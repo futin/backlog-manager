@@ -99,7 +99,7 @@ services:
       # be a token committed to this repository, which is the one mistake in
       # this file that cannot be undone by editing it: it would have to be
       # revoked. `:-` so an empty BM_GITHUB_TOKEN= reads as absent, which the
-      # server renders as `no-token` on the Trackers card rather than sending
+      # server renders as `no-token` on the Sources card rather than sending
       # an empty Authorization header and getting a 401 it would have to
       # explain.
       #

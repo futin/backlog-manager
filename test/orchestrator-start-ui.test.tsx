@@ -8,6 +8,7 @@ import '@testing-library/jest-dom';
 import BoardView from '../client/src/components/board/BoardView';
 import { OrchestrateSheet } from '../client/src/components/board/OrchestrateSheet';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
+import type { SourceSection } from '../client/src/lib/sources';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { daysAgoDate } from './helpers/dates';
 import { pickProject } from './helpers/filter-bar';
@@ -196,8 +197,9 @@ describe('toolbar Orchestrate button', () => {
     return fn;
   }
 
-  async function renderNarrowed(): Promise<void> {
-    render(<BoardView />);
+  // `source` is the page the project under test is drawn on (source-sections): `files` for the default fixture, `github` for a case that swaps in a tracker.
+  async function renderNarrowed(source: SourceSection = 'files'): Promise<void> {
+    render(<BoardView source={source} />);
     // Not just "the button exists" — the Filters popover renders with only
     // "All projects" the instant BoardView mounts, before `/api/projects`
     // has even resolved. Waiting for alpha's own chip is what proves the
@@ -214,7 +216,7 @@ describe('toolbar Orchestrate button', () => {
   // --- Test case 1 ---------------------------------------------------
   it('renders no button while the board is unfiltered, even with capability on', async () => {
     stub({});
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Orchestrate' })).not.toBeInTheDocument();
   });
@@ -277,7 +279,7 @@ describe('toolbar Orchestrate button', () => {
     ['files', ['Merge to main', 'Leave branches for me']]
   ])('opens the sheet for a %s project with the merge modes that source offers', async (source, labels) => {
     stub({ projects: [{ ...PROJECTS[0], source }] });
-    await renderNarrowed();
+    await renderNarrowed(source === 'github' ? 'github' : 'files');
     await userEvent.click(await screen.findByRole('button', { name: 'Orchestrate' }));
     await userEvent.click(await screen.findByRole('button', { name: 'next' }));
     await userEvent.click(screen.getByRole('button', { name: 'next' }));
@@ -399,7 +401,7 @@ describe('toolbar Orchestrate button', () => {
       agents: { ...READY, projectPaths: [] },
       projects: [{ ...PROJECTS[0], source: 'github', repo: 'futin/alpha', interval: 'off' }]
     });
-    await renderNarrowed();
+    await renderNarrowed('github');
     const btn = await screen.findByRole('button', { name: 'Orchestrate' });
     expect(btn).toHaveAttribute('aria-disabled', 'true');
     // The visibility reason outranks sync-off, in the title and in the description alike.

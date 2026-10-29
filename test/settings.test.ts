@@ -11,7 +11,7 @@ describe('clampSettings', () => {
       theme: 'daylight',
       density: 'compact',
       fontScale: 110,
-      landing: 'board',
+      landing: 'github',
       dispatchDefaultModel: 'sonnet',
       dispatchDefaultEffort: 'high',
       staleDays: 14,
@@ -29,7 +29,7 @@ describe('clampSettings', () => {
       theme: 'daylight',
       density: 'compact',
       fontScale: 110,
-      landing: 'board',
+      landing: 'github',
       linkBase: 'http://127.0.0.1:5174',
       dispatchDefaultModel: 'sonnet',
       dispatchDefaultEffort: 'high',
@@ -118,10 +118,23 @@ describe('landing', () => {
     }
   });
 
+  /*
+    `board` and `archive` were root sections until the source rows, so they sit in real installs' `Opens on` pins. A pin names a section, as
+    `landing: 'jira'` does, and both legacy names name GitHub's — the page they meant is dropped here: `clampSettings` is pure and runs on every read, so it
+    never writes a page store. Which source a legacy pin really settles on is the shell's call, on the projects answer.
+  */
+  it('legacy landing board/archive is kept', () => {
+    expect(clampSettings({ landing: 'board' }).landing).toBe('github');
+    expect(clampSettings({ landing: 'archive' }).landing).toBe('github');
+    expect(clampSettings({ landing: 'last' }).landing).toBe('last');
+    expect(clampSettings({ landing: 'runs' }).landing).toBe('runs');
+    expect(clampSettings({ landing: 'nonsense' }).landing).toBe('last');
+  });
+
   it('falls back to `last` for a section this build no longer has', () => {
     // 'projects' is what the Board tab was called before the rail grew
     // Archive, so it is sitting in real installs' settings blobs. It is not
-    // aliased onto 'board' the way App's stored *section* is: a pin this build
+    // aliased onto a section the way App's stored *section* is: a pin this build
     // cannot honour has an honest answer, and it is "open where I left off".
     expect(clampSettings({ landing: 'projects' }).landing).toBe('last');
     expect(clampSettings({ landing: 'archives' }).landing).toBe('last');

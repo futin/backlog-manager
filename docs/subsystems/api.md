@@ -137,7 +137,7 @@ leaves this process in no payload, log line or URL.
 `TRACKER_POLL_MS`; `sweep` syncs only the repos that are DUE — a `15s` repo every tick with no clock check, a slower one once its interval has elapsed since
 its last sync (success or failure), an `off` one never, except the one cold-boot sync a never-filled cache is owed. `shouldPoll` narrows to "a token, and some
 connected repo that is not `off` or still owes that cold sync". `TrackerPollerService.syncOffBlock(projectPath)` is the ONE server home of the refusal
-sentence, `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers`, and `RemoteRunsService` derives nothing for an `off` repo. Both
+sentence, `sync is off for <owner/name> — turn it on in GitHub › Settings`, and `RemoteRunsService` derives nothing for an `off` repo. Both
 `ProjectSummary` and `TrackerProjectRow` carry `interval` — the effective token for a `github` row, `null` for every other.
 
 `POST /api/trackers/sync` (`{ repo, interval }`) is `orchestrator/tracker-sync.controller.ts`, in `OrchestratorModule` rather than beside `GET /api/trackers`
@@ -151,6 +151,33 @@ While a repo is `off`, every write path refuses with 409 `{ error: <the sentence
 `GithubSource` writes (through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check), `dispatch`, `orchestrate` and
 `resume` in `AgentsService`, and `ItemsAbortService.abort` as its first check after the files refusal — before its dashboard stop, not only before its release. `plan()` names the same sentence as its `blocked`, so the launch sheet never offers what dispatch refuses. `backlog.mjs` prints
 the `error` verbatim and exits `1` through its generic non-2xx path — not `5`: the stack is up, the setting is the refusal.
+
+**The PRs page** ([spec](../superpowers/specs/2026-10-29-source-sections-design.md), Goal 2). `pulls.query.ts` holds the GraphQL — one list query per repo
+(open PRs and the repo's merge settings), the single-PR query, the two auto-merge mutations — sent through `GithubClient.graphql`, whose answers are recorded
+into GraphQL's own rate pool (`graphqlRate`), never REST's. `pulls.service.ts` (`PullRequestsService`) is the per-repo, on-demand cache: no timer, a read only
+inside `GET /api/prs` or a write; an entry is re-read once the later of its last success (`polledAt`) and its last attempt is `PR_TTL_MS` (60 s) old, so a
+failing repo is retried once a minute too; a failure keeps the last rows and their `polledAt`; a limit sleeps the entry, and a secondary one the poller's
+repo as well (marking it `rate-limited` there too). An accepted update-branch makes the entry due again `PR_UPDATING_MS` (30 s) later, inside the TTL, so the
+page's one re-read after `updating…` reaches GitHub; a list read that lands after a write spliced the repo keeps its attempt time but drops its rows; a
+successful read clears only a sleep that has run out. `pulls.controller.ts` serves the routes:
+
+- `GET /api/prs` → `PullRequestsPayload`, one view per distinct registered GitHub repo, `syncOff` a field and never a filter. Unguarded. No token is
+  `{ token: false, repos: [] }`; an unreadable registry is the 503 `/api/trackers` answers.
+- `POST /api/prs/merge` `{ repo, number, method, headSha }` → REST `PUT /repos/{repo}/pulls/{n}/merge` with `merge_method` and `sha`; `200` `merged`, or
+  `already-merged` when GitHub refused and the re-read says `MERGED`.
+- `POST /api/prs/auto-merge` `{ repo, number, enable, method? }` (`method` required to enable) → the single-PR read (node id, armed state), then
+  `enablePullRequestAutoMerge` / `disablePullRequestAutoMerge`; `200` `auto-merge-enabled`, `auto-merge-disabled`, or `noop` for a disarm with nothing armed,
+  which sends no mutation.
+- `POST /api/prs/update-branch` `{ repo, number, headSha }` → REST `PUT .../update-branch` with `expected_head_sha`; `202` `update-requested`, the update
+  running on GitHub after it answers.
+
+Each write answers `PrWriteResult { ok, outcome, pr, reread }`: `pr` is the write's own single-PR re-read, spliced into the cache, or `null` when the PR is no
+longer open or the re-read failed — a failed re-read is never an error. The refusal ladder, in order: `400` a malformed body (`isRepo`, a positive integer
+`number`, a `method` in `MERGE_METHODS`, a 40-lowercase-hex `headSha`, a boolean `enable`) · `404` a repo no registered project resolves to · `503` no token
+· then inside the per-`<repo>#<number>` chain `409` sync off (`syncOffBlock`, verbatim) · `429` the repo asleep (this cache's sleep or the poller's
+secondary one) · and GitHub's answer: REST `405`/`409`/`422` or a typed GraphQL error → `409` with GitHub's message; a `401`/`403` that is not a limit →
+`502 the token lacks permission for this — <GitHub's message>`; a limit → `429`, and the repo sleeps; anything else → `502`. Every outcome but a limit
+re-reads the PR. Each POST carries `SameOriginPostGuard`, and the Host allowlist admits tailnet hosts as it does for every route.
 
 ### `jira/`
 

@@ -8,6 +8,9 @@ import '@testing-library/jest-dom';
 import { SideRail } from '../client/src/components/SideRail';
 import { type Section } from '../client/src/lib/sections';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
+import { ProjectsContext } from '../client/src/hooks/ProjectsContext';
+import type { DrawnSources } from '../client/src/lib/sources';
+import { FILES_PAGE_KEY, GITHUB_PAGE_KEY } from '../client/src/lib/source-page';
 import { RUNS_MODE_KEY, isRunsMode } from '../client/src/lib/runs-mode';
 import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
 
@@ -38,19 +41,27 @@ const settingsTree = (): HTMLElement | null => screen.queryByRole('group', { nam
  * `useSettings()` falls back to `DEFAULT_SETTINGS` with a no-op `update` and
  * never touches localStorage, so a bare render could never observe a pick.
  */
-function renderRail(section: Section = 'runs') {
-  const onChange = jest.fn();
-  const result = render(
+/**
+ * The shell's projects answer, supplied straight through `ProjectsContext` rather than through `ProjectsProvider` and a mocked `fetch`: every case here
+ * is about what the rail draws for a GIVEN answer, and the provider's own fetching is test/projects-context.test.tsx's. `drawn` defaults to both sources
+ * present, the shape most cases want; `null` is the unknown state.
+ */
+const BOTH: DrawnSources = { files: true, github: true };
+
+function railTree(section: Section, onChange: (s: Section) => void, drawn: DrawnSources | null, provisional: boolean) {
+  return (
     <SettingsProvider>
-      <SideRail section={section} onChange={onChange} />
+      <ProjectsContext.Provider value={{ data: null, drawn, reload: () => {} }}>
+        <SideRail section={section} onChange={onChange} provisional={provisional} />
+      </ProjectsContext.Provider>
     </SettingsProvider>
   );
-  const rerenderRail = (next: Section, handler: () => void = jest.fn()): void =>
-    result.rerender(
-      <SettingsProvider>
-        <SideRail section={next} onChange={handler} />
-      </SettingsProvider>
-    );
+}
+
+function renderRail(section: Section = 'runs', { drawn = BOTH, provisional = false }: { drawn?: DrawnSources | null; provisional?: boolean } = {}) {
+  const onChange = jest.fn();
+  const result = render(railTree(section, onChange, drawn, provisional));
+  const rerenderRail = (next: Section, handler: () => void = jest.fn()): void => result.rerender(railTree(next, handler, drawn, provisional));
   return { ...result, onChange, rerenderRail };
 }
 
@@ -81,13 +92,13 @@ describe('SideRail · the sub-nav tree', () => {
   beforeEach(() => localStorage.clear());
 
   it('draws the tree only while Runs is the open section', () => {
-    const { rerenderRail } = renderRail('board');
+    const { rerenderRail } = renderRail('files');
     expect(tree()).toBeNull();
 
     rerenderRail('runs');
     expect(tree()).not.toBeNull();
 
-    rerenderRail('archive');
+    rerenderRail('github');
     expect(tree()).toBeNull();
   });
 
@@ -143,7 +154,7 @@ describe('SideRail · the sub-nav tree', () => {
     expect(screen.getByRole('button', { name: 'Watchdog' })).toHaveAttribute('aria-current', 'true');
     expect(screen.getByRole('button', { name: 'History' })).not.toHaveAttribute('aria-current');
 
-    rerenderRail('board');
+    rerenderRail('files');
     expect(tree()).toBeNull();
   });
 
@@ -178,7 +189,7 @@ describe('SideRail · the sub-nav tree', () => {
     without one.
   */
   it('draws no phone menu button at desktop width', () => {
-    renderRail('board');
+    renderRail('github');
 
     expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();
   });
@@ -204,7 +215,7 @@ describe('SideRail · the Settings tree', () => {
   beforeEach(() => localStorage.clear());
 
   it('draws the tree only while Settings is the open section', () => {
-    const { rerenderRail } = renderRail('board');
+    const { rerenderRail } = renderRail('github');
     expect(settingsTree()).toBeNull();
 
     rerenderRail('settings');
@@ -276,7 +287,7 @@ describe('SideRail · the Settings tree', () => {
   */
   it('stands both trees open below 700px, whatever the current section is', async () => {
     await withNarrow(async () => {
-      renderRail('board');
+      renderRail('github');
 
       // The rows live behind the ☰ below 700 px, so the trees are only on
       // screen once the menu is: `treeOpen` decides whether a tree is drawn
@@ -296,11 +307,86 @@ describe('SideRail · the Settings tree', () => {
   */
   it('marks nothing in a tree whose section is not the current one', async () => {
     await withNarrow(async () => {
-      renderRail('board');
+      renderRail('github');
       await userEvent.click(screen.getByRole('button', { name: 'Menu' }));
 
       for (const b of within(settingsTree() as HTMLElement).getAllByRole('button')) expect(b).not.toHaveAttribute('aria-current');
       for (const b of within(tree() as HTMLElement).getAllByRole('button')) expect(b).not.toHaveAttribute('aria-current');
+    });
+  });
+});
+
+/*
+  The source rows (source-sections spec, "The rail after the change"): Files and GitHub replace the root Board and Archive, each drawn from the shell's
+  projects answer by the Jira row's three states — unknown draws a source row only while it is the section on screen (and never while that section is a
+  provisional guess), answered-present draws it, answered-absent hides it. Each carries its own tree, switched by the tree alone.
+*/
+describe('SideRail · the source rows', () => {
+  beforeEach(() => localStorage.clear());
+
+  const rows = (): string[] =>
+    within(screen.getByRole('navigation', { name: 'Sections' }))
+      .getAllByRole('button')
+      .filter((b) => b.classList.contains('rail-link'))
+      .map((b) => b.textContent ?? '');
+  const filesTree = (): HTMLElement | null => screen.queryByRole('group', { name: 'Files pages' });
+  const githubTree = (): HTMLElement | null => screen.queryByRole('group', { name: 'GitHub pages' });
+  const labels = (el: HTMLElement | null): string[] =>
+    within(el as HTMLElement)
+      .getAllByRole('button')
+      .map((b) => b.textContent ?? '');
+
+  it('reads Files, GitHub, Runs, Settings with both sources answered', () => {
+    renderRail('runs');
+    expect(rows()).toEqual(['Files', 'GitHub', 'Runs', 'Settings']);
+  });
+
+  it("names Files' tree Board, Archive and GitHub's Board, PRs, Archive, Settings", () => {
+    const { rerenderRail } = renderRail('files');
+    expect(labels(filesTree())).toEqual(['Board', 'Archive']);
+    expect(githubTree()).toBeNull();
+
+    rerenderRail('github');
+    expect(labels(githubTree())).toEqual(['Board', 'PRs', 'Archive', 'Settings']);
+    expect(filesTree()).toBeNull();
+  });
+
+  it('draws no Files row when no files project is registered', () => {
+    renderRail('github', { drawn: { files: false, github: true } });
+    expect(rows()).toEqual(['GitHub', 'Runs', 'Settings']);
+  });
+
+  it('draws the current source row, and only it, while the answer is unknown and the section is a stored one', () => {
+    renderRail('github', { drawn: null, provisional: false });
+    expect(rows()).toEqual(['GitHub', 'Runs', 'Settings']);
+  });
+
+  it('draws neither source row while the answer is unknown and the section is a provisional guess', () => {
+    renderRail('github', { drawn: null, provisional: true });
+    expect(rows()).toEqual(['Runs', 'Settings']);
+  });
+
+  it("switches section and page in one click from another section, marking only the current section's tree", async () => {
+    await withNarrow(async () => {
+      // Below 700 px every tree stands open, so GitHub's is reachable while Files is current.
+      const { onChange } = renderRail('files');
+      await userEvent.click(screen.getByRole('button', { name: 'Menu' }));
+      await userEvent.click(within(githubTree() as HTMLElement).getByRole('button', { name: 'Settings' }));
+      expect(onChange).toHaveBeenLastCalledWith('github');
+      expect(JSON.parse(localStorage.getItem(GITHUB_PAGE_KEY) as string)).toBe('settings');
+
+      // Still on Files (the handler is a spy): GitHub's tree marks nothing, and Files' marks its own page — Board, the store's default.
+      await userEvent.click(screen.getByRole('button', { name: 'Menu' }));
+      const marked = (el: HTMLElement | null): string[] =>
+        labels(el).filter(
+          (_, i) =>
+            within(el as HTMLElement)
+              .getAllByRole('button')
+              [i].getAttribute('aria-current') === 'true'
+        );
+      expect(marked(githubTree())).toEqual([]);
+      expect(marked(filesTree())).toEqual(['Board']);
+      expect(localStorage.getItem(FILES_PAGE_KEY)).toBeNull();
     });
   });
 });
@@ -316,7 +402,7 @@ describe('SideRail · the prompt-cursor wordmark', () => {
   function renderWithWorking(working: boolean | undefined) {
     return render(
       <SettingsProvider>
-        <SideRail section="board" onChange={jest.fn()} working={working} />
+        <SideRail section="github" onChange={jest.fn()} working={working} provisional={false} />
       </SettingsProvider>
     );
   }
@@ -365,7 +451,7 @@ describe('SideRail · the version chip', () => {
   function renderWithReleases(releases?: { label: string; dot: boolean; onOpen: () => void }) {
     return render(
       <SettingsProvider>
-        <SideRail section="board" onChange={jest.fn()} releases={releases} />
+        <SideRail section="github" onChange={jest.fn()} releases={releases} provisional={false} />
       </SettingsProvider>
     );
   }

@@ -2,7 +2,7 @@ import { runGit } from '../git-run.util';
 
 /**
  * The GitHub repo a files project's `origin` points at, read from git PER
- * REQUEST (task-45, spec §5.6) — the Trackers card's "here is the exact
+ * REQUEST (task-45, spec §5.6) — the Sources card's "here is the exact
  * command to connect this project" row.
  *
  * Per request and memoised nowhere, the way `uncommitted.util.ts` reads git
@@ -18,7 +18,7 @@ import { runGit } from '../git-run.util';
  * shows none.
  *
  * Async and time-bounded since #277 (`runGit`): a slow repository makes the
- * Trackers card slow, never the whole server. A timeout is one more failure,
+ * Sources card slow, never the whole server. A timeout is one more failure,
  * and degrades to `null` like the rest.
  */
 

@@ -110,7 +110,7 @@ function stub(items: ItemsIndex = ITEMS, agents: AgentsStatus | null = AGENTS_ST
 }
 
 async function renderBoard(): Promise<void> {
-  render(<BoardView />);
+  render(<BoardView source="files" />);
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 

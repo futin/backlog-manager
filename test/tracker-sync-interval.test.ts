@@ -266,7 +266,7 @@ describe('summary and syncOffBlock', () => {
     const f = fake();
     const tracker = githubProject('futin/x');
     writeSyncInterval('futin/x', 'off');
-    expect(f.poller.syncOffBlock(tracker)).toBe('sync is off for futin/x — turn it on in Settings › Shared › Trackers');
+    expect(f.poller.syncOffBlock(tracker)).toBe('sync is off for futin/x — turn it on in GitHub › Settings');
     writeSyncInterval('futin/x', '1m');
     expect(f.poller.syncOffBlock(tracker)).toBeNull();
 

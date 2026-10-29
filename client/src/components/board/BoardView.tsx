@@ -20,7 +20,9 @@ import type { SortDir, SortKey } from '../../lib/board-sort';
 import { disabledReason } from '../../lib/gate-view';
 import { buildProjectHues } from '../../lib/project-hue';
 import { projectName } from '../../lib/project-label';
-import { PROJECT_KEY } from '../../lib/view-keys';
+import { narrowToSource, projectsIn } from '../../lib/sources';
+import type { SourceSection } from '../../lib/sources';
+import { projectKey } from '../../lib/view-keys';
 import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
 import { FilterBar, FilterSection, ProjectPicks } from '../FilterBar';
 import type { FilterBarSort } from '../FilterBar';
@@ -39,7 +41,7 @@ import { RunChip } from './RunChip';
 import { PlanReviewChip } from './PlanReviewChip';
 import type { BacklogItem, RunStage, Section } from '../../../../shared/types';
 
-/* PROJECT_KEY is imported, not declared here: Archive reads the same one, and
+/* The project key is imported, not declared here: Archive reads the same one, and
    the two surfaces are separate lazy chunks — see lib/view-keys.ts for why a
    shared module rather than an export off this file. The three below stay local
    because Archive has none of these controls. */
@@ -112,9 +114,19 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
  *
  * `onWorking` is the rail cursor's report (§8.0, `useReportWorking`): this view's own poll is the one the shell reads, so `App` polls nothing itself.
  * Optional for the same reason `onOpenRuns` is.
+ *
+ * `source` (source-sections) is REQUIRED: this page draws ONE source's projects, Files or GitHub, and a page that could silently draw every one would be the
+ * single board the rail reshape took apart. It narrows the fetched index before any other derivation — items, the project picks, the unreachable warnings,
+ * the Orchestrate sheet's project list, the plan-review tally — through `narrowToSource`, so every one of them reads the same set. The run chip is the exception
+ * and stays machine-wide (`runs` is never filtered): a run on the other source is still a run on this machine.
  */
-export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () => void; onWorking?: (working: boolean) => void }) {
-  const { items: index, projects, loading, error, refetch } = useBoard();
+export default function BoardView({ source, onOpenRuns, onWorking }: { source: SourceSection; onOpenRuns?: () => void; onWorking?: (working: boolean) => void }) {
+  const { items: fullIndex, projects: fullProjects, loading, error, refetch } = useBoard();
+  /* The source split, once per fetch. `projects` stays `null` until the first answer, exactly as the hook hands it, because `hasTracker` and the hue memo
+     below read the absence; `index` is `narrowToSource`'s cut (`lib/sources.ts`, which also owns the rule that routes each index error to the source it
+     names). */
+  const projects = useMemo(() => (fullProjects === null ? null : projectsIn(fullProjects, source)), [fullProjects, source]);
+  const index = useMemo(() => narrowToSource(fullIndex, fullProjects, source), [fullIndex, fullProjects, source]);
   /* #367 — the tick's recorded caps, for the band's plan-review reading. `live: false`: a tick records its caps at most once per scheduled run, so the
      mount + focus reads `useRefreshing` gives every board poller are the right cadence, and the 15 s poll Runs › Ticks arms would be traffic for nothing. A
      failed read leaves `data` null, and the chip reads bare counts with no cap rather than going away. */
@@ -183,7 +195,7 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
      (`9 open in brickwright`). The sort survives it more simply — the track
      prints it. */
   const [query, setQuery] = useState('');
-  const [project, setProject] = usePersistedState<string>(PROJECT_KEY, ALL);
+  const [project, setProject] = usePersistedState<string>(projectKey(source), ALL);
   const [status, setStatus] = usePersistedState<StatusFilter>(STATUS_KEY, 'open');
   const [storedSort, setSort] = usePersistedState<SortKey>(SORT_KEY, 'created');
   const [storedDir, setSortDir] = usePersistedState<SortDir | null>(SORT_DIR_KEY, null);
@@ -214,14 +226,12 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
      the dispatch chip above it cannot. Derived here, never an effect that calls `setOpen`: an effect paints one stale frame and then a second render. */
   const openItem = open === null ? null : (all.find((i) => i.projectPath === open.projectPath && i.id === open.id) ?? open);
 
-  /* One assignment for the whole board, built here rather than per card: the
-     hue a project gets depends on which projects were registered before it, so
-     it is a property of the registry and not of any one item. Keyed on
-     `projects` and not on `registered` — the pass is cheap either way, but
-     `registered` is a fresh [] on every render while the fetch is in flight,
-     which would make the memo a no-op and hand every card a new prop object on
-     each keystroke in the search box. */
-  const hues = useMemo(() => buildProjectHues(projects ?? []), [projects]);
+  /* One assignment for the whole board, built here rather than per card: the hue a project gets depends on which projects were registered before it, so it is a
+     property of the registry and not of any one item. Keyed on `fullProjects` (the WHOLE registry, not this source's slice — a project keeps its colour on the
+     page of the other source, because a hue depends on which projects were registered before it, so a slice would recolour it) and not on `registered` — the
+     pass is cheap either way, but `registered` is a fresh [] on every render while the fetch is in flight, which would make the memo a no-op and hand every
+     card a new prop object on each keystroke in the search box. */
+  const hues = useMemo(() => buildProjectHues(fullProjects ?? []), [fullProjects]);
 
   /* Fail-open on a stale stored project (unregistered since): an unmatched
      filter that emptied the board would look like the server broke. The
@@ -722,8 +732,10 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
       ) : all.length === 0 ? (
         /* Two distinct empty states: an empty registry is fixed by running a
            backlog skill in some project; an empty RESULT is fixed by the
-           controls two inches above the message. */
-        <div className="board-empty">nothing registered yet</div>
+           controls two inches above the message. Since the source split, `all` is ONE source's items, so an empty one no longer means an empty
+           registry: a freshly connected repo with no open issues, or a files project whose store is empty, is a registered project of this source —
+           the very thing the rail drew this page for — and `nothing registered yet` would contradict the rail. `registered` is the same narrowed list. */
+        <div className="board-empty">{registered.length === 0 ? 'nothing registered yet' : 'no items yet'}</div>
       ) : visible.length === 0 ? (
         /* With `Awaiting review` on, the empty result names the pile rather than the controls: the likely reason is the last plan was just approved. */
         <div className="board-empty">{awaitingReview ? 'no plans awaiting review' : 'no matches'}</div>

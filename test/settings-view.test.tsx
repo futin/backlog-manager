@@ -14,6 +14,8 @@ import SettingsView, { SWATCHES } from '../client/src/components/settings/Settin
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { JiraContext } from '../client/src/hooks/JiraContext';
+import { ProjectsContext } from '../client/src/hooks/ProjectsContext';
+import type { DrawnSources } from '../client/src/lib/sources';
 import type { JiraState } from '../client/src/hooks/useJira';
 import { SETTINGS_STORAGE_KEY, type SettingsScope } from '../client/src/lib/settings';
 import type { AgentsStatus, JiraSkill, JiraStatusPayload } from '../shared/types';
@@ -227,21 +229,53 @@ describe('SettingsView', () => {
     expect(document.documentElement.dataset.width).toBe('full');
   });
 
-  it('offers every rail section as a landing choice, plus Last used', async () => {
-    renderView();
-    const picker = screen.getByLabelText('Opens on');
-    expect(
-      within(picker)
-        .getAllByRole('option')
-        .map((o) => o.textContent)
-    ).toEqual(['Last used', 'Board', 'Runs', 'Archive', 'Settings']);
+  /*
+    The source options follow the rail (source-sections spec): `Files` and `GitHub` are offered while their row is drawn — the shell's projects answer,
+    supplied here straight through `ProjectsContext` — withheld while it is unknown, and a stored pin keeps its own option, Jira's rule.
+  */
+  function renderWithSources(drawn: DrawnSources | null) {
+    render(
+      <SettingsProvider>
+        <TrackersProvider>
+          <ProjectsContext.Provider value={{ data: null, drawn, reload: () => {} }}>
+            <SettingsView />
+          </ProjectsContext.Provider>
+        </TrackersProvider>
+      </SettingsProvider>
+    );
+  }
+  const landingOptions = (): (string | null)[] =>
+    within(screen.getByLabelText('Opens on'))
+      .getAllByRole('option')
+      .map((o) => o.textContent);
 
-    // Archive rather than Board, because Board is what an unrecognised value
+  it('offers every rail section as a landing choice, plus Last used', async () => {
+    renderWithSources({ files: true, github: true });
+    expect(landingOptions()).toEqual(['Last used', 'Files', 'GitHub', 'Runs', 'Settings']);
+
+    // Files rather than GitHub, because GitHub is what an unrecognised section
     // resolves to anyway — picking it could pass on a picker that stored
     // nothing at all.
-    await userEvent.selectOptions(picker, 'archive');
+    await userEvent.selectOptions(screen.getByLabelText('Opens on'), 'files');
     const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
-    expect(stored.landing).toBe('archive');
+    expect(stored.landing).toBe('files');
+  });
+
+  it('offers only the sources whose row is drawn, and none while the answer is unknown', () => {
+    renderWithSources({ files: true, github: false });
+    expect(landingOptions()).toContain('Files');
+    expect(landingOptions()).not.toContain('GitHub');
+    cleanup();
+
+    renderWithSources(null);
+    expect(landingOptions()).toEqual(['Last used', 'Runs', 'Settings']);
+  });
+
+  it('keeps a stored github pin its GitHub option on a machine with no github project', () => {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ landing: 'github' }));
+    renderWithSources({ files: true, github: false });
+    expect(landingOptions()).toEqual(['Last used', 'Files', 'GitHub', 'Runs', 'Settings']);
+    expect(screen.getByLabelText('Opens on')).toHaveValue('github');
   });
 
   /*
@@ -265,7 +299,9 @@ describe('SettingsView', () => {
     it('renders only the host-backed cards on Shared — and not the Dashboards card, which is a page of its own', () => {
       renderView('shared');
 
-      for (const title of ['Orchestrator watchdog', 'Backlog tick', 'Trackers']) expect(groupTitles()).toContain(title);
+      for (const title of ['Sources', 'Orchestrator watchdog', 'Backlog tick']) expect(groupTitles()).toContain(title);
+      // The Trackers card was split by subject (source-sections spec): its sync pickers live on GitHub › Settings, the rest on the Sources card.
+      expect(groupTitles()).not.toContain('Trackers');
       for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch', 'Dashboards']) expect(groupTitles()).not.toContain(title);
     });
 
@@ -280,7 +316,7 @@ describe('SettingsView', () => {
       await waitFor(() => expect(document.querySelectorAll('.dash-page-row').length).toBeGreaterThan(0));
 
       expect(groupTitles()).toContain('Suggest');
-      for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch', 'Orchestrator watchdog', 'Backlog tick', 'Trackers'])
+      for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch', 'Orchestrator watchdog', 'Backlog tick', 'Sources'])
         expect(groupTitles()).not.toContain(title);
     });
 
@@ -409,8 +445,8 @@ describe('SettingsView', () => {
       global.fetch = jest.fn(() => new Promise(() => {})) as jest.Mock;
 
       renderView('dashboards');
-      // `getAllBy`, not `getBy`: the Trackers card beside this one (task-45)
-      // says `checking…` in the same frame and for the same reason — its own
+      // `getAllBy`, not `getBy`: the page's other unanswered reads (the list,
+      // each machine's health) say `checking…` in the same frame and for the same reason — its own
       // fetch has not answered either. What this case is about is the SETUP
       // PANEL below the status line, which must not appear while the answer is
       // still outstanding.
@@ -909,8 +945,10 @@ describe('SettingsView', () => {
       // `Dashboards` joined in multi-dashboard task 11, absorbed `Claude Agents` (whose dispatch report became its Home row) and then left for a
       // Settings page of its own, which is why Shared draws no dispatch line at all.
       // `Time zone` joined in #241, under the tick breaker in the same column — the third host control.
-      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Backlog tick', 'Time zone', 'Trackers']);
-      expect(groupScopes()).toEqual(['this server', 'this machine', 'this server', 'this machine']);
+      // `Sources` replaced `Trackers` in the source-sections change and comes FIRST: the spec puts it at the page's top, so the one host report now
+      // opens the left column and the three controls moved to the right. `Trackers` is gone from this page — its pickers are GitHub › Settings'.
+      expect(groupTitles()).toEqual(['Sources', 'Orchestrator watchdog', 'Backlog tick', 'Time zone']);
+      expect(groupScopes()).toEqual(['this machine', 'this server', 'this machine', 'this server']);
     });
 
     /** And the same rows inside them — the three cards this file owns outright.

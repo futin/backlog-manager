@@ -339,7 +339,7 @@ export const CONTENT_WIDTHS: readonly ContentWidth[] = ['fixed', 'full'];
  *
  * A stored `landing` naming a section this build no longer has — `'projects'`,
  * from before the rail said Board — falls back to `last` rather than being
- * aliased across the way `resolveSection` aliases the stored *section*. The
+ * aliased across the way `resolveLegacySection` aliases the stored *section*. The
  * two are not the same problem: a section key with no matching tab would leave
  * `main` rendering nothing, so it has to be mapped onto something, whereas
  * `last` is a real preference that means "open where I left off" and is the
@@ -347,9 +347,19 @@ export const CONTENT_WIDTHS: readonly ContentWidth[] = ['fixed', 'full'];
  *
  * `jira` (Jira phase 2) is kept like any section, although this machine may not have Jira configured: the clamp is pure and runs before `GET /api/jira`
  * has answered, so it cannot know, and a pin it dropped on a slow first read would be gone for good. What a `jira` pin does on an unconfigured machine is
- * the shell's call — `App` falls the section to Board on the answer that says so — and `Opens on` offers the option only while the status says configured.
+ * the shell's call — `App` falls the section to the first drawn source on the answer that says so — and `Opens on` offers the option only while the status
+ * says configured. `files` and `github` are kept the same way, for the same reason: the projects answer that says whether either has a project arrives
+ * after this runs.
+ *
+ * `board` and `archive` are the one exception to "falls back to `last`" (source-sections spec, "Migrating stored values"): they were sections until the
+ * source rows, so a pin on either is a reader's real choice of the work view, and dropping it to `last` would throw that away. They map to `github` — today's
+ * Board is GitHub › Board — through `legacyLanding` below. The shell still treats such a pin as PROVISIONAL, because it reads the raw stored blob, sees
+ * the legacy name, and settles it on the projects answer; this clamp only keeps the blob a valid `Settings`.
  */
 const LANDINGS: readonly Landing[] = ['last', ...SECTIONS];
+function legacyLanding(v: unknown): unknown {
+  return v === 'board' || v === 'archive' ? 'github' : v;
+}
 
 /**
  * `''` first, then the lists the launch sheet's own pickers are built from —
@@ -373,7 +383,7 @@ export function clampSettings(raw: unknown): Settings {
     theme: pickOne(s.theme, THEME_IDS, DEFAULT_SETTINGS.theme),
     density: pickOne(s.density, DENSITIES, DEFAULT_SETTINGS.density),
     fontScale: clampInt(s.fontScale, DEFAULT_SETTINGS.fontScale, LIMITS.fontScale.min, LIMITS.fontScale.max),
-    landing: pickOne(s.landing, LANDINGS, DEFAULT_SETTINGS.landing),
+    landing: pickOne(legacyLanding(s.landing), LANDINGS, DEFAULT_SETTINGS.landing),
     linkBase: clampOrigin(s.linkBase, DEFAULT_SETTINGS.linkBase),
     dispatchDefaultModel: pickOne(s.dispatchDefaultModel, DISPATCH_MODELS, DEFAULT_SETTINGS.dispatchDefaultModel),
     dispatchDefaultEffort: pickOne(s.dispatchDefaultEffort, DISPATCH_EFFORTS, DEFAULT_SETTINGS.dispatchDefaultEffort),

@@ -1,11 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
+import type { SourceSection } from '../client/src/lib/sources';
 import { queuedStripFor, type LiveBar } from '../client/src/lib/live-bar';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { pickProject, pickStatus } from './helpers/filter-bar';
@@ -148,9 +149,19 @@ function stubFetch(items: BacklogItem[], summaries: ProjectSummary[], runs: Orch
   }) as jest.Mock;
 }
 
-async function renderBoard(items: BacklogItem[], summaries: ProjectSummary[] = projects(), runs: OrchestratorRunsPayload = NO_RUNS): Promise<void> {
+/*
+ * Source sections: a board draws ONE source, and this suite is about the tracker (`github`) project, so `github` is the page by default. The files card the
+ * cases used to compare against in the same render is on the OTHER page now — a case that still wants it renders `files` as a second pass (`unmount`
+ * between, so one stub never answers two boards).
+ */
+async function renderBoard(
+  items: BacklogItem[],
+  summaries: ProjectSummary[] = projects(),
+  runs: OrchestratorRunsPayload = NO_RUNS,
+  source: SourceSection = 'github'
+): Promise<void> {
   stubFetch(items, summaries, runs);
-  render(<BoardView />);
+  render(<BoardView source={source} />);
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 
@@ -172,11 +183,15 @@ afterEach(() => {
 });
 
 describe('dispatch on a tracker project', () => {
-  it('draws a dispatch control, exactly as a files card in the same render does', async () => {
+  it('draws a dispatch control, exactly as a files card does on the Files page', async () => {
     await renderBoard([item({}), issueItem({ groomed: true })]);
 
     expect(within(card('an issue')).getByRole('button', { name: /execute/i })).toBeInTheDocument();
+    expect(screen.queryByText('a files bug')).toBeNull();
+    cleanup();
+    await renderBoard([item({}), issueItem({ groomed: true })], projects(), NO_RUNS, 'files');
     expect(within(card('a files bug')).getByRole('button', { name: /execute/i })).toBeInTheDocument();
+    expect(screen.queryByText('an issue')).toBeNull();
   });
 
   /* The per-item blocks work for a tracker item for free, which is the other
@@ -199,10 +214,12 @@ describe('dispatch on a tracker project', () => {
   it('draws the Orchestrate control for a tracker project as well as a files one', async () => {
     await renderBoard([item({}), issueItem()]);
 
-    await pickProject('alpha');
-    expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeInTheDocument();
-
     await pickProject('tracker');
+    expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeInTheDocument();
+    cleanup();
+
+    await renderBoard([item({}), issueItem()], projects(), NO_RUNS, 'files');
+    await pickProject('alpha');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Orchestrate' })).toBeInTheDocument());
   });
 });
@@ -218,6 +235,8 @@ describe('the card’s untyped, link-out and assignee readings', () => {
     await renderBoard([item({}), issueItem()]);
     const link = within(card('an issue')).getByRole('link', { name: /open #31/i });
     expect(link).toHaveAttribute('href', 'https://github.com/futin/x/issues/31');
+    cleanup();
+    await renderBoard([item({}), issueItem()], projects(), NO_RUNS, 'files');
     expect(within(card('a files bug')).queryByRole('link')).toBeNull();
   });
 
@@ -431,7 +450,7 @@ describe('the board’s own poll', () => {
     jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
     try {
       stubFetch([item({})], [projects()[0]]);
-      render(<BoardView />);
+      render(<BoardView source="files" />);
       await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
       const filesOnly = (global.fetch as jest.Mock).mock.calls.length;
       jest.advanceTimersByTime(BOARD_TRACKER_POLL_MS * 2);
@@ -450,7 +469,7 @@ describe('the board’s own poll', () => {
  * about one project, not about the environment (CLAUDE.md's "environment-level blocks hide, per-item ones disable").
  */
 describe('a tracker project whose sync is off (#17)', () => {
-  const SENTENCE = 'sync is off for futin/x — turn it on in Settings › Shared › Trackers';
+  const SENTENCE = 'sync is off for futin/x — turn it on in GitHub › Settings';
 
   it('disables the card’s dispatch control with the server’s sentence, and leaves the files card alone', async () => {
     await renderBoard([item({}), issueItem({ groomed: true })], projects({ interval: 'off' }));
@@ -458,6 +477,8 @@ describe('a tracker project whose sync is off (#17)', () => {
     const button = within(card('an issue')).getByRole('button', { name: /execute/i });
     expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveAttribute('title', SENTENCE);
+    cleanup();
+    await renderBoard([item({}), issueItem({ groomed: true })], projects({ interval: 'off' }), NO_RUNS, 'files');
     expect(within(card('a files bug')).getByRole('button', { name: /execute/i })).not.toHaveAttribute('aria-disabled', 'true');
   });
 
@@ -487,7 +508,7 @@ describe('a tracker project whose sync is off (#17)', () => {
     jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
     try {
       stubFetch([item({})], projects({ interval }));
-      render(<BoardView />);
+      render(<BoardView source="files" />);
       await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
       const before = (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('/api/projects')).length;
       jest.advanceTimersByTime(BOARD_TRACKER_POLL_MS * 2);

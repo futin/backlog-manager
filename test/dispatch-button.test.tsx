@@ -788,7 +788,7 @@ describe('the board wiring', () => {
    */
   it('clears a stale project-visibility block on click, with the window never losing focus', async () => {
     AGENTS = { ...READY, projectPaths: [] };
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
     const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
     const btn = within(card).getByRole('button', { name: 'execute' });
@@ -802,7 +802,7 @@ describe('the board wiring', () => {
   });
 
   it('opens the sheet from a card without opening the item drawer', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
     const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
     await userEvent.click(within(card).getByRole('button', { name: 'execute' }));
@@ -814,7 +814,7 @@ describe('the board wiring', () => {
   });
 
   it('closes the sheet on cancel', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
     const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
     await userEvent.click(within(card).getByRole('button', { name: 'execute' }));
@@ -831,7 +831,7 @@ describe('the board wiring', () => {
   // it (preventDefault on keydown silently cancels the button's own activation
   // rather than triggering both handlers the way an unstopped click would).
   it('opens the sheet from the keyboard without opening the item drawer', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
     const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
     within(card).getByRole('button', { name: 'execute' }).focus();
@@ -848,7 +848,7 @@ describe('the board wiring', () => {
   // only assertion that actually distinguishes "separate state" from "shared
   // state that happens to pass the simpler case".
   it('opens the sheet from inside the item modal, leaving the modal open behind it', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
     await userEvent.click(screen.getByText('a task'));
     const drawer = await screen.findByRole('dialog', { name: 'a task' });
@@ -874,7 +874,7 @@ describe('the board wiring', () => {
   // The standalone "closes on Escape" case in test/launch-sheet.test.tsx
   // passed throughout, because it mounts the sheet with nothing focused.
   it('closes the sheet on Escape with focus still on the card button that opened it', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
     const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
     const btn = within(card).getByRole('button', { name: 'execute' });
@@ -894,7 +894,7 @@ describe('the board wiring', () => {
   // survives, and item B renders A's success panel under B's title with no
   // launch button at all — B reading as already launched and undispatchable.
   it('re-seeds the sheet when a different item is dispatched after a launch', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
 
     const taskCard = screen.getByText('a task').closest('.board-card') as HTMLElement;
@@ -920,7 +920,7 @@ describe('the board wiring', () => {
    */
   it('disables the tab of a card a fresh run has claimed, leaving an unqueued sibling live', async () => {
     RUNS = [runFor(['task-1'], 'reviewing')];
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
 
     const taskCard = screen.getByText('a task').closest('.board-card') as HTMLElement;
@@ -936,7 +936,7 @@ describe('the board wiring', () => {
      saying "go ahead" instead of one. */
   it('disables the drawer chip for a claimed item, from the same run payload', async () => {
     RUNS = [runFor(['task-1'], 'merging')];
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
 
     await userEvent.click(screen.getByText('a task'));
@@ -953,7 +953,7 @@ describe('the board wiring', () => {
      permanently dead card is the worse failure. */
   it('leaves the tab live when the run holding the item has gone stale', async () => {
     RUNS = [runFor(['task-1'], 'reviewing', { fresh: false })];
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
 
     const taskCard = screen.getByText('a task').closest('.board-card') as HTMLElement;

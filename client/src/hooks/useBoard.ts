@@ -100,8 +100,8 @@ export function useBoard(): BoardState {
   // after it.
   // A repo whose sync is `off` (#17) counts as no tracker here: its cache is
   // not moving, so re-reading it every fifteen seconds would re-read the same
-  // bytes — and turning it back on refetches through the Trackers card's own
-  // answer, then this board's next mount or focus.
+  // bytes — and turning it back on refetches through GitHub › Settings' Sync
+  // card's own answer, then this board's next mount or focus.
   const tracked = hasSyncingTracker(state.projects);
   const request = useRefreshing(load, { armed: tracked, intervalMs: BOARD_TRACKER_POLL_MS });
   const refetch = useCallback(() => {

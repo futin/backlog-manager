@@ -1,3 +1,5 @@
+import type { MergeMethod } from '../../../shared/types';
+
 /**
  * A thin client over `fetch` for the two dozen lines of GitHub's REST API this
  * app uses (task-45, spec §5.1). Its own file, no Nest decorators and no
@@ -13,10 +15,12 @@
  *    reach; nothing in a request shape names a host, and `repo` is validated
  *    (`isRepo`) before it is interpolated into a path. Spec §11: the server
  *    now holds a credential, so "where can this call go" has to be answerable
- *    by reading one file.
+ *    by reading one file. Since the PRs page, one GraphQL endpoint too
+ *    (`graphql()`), on the same host; its repo travels as a variable, checked by
+ *    `pulls.query.ts` with the same `isRepo` before it is split.
  * 2. **Every response's rate-limit headers are recorded**, including a `304`'s
  *    and a failure's. A `304` costs no budget, but it still REPORTS the
- *    budget, and the Trackers card's "4,812 of 5,000 left" would otherwise
+ *    budget, and the Sources card's "4,812 of 5,000 left" would otherwise
  *    freeze at whatever the last changed poll happened to see.
  * 3. **Nothing here throws on an HTTP status.** Every response comes back as a
  *    value the caller branches on, because every one of them is a state the
@@ -67,13 +71,39 @@ export interface GithubResponse<T> {
   /** The transport error's message, for `status: 0`. */
   error: string | null;
   rate: RateLimit;
+  /** A typed GraphQL `RATE_LIMITED` (`graphql()` only; absent everywhere else). GitHub sends it when a query would cost MORE points than are left, so
+   *  `remaining` can still be above zero — and `failureVerdict` reads this bit, not `remaining`, as the limit it is. */
+  rateLimited?: boolean;
 }
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
+/** Which of GitHub's two primary rate-limit pools a request draws on. REST's hourly 5,000 and GraphQL's hourly 5,000 POINTS are separate budgets, each
+ *  reported in its own responses' `x-ratelimit-*` headers — so a response's headers are recorded into the pool the request spent from, never the other. */
+type Pool = 'rest' | 'graphql';
+
+/** One GraphQL error as GitHub sends it in a 200's `errors` array. `type` is present on the errors this file maps to a status; a schema or syntax error
+ *  carries none. */
+interface GraphqlError {
+  type?: string;
+  message?: string;
+}
+
+/**
+ * The typed GraphQL errors that ARE an HTTP status in all but name. GraphQL answers 200 for them, which `failureVerdict` (the poller's one failure rule)
+ * would read as success — so the client restates each as the status its REST twin answers, and the same rule then sleeps, forbids or 404s exactly as it
+ * does for REST. Every other typed error (`UNPROCESSABLE`, a mutation refused on its merits) keeps the 200 with `error` set, and the caller reads
+ * `error !== null` as the failure it is.
+ */
+const GRAPHQL_STATUS: Record<string, number> = { RATE_LIMITED: 429, FORBIDDEN: 403, NOT_FOUND: 404 };
+
 export class GithubClient {
-  /** The last rate-limit headers seen, from ANY response — see rule 2 above. */
+  /** The last REST rate-limit headers seen, from ANY REST response — see rule 2 above. A GraphQL answer never moves it (`graphqlRate`). */
   private lastRate: RateLimit = { limit: null, remaining: null, reset: null };
+
+  /** The same bookkeeping for the GraphQL pool. Separate because the pools are separate: a PR read that spent GraphQL's budget to zero must not make the
+   *  Sources card report REST as exhausted, nor a REST answer hide that GraphQL is. */
+  private lastGraphqlRate: RateLimit = { limit: null, remaining: null, reset: null };
 
   /** `fetch` by default; a fake in tests. Injected through the constructor
    *  rather than monkey-patched globally so two suites can never share one. */
@@ -83,8 +113,40 @@ export class GithubClient {
     return { ...this.lastRate };
   }
 
+  get graphqlRate(): RateLimit {
+    return { ...this.lastGraphqlRate };
+  }
+
   /**
-   * The authenticated user, for the Trackers card's platform row. `null` data
+   * One GraphQL request (the PRs page, spec "PR list freshness"): one query per repo where REST would be N+1 per PR, and the only API that has a PR's
+   * review decision. Repo-agnostic on purpose — the query builders in `pulls.query.ts` take the repo and refuse a malformed one with `isRepo` before
+   * splitting it, and the repo travels as a VARIABLE, never interpolated into the query text, so this file's one-host rule needs no second guard here.
+   *
+   * Keeps this file's three rules. The host is `API`; the response's headers are recorded into the GraphQL pool (`graphqlRate`) and handed back as THIS
+   * answer's `rate`, so `failureVerdict` reads GraphQL's own remaining/reset; nothing throws. A non-200 (a secondary limit's 403, a 502) is normalised by
+   * `request()` exactly as REST's is, so `retryAfter` and `secondary` arrive as values. A 200 whose body carries `errors` sets `error` to their messages
+   * joined, `data` to `null`, and restates the first typed error `GRAPHQL_STATUS` knows as that status. A 200 with neither `errors` nor `data` comes back
+   * as `status: 200, error: null, data: null` — a success with nothing in it, which every caller null-checks.
+   */
+  async graphql<T>(query: string, variables: Record<string, unknown>, opts: { token: string }): Promise<GithubResponse<T>> {
+    const res = await this.request<{ data?: T | null; errors?: GraphqlError[] }>('POST', `${API}/graphql`, {
+      token: opts.token,
+      body: { query, variables },
+      pool: 'graphql'
+    });
+    if (res.status !== 200 || res.data === null) return { ...res, data: null };
+    const errors = Array.isArray(res.data.errors) ? res.data.errors : [];
+    if (errors.length === 0) return { ...res, data: res.data.data ?? null };
+    const message = errors.map((e) => (typeof e?.message === 'string' ? e.message : 'GraphQL error')).join('; ');
+    const typed = errors.find((e) => typeof e?.type === 'string' && GRAPHQL_STATUS[e.type] !== undefined);
+    const status = typed === undefined ? 200 : GRAPHQL_STATUS[typed.type as string];
+    // REST tells a secondary limit apart by its sentence (`request()`); GraphQL sends that same sentence under `RATE_LIMITED`, so it is read the same way.
+    const secondary = typed?.type === 'RATE_LIMITED' && /secondary rate limit/i.test(message);
+    return { ...res, status, data: null, error: message, secondary, ...(typed?.type === 'RATE_LIMITED' ? { rateLimited: true } : {}) };
+  }
+
+  /**
+   * The authenticated user, for the Sources card's GitHub row. `null` data
    * on any non-200, which the card renders as the access state it already has
    * — a login it cannot fetch is not a second kind of failure.
    */
@@ -278,11 +340,39 @@ export class GithubClient {
     return this.request<unknown>('DELETE', `${API}/repos/${repo}/issues/${number}/labels/${encodeURIComponent(name)}`, opts);
   }
 
+  /**
+   * Merge one pull request — the PRs page's merge (Plan B). `sha` is the head the page read: GitHub answers `409` when the head has moved since, so a merge
+   * can never land a commit nobody looked at. `405` is GitHub's "not mergeable" (protection, required checks, already merged) and comes back as the value it
+   * is; the caller re-reads the PR to tell an already-merged one from a refusal. The method is GitHub's own word (`squash` / `merge` / `rebase`).
+   */
+  async mergePull(
+    repo: string,
+    number: number,
+    body: { merge_method: MergeMethod; sha: string },
+    opts: { token: string }
+  ): Promise<GithubResponse<{ sha: string; merged: boolean; message: string }>> {
+    const bad = refuseRepo<{ sha: string; merged: boolean; message: string }>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request('PUT', `${API}/repos/${repo}/pulls/${number}/merge`, { ...opts, body });
+  }
+
+  /**
+   * GitHub's update-branch — merge the base into the head on GitHub's side, never a rebase and never local git. `202` means GitHub accepted it and will do
+   * it asynchronously; `expected_head_sha` makes a head that moved since the read a `422` instead of an update of a branch nobody looked at.
+   */
+  async updatePullBranch(repo: string, number: number, expectedHeadSha: string, opts: { token: string }): Promise<GithubResponse<{ message: string }>> {
+    const bad = refuseRepo<{ message: string }>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request('PUT', `${API}/repos/${repo}/pulls/${number}/update-branch`, { ...opts, body: { expected_head_sha: expectedHeadSha } });
+  }
+
   private async request<T>(
     method: string,
     url: string,
-    opts: { token: string; etag?: string | null; body?: unknown }
+    opts: { token: string; etag?: string | null; body?: unknown; pool?: Pool }
   ): Promise<GithubResponse<T>> {
+    const pool: Pool = opts.pool ?? 'rest';
+    const rate = (): RateLimit => (pool === 'graphql' ? this.graphqlRate : this.rate);
     const headers: Record<string, string> = {
       accept: 'application/vnd.github+json',
       authorization: `Bearer ${opts.token}`,
@@ -314,27 +404,27 @@ export class GithubClient {
         retryAfter: null,
         secondary: false,
         error: e instanceof Error ? e.message : String(e),
-        rate: this.rate
+        rate: rate()
       };
     }
 
     // Recorded BEFORE any status branch, so a 304, a 403 and a 200 all keep
     // the card's numbers moving (rule 2).
-    this.record(res.headers);
+    this.record(res.headers, pool);
 
     const retryAfter = numberHeader(res.headers.get('retry-after'));
     const etag = res.headers.get('etag');
     const next = nextLink(res.headers.get('link'));
 
     if (res.status === 304) {
-      return { status: 304, data: null, etag, next, retryAfter, secondary: false, error: null, rate: this.rate };
+      return { status: 304, data: null, etag, next, retryAfter, secondary: false, error: null, rate: rate() };
     }
 
     let data: T | null = null;
     let secondary = false;
     let error: string | null = null;
     // A body is read for every other status, including the failures: GitHub's
-    // error bodies carry the sentence the Trackers card shows, and the
+    // error bodies carry the sentence the Sources card shows, and the
     // secondary-limit bit can only be read from the message.
     try {
       const text = await res.text();
@@ -350,26 +440,30 @@ export class GithubClient {
       error = e instanceof Error ? e.message : String(e);
     }
 
-    return { status: res.status, data, etag, next, retryAfter, secondary, error, rate: this.rate };
+    return { status: res.status, data, etag, next, retryAfter, secondary, error, rate: rate() };
   }
 
-  private record(headers: Headers): void {
+  private record(headers: Headers, pool: Pool): void {
+    const last = pool === 'graphql' ? this.lastGraphqlRate : this.lastRate;
     const limit = numberHeader(headers.get('x-ratelimit-limit'));
     const remaining = numberHeader(headers.get('x-ratelimit-remaining'));
     const reset = numberHeader(headers.get('x-ratelimit-reset'));
     // Field by field rather than wholesale: a response that carries only some
     // of the three must not blank the others, since the card reads all three
     // together and a half-updated reading is worse than a slightly old one.
-    this.lastRate = {
-      limit: limit ?? this.lastRate.limit,
-      remaining: remaining ?? this.lastRate.remaining,
-      reset: reset ?? this.lastRate.reset
+    const next: RateLimit = {
+      limit: limit ?? last.limit,
+      remaining: remaining ?? last.remaining,
+      reset: reset ?? last.reset
     };
+    if (pool === 'graphql') this.lastGraphqlRate = next;
+    else this.lastRate = next;
   }
 }
 
 /**
- * The write methods' repo guard: `null` when the repo is fine, and otherwise
+ * The write methods' repo guard — and `pulls.query.ts`'s, which splits the repo into GraphQL variables only after it passes (exported for that one
+ * caller): `null` when the repo is fine, and otherwise
  * the response a caller gets INSTEAD of a request being made.
  *
  * `status: 0` rather than a throw, because rule 3 at the top of this file has
@@ -378,7 +472,7 @@ export class GithubClient {
  * so a writer's `upstream` refusal reads as something an operator can fix (a
  * typo in a committed `backlog/source.json`) rather than as a network blip.
  */
-function refuseRepo<T>(repo: string, rate: RateLimit): GithubResponse<T> | null {
+export function refuseRepo<T>(repo: string, rate: RateLimit): GithubResponse<T> | null {
   if (isRepo(repo)) return null;
   return {
     status: 0,

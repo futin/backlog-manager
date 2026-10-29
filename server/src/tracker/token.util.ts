@@ -25,7 +25,7 @@ export const GITHUB_TOKEN_ENV = 'BM_GITHUB_TOKEN';
  * The token, or `null` when there is none. Whitespace-only counts as none: a
  * `BM_GITHUB_TOKEN=` line in a `.env` is how a variable is unset in practice,
  * and an empty Authorization header is a 401 rather than the honest
- * `access: 'no-token'` the Trackers card exists to show.
+ * `access: 'no-token'` the Sources card's GitHub row exists to show.
  */
 export function githubToken(): string | null {
   const raw = process.env[GITHUB_TOKEN_ENV];

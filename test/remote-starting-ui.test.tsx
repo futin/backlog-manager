@@ -115,7 +115,7 @@ function stub(items: BacklogItem[], remoteStarting: RemoteStarting[] = []): void
 }
 
 async function renderBoard(): Promise<void> {
-  render(<BoardView />);
+  render(<BoardView source="github" />);
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 

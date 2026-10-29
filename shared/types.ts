@@ -490,15 +490,15 @@ export interface ProjectSummary {
   detail: string | null;
   /**
    * The connected repo's effective sync interval on this machine (#17) — the settings file's value after its defaults, so never absent for a `github`
-   * project — and `null` for everything else, the same total-shape rule as the four fields above. Carried here, not only on the Trackers rows, because the
+   * project — and `null` for everything else, the same total-shape rule as the four fields above. Carried here, not only on the `/api/trackers` rows, because the
    * board's band line and the dispatch gate read this payload: an `off` repo reads `sync off` and its project refuses dispatch.
    */
   interval: SyncInterval | null;
 }
 
 /**
- * `GET /api/trackers` — everything the Shared Settings page's Trackers card
- * draws (task-45, spec §5.6), and deliberately nothing else. There is no
+ * `GET /api/trackers` — everything the Shared Settings page's Sources card and
+ * GitHub › Settings' Sync card draw (task-45, spec §5.6), and deliberately nothing else. There is no
  * connections file — a project is connected by committing `backlog/source.json`,
  * which is `backlog.mjs connect`'s job and nobody else's. The card's one write,
  * a repo's sync interval (#17), is `POST /api/trackers/sync`; its answer is a
@@ -559,7 +559,7 @@ export interface TrackerProjectRow {
 
 /**
  * How often the tracker poller syncs one repo, on THIS machine (#17). The one home of the enumeration: the server's validator, the poller's due-check and
- * the Trackers card's picker all read this record, and the picker's labels are its KEYS — there is no second list to drift. Declaration order is the picker's
+ * GitHub › Settings' sync picker all read this record, and the picker's labels are its KEYS — there is no second list to drift. Declaration order is the picker's
  * order. Every value is a whole multiple of the poller's 15 s base tick (`TRACKER_POLL_MS`), so the tick is the resolution and no repo needs a timer of its
  * own; `off` has no milliseconds because it has no schedule — one cold-boot sync per process, then nothing.
  *
@@ -581,6 +581,132 @@ export const DEFAULT_SYNC_INTERVAL: SyncInterval = '15s';
 /** Own-key check, so `toString` and `__proto__` — both "in" any object literal — are not tokens. */
 export function isSyncInterval(value: unknown): value is SyncInterval {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SYNC_INTERVALS, value);
+}
+
+// ── Pull requests (GitHub › PRs) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Spec: docs/superpowers/specs/2026-10-29-source-sections-design.md, Goal 2 and "Left to the builder". One row per OPEN pull request of a registered GitHub
+// repo, read by ONE GraphQL query per repo (`server/src/tracker/pulls.query.ts`, which holds the mapping from GitHub's enums to these words). The PR's GraphQL
+// node id is deliberately absent: the auto-merge mutation needs it, the server reads it fresh for that one call, and it never leaves the server — a write names
+// a PR as `<repo>#<number>`, which is also the write's serialisation key.
+
+/** GitHub's three merge methods, in lower case. */
+export type MergeMethod = 'squash' | 'merge' | 'rebase';
+
+/** Every merge method, in the order a PR's default is picked from: the repo's first ALLOWED one in this order (spec, "Merge method"). */
+export const MERGE_METHODS: readonly MergeMethod[] = ['squash', 'merge', 'rebase'];
+
+/** One open pull request, as the PRs page draws it. Every enum is GitHub's, lower-cased or narrowed in `toRow`; nothing here is derived from two fields. */
+export interface PullRequestRow {
+  number: number;
+  title: string;
+  /** Where a person opens the PR on github.com. */
+  url: string;
+  /** The author's login, or `null` for a deleted account ("ghost") — GitHub answers `author: null` for one. */
+  author: string | null;
+  draft: boolean;
+  /** The head branch's name (`headRefName`) — what the run-in-progress warning matches against `backlog/<id>` and `execute/<id>`. */
+  head: string;
+  /** The head commit's SHA. A merge and an update-branch both send it back, so a head that moved since the read is GitHub's 409/422, never a surprise. */
+  headSha: string;
+  base: string;
+  /** The head lives in a fork. With `maintainerCanModify` false, GitHub refuses update-branch with a 422, so the page disables it with a reason. */
+  crossRepository: boolean;
+  maintainerCanModify: boolean;
+  updatedAt: string;
+  /** `UNKNOWN` is GitHub still computing it — common for a few seconds after a push or an update-branch, so it is a state, not an error. */
+  mergeable: 'mergeable' | 'conflicting' | 'unknown';
+  /** `mergeStateStatus` lower-cased (`clean`, `behind`, `blocked`, `dirty`, `unstable`, `has_hooks`, `draft`, `unknown`) — kept as GitHub's open word list
+   *  rather than narrowed, because GitHub has added values to it before and an unknown one should still render. */
+  mergeState: string;
+  /** `reviewDecision`; `null` when the repo requires no review. */
+  review: 'approved' | 'changes-requested' | 'review-required' | null;
+  /** The head commit's `statusCheckRollup.state`; `none` when the commit has no checks at all. */
+  checks: 'success' | 'failure' | 'pending' | 'none';
+  /** Armed auto-merge, or `null`. `enabledAt` is `''` in the one case GitHub's nullable `DateTime` comes back empty. */
+  autoMerge: { method: MergeMethod; enabledAt: string } | null;
+  /** GitHub's own `viewerCanUpdateBranch`: false when the head is already up to date with its base OR this token may not update it. */
+  canUpdateBranch: boolean;
+}
+
+/**
+ * One registered GitHub repo's slice of the PRs page, from the server's per-repo, on-demand PR cache (`server/src/tracker/pulls.service.ts`). One view per
+ * DISTINCT repo: two checkouts of one repo are one view, because they are one list on GitHub and reading it twice would spend twice the budget.
+ */
+export interface PrRepoView {
+  repo: string;
+  /** When the rows below were last read successfully — the age the page renders. `null` before the first successful read. A failed read leaves it where
+   *  it was, together with the rows, so the page keeps drawing the last answer beside the failure rather than an empty list. */
+  polledAt: string | null;
+  /** The last read's connection state, `ProjectSummary.access`'s vocabulary (`no-token` never appears here: no token is `token: false` on the payload). */
+  access: NonNullable<ProjectSummary['access']>;
+  /** The human half of `access` — the error text, or the sleep a rate limit put the repo under, naming when it ends. */
+  detail: string | null;
+  /** `sync is off for <repo> — …` when the repo's sync is `off` (the poller's `syncOffBlock`, verbatim), else `null`. A field, never a filter: the rows
+   *  are still read and drawn, and the page disables the writes with this as the reason. */
+  syncOff: string | null;
+  /** The merge methods the repo allows, in `MERGE_METHODS` order — the first is the page's default. Empty until the first successful read. */
+  methods: MergeMethod[];
+  /** The repo's own auto-merge setting; the page disables auto-merge where it is off. `false` until the first successful read. */
+  autoMergeAllowed: boolean;
+  /** Open PRs, newest update first, at most 100 (one GraphQL page). */
+  prs: PullRequestRow[];
+  /** How many open PRs the repo has in all. */
+  total: number;
+  /** `total > prs.length` — the page says how many it left out rather than paginating. */
+  truncated: boolean;
+}
+
+/** `GET /api/prs`'s answer. `token: false` means `BM_GITHUB_TOKEN` is unset, and then `repos` is empty and no request was made. */
+export interface PullRequestsPayload {
+  token: boolean;
+  repos: PrRepoView[];
+}
+
+/** `POST /api/prs/merge`. `headSha` is the head the page read (40 lowercase hex); GitHub refuses the merge with a 409 if the head has moved since. */
+export interface PrMergeRequest {
+  repo: string;
+  number: number;
+  method: MergeMethod;
+  headSha: string;
+}
+
+/** `POST /api/prs/auto-merge`. `method` is required to arm (`enable: true`) and ignored to disarm. */
+export interface PrAutoMergeRequest {
+  repo: string;
+  number: number;
+  enable: boolean;
+  method?: MergeMethod;
+}
+
+/** `POST /api/prs/update-branch` — GitHub's update-branch (base merged into head), never a rebase. `headSha` is sent as `expected_head_sha`. */
+export interface PrUpdateBranchRequest {
+  repo: string;
+  number: number;
+  headSha: string;
+}
+
+/** What a PR write did. `already-merged` is a merge that GitHub refused because the PR was merged already — by a second click serialised behind the first,
+ *  or by somebody on github.com — which the re-read proves; `noop` is a disarm of a PR with no auto-merge armed, which makes no mutation at all. */
+export type PrWriteOutcome = 'merged' | 'already-merged' | 'auto-merge-enabled' | 'auto-merge-disabled' | 'noop' | 'update-requested';
+
+/**
+ * How long after an accepted update-branch (`update-requested`) the PR's row says `updating…`, and when the page re-reads once. ONE number for two
+ * processes: the client's mark (`UPDATING_MS`, `client/src/lib/prs.ts`) times its re-read by it, and the server makes that repo's PR-cache entry due again
+ * at the same moment although its 60 s TTL has not run out — two literals would let the re-read land inside the TTL and be served the head the update
+ * has since moved, with the row's actions enabled on it.
+ */
+export const PR_UPDATING_MS = 30_000;
+
+/**
+ * The answer of the three PR writes (`200`, or `202` for update-branch). The write landed — that is what the status says. `pr` is the PR as the write's own
+ * single-PR re-read found it, or `null` when the PR is no longer open (merged, closed) or the re-read failed; `reread` says which. A failed re-read is never
+ * an error, for the same reason as `JiraIssueWriteResult`'s: the write cannot be un-happened, and an error would invite a retry of one that already stood.
+ */
+export interface PrWriteResult {
+  ok: true;
+  outcome: PrWriteOutcome;
+  pr: PullRequestRow | null;
+  reread: boolean;
 }
 
 // ── Jira ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

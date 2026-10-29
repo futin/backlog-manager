@@ -950,6 +950,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* A code span on `--steel` (§8.7), not a coloured word: `--cyan` here made a
    path read as a link in a hint that has none. */
 .set-hint code { font-size: 13px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 0 4px }
+/* One reading per line inside a hint (the Sources card, §8.6): a source row says its count, its token and each repo's reach, and run together on one line
+   those read as one sentence. Layout only — the line keeps `.set-hint`'s type, so this is no second look for the hint. */
+.set-hint-line { display: block }
 /* A refused `POST /api/agents/watchdog/config` (bug-24), rendered as its own
    row directly under the control that was refused. `var(--red)`, matching
    `.run-controls-error`'s posture rather than `.sheet-error`'s amber: this is
@@ -2911,6 +2914,38 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   --uk-breaking-ink: var(--red);
   --uk-breaking-tint: color-mix(in srgb, var(--red) 14%, var(--strip));
 }
+
+/* GitHub › PRs (DESIGN.md §8.11). One `Sheet` per repo, Settings' card ground, stacked in the well with the 16 px gap every page uses; rows inside are
+   boxless with a hairline BETWEEN them, as a settings row is (§8.6). Own `.prs-*` classes only — design guard 7 forbids restyling a `.ui-*` primitive from
+   here, so the pills, chips, select and confirm in a row are drawn exactly as everywhere else. The page reserves no height, so it reads no strip token. */
+.prs { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
+.prs p { margin: 0 }
+.prs-status { font-size: 13px; color: var(--ink2); line-height: 1.45 }
+.prs-status-error { color: var(--red) }
+.prs-repo-inner { display: flex; flex-direction: column; min-width: 0 }
+.prs-repo-sub { display: flex; flex-wrap: wrap; gap: 4px 12px }
+/* The repo's own notes under its head — the sync-off sentence, a failed read's detail. Readable without hover: on a phone there is none. */
+.prs-note { font-size: 13px; color: var(--ink2); line-height: 1.45; margin-bottom: 12px }
+.prs-note-bad { color: var(--red) }
+.prs-list { list-style: none; margin: 0; padding: 0 }
+.prs-row { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; min-width: 0 }
+.prs-row + .prs-row { border-top: 1px solid var(--hairline) }
+.prs-row:first-child { padding-top: 0 }
+.prs-row:last-child { padding-bottom: 0 }
+.prs-row-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 15px; font-weight: 500; color: var(--ink) }
+.prs-num { color: var(--ink2); text-decoration: none; flex: none }
+.prs-num:hover { text-decoration: underline }
+.prs-title { min-width: 0; overflow-wrap: anywhere }
+.prs-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; color: var(--ink2) }
+.prs-branches { overflow-wrap: anywhere }
+.prs-chips { display: flex; flex-wrap: wrap; gap: 6px }
+.prs-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px }
+/* An action and its reason travel together, so a wrap never strands a reason under the wrong button. */
+.prs-action { display: inline-flex; align-items: center; gap: 6px }
+.prs-why { font-size: 12px; color: var(--ink3) }
+.prs-outcome { font-size: 13px; color: var(--ink2); line-height: 1.45 }
+.prs-outcome-error { color: var(--red) }
+.prs-repo-inner > .prs-outcome { margin-top: 12px }
 
 /* ── ui primitives ────────────────────────────────────────────────────────────
    Every class family owned by a component in client/src/components/ui/, and

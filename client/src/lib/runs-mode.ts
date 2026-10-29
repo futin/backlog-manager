@@ -17,7 +17,7 @@
  * picks which of two PAGES the section is, the control naming that choice is
  * always visible, and a person who left on Watchdog while a run was live
  * wants to come back to it. Section-like, so it persists like the section key
- * does — through a guard, for the same reason `resolveSection` has one.
+ * does — through a guard, for the same reason `resolveLegacySection` has one.
  *
  * This module carries no button LABELS, and that is task-38's own removal
  * rather than an omission: it used to export a `MODE_BUTTON` pair for the

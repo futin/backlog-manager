@@ -3294,6 +3294,17 @@ nothing, or the rail announces a current item on a page nobody is looking at.
 Jira phase 2 made it three call sites — Runs, Jira, Settings — and the third arrived exactly as the argument above says it should: a new item list
 (`JIRA_PAGES`), a new current value (`useJiraPage`) and a new write (`setJiraPage`), with nothing about the markup restated.
 
+The source-sections change made it five — Files, GitHub, Jira, Runs, Settings — the same way twice over: `FILES_PAGES` and `GITHUB_PAGES` for the item lists,
+`useFilesPage` and `useGithubPage` for the current values, `setFilesPage` and `setGithubPage` for the writes, and still nothing about the markup.
+
+### A source's own settings page may hold a host card
+
+No card mixes local and host, and the page is the scope — but the scope rule is about Settings' three pages, not a ban on host cards anywhere else. GitHub ›
+Settings holds one, `Sync` (each repo's sync interval, a host write through `POST /api/trackers/sync`), with a `this machine` pill in its band, for the reason
+Jira › Setup holds `jira.json`'s writes: the control governs one source, and its home is that source's section, one tree entry from the board it changes. Shared
+keeps the read-only report of every source this machine reaches, the `Sources` card, alone in its left column, against Watchdog, Tick and Time zone in its
+right; its two links (`GitHub › Settings ↗`, `Jira › Setup ↗`) are the shell's pairs threaded down, and each is drawn only while the section it opens is drawn.
+
 ## The Jira section's two pages are switched by the rail's tree, and the section is drawn only when configured
 
 The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
@@ -3313,29 +3324,86 @@ construction; a link built inside the page out of its own `localStorage` write a
 page value lives in a module store (`hooks/useJiraPage.ts`, `useRunsMode`'s shape) rather than a `usePersistedState` per caller for the same reason Runs' does:
 the tree and the page are two mounted writers, and a per-caller copy would leave one of them looking at the page the other has just left.
 
-The chip's popover and the Trackers row stay readings with no link at all, for the rule's other face: a `Setup ›` link there would be an in-page switch on a
-surface that is not even in the section. The Trackers row writes `Jira › Setup` as text, and the rail is one click away.
+The chip's popover stays a reading with no link at all, for the rule's other face: a `Setup ›` link there would be an in-page switch on a surface that is not
+even in the section. The Sources card's Jira row is the one surface outside the section that links in, and its `Jira › Setup ↗` is not a switch of its own
+either: it is `onOpenJiraPage`, the shell's pair, threaded down through `SettingsView` and `SharedPage` (the Trackers row before it wrote `Jira › Setup` as
+text), and it is drawn only while configured, since a link into a section the rail does not draw would open a page that falls on arrival.
 
 ### An unconfigured machine must not show an entry it cannot fill
 
-A machine without `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` has no Jira section to show: every route but the status answers 503, so a rail row
-would open on a page that can only say so, and on a machine that never configures Jira an entry that is always there and always empty is furniture that
-teaches readers to ignore the rail. So the row is drawn while the status says `configured: true` and not otherwise, and the chip and the
-Trackers row follow the same answer.
+A machine without `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` has no Jira section to show: every route but the status answers 503, so a rail row would
+open on a page that can only say so, and on a machine that never configures Jira an entry that is always there and always empty is furniture that teaches
+readers to ignore the rail. So the row is drawn while the status says `configured: true` and not otherwise, and the chip and the Sources card's `Jira › Setup ↗`
+link follow the same answer.
 
-What makes this harder than hiding a row is that the section can be STORED. `jira` is a member of `SECTIONS` unconditionally, because `resolveSection` runs in
-a `useState` initializer, before `GET /api/jira` has answered, and a list that refused `jira` there would throw away the section a reader left on a configured
-machine on every reload. The conditional half therefore cannot live in the list; it lives in the shell, and it is decided by ONE answer. `App`'s effect moves
-a `jira` section to Board on `configured: false` — the only status that says there is nothing to show — and on nothing else. An unknown status, whether not
-answered yet or every read so far failed, HOLDS the section, drawn in `JiraView`'s `loading…` or `Jira unavailable` shape: a network blip at load says nothing
-about the credentials, and a shell that fell on it would move a reader off a working section and record `board` as where they were. A failure after a
-`configured: true` keeps that answer, because `useJira` keeps its last payload.
+What makes this harder than hiding a row is that the section can be STORED. `jira` is a member of `SECTIONS` unconditionally, because `resolveLegacySection`
+runs in a `useState` initializer, before `GET /api/jira` has answered, and a list that refused `jira` there would throw away the section a reader left on a
+configured machine on every reload. The conditional half therefore cannot live in the list; it lives in the shell, and it is decided by ONE answer. `App`'s
+effect moves a `jira` section to the first drawn source row (`firstDrawn`, Runs when there is none) on `configured: false` — the only status that says there is
+nothing to show — and on nothing else. An unknown status, whether not answered yet or every read so far failed, HOLDS the section, drawn in `JiraView`'s
+`loading…` or `Jira unavailable` shape: a network blip at load says nothing about the credentials, and a shell that fell on it would move a reader off a working
+section and record another section as where they were. A failure after a `configured: true` keeps that answer, because `useJira` keeps its last payload.
 
 The rail follows the shell rather than the status alone: while the section is held, the row is drawn — a held section with no row of its own would leave the
 reader on a page the rail does not name — and while another section is open and the status is unknown, it is not, because a row drawn on a guess and removed
 on the answer would make the rail flicker on every load of every machine that never configures Jira. `Opens on` offers `Jira` under the
 same answer, and a stored `jira` pin keeps its option so a native select never shows a value with no option; the pin itself is left alone and takes the same
 fall at load, because the machine may get its credentials back.
+
+## A source row is drawn only while a registered project has that source, and its pages are switched by the rail's tree
+
+A source row (Files, GitHub) is drawn only while a registered project has that source, and its pages are switched by the rail's tree or a link threaded down
+from it. The rule is the Jira row's twice over — the tree half from Runs and Settings, the drawn half from Jira — with the projects answer in place of the Jira
+status.
+
+### Why the rail splits by source
+
+One Board mixed two write paths. A files project's items are files the skills write and git carries; a GitHub project's are issues this server writes through
+the guarded item routes, with a claim, a sync interval and a cache age no file item has. In one well every reading had to say which of the two it was about, and
+GitHub's one control — the sync interval — sat on Shared Settings, a section away from the board it governs. A row per source puts each write path under its own
+entry, gives GitHub a Settings page beside its Board and Archive, and leaves Shared a read-only report of what this machine reaches.
+
+### The tree rule, applied to two more sections
+
+Files (Board, Archive) and GitHub (Board, PRs, Archive, Settings) are pages under one rail entry, so the tree is the switch at every width and no page draws one of
+its own. The one link that lands on a source page from outside — the Sources card's `GitHub › Settings ↗` — is `onOpenGithubPage`, built once in `App` as
+`setGithubPage(p)` then `change('github')` and threaded down, for the reason Jira's links are: a link built inside the card out of its own store write would
+mean what the tree entry means only until one of them changed. The page values live in module stores (`hooks/useSourcePage.ts`) because the tree, the link and
+the shell's own legacy-landing initializer are separate writers.
+
+### The answer is the registry's, read once by the shell
+
+Whether a row is drawn is a question about the registry, not the tracker. `ProjectsProvider` reads `GET /api/projects` once for the shell and hands
+`drawnSources` out, rather than deriving it from `TrackersPayload.projects`. That payload does list every registered project, but it is the tracker's view of
+them — it calls a GitHub marker with an invalid repo `unsupported` where `/api/projects` says `github` — and the rail's rows must agree with the registry. It reads on mount and focus and never polls — the registry moves on a `register`, not on a clock — and keeps its last answer on a failure, so a blip cannot
+take a row away. An `unsupported` project and one with no source sit under Files as display grouping only, never as a source of their own: what they have to
+show is file errors, and Files is the source with a place to show them. The index's `errors` are split the same way, by what each one names
+(`errorSource`): every error the server sends starts with its subject, so a `gh:<owner/name>#<n>` URN — a warning about one GitHub issue — goes to GitHub, an
+error starting with a registered project's path goes wherever that project is drawn (a github project's invalid-repo marker to GitHub, an `unsupported`
+project's unreadable marker to Files), and only an error naming nothing registered falls to Files. Keeping every error on Files, as the first cut did, showed
+GitHub's warnings on a page that does not draw their items — and on a machine with only GitHub projects, where the Files row is never drawn, nowhere at all.
+
+### Three states, and hold-and-fall
+
+Unknown (not answered yet, or every read so far failed) moves nothing: a section the reader chose is held, and the rail draws its row while it is the section on
+screen, so a slow server never moves anyone and never leaves them on a page the rail does not name. A known answer that no longer draws the section on screen
+falls it, through `change`, to the first drawn row — Files before GitHub, the rail's own order — or to Runs, the section that needs no project. The effect is
+keyed on the state, so a focus reload that drops the row (a repo disconnected on another machine, the last files project unregistered) is the same case as a
+first answer that never had it.
+
+### The provisional landing
+
+A machine with no stored section, or one that stored a root `board`/`archive` from before the split, has no section the reader chose. `resolveLegacySection`
+gives it a PROVISIONAL GitHub — the one value that needs no answer, and today's Board is GitHub › Board — and the shell paints the loading shape, neither the
+row nor the board, until the first projects answer settles it once: a page-named landing goes to GitHub when this machine has a GitHub project and to the first
+drawn source otherwise (`settleSection`), anything else to `firstDrawn`. Drawing the guess instead would flash a GitHub row and board on every load of a
+files-only machine before taking them back. A legacy `Opens on` pin is rewritten to where it settled: left as the clamped `github`, the next `update()` — any
+Settings change — would store it as a real GitHub pin, and that machine would draw a held GitHub row on every load with `Opens on` naming a source it does not
+have. A click made before the answer clears the provisional mark, so the settle never yanks a reader back. An old `?section=board` deep link names no section
+and is ignored, like any unknown one.
+
+`Opens on` offers Files and GitHub under the same answer (`landingOptions`), keeping a stored pin's option so a native select never shows a value with no
+option; the pin itself takes the fall at load.
 
 ## `contentWidth` is stamped before first paint, and the CSP hash travels with it
 
@@ -3386,9 +3454,9 @@ it, no payload carries it, and the browser never talks to `api.github.com` at al
 
 That is deliberately the same SHAPE as "the browser never talks to the dashboard", stated separately rather than assumed to be covered by it. The dashboard rule
 is about an ORIGIN the browser must not reach; this one is about a SECRET that must not reach the browser. Neither implies the other, and this app now has both.
-`GET /api/trackers` is what the Trackers card reads, and it carries `hasToken` and a `login` — whether a credential is loaded, and whose — because those are
-what an operator needs in order to know the right one is in place. `test/tracker-items.test.ts` asserts the value appears in no response of any route this
-module serves.
+`GET /api/trackers` is what the Sources card and GitHub › Settings read, and it carries `hasToken` and a `login` — whether a credential is loaded, and whose —
+because those are what an operator needs in order to know the right one is in place. `test/tracker-items.test.ts` asserts the value appears in no response of
+any route this module serves.
 
 **`docker-compose.yml` passes it through as an interpolation with a default, never a literal** — bug-25's rule, applied to a variable where the stake is higher.
 A literal `BM_AGENTS: 'on'` was a wrong default; a literal token would be a credential committed to a repository, and the fix for that is revoking it rather
@@ -3421,7 +3489,7 @@ slower one once its interval has elapsed since its last sync, stamped on failure
 #17, [spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.md) §6 and §8. An `off` repo's cache is not refreshed, so everything this server
 knows about its issues and claims is as old as the last sync — and every write path decides something from that cache: whether a claim is held, what the body
 was, which label to remove. A write against a frozen view is the same class of failure bug-55's phantom claim was, reached on purpose instead of by accident.
-So `off` refuses them all, with one sentence naming the repo and the fix — `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers` —
+So `off` refuses them all, with one sentence naming the repo and the fix — `sync is off for <owner/name> — turn it on in GitHub › Settings` —
 composed in exactly one server place (`TrackerPollerService.syncOffBlock`) and pinned byte for byte against the client's copy (`syncOffReason`), since the
 client cannot import the server's composer.
 
@@ -3437,7 +3505,7 @@ slowing a live run's sync costs latency, and that is the user's call. The route 
 the starting entries, and hosting it in `TrackerModule` would be a module cycle. Remote runs are the read-side twin: an `off` repo derives none, because a
 frozen comment cache would otherwise show another machine's run as live for as long as sync stays off.
 
-## The tracker and Jira caches are the two caches in this server whose age is a rendered value
+## The tracker, Jira and pull-request caches are the three caches in this server whose age is a rendered value
 
 `TrackerPollerService` holds every connected repo's issues in memory, per repo, lost on restart and rebuilt by the first sync (task-45, spec §5.1). Every other
 read in this server is per request and uncached — the registry, each project's source marker, the run files, `uncommitted` — and those rules are untouched: this
@@ -3445,9 +3513,24 @@ poller re-reads all of them on every tick. What it keeps is the one thing behind
 The Jira board cache is the second (`JiraPollerService`, one list per board, `polledAt` per board in `GET /api/jira`), allowed for the same reason and kept
 honest the same way; everything below is about the tracker's.
 
+**The pull-request cache is the third, and the only one with no clock of its own** (`PullRequestsService`, Plan B of the source-sections change). It is per
+repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep, because nothing but the
+PRs page reads pull requests — a background read would spend GraphQL budget on a list nobody is drawing, and would keep a poll alive after the page closed,
+which is exactly what "the poller is armed only while something is connected" forbids. The page's own 60 s fetch is the cadence, and it stops when the page
+unmounts. It is kept honest the same way as the other two: `polledAt` rides on every repo's view and the PRs page renders it, and it moves only on a
+successful read. A failure keeps the last answer — the previous rows, their `polledAt` — beside the failure's `access` and `detail`, because a stale list
+labelled with its age is more use than an empty one, and an emptied list would read as "no open PRs", which is a claim about the repo the cache cannot make.
+
+Two rules keep a write and the TTL from contradicting each other (the Plan B fix wave). An accepted update-branch makes the repo due again `PR_UPDATING_MS`
+(30 s, `shared/types.ts`, the one number the page's `updating…` mark also reads) after the write, although its TTL has not run out: GitHub merges the base in
+after it answers, so the page re-reads once when the mark ends — and a re-read served from the 60 s TTL would bring back the head the update has since
+moved, with the row's actions enabled on it, which is the self-caused 409 the row's busy rule exists to prevent. And a list read that lands after a write
+spliced the repo drops its rows (it still counts as an attempt): it carries GitHub's state from before the write, and storing it would put a merged PR back
+on the page for a whole TTL. A successful read likewise clears only a sleep that has run out — one a write recorded while the read was out is newer news.
+
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
 board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip
-counts the sweep down on its POLL meter (#228 — the board's band printed `futin/x · polled 12 s ago` before that), the item modal prints it beside the body it drew from that same cache, and the Trackers card prints it per project. A cache
+counts the sweep down on its POLL meter (#228 — the board's band printed `futin/x · polled 12 s ago` before that), the item modal prints it beside the body it drew from that same cache, and the Sources card prints it per repo. A cache
 whose staleness is on screen is a different object from one that is not.
 
 **The orchestrator's queue preview is the fourth reader of that age, and a named id gets one retry before it is refused (bug-41).** `trackerCandidates`
@@ -3703,6 +3786,48 @@ is order and bookkeeping, not capability: everything it can refuse is refused be
 the workflow offers, `no identity` before an assign is attempted, the first composition's length), an assign the ticket already carries is skipped rather
 than sent, and a failure after a landed write says so in its own sentence (`— the assign stands`, `— the Jira writes stand`) because the write is not
 undone and a retry must not be invited as though it were. Unassign, assigning anyone else, a comment and a field edit remain a new rule apiece.
+
+## The board's pull-request writes are merge, auto-merge and update-branch, nothing else, and each re-reads the PR
+
+The PRs page ([spec](../superpowers/specs/2026-10-29-source-sections-design.md), Goal 2; Plan B, task 4) gives this server its third surface that changes
+somebody else's data, after the tracker items and the two Jira writes, and this rule is what keeps it at three calls: **merge** (REST
+`PUT /repos/{repo}/pulls/{n}/merge`), **update-branch** (REST `PUT .../update-branch`) and **auto-merge** (GraphQL `enablePullRequestAutoMerge` /
+`disablePullRequestAutoMerge`), behind `POST /api/prs/merge`, `/auto-merge` and `/update-branch` in `server/src/tracker/pulls.controller.ts`. Close,
+reopen, approve, comment, edit, label or delete a branch is a new rule and a new section here, never another route that "fits the pattern" — for the same
+reason as Jira's: a token that can merge into somebody's `main` is the sharpest thing this server holds, and what it may do with it should be countable.
+
+**GitHub API calls, never local git.** Merge and update-branch are requests to `api.github.com` through the one `GithubClient`; the server checks nothing out,
+fetches nothing and pushes nothing, so [the server never writes git](#the-server-never-writes-git) holds unchanged. Update-branch is GitHub's own (the base
+merged into the head), not a rebase, and it runs on GitHub after the `202`.
+
+**Guarded like every write, tailnet included.** Each POST carries `SameOriginPostGuard` per route (`application/json` and a same-origin `Origin`), and the
+global Host allowlist has already answered — so a tailnet host the allowlist admits may merge exactly as loopback may. There is no loopback-only rule for
+these: the person on the tailnet is the same person, and a write the board offers on one host and refuses on another would be a board that lies about what
+its buttons do. `test/agents-origin-guard.test.ts` holds the three routes in `GUARDED`.
+
+**Serialised per `<repo>#<number>`.** `PullRequestsService.serialise` is `GithubSource.serialise`'s shape — `previous.then(fn, fn)`, the entry dropped once it
+is the tail again — keyed by the PR, never by the repo (a merge of #12 is never queued behind one of #7) and never by the GraphQL node id, which the auto-merge
+mutation needs, the server reads fresh for that one call, and which never leaves the server. Sync off and the sleep are judged INSIDE the chain, when the
+write's turn comes, as `writeChain` judges sync off for the item writes.
+
+**The refusal ladder, in order:** `400` a malformed body · `404` a repo no registered project resolves to · `503` no token · inside the chain `409` sync off
+— `syncOffBlock(path)` of the repo's first registered project, the sentence's one server home, never a copy · `429` the repo asleep · then GitHub's answer:
+a refusal on its merits (REST `405`/`409`/`422`, or a typed GraphQL error on a `200`) is `409` with GitHub's message; a `401`/`403` that is not a limit is
+`502 the token lacks permission for this — <GitHub's message>`, because a fine-grained token's write permissions cannot be read back and this is where a
+person learns the token is short, so the page disables nothing on a guess; a limit is `429` and sleeps the repo (`failureVerdict`, the poller's one rule;
+ruling R4 creates the PR-cache entry when none exists, and a secondary limit sleeps the poller's repo too); anything else is `502`. Nothing before the
+GitHub call makes an outbound request.
+
+**Each re-reads the PR.** After every outcome but a limit, the write reads the single PR again and splices it into the PR cache — its row while open, its
+removal once merged or closed — rather than patching the cached row to what the person expected: a merge queue, a required check or GitHub's own
+`mergeable` recomputation can make the PR something other than what was asked for. The answer carries that row as `pr` and `reread`; a failed re-read is
+`reread: false` and never an error, because the write has already happened ([the Jira rule](#the-boards-jira-writes-are-assign-and-transition-nothing-else)).
+A merge's `200` splices the PR out even when its re-read fails — GitHub's answer already said it is merged.
+
+**Why the second merge is `already-merged`.** Two clicks on Merge, two tabs, or a merge raced from github.com: the second request is serialised behind the
+first here, or simply arrives after GitHub merged it, and GitHub answers `405` for a PR that is no longer open. That is exactly the state the person asked
+for, so the merge's refusal path re-reads first, and a re-read that says `MERGED` answers `200 already-merged`. An error there would invite the person to
+retry a merge that already stood. A disarm of a PR with no auto-merge armed is `200 noop` and sends no mutation, for the same reason.
 
 ## A Jira session is remembered in server memory only, and Stop is the one hand that clears it early
 
@@ -4571,10 +4696,11 @@ The other half of the same incident. While the server was stalled, the client's 
 request had come back, so each one stacked a fresh duplicate on every tick; when the server recovered it had a queue of identical questions to answer, most of
 them git spawns, which amplified the stall. `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure of React and tested directly with fake timers) and its React
 shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog`, `useAgents`, `useTicks` and — since
-#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six — and, since Settings › Dashboards, `useMachines`, a seventh that polls a minute while that page is open — enters through `hooks/useRefreshing.ts` (#285), which owns the
+#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six — and, since Settings › Dashboards, `useMachines`, a seventh that polls a minute while that page is open, and `usePullRequests`, an eighth on the same terms for GitHub › PRs — enters through `hooks/useRefreshing.ts` (#285), which owns the
 board's mount + window-focus triggers once instead of each hook writing the two effects by hand; `useCoalescedFetch` stays the lower layer, used directly by
 `useJiraBoard`, which triggers on its board id rather than on mount and focus. `TimeZoneProvider` (#241) enters through `useRefreshing` too, with no `armed`
-like `useOrchestratorArchive`: it reads the shared zone on mount and focus and never polls, since the value moves only on a person's pick.
+like `useOrchestratorArchive`: it reads the shared zone on mount and focus and never polls, since the value moves only on a person's pick. `ProjectsProvider`
+(the source sections' one `GET /api/projects` read) enters the same way, for the same reason: the registry moves on a `register`, not on a clock.
 
 **The timer is armed by an answer.** The next tick is a `setTimeout` set when the current request settles, `intervalMs` later, so a slow answer slows the poll
 instead of piling onto it and at most one timer is ever pending. Each hook keeps its own `armed` condition for "something is moving worth polling" exactly as

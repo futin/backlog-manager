@@ -470,7 +470,7 @@ describe('staleTakeover', () => {
  * A slowed repo needs no new words, but it does need its own clock — a `5m` repo is not overdue at 34 s.
  */
 describe('sync interval readings (#17)', () => {
-  const SENTENCE = 'sync is off for futin/x — turn it on in Settings › Shared › Trackers';
+  const SENTENCE = 'sync is off for futin/x — turn it on in GitHub › Settings';
 
   it('syncOffReason is the server’s sentence, byte for byte, and only for off', () => {
     // The client cannot import the server's composer; both sides pin this literal (tracker-sync-interval.test.ts pins the server's), so a wording change
