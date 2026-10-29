@@ -41,13 +41,13 @@ const WARNING_CLOCK_MS = 15_000;
  * **Layouts and reach.** Three layouts — Inbox (the default), Matrix and Cards — behind a `Segmented` in the toolbar, the choice stored per device
  * (`PR_LAYOUT_KEY`, read through `parseLayout` so a hand-edited value is Inbox). Matrix is wide-only: a narrow window DRAWS a stored `matrix` as Inbox
  * (`drawableLayout`) and the switcher offers no Matrix, but the stored word is only ever written by a click, never by a draw, so the choice returns with the
- * window. A repo the token cannot read (`splitReach`: `forbidden`, `not-found`) is never handed to a layout, never counted in `N open`, and is named only by the
- * toolbar's `N repos hidden — no access · GitHub › Settings`, the link being `onOpenSettings` (threaded from `App` like the Sources card's, so the rail's tree
- * stays the only switch). Empty states, in order: the PAYLOAD has no repo → `no GitHub repo registered`; it has repos but none is shown → `no repo this token
- * can read`; otherwise the layout, which says `no open pull requests` itself.
+ * window. A repo the token cannot read (`splitReach`: `forbidden`, `not-found`) is never handed to a layout, never counted in `N open`, and is named only by
+ * the toolbar's `N repos hidden — no access · GitHub › Settings`, the link being `onOpenSettings` (threaded from `App` like the Sources card's, so the rail's
+ * tree stays the only switch). Empty states, in order: the PAYLOAD has no repo → `no GitHub repo registered`; it has repos but none is shown → `no repo this
+ * token can read`; otherwise the layout, which says `no open pull requests` itself.
  *
- * **Repo heading (Cards).** The repo, `polled N s ago`, a `sync off` pill beside the server's full sentence (`repo.syncOff`, `syncOffBlock`'s one home — never a
- * client copy) when the repo's sync is off, the read's `detail` when its last read was not `ok`, and `showing <n> of <total>` when GitHub had more than one
+ * **Repo heading (Cards).** The repo, `polled N s ago`, a `sync off` pill beside the server's full sentence (`repo.syncOff`, `syncOffBlock`'s one home — never
+ * a client copy) when the repo's sync is off, the read's `detail` when its last read was not `ok`, and `showing <n> of <total>` when GitHub had more than one
  * page. Each repo is a `Sheet`, Settings' card ground, so two repos never read as one list. Inbox and Matrix say the same things once, in `PrRepoNotes`.
  *
  * **Writes and their outcomes.** A row asks the page to run a write (`write`); the page records the one-line outcome under `<repo>#<number>` — the server's

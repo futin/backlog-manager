@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -160,13 +160,29 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
+/** Microtask turns enough for a write's whole chain (POST, `.json()`, the re-read, its `.json()`, the page's in-flight release) to run to its end. */
+const drain = async (): Promise<void> => {
+  for (let i = 0; i < 30; i += 1) await Promise.resolve();
+};
+
 /** Lets the fetches and their `.json()` settle. */
 async function flush(): Promise<void> {
-  for (let i = 0; i < 6; i += 1) {
-    await act(async () => {
-      await Promise.resolve();
-    });
-  }
+  await act(async () => {
+    await drain();
+  });
+}
+
+/**
+ * Clicks a control that starts a write and lets the write finish, all inside ONE act scope. `user.click` cannot do this: it leaves React's act environment as
+ * it returns, with the write's last link (the page's in-flight release, after the re-read) still to run, so that state update lands bare and warns — and
+ * wrapping `user.click` in `act` only trades that for "not configured to support act", because user-event switches the environment off while it runs. A plain
+ * `fireEvent.click` is all a button needs here, and it keeps the click and the whole chain under one scope.
+ */
+async function clickAndSettle(el: HTMLElement): Promise<void> {
+  await act(async () => {
+    fireEvent.click(el);
+    await drain();
+  });
 }
 
 async function mount(props: { onOpenSettings?: () => void } = {}) {
@@ -257,8 +273,7 @@ describe('PullRequestsView — merge', () => {
 
     const before = reads;
     await user.click(action('futin/y#12', 'Merge'));
-    await user.click(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
-    await flush();
+    await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
     expect(posts).toEqual([{ url: '/api/prs/merge', body: { repo: 'futin/y', number: 12, method: 'squash', headSha: SHA12 } }]);
     expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('merged');
     expect(reads).toBe(before + 1);
@@ -268,8 +283,7 @@ describe('PullRequestsView — merge', () => {
     const { user } = await mount();
     payload = { ...basePayload(), repos: [basePayload().repos[0], repo({ repo: 'futin/y', prs: [], total: 0 })] };
     await user.click(action('futin/y#12', 'Merge'));
-    await user.click(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
-    await flush();
+    await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
     expect(screen.queryByTestId('pr-row-futin/y#12')).toBeNull();
     expect(screen.getByTestId('pr-repo-futin/y')).toHaveTextContent('#12 merged');
   });
@@ -283,8 +297,7 @@ describe('PullRequestsView — merge', () => {
     await user.selectOptions(select, 'rebase');
     await user.click(action('futin/x#9', 'Merge'));
     expect(within(row('futin/x#9')).getByTestId('pr-merge-confirm')).toHaveTextContent('Merge #9 into develop (rebase)?');
-    await user.click(within(row('futin/x#9')).getByTestId('pr-merge-confirm-accept'));
-    await flush();
+    await clickAndSettle(within(row('futin/x#9')).getByTestId('pr-merge-confirm-accept'));
     expect(posts.map((p) => p.body)).toEqual([{ repo: 'futin/x', number: 9, method: 'rebase', headSha: SHA9 }]);
   });
 
@@ -293,8 +306,7 @@ describe('PullRequestsView — merge', () => {
     const { user } = await mount();
     const before = reads;
     await user.click(action('futin/y#12', 'Merge'));
-    await user.click(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
-    await flush();
+    await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
     expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent(/^Head branch was modified\. Review and try the merge again\.$/);
     expect(reads).toBe(before + 1);
   });
@@ -303,8 +315,7 @@ describe('PullRequestsView — merge', () => {
     answerPost = () => ({ status: 502, body: { error: 'the token lacks permission for this — Resource not accessible by integration' } });
     const { user } = await mount();
     await user.click(action('futin/y#12', 'Merge'));
-    await user.click(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
-    await flush();
+    await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
     expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent(
       'the token lacks permission for this — Resource not accessible by integration'
     );
@@ -373,8 +384,7 @@ describe('PullRequestsView — auto-merge and update branch', () => {
   it('arms auto-merge with the picked method', async () => {
     answerPost = () => ({ status: 200, body: { ok: true, outcome: 'auto-merge-enabled', pr: null, reread: true } });
     const { user } = await mount();
-    await user.click(action('futin/y#12', 'Enable auto-merge'));
-    await flush();
+    await clickAndSettle(action('futin/y#12', 'Enable auto-merge'));
     expect(posts).toEqual([{ url: '/api/prs/auto-merge', body: { repo: 'futin/y', number: 12, enable: true, method: 'squash' } }]);
     expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('auto-merge armed');
   });
@@ -384,16 +394,14 @@ describe('PullRequestsView — auto-merge and update branch', () => {
     answerPost = () => ({ status: 200, body: { ok: true, outcome: 'auto-merge-disabled', pr: null, reread: true } });
     const { user } = await mount();
     expect(within(row('futin/y#12')).getByText('auto-merge · merge')).toBeInTheDocument();
-    await user.click(action('futin/y#12', 'Disable auto-merge'));
-    await flush();
+    await clickAndSettle(action('futin/y#12', 'Disable auto-merge'));
     expect(posts.map((p) => p.body)).toEqual([{ repo: 'futin/y', number: 12, enable: false }]);
   });
 
   it('shows updating… until a re-read brings a new head SHA', async () => {
     answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
     const { user } = await mount();
-    await user.click(action('futin/y#12', 'Update branch'));
-    await flush();
+    await clickAndSettle(action('futin/y#12', 'Update branch'));
     expect(posts).toEqual([{ url: '/api/prs/update-branch', body: { repo: 'futin/y', number: 12, headSha: SHA12 } }]);
     expect(row('futin/y#12')).toHaveTextContent('updating…');
 
@@ -408,8 +416,7 @@ describe('PullRequestsView — auto-merge and update branch', () => {
   it('clears updating… after 30 s on the same SHA, with one extra read at that moment', async () => {
     answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
     const { user } = await mount();
-    await user.click(action('futin/y#12', 'Update branch'));
-    await flush();
+    await clickAndSettle(action('futin/y#12', 'Update branch'));
     expect(row('futin/y#12')).toHaveTextContent('updating…');
     const before = reads;
 
@@ -599,8 +606,7 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
     storeLayout('cards');
     answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
     const { user } = await mount();
-    await user.click(action('futin/y#12', 'Update branch'));
-    await flush();
+    await clickAndSettle(action('futin/y#12', 'Update branch'));
     expect(row('futin/y#12')).toHaveTextContent('updating…');
 
     await switchTo(user, 'Inbox');
@@ -628,13 +634,12 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
       strip = screen.getByTestId('pr-quiet-futin/y#12');
       if (kind === 'merge') await user.click(within(strip).getByRole('button', { name: 'Merge…' }));
     }
-    if (kind === 'update') await user.click(within(strip).getByRole('button', { name: 'Update branch' }));
-    else if (kind === 'auto-merge') await user.click(within(strip).getByRole('button', { name: 'Enable auto-merge' }));
+    if (kind === 'update') await clickAndSettle(within(strip).getByRole('button', { name: 'Update branch' }));
+    else if (kind === 'auto-merge') await clickAndSettle(within(strip).getByRole('button', { name: 'Enable auto-merge' }));
     else {
       await user.click(within(strip).getByRole('button', { name: 'Merge' }));
-      await user.click(within(strip).getByTestId('pr-merge-confirm-accept'));
+      await clickAndSettle(within(strip).getByTestId('pr-merge-confirm-accept'));
     }
-    await flush();
   }
 
   const WRITES: Record<Kind, { url: string; body: unknown; answer: unknown; says: string }> = {
@@ -709,5 +714,54 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
     const after = screen.getByTestId('pr-quiet-futin/y#12');
     expect(within(after).getByRole('button', { name: 'Merge…' })).toBeEnabled();
     expect(within(after).getByRole('button', { name: 'Enable auto-merge' })).toBeEnabled();
+  });
+
+  /** A write that ENDS badly must release its PR as surely as one that ends well, or its keys stay dead until a reload. */
+  describe.each([
+    {
+      name: 'the POST answers 409',
+      arrange: (): void => {
+        answerPost = () => ({ status: 409, body: { error: 'Head branch was modified. Review and try the merge again.' } });
+      },
+      says: 'Head branch was modified. Review and try the merge again.'
+    },
+    {
+      name: 'the /api/prs re-read rejects',
+      arrange: (): void => {
+        const ok = global.fetch;
+        global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+          // The first read is the mount's; every later one is the write's re-read (or the poll), and it fails.
+          if (String(input) === '/api/prs' && init?.method !== 'POST' && reads > 0) return Promise.reject(new Error('network down'));
+          return (ok as jest.Mock)(input, init) as Promise<Response>;
+        }) as unknown as typeof fetch;
+      },
+      says: 'merged'
+    }
+  ])('when $name', ({ arrange, says }) => {
+    it.each(['inbox', 'matrix', 'cards'] as const)('enables the keys again in %s once the write has settled', async (layout) => {
+      storeLayout('cards');
+      const { user } = await mount();
+      arrange();
+      await clickAndSettle(action('futin/y#12', 'Merge'));
+      await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
+      expect(posts).toHaveLength(1);
+      expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent(says);
+
+      // Cards is the layout the write started in, so it is reached by leaving and returning — the strip is a fresh mount either way.
+      await switchTo(user, layout === 'matrix' ? 'Matrix' : 'Inbox');
+      if (layout === 'cards') await switchTo(user, 'Cards');
+      if (layout === 'inbox') {
+        await user.click(screen.getByRole('button', { name: 'Actions for #12' }));
+        const quiet = screen.getByTestId('pr-quiet-futin/y#12');
+        expect(within(quiet).getByRole('button', { name: 'Merge…' })).toBeEnabled();
+        expect(within(quiet).getByRole('button', { name: 'Enable auto-merge' })).toBeEnabled();
+      } else if (layout === 'matrix') {
+        await user.click(screen.getByTestId('pr-mrow-futin/y#12'));
+        const strip = screen.getByTestId('pr-expand-futin/y#12');
+        for (const name of ['Merge', 'Enable auto-merge', 'Update branch']) expect(within(strip).getByRole('button', { name })).toBeEnabled();
+      } else {
+        for (const name of ['Merge', 'Enable auto-merge', 'Update branch']) expect(action('futin/y#12', name)).toBeEnabled();
+      }
+    });
   });
 });
