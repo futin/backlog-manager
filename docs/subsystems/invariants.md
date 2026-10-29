@@ -4706,7 +4706,7 @@ The other half of the same incident. While the server was stalled, the client's 
 request had come back, so each one stacked a fresh duplicate on every tick; when the server recovered it had a queue of identical questions to answer, most of
 them git spawns, which amplified the stall. `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure of React and tested directly with fake timers) and its React
 shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog`, `useAgents`, `useTicks` and — since
-#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six — and, since Settings › Dashboards, `useMachines`, a seventh that polls a minute while that page is open, and `usePullRequests`, an eighth on the same terms for GitHub › PRs — enters through `hooks/useRefreshing.ts` (#285), which owns the
+#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six — and, since Settings › Dashboards, `useMachines`, a seventh that polls a minute while that page is open, and `usePullRequests`, an eighth on the same terms for GitHub › PRs and for GitHub › Settings' Access card — enters through `hooks/useRefreshing.ts` (#285), which owns the
 board's mount + window-focus triggers once instead of each hook writing the two effects by hand; `useCoalescedFetch` stays the lower layer, used directly by
 `useJiraBoard`, which triggers on its board id rather than on mount and focus. `TimeZoneProvider` (#241) enters through `useRefreshing` too, with no `armed`
 like `useOrchestratorArchive`: it reads the shared zone on mount and focus and never polls, since the value moves only on a person's pick. `ProjectsProvider`

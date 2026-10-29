@@ -29,8 +29,8 @@ const WARNING_CLOCK_MS = 15_000;
  * GitHub › PRs (.claude/DESIGN.md §8.11; source-sections spec, Goal 2 and "Left to the builder"): the open pull requests of every registered GitHub repo,
  * grouped by repo, with merge, auto-merge and update branch.
  *
- * **Reads.** `usePullRequests` is the page's one read of `GET /api/prs`, and this page is its only mount — leaving the page is what stops PR reads, because
- * the server's PR cache has no timer of its own. The run-in-progress warning (`prRunWarning`) is derived from what the Board already polls: `useBoard`'s items
+ * **Reads.** `usePullRequests` is the page's one read of `GET /api/prs`, and this page is one of its two mounts (the other is GitHub › Settings' `Access` card) —
+ * leaving both is what stops PR reads, because the server's PR cache has no timer of its own. The run-in-progress warning (`prRunWarning`) is derived from what the Board already polls: `useBoard`'s items
  * and projects and `useOrchestratorRuns`' runs, remote runs and remote launches — no request of its own. `onWorking` is every view's rail-cursor report
  * (`useReportWorking`, §8.0), and since this page runs a `useOrchestratorRuns()` for the warning anyway, it reports the same reading Board and Archive do: a
  * run on this machine working, not the page loading — a cursor that blinked on a page read would say a run started when none had.

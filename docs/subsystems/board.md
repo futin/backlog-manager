@@ -480,7 +480,7 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
 - **The PRs page** (GitHub › PRs, [spec](../superpowers/specs/2026-10-29-source-sections-design.md) Goal 2; DESIGN.md §8.11). `PullRequestsView` lists every
   open pull request of the registered GitHub repos — forks and other authors included — one `Sheet` per repo in `groupRepos` order (repos with open PRs first,
   most recently touched on top, then the empty ones by name; PRs newest update first). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
-  last answer, plus mount and focus), mounted by this page alone: the server's PR cache has no timer, so nobody on the page means no PR reads at all. A repo's
+  last answer, plus mount and focus), mounted by this page and by GitHub › Settings' Access card: the server's PR cache has no timer, so with neither open there are no PR reads at all. A repo's
   heading carries `polled N s ago` (`pollAge`), a `sync off` pill beside the server's full sentence (`syncOff`, `syncOffBlock`'s one home) when its sync is
   off, the last read's `detail` when it was not `ok`, `showing 100 of N` when GitHub had more than one page, or `no open pull requests`; a token-less server
   reads `no token — set BM_GITHUB_TOKEN in .env and restart`. A row (`PrRow`) is `#<n>` (to github.com, a new tab), the title, the author, `head → base`, the
