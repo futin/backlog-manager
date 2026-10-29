@@ -399,7 +399,7 @@ the tracker's and a machine's reset clocks, a card's created date for a full sta
 clock for one run. It is read once per page load by the shell's `TimeZoneProvider` and handed out by `useTimeZone()`; `lib/time-zone.ts` is the one home of the
 zone math, and `test/time-zone-guard.test.ts` refuses a `Date`'s local getters and setters and the locale date/time formatters in every other client file.
 
-The watchdog card is one of five places Settings writes to the server — the Trackers card's sync picker above, since #17, the `Backlog tick` card's threshold,
+The watchdog card is one of five places Settings writes to the server — the Trackers card's sync picker above, since #17, the `Backlog tick` card's threshold and two caps,
 the `Time zone` card's zone (#241), and the Dashboards page's four `POST /api/dashboards/*` writes — four knobs that
 live in `settings/watchdog.json` beside the registry rather than in this browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the
 rail's tree calls. Because it writes, it can be refused, like the sync picker: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it was refused for, while
