@@ -106,7 +106,7 @@ describe('fetchers', () => {
     global.fetch = realFetch;
   });
 
-  const payload: TicksPayload = { config: { haltAfter: 3, source: 'default' }, projects: [proj('a')] };
+  const payload: TicksPayload = { config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, source: 'default' }, projects: [proj('a')] };
   function stub(body: unknown, ok = true, status = 200): jest.Mock {
     const fn = jest.fn(() => Promise.resolve({ ok, status, json: () => Promise.resolve(body) } as Response));
     global.fetch = fn as unknown as typeof fetch;
@@ -121,12 +121,18 @@ describe('fetchers', () => {
 
   it('updateTickConfig POSTs {haltAfter} as JSON', async () => {
     const fn = stub(payload);
-    await updateTickConfig(5);
+    await updateTickConfig({ haltAfter: 5 });
     expect(fn).toHaveBeenCalledWith('/api/ticks/config', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ haltAfter: 5 })
     });
+  });
+
+  it('updateTickConfig posts exactly the keys it was given, so one pick never resends the other two numbers', async () => {
+    const fn = stub(payload);
+    await updateTickConfig({ maxPrs: 3 });
+    expect((fn.mock.calls[0] as unknown as [string, RequestInit])[1].body).toBe('{"maxPrs":3}');
   });
 
   it('resetTicks POSTs {project} as JSON', async () => {
@@ -145,11 +151,15 @@ describe('fetchers', () => {
       {},
       { config: { haltAfter: 'x', source: 'file' }, projects: [] },
       { config: payload.config, projects: 'no' },
-      { config: { haltAfter: 3, source: 'nope' }, projects: [] }
+      { config: { ...payload.config, source: 'nope' }, projects: [] },
+      // a server from before #378 sends no caps; the Settings card would bind its Selects to `undefined`
+      { config: { haltAfter: 3, maxPrs: 2, source: 'file' }, projects: [] },
+      { config: { haltAfter: 3, maxPlans: '3', maxPrs: 2, source: 'file' }, projects: [] },
+      { config: { haltAfter: 3, maxPlans: 3, source: 'file' }, projects: [] }
     ]) {
       stub(bad);
       await expect(fetchTicks()).rejects.toThrow('malformed /api/ticks response');
-      await expect(updateTickConfig(3)).rejects.toThrow('malformed /api/ticks/config response');
+      await expect(updateTickConfig({ haltAfter: 3 })).rejects.toThrow('malformed /api/ticks/config response');
       await expect(resetTicks('/r/a')).rejects.toThrow('malformed /api/ticks/reset response');
     }
   });
@@ -161,6 +171,6 @@ describe('fetchers', () => {
 
   it("surfaces the server's own error wording on a non-2xx", async () => {
     stub({ error: 'haltAfter must be an integer' }, false, 400);
-    await expect(updateTickConfig(3)).rejects.toThrow('haltAfter must be an integer');
+    await expect(updateTickConfig({ haltAfter: 3 })).rejects.toThrow('haltAfter must be an integer');
   });
 });

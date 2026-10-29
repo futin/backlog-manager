@@ -13,8 +13,9 @@ import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
 import type { AgentsStatus, TicksPayload } from '../shared/types';
 
 /**
- * Task 7 of the tick breaker: the `Backlog tick` card on Settings' Shared page — one Select, `haltAfter` 1–10, over `useTicks({ live: false })`. The card is
- * rendered bare for everything about the control, and through `SettingsView` only for the one question that is about the page (Shared and not Local).
+ * Task 7 of the tick breaker: the `Backlog tick` card on Settings' Shared page — `haltAfter` 1–10, and since #378 the two tick caps `maxPlans` and `maxPrs`,
+ * each its own 1–10 Select, over `useTicks({ live: false })`. The card is rendered bare for everything about the controls, and through `SettingsView` only for
+ * the one question that is about the page (Shared and not Local).
  */
 
 const AGENTS_STATUS: AgentsStatus = {
@@ -27,7 +28,7 @@ const AGENTS_STATUS: AgentsStatus = {
 };
 
 function payload(haltAfter: number, over: Partial<TicksPayload['config']> = {}): TicksPayload {
-  return { config: { haltAfter, source: 'file', ...over }, projects: [] };
+  return { config: { haltAfter, maxPlans: 3, maxPrs: 2, source: 'file', ...over }, projects: [] };
 }
 
 function respond(status: number, body: unknown): Promise<Response> {
@@ -36,11 +37,11 @@ function respond(status: number, body: unknown): Promise<Response> {
 
 /** `GET /api/ticks` answers `get`; `POST /api/ticks/config` answers `post(body)`. Anything else is the agents status, which is all `SettingsView`'s other
  *  cards need to mount quietly. */
-function stubFetch(opts: { get: TicksPayload | 'reject'; post?: (body: { haltAfter: number }) => { status: number; body: unknown } }): jest.Mock {
+function stubFetch(opts: { get: TicksPayload | 'reject'; post?: (body: { haltAfter?: number }) => { status: number; body: unknown } }): jest.Mock {
   const fn = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith('/api/ticks/config')) {
-      const answer = (opts.post ?? ((b) => ({ status: 200, body: payload(b.haltAfter) })))(JSON.parse(String(init?.body ?? '{}')));
+      const answer = (opts.post ?? ((b) => ({ status: 200, body: payload(b.haltAfter ?? 3) })))(JSON.parse(String(init?.body ?? '{}')));
       return respond(answer.status, answer.body);
     }
     if (url.endsWith('/api/ticks')) return opts.get === 'reject' ? Promise.reject(new Error('ticks unreachable')) : respond(200, opts.get);
@@ -87,16 +88,59 @@ describe('TickGroup', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('shows the refusal and keeps the old value on a 409', async () => {
+  it('draws the two caps beside Halt after, each 1–10 and showing the payload value', async () => {
+    stubFetch({ get: payload(3, { maxPlans: 4, maxPrs: 6 }) });
+    render(<TickGroup />);
+
+    const plans = (await screen.findByRole('combobox', { name: 'Plans awaiting review' })) as HTMLSelectElement;
+    const prs = screen.getByRole('combobox', { name: 'Open execute PRs' }) as HTMLSelectElement;
+    await waitFor(() => expect(plans.value).toBe('4'));
+    expect(prs.value).toBe('6');
+    const ladder = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+    expect([...plans.options].map((o) => o.value)).toEqual(ladder);
+    expect([...prs.options].map((o) => o.value)).toEqual(ladder);
+    // Each hint names the job flag that still wins over the setting.
+    expect(screen.getByText('--max-plans')).toBeInTheDocument();
+    expect(screen.getByText('--max-prs')).toBeInTheDocument();
+  });
+
+  it('posts {maxPlans: 5} once — only the key that was picked — and shows the answer', async () => {
+    const fn = stubFetch({ get: payload(3), post: () => ({ status: 200, body: payload(3, { maxPlans: 5 }) }) });
+    render(<TickGroup />);
+
+    const plans = (await screen.findByRole('combobox', { name: 'Plans awaiting review' })) as HTMLSelectElement;
+    await waitFor(() => expect(plans.value).toBe('3'));
+    await userEvent.selectOptions(plans, '5');
+
+    await waitFor(() => expect(plans.value).toBe('5'));
+    expect(posts(fn)).toHaveLength(1);
+    expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ maxPlans: 5 });
+  });
+
+  it('posts {maxPrs: 4} from the Open execute PRs Select', async () => {
+    const fn = stubFetch({ get: payload(3), post: () => ({ status: 200, body: payload(3, { maxPrs: 4 }) }) });
+    render(<TickGroup />);
+
+    const prs = (await screen.findByRole('combobox', { name: 'Open execute PRs' })) as HTMLSelectElement;
+    await waitFor(() => expect(prs.value).toBe('2'));
+    await userEvent.selectOptions(prs, '4');
+
+    await waitFor(() => expect(prs.value).toBe('4'));
+    expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ maxPrs: 4 });
+  });
+
+  it('shows the refusal and keeps every old value on a 409', async () => {
     stubFetch({ get: payload(3), post: () => ({ status: 409, body: { error: 'tick.json unreadable' } }) });
     render(<TickGroup />);
 
     const select = (await screen.findByRole('combobox', { name: 'Halt after' })) as HTMLSelectElement;
+    const plans = screen.getByRole('combobox', { name: 'Plans awaiting review' }) as HTMLSelectElement;
+    const prs = screen.getByRole('combobox', { name: 'Open execute PRs' }) as HTMLSelectElement;
     await waitFor(() => expect(select.value).toBe('3'));
-    await userEvent.selectOptions(select, '5');
+    await userEvent.selectOptions(plans, '5');
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Not saved — tick.json unreadable');
-    expect(select.value).toBe('3');
+    expect([select.value, plans.value, prs.value]).toEqual(['3', '3', '2']);
   });
 
   it('disables the Select and names the file when tick.json is unreadable', async () => {
@@ -106,6 +150,9 @@ describe('TickGroup', () => {
 
     const select = await screen.findByRole('combobox', { name: 'Halt after' });
     expect(select).toBeDisabled();
+    // All three go together: the server refuses every write to an unreadable file, so no control may offer one.
+    expect(screen.getByRole('combobox', { name: 'Plans awaiting review' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Open execute PRs' })).toBeDisabled();
     expect(
       screen.getByText('/home/me/.backlog-manager/settings/tick.json: Unexpected token } in JSON at position 12 — fix or remove the file by hand.')
     ).toBeInTheDocument();

@@ -384,10 +384,12 @@ and puts the server's sentence in the row's hint until the next pick for that re
 wipe it within a second. Two checkouts of one repo are one key, so both rows move.
 
 The `Backlog tick` card (`TickGroup`) sits under the watchdog in the same column, because both are machine-wide controls — a value written to a file on the host
-— where the right column is host reports. It is one `Select` of 1–10, the number of failed ticks in a row that halt a project (`haltAfter`, default 3), written
-to `settings/tick.json` through `POST /api/ticks/config` and drawn from the POST's own answer; it mounts `useTicks({ live: false })`, so it never polls. When
-the server reports `source: "unreadable"` the `Select` is disabled and its hint names the file, because every write would be a 409; a refused save renders one
-red line under the control while the value shown stays the one the server holds.
+— where the right column is host reports. It is three `Select`s of 1–10: the number of failed ticks in a row that halt a project (`haltAfter`, default 3), and
+the two caps a tick job applies when its prompt carries no flag (#378) — **Plans awaiting review** (`maxPlans`, default 3) and **Open execute PRs** (`maxPrs`,
+default 2), each hint naming the `--max-plans` / `--max-prs` flag that still wins. Each pick posts only its own key to `settings/tick.json` through
+`POST /api/ticks/config`, and the card is drawn from the POST's own answer; it mounts `useTicks({ live: false })`, so it never polls. When the server reports
+`source: "unreadable"` all three are disabled and the first hint names the file, because every write would be a 409; a refused save renders one red line under
+the controls while every value shown stays the one the server holds.
 
 The `Time zone` card (`TimeZoneGroup`, #241) sits under the tick breaker, the third host control in that column: one `Select` over the platform's zones
 (`timeZoneOptions`, plus `UTC`, plus a stored zone this browser does not list), its first option `Each browser's own (<this browser's zone>)` — unset, `null` on

@@ -2521,6 +2521,17 @@ export interface WatchdogStatus {
  */
 export const TICK_HALT_LIMITS = { min: 1, max: 10, default: 3 } as const;
 
+/**
+ * The bounds on the tick's two caps as machine-wide settings (#378): `maxPlans`, how many plans may wait in `plan-review` before a tick stops grooming, and
+ * `maxPrs`, how many `execute/*` PRs may be open before it stops executing. Same clamp rule as `TICK_HALT_LIMITS`. The range is the SETTING's: a job's
+ * `--max-plans 0` / `--max-prs 0` flag still means "this job never grooms / executes" and still wins over the setting, because a number written into one
+ * schedule's prompt is a deliberate fact about that schedule. Both the server and `tick-breaker.mjs` hold these numbers.
+ */
+export const TICK_CAP_LIMITS = {
+  maxPlans: { min: 1, max: 10, default: 3 },
+  maxPrs: { min: 1, max: 10, default: 2 }
+} as const;
+
 /** One finished tick, as `state.json`'s `recent` records it. Strings, not unions: the rule must survive a value a future `tick.mjs` writes that this build
  *  has never heard of (an unknown `outcome` neither counts nor stops a streak). */
 export interface TickRecentEntry {
@@ -2540,11 +2551,14 @@ export interface TickLock {
 }
 
 /**
- * `tick.json`, as the board shows it. `source: 'unreadable'` carries `haltAfter` at its default for display only and the reason in `error`: the file is never
- * replaced while it is in that state, so the number on screen is not a setting anyone can act on until a person has fixed the file by hand.
+ * `tick.json`, as the board shows it. `source: 'unreadable'` carries all three numbers — `haltAfter`, `maxPlans`, `maxPrs` — at their defaults for display
+ * only and the reason in `error`: the file is never replaced while it is in that state, so the numbers on screen are not settings anyone can act on until a
+ * person has fixed the file by hand.
  */
 export interface TickConfig {
   haltAfter: number;
+  maxPlans: number;
+  maxPrs: number;
   source: 'default' | 'file' | 'unreadable';
   error?: string;
 }

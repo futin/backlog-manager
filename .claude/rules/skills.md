@@ -32,7 +32,7 @@ paths: ["skills/**", "agents/**"]
   through the API, so skipped with the stack down), a `started:` marker on any open item in the main checkout or a linked worktree (the orchestrator's
   `.worktrees/<id>`, execute's `.worktrees/execute-<id>` and a PR-mode groom's `.worktrees/groom-<id>` trees skipped), a live claim, or a fresh remote run.
   Execute is capped by the open PRs whose head starts `execute/` (`gh pr list --state open --limit 500`; no `gh`, a failure, unparseable output or 500 results
-  is `cannot count open PRs`) and groom by the items carrying `plan-review`; a groom only plans an ungroomed bug or promotes a refactor, and skips an item whose
+  is `cannot count open PRs`) and groom by the items carrying `plan-review`, each cap the flag, else `tick.json`'s `maxPrs`/`maxPlans`, else 2/3; a groom only plans an ungroomed bug or promotes a refactor, and skips an item whose
   `groom/<id>` branch or `.worktrees/groom-<id>` tree exists (`groomTaken`). The mark is the label on a tracker project and a `plan-review: true`
   frontmatter line on a files project, written in the SAME write as the plan — `backlog.mjs body|new --plan-review`, or the frontmatter groom prints — so no
   moment exists where an approved-looking plan has no mark, and every gate refuses it with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
@@ -58,7 +58,7 @@ paths: ["skills/**", "agents/**"]
   a halted project costs one call and no API traffic and the check works with the stack down; a stale lock is still recovered while halted, and an unreadable
   `tick.json` is `idle` too (`<path> unreadable — fix or remove it by hand`), never a default. `status` prints `breaker: N of M failures in a row` or `breaker:
   HALTED — N failures in a row (halt after M) since <at>`, plus ` (reset <resetAt>)`, and `status --json` carries `breaker: { streak, haltAfter, halted, resetAt,
-  settings }`. The rule has TWO copies — `tick-breaker.mjs` and `server/src/tick/tick-breaker.util.ts` — because a skill's `tools/` never imports `server/` or
+  settings }` and `caps: { maxPlans, maxPrs, source }`. The rule has TWO copies — `tick-breaker.mjs` and `server/src/tick/tick-breaker.util.ts` — because a skill's `tools/` never imports `server/` or
   `shared/`; the same `streakOf` table is pinned row for row in `tick-breaker.test.mjs` and `test/tick-breaker.test.ts`, and a change to one is a change to both.
   Reset is a `resetAt` stamp the server writes — `max(now, newest parseable at)` — and the tool never writes `tick.json`. Why:
   [invariants.md](docs/subsystems/invariants.md#a-tick-halt-is-derived-from-the-records-and-the-reset-time-never-stored-and-only-a-persons-reset-clears-it)

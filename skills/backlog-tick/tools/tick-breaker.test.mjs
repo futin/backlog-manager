@@ -6,7 +6,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { HALT_DEFAULT, HALT_MAX, HALT_MIN, clampHaltAfter, readTickSettings, streakOf, tickSettingsFile } from './tick-breaker.mjs';
+import {
+  CAP_MAX,
+  CAP_MIN,
+  HALT_DEFAULT,
+  HALT_MAX,
+  HALT_MIN,
+  MAX_PLANS_DEFAULT,
+  MAX_PRS_DEFAULT,
+  clampHaltAfter,
+  readTickSettings,
+  streakOf,
+  tickSettingsFile
+} from './tick-breaker.mjs';
 
 // Times are strictly increasing minutes of one hour unless a case says otherwise.
 const T = (n) => `2026-10-22T10:${String(n).padStart(2, '0')}:00.000Z`;
@@ -63,17 +75,49 @@ function withFile(t, text) {
 
 test('readTickSettings — an absent file is the default', (t) => {
   const file = path.join(fixture(t), 'nope.json');
-  assert.deepEqual(readTickSettings(file), { ok: true, haltAfter: 3, resetAt: {}, source: 'default' });
+  assert.deepEqual(readTickSettings(file), { ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'default' });
 });
 
 test('readTickSettings — a file is read, haltAfter clamped and non-integers read as 3', (t) => {
-  assert.deepEqual(readTickSettings(withFile(t, { haltAfter: 5 })), { ok: true, haltAfter: 5, resetAt: {}, source: 'file' });
+  assert.deepEqual(readTickSettings(withFile(t, { haltAfter: 5 })), { ok: true, haltAfter: 5, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'file' });
   assert.equal(readTickSettings(withFile(t, { haltAfter: 0 })).haltAfter, 1);
   assert.equal(readTickSettings(withFile(t, { haltAfter: 42 })).haltAfter, 10);
   assert.equal(readTickSettings(withFile(t, { haltAfter: '7' })).haltAfter, 3);
   assert.equal(readTickSettings(withFile(t, { haltAfter: 2.5 })).haltAfter, 3);
   // a file with no haltAfter at all is still a file
-  assert.deepEqual(readTickSettings(withFile(t, {})), { ok: true, haltAfter: 3, resetAt: {}, source: 'file' });
+  assert.deepEqual(readTickSettings(withFile(t, {})), { ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'file' });
+});
+
+// PINNED: `test/tick-breaker.test.ts` carries the same rows for the server's `readTickFile`, so the two readers cannot disagree about a hand-edited cap.
+const CAP_CLAMP = [
+  [0, 1],
+  [11, 10],
+  [99, 10],
+  [-3, 1],
+  [5, 5],
+  ['5', 'default'],
+  [2.5, 'default'],
+  [null, 'default']
+];
+
+test('readTickSettings — the two caps: defaults, file values and the pinned clamp table', (t) => {
+  assert.equal(MAX_PLANS_DEFAULT, 3);
+  assert.equal(MAX_PRS_DEFAULT, 2);
+  assert.equal(CAP_MIN, 1);
+  assert.equal(CAP_MAX, 10);
+  const both = readTickSettings(withFile(t, { maxPlans: 5, maxPrs: 4 }));
+  assert.equal(both.maxPlans, 5);
+  assert.equal(both.maxPrs, 4);
+  // only haltAfter on file → the caps are the defaults, haltAfter is the file's
+  const halt = readTickSettings(withFile(t, { haltAfter: 4 }));
+  assert.deepEqual([halt.haltAfter, halt.maxPlans, halt.maxPrs], [4, 3, 2]);
+  for (const [raw, want] of CAP_CLAMP) {
+    const r = readTickSettings(withFile(t, { maxPlans: raw, maxPrs: raw }));
+    assert.equal(r.maxPlans, want === 'default' ? 3 : want, `maxPlans ${JSON.stringify(raw)}`);
+    assert.equal(r.maxPrs, want === 'default' ? 2 : want, `maxPrs ${JSON.stringify(raw)}`);
+  }
+  // a missing key is the default too, independently per cap
+  assert.equal(readTickSettings(withFile(t, { maxPlans: 7 })).maxPrs, 2);
 });
 
 test('readTickSettings — a resetAt entry that is not a parseable string is dropped', (t) => {

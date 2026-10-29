@@ -360,11 +360,13 @@ error? }`
 first; `lastDecide` (#367) is `last-decide.json`'s `{ at, verdict, caps: { openPrs, maxPrs, planReview, maxPlans } }`, rebuilt field by field and absent when
 the file is missing or any field is the wrong shape — it rides on an errored row too, since it is a separate file; `error` is set, with `recent` empty, when
 `state.json` exists and cannot be read. `streak`, `halted` and `haltedSince` come from `streakOf` in
-`tick-breaker.util.ts`, the server's copy of the rule `tick.mjs decide` applies, and `config` is `{ haltAfter, source: 'file' | 'default' | 'unreadable', error?
-}` — `unreadable` reports `haltAfter` 3 for display only. `tick/` is not an outbound-calling module: files only, no network.
+`tick-breaker.util.ts`, the server's copy of the rule `tick.mjs decide` applies, and `config` is `{ haltAfter, maxPlans, maxPrs, source: 'file' | 'default' |
+'unreadable', error? }` — `unreadable` reports `haltAfter` 3 and the caps 3 and 2 for display only. `tick/` is not an outbound-calling module: files only, no network.
 
 Two POSTs, both behind `SameOriginPostGuard` (content-type and origin, like every agents POST) and the only writes this module makes. `POST /api/ticks/config`
-`{ haltAfter }` is a `400` for anything but an integer, clamps to `TICK_HALT_LIMITS` (1–10), and answers the new `TicksPayload`. `POST /api/ticks/reset` `{
+takes any non-empty subset of `{ haltAfter, maxPlans, maxPrs }` — a present key that is not an integer is a `400` naming it, a body naming none of them is
+`400 nothing to set`, unknown keys are ignored — clamps each to `TICK_HALT_LIMITS` / `TICK_CAP_LIMITS` (1–10), leaves the keys it was not sent as they are on
+file, and answers the new `TicksPayload`. `POST /api/ticks/reset` `{
 project }` is a `400` for anything but an absolute-path string, a `404` when the tick home has no directory for it, and otherwise stamps `resetAt[project] =
 max(now, the newest parseable at in its recent)` into `settings/tick.json` and answers the new payload; it is allowed in every state and touches no lock. Both
 are a `409` naming the file when `tick.json` exists and cannot be read — `TickFileUnreadable`, thrown before any write, so the file is left byte-identical. The

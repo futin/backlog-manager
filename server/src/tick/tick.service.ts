@@ -4,7 +4,7 @@ import { Injectable } from '@nestjs/common';
 
 import { RegistryService } from '../registry/registry.service';
 import { readTickFile, streakOf, tickFile, tickHome, writeTickFile } from './tick-breaker.util';
-import { TICK_HALT_LIMITS } from '../../../shared/types';
+import { TICK_CAP_LIMITS, TICK_HALT_LIMITS } from '../../../shared/types';
 import type { TickConfig, TickLastDecide, TickLock, TickProject, TickRecentEntry, TicksPayload } from '../../../shared/types';
 
 /**
@@ -17,6 +17,9 @@ import type { TickConfig, TickLastDecide, TickLock, TickProject, TickRecentEntry
  * only file it writes is `settings/tick.json`, and only through `writeTickFile`. `streak`/`halted`/`haltedSince` are derived here from each project's
  * `recent` and are never stored; a Reset is a `resetAt` timestamp, nothing else.
  */
+
+/** The settable numbers in `tick.json`, as `POST /api/ticks/config` hands them on. */
+export type TickConfigPatch = Partial<Pick<TickConfig, 'haltAfter' | 'maxPlans' | 'maxPrs'>>;
 
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -113,13 +116,18 @@ export class TickService {
   /** The whole `GET /api/ticks` answer, fresh from disk. */
   payload(): TicksPayload {
     const file = readTickFile();
-    // An unreadable `tick.json` still lets every figure render (review focus 5): the default N and no Resets, for display only — the file is never replaced
-    // while it is in that state, and `config.source` says so.
+    // An unreadable `tick.json` still lets every figure render (review focus 5): the default N, the default caps and no Resets, for display only — the file is
+    // never replaced while it is in that state, and `config.source` says so.
     const haltAfter = file.ok ? file.haltAfter : TICK_HALT_LIMITS.default;
+    const caps = file.ok
+      ? { maxPlans: file.maxPlans, maxPrs: file.maxPrs }
+      : { maxPlans: TICK_CAP_LIMITS.maxPlans.default, maxPrs: TICK_CAP_LIMITS.maxPrs.default };
     const resetAt = file.ok ? file.resetAt : {};
     // `file.error` alone is a bare `e.message` ("Unexpected token …") with no path, and the Settings card shows this string as its hint — so name the file here,
     // in the `<path>: <reason>` style this service already uses for a state.json error, and leave `readTickFile` returning the reason alone.
-    const config: TickConfig = file.ok ? { haltAfter, source: file.source } : { haltAfter, source: 'unreadable', error: `${file.file}: ${file.error}` };
+    const config: TickConfig = file.ok
+      ? { haltAfter, ...caps, source: file.source }
+      : { haltAfter, ...caps, source: 'unreadable', error: `${file.file}: ${file.error}` };
 
     const names = new Map(this.registry.load().projects.map((p) => [p.path, p.name]));
     const projects: TickProject[] = [];
@@ -163,9 +171,12 @@ export class TickService {
     }
   }
 
-  /** `POST /api/ticks/config`. Throws `TickFileUnreadable` (the controller's 409) and writes nothing in that case. */
-  setHaltAfter(haltAfter: number): TicksPayload {
-    writeTickFile({ haltAfter }, tickFile());
+  /**
+   * `POST /api/ticks/config` — any non-empty subset of the three numbers, already validated by the controller; a key the patch does not carry keeps its value
+   * on file. Throws `TickFileUnreadable` (the controller's 409) and writes nothing in that case.
+   */
+  setConfig(patch: TickConfigPatch): TicksPayload {
+    writeTickFile(patch, tickFile());
     return this.payload();
   }
 

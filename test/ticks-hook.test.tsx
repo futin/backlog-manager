@@ -12,7 +12,7 @@ import type { TicksPayload } from '../shared/types';
  */
 
 function payload(haltAfter: number, names: string[] = ['a']): TicksPayload {
-  return { config: { haltAfter, source: 'file' }, projects: names.map((name) => ({ root: `/r/${name}`, name, lock: null, recent: [] })) };
+  return { config: { haltAfter, maxPlans: 3, maxPrs: 2, source: 'file' }, projects: names.map((name) => ({ root: `/r/${name}`, name, lock: null, recent: [] })) };
 }
 
 type Reply = { ok?: boolean; status?: number; body: unknown };
@@ -102,7 +102,7 @@ describe('useTicks', () => {
     const { result } = renderHook(() => useTicks({ live: false }));
     await flush();
     await act(async () => {
-      await result.current.save(7);
+      await result.current.save({ haltAfter: 7 });
     });
     expect(result.current.data).toEqual(payload(7));
     expect(result.current.saveError).toBeNull();
@@ -131,14 +131,14 @@ describe('useTicks', () => {
     const { result } = renderHook(() => useTicks({ live: false }));
     await flush();
     await act(async () => {
-      await result.current.save(4);
+      await result.current.save({ haltAfter: 4 });
     });
     expect(result.current.saveError).toBe('/x/tick.json unreadable');
     expect(result.current.data).toEqual(payload(3));
     expect(result.current.error).toBeNull();
     fail = false;
     await act(async () => {
-      await result.current.save(4);
+      await result.current.save({ haltAfter: 4 });
     });
     expect(result.current.saveError).toBeNull();
     expect(result.current.data).toEqual(payload(4));

@@ -2,11 +2,13 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { TICK_HALT_LIMITS, type TickRecentEntry } from '../../../shared/types';
+import { TICK_CAP_LIMITS, TICK_HALT_LIMITS, type TickRecentEntry } from '../../../shared/types';
 
 /**
- * tick-breaker.util.ts — the tick breaker's streak rule, and `~/.backlog-manager/settings/tick.json`, which says how many failures in a row halt a project and
- * when each project was last Reset.
+ * tick-breaker.util.ts — the tick breaker's streak rule, and `~/.backlog-manager/settings/tick.json`, which says how many failures in a row halt a project,
+ * when each project was last Reset, and the machine's two caps — `maxPlans` and `maxPrs` — a job without `--max-plans` / `--max-prs` applies (#378). The
+ * clamp rule for all three numbers is twinned the same way as the streak rule: `tick-breaker.test.mjs`'s cap clamp table is carried row for row by
+ * `test/tick-breaker.test.ts`.
  *
  * This is the SECOND COPY of the streak rule; the first is `skills/backlog-tick/tools/tick-breaker.mjs`, and each header points at the other. They are two
  * copies and not one import because this server may not import from `skills/` and a plugin skill's `tools/` may never import from `server/` or `shared/`
@@ -79,20 +81,22 @@ export function streakOf(recent: readonly TickRecentEntry[], resetAt: string | u
   return { streak, since };
 }
 
-/** An integer clamps into the limits; anything else — a string, a float, null, a missing key — is the default (the `clampAttempts` rule). */
-function clampHaltAfter(v: unknown): number {
-  if (typeof v !== 'number' || !Number.isInteger(v)) return TICK_HALT_LIMITS.default;
-  return Math.min(TICK_HALT_LIMITS.max, Math.max(TICK_HALT_LIMITS.min, v));
+/** An integer clamps into the limits; anything else — a string, a float, null, a missing key — is the default (the `clampAttempts` rule). One rule for every
+ *  number in the file, so a hand-edited `"5"` reads the same way whichever key it sits under. */
+function clampSetting(v: unknown, limits: { min: number; max: number; default: number }): number {
+  if (typeof v !== 'number' || !Number.isInteger(v)) return limits.default;
+  return Math.min(limits.max, Math.max(limits.min, v));
 }
 
 export type TickFileRead =
-  | { ok: true; haltAfter: number; resetAt: Record<string, string>; source: 'default' | 'file' }
+  | { ok: true; haltAfter: number; maxPlans: number; maxPrs: number; resetAt: Record<string, string>; source: 'default' | 'file' }
   | { ok: false; file: string; error: string };
 
 /**
  * The three shapes of answer, never a throw:
  *   - no file                              → `{ ok: true, source: 'default' }` — never configured, the common case;
- *   - a file that parses to a plain object → `{ ok: true, source: 'file' }`, `haltAfter` clamped and `resetAt` reduced to its usable entries;
+ *   - a file that parses to a plain object → `{ ok: true, source: 'file' }`, `haltAfter`, `maxPlans` and `maxPrs` clamped and `resetAt` reduced to its usable
+ *     entries;
  *   - ANYTHING else (an I/O error that is not ENOENT — EISDIR, EACCES —, text that is not JSON, JSON that is an array or `null`) → `{ ok: false, file, error }`.
  * The last is never read as the default: see the header — `decide` answers `idle` naming the file, and the board shows `source: 'unreadable'`.
  */
@@ -101,7 +105,16 @@ export function readTickFile(file: string = tickFile()): TickFileRead {
   try {
     text = readFileSync(file, 'utf8');
   } catch (e) {
-    if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') return { ok: true, haltAfter: TICK_HALT_LIMITS.default, resetAt: {}, source: 'default' };
+    if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return {
+        ok: true,
+        haltAfter: TICK_HALT_LIMITS.default,
+        maxPlans: TICK_CAP_LIMITS.maxPlans.default,
+        maxPrs: TICK_CAP_LIMITS.maxPrs.default,
+        resetAt: {},
+        source: 'default'
+      };
+    }
     return { ok: false, file, error: e instanceof Error ? e.message : String(e) };
   }
   let parsed: unknown;
@@ -120,7 +133,14 @@ export function readTickFile(file: string = tickFile()): TickFileRead {
       if (project !== '__proto__' && !Number.isNaN(atMs(at))) resetAt[project] = at as string;
     }
   }
-  return { ok: true, haltAfter: clampHaltAfter(obj.haltAfter), resetAt, source: 'file' };
+  return {
+    ok: true,
+    haltAfter: clampSetting(obj.haltAfter, TICK_HALT_LIMITS),
+    maxPlans: clampSetting(obj.maxPlans, TICK_CAP_LIMITS.maxPlans),
+    maxPrs: clampSetting(obj.maxPrs, TICK_CAP_LIMITS.maxPrs),
+    resetAt,
+    source: 'file'
+  };
 }
 
 /**
@@ -136,18 +156,24 @@ export class TickFileUnreadable extends Error {
 
 /**
  * The one write path for `tick.json`. Reads the current file first and refuses (`TickFileUnreadable`, file untouched) if it is unreadable: rewriting from
- * defaults would turn a stray comma into "3, no resets" with nothing on disk left to recover the old values from. Otherwise `haltAfter` replaces the current
- * one only when the patch carries it (clamped), and `resetAt` merges KEY-WISE over the current map — resetting one project must not forget another's Reset.
+ * defaults would turn a stray comma into "3, no resets" with nothing on disk left to recover the old values from. Otherwise each of `haltAfter`, `maxPlans`
+ * and `maxPrs` replaces the current one only when the patch carries it (clamped) and is carried through from the current file when it does not, and `resetAt`
+ * merges KEY-WISE over the current map — resetting one project must not forget another's Reset, nor setting one number forget the other two.
  *
  * Written tmp + rename, the same atomic way `writeWatchdogConfig` and `writeSyncInterval` are: the temp file is in the SAME directory, so the rename is one
  * filesystem and atomic at the OS level, a `tick.mjs` reading concurrently sees the old complete file or the new complete one and never half of one, and the
  * rename IS the cleanup — no temp file is left behind. A write that fails before the rename leaves the old file as it was.
  */
-export function writeTickFile(patch: { haltAfter?: number; resetAt?: Record<string, string> }, file: string = tickFile()): void {
+export function writeTickFile(
+  patch: { haltAfter?: number; maxPlans?: number; maxPrs?: number; resetAt?: Record<string, string> },
+  file: string = tickFile()
+): void {
   const current = readTickFile(file);
   if (!current.ok) throw new TickFileUnreadable(file, current.error);
   const next = {
-    haltAfter: patch.haltAfter !== undefined ? clampHaltAfter(patch.haltAfter) : current.haltAfter,
+    haltAfter: patch.haltAfter !== undefined ? clampSetting(patch.haltAfter, TICK_HALT_LIMITS) : current.haltAfter,
+    maxPlans: patch.maxPlans !== undefined ? clampSetting(patch.maxPlans, TICK_CAP_LIMITS.maxPlans) : current.maxPlans,
+    maxPrs: patch.maxPrs !== undefined ? clampSetting(patch.maxPrs, TICK_CAP_LIMITS.maxPrs) : current.maxPrs,
     resetAt: { ...current.resetAt, ...(patch.resetAt ?? {}) }
   };
   const dir = dirname(file);

@@ -96,7 +96,7 @@ describe('BoardView and plan review', () => {
     planReview: true
   };
   const TICKS: TicksPayload = {
-    config: { haltAfter: 3, source: 'default' },
+    config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, source: 'default' },
     projects: [
       {
         root: '/abs/alpha',
