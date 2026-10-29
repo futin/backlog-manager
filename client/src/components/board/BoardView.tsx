@@ -20,7 +20,7 @@ import type { SortDir, SortKey } from '../../lib/board-sort';
 import { disabledReason } from '../../lib/gate-view';
 import { buildProjectHues } from '../../lib/project-hue';
 import { projectName } from '../../lib/project-label';
-import { inSource, projectsIn } from '../../lib/sources';
+import { narrowToSource, projectsIn } from '../../lib/sources';
 import type { SourceSection } from '../../lib/sources';
 import { projectKey } from '../../lib/view-keys';
 import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
@@ -117,22 +117,15 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
  *
  * `source` (source-sections) is REQUIRED: this page draws ONE source's projects, Files or GitHub, and a page that could silently draw every one would be the
  * single board the rail reshape took apart. It narrows the fetched index before any other derivation — items, the project picks, the unreachable warnings,
- * the Orchestrate sheet's project list, the plan-review tally — through `inSource`, so every one of them reads the same set. The run chip is the exception
+ * the Orchestrate sheet's project list, the plan-review tally — through `narrowToSource`, so every one of them reads the same set. The run chip is the exception
  * and stays machine-wide (`runs` is never filtered): a run on the other source is still a run on this machine.
  */
 export default function BoardView({ source, onOpenRuns, onWorking }: { source: SourceSection; onOpenRuns?: () => void; onWorking?: (working: boolean) => void }) {
   const { items: fullIndex, projects: fullProjects, loading, error, refetch } = useBoard();
   /* The source split, once per fetch. `projects` stays `null` until the first answer, exactly as the hook hands it, because `hasTracker` and the hue memo
-     below read the absence; `index` keeps its `errors` only on Files, where `unsupported` and `missing` projects land and where their reasons are the
-     page's to tell (an index error carries no project, so it cannot be attributed any finer than the source that owns the unreadable ones). */
+     below read the absence; `index` is `narrowToSource`'s cut (`lib/sources.ts`, which also owns the rule that index errors ride only with Files). */
   const projects = useMemo(() => (fullProjects === null ? null : projectsIn(fullProjects, source)), [fullProjects, source]);
-  const index = useMemo(
-    () =>
-      fullIndex === null
-        ? null
-        : { items: fullIndex.items.filter((i) => inSource(i.projectPath, fullProjects ?? [], source)), errors: source === 'files' ? fullIndex.errors : [] },
-    [fullIndex, fullProjects, source]
-  );
+  const index = useMemo(() => narrowToSource(fullIndex, fullProjects, source), [fullIndex, fullProjects, source]);
   /* #367 — the tick's recorded caps, for the band's plan-review reading. `live: false`: a tick records its caps at most once per scheduled run, so the
      mount + focus reads `useRefreshing` gives every board poller are the right cadence, and the 15 s poll Runs › Ticks arms would be traffic for nothing. A
      failed read leaves `data` null, and the chip reads bare counts with no cap rather than going away. */
@@ -235,8 +228,8 @@ export default function BoardView({ source, onOpenRuns, onWorking }: { source: S
   /* One assignment for the whole board, built here rather than per card: the
      hue a project gets depends on which projects were registered before it, so
      it is a property of the registry and not of any one item. Keyed on
-     `fullProjects` (the WHOLE registry, not this source's slice — a project keeps its colour on the page of the other source and on Runs, which colour
-     it off the same registry order) and not on `registered` — the pass is cheap either way, but
+     `fullProjects` (the WHOLE registry, not this source's slice — a project keeps its colour on the page of the other source, because a hue depends on which projects were
+     registered before it, so a slice would recolour it) and not on `registered` — the pass is cheap either way, but
      `registered` is a fresh [] on every render while the fetch is in flight,
      which would make the memo a no-op and hand every card a new prop object on
      each keystroke in the search box. */

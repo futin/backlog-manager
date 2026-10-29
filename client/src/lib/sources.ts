@@ -1,4 +1,4 @@
-import type { ProjectSummary } from '../../../shared/types';
+import type { ItemsIndex, ProjectSummary } from '../../../shared/types';
 
 /**
  * Which rail row a project's items are shown under (source-sections spec) — a DISPLAY grouping of `ProjectSummary.source`, nothing more. Which adapter
@@ -60,4 +60,16 @@ export function inSource(projectPath: string, projects: readonly ProjectSummary[
 /** The registered projects drawn under `source`, in registry order — the half of `inSource` a page needs as a list (its project picks, its warnings). */
 export function projectsIn(projects: readonly ProjectSummary[], source: SourceSection): ProjectSummary[] {
   return projects.filter((p) => sourceSectionOf(p.source) === source);
+}
+
+/**
+ * The one narrowing both pages share: an index cut to the items `source` draws, with `errors` kept ONLY on Files. An index error names no project, only a
+ * file, so it cannot be attributed finer than the source that owns the unreadable projects (`unsupported` and `missing`), and that source is Files — the
+ * rule lives here, once, so Board and Archive cannot drift apart on it. `null` (not fetched yet) passes through, and a `null` registry reads as empty, which
+ * keeps every item out until the projects arrive rather than showing them under whichever page asked.
+ */
+export function narrowToSource(index: ItemsIndex | null, projects: readonly ProjectSummary[] | null, source: SourceSection): ItemsIndex | null {
+  if (index === null) return null;
+  const registry = projects ?? [];
+  return { items: index.items.filter((i) => inSource(i.projectPath, registry, source)), errors: source === 'files' ? index.errors : [] };
 }

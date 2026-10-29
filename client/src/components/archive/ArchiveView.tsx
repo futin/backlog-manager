@@ -12,7 +12,7 @@ import { leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
 import { projectName } from '../../lib/project-label';
 import { itemSyncOff } from '../../lib/tracker';
-import { inSource, projectsIn } from '../../lib/sources';
+import { narrowToSource, projectsIn } from '../../lib/sources';
 import type { SourceSection } from '../../lib/sources';
 import { projectKey } from '../../lib/view-keys';
 import { runClaimBlock } from '../../../../shared/agent';
@@ -94,21 +94,15 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
  * `onWorking` is the rail cursor's report (§8.0, `useReportWorking`) — this view's run poll is the one the shell reads, so `App` adds none.
  *
  * `source` (source-sections) is REQUIRED and narrows the fetched index exactly as `BoardView`'s does — items, project picks and warnings, before any other
- * derivation, through `inSource` — so Files › Archive and GitHub › Archive are one component drawing two disjoint sets. The run payload stays machine-wide.
+ * derivation, through `narrowToSource` — so Files › Archive and GitHub › Archive are one component drawing two disjoint sets. The run payload stays machine-wide.
  */
 export default function ArchiveView({ source, onWorking }: { source: SourceSection; onWorking?: (working: boolean) => void }) {
   const { zone } = useTimeZone();
   const { items: fullIndex, projects: fullProjects, loading, error } = useBoard();
-  /* BoardView's split, verbatim in meaning: `projects` stays `null` until the first answer, and index errors ride only with Files (they name no project, and
-     Files owns the `unsupported` and `missing` ones whose reasons they carry). */
+  /* BoardView's split: `projects` stays `null` until the first answer, and `index` is `narrowToSource`'s cut (index errors ride only with Files, once, in
+     `lib/sources.ts`). */
   const projects = useMemo(() => (fullProjects === null ? null : projectsIn(fullProjects, source)), [fullProjects, source]);
-  const index = useMemo(
-    () =>
-      fullIndex === null
-        ? null
-        : { items: fullIndex.items.filter((i) => inSource(i.projectPath, fullProjects ?? [], source)), errors: source === 'files' ? fullIndex.errors : [] },
-    [fullIndex, fullProjects, source]
-  );
+  const index = useMemo(() => narrowToSource(fullIndex, fullProjects, source), [fullIndex, fullProjects, source]);
   /* Only `staleDays` is read, but the whole control comes back — `useSettings`
      falls back to the defaults outside a provider (see its own comment), which
      is what lets a test that never mounts one still get the documented 30-day

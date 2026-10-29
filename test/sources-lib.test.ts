@@ -1,5 +1,5 @@
-import { drawnSources, firstDrawn, inSource, settleSection, sourceSectionOf } from '../client/src/lib/sources';
-import type { ProjectSummary } from '../shared/types';
+import { drawnSources, firstDrawn, inSource, narrowToSource, settleSection, sourceSectionOf } from '../client/src/lib/sources';
+import type { ItemsIndex, ProjectSummary } from '../shared/types';
 
 /** Only `source` is read by the derivations; the rest of a summary is filler the cast papers over. */
 function project(source: ProjectSummary['source']): ProjectSummary {
@@ -86,5 +86,30 @@ describe('inSource', () => {
   it('is false for a path no project carries, under either source', () => {
     expect(inSource('/nope', projects, 'files')).toBe(false);
     expect(inSource('/nope', projects, 'github')).toBe(false);
+  });
+});
+
+describe('narrowToSource', () => {
+  const projects = [
+    { name: 'a', path: '/a', source: 'files' },
+    { name: 'b', path: '/b', source: 'github' },
+    { name: 'c', path: '/c', source: 'unsupported' }
+  ] as ProjectSummary[];
+  const index = {
+    items: [{ id: '1', projectPath: '/a' }, { id: '2', projectPath: '/b' }, { id: '3', projectPath: '/c' }, { id: '4', projectPath: '/gone' }],
+    errors: ['/c/backlog/source.json: unsupported']
+  } as unknown as ItemsIndex;
+
+  it('keeps the items of the source and drops an unregistered project', () => {
+    expect(narrowToSource(index, projects, 'files')!.items.map((i) => i.id)).toEqual(['1', '3']);
+    expect(narrowToSource(index, projects, 'github')!.items.map((i) => i.id)).toEqual(['2']);
+  });
+  it('lets the index errors ride only with Files', () => {
+    expect(narrowToSource(index, projects, 'files')!.errors).toEqual(index.errors);
+    expect(narrowToSource(index, projects, 'github')!.errors).toEqual([]);
+  });
+  it('passes the not-yet-fetched null through, and reads a null registry as empty', () => {
+    expect(narrowToSource(null, projects, 'files')).toBeNull();
+    expect(narrowToSource(index, null, 'files')!.items).toEqual([]);
   });
 });
