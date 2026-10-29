@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useTicks } from '../../hooks/useTicks';
-import { planReviewTally } from '../../lib/plan-review';
+import { awaitsPlanReview, planReviewTally } from '../../lib/plan-review';
 import { useDashboards } from '../../hooks/useDashboards';
 import { useNow } from '../../hooks/useNow';
 import { machineLabelByHost, machineLabelById } from '../../lib/dashboards';
@@ -25,6 +25,7 @@ import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
 import { FilterBar, FilterSection, ProjectPicks } from '../FilterBar';
 import type { FilterBarSort } from '../FilterBar';
 import { Band } from '../ui/Band';
+import { Chip } from '../ui/Chip';
 import { GatedChip } from '../ui/GatedChip';
 import { Segmented } from '../ui/Segmented';
 import { BoardColumn } from './BoardColumn';
@@ -186,6 +187,11 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
   const [status, setStatus] = usePersistedState<StatusFilter>(STATUS_KEY, 'open');
   const [storedSort, setSort] = usePersistedState<SortKey>(SORT_KEY, 'created');
   const [storedDir, setSortDir] = usePersistedState<SortDir | null>(SORT_DIR_KEY, null);
+  /* #387 — the `Awaiting review` filter, and the one filter NOT in `usePersistedState`: off on every mount. The pile it narrows to is transient — a person
+     reads it down to nothing — so a remembered toggle would reload, a day later, into a board narrowed to plans someone has since approved: an empty board
+     for no visible reason, the objection the query above is plain state for. Two controls flip it, the band's `PlanReviewChip` and the panel's
+     `Plan review` › `Awaiting review` chip, and both read this one value. */
+  const [awaitingReview, setAwaitingReview] = useState(false);
   const sort = resolveSortKey(storedSort);
   /* The stored direction when it is one, otherwise the resolved key's natural one. The `null` fallback is load-bearing: a reader who last picked
      `By name` before the direction existed has no direction stored, and must land on `Name (asc)` — A–Z, as they left it — not on a fixed
@@ -231,12 +237,15 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
 
   /* How many filters are set, for the filter button's badge and raised look, and for whether Clear all does anything. Off `projectValue` — the
      fail-open value — never the raw stored path, so a stale path lights no badge while `All projects` is the pressed chip. The search
-     is not counted: it states itself in its own field. Nor is the sort, which is not a filter and which Clear all leaves alone. */
-  const filterCount = (projectValue === ALL ? 0 : 1) + (status === 'open' ? 0 : 1);
+     is not counted: it states itself in its own field. Nor is the sort, which is not a filter and which Clear all leaves alone. The `Awaiting review`
+     toggle counts while it is on, and Clear all turns it off like the other two (#387). */
+  const filterCount = (projectValue === ALL ? 0 : 1) + (status === 'open' ? 0 : 1) + (awaitingReview ? 1 : 0);
   const clearFilters = (): void => {
     setProject(ALL);
     setStatus('open');
+    setAwaitingReview(false);
   };
+  const toggleAwaitingReview = (): void => setAwaitingReview((on) => !on);
 
   /* Fresh runs only: a stale run has stopped reporting, and a card's live
      strip is the claim "this item is being worked right now" — so it has to go
@@ -312,6 +321,9 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
   const matches = (i: BacklogItem): boolean =>
     (projectValue === ALL || i.projectPath === projectValue) &&
     (needle === '' || i.title.toLowerCase().includes(needle)) &&
+    // #387 — the band chip's own rule (`awaitsPlanReview`), so the board it narrows to is the pile the chip counts. Status still applies on top: `Done`
+    // with this on is honestly empty, since a done item awaits nothing.
+    (!awaitingReview || awaitsPlanReview(i)) &&
     // The Board is queue work only; rejected items belong to Archive (Task 6).
     // Dropped here rather than left to fall through a column that no longer
     // exists, so `visible` — which drives the "no matches" empty state and the
@@ -612,7 +624,12 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
             about runs, in one control that opens Runs; absent entirely when
             the payload carries no run and no starting entry. */}
         <RunChip runs={runs} starting={starting} remoteStarting={remoteStartingChip} onOpen={() => onOpenRuns?.()} />
-        <PlanReviewChip tallies={planReviewTally(all, ticks?.projects ?? [])} projectValue={projectValue === ALL ? null : projectValue} />
+        <PlanReviewChip
+          tallies={planReviewTally(all, ticks?.projects ?? [])}
+          projectValue={projectValue === ALL ? null : projectValue}
+          pressed={awaitingReview}
+          onToggle={toggleAwaitingReview}
+        />
         <input
           type="search"
           className="board-band-search"
@@ -634,7 +651,12 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
             Project first, chips valued by path and labelled by name so two
             checkouts of one repo stay two picks, with the hint that says why
             it is single-select; then Status, a four-way pill switch laid out
-            the panel's full width (`fill`). `onPick` is the setter itself:
+            the panel's full width (`fill`); then Plan review (#387), one
+            `Awaiting review` chip that is the band's PlanReviewChip's state
+            by another hand — a toggle beside Status rather than a fifth pill,
+            because four pills already need `nowrap` to fit the panel. Its
+            pressed look is `Chip`'s own, never the ink fill, for the reason
+            `ProjectPicks` gives. `onPick` is the setter itself:
             picking the chosen chip again stores the value it already holds,
             which changes nothing. */}
         <FilterBar<SortKey>
@@ -652,6 +674,13 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
           />
           <FilterSection title="Status" fill>
             <Segmented<StatusFilter> pill label="Status" value={status} options={STATUS_OPTIONS} onChange={setStatus} />
+          </FilterSection>
+          <FilterSection title="Plan review">
+            <div className="filter-bar-picks" role="group" aria-label="Plan review">
+              <Chip size={28} pressed={awaitingReview} onClick={toggleAwaitingReview}>
+                Awaiting review
+              </Chip>
+            </div>
           </FilterSection>
         </FilterBar>
         {/* Task 13: the "drain this project's groomed queue" control. `showOrchestrate` (computed above) is its four show-rules — a narrowed board,
@@ -696,7 +725,8 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
            controls two inches above the message. */
         <div className="board-empty">nothing registered yet</div>
       ) : visible.length === 0 ? (
-        <div className="board-empty">no matches</div>
+        /* With `Awaiting review` on, the empty result names the pile rather than the controls: the likely reason is the last plan was just approved. */
+        <div className="board-empty">{awaitingReview ? 'no plans awaiting review' : 'no matches'}</div>
       ) : (
         <div className="board-columns">
           {COLUMNS.map((col) => {

@@ -19,14 +19,24 @@ export interface PlanReviewTally {
 }
 
 /**
- * One entry per project holding ≥1 OPEN item with `planReview === true`, ordered by project name. A project with none has no entry whatever its
+ * Whether an item is in the plan-review pile: OPEN and carrying the mark. The one home of that rule on the client (#387), read by three callers that must
+ * agree — `planReviewTally` below (the band chip's count), the Board's `Awaiting review` filter (`BoardView`'s `matches`), and `PlanApprove` (whether the
+ * modal offers Approve) — so the chip's count and the filtered board are the same set by construction. Not `shared/agent.ts`'s `planReviewBlock`, which reads
+ * the mark alone, without the status, and is shared with the server's dispatch gate.
+ */
+export function awaitsPlanReview(item: BacklogItem): boolean {
+  return item.status === 'open' && item.planReview === true;
+}
+
+/**
+ * One entry per project holding ≥1 item `awaitsPlanReview` answers true for, ordered by project name. A project with none has no entry whatever its
  * `lastDecide` says — a tick at its cap a minute ago is not blocked once a person has approved the pile. `cap` comes from the tick row whose `root` is the
  * project's path (never its display name: two checkouts of one repo share a name), and `blocked` is `count >= cap`.
  */
 export function planReviewTally(items: readonly BacklogItem[], ticks: readonly TickProject[]): PlanReviewTally[] {
   const byPath = new Map<string, { name: string; count: number }>();
   for (const item of items) {
-    if (item.status !== 'open' || item.planReview !== true) continue;
+    if (!awaitsPlanReview(item)) continue;
     const entry = byPath.get(item.projectPath);
     if (entry) entry.count += 1;
     else byPath.set(item.projectPath, { name: item.project, count: 1 });
