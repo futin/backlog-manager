@@ -4,7 +4,7 @@ import { Injectable } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
 import { claimsByIssue } from './claim';
-import { GithubClient, isRepo, type GithubComment, type GithubIssue } from './github.client';
+import { GithubClient, isRepo, type GithubComment, type GithubIssue, type GithubResponse } from './github.client';
 import { TRACKER_LABELS, TRACKER_LABEL_NAMES } from './labels';
 import { intervalFor } from './sync-config.util';
 import { githubToken } from './token.util';
@@ -151,6 +151,52 @@ function recordBodyStamp(state: RepoState, issue: GithubIssue): void {
 /** The connection state of one repo, as `ProjectSummary.access` spells it. */
 export type Access = NonNullable<SourceSummary['access']>;
 
+/** What a failed response means for one repo: the connection state the board shows, the sentence beside it, and — when it is a limit — when to try again. */
+export interface FailureVerdict {
+  access: Access;
+  detail: string | null;
+  /** Epoch ms before which no request may be made, or `null` when the failure is not a limit. */
+  sleepUntil: number | null;
+  /** A secondary (abuse) limit rather than the hourly one — the kind the PR cache shares with this poller. */
+  secondary: boolean;
+}
+
+/**
+ * Turn a failed response into a verdict, or `null` for a 2xx/304. One pure function for the whole mapping, because every request this poller and the PR
+ * cache make can fail the same six ways and six copies of the branch is how one of them ends up reading `error` for a rate limit. `now` is passed in so a
+ * case can pin it.
+ */
+export function failureVerdict(res: GithubResponse<unknown>, now: number): FailureVerdict | null {
+  if ((res.status >= 200 && res.status < 300) || res.status === 304) return null;
+
+  if (res.secondary) {
+    return { access: 'rate-limited', detail: `secondary rate limit — backing off ${SECONDARY_BACKOFF_MS / 1000} s`, sleepUntil: now + SECONDARY_BACKOFF_MS, secondary: true };
+  }
+
+  // The hourly limit, which GitHub signals as a 403 or a 429 with
+  // `x-ratelimit-remaining: 0`, or with a `Retry-After`. Both are honoured:
+  // `remaining` alone would miss a 429 that carries only the header, and
+  // `retry-after` alone would miss the far more common 403.
+  const limited = (res.status === 403 || res.status === 429) && (res.rate.remaining === 0 || res.retryAfter !== null);
+  if (limited) {
+    const resetMs = res.retryAfter !== null ? now + res.retryAfter * 1000 : res.rate.reset !== null ? res.rate.reset * 1000 : now + SECONDARY_BACKOFF_MS;
+    // The reset TIME, not a duration: the card is read minutes after the
+    // fact as often as seconds after it, and "resets 14:32" stays true while
+    // "in 47 s" goes stale the moment it is drawn.
+    return { access: 'rate-limited', detail: `rate limit reached — resets ${new Date(resetMs).toISOString()}`, sleepUntil: resetMs, secondary: false };
+  }
+
+  // 401 sits with 403 deliberately: both mean "this credential cannot do
+  // this", which is one thing to fix (the token) rather than two.
+  if (res.status === 401 || res.status === 403) return { access: 'forbidden', detail: res.error, sleepUntil: null, secondary: false };
+  // GitHub answers 404 for a repo that does not exist AND for one the
+  // token cannot see — deliberately, so a private repo's existence is not
+  // disclosed. This app cannot tell them apart either, and says so in one
+  // state rather than guessing.
+  if (res.status === 404) return { access: 'not-found', detail: res.error, sleepUntil: null, secondary: false };
+  return { access: 'error', detail: res.error ?? `HTTP ${res.status}`, sleepUntil: null, secondary: false };
+}
+
 /** Everything this process knows about one connected repo. Per repo rather
  *  than per project on purpose: two registered projects can be two checkouts
  *  of one repo, and polling it twice would spend twice the budget to learn the
@@ -230,6 +276,12 @@ interface RepoState {
   /** Epoch ms before which this repo gets no requests at all — a rate limit's
    *  reset, or a secondary limit's backoff. */
   sleepUntil: number | null;
+  /**
+   * Epoch ms before which this repo gets no requests because of a SECONDARY limit — set by this poller's own failure and by `noteSecondary`, which is how
+   * the PR cache (which shares the repo's secondary budget but not its REST one) puts this poller to sleep too. Apart from `sleepUntil` so that a sleep
+   * noted from outside can never shorten, or be wiped by, the hourly limit's own reset; the sweep reads the later of the two.
+   */
+  secondaryUntil: number | null;
   /**
    * Epoch ms at which the last sync that made a request FINISHED — success, failure and `304` alike (#17). What the interval due-check measures from, so
    * a failing repo is not retried faster than its interval; and what marks an `off` repo's one cold attempt as spent, so a cold sync that fails is not
@@ -633,7 +685,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       if (!this.due(repo, intervalFor(repo), now)) continue;
       const state = this.stateOf(repo);
       // The asleep early return in `syncRepo` makes no request, so it must not count as an attempt — see `lastSyncAt`.
-      const asleep = state.sleepUntil !== null && Date.now() < state.sleepUntil;
+      const asleep = this.asleep(state);
       try {
         await this.syncRepo(repo, token);
       } finally {
@@ -664,6 +716,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
         detail: null,
         labelsEnsured: false,
         sleepUntil: null,
+        secondaryUntil: null,
         lastSyncAt: null
       };
       this.repos.set(repo, state);
@@ -678,8 +731,9 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // one. A `304` is free against the budget but a 403 is not, and asking
     // again before the reset is how an app earns a secondary limit on top of
     // the one it already has.
-    if (state.sleepUntil !== null && Date.now() < state.sleepUntil) return;
+    if (this.asleep(state)) return;
     state.sleepUntil = null;
+    state.secondaryUntil = null;
 
     // Cold: this process has never read the repo successfully. Taken before the request, because the branches below are what stamp `polledAt`.
     const cold = state.polledAt === null;
@@ -918,56 +972,43 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     }
   }
 
+  /** True while either sleep — the hourly limit's reset or a secondary limit's backoff — is still ahead. */
+  private asleep(state: RepoState): boolean {
+    const now = Date.now();
+    return (state.sleepUntil !== null && now < state.sleepUntil) || (state.secondaryUntil !== null && now < state.secondaryUntil);
+  }
+
+  /** The one place a secondary sleep is written. Never shortens one already set: two callers noting a limit a few seconds apart must leave the later end. */
+  private sleepSecondary(state: RepoState, untilMs: number): void {
+    if (state.secondaryUntil === null || untilMs > state.secondaryUntil) state.secondaryUntil = untilMs;
+  }
+
+  /**
+   * Put a repo to sleep under a secondary limit somebody else met (the PR cache's GraphQL or write calls): the sweep makes no request for it before
+   * `untilMs`. Creates the repo's state when this poller has not met it yet, so the sleep is not lost to ordering. Never shortens an existing sleep.
+   */
+  noteSecondary(repo: string, untilMs: number): void {
+    this.sleepSecondary(this.stateOf(repo), untilMs);
+  }
+
+  /** Epoch ms until which a secondary limit keeps `repo` quiet, or `null` when none is ahead — what the PR cache reads before its own request. */
+  secondaryUntil(repo: string): number | null {
+    const until = this.repos.get(repo)?.secondaryUntil ?? null;
+    return until !== null && Date.now() < until ? until : null;
+  }
+
   /**
    * Turn a failed response into this repo's `access`/`detail`, and say whether
-   * the caller should stop. One place for the whole mapping, because every
-   * request in this file can fail the same six ways and six copies of the
-   * branch is how one of them ends up reading `error` for a rate limit.
+   * the caller should stop. `failureVerdict` holds the whole mapping; this applies it to one repo's state.
    */
-  private handleFailure(state: RepoState, res: { status: number; error: string | null; retryAfter: number | null; secondary: boolean; rate: { remaining: number | null; reset: number | null } }): boolean {
-    if (res.status === 200 || res.status === 304 || res.status === 201) return false;
-
-    if (res.secondary) {
-      state.sleepUntil = Date.now() + SECONDARY_BACKOFF_MS;
-      state.access = 'rate-limited';
-      state.detail = `secondary rate limit — backing off ${SECONDARY_BACKOFF_MS / 1000} s`;
-      return true;
-    }
-
-    // The hourly limit, which GitHub signals as a 403 or a 429 with
-    // `x-ratelimit-remaining: 0`, or with a `Retry-After`. Both are honoured:
-    // `remaining` alone would miss a 429 that carries only the header, and
-    // `retry-after` alone would miss the far more common 403.
-    const limited = (res.status === 403 || res.status === 429) && (res.rate.remaining === 0 || res.retryAfter !== null);
-    if (limited) {
-      const resetMs = res.retryAfter !== null ? Date.now() + res.retryAfter * 1000 : res.rate.reset !== null ? res.rate.reset * 1000 : Date.now() + SECONDARY_BACKOFF_MS;
-      state.sleepUntil = resetMs;
-      state.access = 'rate-limited';
-      // The reset TIME, not a duration: the card is read minutes after the
-      // fact as often as seconds after it, and "resets 14:32" stays true while
-      // "in 47 s" goes stale the moment it is drawn.
-      state.detail = `rate limit reached — resets ${new Date(resetMs).toISOString()}`;
-      return true;
-    }
-
-    // 401 sits with 403 deliberately: both mean "this credential cannot do
-    // this", which is one thing to fix (the token) rather than two.
-    if (res.status === 401 || res.status === 403) {
-      state.access = 'forbidden';
-      state.detail = res.error;
-      return true;
-    }
-    if (res.status === 404) {
-      // GitHub answers 404 for a repo that does not exist AND for one the
-      // token cannot see — deliberately, so a private repo's existence is not
-      // disclosed. This app cannot tell them apart either, and says so in one
-      // state rather than guessing.
-      state.access = 'not-found';
-      state.detail = res.error;
-      return true;
-    }
-    state.access = 'error';
-    state.detail = res.error ?? `HTTP ${res.status}`;
+  private handleFailure(state: RepoState, res: GithubResponse<unknown>): boolean {
+    const verdict = failureVerdict(res, Date.now());
+    if (verdict === null) return false;
+    state.access = verdict.access;
+    state.detail = verdict.detail;
+    if (verdict.sleepUntil !== null) state.sleepUntil = verdict.sleepUntil;
+    // The secondary path every caller shares: the PR cache reaches `sleepSecondary` through `noteSecondary`, this poller through here.
+    if (verdict.secondary && verdict.sleepUntil !== null) this.sleepSecondary(state, verdict.sleepUntil);
     return true;
   }
 

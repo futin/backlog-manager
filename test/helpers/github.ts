@@ -105,6 +105,13 @@ export class FakeGithub {
    */
   failNext: { fragment: string; status: number; method?: string; headers?: Record<string, string>; message?: string } | null = null;
 
+  /**
+   * Repos besides `FAKE_REPO` this fake answers for (`addRepo`). Every other route in `route` is pinned to `FAKE_REPO`; a second registered repo gets the
+   * poller's three REST reads — `labels`, `issues`, `issues/comments` — answered `200` with an empty list, and a label create `201`. A repo not added here
+   * still 404s, which is what "the token cannot see it" looks like.
+   */
+  readonly extraRepos = new Set<string>();
+
   /** Rows per page. GitHub's own maximum is 100; a case that wants to prove a
    *  caller follows `Link` lowers this to 1. */
   pageSize = 100;
@@ -131,6 +138,26 @@ export class FakeGithub {
     if (issue === undefined) return;
     const next = Math.max(Date.now(), Date.parse(issue.updated_at) + 1);
     issue.updated_at = new Date(next).toISOString();
+  }
+
+  /** Register a second repo: its poller reads answer empty and healthy. `FAKE_REPO` keeps its issues; anything not added or `FAKE_REPO` still 404s. */
+  addRepo(repo: string): void {
+    this.extraRepos.add(repo);
+  }
+
+  /**
+   * The empty-and-healthy answers for an added repo — a table of path suffix to answer, so a later task adds a route (the PR reads and writes) by adding a row
+   * here rather than another branch in `route`. `null` when `path` is not an added repo's, so `route` falls through to its `FAKE_REPO` table.
+   */
+  private extraRepoRoute(method: string, path: string): { status: number; payload?: unknown } | null {
+    const match = /^\/repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path);
+    if (match === null || !this.extraRepos.has(match[1])) return null;
+    const answers: Record<string, { status: number; payload?: unknown }> = {
+      labels: method === 'POST' ? { status: 201, payload: {} } : { status: 200, payload: [] },
+      issues: { status: 200, payload: [] },
+      'issues/comments': { status: 200, payload: [] }
+    };
+    return answers[match[2]] ?? { status: 404, payload: { message: 'Not Found' } };
   }
 
   issue(over: Partial<FakeIssue> = {}): FakeIssue {
@@ -235,6 +262,8 @@ export class FakeGithub {
     const path = url.replace('https://api.github.com', '').split('?')[0];
 
     if (path === '/user') return { status: 200, payload: { login: 'futin' } };
+    const extra = this.extraRepoRoute(method, path);
+    if (extra !== null) return extra;
     if (path === `/repos/${FAKE_REPO}/labels`) return { status: 200, payload: TRACKER_LABELS.map((l) => ({ name: l.name })) };
 
     // The repository-wide comment read the poller makes.
