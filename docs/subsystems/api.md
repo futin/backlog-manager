@@ -102,8 +102,9 @@ only a `body` write by a session holding a live claim does, because that is what
 ([invariants.md](invariants.md#an-outsiders-tracker-issue-is-executable-only-while-its-body-matches-a-pin-a-groom-of-ours-wrote)).
 
 The eleventh write route, `POST /api/items/abort` (#225, body `project, id`), is not in this file: it calls the dashboard, so it lives in
-`agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this one. It releases a live, non-run claim with `reason: 'aborted'` and
-`authority: 'board'` (a field `release` never parses) once one proof holds — the holder is a session this server dispatched, which it stops through the
+`agents/items-abort.controller.ts` and gates and maps through the same `writable`, `required` (`items/write-gate.util.ts`) and `answer`
+(`items/write-answer.util.ts`) these routes use. It releases a live, non-run claim with `reason: 'aborted'` and `authority: 'board'` (a field `release`
+never parses) once one proof holds — the holder is a session this server dispatched, which it stops through the
 dashboard first (`POST /api/sessions/:id/stop`; a 200 or the `no live session` 404 proceeds, anything else is a 502 and the claim is untouched), or the claim's
 `host` equals `BM_MACHINE_NAME` and `GET /api/sessions` reports the holder neither `working` nor `question`. Every other case is a 409 naming what failed.
 A STALE non-run claim this server did not dispatch (#227) is released with `reason: 'stale'` and no `authority`, answering `stopped: false`, unless the claim was

@@ -1,3 +1,5 @@
+import { basename } from 'node:path';
+
 import { COMMIT_RULE, defuseFinishFlags, finishClause, oneLine } from '../../../shared/agent';
 import type { AgentAction } from '../../../shared/agent';
 import type { BacklogItem, ExecuteFinish, FinishFlags } from '../../../shared/types';
@@ -142,4 +144,67 @@ function instruction(item: BacklogItem, action: AgentAction): string {
  */
 export function sessionName(item: BacklogItem): string {
   return `bl ${item.project} ${item.id}`.slice(0, 60);
+}
+
+/**
+ * The `-n` name an orchestrate run's dashboard row is labelled with —
+ * `sessionName`'s (above) counterpart for a whole project rather
+ * than one item, needed because `orchestrate()` has no `BacklogItem` to
+ * build that one from. Same dashboard constraint, same reason:
+ * `sessionName`'s own comment explains that the dashboard's
+ * `NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/` allows neither `:` nor `/`,
+ * and a name that fails it is not rejected but silently dropped to
+ * `undefined` — the exact failure mode `sessionName` itself was rewritten
+ * once to fix, after an earlier `bl:<project>/<id>` spelling was discarded
+ * on 100% of dispatches without a single request actually failing. Space-
+ * separated for that reason, not the more obvious `orchestrate:<project>`.
+ * Sliced to the same 60-character cap `sessionName` uses, for the same
+ * reason: over the cap is the same silent drop. Exported for test/agents-prompt.test.ts, which pins the cap beside `resumeSessionName`'s.
+ */
+export function orchestrateSessionName(projectPath: string): string {
+  return `orchestrate ${basename(projectPath)}`.slice(0, 60);
+}
+
+/**
+ * `orchestrateSessionName`'s counterpart for a resumed run — same
+ * `basename(projectPath)`, same 60-character cap for the same silent-drop
+ * reason (see that function's own comment), and the same reason to exist at
+ * all: `resume()` has no `BacklogItem` to build a name from either. The one
+ * addition is the `origin` prefix, and it is the whole reason `resume()`
+ * takes an `origin` parameter in the first place — the dashboard's session
+ * list is the one durable trail this feature leaves behind (this app writes
+ * nothing to `run.json`; see the class doc comment on `resume()`), so a row
+ * reading "watchdog resume alpha" versus "resume alpha" is the only place a
+ * reader can later tell "the sweeper did this while nobody was watching"
+ * apart from "I clicked the button" — see the design's own §3 for why that
+ * distinction is worth a name change rather than a fifth field on the
+ * run-payload's `RunWatchdog`.
+ *
+ * The prefix-to-basename separator is a plain space, not the middle dot
+ * (`·`, U+00B7) the design doc originally wrote it with. `orchestrateSessionName`
+ * above already tells this story once for `:` and `/`; it applies just as
+ * exactly to `·`, which is also outside `NAME_RE`'s
+ * `[A-Za-z0-9][A-Za-z0-9 ._-]*` character class. A name that fails that
+ * regex is not rejected — `parseSpawnRequest` on the dashboard side drops it
+ * to `undefined` and the row falls back to the bare project name, silently,
+ * with no failed request anywhere to notice. That is exactly the failure
+ * this field exists to prevent (see the comment above): a middle-dot name
+ * would make every resumed session's row indistinguishable from a
+ * hand-started one, defeating `origin`'s only purpose without ever
+ * producing an error. Do not "restore" the middle dot for readability — a
+ * space reads fine and, unlike `·`, the dashboard actually keeps it.
+ */
+export function resumeSessionName(projectPath: string, origin: 'watchdog' | 'board'): string {
+  const prefix = origin === 'watchdog' ? 'watchdog resume' : 'resume';
+  return `${prefix} ${basename(projectPath)}`.slice(0, 60);
+}
+
+/**
+ * The abort session's row name (bug-39) — `resumeSessionName`'s sibling, with
+ * no `origin` because there is only one: a stop is always a person's, and
+ * nothing automated ever sends one. Same `slice(0, 60)` and same plain-space
+ * separator, for the reasons that function's comment gives at length.
+ */
+export function stopSessionName(projectPath: string): string {
+  return `stop ${basename(projectPath)}`.slice(0, 60);
 }

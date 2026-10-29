@@ -44,8 +44,8 @@ export function readAgentsConfig(env: NodeJS.ProcessEnv = process.env): AgentsCo
  * The three helpers below are every outbound call's to a dashboard, and they live HERE — beside the config they read — rather than in agents.service.ts,
  * where they began, because the multi-dashboard readers (`dashboard-status.service.ts`, `dashboards/usage.service.ts`, `dashboards/remote-board.util.ts`)
  * need them and `AgentsService` will inject those readers: a reader importing `agents.service` while `agents.service` imports the reader is a module cycle,
- * and under CommonJS a cycle hands Nest an `undefined` constructor parameter type at class-definition time. `agents.service.ts` re-exports all three, so
- * every importer that predates the move is untouched.
+ * and under CommonJS a cycle hands Nest an `undefined` constructor parameter type at class-definition time. `agents.service.ts` re-exported all three
+ * until #388, which pointed every importer here and dropped the re-export (a service file exports its class, not a neighbour's helpers).
  */
 
 /** `Authorization: Bearer …` when a token is set, nothing otherwise — the one place a token becomes a header, and it never becomes anything else. */

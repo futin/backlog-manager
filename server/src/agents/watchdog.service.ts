@@ -1,15 +1,15 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
-import { AgentsService, message } from './agents.service';
-import { readAgentsConfig } from './config.util';
+import { AgentsService } from './agents.service';
+import { message, readAgentsConfig } from './config.util';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
-import { readWatchdogConfig, watchdogEnvOff } from '../orchestrator/watchdog-config.util';
+import { readWatchdogConfig, watchdogEnvOff, writeWatchdogConfig } from '../orchestrator/watchdog-config.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import type { WatchdogEntry } from '../orchestrator/watchdog-state.service';
 import { watchdogExhausted, watchdogFailing, watchdogStoodDown } from '../../../shared/agent';
 import { RESUME_LOCKED_CODE } from '../../../shared/types';
-import type { OrchestratorRunsPayload, WatchdogStatus } from '../../../shared/types';
+import type { OrchestratorRunsPayload, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 
 /**
  * watchdog.service.ts — the sweeper.
@@ -210,6 +210,58 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
    *  save is visible immediately instead of at the next tick. */
   status(): WatchdogStatus {
     return this.state.status(readWatchdogConfig(), [...this.watching]);
+  }
+
+  /**
+   * A Settings save (`POST /api/agents/watchdog/config`, design §5.3): write
+   * the patch, arm, kick an unawaited tick, and answer the status that flows
+   * from it. The controller parses the body and hands the patch here; the
+   * sequence is this service's because every step of it is the watchdog's own
+   * domain — it sat in `AgentsController.watchdogConfig` until #388.
+   *
+   * `writeWatchdogConfig` (`orchestrator/watchdog-config.util.ts`, Task 1)
+   * owns `settings/watchdog.json` exclusively: this method never touches the
+   * file directly, and never re-implements the clamp — `writeWatchdogConfig`
+   * already merges the patch over the file's CURRENT contents, clamps every
+   * field to `WATCHDOG_LIMITS`, and writes atomically.
+   *
+   * `arm()` is called after every save, REGARDLESS of which field changed
+   * or what it changed to — including a save that flips `enabled` from
+   * `true` to `false`. This is deliberate, not merely harmless: `arm()`
+   * only ever WATCHES more eagerly (it starts a chain if none exists; it is
+   * a no-op if one already does), so calling it after a save that turns
+   * watching OFF costs nothing and calling it after a save that turns
+   * watching ON is the one case that actually matters. That case is exactly
+   * why this line exists at all: the design's own worked example is an
+   * operator toggling `enabled` from false to true while a run is ALREADY
+   * sitting crashed. `arm()` alone is not enough to make that toggle act
+   * immediately — its own doc comment states plainly that it is a no-op
+   * while a timer already exists, which is precisely the state a watchdog
+   * that has been watching a crashed-but-disabled run is already in. Without
+   * an explicit kick, that flip would sit inert until the ALREADY-SCHEDULED
+   * next tick fires — up to a full `tickMs` (a minute, by default) after a
+   * person who just turned the feature on would reasonably expect it to
+   * have acted. So `arm()` runs first (to start a chain from cold — the
+   * fresh-install, nothing-has-ever-run case), and a bare `tick()` runs
+   * right after it, UNAWAITED: `tick()`'s own in-flight guard (it returns
+   * the ALREADY-RUNNING sweep's promise rather than starting a second one)
+   * is what makes firing it unconditionally, even when `arm()` just started
+   * an identical one itself, safe rather than a double-sweep. It is not
+   * awaited here because a save's job is to persist the setting and report
+   * the state that flows from it — `status()` below already reflects the
+   * ARMED phase synchronously, since `arm()`'s own phase transition happens
+   * before this line runs, and reads fresh CONFIG from disk on that call
+   * regardless of whether the kicked tick has finished — making the caller
+   * wait for a live resume spawn (which can take seconds, and depends on a
+   * THIRD process, the dashboard) would turn a settings save into a request
+   * with the latency profile of a dispatch, for no benefit the response body
+   * would show anyway.
+   */
+  configure(patch: Partial<WatchdogConfig>): WatchdogStatus {
+    writeWatchdogConfig(patch);
+    this.arm();
+    void this.tick();
+    return this.status();
   }
 
   /**

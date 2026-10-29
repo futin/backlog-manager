@@ -178,7 +178,7 @@ describe('GET /api/agents/merge-check', () => {
   let homePath: string;
   // A second registered project, unused by cases 11-13 (they only ever name
   // `projectPath`) and present purely so cases 14-15 below have a WRONG
-  // project to prove `AgentsService.mergeCheck` didn't pick — see those
+  // project to prove `OrchestrateArgsService.mergeCheck` didn't pick — see those
   // cases' own comments for why a single registered project can't do that.
   let otherPath: string;
   const env = { ...process.env };
@@ -258,7 +258,7 @@ describe('GET /api/agents/merge-check', () => {
     // Written to settings.local.json specifically, not settings.json: that
     // file is the util's project-side tier ONLY — it is never consulted as
     // the home-side candidate under any argument order — so if
-    // AgentsService.mergeCheck ever called
+    // OrchestrateArgsService.mergeCheck ever called
     // `checkMergeCoverage(homedir(), entry.path)` (project and home swapped)
     // instead of the intended `checkMergeCoverage(entry.path, homedir())`,
     // the util would look for this project's covering entry under

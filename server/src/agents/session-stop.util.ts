@@ -1,7 +1,6 @@
 import { HttpException } from '@nestjs/common';
 
-import type { AgentsConfig } from './config.util';
-import { authHeaders, dashboardError } from './agents.service';
+import { authHeaders, dashboardError, type AgentsConfig } from './config.util';
 
 /** The dashboard's stop answers at once — it signals a process, it does not wait for one — so the spawn call's budget is plenty. */
 const STOP_TIMEOUT_MS = 10_000;
