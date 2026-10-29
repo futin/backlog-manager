@@ -17,7 +17,7 @@ and each project's `backlog/` directory are the data.
 | API only, on the host                     | `pnpm run dev`                                                     |
 | Client only, on the host                  | `pnpm run dev:web`                                                 |
 | Tests (both runners)                      | `pnpm test` (`scripts/test-all.mjs` — jest, then node)             |
-| Tests, jest only                          | `pnpm run test:jest` (`jest --runInBand`)                          |
+| Tests, jest only                          | `pnpm run test:jest` (`jest`, a worker per core less one)          |
 | Skill tests                               | `pnpm run test:skills` (`scripts/test-tmpdir.mjs` — `node --test`) |
 | Reinstall the plugin from the pushed HEAD | `pnpm run plugin:sync`                                             |
 | Publish the web port to the tailnet       | `pnpm run tailnet` (`up` \| `status` \| `down`)                    |

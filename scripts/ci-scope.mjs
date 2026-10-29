@@ -98,7 +98,7 @@ export function makePlan(files, { jest, node }) {
   const steps = [];
   const jestFiles = selectSuites(files, jest, { wide: scope === 'skills' });
   if (jestFiles.length > 0) {
-    steps.push({ label: `jest (${jestFiles.length} suites)`, cmd: 'pnpm', args: ['exec', 'jest', '--runInBand', '--runTestsByPath', ...jestFiles] });
+    steps.push({ label: `jest (${jestFiles.length} suites)`, cmd: 'pnpm', args: ['exec', 'jest', '--runTestsByPath', ...jestFiles] });
   }
   if (scope === 'skills') {
     steps.push({ label: 'pnpm run test:skills', cmd: 'pnpm', args: ['run', 'test:skills'] });
