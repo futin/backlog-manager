@@ -1,6 +1,6 @@
 # GitHub › PRs: Inbox, Matrix and Cards layouts, and a Settings › Access card
 
-Date: 2026-10-29. Status: draft, awaiting approval. Mockups (sample rows, daylight theme): https://claude.ai/artifact/JGHYN5bT7oaU8uute4W82h
+Date: 2026-10-29. Status: approved (autopilot gate, after doc-review round 1 — `docs/superpowers/reviews/2026-10-29-prs-layouts-design-review-1.md`). Mockups (sample rows, daylight theme): https://claude.ai/artifact/JGHYN5bT7oaU8uute4W82h
 
 ## Intent
 
@@ -25,7 +25,7 @@ Reference implementation to port FROM (behaviour and visual language, not code t
 4. **Cards**: today's page, unchanged apart from Goal 5.
 5. Repos the token **cannot read** — last PR read `access: 'forbidden'` or `'not-found'` — are drawn by no layout. The toolbar says how many are hidden and
    links to GitHub › Settings.
-6. GitHub › Settings gets an **Access** card beside Sync listing those repos, the error GitHub gave, when each was last checked, and how to fix it.
+6. GitHub › Settings gets an **Access** card beside Sync listing those repos, the error GitHub gave, and how to fix it (no age — see the Access card).
 7. A hidden repo comes back on its own: the next read that answers `ok` puts it back on every layout and takes it off the Access card, with no button.
 
 ## Non-goals
@@ -65,9 +65,10 @@ one function. `N open` becomes the sum of `total` over shown repos only.
 
 ### Level of a PR
 
-Three levels, first match wins:
+Three levels, first match wins, and the first rule is `draft → Quiet` — before either list below, so a draft whose checks fail or whose review is required
+is still Quiet:
 
-- **Needs you** — checks `failure`; or mergeable `conflicting`; or review `changes-requested`. A draft is never Needs you (see Quiet).
+- **Needs you** — checks `failure`; or mergeable `conflicting`; or review `changes-requested`.
 - **Worth a look** — mergeState `behind`; or review `review-required`; or checks `pending` *unless auto-merge is armed* (GitHub will merge it on its own); or
   mergeable `unknown`; or mergeState `blocked` / `unstable` with none of the reasons above to name.
 - **Quiet** — everything else: drafts (whatever their checks say), ready-and-clean PRs, armed auto-merge waiting on checks.
@@ -82,7 +83,10 @@ line's facts are the same vocabulary as `prChips` (it must not describe a PR two
 
 ### Rank
 
-Across all shown repos: level (Needs you, Worth a look, Quiet), then problem severity within the level, then newest `updatedAt` first.
+Across all shown repos: level (Needs you, Worth a look, Quiet), then problem severity within the level, then newest `updatedAt` first. **Severity** is the
+index, in its level's list above, of the first fact that put the PR there (Needs you: checks failure 0, conflicting 1, changes-requested 2; Worth a look:
+behind 0, review-required 1, checks pending 2, mergeable unknown 3, blocked/unstable 4); lower ranks first. Quiet PRs have no severity and sort by
+`updatedAt` alone.
 
 ### Layout key
 
@@ -97,6 +101,11 @@ access · GitHub › Settings`, the last part a link threaded down from the rail
 are switched by the rail's tree or a link threaded down from it, never an in-page control of their own); the page's polled age at the right (the newest
 `polledAt` over shown repos, on the existing one-second clock). The loading, `no token`, `pull requests unavailable` and `refresh failed` lines are unchanged
 and sit where they are today, above or instead of the layout.
+
+**Empty states**, the same in every layout and checked in this order: `no GitHub repo registered` tests the PAYLOAD's repo list (`data.repos`), never the
+shown list, so it stays true; when the payload has repos but every one is no-access, the layout area says `no repo this token can read` (the toolbar's hidden
+note carries the link); when shown repos exist but hold no open PR, Inbox and Matrix say `no open pull requests` (Cards keeps its per-repo line). That
+sentence is distinct from the tile filter's `No pull request at this level.`, which is drawn only while a tile is selected.
 
 ### Inbox
 
@@ -115,7 +124,8 @@ and sit where they are today, above or instead of the layout.
   PR rows it still holds from an earlier read stay in the ranking, the tiles and the Matrix counts with their actions, exactly as Cards draws them today — a
   failed refresh is not a reason to stop offering a merge (anti-goal: lose nothing Cards has). The line is added on top. A rate-limited repo's writes are
   refused by the server as today; nothing new is blocked client-side.
-- A shown repo read `ok` with no PRs draws nothing in Inbox (Cards is where "no open pull requests" is read).
+- A shown repo read `ok` with no PRs draws nothing of its own in Inbox (Cards is where its per-repo line is read); when NO shown repo has a PR, see Empty
+  states.
 
 ### Matrix
 
@@ -143,6 +153,11 @@ repo head as today; in Inbox/Matrix the builder places it once per affected repo
 total` for a truncated repo (Inbox/Matrix: one note line under the list naming the repo). Outcome lines for PRs a write took off the list (merged) show in
 Inbox/Matrix as status lines above the list, keyed `repo#n`, until the page is left — Cards keeps showing them in the repo's card.
 
+The outcome line of a PR still ON the list (`auto-merge armed`, a 409/502 refusal) and its `updating…` mark are never inside a collapsed part: Inbox draws
+them under the loud item or the quiet line, Matrix as a line beneath the row (outside its expansion) and the `updating…` in the Base cell. One small
+component renders that line from `outcomeLine` (`lib/prs.ts`) and keeps the `pr-outcome` test id and `role="status"`; `PrRow` and both new layouts render it,
+so the line is not part of the actions strip and is visible whether or not the strip is open.
+
 ## One actions component
 
 Today `PrRow` owns the method select, Merge with its inline `Confirm`, Update branch, the auto-merge toggle, the `why` reasons and the busy state. Extract that
@@ -157,14 +172,17 @@ A second card in `GithubSettingsView`, beside `Sync` (DESIGN §8.6 card language
 - Drawn only when ≥1 repo is no-access. Title `Access` with a bad pill `N without access`.
 - Lead: the token cannot read pull requests on these repos, so the PRs page leaves them out; each comes back on its own once it can.
 - One row per no-access repo: name and `detail` in `--red` (no age, see below).
-- A fix note naming the fine-grained token's repository access and the **Pull requests: Read and write** permission (write is what the three writes need), and
+- A fix note naming the fine-grained token's repository access and two permissions: **Pull requests: Read and write** (the list, update branch and
+  auto-merge) and **Contents: Read and write** (merge — the server merges through REST `PUT …/pulls/{n}/merge`, which GitHub files under Contents), and
   that the variable is `BM_GITHUB_TOKEN`. It never shows or hints at the token's value.
 - A muted `N repos readable.` line.
 
 **Where it reads from** (my call): the same `usePullRequests` hook, so it is the same request, the same 60 s cache and the same payload the PRs page reads;
 mounting it on Settings costs at most one PR-list read per repo per minute while the page is open, the same as the PRs page. This changes a recorded fact:
-`.claude/rules/board.md` (the `useCoalescedFetch` bullet), `docs/subsystems/invariants.md` (same section) and the hook's own doc comment all say
-`usePullRequests` is mounted only by GitHub › PRs and that this mount is the only thing that ever reads PRs. The plan rewrites all three to name both pages
+five texts say `usePullRequests` is mounted only by GitHub › PRs and that this mount is the only thing that ever reads PRs: `.claude/rules/board.md` (the
+`useCoalescedFetch` bullet), `docs/subsystems/invariants.md` (same section), the hook's own doc comment (`client/src/hooks/usePullRequests.ts`),
+`PullRequestsView.tsx`'s header comment ("this page is its only mount") and `docs/subsystems/board.md`'s PRs paragraph ("mounted by this page alone"). The
+plan rewrites all five to name both pages
 (GitHub › PRs and GitHub › Settings); the bullet's headline is unchanged, so `test/claude-rules.test.ts` stays green, but the plan must run it. The property
 the sentence protects — the PR cache has no timer, so PRs are read only while a page that shows them is open — still holds.
 
@@ -176,12 +194,13 @@ row shows the repo and its `detail` without a `checked … ago`. The mockup's ag
 `.claude/DESIGN.md` §8.11 rewritten for three layouts and the hidden-repo rule; §8 gains the Access card beside Sync's subsection; `docs/subsystems/board.md`'s
 PRs paragraph; CLAUDE.md's Layout line for the GitHub section mentions the three layouts. Every new component cites its DESIGN subsection in a header comment
 (CLAUDE.md). No invariant headline changes: the server is untouched and no new write exists. The one mechanism text that changes is the "`usePullRequests`
-is mounted only by GitHub › PRs" fact, in `.claude/rules/board.md`, `docs/subsystems/invariants.md` and `hooks/usePullRequests.ts` (see the Access card).
+is mounted only by GitHub › PRs" fact, in the five texts the Access card section lists.
 
 ## Tests (cases, not code)
 
-- `lib`: reach for each `access` value; level for each driving fact, a draft with failing checks is Quiet, auto-merge armed + checks pending is Quiet,
-  behind + approved is Worth a look; verdict and steps order; rank (level, then severity, then newest); layout parse (unknown → inbox), drawable (narrow +
+- `lib`: reach for each `access` value; level for each driving fact, a draft with failing checks is Quiet, a draft with `review-required` is Quiet, auto-merge
+  armed + checks pending is Quiet, behind + approved is Worth a look; verdict and steps order; rank (level, then severity as defined, then newest);
+  layout parse (unknown → inbox), drawable (narrow +
   matrix → inbox, stored value untouched), switcher options narrow vs wide; compact-key pick (behind → Update branch primary; ready → Merge… primary; failing
   checks → Merge disabled with `checks failing` shown); Matrix cell tone per fact (draft + failing → red Checks cell, Quiet dot; blocked → Mergeable
   `blocked`).
@@ -189,8 +208,11 @@ is mounted only by GitHub › PRs" fact, in `.claude/rules/board.md`, `docs/subs
   `Can't read` line / muted row.
 - View: no-access repos absent from all three layouts, `N open` excludes them, hidden note shows the right count and its link opens GitHub › Settings; a
   rate-limited repo still shows with its detail in each layout; switching layout persists and survives a reload; tile filter and clear; Matrix row toggle by
-  click and by Enter, a click on the `#n` link does not toggle; the actions component's existing write tests pass unchanged when driven from Inbox and Matrix;
-  an `updating…` mark survives a layout switch.
+  click and by Enter, a click on the `#n` link does not toggle; an `updating…` mark survives a layout switch; empty states (no shown repo, no PR at all).
+- Existing suite: jsdom is wide, so Inbox is drawn by default and `test/prs-view.test.tsx`'s Cards-anatomy cases (`pr-repo-*`, `pr-head-*`, `pr-outcome`
+  inside `pr-row-<key>`, the merged line in the repo card) pin `cards` by writing the layout's storage key before render — they are not expected to pass
+  untouched. The write cases (merge confirm `pr-merge-confirm`, auto-merge toggle, update branch, outcome `pr-outcome`) are re-run from Inbox and from Matrix;
+  those test ids belong to the shared actions component and the shared outcome line, so they mean the same element in every layout.
 - Settings: Access card absent when every repo reads; lists exactly the no-access repos with their detail; the fix note never contains a token value.
 
 ## Left to the builder
