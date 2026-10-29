@@ -121,9 +121,14 @@ function AppShell() {
     named no page. It is written into BOTH page stores here, before either source page mounts, so whichever source the section settles on opens on it —
     StrictMode's second run of the initializer writes the same values again. Held in state rather than derived, because what clears it is an event (the
     first projects answer, or the reader picking a section), not a value.
+
+    `fromPin` says the guess came from the `landing` pin rather than the section key — only ever a legacy `board`/`archive` pin, since `clampSettings`
+    turns any other unrecognised pin into `last`. Such a pin is settled in Settings as well as on screen (see the settle effect), because the blob still
+    says `github` after the clamp, and the first `update()` from anywhere would write that down as a real GitHub pin.
   */
   const [initial] = useState(() => {
     if (link.section !== null) return { section: link.section, pending: null };
+    const fromPin = settings.landing !== 'last';
     const raw =
       settings.landing === 'last' ? readRaw(SECTION_KEY) : ((readRaw(SETTINGS_STORAGE_KEY) as { landing?: unknown } | undefined)?.landing ?? settings.landing);
     const r = resolveLegacySection(raw);
@@ -131,10 +136,10 @@ function AppShell() {
       setFilesPage(r.page);
       setGithubPage(r.page);
     }
-    return { section: r.section, pending: r.provisional ? { page: r.page } : null };
+    return { section: r.section, pending: r.provisional ? { page: r.page, fromPin } : null };
   });
   const [section, setSection] = useState<Section>(initial.section);
-  const [pending, setPending] = useState<{ page: 'board' | 'archive' | null } | null>(initial.pending);
+  const [pending, setPending] = useState<{ page: 'board' | 'archive' | null; fromPin: boolean } | null>(initial.pending);
   const [filesPage] = useFilesPage();
   const [githubPage] = useGithubPage();
   /*
@@ -218,7 +223,12 @@ function AppShell() {
   useEffect(() => {
     if (drawn === null) return;
     if (pending !== null) {
-      change(pending.page === null ? firstDrawn(drawn) : settleSection(section, drawn));
+      const settled = pending.page === null ? firstDrawn(drawn) : settleSection(section, drawn);
+      change(settled);
+      // A legacy pin is rewritten to where it settled. Left as the clamped `github`, the next `update()` — any Settings change, a Settings-tree scope
+      // pick — would store it as a REAL GitHub pin, and a files-only machine would then draw a held GitHub row and board on every load until the answer
+      // took them back: the flicker the spec's Fallback forbids, with `Opens on` reading GitHub on a machine that has none.
+      if (pending.fromPin) update({ landing: settled });
       return;
     }
     if (isSourceSection(section) && !drawn[section]) change(firstDrawn(drawn));
@@ -250,7 +260,7 @@ function AppShell() {
     }
     // No projects answer yet: land on the provisional fallback, exactly as an absent stored section would, and let the settle above correct it.
     change(FALLBACK_SECTION);
-    setPending({ page: null });
+    setPending({ page: null, fromPin: false });
   }, [jiraConfigured, section]);
 
   /*

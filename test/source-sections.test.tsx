@@ -204,6 +204,32 @@ describe('settling a provisional landing', () => {
     expect(current()).toBe('GitHub');
     expect(rows()).toContain('GitHub');
   });
+  /*
+    The legacy pin is settled in Settings too, not only on screen: left as the `github` `clampSettings` maps it to, the first `update()` from anywhere would
+    write that down as a real GitHub pin, and every later load on a files-only machine would draw a held GitHub row and board before the answer.
+  */
+  it('legacy board pin is rewritten to its settled source, so the next load draws no GitHub row', async () => {
+    store(SETTINGS_STORAGE_KEY, { landing: 'board' });
+    projectsAnswer = FILES;
+    const first = render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    expect(current()).toBe('Files');
+    await flush();
+    expect((stored(SETTINGS_STORAGE_KEY) as { landing: unknown }).landing).toBe('files');
+    first.unmount();
+
+    const held = deferred<unknown[]>();
+    projectsAnswer = held.promise;
+    render(<App />);
+    await flush();
+    expect(rows()).not.toContain('GitHub');
+    expect(current()).toBe('Files');
+
+    await act(async () => held.resolve(FILES));
+    await flush();
+    expect(rows()).not.toContain('GitHub');
+    expect(current()).toBe('Files');
+  });
 });
 
 describe('holding and falling', () => {
