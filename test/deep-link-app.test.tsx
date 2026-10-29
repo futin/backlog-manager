@@ -32,7 +32,8 @@ const stored = (key: string): unknown => JSON.parse(localStorage.getItem(key) ??
 
 beforeEach(() => {
   localStorage.clear();
-  localStorage.setItem(SECTION_KEY, JSON.stringify('board'));
+  // A real section, so it is held and drawn while the projects answer — which this suite never gives — is unknown.
+  localStorage.setItem(SECTION_KEY, JSON.stringify('github'));
   localStorage.setItem(RUNS_MODE_KEY, JSON.stringify('watchdog'));
   global.fetch = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true }) } as Response)) as unknown as typeof fetch;
 });
@@ -42,7 +43,7 @@ afterEach(() => {
 });
 
 describe('a deep link', () => {
-  it('opens Runs › History over a stored Board and a stored Watchdog, records both, and leaves the address bar', async () => {
+  it('opens Runs › History over a stored GitHub and a stored Watchdog, records both, and leaves the address bar', async () => {
     window.history.replaceState(null, '', '/?section=runs&runs=history');
     render(<App />);
     expect(await screen.findByText('runs stub: runs')).toBeInTheDocument();
@@ -52,7 +53,7 @@ describe('a deep link', () => {
   });
 
   it('wins over a pinned landing', async () => {
-    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ landing: 'board' }));
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ landing: 'github' }));
     window.history.replaceState(null, '', '/?section=runs&runs=history');
     render(<App />);
     expect(await screen.findByText('runs stub: runs')).toBeInTheDocument();
@@ -84,5 +85,14 @@ describe('a deep link', () => {
     render(<App />);
     expect(await screen.findByText('board stub')).toBeInTheDocument();
     expect(stored(RUNS_MODE_KEY)).toBe('watchdog');
+  });
+
+  // The root Board the source rows replaced (source-sections spec): `?section=board` is not a section any more, so the load is a plain one — the stored
+  // GitHub opens, and the parameter is left alone like any other the app does not read.
+  it('ignores ?section=board, opening the app as a plain load would', async () => {
+    window.history.replaceState(null, '', '/?section=board');
+    render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    expect(stored(SECTION_KEY)).toBe('github');
   });
 });

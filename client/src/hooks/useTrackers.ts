@@ -6,7 +6,7 @@ import { useWindowFocus } from './useWindowFocus';
 
 /**
  * `GET /api/trackers` — the shell's one instance (the tracker strip spec, §4), provided through `TrackersContext` to the strip chip and to Shared
- * Settings' Trackers card. Nothing else calls this hook directly: two instances would be two clocks.
+ * Settings' Sources card and GitHub › Settings' Sync card. Nothing else calls this hook directly: two instances would be two clocks.
  *
  * **On the server's poll clock.** After every answer there is exactly one pending timer, aimed at `newest polledAt + TRACKER_CYCLE_MS +
  * TRACKER_FETCH_SLACK_MS` — just after the server's next sweep should have stamped a fresh `polledAt`. That is what makes the chip's POLL bar reach its
@@ -46,7 +46,7 @@ export interface TrackersState {
   error: boolean;
   reload: () => void;
   /**
-   * The Trackers card's one write (#17): `POST /api/trackers/sync`, then a refetch, so the picker shows the value the SERVER now reads rather than the one
+   * GitHub › Settings' one write (#17): `POST /api/trackers/sync`, then a refetch, so the picker shows the value the SERVER now reads rather than the one
    * clicked. Resolves on every outcome and never throws — a refusal is a reading for the card, not an exception for its click handler.
    */
   saveInterval: (repo: string, interval: SyncInterval) => Promise<void>;

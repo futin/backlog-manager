@@ -36,7 +36,7 @@ import { SettingsRow } from '../ui/SettingsRow';
  * Three sections, in the mock's order:
  *
  * - **Name & sync** — two `SettingsRow`s (§8.6's row, the same one Setup's cards draw): the name in a `.set-text`, the interval as a `Segmented` pill over
- *   `SYNC_INTERVALS`, the same control the Trackers card draws for a GitHub repo's interval, so the two read alike.
+ *   `SYNC_INTERVALS`, the same control GitHub › Settings' Sync card draws for a GitHub repo's interval, so the two read alike.
  * - **Roots** — the keys, one row each with ×, and a search field whose `Popover` lists `/api/jira/search` answers; a pick adds the key. Only the KEY is
  *   stored (`JiraBoard.roots` is `string[]`), so the summary a row reads beside it is display-only and comes from one of two places that cost no Jira call:
  *   the search answer a root was picked from, or — for an edited board — ONE read of the board's cached list (`/api/jira/boards/:id/issues`, served from the

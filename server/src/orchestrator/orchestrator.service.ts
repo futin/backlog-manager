@@ -65,7 +65,7 @@ function isPlausibleRun(value: unknown): value is OrchestratorRun {
  *      never heard of, or plain corruption.
  *
  * This is the deliberate asymmetry with `POST /api/agents/orchestrate`'s
- * `resolveMergeMode` (agents.service.ts), which 400s on the identical bad
+ * `resolveMergeMode` (orchestrate-args.service.ts), which 400s on the identical bad
  * string instead of defaulting it. There, the value is a caller's
  * *instruction* about to be acted on, and merging to `main` is the
  * irreversible direction (undoable afterwards only via `git revert -m 1`,
@@ -110,7 +110,7 @@ function isPlausibleRun(value: unknown): value is OrchestratorRun {
  * and a run list that hid such a run, or rewrote its base to `main`, would be
  * lying about where that work actually landed. Validating a base against the
  * repository is `POST /api/agents/orchestrate`'s job, on the way in, where the
- * value is still an instruction (`resolveBase`, agents.service.ts).
+ * value is still an instruction (`resolveBase`, orchestrate-args.service.ts).
  */
 function sanitizeMergeFields(run: OrchestratorRun): OrchestratorRun {
   return {

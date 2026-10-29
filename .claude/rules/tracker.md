@@ -81,9 +81,9 @@ paths: ["server/src/tracker/**"]
   `lastSyncAt`, stamped on failure too but not for a sweep that found the repo asleep on a rate limit. The interval is `intervalFor(repo)`, read fresh per call from
   `settings/tracker-sync.json` (`sync-config.util.ts`, `BM_TRACKER_SYNC_FILE`), every missing or invalid entry reading `15s`. Why:
   [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
-- **The tracker and Jira caches are the two caches in this server whose age is a rendered value.** In memory, per repo, lost on restart, rebuilt by the
-  first sync; it
-  exists because the hourly rate limit makes a per-request fetch impossible, and `polledAt` on the board, in the item modal, on the Trackers card and — since
+- **The tracker, Jira and pull-request caches are the three caches in this server whose age is a rendered value.** In memory, per repo, lost on restart,
+  rebuilt by the first sync; it
+  exists because the hourly rate limit makes a per-request fetch impossible, and `polledAt` on the board, in the item modal, on the Sources card and — since
   bug-41 — beside every tracker queue `orchestrate.mjs plan`/`init` builds is what keeps it honest. **A named `--ids` entry the cache has not polled yet buys
   ONE re-read, timed off `polledAt`, and only a second miss is refused** — never a fresh per-id `GET` to GitHub, which was weighed and rejected. Every other read stays per request — the registry's and `resolveSource`'s rules are untouched. A `304` leaves the cache unchanged and MOVES
   `polledAt`: the rendered age means "since we last successfully checked", and a conditional request that came back `304` is a successful check (settled
@@ -101,10 +101,20 @@ paths: ["server/src/tracker/**"]
   `connect`'s issue forms by a source-reading guard (`test/tracker-labels.test.ts`), never an import. **The Jira board caches are the second**
   (`JiraPollerService`, `server/src/jira/poller.service.ts`): in memory, one `JiraBoardCache` per board, lost on restart, replaced whole by a sweep or not at
   all — a whole-board failure keeps the last good list and its `polledAt` — and that `polledAt` rides on every board in `GET /api/jira` and on `GET
-  /api/jira/boards/:id/issues`. The issue detail, the roots search, the project list and the JQL check are fresh reads and never cached. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-tracker-and-jira-caches-are-the-two-caches-in-this-server-whose-age-is-a-rendered-value)
+  /api/jira/boards/:id/issues`. The issue detail, the roots search, the project list and the JQL check are fresh reads and never cached. **The PR cache is
+  the third** (`PullRequestsService`, `server/src/tracker/pulls.service.ts`): in memory, per DISTINCT repo, lost on restart, and ON DEMAND — no timer, interval
+  or sweep; a read happens only inside `GET /api/prs` or a write's re-read — served while younger than `PR_TTL_MS` (60 s), with one in-flight read per repo
+  shared by concurrent callers. `polledAt` moves on a successful read only; a failure keeps the last rows and sets `access`/`detail` from `failureVerdict`.
+  An hourly-limit verdict sleeps that repo's entry (`noteSleep`, which a write's verdict reaches too, creating an empty entry); a secondary one also calls
+  `poller.noteSecondary`, and the poller's `secondaryUntil` sleeps the entry in turn — `noteSecondary` also sets the poller's repo `access: 'rate-limited'`
+  and the secondary detail, as its own verdict does. A typed GraphQL `RATE_LIMITED` is a limit whatever `remaining` says (`GithubResponse.rateLimited`).
+  `splice` puts a write's re-read row in place without moving `polledAt`, counts down `total` on a removal and up only on a complete list, and bumps the
+  entry's `splices`: a list read that lands with a different count drops its rows (the attempt still counts), and a successful read clears `sleepUntil` only
+  when it has run out. An `update-requested` sets `dueAt = now + PR_UPDATING_MS` (`shared/types.ts`, also the client's `UPDATING_MS`): `refresh` reads an
+  entry past its `dueAt` inside the TTL too, still joining a read in flight. Each write reads its clock when its serialised turn comes. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-and-pull-request-caches-are-the-three-caches-in-this-server-whose-age-is-a-rendered-value)
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.** `TrackerPollerService.syncOffBlock(path)` is
-  the ONE server home of the sentence `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers` (tracker projects only, `null` otherwise);
+  the ONE server home of the sentence `sync is off for <owner/name> — turn it on in GitHub › Settings` (tracker projects only, `null` otherwise);
   `syncOffReason` (`client/src/lib/tracker.ts`) is the client's copy, and both are pinned to the same literal in a test, never an import. It answers 409
   `{ error }` from the ten `GithubSource` writes — through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check, before
   any GitHub request (`create` checks it after `ready()`) — from `AgentsService`'s `dispatch`, `orchestrate` and `resume`, before any spawn, and from `ItemsAbortService.abort` before its dashboard stop; `plan()` puts
@@ -113,3 +123,17 @@ paths: ["server/src/tracker/**"]
   writes, `arm()`s and returns `summary(repo)`. The write itself answers one more 409, for any interval: a `tracker-sync.json` that exists but does not parse
   is refused (`SyncConfigUnreadableError`) and left untouched, never replaced by the one key being written (#270); a MISSING file is still written fresh. `RemoteRunsService` drops `off` repos before deriving. Why:
   [invariants.md](docs/subsystems/invariants.md#a-repo-whose-sync-is-off-refuses-every-write-path-and-cannot-be-switched-off-under-a-live-or-paused-run)
+- **The board's pull-request writes are merge, auto-merge and update-branch, nothing else, and each re-reads the PR.** `PullsController`
+  (`server/src/tracker/pulls.controller.ts`) serves `GET /api/prs` (unguarded) and `POST /api/prs/merge` `{ repo, number, method, headSha }`, `/auto-merge`
+  `{ repo, number, enable, method? }` and `/update-branch` `{ repo, number, headSha }`, each with `@UseGuards(SameOriginPostGuard)` per route; the controller
+  validates (`400`: `isRepo`, positive integer `number`, `method` in `MERGE_METHODS` — required when `enable` — `headSha` 40 lowercase hex, boolean `enable`)
+  and `PullRequestsService` does the rest: `404` for a repo no registered project resolves to, `503` no token, then inside `serialise('<repo>#<number>')`
+  (`GithubSource.serialise`'s shape) `409` `syncOffBlock(path)` of the repo's first registered project, `429` while `sleepingUntil` (the entry's own sleep
+  or the poller's `secondaryUntil`) is ahead, then the GitHub calls — REST `GithubClient.mergePull` (`merge_method`, `sha`) and `updatePullBranch`
+  (`expected_head_sha`), GraphQL `readPull` + `setAutoMerge`. `refusal` maps a failed answer: a `failureVerdict` limit → `429` and `noteSleep` (R4);
+  `401`/`403` → `502 the token lacks permission for this — <message>`; `405`/`409`/`422` or a `200` with `error` → `409` with GitHub's message; anything else
+  → `502`. Every outcome but a limit re-reads through `readPull` and `splice`s (open row, or removal when merged/closed); a merge refusal whose re-read is
+  `MERGED` answers `200 already-merged`, a merge `200` splices the PR out even if its re-read failed, and a disarm with nothing armed is `200 noop` with no
+  mutation. The answer is `PrWriteResult { ok, outcome, pr, reread }` (`202` for update-branch); a failed re-read is `reread: false`, never an error. The
+  node id never leaves the server. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-boards-pull-request-writes-are-merge-auto-merge-and-update-branch-nothing-else-and-each-re-reads-the-pr)

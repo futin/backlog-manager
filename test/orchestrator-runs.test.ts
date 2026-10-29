@@ -220,7 +220,7 @@ describe('GET /api/orchestrator/runs', () => {
     // heard of, or plain disk corruption must degrade exactly like the
     // absent-fields case above rather than 500 the whole payload — the
     // deliberate asymmetry with POST /api/agents/orchestrate's 400 for the
-    // identical string (agents.service.ts's resolveMergeMode): there the
+    // identical string (orchestrate-args.service.ts's resolveMergeMode): there the
     // value is a caller's instruction about to be acted on and merging to
     // main is irreversible, so a bad value must be refused; here the value
     // is a reading of a run that already happened, and refusing to render

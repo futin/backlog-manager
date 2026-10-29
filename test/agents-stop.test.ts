@@ -11,7 +11,7 @@ import { GithubClient } from '../server/src/tracker/github.client';
 import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
-import { stopSessionName } from '../server/src/agents/agents.service';
+import { stopSessionName } from '../server/src/agents/prompt.util';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { FakeGithub } from './helpers/github';

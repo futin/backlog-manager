@@ -2,7 +2,7 @@ import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 
 import { ItemsAbortService } from './items-abort.service';
 import { SameOriginPostGuard } from './origin.guard';
-import { required } from '../items/items-write.controller';
+import { required } from '../items/write-gate.util';
 import type { ItemAbortResult } from '../../../shared/types';
 
 /**

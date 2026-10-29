@@ -1,9 +1,9 @@
 # The board (client)
 
-A React SPA in five sections behind a side rail — Board, Runs, Archive, Jira, Settings — each its own lazy chunk, Jira drawn only on a machine whose
-server says it is configured ([jira.md](jira.md) has its client half). The server returns whole corpora, so most of what
-appears on screen is decided here: whether an item is groomed, whether it belongs on the Board or in Archive, how long an item's work took, what a run cost.
-Those derivations live in `client/src/lib/` as one implementation each, so two surfaces cannot disagree about the same item.
+A React SPA in five sections behind a side rail — Files, GitHub, Jira, Runs, Settings — each page its own lazy chunk, Files and GitHub drawn only while a
+registered project has that source, Jira only on a machine whose server says it is configured ([jira.md](jira.md) has its client half). The server returns whole
+corpora, so most of what appears on screen is decided here: whether an item is groomed, whether it belongs on the Board or in Archive, how long an item's work
+took, what a run cost. Those derivations live in `client/src/lib/` as one implementation each, so two surfaces cannot disagree about the same item.
 
 The look is not decided here. [`.claude/DESIGN.md`](../../.claude/DESIGN.md) is the visual language — §1–7 the system, §8 how this board applies it, one
 subsection per surface — and every component cites its subsection in a header comment. This document is the mechanism: what each surface is made of, what it
@@ -13,39 +13,55 @@ reads, and which file owns each decision.
 
 ### The rail
 
-Board / Runs / Archive / Jira / Settings, a plain section switch. `SECTIONS` in `client/src/lib/sections.ts` is the one runtime list of them — it lived in
-`SideRail.tsx` until the rail gained a `useSettings` read and the two files closed an import cycle — and the rail keeps only the LABELS, as a
-`Record<Section, string>`, so a section added to the list cannot ship without one. `resolveSection` in `App.tsx` maps a stored value that names no tab — the
-legacy `'projects'` included — onto Board, so an upgrade never opens on a blank main area.
+Files / GitHub / Jira / Runs / Settings, a plain section switch, with one rule drawn above Settings. `SECTIONS` in `client/src/lib/sections.ts` is the one
+runtime list of them — it lived in `SideRail.tsx` until the rail gained a `useSettings` read and the two files closed an import cycle — and the rail keeps only
+the LABELS, as a `Record<Section, string>`, so a section added to the list cannot ship without one. `resolveLegacySection` (`client/src/lib/source-page.ts`)
+maps a stored value that names no section — the root `board` and `archive` from before the source rows, the older `'projects'`, a hand-edited value — onto a
+PROVISIONAL GitHub, remembering the page a `board`/`archive` meant, and the shell settles it on the first projects answer (below), so an upgrade never opens on
+a blank main area.
 
-One URL beats both the stored section and `landing` (#328): `readDeepLink` (`client/src/lib/deep-link.ts`) reads `section`, `runs=history|watchdog` only
-beside `section=runs`, and `settings=local|shared|dashboards` only beside `section=settings`, and ignores anything it does not recognise, so a bad link opens
-the app as a plain load does. Lookout's Orchestrator tile opens `/?section=runs&runs=history`. `App` reads it once, in a `useState` initializer for the
-no-flash reason — the Runs page through the same `setRunsMode` the tree calls, the Settings page through `update({ settingsScope })` in a layout effect — then
-records the section as a rail click would and strips the parameters with `history.replaceState`, so a reload reopens where the reader has gone since.
+One URL beats both the stored section and `landing` (#328): `readDeepLink` (`client/src/lib/deep-link.ts`) reads `section`, `runs=history|watchdog` only beside
+`section=runs`, and `settings=local|shared|dashboards` only beside `section=settings`, and ignores anything it does not recognise, so a bad link opens the app
+as a plain load does — an old `?section=board` included, since it names no section. Lookout's Orchestrator tile opens `/?section=runs&runs=history`. `App` reads
+it once, in a `useState` initializer for the no-flash reason — the Runs page through the same `setRunsMode` the tree calls, the Settings page through `update({ settingsScope
+})` in a layout effect — then records the section as a rail click would and strips the parameters with `history.replaceState`, so a reload reopens
+where the reader has gone since.
 
-`jira` (Jira phase 2) is a member of the list unconditionally, because `resolveSection` runs in a `useState` initializer before `GET /api/jira` has
-answered; the conditional half is the shell's. The rail's `drawn` skips the Jira row unless the shell's one `useJira` says `configured: true`, or the status
-is still unknown while `jira` is the section on screen; `App` falls a `jira` section to Board on `configured: false` and holds it on anything else, drawn in
-`JiraView`'s `loading…` or `Jira unavailable` line; and Settings' `Opens on` offers `Jira` only while configured. Why each half is the way it is:
+`jira` (Jira phase 2) is a member of the list unconditionally, because `resolveLegacySection` runs in a `useState` initializer before `GET /api/jira` has
+answered; the conditional half is the shell's. The rail's `drawn` skips the Jira row unless the shell's one `useJira` says `configured: true`, or the status is
+still unknown while `jira` is the section on screen; `App` falls a `jira` section to the first drawn source row (`firstDrawn`, Runs when there is none) on
+`configured: false` and holds it on anything else, drawn in `JiraView`'s `loading…` or `Jira unavailable` line; and Settings' `Opens on` offers `Jira` only
+while configured. Why each half is the way it is:
 [invariants.md](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 
+`files` and `github` are members of the list unconditionally for the same reason, and their conditional half is the projects answer's. `ProjectsProvider`
+(`client/src/hooks/ProjectsContext.tsx`) is the shell's one read of `GET /api/projects` — through `useRefreshing`, mount and focus, no poll — keeping its last
+answer on a failure, and `drawnSources` (`client/src/lib/sources.ts`) turns it into `{ files, github }`, `null` while unknown. `sourceSectionOf` puts a `github`
+project under GitHub and a `files`, `unsupported` or source-less one under Files, as display grouping only. The rail draws a source row while its flag is true,
+or while the answer is unknown and that section is on screen and not provisional. `App` moves nothing while the answer is unknown; once it exists, a provisional
+landing settles once (`settleSection` for a page-named one, `firstDrawn` — Files, then GitHub, else Runs — otherwise) and a legacy `Opens on` pin is rewritten
+to where it settled; a source section whose row the answer no longer draws falls to `firstDrawn`. Until a provisional landing settles the well draws the
+section's loading shape, so a files-only machine never flashes a GitHub board. Settings' `Opens on` offers Files and GitHub only while drawn (`landingOptions`),
+keeping a stored pin's option. Why:
+[invariants.md](invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree).
+
 A section that fails to render does not take the rail with it (#270). The lazy sections sit inside `SectionBoundary`
-(`client/src/components/SectionBoundary.tsx`), keyed by section, which draws `this section failed to load` and a reload button in the well; switching sections clears it. Its common cause — a rebuild
+(`client/src/components/SectionBoundary.tsx`), keyed by view (`files:board`, `github:settings`, `runs`, …) so a crash on one source page does not follow the
+reader to its sibling. It draws `this section failed to load` and a reload button in the well; switching views clears it. Its common cause — a rebuild
 deleting the chunk an open tab asks for next — rarely gets that far: `installPreloadReload` (`client/src/lib/preload-reload.ts`, installed in `main.tsx`)
-answers Vite's `vite:preloadError` with one page reload, and a second failure within `RELOAD_GUARD_MS` of it (a timestamp in `sessionStorage`) is left to
-the boundary instead, so a chunk a reload cannot bring back never loops.
+answers Vite's `vite:preloadError` with one page reload, and a second failure within `RELOAD_GUARD_MS` of it (a timestamp in `sessionStorage`) is left to the
+boundary instead, so a chunk a reload cannot bring back never loops.
 
 The wordmark is a prompt, `BACKLOG` over `› manager▌`, whose cursor blinks while a run on this machine is working (`.claude/DESIGN.md` §8.0). The answer is
-`runsWorking` (`client/src/lib/run-pulse.ts`: a `starting` entry, or a local run `running` and not `isCrashed`), and `App` polls nothing to get it — Board,
-Runs and Archive each already run a `useOrchestratorRuns()` and report it up through `useReportWorking`; `App` keeps the report tagged with the section that
-made it and drops it on a section change, so Settings, which reports nothing, always shows a solid cursor.
+`runsWorking` (`client/src/lib/run-pulse.ts`: a `starting` entry, or a local run `running` and not `isCrashed`), and `App` polls nothing to get it — each
+source's Board and Archive, and Runs, already run a `useOrchestratorRuns()` and report it up through `useReportWorking`; `App` keeps the report tagged with the
+view that made it (`files:board`, `github:archive`, `runs`, …) and drops it on a view change, so Settings, which reports nothing, always shows a solid cursor.
 
-THREE sections have a sub-nav tree under their row: Runs (History, Watchdog, Ticks), Jira (Board, Setup) and Settings (Local, Shared, Dashboards). All three are drawn by one
-component, `RailTree`, because
-the markup carries three details that must not drift — the `rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone
-menu on a pick. What each call site supplies is only what legitimately differs: the item list, which of them is current, and what a pick writes. In every case
-the tree is the **only** control that switches between the two views — there is no in-page switch at any width (`.claude/DESIGN.md` §8.0).
+Every section has a sub-nav tree under its row: Files (Board, Archive), GitHub (Board, PRs, Archive, Settings), Jira (Board, Setup), Runs (History, Watchdog, Ticks)
+and Settings (Local, Shared, Dashboards). All five are drawn by one component, `RailTree`, because the markup carries three details that must not drift — the
+`rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone menu on a pick. What each call site supplies is only what
+legitimately differs: the item list, which of them is current, and what a pick writes. In every case the tree is the **only** control that switches between the
+two views — there is no in-page switch at any width (`.claude/DESIGN.md` §8.0).
 
 The two trees differ in where their value lives, and the difference is not arbitrary. Runs' mode goes through `useRunsMode` (`client/src/hooks/useRunsMode.ts`),
 a module-level value every mounted reader subscribes to, because the rail is not its only writer — the Watchdog page's own rows jump back to History with a run
@@ -54,7 +70,10 @@ selected, and the Settings watchdog card's `Live view` link opens Watchdog — a
 readers already sit inside `SettingsProvider` and nothing outside Settings writes it. Jira's page takes Runs' road for Runs' reason: `useJiraPage`
 (`client/src/hooks/useJiraPage.ts`) is a module store over `lib/jira-page.ts`'s `JIRA_PAGES`, key and guard, because the tree is not its only writer either —
 Setup's `Open board` and the empty board's `Open Setup` land on a page too, through `onOpenJiraPage`, the tree's own pair (`setJiraPage`, then the shell's
-`change`) built once in `App` and handed down, as the Settings watchdog card's `Live view` is `onOpenWatchdog`.
+`change`) built once in `App` and handed down, as the Settings watchdog card's `Live view` is `onOpenWatchdog`. The source rows' pages take the same road:
+`useFilesPage` and `useGithubPage` (`client/src/hooks/useSourcePage.ts`) are module stores over `lib/source-page.ts`'s `FILES_PAGES`/`GITHUB_PAGES`, keys and
+guards, written by the tree, by the shell's legacy-landing initializer and — GitHub's — by the Sources card's `GitHub › Settings ↗`, which is
+`onOpenGithubPage`, the tree's pair built once in `App` the same way.
 
 The rail's last element is the version chip, `v0.2.0` or `v0.2.0+3`, with a cyan dot while a release has landed since this browser last opened the
 What's new drawer behind it; the shell owns the read, the dot and the drawer, and renders the drawer outside the rail. All of it is
@@ -127,6 +146,12 @@ section of the filter popover (`FilterSection`, whose `fill` flag lays a switch 
 last two so that no page draws a section heading or a project chip of its own. Its family is `.filter-bar*`, never `.ui-*`.
 
 ### Board
+
+Drawn once per source: Files › Board and GitHub › Board are one `BoardView` with a required `source` prop. The index is cut by `narrowToSource` and the project
+list by `projectsIn` (`lib/sources.ts`), hues stay keyed on the whole registry so a project keeps its colour on either page, and the project filter is stored
+per source (`projectKey(source)`, `lib/view-keys.ts`). The warnings strip shows only the index errors `errorSource` routes to this source. An empty cut reads
+`nothing registered yet` only when this source has no registered project; with one, it reads `no items yet` — a freshly connected repo with no open issues,
+or an empty files store — since the rail draws the row because that project is registered. Archive has the same pair.
 
 A `Band` titled with the scope — `All projects`, or the picked project's name, since the picker is behind a popover — and no count line, then search, the
 filter track (`FilterBar`: a `Filters` popover holding the Project picks, the Status switch and the `Awaiting review` toggle (#387), with `Clear all`; a `Sort by` popover holding the three
@@ -230,6 +255,9 @@ own `FilterBar` without its sort half — a `Filters` popover holding the Projec
 or contradict the surface. No card here ever paints a live strip — whatever put an item in Archive already took it off the Board a run could be holding — which
 `ArchiveView` guarantees by handing `ItemCard` no run at all. A card opens the same item modal the Board opens.
 
+Archive is drawn once per source as well — Files › Archive and GitHub › Archive are one `ArchiveView` taking the same `source` prop, the same `narrowToSource`
+cut, and its source's Board project key.
+
 Nothing in it is finished, and both halves come back by their own route — a stale item by dispatching a **groom**, which refreshes `updated:` and puts it back
 on the Board at the next load; a rejected one by dispatching a **capture**, which files a _new_ item citing `from: <id>` and leaves the original rejected on the
 record. (That id keeps whatever prefix it always had — a rejection moves a file, it never renames one.) As everywhere else, the board writes no item file; the
@@ -326,31 +354,36 @@ is the scope**: Local is everything in this browser's `localStorage`, Shared and
 `Pill` at `neutral` (`this browser` / `this machine`, the latter on both host pages) and its subtitle is the page's own one-line summary; there is no in-page
 switch at any width.
 
-| Page           | Column 1                            | Column 2                |
-| -------------- | ----------------------------------- | ----------------------- |
-| **Local**      | Display, Board                      | Orchestrator, Dispatch  |
-| **Shared**     | Orchestrator watchdog, Backlog tick | Trackers                |
+| Page           | Column 1                            | Column 2                                       |
+| -------------- | ----------------------------------- | ---------------------------------------------- |
+| **Local**      | Display, Board                      | Orchestrator, Dispatch                         |
+| **Shared**     | Sources                             | Orchestrator watchdog, Backlog tick, Time zone |
 
 **Dashboards** is not a two-column page; it is described below the cards.
 
 Each card on Local and Shared is still a title plus a scope (`this device`, `this machine`, `this server`) answering a different question from the name: whether
 changing this affects anybody but the person changing it. Both draw the same two hand-placed columns, so a card does not move to the other side of the page when
-its neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones; Shared is the watchdog's long card,
-with the `Backlog tick` card under it (both machine-wide controls), against `Trackers`, the one host report. Shared once held `Dashboards` in that column too
-(task-45 added `Trackers` under `Claude Agents`, multi-dashboard put `Dashboards` between them, and `Dashboards` absorbed `Claude Agents`) until the machine
-list outgrew a card and became its own page; Shared draws no dispatch line now.
+its neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones; Shared is the `Sources` report
+alone in its left column, against the watchdog's long card, the `Backlog tick` card and the `Time zone` card in its right (the three machine-wide controls).
+Shared once held `Dashboards` in that column too (task-45 added `Trackers` under `Claude Agents`, multi-dashboard put `Dashboards` between them, and
+`Dashboards` absorbed `Claude Agents`) until the machine list outgrew a card and became its own page; Shared draws no dispatch line now.
 
 Local holds themes, density, text scale, content width, landing section, the staleness window, the two orchestrator run defaults, and `Dispatch` — the default
 model and effort every launch sheet seeds from, the dashboard link base, and the `open dashboard ↗` link, which rides the `Dashboard link` row it reads its href
 from. `Dispatch` also carries `Execute finish` (`executeDefaultFinish`, the execute sheet's Finish seed), `Groom finish` (`groomDefaultFinish`, a home groom's),
 `Auto-merge PRs` (`prAutoMergeDefault`) and `Fix if it fails` (`prFixDefault`, disabled while the row above it is off, its stored value left alone) and, only
-while Jira is configured, `Jira default
-action` — the action a Jira card's `Run ▾` lists first, read through `resolveJiraAction` so a deleted skill's id reads as `Work it end to end` while the stored
-value is left alone.
-That card is what the old `Claude Agents` card's per-device half became: that card mixed backends, and a page that promises a scope cannot carry one that
-does. `Trackers · this machine` is the Shared report and is read-only by design, not by phase: a project is connected by committing `backlog/source.json`, so
-what the card offers instead of a button is the `backlog.mjs connect github <owner>/<repo>` command as copyable text, with the repo read off that project's
-`origin` per request, and the one control it has is each repo's sync interval (#17). It never shows the token — only whether one is set, and whose login it is.
+while Jira is configured, `Jira default action` — the action a Jira card's `Run ▾` lists first, read through `resolveJiraAction` so a deleted skill's id reads
+as `Work it end to end` while the stored value is left alone. That card is what the old `Claude Agents` card's per-device half became: that card mixed backends,
+and a page that promises a scope cannot carry one that does. `Sources · this machine` (`SourcesGroup`) is the Shared report and is read-only by design, not by
+phase: one row per source — Files (its project count, any unsupported or missing project, and the connect commands), GitHub (`as <login> · N of M left · resets
+HH:MM`, `token set` or the no-token sentence, its project count, and one `repo · state` line per repo, sync off included) and Jira (`configured · <site> · N
+boards`, `not configured`, `checking…` or `unavailable`) — plus a `Last read` row when a read failed and an earlier answer is shown. A project is connected by
+committing `backlog/source.json`, so what the card offers instead of a button is the `backlog.mjs connect github <owner>/<repo>` command as copyable text, with
+the repo read off that project's `origin` per request. It never shows the token — only whether one is set, and whose login it is. Its two links, `GitHub ›
+Settings ↗` and `Jira › Setup ↗`, are the shell's pairs (`onOpenGithubPage`, `onOpenJiraPage`) threaded down through `SettingsView` and `SharedPage`, and each
+is drawn only while the section it opens is drawn — GitHub's while the rail's projects answer draws its row (`useProjectsContext().drawn`, not the tracker
+counts, which call an invalid-repo marker `unsupported`), Jira's while configured. The sync interval the old `Trackers`
+card carried (#17) is GitHub › Settings' now (below).
 
 **Dashboards** is the one page that writes the machine list (`DashboardsPage`, drawn to `.claude/DESIGN.md` §8.6): the Suggest card (`SuggestCard` — the three
 strategies as a radio group, the threshold beneath) on top, then `DashboardsList` (360 px) beside `DashboardDetail`, and a footer, folding to one column at
@@ -376,20 +409,24 @@ is second. The default only reaches a browser that has no valid stored theme: `c
 Midnight keeps it. `theme.css`'s `:root` block still holds Midnight's palette, which is why `index.html`'s pre-paint script stamps `data-theme="daylight"`
 before its `try` — a fresh browser, a corrupt blob or blocked storage paints Daylight with no dark first frame.
 
-Since #17 ([spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.md)) the Trackers card sets exactly one thing: each `github` row's sync interval,
-a `Segmented` pill (`15s`, `1m`, `5m`, `off` — `SYNC_INTERVALS`' keys, never a second list) in the row's right slot. Connecting stays read-only; the interval is
-how often THIS machine asks GitHub, so it is the machine's, in `settings/tracker-sync.json`. `useTrackers().saveInterval` posts `POST /api/trackers/sync` and
-refetches, so the pill shows the server's value, never the one clicked; a refusal (turning a repo off under a live or paused run) keeps the old value selected
-and puts the server's sentence in the row's hint until the next pick for that repo or a read in which its interval has moved — not any read, which would
-wipe it within a second. Two checkouts of one repo are one key, so both rows move.
+Since #17 ([spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.md)) the sync interval is the one thing this board sets about a tracker, and
+since the source-sections change it lives on **GitHub › Settings** (`GithubSettingsView`: a `Settings` band, `how often this machine asks GitHub about each
+repo`, with a `this machine` pill): one `Sync` card (`GithubSyncGroup`) holding a `Segmented` pill per `github` repo (`15s`, `1m`, `5m`, `off` —
+`SYNC_INTERVALS`' keys, never a second list) in the row's right slot, or `nothing registered yet`. It is a host card on a page outside Settings, which the scope
+rule allows: the control governs one source, so it lives in that source's section
+([invariants.md](invariants.md#a-sources-own-settings-page-may-hold-a-host-card)). Connecting stays read-only; the interval is how often THIS machine asks
+GitHub, so it is the machine's, in `settings/tracker-sync.json`. `useTrackers().saveInterval` posts `POST /api/trackers/sync` and refetches, so the pill shows
+the server's value, never the one clicked; a refusal (turning a repo off under a live or paused run) keeps the old value selected and puts the server's sentence
+in the row's hint until the next pick for that repo or a read in which its interval has moved — not any read, which would wipe it within a second. Two checkouts
+of one repo are one key, so both rows move.
 
 The `Backlog tick` card (`TickGroup`) sits under the watchdog in the same column, because both are machine-wide controls — a value written to a file on the host
-— where the right column is host reports. It is three `Select`s of 1–10: the number of failed ticks in a row that halt a project (`haltAfter`, default 3), and
+— where the left column is the host report. It is three `Select`s of 1–10: the number of failed ticks in a row that halt a project (`haltAfter`, default 3), and
 the two caps a tick job applies when its prompt carries no flag (#378) — **Plans awaiting review** (`maxPlans`, default 3) and **Open execute PRs** (`maxPrs`,
-default 2), each hint naming the `--max-plans` / `--max-prs` flag that still wins. Each pick posts only its own key to `settings/tick.json` through
-`POST /api/ticks/config`, and the card is drawn from the POST's own answer; it mounts `useTicks({ live: false })`, so it never polls. When the server reports
-`source: "unreadable"` all three are disabled and the first hint names the file, because every write would be a 409; a refused save renders one red line under
-the controls while every value shown stays the one the server holds.
+default 2), each hint naming the `--max-plans` / `--max-prs` flag that still wins. Each pick posts only its own key to `settings/tick.json` through `POST
+/api/ticks/config`, and the card is drawn from the POST's own answer; it mounts `useTicks({ live: false })`, so it never polls. When the server reports `source:
+"unreadable"` all three are disabled and the first hint names the file, because every write would be a 409; a refused save renders one red line under the
+controls while every value shown stays the one the server holds.
 
 The `Time zone` card (`TimeZoneGroup`, #241) sits under the tick breaker, the third host control in that column: one `Select` over the platform's zones
 (`timeZoneOptions`, plus `UTC`, plus a stored zone this browser does not list), its first option `Each browser's own (<this browser's zone>)` — unset, `null` on
@@ -399,12 +436,12 @@ the tracker's and a machine's reset clocks, a card's created date for a full sta
 clock for one run. It is read once per page load by the shell's `TimeZoneProvider` and handed out by `useTimeZone()`; `lib/time-zone.ts` is the one home of the
 zone math, and `test/time-zone-guard.test.ts` refuses a `Date`'s local getters and setters and the locale date/time formatters in every other client file.
 
-The watchdog card is one of five places Settings writes to the server — the Trackers card's sync picker above, since #17, the `Backlog tick` card's threshold and two caps,
-the `Time zone` card's zone (#241), and the Dashboards page's four `POST /api/dashboards/*` writes — four knobs that
-live in `settings/watchdog.json` beside the registry rather than in this browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the
-rail's tree calls. Because it writes, it can be refused, like the sync picker: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it was refused for, while
-every knob keeps showing the value the server actually holds. That is a separate hook field (`saveError`) from the failed-GET `error` beside it, because a
-failed read replaces the whole group and a failed write must not.
+The watchdog card is one of five places Settings writes to the server — GitHub › Settings' sync picker, since #17, the `Backlog tick` card's threshold and two
+caps, the `Time zone` card's zone (#241), and the Dashboards page's four `POST /api/dashboards/*` writes — four knobs that live in `settings/watchdog.json`
+beside the registry rather than in this browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the rail's tree calls. Because it
+writes, it can be refused, like the sync picker: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it
+was refused for, while every knob keeps showing the value the server actually holds. That is a separate hook field (`saveError`) from the failed-GET `error`
+beside it, because a failed read replaces the whole group and a failed write must not.
 
 `contentWidth` is the one setting here whose effect is not drawn by a component at all: `fixed | full`, stamped on `<html>` as `data-width` pre-paint and by
 `useSettings`, releasing `.wrap` and `.wrap.wide` through one CSS block. Every section renders in `wrap wide` — Settings included since the split, which took
@@ -434,12 +471,28 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   link-out to the issue that stops its click, and its Enter and Space, from opening the modal behind it — the same two-half guard `DispatchButton` uses.
 - **The item modal** prints its project's `polled 12 s ago` line under the title, because the body it shows came out of the poller's cache rather than from
   GitHub on open — the one place a per-project poll age is still drawn, since it qualifies that one body.
-- **Sync off** (#17). A repo this machine no longer syncs reads `futin/x · sync off · polled 3h ago` (or `· never polled`) in the modal and on the Trackers
-  row — one `trackerState`, an access reason still winning over it. Because the server refuses every write and spawn for it, the card's and modal's dispatch
+- **Sync off** (#17). A repo this machine no longer syncs reads `futin/x · sync off · polled 3h ago` (or `· never polled`) in the modal and on the Sources
+  card's GitHub row — one `trackerState`, an access reason still winning over it. Because the server refuses every write and spawn for it, the card's and modal's dispatch
   control is DISABLED with the server's sentence (`syncOffReason`, byte-equal to `syncOffBlock`, pinned on both sides) — carried on `DispatchButton`'s
   `runBlock` after the run block, never hidden, since it is a per-project block rather than an environment one — and so is the toolbar's Orchestrate chip,
   whose click re-asks nothing for this reason because no status refetch could clear it — alone, or beside a visibility block, since #272 put both controls
   on `GatedChip`'s one rule.
+- **The PRs page** (GitHub › PRs, [spec](../superpowers/specs/2026-10-29-source-sections-design.md) Goal 2; DESIGN.md §8.11). `PullRequestsView` lists every
+  open pull request of the registered GitHub repos — forks and other authors included — one `Sheet` per repo in `groupRepos` order (repos with open PRs first,
+  most recently touched on top, then the empty ones by name; PRs newest update first). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
+  last answer, plus mount and focus), mounted by this page alone: the server's PR cache has no timer, so nobody on the page means no PR reads at all. A repo's
+  heading carries `polled N s ago` (`pollAge`), a `sync off` pill beside the server's full sentence (`syncOff`, `syncOffBlock`'s one home) when its sync is
+  off, the last read's `detail` when it was not `ok`, `showing 100 of N` when GitHub had more than one page, or `no open pull requests`; a token-less server
+  reads `no token — set BM_GITHUB_TOKEN in .env and restart`. A row (`PrRow`) is `#<n>` (to github.com, a new tab), the title, the author, `head → base`, the
+  `prChips` and — while a live or paused run, a remote launch or a live claim is still working the branch (`prRunWarning`, from what the Board already polls)
+  — a warn-toned warning that leaves every action enabled. Its actions are a method `Select` (the repo's allowed methods, seeded by `defaultMethod`), `Merge`
+  behind an inline `Confirm` (`Merge #<n> into <base> (<method>)?`), `Enable`/`Disable auto-merge` and `Update branch`; a blocked one is disabled with its
+  reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync off` on each for a sync-off repo) in text beside it and as its `aria-describedby`, never a
+  tooltip alone. A write disables the row's actions until the page has re-read, after success and failure alike; its outcome is one line — `outcomeLine`, or
+  the server's refusal verbatim — held by the page per `<repo>#<number>`, so a merged PR that left the list keeps a `#12 merged` line under its repo. An
+  update-branch's 202 marks the PR at the head SHA it was asked from: the row reads `updating…` while `isUpdating`, until a read shows a new head or
+  `UPDATING_MS` (30 s, `PR_UPDATING_MS` in `shared/types.ts`) pass, and at that moment the page re-reads once — a read the server answers from GitHub,
+  because the update made the repo due at that same moment. `updateBlock` reads `no permission to update` for a PR that cannot be updated while behind. The page reports the rail cursor as Board and Archive do (`useReportWorking`).
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live
@@ -554,7 +607,7 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
   rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
 - `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those pollers go through, `useMachines`
-  among them, and `TimeZoneProvider`'s read (#241), which like `useOrchestratorArchive` passes no `armed` and never polls.
+  among them, and `TimeZoneProvider`'s read (#241) and `ProjectsProvider`'s, which like `useOrchestratorArchive` pass no `armed` and never poll.
 - `hooks/useFetched.ts` (#285) — the keyed one-shot read: `idle | pending | ok | failed`, a key change reads `pending` on the render that carries it, and a
   superseded or post-unmount answer sets nothing. `useProjectSources`, the item modal's body, `LaunchSheet`'s plan and branch list, `useOrchestrateDraft`'s
   merge-check, uncommitted flag and branch list, `RunDetail`'s archived run, `JiraIssueModal`'s detail and worktrees, `JiraLaunchSheet`'s prompt preview and
@@ -582,8 +635,8 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   `lockedFor`, `narrowTo`, `defaultMachine` and the usage wording; `lib/remote-starting.ts` the `Starting on` readings.
 - `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker whose sync is not `off`
   (`hasSyncingTracker`, #17): a tracker's items move on the server's poll clock, which this tab has no event for. No syncing tracker means no timer at all.
-- `hooks/useTrackers.ts` — the shell's one instance, provided by `TrackersProvider` (`hooks/TrackersContext.tsx`) and read by the chip and by the Shared
-  Settings Trackers card through `useTrackersContext`. Mount and window focus, plus a timer on the server's poll clock: `nextDelay` arms the next read
+- `hooks/useTrackers.ts` — the shell's one instance, provided by `TrackersProvider` (`hooks/TrackersContext.tsx`) and read by the chip, by the Shared
+  Settings Sources card and by GitHub › Settings' Sync card through `useTrackersContext`. Mount and window focus, plus a timer on the server's poll clock: `nextDelay` arms the next read
   `TRACKER_FETCH_SLACK_MS` after the newest stamp's cycle ends, drops to a 1 s floor while any `ok` repo of the same sweep is still due (the server stamps repos
   one after another, so the newest stamp lands before the sweep does), and waits one whole cycle — never the floor — once the newest deadline has passed with
   nothing due (overdue or failing stamps do not move) and after an error. No github row means no timer at all. Since #17 each row counts on its own
@@ -593,6 +646,19 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `hooks/useJira.ts` and `hooks/useJiraBoard.ts` (Jira phase 2) — the shell's one `GET /api/jira` instance, provided by `JiraProvider`
   (`hooks/JiraContext.tsx`) on `useTrackers`' shape, and the Jira Board page's issue list on `useCoalescedFetch`; both are described in
   [jira.md](jira.md#the-client-phase-2-the-modals-controls-phase-3).
+- `hooks/ProjectsContext.tsx` — `ProjectsProvider`, the shell's one read of `GET /api/projects` for the source rows (through `useRefreshing` with no `armed`:
+  mount and window focus, never a poll), keeping the last answer on a failure, and `useProjectsContext()`: `{ data, drawn, reload }`, `drawn` being
+  `drawnSources(data)` or `null` while unknown. A component mounted without the provider reads the unknown state and never fetches.
+- `lib/sources.ts` — the source split, pure: `sourceSectionOf` (display grouping: `github` under GitHub, everything else under Files), `drawnSources`,
+  `projectsPerSource`, `firstDrawn`, `settleSection`, `inSource`, `projectsIn`, `errorSource` and `narrowToSource`, the one cut Board and Archive share,
+  which sends each index error to the source it names — a `gh:` issue URN to GitHub, a registered project's path to that project's source, anything else to
+  Files.
+- `lib/source-page.ts` and `hooks/useSourcePage.ts` — `FILES_PAGES`/`GITHUB_PAGES` with their keys and guards, `FALLBACK_SECTION` and `resolveLegacySection`;
+  and `useFilesPage`/`useGithubPage` with their setters, module stores on `useJiraPage`'s shape.
+- `components/github/` — `GithubSettingsView` (GitHub › Settings) and `GithubSyncGroup`, its one `Sync` card; `PullRequestsView` (GitHub › PRs) and
+  `PrRow`, one open pull request; `components/settings/SourcesGroup.tsx` is the Shared report.
+- `lib/prs.ts`, `lib/pr-run.ts`, `lib/prs-api.ts` and `hooks/usePullRequests.ts` — the PRs page's derivations (chips, the three blocks, the default method,
+  `isUpdating`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read.
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
   explanatory line, and a committed marker changes on a commit rather than on a poll.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.
@@ -604,7 +670,8 @@ The rules this surface is held to — one implementation per derivation, board-v
 click through, the dialog escape stack and its eight dialogs, a crashed run rendering as crashed, "queue wait is not work",
 [Settings being three pages whose page IS the scope](invariants.md#settings-is-three-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
-row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), and [the content-width stamp that
+row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), [the source rows' tree and
+their registered-only rows](invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree), and [the content-width stamp that
 the CSP hash travels with](invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it) — are in [invariants.md](invariants.md),
 with the failure each one encodes. Not restated here.
 

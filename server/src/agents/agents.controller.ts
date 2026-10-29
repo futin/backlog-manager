@@ -1,11 +1,11 @@
 import { Body, Controller, Get, HttpCode, HttpException, Post, Query, UseGuards } from '@nestjs/common';
 
 import { AgentsService, type AgentOrchestrateRequest } from './agents.service';
+import { OrchestrateArgsService } from './orchestrate-args.service';
 import { SameOriginPostGuard } from './origin.guard';
 import { WatchdogService } from './watchdog.service';
 import { StartingRunsService } from '../orchestrator/starting-runs.service';
 import { RemoteStartingService } from '../orchestrator/remote-starting.service';
-import { writeWatchdogConfig } from '../orchestrator/watchdog-config.util';
 import { isAgentAction } from '../../../shared/agent';
 import type { AgentBranchesPayload, AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, MergeCheckResult, PauseResult, StopResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 
@@ -21,7 +21,9 @@ export class AgentsController {
     private readonly watchdog: WatchdogService,
     private readonly starting: StartingRunsService,
     /** Multi-dashboard task 6 — a remote orchestrate's "starting on <machine>" mark, the remote counterpart of `starting` above. */
-    private readonly remoteStarting: RemoteStartingService
+    private readonly remoteStarting: RemoteStartingService,
+    /** #388 — the Orchestrate sheet's two reads, `mergeCheck` and `branches`, which moved out of `AgentsService` with the request resolvers. */
+    private readonly orchestrateArgs: OrchestrateArgsService
   ) {}
 
   /**
@@ -391,15 +393,15 @@ export class AgentsController {
 
   /**
    * `POST /api/agents/watchdog/config` (design §5.3) — the Settings group's
-   * one write path onto `settings/watchdog.json`, which
-   * `writeWatchdogConfig` (`orchestrator/watchdog-config.util.ts`, Task 1)
-   * owns exclusively: this handler never touches the file directly, and
-   * never re-implements the clamp — `writeWatchdogConfig` already merges
-   * the patch over the file's CURRENT contents, clamps every field to
-   * `WATCHDOG_LIMITS`, and writes atomically. `@HttpCode(200)` overrides
-   * Nest's POST default of 201: this route redraws an existing setting
-   * rather than creating a resource, the same distinction a PUT would carry
-   * if this app used one.
+   * one write path onto `settings/watchdog.json`. This handler parses the
+   * request and nothing else: the save itself — write the file, arm, kick an
+   * unawaited tick, read the status back — is `WatchdogService.configure`
+   * (#388), which says why each step is there. It used to be sequenced here,
+   * a controller doing the watchdog's own domain work; the guard in
+   * `test/server-layering.test.ts` keeps it from coming back. `@HttpCode(200)`
+   * overrides Nest's POST default of 201: this route redraws an existing
+   * setting rather than creating a resource, the same distinction a PUT would
+   * carry if this app used one.
    *
    * The body is `Partial<WatchdogConfig>`, but arrives as `unknown` — a
    * caller cannot be trusted to have sent the right shape merely because
@@ -443,45 +445,6 @@ export class AgentsController {
    * `writeWatchdogConfig`'s job alone (Task 1's own tests already cover
    * every clamp case), and re-clamping here would be a second copy of that
    * logic with its own chance to drift from `WATCHDOG_LIMITS`.
-   *
-   * `arm()` is called after every save, REGARDLESS of which field changed
-   * or what it changed to — including a save that flips `enabled` from
-   * `true` to `false`. This is deliberate, not merely harmless: `arm()`
-   * only ever WATCHES more eagerly (it starts a chain if none exists; it is
-   * a no-op if one already does), so calling it after a save that turns
-   * watching OFF costs nothing and calling it after a save that turns
-   * watching ON is the one case that actually matters. That case is exactly
-   * why this line exists at all: the design's own worked example is an
-   * operator toggling `enabled` from false to true while a run is ALREADY
-   * sitting crashed. `arm()` alone is not enough to make that toggle act
-   * immediately — its own doc comment states plainly that it is a no-op
-   * while a timer already exists, which is precisely the state a watchdog
-   * that has been watching a crashed-but-disabled run is already in. Without
-   * an explicit kick, that flip would sit inert until the ALREADY-SCHEDULED
-   * next tick fires — up to a full `tickMs` (a minute, by default) after a
-   * person who just turned the feature on would reasonably expect it to
-   * have acted. So `arm()` runs first (to start a chain from cold — the
-   * fresh-install, nothing-has-ever-run case), and a bare `tick()` runs
-   * right after it, UNAWAITED: `tick()`'s own in-flight guard (it returns
-   * the ALREADY-RUNNING sweep's promise rather than starting a second one)
-   * is what makes firing it unconditionally, even when `arm()` just started
-   * an identical one itself, safe rather than a double-sweep. It is not
-   * awaited here because this route's job is to persist the setting and
-   * report the state that flows from it — `watchdog.status()` below already
-   * reflects the ARMED phase synchronously, since `arm()`'s own phase
-   * transition happens before this line runs, and reads fresh CONFIG from
-   * disk on that call regardless of whether the kicked tick has finished —
-   * making the caller wait for a live resume spawn (which can take seconds,
-   * and depends on a THIRD process, the dashboard) would turn a settings
-   * save into a request with the latency profile of a dispatch, for no
-   * benefit the response body would show anyway.
-   *
-   * CLAUDE.md's "the two agents POSTs are guarded by content-type and
-   * origin" line is now stale — `dispatch`/`orchestrate` were the only two
-   * when it was written; `resume` made three, and this route makes four.
-   * Left unedited here, on purpose: a later task in this plan rewrites that
-   * line, and doing it piecemeal from inside an unrelated task's diff is
-   * how a line like that drifts a second time.
    */
   @UseGuards(SameOriginPostGuard)
   @Post('watchdog/config')
@@ -496,10 +459,7 @@ export class AgentsController {
     if (b.tickMs !== undefined) patch.tickMs = b.tickMs as WatchdogConfig['tickMs'];
     if (b.graceMs !== undefined) patch.graceMs = b.graceMs as WatchdogConfig['graceMs'];
     if (b.maxAttempts !== undefined) patch.maxAttempts = b.maxAttempts as WatchdogConfig['maxAttempts'];
-    writeWatchdogConfig(patch);
-    this.watchdog.arm();
-    void this.watchdog.tick();
-    return this.watchdog.status();
+    return this.watchdog.configure(patch);
   }
 
   /**
@@ -528,7 +488,7 @@ export class AgentsController {
   mergeCheck(@Query('project') project: string | undefined): MergeCheckResult {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
-    return this.agents.mergeCheck(trimmed);
+    return this.orchestrateArgs.mergeCheck(trimmed);
   }
 
   /**
@@ -550,6 +510,6 @@ export class AgentsController {
   branches(@Query('project') project: string | undefined): Promise<AgentBranchesPayload> {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
-    return this.agents.branches(trimmed);
+    return this.orchestrateArgs.branches(trimmed);
   }
 }

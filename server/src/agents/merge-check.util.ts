@@ -150,7 +150,7 @@ function readAllowList(file: string): string[] | null {
  *
  * `projectPath` is assumed to already be a registered project's path — the
  * registry gate that proves that runs one layer up, in
- * AgentsService.mergeCheck, before this function (or the filesystem it
+ * OrchestrateArgsService.mergeCheck, before this function (or the filesystem it
  * reads) is ever touched.
  */
 export function mergeCheck(projectPath: string, homeDir: string): MergeCheckResult {

@@ -3,7 +3,8 @@ import { createContext, useContext, type ReactNode } from 'react';
 import { useTrackers, type TrackersState } from './useTrackers';
 
 /**
- * The shell's one `useTrackers` instance (the tracker strip spec, §4), handed to every reader — the strip chip and Shared Settings' Trackers card.
+ * The shell's one `useTrackers` instance (the tracker strip spec, §4), handed to every reader — the strip chip, Shared Settings' Sources card and
+ * GitHub › Settings.
  *
  * One instance because two would be two clocks: each hook schedules its own fetch off the answer it got, so two callers would fetch twice per cycle and,
  * worse, could hold two different answers — the chip saying one repo is failing while the card beside it says the other. The provider sits in `App`,

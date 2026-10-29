@@ -63,23 +63,30 @@ describe('runsWorking', () => {
 
 /**
  * The wiring, read from source because behaviour cannot see what is missing. Every `useOrchestratorRuns()` call is its own 5 s poller, so the shell must
- * not grow a fourth one just to learn what the three views already know: each view reports its own reading up, and `App` only holds it.
+ * not grow one more just to learn what the views already know: each view reports its own reading up, and `App` only holds it. GitHub › PRs is the fourth
+ * view — it runs the hook for its run-warning chip anyway, so it reports the same reading Board and Archive do rather than leaving the cursor blind there.
  */
 describe('the cursor reads the views’ pollers rather than adding one', () => {
   const SRC = join(__dirname, '..', 'client', 'src');
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
+  const VIEWS = [
+    'components/archive/ArchiveView.tsx',
+    'components/board/BoardView.tsx',
+    'components/github/PullRequestsView.tsx',
+    'components/runs/RunsView.tsx',
+  ];
   const sources = walk(SRC)
     .filter((f) => /\.tsx?$/.test(f))
     .map((f) => ({ file: f.slice(SRC.length + 1), text: readFileSync(f, 'utf8') }));
 
-  it('calls useOrchestratorRuns() in exactly the three views, and App is not one of them', () => {
+  it('calls useOrchestratorRuns() in exactly the four views, and App is not one of them', () => {
     const callers = sources.filter((s) => /=\s*useOrchestratorRuns\(\)/.test(s.text)).map((s) => s.file);
-    expect(callers.sort()).toEqual(['components/archive/ArchiveView.tsx', 'components/board/BoardView.tsx', 'components/runs/RunsView.tsx']);
+    expect(callers.sort()).toEqual(VIEWS);
   });
 
   it('has each of those views report its own runs and starting entries up', () => {
-    for (const file of ['components/archive/ArchiveView.tsx', 'components/board/BoardView.tsx', 'components/runs/RunsView.tsx']) {
+    for (const file of VIEWS) {
       const text = sources.find((s) => s.file === file)?.text ?? '';
       expect({ file, reports: /useReportWorking\(/.test(text) }).toEqual({ file, reports: true });
     }

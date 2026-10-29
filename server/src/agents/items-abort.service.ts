@@ -2,11 +2,12 @@ import { HttpException, Injectable } from '@nestjs/common';
 
 import { ItemsService } from '../items/items.service';
 import { DispatchRecordsService } from '../items/dispatch-records.service';
-import { answer, writable } from '../items/items-write.controller';
+import { answer } from '../items/write-answer.util';
+import { writable } from '../items/write-gate.util';
 import { isLive } from '../tracker/claim';
 import { TrackerPollerService } from '../tracker/poller.service';
 import { readAgentsConfig } from './config.util';
-import { dashboardSessionStatus, staleClaimProbe } from './agents.service';
+import { dashboardSessionStatus, staleClaimProbe } from './dashboard-sessions.util';
 import { stopDashboardSession } from './session-stop.util';
 import { DashboardsService, type Machine } from './dashboards/dashboards.service';
 import type { ItemAbortResult } from '../../../shared/types';
@@ -19,8 +20,8 @@ import type { ItemAbortResult } from '../../../shared/types';
  *
  * Because it calls the dashboard, and `agents/`, `tracker/` and `jira/` are this server's only three outbound-calling modules (and the dashboard is `agents/`'s
  * alone). `ItemsModule` knows nothing about the dashboard and must not start to. The release itself still goes through the `ItemWriter` seam like every other
- * item write — `writable` and `answer` are the same two functions `items-write.controller.ts` gates and maps with, imported rather than copied — so "what can
- * write to an issue" is still answered by reading `github.source.ts`.
+ * item write — `writable` (`items/write-gate.util.ts`) and `answer` (`items/write-answer.util.ts`) are the same two functions the item write routes gate
+ * and map with, imported rather than copied — so "what can write to an issue" is still answered by reading `github.source.ts`.
  *
  * ## The two cases, and why each proof is the one it is
  *

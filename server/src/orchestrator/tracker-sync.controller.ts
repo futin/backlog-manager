@@ -37,7 +37,7 @@ export class TrackerSyncController {
 
   /**
    * `@HttpCode(200)` for the reason `watchdog/config` gives: this redraws an existing setting rather than creating anything. The answer is the repo's
-   * `summary()` — the same fields a Trackers row carries — so the card can show the server's value rather than an optimistic one.
+   * `summary()` — the same fields a `GET /api/trackers` row carries — so GitHub › Settings' Sync card can show the server's value rather than an optimistic one.
    *
    * The checks run in the table's order, each its own status: a malformed request is a 400 before anything is looked up, an unconnected repo a 404 before
    * any run is read, and the 409 only for `off` — or, for any interval, for a `tracker-sync.json` that exists but does not parse (#270).

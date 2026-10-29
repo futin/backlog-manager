@@ -25,7 +25,7 @@ const KNOWN: ReadonlySet<string> = new Set(['github']);
  * CACHED comments, and concatenate.
  *
  * Makes no network request and keeps no cache of its own. Every call
- * re-derives from the poller's cache, which is one of the two caches in this
+ * re-derives from the poller's cache, which is one of the three caches in this
  * server whose age is rendered — a second copy here would be a second age
  * nobody renders. A repo that never synced has no comments and so no remote
  * runs, which is the same "says nothing" a never-synced repo's board shows.

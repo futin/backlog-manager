@@ -208,7 +208,7 @@ describe('case A — the board dispatched the holding session', () => {
 
     const res = await abort().expect(409);
 
-    expect(res.body).toEqual({ error: `sync is off for ${FAKE_REPO} — turn it on in Settings › Shared › Trackers` });
+    expect(res.body).toEqual({ error: `sync is off for ${FAKE_REPO} — turn it on in GitHub › Settings` });
     expect(stopCalls()).toEqual([]);
     expect(gh.calls).toEqual([]);
     expect(claimIn(100)?.released).toBeUndefined();

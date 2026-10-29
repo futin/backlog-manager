@@ -9,9 +9,13 @@ import { Switch } from '../ui/Switch';
 import { DashboardsPage } from './DashboardsPage';
 import { TickGroup } from './TickGroup';
 import { TimeZoneGroup } from './TimeZoneGroup';
-import { TrackersGroup } from './TrackersGroup';
+import { SourcesGroup } from './SourcesGroup';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useProjectsContext } from '../../hooks/ProjectsContext';
+import type { DrawnSources } from '../../lib/sources';
+import type { GithubPage } from '../../lib/source-page';
+import type { JiraPage } from '../../lib/jira-page';
 import { useSettings } from '../../hooks/useSettings';
 import { EXECUTE_FINISH_OPTIONS } from '../../lib/agents';
 import { jiraSettingOf, resolveJiraAction } from '../../lib/jira';
@@ -71,29 +75,38 @@ const CONTENT_WIDTH_OPTIONS = [
  */
 const LANDINGS: { value: Landing; label: string }[] = [
   { value: 'last', label: 'Last used' },
-  { value: 'board', label: 'Board' },
-  { value: 'runs', label: 'Runs' },
-  { value: 'archive', label: 'Archive' },
+  { value: 'files', label: 'Files' },
+  { value: 'github', label: 'GitHub' },
   { value: 'jira', label: 'Jira' },
+  { value: 'runs', label: 'Runs' },
   { value: 'settings', label: 'Settings' }
 ];
 
 /**
  * The `Opens on` list this machine can honour (Jira phase 2, spec §6.1): `Jira` only while `GET /api/jira` says `configured: true`, because the rail draws no
- * Jira row otherwise and a pin to it would open on Board anyway — `App` falls a `jira` section to Board on that same answer. Before the status has answered
- * the option is withheld too: offering it on a guess would let a reader pin a section this machine may not have.
+ * Jira row otherwise and a pin to it would open elsewhere anyway — `App` falls a `jira` section to the first drawn source row (Runs when there is none) on that
+ * same answer. Before the status has answered the option is withheld too: offering it on a guess would let a reader pin a section this machine may not have.
  *
  * One exception, and it is not an offer: a STORED `jira` landing keeps its option on an unconfigured machine. A native select whose value matches no option
  * renders blank (the reason `lib/settings.ts` clamps the dispatch defaults rather than keeping an unknown name), so the row would hide the very preference
  * that is in force; drawn, it says what is stored and can be changed. Nothing is rewritten — the machine may get its credentials back, and the pin with them.
+ *
+ * `Files` and `GitHub` (source-sections spec) take the same rule over the shell's projects answer: offered while a registered project has that source, the
+ * rows the rail draws, withheld while the answer is unknown (`drawn` null), and a stored pin keeps its option for the same blank-select reason. A legacy
+ * `board`/`archive` pin reaches here already clamped to `github`, so it shows as `GitHub` — the section it settles on when this machine has one.
  */
-function landingOptions(jiraConfigured: boolean, current: Landing): { value: Landing; label: string }[] {
-  return LANDINGS.filter((o) => o.value !== 'jira' || jiraConfigured || current === 'jira');
+function landingOptions(jiraConfigured: boolean, drawn: DrawnSources | null, current: Landing): { value: Landing; label: string }[] {
+  return LANDINGS.filter((o) => {
+    if (o.value === 'jira') return jiraConfigured || current === 'jira';
+    if (o.value === 'files' || o.value === 'github') return drawn?.[o.value] === true || current === o.value;
+    return true;
+  });
 }
 
 /**
  * The Settings section (`.claude/DESIGN.md` §8.6): three pages, and the page is the scope. Local is this device only (localStorage); Shared is what the API
- * reads off the host (the watchdog file, the tick breaker, the tracker report); Dashboards is the machines a launch can run on, also the host's.
+ * reads off the host (the sources this machine has connected, the watchdog file, the tick breaker, the time zone); Dashboards is the machines a launch can
+ * run on, also the host's.
  *
  * `onOpenWatchdog` is the rail's own navigation, threaded down for the watchdog
  * group's `Live view` link (DESIGN.md §8.6), exactly as `BoardView` takes
@@ -102,8 +115,20 @@ function landingOptions(jiraConfigured: boolean, current: Landing): { value: Lan
  * and the section lives in `App`'s shell. Optional, because every suite that
  * renders this view bare predates the link and none of them needs a
  * destination for it.
+ *
+ * `onOpenGithubPage` and `onOpenJiraPage` are the same kind of pair, for the Sources card's two links (GitHub › Settings, Jira › Setup): built once in
+ * `App` as page store first, then `change`, and threaded through Shared to the card rather than rebuilt here — the source-sections rule that a source's
+ * pages are switched by the rail's tree or by that pair, never by an in-page control. Optional for the same reason.
  */
-export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
+export default function SettingsView({
+  onOpenWatchdog,
+  onOpenGithubPage,
+  onOpenJiraPage
+}: {
+  onOpenWatchdog?: () => void;
+  onOpenGithubPage?: (p: GithubPage) => void;
+  onOpenJiraPage?: (p: JiraPage) => void;
+}) {
   const { settings, update } = useSettings();
   const scope = settings.settingsScope;
 
@@ -146,7 +171,13 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
           width. The rail's tree is the only one, the same rule Runs' three pages
           follow since task-38; a second control here would be a second wording
           free to disagree with the tree's. */}
-      {scope === 'shared' ? <SharedPage onOpenWatchdog={onOpenWatchdog} /> : scope === 'dashboards' ? <DashboardsPage /> : <LocalPage />}
+      {scope === 'shared' ? (
+        <SharedPage onOpenWatchdog={onOpenWatchdog} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+      ) : scope === 'dashboards' ? (
+        <DashboardsPage />
+      ) : (
+        <LocalPage />
+      )}
     </div>
   );
 }
@@ -164,31 +195,41 @@ const BAND_SUB: Record<SettingsScope, string> = {
 };
 
 /**
- * The Shared page: the watchdog's file beside the registry, what this machine can currently see of each project's tracker — since task-45 — and, since the
- * tick breaker, the tick halt threshold under the watchdog — and, since #241, the shared time zone under that.
+ * The Shared page: what this machine has connected — the Sources card, since the source-sections change, which took the old Trackers card's reports — the
+ * watchdog's file beside the registry, since the tick breaker the tick halt threshold under the watchdog, and, since #241, the shared time zone under that.
  *
- * Four cards, and the hand-balanced columns hold up for a different reason than on Local: the left column is the three machine-wide CONTROLS (the
- * watchdog's long card over the tick breaker's and the shared time zone's one-row cards), the right the one host REPORT, `Trackers`. The machines a launch can
- * run on were a fourth card here
+ * Four cards, and the hand-balanced columns hold up for a different reason than on Local: one column is the one host REPORT, `Sources`, the other the three
+ * machine-wide CONTROLS (the watchdog's long card over the tick breaker's and the shared time zone's one-row cards). The report is the LEFT column now: the
+ * spec puts `Sources` at the page's top, and a report that says what the machine has is what a reader of the controls beside it presumes — so it comes
+ * first in reading order, and first when the columns fold under 1100 px. The old Trackers card's one control, each repo's sync interval, is GitHub ›
+ * Settings' now. The machines a launch can run on were a fourth card here
  * (`Dashboards`, which had absorbed the old `Claude Agents` dispatch report as its Home row) until its list, its selection and its per-machine detail outgrew
  * a card: they are the Dashboards page now, so Shared draws no dispatch line at all and a reader looking for one is one rail entry away.
  */
-function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
+function SharedPage({
+  onOpenWatchdog,
+  onOpenGithubPage,
+  onOpenJiraPage
+}: {
+  onOpenWatchdog?: () => void;
+  onOpenGithubPage?: (p: GithubPage) => void;
+  onOpenJiraPage?: (p: JiraPage) => void;
+}) {
   return (
     <div className="set-cols">
       <div className="set-col">
+        {/* The host's one report on this page: what this machine has connected, per source, and whether it works (source-sections spec). */}
+        <SourcesGroup onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+      </div>
+
+      <div className="set-col">
         <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
-        {/* Under the watchdog, in its column: both are machine-wide CONTROLS — a number written to a file on the host — where the right column is host
-            REPORTS. The breaker is the watchdog's sibling in subject too: one resumes a crashed run, the other stops a project that keeps failing. */}
+        {/* Under the watchdog, in its column: both are machine-wide CONTROLS — a number written to a file on the host — where the left column is the host
+            REPORT. The breaker is the watchdog's sibling in subject too: one resumes a crashed run, the other stops a project that keeps failing. */}
         <TickGroup />
         {/* The third host CONTROL (#241): one zone every device reads the board in, written to a file beside the other two. Last in the column because it
             is the one control here that changes no machine behaviour — it only moves how readings are drawn. */}
         <TimeZoneGroup />
-      </div>
-
-      <div className="set-col">
-        {/* The host's one report on this page: what this machine can currently reach of each project's tracker (spec §5.6). */}
-        <TrackersGroup />
       </div>
     </div>
   );
@@ -198,6 +239,7 @@ function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
 function LocalPage() {
   const { settings, update } = useSettings();
   const jiraConfigured = useJiraContext().data?.configured === true;
+  const sources = useProjectsContext().drawn;
 
   return (
     /* Two hand-balanced columns (§8.6), placed by hand rather than reflowed: a
@@ -213,8 +255,8 @@ function LocalPage() {
        hang under `Orchestrator` for the same kind of reason, and that pairing
        is gone by design — the watchdog is the server's and this page is the
        browser's, and the split is what says so. Shared is the other shape
-       entirely: the watchdog's long card over the tick breaker against the
-       tracker report (see `SharedPage`).
+       entirely: the Sources report alone against the watchdog's long card,
+       the tick breaker and the time zone (see `SharedPage`).
 
        Folds to one column under 1100 px, which is Settings' own breakpoint and
        deliberately NOT the 700 px phone break every other split on this board
@@ -295,7 +337,7 @@ function LocalPage() {
               <Select
                 label="Opens on"
                 value={settings.landing}
-                options={landingOptions(jiraConfigured, settings.landing)}
+                options={landingOptions(jiraConfigured, sources, settings.landing)}
                 onChange={(landing) => update({ landing })}
               />
             </SettingsRow>

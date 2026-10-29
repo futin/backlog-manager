@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { renderClaim } from '../../server/src/tracker/claim';
 import { TRACKER_LABELS } from '../../server/src/tracker/labels';
 import type { ClaimRecord } from '../../shared/types';
@@ -35,7 +36,54 @@ export interface Call {
   body: Record<string, unknown> | undefined;
   /** The conditional-request header, when the caller sent one (bug-55). */
   ifNoneMatch?: string;
+  /** A `/graphql` call's operation name (`PullRequests`, `PullRequest`, `EnableAutoMerge`, `DisableAutoMerge`), read off the query text — every call
+   *  shares one URL, so this is how a case counts list reads apart from single reads. */
+  operation?: string;
+  /** The repo a `/graphql` call is about: its `owner`/`name` variables, or — for a mutation, which names only a node id — the repo of the PR that id is. */
+  repo?: string;
 }
+
+/**
+ * One fake pull request, stored under GraphQL's own field names so rendering a node is a spread, not a mapping — the mapping under test is `toRow`'s, and a
+ * second one here could only hide its mistakes. `rollup` is the head commit's `statusCheckRollup.state`, `null` for a commit with no checks.
+ */
+export interface FakePr {
+  /** The GraphQL node id. Built from the repo and number so two repos' PRs can never share one. */
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  author: string | null;
+  isDraft: boolean;
+  headRefName: string;
+  headRefOid: string;
+  baseRefName: string;
+  isCrossRepository: boolean;
+  maintainerCanModify: boolean;
+  updatedAt: string;
+  mergeable: string;
+  mergeStateStatus: string;
+  reviewDecision: string | null;
+  viewerCanUpdateBranch: boolean;
+  autoMergeRequest: { mergeMethod: string; enabledAt: string | null } | null;
+  rollup: string | null;
+  state: 'OPEN' | 'CLOSED' | 'MERGED';
+}
+
+/** A repo's merge settings, as the list query reads them. Every one `true` until a case says otherwise (`setRepoSettings`). */
+export interface FakeRepoSettings {
+  squashMergeAllowed: boolean;
+  mergeCommitAllowed: boolean;
+  rebaseMergeAllowed: boolean;
+  autoMergeAllowed: boolean;
+}
+
+/** `PullRequestMergeMethod` → the REST `merge_method` word and the setting that allows it. */
+const METHOD_SETTING: Record<string, keyof FakeRepoSettings> = {
+  squash: 'squashMergeAllowed',
+  merge: 'mergeCommitAllowed',
+  rebase: 'rebaseMergeAllowed'
+};
 
 export interface FakeIssue {
   number: number;
@@ -103,7 +151,49 @@ export class FakeGithub {
    * apart from the hourly one by that sentence alone (`GithubClient.request`), never by a header. `method`, when given, narrows the match to that verb: a
    * fresh `GET` of an issue and the `PATCH` that closes it share one URL (#348), and a case about the close must not fail the read in front of it.
    */
-  failNext: { fragment: string; status: number; method?: string; headers?: Record<string, string>; message?: string } | null = null;
+  failNext: {
+    fragment: string;
+    /** The HTTP status. Ignored when `graphqlError` is set — that answer is always GraphQL's `200` with `errors`. */
+    status?: number;
+    method?: string;
+    headers?: Record<string, string>;
+    message?: string;
+    /** A GraphQL failure: a `200` whose body is `{ data: null, errors: [{ type, message }] }`. A `RATE_LIMITED` one also sends `x-ratelimit-remaining: 0`
+     *  and a reset an hour out unless `headers` says otherwise, because that is how GitHub reports it and what `failureVerdict` reads. */
+    graphqlError?: { type: string; message: string };
+    /** Narrows the match to a call about this repo — every `/graphql` call shares one URL, so the fragment alone cannot fail `futin/x`'s read and not
+     *  `futin/y`'s. Matched against `Call.repo` for `/graphql` and against the URL otherwise. */
+    repo?: string;
+    /** Narrows a `/graphql` match to one operation name. */
+    operation?: string;
+  } | null = null;
+
+  /** Open and closed PRs per repo (`addPr`). */
+  readonly pulls = new Map<string, FakePr[]>();
+
+  /** Per-repo merge settings; a repo absent here allows everything. */
+  readonly repoSettings = new Map<string, FakeRepoSettings>();
+
+  /**
+   * The most writes ever in flight at once per `<repo>#<number>` — the PR writes' serialisation key — counting both REST writes and both mutations. Only
+   * measurable while answers are held (`holdAnswers`): an unheld answer is routed synchronously, so nothing overlaps it.
+   */
+  readonly maxConcurrent = new Map<string, number>();
+  private inFlight = new Map<string, number>();
+
+  /** While set, every `/graphql` call and every PR write waits for it before being answered — or, with `gateOperation`, only that one operation. */
+  private gate: Promise<void> | null = null;
+  private gateOperation: string | undefined;
+  private nextPrNumber = 7;
+  private prSeq = 0;
+  private shaSeq = 0;
+
+  /**
+   * Repos besides `FAKE_REPO` this fake answers for (`addRepo`). Every other route in `route` is pinned to `FAKE_REPO`; a second registered repo gets the
+   * poller's three REST reads — `labels`, `issues`, `issues/comments` — answered `200` with an empty list, and a label create `201`. A repo not added here
+   * still 404s, which is what "the token cannot see it" looks like.
+   */
+  readonly extraRepos = new Set<string>();
 
   /** Rows per page. GitHub's own maximum is 100; a case that wants to prove a
    *  caller follows `Link` lowers this to 1. */
@@ -131,6 +221,144 @@ export class FakeGithub {
     if (issue === undefined) return;
     const next = Math.max(Date.now(), Date.parse(issue.updated_at) + 1);
     issue.updated_at = new Date(next).toISOString();
+  }
+
+  /** Register a second repo: its poller reads answer empty and healthy. `FAKE_REPO` keeps its issues; anything not added or `FAKE_REPO` still 404s. */
+  addRepo(repo: string): void {
+    this.extraRepos.add(repo);
+  }
+
+  /** `FAKE_REPO` or a repo `addRepo` registered — the repos this fake answers PR calls for; any other is GitHub's "cannot see it". */
+  private knows(repo: string): boolean {
+    return repo === FAKE_REPO || this.extraRepos.has(repo);
+  }
+
+  /** A fresh 40-hex SHA, distinct per call — a head SHA, or the one an update-branch moves a head to. */
+  private sha(seed: string): string {
+    return createHash('sha1').update(`${seed}#${this.shaSeq++}`).digest('hex');
+  }
+
+  /**
+   * Seed one PR. Every default discriminates — the number counts up from 7, and the title, head branch, head SHA, author and `updatedAt` are all derived
+   * from the repo and number — so a mapping that swaps two PRs' fields, or two repos' PRs, cannot pass by accident. A repo other than `FAKE_REPO` is
+   * registered (`addRepo`) on first use. `updatedAt` moves one minute later per seeded PR, so seed order is update order unless a case says otherwise.
+   */
+  addPr(repo: string, over: Partial<FakePr> = {}): FakePr {
+    if (repo !== FAKE_REPO) this.addRepo(repo);
+    const number = over.number ?? this.nextPrNumber++;
+    this.nextPrNumber = Math.max(this.nextPrNumber, number + 1);
+    const pr: FakePr = {
+      id: `PR_${repo.replace('/', '_')}_${number}`,
+      number,
+      title: `${repo} change ${number}`,
+      url: `https://github.com/${repo}/pull/${number}`,
+      author: `author-${number}`,
+      isDraft: false,
+      headRefName: `feature/${repo.split('/')[1]}-${number}`,
+      headRefOid: this.sha(`${repo}#${number}`),
+      baseRefName: 'main',
+      isCrossRepository: false,
+      maintainerCanModify: true,
+      updatedAt: new Date(Date.UTC(2026, 9, 1, 10, this.prSeq++)).toISOString(),
+      mergeable: 'MERGEABLE',
+      mergeStateStatus: 'CLEAN',
+      reviewDecision: null,
+      viewerCanUpdateBranch: false,
+      autoMergeRequest: null,
+      rollup: 'SUCCESS',
+      state: 'OPEN',
+      ...over
+    };
+    const list = (this.pulls.get(repo) ?? []).filter((p) => p.number !== number);
+    list.push(pr);
+    this.pulls.set(repo, list);
+    return pr;
+  }
+
+  /** Change some of a repo's merge settings; the rest keep their value (all `true` to begin with). */
+  setRepoSettings(repo: string, over: Partial<FakeRepoSettings>): void {
+    this.repoSettings.set(repo, { ...this.settingsOf(repo), ...over });
+  }
+
+  private settingsOf(repo: string): FakeRepoSettings {
+    return this.repoSettings.get(repo) ?? { squashMergeAllowed: true, mergeCommitAllowed: true, rebaseMergeAllowed: true, autoMergeAllowed: true };
+  }
+
+  /** Hold every `/graphql` answer and every PR write until the returned function is called — how a case starts several requests and asks what overlapped
+   *  (`maxConcurrent`) or which ones were made at all before any answered. `operation` narrows the hold to that one GraphQL operation, so a case can keep
+   *  a list read (`PullRequests`) out while a write and its re-read go through — the race between a read in flight and a write's splice. */
+  holdAnswers(operation?: string): () => void {
+    let release!: () => void;
+    this.gate = new Promise<void>((resolve) => (release = resolve));
+    this.gateOperation = operation;
+    return () => {
+      this.gate = null;
+      this.gateOperation = undefined;
+      release();
+    };
+  }
+
+  /** The `/graphql` calls, optionally narrowed to one operation and one repo. */
+  graphqlCalls(operation?: string, repo?: string): Call[] {
+    return this.calls.filter((c) => c.operation !== undefined && (operation === undefined || c.operation === operation) && (repo === undefined || c.repo === repo));
+  }
+
+  private prById(id: unknown): { repo: string; pr: FakePr } | null {
+    for (const [repo, list] of this.pulls) {
+      const pr = list.find((p) => p.id === id);
+      if (pr !== undefined) return { repo, pr };
+    }
+    return null;
+  }
+
+  private prOf(repo: string, number: number): FakePr | undefined {
+    return this.pulls.get(repo)?.find((p) => p.number === number);
+  }
+
+  /** A PR as the queries select it — GraphQL's own field names, plus the nesting `author` and `commits` have on the wire. */
+  private node(pr: FakePr, withIdentity: boolean): Record<string, unknown> {
+    const { id, state, rollup, author, ...fields } = pr;
+    return {
+      ...(withIdentity ? { id, state } : {}),
+      ...fields,
+      author: author === null ? null : { login: author },
+      commits: { nodes: [{ commit: { statusCheckRollup: rollup === null ? null : { state: rollup } } }] }
+    };
+  }
+
+  /** The operation name and subject repo of a `/graphql` body; `undefined` for any other call. */
+  private graphqlTarget(url: string, body: Record<string, unknown> | undefined): { operation: string; repo?: string } | undefined {
+    if (!url.endsWith('/graphql')) return undefined;
+    const operation = /^\s*(?:query|mutation)\s+(\w+)/.exec(String(body?.query ?? ''))?.[1] ?? 'anonymous';
+    const vars = (body?.variables ?? {}) as Record<string, unknown>;
+    if (typeof vars.owner === 'string' && typeof vars.name === 'string') return { operation, repo: `${vars.owner}/${vars.name}` };
+    return { operation, repo: this.prById(vars.id)?.repo };
+  }
+
+  /** The `<repo>#<number>` a PR WRITE is about, or `null` for a read or any other call. */
+  private writeKey(method: string, url: string, target: { operation: string; repo?: string } | undefined, body: Record<string, unknown> | undefined): string | null {
+    const rest = /\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)\/(?:merge|update-branch)$/.exec(url.split('?')[0]);
+    if (rest !== null && method === 'PUT') return `${rest[1]}#${rest[2]}`;
+    if (target !== undefined && (target.operation === 'EnableAutoMerge' || target.operation === 'DisableAutoMerge')) {
+      const found = this.prById((body?.variables as Record<string, unknown> | undefined)?.id);
+      return found === null ? null : `${found.repo}#${found.pr.number}`;
+    }
+    return null;
+  }
+
+  /**
+   * The empty-and-healthy answers for an added repo — a table of path suffix to answer, so a later task adds a route (the PR reads and writes) by adding a row
+   * here rather than another branch in `route`. `null` when `path` is not an added repo's, so `route` falls through to its `FAKE_REPO` table.
+   */
+  private extraRepoRoute(method: string, path: string): { status: number; payload?: unknown } | null {
+    const match = /^\/repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path);
+    if (match === null || !this.extraRepos.has(match[1])) return null;
+    const answers: Record<string, { status: number; payload?: unknown }> = {
+      labels: method === 'POST' ? { status: 201, payload: {} } : { status: 200, payload: [] },
+      issues: { status: 200, payload: [] },
+      'issues/comments': { status: 200, payload: [] }
+    };
+    return answers[match[2]] ?? { status: 404, payload: { message: 'Not Found' } };
   }
 
   issue(over: Partial<FakeIssue> = {}): FakeIssue {
@@ -185,13 +413,58 @@ export class FakeGithub {
     const method = init?.method ?? 'GET';
     const body = init?.body === undefined ? undefined : (JSON.parse(String(init.body)) as Record<string, unknown>);
     const headers = (init?.headers ?? {}) as Record<string, string>;
-    this.calls.push({ method, url, body, ifNoneMatch: headers['if-none-match'] });
-    if (this.failNext !== null && url.includes(this.failNext.fragment) && (this.failNext.method === undefined || this.failNext.method === method)) {
-      const failure = this.failNext;
-      this.failNext = null;
-      return new Response(JSON.stringify({ message: failure.message ?? 'failed on purpose' }), { status: failure.status, headers: failure.headers });
+    const target = this.graphqlTarget(url, body);
+    this.calls.push({ method, url, body, ifNoneMatch: headers['if-none-match'], ...(target === undefined ? {} : { operation: target.operation, repo: target.repo }) });
+
+    // The PR surface may be held (`holdAnswers`); a write is counted in flight for the whole wait, which is what makes overlap measurable.
+    const key = this.writeKey(method, url, target, body);
+    if (key !== null) {
+      const now = (this.inFlight.get(key) ?? 0) + 1;
+      this.inFlight.set(key, now);
+      this.maxConcurrent.set(key, Math.max(this.maxConcurrent.get(key) ?? 0, now));
     }
-    const { status, payload, next, etag } = this.route(method, url, body, headers['if-none-match']);
+    try {
+      // A narrowed hold answers FIRST and delivers late: the answer is GitHub's state when the request arrived, which is what a read in flight while a
+      // write lands really carries back. The broad hold answers after the wait, as it always has — its cases ask what overlapped, not what was seen.
+      if (this.gate !== null && this.gateOperation !== undefined && target?.operation === this.gateOperation) {
+        const gate = this.gate;
+        const early = this.answer(method, url, body, headers, target);
+        await gate;
+        return early;
+      }
+      if (this.gate !== null && this.gateOperation === undefined && (target !== undefined || /\/pulls\//.test(url))) await this.gate;
+      return this.answer(method, url, body, headers, target);
+    } finally {
+      if (key !== null) this.inFlight.set(key, (this.inFlight.get(key) ?? 1) - 1);
+    }
+  }) as unknown as typeof fetch;
+
+  private answer(
+    method: string,
+    url: string,
+    body: Record<string, unknown> | undefined,
+    headers: Record<string, string>,
+    target: { operation: string; repo?: string } | undefined
+  ): Response {
+    const f = this.failNext;
+    if (
+      f !== null &&
+      url.includes(f.fragment) &&
+      (f.method === undefined || f.method === method) &&
+      (f.operation === undefined || f.operation === target?.operation) &&
+      (f.repo === undefined || (target !== undefined ? target.repo === f.repo : url.includes(`/repos/${f.repo}/`)))
+    ) {
+      this.failNext = null;
+      if (f.graphqlError !== undefined) {
+        const limited: Record<string, string> =
+          f.graphqlError.type === 'RATE_LIMITED' ? { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600) } : {};
+        return new Response(JSON.stringify({ data: null, errors: [f.graphqlError] }), { status: 200, headers: { ...limited, ...f.headers } });
+      }
+      return new Response(JSON.stringify({ message: f.message ?? 'failed on purpose' }), { status: f.status ?? 500, headers: f.headers });
+    }
+    const routed: { status: number; payload?: unknown; next?: string; etag?: string } =
+      target !== undefined ? this.graphqlRoute(target, body) : this.route(method, url, body, headers['if-none-match']);
+    const { status, payload, next, etag } = routed;
     const out: Record<string, string> = {};
     // `Link` is how this API paginates, and the client reads `rel="next"` off
     // it — so a fake that never sends one can never exercise a caller's page
@@ -200,7 +473,91 @@ export class FakeGithub {
     if (next !== undefined) out.link = `<${next}>; rel="next"`;
     if (etag !== undefined) out.etag = etag;
     return new Response(status === 304 || payload === undefined ? null : JSON.stringify(payload), { status, headers: out });
-  }) as unknown as typeof fetch;
+  }
+
+  /**
+   * The four operations `pulls.query.ts` sends, told apart by operation name. Failures are GitHub's shape: a `200` whose `errors` carry a `type`
+   * (`NOT_FOUND` for a repo or PR it cannot see, `UNPROCESSABLE` for a mutation refused on its merits) and whose `data` holds `null` where the answer
+   * would have been.
+   */
+  private graphqlRoute(target: { operation: string; repo?: string }, body: Record<string, unknown> | undefined): { status: number; payload: unknown } {
+    const vars = (body?.variables ?? {}) as Record<string, unknown>;
+    const fail = (data: unknown, type: string, message: string) => ({ status: 200, payload: { data, errors: [{ type, message }] } });
+
+    if (target.operation === 'PullRequests' || target.operation === 'PullRequest') {
+      const repo = target.repo ?? '';
+      if (!this.knows(repo)) return fail({ repository: null }, 'NOT_FOUND', `Could not resolve to a Repository with the name '${repo}'.`);
+      const all = this.pulls.get(repo) ?? [];
+      if (target.operation === 'PullRequest') {
+        const pr = all.find((p) => p.number === vars.number);
+        if (pr === undefined) return fail({ repository: { pullRequest: null } }, 'NOT_FOUND', `Could not resolve to a PullRequest with the number of ${String(vars.number)}.`);
+        return { status: 200, payload: { data: { repository: { pullRequest: this.node(pr, true) } } } };
+      }
+      // `states: OPEN`, `orderBy: UPDATED_AT DESC`, `first: 100` — what the list query asks for.
+      const open = all.filter((p) => p.state === 'OPEN').sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+      return {
+        status: 200,
+        payload: {
+          data: {
+            repository: { ...this.settingsOf(repo), pullRequests: { totalCount: open.length, nodes: open.slice(0, 100).map((p) => this.node(p, false)) } }
+          }
+        }
+      };
+    }
+
+    if (target.operation === 'EnableAutoMerge' || target.operation === 'DisableAutoMerge') {
+      const field = target.operation === 'EnableAutoMerge' ? 'enablePullRequestAutoMerge' : 'disablePullRequestAutoMerge';
+      const found = this.prById(vars.id);
+      if (found === null) return fail({ [field]: null }, 'NOT_FOUND', `Could not resolve to a node with the global id of '${String(vars.id)}'`);
+      const { repo, pr } = found;
+      if (target.operation === 'EnableAutoMerge') {
+        if (!this.settingsOf(repo).autoMergeAllowed) return fail({ [field]: null }, 'UNPROCESSABLE', 'Pull request Auto merge is not allowed for this repository');
+        if (pr.state !== 'OPEN') return fail({ [field]: null }, 'UNPROCESSABLE', 'Pull request is not open');
+        pr.autoMergeRequest = { mergeMethod: String(vars.method), enabledAt: new Date().toISOString() };
+      } else {
+        pr.autoMergeRequest = null;
+      }
+      pr.updatedAt = new Date(Math.max(Date.now(), Date.parse(pr.updatedAt) + 1)).toISOString();
+      return { status: 200, payload: { data: { [field]: { pullRequest: { id: pr.id } } } } };
+    }
+
+    return fail(null, 'UNKNOWN', `unknown operation ${target.operation}`);
+  }
+
+  /**
+   * The two REST PR writes. `merge` answers GitHub's refusals in GitHub's order: a PR that is not open (already merged, or closed) `405`, a `sha` that is
+   * not the head `409`, a method the repo disallows `405`. `update-branch` answers `202` and moves the head at once — GitHub's is asynchronous, but the
+   * only thing a caller can observe either way is a later read showing a new SHA — and `422` for a moved head or a fork that does not allow edits.
+   */
+  private pullWrite(repo: string, number: number, action: string, body: Record<string, unknown> | undefined): { status: number; payload: unknown } {
+    const pr = this.prOf(repo, number);
+    if (pr === undefined) return { status: 404, payload: { message: 'Not Found' } };
+    const bump = (): void => {
+      pr.updatedAt = new Date(Math.max(Date.now(), Date.parse(pr.updatedAt) + 1)).toISOString();
+    };
+    if (action === 'merge') {
+      if (pr.state !== 'OPEN') return { status: 405, payload: { message: 'Pull Request is not mergeable' } };
+      if (body?.sha !== undefined && body.sha !== pr.headRefOid) return { status: 409, payload: { message: 'Head branch was modified. Review and try the merge again.' } };
+      const method = String(body?.merge_method ?? 'merge');
+      const setting = METHOD_SETTING[method];
+      if (setting === undefined || !this.settingsOf(repo)[setting]) return { status: 405, payload: { message: `${method} merges are not allowed on this repository.` } };
+      pr.state = 'MERGED';
+      pr.autoMergeRequest = null;
+      bump();
+      return { status: 200, payload: { sha: this.sha(`merge ${repo}#${number}`), merged: true, message: 'Pull Request successfully merged' } };
+    }
+    if (pr.state !== 'OPEN') return { status: 422, payload: { message: 'Pull request is not open' } };
+    if (pr.isCrossRepository && !pr.maintainerCanModify) return { status: 422, payload: { message: 'You do not have permission to update this pull request branch' } };
+    if (body?.expected_head_sha !== undefined && body.expected_head_sha !== pr.headRefOid) {
+      return { status: 422, payload: { message: 'expected_head_sha does not match the current head SHA of the pull request' } };
+    }
+    pr.headRefOid = this.sha(`update ${repo}#${number}`);
+    pr.mergeable = 'UNKNOWN';
+    pr.mergeStateStatus = 'UNKNOWN';
+    pr.viewerCanUpdateBranch = false;
+    bump();
+    return { status: 202, payload: { message: 'Updating pull request branch.', url: pr.url } };
+  }
 
   /**
    * `since` and one page of rows, the way GitHub answers a list.
@@ -235,6 +592,10 @@ export class FakeGithub {
     const path = url.replace('https://api.github.com', '').split('?')[0];
 
     if (path === '/user') return { status: 200, payload: { login: 'futin' } };
+    const pull = /^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)\/(merge|update-branch)$/.exec(path);
+    if (pull !== null && method === 'PUT' && this.knows(pull[1])) return this.pullWrite(pull[1], Number(pull[2]), pull[3], body);
+    const extra = this.extraRepoRoute(method, path);
+    if (extra !== null) return extra;
     if (path === `/repos/${FAKE_REPO}/labels`) return { status: 200, payload: TRACKER_LABELS.map((l) => ({ name: l.name })) };
 
     // The repository-wide comment read the poller makes.

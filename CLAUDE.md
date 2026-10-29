@@ -43,7 +43,8 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   and the 60 s reconciler that keeps the Jira live map honest, and `agents/dashboards/` — `dashboards.json`'s reader/writer, the machine offers, health and
   usage reads, and a card's or an Orchestrate run's launch and stop on another machine, whose outbound calls go to remote dashboards and remote boards and are
   part of THIS module, not a fourth), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap,
-  the read-only `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read
+  the read-only `trackers` route and `tracker-sync.json`'s reader/writer, and the PRs page's on-demand per-repo PR cache behind `GET /api/prs` and its three
+  guarded writes, `POST /api/prs/merge`, `/auto-merge` and `/update-branch`), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read
   routes under `/api/jira` — `GET /prompt`, `/refs` and `/worktrees` among them — `jira.json`'s six guarded write routes, `POST /api/jira/boards`,
   `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the two writes to Jira itself,
   `POST /api/jira/issue/assign` and `/issue/transition`, and the in-memory live map `JiraLiveService` (a session per ticket key, forgotten on restart),
@@ -56,7 +57,9 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   time zone), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
   route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
   → [docs/subsystems/api.md](docs/subsystems/api.md)
-- `client/src/` — React SPA: five lazy sections behind a side rail (Board, Runs, Archive, Jira, Settings) that ends in a version chip opening the What's new
+- `client/src/` — React SPA: five lazy sections behind a side rail (Files, GitHub, Jira, Runs, Settings — Files and GitHub each drawn only while a registered
+  project has that source, with Board and Archive under each; GitHub's tree is Board, PRs, Archive, Settings — PRs being the open pull requests of the
+  registered GitHub repos, with merge, auto-merge and update branch) that ends in a version chip opening the What's new
   drawer ([releases](docs/subsystems/releases.md)), one run chip in the board's band, and the three-step
 Orchestrate sheet. Runs is THREE pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
   on a board 1400 px or wider, that strip standing as a 320 px right rail instead) and
@@ -64,7 +67,8 @@ Orchestrate sheet. Runs is THREE pages under one rail entry — History (a figur
   Watchdog, Ticks — switched by the rail's sub-nav tree alone, never by an in-page control. Every derivation has one home in `lib/`, and every look more than one
   surface draws has one home in `components/ui/`. A connected tracker adds one shell-level chip — POLL and API meters in the strip above the well, or in
   the rail bar below 700 px — and two item readings: the card's `untyped`/assignee/link-out/`queued` badge, and the item modal's age beside the cached body —
-  all derived in `lib/tracker.ts`, plus the `Trackers` card on Shared Settings, whose one control is each repo's sync interval. Jira is drawn only
+  all derived in `lib/tracker.ts`, plus GitHub › Settings' `Sync` card, whose one control is each repo's sync interval, and the read-only `Sources` card on
+  Shared Settings (token, reach, connect commands, the Jira row). Jira is drawn only
   while `GET /api/jira` says configured: a second shell chip beside the tracker's, and two pages under its rail entry — Board and Setup, switched by the tree
   alone — all derived in `lib/jira.ts`. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
@@ -132,9 +136,10 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#ui-kit-draws-the-version-chip-and-the-whats-new-drawer-this-board-only-maps-its-tokens-and-places-the-chip)
 - **The strip's height and the well's gap are one token, `--main-gap`, read by the strip and the Runs page — never a px literal.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-strips-height-and-the-wells-gap-are-one-token)
-- **Item files are read-only to the server and client**; every write goes through the skills. Dispatch writes no item files either — the spawned session runs
-  the skills, which remain the only writers. **A TRACKER project's items are the one thing this server writes** (task-46), and only through the eleven routes
-  below — never a file, on any path — **and a Jira issue's assignee and status, through `/api/jira/issue/assign` and `/issue/transition`.**
+- **Item files are read-only to the server and client**; every write goes through the skills, and dispatch writes none — the spawned session runs them.
+  **A TRACKER project's items are what this server writes** (task-46), only through the eleven routes below — never a file, on any path — **plus a Jira
+  issue's assignee and status, through `/api/jira/issue/assign` and `/issue/transition`, and an open PR's merge, auto-merge and update-branch, through
+  `/api/prs/*`.**
 - **The eleven `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-eleven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.**
@@ -155,8 +160,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-repo-whose-sync-is-off-refuses-every-write-path-and-cannot-be-switched-off-under-a-live-or-paused-run)
-- **The tracker and Jira caches are the two caches in this server whose age is a rendered value.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-and-jira-caches-are-the-two-caches-in-this-server-whose-age-is-a-rendered-value)
+- **The tracker, Jira and pull-request caches are the three caches in this server whose age is a rendered value.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-and-pull-request-caches-are-the-three-caches-in-this-server-whose-age-is-a-rendered-value)
 - **`~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.**
   Why: [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
 - **`~/.backlog-manager/settings/tick.json` has exactly one writer, the server, and a file that cannot be read is never replaced.**
@@ -171,6 +176,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#every-value-the-server-puts-into-jql-is-quoted-and-escaped-and-a-persons-jql-is-passed-verbatim)
 - **The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)
+- **The board's pull-request writes are merge, auto-merge and update-branch, nothing else, and each re-reads the PR.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-boards-pull-request-writes-are-merge-auto-merge-and-update-branch-nothing-else-and-each-re-reads-the-pr)
 - **A Jira branch name obeys one rule, in `shared/jira-branch.ts`, and `jira.mjs` carries its one hand-kept copy.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-one-hand-kept-copy)
 - **A Jira session is remembered in server memory only; a restart forgets it, and Stop is the one hand that clears it early.**
@@ -237,6 +244,9 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only
   when `GET /api/jira` says configured.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
+- **A source row (Files, GitHub) is drawn only while a registered project has that source, and its pages are switched by the rail's tree or a link threaded
+  down from it.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree)
 - **`contentWidth` is stamped before first paint, and the CSP hash travels with the script that stamps it.**
   Why: [invariants.md](docs/subsystems/invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it)
 - **The served build carries a CSP (`server/src/security.ts`); dev does not.** `script-src` pins the pre-paint theme script's sha256 — edit that script and

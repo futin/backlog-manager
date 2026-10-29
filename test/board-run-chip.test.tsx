@@ -322,7 +322,7 @@ describe('BoardView: the run chip', () => {
   }
 
   async function renderBoard(): Promise<void> {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
   }
 
@@ -370,7 +370,7 @@ describe('BoardView: the run chip', () => {
   it('reports working up to the shell for a live run', async () => {
     stub([run({ status: 'running', fresh: true })]);
     const onWorking = jest.fn();
-    render(<BoardView onWorking={onWorking} />);
+    render(<BoardView source="files" onWorking={onWorking} />);
     await waitFor(() => expect(screen.getByTestId('run-chip')).toHaveTextContent('live'));
     expect(onWorking).toHaveBeenLastCalledWith(true);
   });
@@ -378,7 +378,7 @@ describe('BoardView: the run chip', () => {
   it('reports not working for a crashed run — the cursor must not blink for it', async () => {
     stub([run({ status: 'running', fresh: false })]);
     const onWorking = jest.fn();
-    render(<BoardView onWorking={onWorking} />);
+    render(<BoardView source="files" onWorking={onWorking} />);
     await waitFor(() => expect(screen.getByTestId('run-chip')).toHaveTextContent('crashed'));
     expect(onWorking).toHaveBeenLastCalledWith(false);
     expect(onWorking).not.toHaveBeenCalledWith(true);

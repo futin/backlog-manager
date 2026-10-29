@@ -5,16 +5,15 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
-import { TrackersGroup } from '../client/src/components/settings/TrackersGroup';
-import { JiraContext } from '../client/src/hooks/JiraContext';
-import type { JiraState } from '../client/src/hooks/useJira';
+import GithubSettingsView from '../client/src/components/github/GithubSettingsView';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { SYNC_INTERVALS } from '../shared/types';
-import type { JiraBoardStatus, JiraStatusPayload, SyncInterval, TrackerProjectRow, TrackersPayload } from '../shared/types';
+import type { SyncInterval, TrackerProjectRow, TrackersPayload } from '../shared/types';
 
 /**
- * The Trackers card's one control (#17, spec §9): a per-repo sync picker on every `github` row. What it must never do is show a value the server did not
- * answer — the pill follows the refetch, a refusal leaves the old value selected and says why in the row — and two checkouts of one repo are one setting.
+ * GitHub › Settings (source-sections spec, "Parts of the how"): each registered github project's sync picker, moved here off Settings › Shared's old
+ * Trackers card (#17, spec §9 of the sync-interval design). What it must never do is show a value the server did not answer — the pill follows the
+ * refetch, a refusal leaves the old value selected and says why in the row — and two checkouts of one repo are one setting.
  *
  * Mounted under the real `TrackersProvider`, so the refetch after a POST is the shell's own `useTrackers` read, not a stand-in.
  */
@@ -34,7 +33,7 @@ function row(over: Partial<TrackerProjectRow> = {}): TrackerProjectRow {
   };
 }
 
-const files = row({ name: 'beta', path: '/abs/beta', source: 'files', repo: null, polledAt: null, access: null, interval: null, connect: null });
+const files = row({ name: 'beta', path: '/abs/beta', source: 'files', repo: null, polledAt: null, access: null, interval: null, connect: 'connect beta' });
 
 let rows: TrackerProjectRow[];
 let posts: { body: unknown; contentType: string | undefined }[];
@@ -66,19 +65,20 @@ function serverWrites(): void {
   };
 }
 
-async function renderCard(): Promise<void> {
+async function renderPage(waitFor_ = 'alpha'): Promise<void> {
   stubFetch();
   render(
     <TrackersProvider>
-      <TrackersGroup />
+      <GithubSettingsView />
     </TrackersProvider>
   );
-  await waitFor(() => expect(screen.getByText('alpha')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(waitFor_)).toBeInTheDocument());
 }
 
 const rowOf = (name: string): HTMLElement => screen.getByText(name).closest('.set-row') as HTMLElement;
 const pillOf = (name: string): HTMLElement => within(rowOf(name)).getByRole('group', { name: 'Sync interval' });
 const selected = (name: string): string | null => within(pillOf(name)).getByRole('button', { pressed: true }).textContent;
+const hintOf = (name: string): string | null => rowOf(name).querySelector('.set-hint')?.textContent ?? null;
 
 beforeEach(() => {
   rows = [row(), files];
@@ -89,9 +89,22 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-describe('the Trackers card’s sync picker', () => {
-  it('draws the four intervals on a github row with its interval selected, and no control on a files row', async () => {
-    await renderCard();
+describe('GitHub › Settings: the sync card', () => {
+  it('draws one row per github project — its name, its repo as the hint — and none for a files project', async () => {
+    await renderPage();
+
+    expect(hintOf('alpha')).toBe('futin/x');
+    // A files project has no sync to set: it has no row here at all (its connect command is the Sources card's).
+    expect(screen.queryByText('beta')).toBeNull();
+    expect(screen.queryByText('connect beta')).toBeNull();
+    // The card's own landmark and scope: everything on it is this machine's.
+    const card = rowOf('alpha').closest('.set-group') as HTMLElement;
+    expect(within(card).getByText('Sync')).toHaveClass('ui-sheet-title');
+    expect(within(card).getByText('this machine')).toBeInTheDocument();
+  });
+
+  it('draws the four intervals with the repo’s interval selected', async () => {
+    await renderPage();
 
     const labels = within(pillOf('alpha'))
       .getAllByRole('button')
@@ -100,22 +113,20 @@ describe('the Trackers card’s sync picker', () => {
     // The pin: the options ARE the shared constant's keys, never a second list.
     expect(labels).toEqual(Object.keys(SYNC_INTERVALS));
     expect(selected('alpha')).toBe('1m');
-    expect(within(rowOf('beta')).queryByRole('group')).toBeNull();
   });
 
   it('posts the choice as JSON and then shows the value the refetch answered', async () => {
-    await renderCard();
+    await renderPage();
 
     await userEvent.click(within(pillOf('alpha')).getByRole('button', { name: 'off' }));
 
     expect(posts).toEqual([{ body: { repo: 'futin/x', interval: 'off' }, contentType: 'application/json' }]);
     await waitFor(() => expect(selected('alpha')).toBe('off'));
-    expect(within(rowOf('alpha')).getByText(/sync off · polled/)).toBeInTheDocument();
   });
 
   it('never shows an optimistic value: a server that answered 200 but kept 1m still reads 1m', async () => {
     answerPost = () => ({ status: 200, body: rows[0] });
-    await renderCard();
+    await renderPage();
 
     await userEvent.click(within(pillOf('alpha')).getByRole('button', { name: '5m' }));
 
@@ -124,21 +135,22 @@ describe('the Trackers card’s sync picker', () => {
     expect(selected('alpha')).toBe('1m');
   });
 
-  it('leaves the old value selected on a 409 and shows the refusal in the row', async () => {
+  it('leaves the old value selected on a 409 and shows the refusal in place of the repo hint', async () => {
     answerPost = () => ({ status: 409, body: { error: 'sync cannot be turned off while a run is running in guide-manager (run r1)' } });
-    await renderCard();
+    await renderPage();
 
     await userEvent.click(within(pillOf('alpha')).getByRole('button', { name: 'off' }));
 
     expect(await within(rowOf('alpha')).findByText('sync cannot be turned off while a run is running in guide-manager (run r1)')).toBeInTheDocument();
+    expect(hintOf('alpha')).toBe('sync cannot be turned off while a run is running in guide-manager (run r1)');
     expect(selected('alpha')).toBe('1m');
   });
 
   // Final review M6: clearing the refusal on ANY successful read let a scheduled poll or a focus refetch wipe it within a second of appearing — and a refused
   // pick does not move the pill, so the hint is the only sign the click was answered at all.
-  it('keeps the refusal through an unrelated read, and clears it on the next pick for that repo', async () => {
+  it('keeps the refusal through an unrelated read, and clears it — back to the repo — on the next pick for that repo', async () => {
     answerPost = () => ({ status: 409, body: { error: 'sync cannot be turned off while a run is running in guide-manager (run r1)' } });
-    await renderCard();
+    await renderPage();
     await userEvent.click(within(pillOf('alpha')).getByRole('button', { name: 'off' }));
     await within(rowOf('alpha')).findByText(/sync cannot be turned off/);
 
@@ -157,90 +169,36 @@ describe('the Trackers card’s sync picker', () => {
     await userEvent.click(within(pillOf('alpha')).getByRole('button', { name: '5m' }));
     await waitFor(() => expect(selected('alpha')).toBe('5m'));
     expect(within(rowOf('alpha')).queryByText(/sync cannot be turned off/)).toBeNull();
+    expect(hintOf('alpha')).toBe('futin/x');
   });
 
   it('moves every row on the repo together, since the repo is the setting (Review Focus 3)', async () => {
     rows = [row(), row({ name: 'alpha-twin', path: '/abs/alpha-twin' }), files];
-    await renderCard();
+    await renderPage();
 
+    expect(hintOf('alpha-twin')).toBe('futin/x');
     await userEvent.click(within(pillOf('alpha')).getByRole('button', { name: '15s' }));
 
     await waitFor(() => expect(selected('alpha')).toBe('15s'));
     expect(selected('alpha-twin')).toBe('15s');
   });
-});
 
-/**
- * The Jira row (Jira phase 2; DESIGN.md §8.9.4): one read-only line after the GitHub rows, drawn only while Jira is configured. Jira's board
- * intervals are NOT editable here — they live on Jira › Setup, which the row names and does not link (the rail's tree is the only page switch).
- */
-function jiraBoard(id: string): JiraBoardStatus {
-  return { id, name: id, roots: ['PLAT-1'], queries: [], interval: '1m', polledAt: null, count: 0, truncated: false, failures: [] };
-}
+  it('says `nothing registered yet` with no github project — the page is reachable only while the section is held', async () => {
+    rows = [files];
+    await renderPage('nothing registered yet');
+    expect(screen.queryByRole('group', { name: 'Sync interval' })).toBeNull();
+  });
 
-function jiraStatus(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
-  return {
-    configured: true,
-    configUnreadable: null,
-    site: 'acme.atlassian.net',
-    me: { accountId: 'a1', name: 'Ada' },
-    tokenKind: 'classic',
-    access: 'ok',
-    detail: null,
-    boards: [jiraBoard('b_00000001'), jiraBoard('b_00000002')],
-    repos: {},
-    repoDefaults: {},
-    projects: [],
-    skills: [],
-    calls: { sweep: 0, last429At: null },
-    live: {},
-    armed: true,
-    home: '/home/x',
-    ...over
-  };
-}
-
-async function renderWithJira(data: JiraStatusPayload | null): Promise<void> {
-  stubFetch();
-  const jira: JiraState = { data, loading: false, error: false, reload: () => {} };
-  render(
-    <JiraContext.Provider value={jira}>
+  it('says `checking…` before the first answer', async () => {
+    global.fetch = jest.fn(() => new Promise(() => {})) as jest.Mock;
+    render(
       <TrackersProvider>
-        <TrackersGroup />
+        <GithubSettingsView />
       </TrackersProvider>
-    </JiraContext.Provider>
-  );
-  await waitFor(() => expect(screen.getByText('alpha')).toBeInTheDocument());
-}
-
-describe('the Trackers card’s Jira row', () => {
-  it('reads the site, the board count and where the intervals live, and carries no control', async () => {
-    await renderWithJira(jiraStatus());
-    const jira = screen.getByText('acme.atlassian.net · 2 boards · intervals live on Jira › Setup').closest('.set-row') as HTMLElement;
-    expect(within(jira).getByText('Jira')).toBeInTheDocument();
-    expect(jira.querySelector('button, a, input, select')).toBeNull();
-    expect(jira.querySelector('.set-control')).toBeNull();
-  });
-
-  it('says `1 board` for one', async () => {
-    await renderWithJira(jiraStatus({ boards: [jiraBoard('b_00000001')] }));
-    expect(screen.getByText('acme.atlassian.net · 1 board · intervals live on Jira › Setup')).toBeInTheDocument();
-  });
-
-  it('sits after the GitHub rows', async () => {
-    await renderWithJira(jiraStatus());
-    const rowsText = [...document.querySelectorAll('.set-row .set-name')].map((n) => n.textContent);
-    expect(rowsText.indexOf('Jira')).toBeGreaterThan(rowsText.indexOf('beta'));
-  });
-
-  it('is absent while Jira is unconfigured or not yet answered', async () => {
-    await renderWithJira(jiraStatus({ configured: false, site: null, me: null, access: 'unconfigured', boards: [], home: null }));
-    expect(screen.queryByText(/intervals live on Jira/)).toBeNull();
-    expect(screen.queryByText('Jira')).toBeNull();
-  });
-
-  it('is absent before the first Jira answer', async () => {
-    await renderWithJira(null);
-    expect(screen.queryByText(/intervals live on Jira/)).toBeNull();
+    );
+    expect(screen.getByText('checking…')).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+    });
   });
 });

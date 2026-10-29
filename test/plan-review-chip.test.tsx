@@ -160,13 +160,13 @@ describe('BoardView and plan review', () => {
 
   // All projects is the band's default scope, which sums counts and names the blocked project — the cap itself is the title's.
   it('reads the tick’s cap in the band', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByTestId('plan-review-chip')).toHaveTextContent('1 plan awaiting review · tick blocked in alpha'));
     expect(screen.getByTestId('plan-review-chip')).toHaveAttribute('title', 'alpha: 1/1');
   });
 
   it('opens the item from the card’s Review plan, and after Approve the modal draws the fresh item', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await userEvent.click(await screen.findByTestId('review-plan'));
     const approve = await screen.findByTestId('plan-approve');
     await userEvent.click(approve);
@@ -271,7 +271,7 @@ describe('BoardView plan-review filter', () => {
     });
 
   it('the band chip narrows to the open plan-review cards, and a second click restores the board', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     const chip = await screen.findByTestId('plan-review-chip');
     await waitFor(() => expect(titles()).toEqual(ALL_OPEN));
 
@@ -287,7 +287,7 @@ describe('BoardView plan-review filter', () => {
   });
 
   it('the panel’s Awaiting review chip is the same state as the band chip', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await screen.findByTestId('plan-review-chip');
     await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
     expect(panelChip()).toHaveAttribute('aria-pressed', 'false');
@@ -299,7 +299,7 @@ describe('BoardView plan-review filter', () => {
   });
 
   it('with Status Done it is honestly empty, and says so', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await userEvent.click(await screen.findByTestId('plan-review-chip'));
     await pickStatus('Done');
     expect(titles()).toEqual([]);
@@ -308,7 +308,7 @@ describe('BoardView plan-review filter', () => {
   });
 
   it('Clear all turns it off along with the status', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await userEvent.click(await screen.findByTestId('plan-review-chip'));
     await pickStatus('Done');
     await clearFilters();
@@ -320,7 +320,7 @@ describe('BoardView plan-review filter', () => {
   });
 
   it('composes with the search, which is never counted', async () => {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await userEvent.click(await screen.findByTestId('plan-review-chip'));
     await userEvent.type(screen.getByLabelText('Search items'), 'marked bug');
     expect(titles()).toEqual(['marked bug']);
@@ -330,7 +330,7 @@ describe('BoardView plan-review filter', () => {
   it('leaves the picked project as it is', async () => {
     projects = [project('alpha'), project('beta')];
     items = [...ALPHA, card('beta', '#7', 'beta marked', { planReview: true }), card('beta', '#8', 'beta plain')];
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await screen.findByTestId('plan-review-chip');
     await pickProject('beta');
     await userEvent.click(screen.getByTestId('plan-review-chip'));
@@ -343,14 +343,14 @@ describe('BoardView plan-review filter', () => {
   });
 
   it('is not persisted: a remount starts with it off, and it writes no storage key', async () => {
-    const { unmount } = render(<BoardView />);
+    const { unmount } = render(<BoardView source="files" />);
     await screen.findByTestId('plan-review-chip');
     const keys = Object.keys(localStorage).sort();
     await userEvent.click(screen.getByTestId('plan-review-chip'));
     expect(titles()).toEqual(MARKED_OPEN);
     unmount();
 
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(titles()).toEqual(ALL_OPEN));
     expect(screen.getByTestId('plan-review-chip')).toHaveAttribute('aria-pressed', 'false');
     expect(Object.keys(localStorage).sort()).toEqual(keys);

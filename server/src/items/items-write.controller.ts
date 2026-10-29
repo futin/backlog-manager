@@ -1,24 +1,21 @@
 import { Body, Controller, HttpException, Post, UseGuards } from '@nestjs/common';
 
-import { ItemsService, type WriterLookup } from './items.service';
+import { ItemsService } from './items.service';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import { KIND_NAMES } from '../tracker/labels';
 import { isMergeMode, isQuestionMode } from '../../../shared/agent';
 import { CLAIM_FINISHED_STATUSES, MERGE_MODES, QUESTION_MODES } from '../../../shared/types';
 import type { CreatedItem } from './sources/source';
 import { answer } from './write-answer.util';
+import { optional, required, text, writable } from './write-gate.util';
 import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, ClaimRun, ItemBodyResult, Section } from '../../../shared/types';
-
-// Re-exported so `agents/items-abort.service.ts` keeps borrowing `writable` and `answer` from one import line. The mapping itself moved to
-// `write-answer.util.ts` in #270, because `ItemsService.readClaim` needs it too and a service importing a controller that injects that same service is a
-// circular import Nest's constructor metadata does not survive.
-export { answer };
 
 /**
  * items-write.controller.ts — ten of a tracker project's eleven item write routes: task-46's seven (spec §6.2), the eighth, `queue` (the orchestrator:queued
  * spec's §2), the tenth, `review` (the execute pr-mode spec's decision 9), and the eleventh, `plan-review` (backlog-tick).
  * The ninth item write, `POST /api/items/abort` (#225), is NOT here: it calls the dashboard, so it lives in
- * `agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this file.
+ * `agents/items-abort.controller.ts` and gates and maps through the same `writable`, `required` (`write-gate.util.ts`) and `answer`
+ * (`write-answer.util.ts`) these routes use.
  *
  * ## What this file is, and what it deliberately is not
  *
@@ -313,67 +310,10 @@ export class ItemsWriteController {
   }
 }
 
-/**
- * The project gate, in one place for all eleven (the second, third and fourth
- * refusals). Throws rather than returning a union, because every caller does
- * the identical thing with a failure and an eleventh copy of that branch is
- * eleven chances for one of them to answer 404 where the others answer 400.
- *
- * Exported since #225, so the abort route in `agents/` gates a project exactly as these routes do.
- */
-export function writable(lookup: WriterLookup): Extract<WriterLookup, { kind: 'writer' }> {
-  // 404 rather than 400: a path this server was never told about is, as far
-  // as this caller is concerned, not a project — the same answer
-  // `uncommitted` and `mergeCheck` already give an unregistered path.
-  if (lookup.kind === 'unregistered') throw new HttpException({ error: 'not found' }, 404);
-  if (lookup.kind === 'files') {
-    throw new HttpException({ error: "this project's items are files — the skills write them directly" }, 400);
-  }
-  // `resolveSource`'s own reason, already prefixed with the marker's absolute
-  // path, rather than a sentence composed here: it is the same string
-  // `ItemsIndex.errors` carries for the same project, and two wordings for
-  // one fact is how a reader ends up believing they are two facts.
-  if (lookup.kind === 'unsupported') throw new HttpException({ error: lookup.reason }, 400);
-  return lookup;
-}
-
 /** The five sections `create` accepts — every one of them, `out-of-scope`
  *  included, which is the tracker spelling of filing something already decided
  *  against. */
 const CREATABLE_SECTIONS: readonly Section[] = ['bugs', 'ideas', 'tasks', 'refactors', 'out-of-scope'];
-
-/** A field read as a trimmed string, `''` for anything that is not one. The
- *  shape every identifier-ish field on these routes takes — never a spread of
- *  the caller's object, the rule `AgentsController.dispatch` already follows. */
-function text(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-/** …and the same, refusing an empty one by name, because a missing `project`
- *  and a missing `id` are different mistakes and a caller should be told which
- *  it made. */
-export function required(value: unknown, field: string): string {
-  const trimmed = text(value);
-  if (trimmed === '') throw new HttpException({ error: `${field} is required` }, 400);
-  return trimmed;
-}
-
-/**
- * A field that may be absent, but must be a non-empty string when it is there
- * — `host`'s rule (bug-46), which is `required`'s minus the requirement.
- *
- * The middle case is the one worth the helper: a caller that sent `host: 7` or
- * `host: '  '` has made a mistake, and answering 400 says so where dropping
- * the field would publish a claim that is silently missing the one thing this
- * field exists to carry. `undefined` is the only value that means "did not
- * send one", so a `null` is a 400 too.
- */
-function optional(value: unknown, field: string): string | undefined {
-  if (value === undefined) return undefined;
-  const trimmed = text(value);
-  if (trimmed === '') throw new HttpException({ error: `${field} must be a non-empty string` }, 400);
-  return trimmed;
-}
 
 /** A comment id: a positive integer, and nothing else. It is interpolated into
  *  a URL path, so a float or a string that happens to parse would reach GitHub

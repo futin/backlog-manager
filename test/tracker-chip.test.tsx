@@ -52,7 +52,7 @@ function wrap(data: TrackersPayload | null, section: Section, extra?: React.Reac
   );
 }
 
-function renderChip(data: TrackersPayload | null, section: Section = 'board') {
+function renderChip(data: TrackersPayload | null, section: Section = 'github') {
   const utils = render(wrap(data, section));
   return { ...utils, update: (next: TrackersPayload | null, nextSection: Section = section) => utils.rerender(wrap(next, nextSection)) };
 }
@@ -363,7 +363,7 @@ describe('TrackerPopover', () => {
       useDialogEscape(closeBelow);
       return null;
     }
-    render(wrap(payload(), 'board', <Below />));
+    render(wrap(payload(), 'github', <Below />));
     await user.click(chip());
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Tracker' })).toBeNull();

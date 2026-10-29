@@ -6,7 +6,8 @@ registry entry, and nothing in `items/` knows it exists. This doc describes **ph
 client, the config reader, the poller and its caches, the issue mapping, the ADF converter, the ticket block and the read routes (six, then seven with phase
 5a's `/prompt`, nine with the repo/branch work's `/refs` and `/worktrees`). Phase 2 adds `jira.json`'s writers behind three guarded write routes (five since
 5a's skills, six with `/repo-defaults`) and the whole client section: a rail entry with two pages (Board and Setup), the issue modal, the shell chip and
-the Trackers row. Phase 3 adds the first two writes to Jira itself — assign the issue to me and transition it — behind two more guarded routes, each followed
+a read-only Jira row on Settings › Shared (the Trackers card's then, the Sources card's since the source-sections change). Phase 3 adds the first two writes to
+Jira itself — assign the issue to me and transition it — behind two more guarded routes, each followed
 by a re-read of the issue that is spliced into the board caches, and the modal's two controls that call them. Phase 4 adds the `jira` skill and its CLI,
 `jira.mjs`, which reach those same routes from any Claude session on this machine — and changes nothing in the server. Phase 5a is the server half of Run: the
 skills writers and their two routes, the prompt composer and `GET /api/jira/prompt`, the in-memory live map, and — in `agents/`, because they call the dashboard —
@@ -259,16 +260,17 @@ minted against every id the file already holds, malformed entries' included, so 
 The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the mechanism. The browser never talks to Jira: every request is to
 `/api/jira…`, a person is initials on a disc rather than Jira's `avatarUrls`, and every link out is `JiraIssue.url` as the server built it.
 
-- **The section.** `jira` is in `SECTIONS` (`client/src/lib/sections.ts`) between `archive` and `settings`, unconditionally, and `RAIL_LABEL.jira` is `Jira`.
+- **The section.** `jira` is in `SECTIONS` (`client/src/lib/sections.ts`) between `github` and `runs`, unconditionally, and `RAIL_LABEL.jira` is `Jira`.
   The rail draws the row only while the status says `configured: true` (or while a stored `jira` section is held for the first answer), `App` falls a `jira`
-  section to Board on `configured: false` and on nothing else, and Settings' `Opens on` offers `Jira` only while configured. `JiraView` (lazy, like every
+  section on `configured: false` and on nothing else — to the first drawn source row, Files before GitHub, or Runs when there is none (`firstDrawn`,
+  `lib/sources.ts`) — and Settings' `Opens on` offers `Jira` only while configured. `JiraView` (lazy, like every
   section) picks the page and holds the open issue. The two pages, `JIRA_PAGES` in `lib/jira-page.ts`, are held by `hooks/useJiraPage.ts`, a module store
   with `useRunsMode`'s shape, and switched by the rail's tree or by `onOpenJiraPage` — the tree's own pair, built in `App` and handed down — never by an
   in-page control. The rule and its reasons are
   [invariants.md](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 - **The provider and the hooks.** `JiraProvider` (`hooks/JiraContext.tsx`) holds the shell's ONE `useJira`, beside `TrackersProvider`, so the rail, the chip,
-  both pages and the Trackers row read one answer on one clock. `useJira` (`hooks/useJira.ts`) is `useTrackers`' shape: one read on mount and focus, a timer
-  aimed at the soonest syncing board's `polledAt + interval + TRACKER_FETCH_SLACK_MS` with a `JIRA_STATUS_FLOOR_MS` (15 s) floor, no timer while
+  both pages and the Sources card's Jira row read one answer on one clock. `useJira` (`hooks/useJira.ts`) is `useTrackers`' shape: one read on mount and focus,
+  a timer aimed at the soonest syncing board's `polledAt + interval + TRACKER_FETCH_SLACK_MS` with a `JIRA_STATUS_FLOOR_MS` (15 s) floor, no timer while
   unconfigured or with no syncing board, only the newest read allowed to write, and the last payload kept through a failed read — it is the second
   deliberate exception to the `useCoalescedFetch` rule
   ([invariants.md](invariants.md#a-client-poller-built-on-usecoalescedfetch-never-has-two-of-its-own-requests-in-flight)). `useJiraBoard(id, interval, nudge)`
@@ -313,10 +315,13 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `origin/` itself, so a stored prefix would make every Start exit 4.
   `JiraConnectionGroup` is a read-only report. Every landed write reloads the shell's status, even if
   the page has gone.
-- **The chip and the Trackers row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` — the
-  strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
-  `Popover` reading with no links or buttons. With both chips in the rail bar neither draws its meters (a CSS rule in the 700 px block). The Settings ›
-  Shared › Trackers card (`components/settings/TrackersGroup.tsx`) closes on one read-only Jira row from the same `useJira`.
+- **The chip and the Sources card's Jira row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` —
+  the strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
+  `Popover` reading with no links or buttons. With both chips in the rail bar neither draws its meters (a CSS rule in the 700 px block). The Settings › Shared ›
+  Sources card (`components/settings/SourcesGroup.tsx`) carries one Jira row from the same `useJira`, drawn whatever Jira's state — `configured · <site> · N
+  boards`, `not configured`, or `checking…`/`unavailable` before Jira has answered — with no control, because a board's interval is set on Setup. While
+  configured it carries one link, `Jira › Setup ↗`, which is `onOpenJiraPage('setup')` threaded down from `App` through `SettingsView`: the tree's own pair,
+  never a switch of the card's own.
 
 ## The skill (phase 4)
 
