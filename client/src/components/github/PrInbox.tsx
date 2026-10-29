@@ -7,7 +7,19 @@ import { PrOutcomeLine } from './PrOutcomeLine';
 import { PrRepoNotes } from './PrRepoNotes';
 import type { PrLayoutProps } from './pr-layout-props';
 import { elapsedSince } from '../../lib/item-age';
-import { LEVELS, LEVEL_DOT, LEVEL_LABEL, levelCounts, prProblems, prVerdict, quietFacts, rankPrs, transientFailures, type PrLevel, type RankedPr } from '../../lib/pr-layouts';
+import {
+  LEVELS,
+  LEVEL_DOT,
+  LEVEL_LABEL,
+  levelCounts,
+  prProblems,
+  prVerdict,
+  quietFacts,
+  rankPrs,
+  transientFailures,
+  type PrLevel,
+  type RankedPr
+} from '../../lib/pr-layouts';
 import { prRunWarning } from '../../lib/pr-run';
 import { isUpdating } from '../../lib/prs';
 
@@ -29,8 +41,10 @@ import { isUpdating } from '../../lib/prs';
  * are worth reading beside a problem, not acting on); `author · head → base · age`; the compact actions on the right, which wrap under on a narrow window.
  * **A quiet line** is dot, `#n`, title, repo, `quietFacts` and — when a run is still working the branch — the warning in the warn tone, because a clean
  * `backlog/<id>` PR an orchestrator run has not finished with is exactly a Quiet PR. Its actions are one click further: a separate toggle button
- * (`aria-expanded`) beside the link, NOT a button wrapping it, because a link inside a button is invalid interactive nesting. The strip stays MOUNTED while
- * collapsed (`hidden`) so a write already in flight keeps its busy state if the line is folded. The outcome line is drawn whether or not the line is open —
+ * (`aria-expanded`) beside the link, NOT a button wrapping it, because a link inside a button is invalid interactive nesting. The strip is UNMOUNTED when the
+ * line is folded: an open `Confirm` joins `useDialogEscape`'s stack while it is drawn, and one that stayed mounted under `hidden` would swallow the next Escape
+ * unseen ("Escape has one owner, and the topmost dialog is the only one that closes"). The price is that a fold forgets a write's busy state, which the
+ * page's own re-read answers. The outcome line is drawn whether or not the line is open —
  * a collapsed part never hides the result of a write (spec, "What every layout carries").
  *
  * **Can't read.** A shown repo whose last read was `rate-limited` or `error` keeps its rows — still ranked, still actionable, a failed refresh is no reason to
@@ -64,6 +78,9 @@ function ItemMeta({ r, now }: { r: RankedPr; now: number }) {
 
 function LoudItem({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
   const { pr, repo, key } = r;
+  /* The compact `Merge…` opens the full strip (method select, Merge, Confirm) inside this wrapper; the wrapper then takes the item's full width and drops under
+     the text, because the spec has the full strip open "inline under the item" and a select plus a Confirm do not fit the narrow right-hand column. */
+  const [stripOpen, setStripOpen] = useState(false);
   const warning = prRunWarning(pr, repo.repo, props.ctx, props.now);
   const { verdict, steps } = prVerdict(prProblems(pr, warning));
   return (
@@ -89,8 +106,8 @@ function LoudItem({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
         )}
         <ItemMeta r={r} now={props.now} />
       </div>
-      <div className="prs-inbox-keys">
-        <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="compact" />
+      <div className={stripOpen ? 'prs-inbox-keys prs-inbox-keys-open' : 'prs-inbox-keys'}>
+        <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="compact" onOpen={() => setStripOpen(true)} />
       </div>
       <PrOutcomeLine outcome={props.outcomes[key]} updating={isUpdating(props.marks[key], pr, props.now)} />
     </li>
@@ -113,14 +130,23 @@ function QuietLine({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
         <span className="prs-inbox-repo">{repo.repo}</span>
         {facts !== '' && <span className="prs-inbox-facts">{facts}</span>}
         {warning !== null && <Pill tone="warn">{warning}</Pill>}
-        <button type="button" className="prs-inbox-toggle" aria-expanded={expanded} aria-label={`Actions for #${pr.number}`} onClick={() => setExpanded((open) => !open)}>
-          {expanded ? 'Hide' : 'Actions'}
+        {/* The visible word is part of the accessible name (label-in-name); `aria-expanded` carries open versus folded, so the word never has to change. */}
+        <button
+          type="button"
+          className="prs-inbox-toggle"
+          aria-expanded={expanded}
+          aria-label={`Actions for #${pr.number}`}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          Actions
         </button>
       </div>
       <PrOutcomeLine outcome={props.outcomes[key]} updating={isUpdating(props.marks[key], pr, props.now)} />
-      <div className="prs-inbox-quiet-actions" hidden={!expanded}>
-        <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="compact" />
-      </div>
+      {expanded && (
+        <div className="prs-inbox-quiet-actions">
+          <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="compact" />
+        </div>
+      )}
     </li>
   );
 }

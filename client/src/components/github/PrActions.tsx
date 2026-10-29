@@ -34,13 +34,16 @@ export function PrActions({
   repo,
   pr,
   onWrite,
-  variant
+  variant,
+  onOpen
 }: {
   repo: PrRepoView;
   pr: PullRequestRow;
   /** Runs one write for this PR and resolves once its outcome is recorded and the page has re-read. Never rejects. */
   onWrite: (call: () => Promise<PrWriteResult>) => Promise<void>;
   variant: 'full' | 'compact';
+  /** Called once when the compact strip's `Merge…` opens the full one, so a layout can give the opened strip the room it needs (Inbox: the item's full width). */
+  onOpen?: () => void;
 }) {
   const ids = useId();
   const mounted = useMountedRef();
@@ -84,7 +87,11 @@ export function PrActions({
   if (variant === 'compact' && !expanded) {
     const { keys, primary } = compactKeys(pr, repo);
     const spec: Record<PrKey, { label: string; reason: string | null; suffix: string; onClick: () => void }> = {
-      merge: { label: 'Merge…', reason: merge, suffix: 'merge', onClick: () => setExpanded(true) },
+      merge: { label: 'Merge…', reason: merge, suffix: 'merge', onClick: () => {
+          setExpanded(true);
+          onOpen?.();
+        }
+      },
       update: { label: 'Update branch', reason: update, suffix: 'update', onClick: runUpdate },
       'auto-merge': { label: autoLabel, reason: autoMerge, suffix: 'auto', onClick: runAutoMerge }
     };

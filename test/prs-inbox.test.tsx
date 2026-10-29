@@ -139,6 +139,37 @@ describe('PrInbox — items', () => {
     expect(screen.getByTestId('pr-item-a/y#7')).toBeInTheDocument();
   });
 
+  it('keeps an open Confirm on a/y#7 when a/x#7, ranked ahead of it, leaves the list', async () => {
+    const user = userEvent.setup();
+    // Both are loud; a/y#7 has a missing review rather than red checks, because red checks disable Merge. a/x#7 is newer, so it ranks first.
+    const ax = pr({ number: 7, checks: 'failure', updatedAt: '2026-10-29T11:30:00Z', url: 'https://github.com/a/x/pull/7' });
+    const ay = pr({ number: 7, review: 'review-required', url: 'https://github.com/a/y/pull/7' });
+    const { rerender } = render(<PrInbox {...props([repo('a/x', [ax]), repo('a/y', [ay])])} />);
+    expect(screen.getAllByTestId(/^pr-item-/).map((el) => el.getAttribute('data-testid'))).toEqual(['pr-item-a/x#7', 'pr-item-a/y#7']);
+    const item = () => screen.getByTestId('pr-item-a/y#7');
+    await user.click(within(item()).getByRole('button', { name: 'Merge…' }));
+    await user.click(within(item()).getByRole('button', { name: 'Merge' }));
+    expect(within(item()).getByTestId('pr-merge-confirm')).toBeInTheDocument();
+    rerender(<PrInbox {...props([repo('a/x', []), repo('a/y', [{ ...ay }])])} />);
+    expect(screen.queryByTestId('pr-item-a/x#7')).not.toBeInTheDocument();
+    expect(within(item()).getByTestId('pr-merge-confirm')).toBeInTheDocument();
+  });
+
+  it('opens the full strip under the item at its full width, not inside the narrow keys column', async () => {
+    const user = userEvent.setup();
+    render(<PrInbox {...props([repo('a/x', [pr({ number: 5, review: 'review-required' })])])} />);
+    const item = screen.getByTestId('pr-item-a/x#5');
+    const keys = item.querySelector('.prs-inbox-keys') as HTMLElement;
+    expect(keys).not.toHaveClass('prs-inbox-keys-open');
+    await user.click(within(item).getByRole('button', { name: 'Merge…' }));
+    const select = within(item).getByRole('combobox', { name: 'Merge method' });
+    expect(keys).toHaveClass('prs-inbox-keys-open');
+    expect(keys).toContainElement(select);
+    // The wrapper that holds the strip is the item's own child, a sibling of the text column — never nested in it.
+    expect(keys.parentElement).toBe(item);
+    expect(item.querySelector('.prs-inbox-main')).not.toContainElement(keys);
+  });
+
   it('hands the page its write keyed by <repo>#<number> and the PR head', async () => {
     const user = userEvent.setup();
     const write = jest.fn(() => Promise.resolve());
@@ -195,16 +226,45 @@ describe('PrInbox — the quiet line', () => {
     expect(within(line).getByRole('button', { name: 'Merge…' })).toBeVisible();
   });
 
-  it('keeps an open merge Confirm across a re-render with a fresh props object holding the same PR', async () => {
+  it('keeps an open merge Confirm on the same PR when a newer quiet PR is ranked ahead of it', async () => {
     const user = userEvent.setup();
     const { rerender } = render(<PrInbox {...props([repo('a/x', [clean])])} />);
     const line = () => screen.getByTestId('pr-quiet-a/x#3');
     await user.click(within(line()).getByRole('button', { name: 'Actions for #3' }));
     await user.click(within(line()).getByRole('button', { name: 'Merge…' }));
     await user.click(within(line()).getByRole('button', { name: 'Merge' }));
+    expect(within(line()).getByTestId('pr-merge-confirm')).toBeInTheDocument();
+    // #8 is clean and newer, so it ranks first and #3 moves from index 0 to index 1: an index key would hand #3's state to #8's line.
+    const newer = pr({ number: 8, title: 'newer clean', updatedAt: '2026-10-29T11:30:00Z', url: 'https://github.com/a/x/pull/8' });
+    rerender(<PrInbox {...props([repo('a/x', [{ ...newer }, { ...clean }])])} />);
+    const quiet = screen.getAllByTestId(/^pr-quiet-/).map((el) => el.getAttribute('data-testid'));
+    expect(quiet).toEqual(['pr-quiet-a/x#8', 'pr-quiet-a/x#3']);
+    expect(within(screen.getByTestId('pr-quiet-a/x#3')).getByTestId('pr-merge-confirm')).toBeInTheDocument();
+    expect(within(screen.getByTestId('pr-quiet-a/x#8')).queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('pr-merge-confirm')).toHaveLength(1);
+  });
+
+  it('unmounts the strip when the line is folded, so a Confirm left open does not keep the Escape stack', async () => {
+    const user = userEvent.setup();
+    const write = jest.fn(() => Promise.resolve());
+    render(<PrInbox {...props([repo('a/x', [clean])], { write })} />);
+    const line = screen.getByTestId('pr-quiet-a/x#3');
+    const toggle = within(line).getByRole('button', { name: 'Actions for #3' });
+    await user.click(toggle);
+    await user.click(within(line).getByRole('button', { name: 'Merge…' }));
+    await user.click(within(line).getByRole('button', { name: 'Merge' }));
     expect(screen.getByTestId('pr-merge-confirm')).toBeInTheDocument();
-    rerender(<PrInbox {...props([repo('a/x', [{ ...clean }])])} />);
-    expect(screen.getByTestId('pr-merge-confirm')).toBeInTheDocument();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // Nothing is left mounted for Escape to consume unseen, and a fold sends no write.
+    expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
+    expect(write).not.toHaveBeenCalled();
+    // Opened again, the strip starts from the compact keys, not from a stale Confirm.
+    await user.click(toggle);
+    expect(within(line).getByRole('button', { name: 'Merge…' })).toBeVisible();
+    expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
   });
 });
 
