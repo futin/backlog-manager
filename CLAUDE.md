@@ -43,7 +43,8 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   and the 60 s reconciler that keeps the Jira live map honest, and `agents/dashboards/` — `dashboards.json`'s reader/writer, the machine offers, health and
   usage reads, and a card's or an Orchestrate run's launch and stop on another machine, whose outbound calls go to remote dashboards and remote boards and are
   part of THIS module, not a fourth), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap,
-  the read-only `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read
+  the read-only `trackers` route and `tracker-sync.json`'s reader/writer, and the PRs page's on-demand per-repo PR cache behind `GET /api/prs` and its three
+  guarded writes, `POST /api/prs/merge`, `/auto-merge` and `/update-branch`), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read
   routes under `/api/jira` — `GET /prompt`, `/refs` and `/worktrees` among them — `jira.json`'s six guarded write routes, `POST /api/jira/boards`,
   `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the two writes to Jira itself,
   `POST /api/jira/issue/assign` and `/issue/transition`, and the in-memory live map `JiraLiveService` (a session per ticket key, forgotten on restart),
@@ -134,9 +135,10 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#ui-kit-draws-the-version-chip-and-the-whats-new-drawer-this-board-only-maps-its-tokens-and-places-the-chip)
 - **The strip's height and the well's gap are one token, `--main-gap`, read by the strip and the Runs page — never a px literal.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-strips-height-and-the-wells-gap-are-one-token)
-- **Item files are read-only to the server and client**; every write goes through the skills. Dispatch writes no item files either — the spawned session runs
-  the skills, which remain the only writers. **A TRACKER project's items are the one thing this server writes** (task-46), and only through the eleven routes
-  below — never a file, on any path — **and a Jira issue's assignee and status, through `/api/jira/issue/assign` and `/issue/transition`.**
+- **Item files are read-only to the server and client**; every write goes through the skills, and dispatch writes none — the spawned session runs them.
+  **A TRACKER project's items are what this server writes** (task-46), only through the eleven routes below — never a file, on any path — **plus a Jira
+  issue's assignee and status, through `/api/jira/issue/assign` and `/issue/transition`, and an open PR's merge, auto-merge and update-branch, through
+  `/api/prs/*`.**
 - **The eleven `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-eleven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.**
@@ -173,6 +175,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#every-value-the-server-puts-into-jql-is-quoted-and-escaped-and-a-persons-jql-is-passed-verbatim)
 - **The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)
+- **The board's pull-request writes are merge, auto-merge and update-branch, nothing else, and each re-reads the PR.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-boards-pull-request-writes-are-merge-auto-merge-and-update-branch-nothing-else-and-each-re-reads-the-pr)
 - **A Jira branch name obeys one rule, in `shared/jira-branch.ts`, and `jira.mjs` carries its one hand-kept copy.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-one-hand-kept-copy)
 - **A Jira session is remembered in server memory only; a restart forgets it, and Stop is the one hand that clears it early.**

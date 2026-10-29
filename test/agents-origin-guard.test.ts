@@ -126,6 +126,9 @@ describe('the agents POST guard', () => {
     if (route === '/api/dashboards/entries/delete') return { name: 'Pro' };
     if (route === '/api/dashboards/home') return { label: 'Max' };
     if (route === '/api/dashboards/settings') return { threshold: 70 };
+    // The three PR writes (Plan B, task 4) take bodies their controller would accept, so a 403 here is the guard's alone; `futin/x` is registered nowhere
+    // here, which only matters to a request the guard let through.
+    if (route.startsWith('/api/prs/')) return { repo: 'futin/x', number: 7, method: 'squash', headSha: 'a'.repeat(40), enable: true };
     const verb = route.slice('/api/agents/'.length);
     // dispatch-jira (Jira phase 5) names a ticket and a repo, not an item: a body its controller would accept, so a 403 here is the guard's alone.
     if (verb === 'dispatch-jira') {
@@ -142,7 +145,8 @@ describe('the agents POST guard', () => {
   // eighth (the orchestrator:queued spec, §2), `abort`, the ninth (#225) — the one item write that lives in `agents/`, because it calls the
   // dashboard — `review`, the tenth (the execute pr-mode spec, decision 9) — and `plan-review`, the eleventh (backlog-tick) — and the four `/api/dashboards` settings POSTs
   // (multi-dashboard task 2), which change which machine a launch may be sent to and so are as guarded as the launch itself.
-  // `dispatch-jira` is Jira phase 5's Start, the second session-starting POST; `jira-stop` is its Stop.
+  // `dispatch-jira` is Jira phase 5's Start, the second session-starting POST; `jira-stop` is its Stop. The three `/api/prs` POSTs (Plan B, task 4) write
+  // to GitHub — merge, auto-merge, update-branch — and are guarded per route beside their unguarded `GET /api/prs`.
   const GUARDED = [
     '/api/agents/plan',
     '/api/agents/dispatch',
@@ -167,7 +171,10 @@ describe('the agents POST guard', () => {
     '/api/dashboards/entries',
     '/api/dashboards/entries/delete',
     '/api/dashboards/home',
-    '/api/dashboards/settings'
+    '/api/dashboards/settings',
+    '/api/prs/merge',
+    '/api/prs/auto-merge',
+    '/api/prs/update-branch'
   ];
 
   for (const route of GUARDED) {

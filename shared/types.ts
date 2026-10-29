@@ -662,6 +662,45 @@ export interface PullRequestsPayload {
   repos: PrRepoView[];
 }
 
+/** `POST /api/prs/merge`. `headSha` is the head the page read (40 lowercase hex); GitHub refuses the merge with a 409 if the head has moved since. */
+export interface PrMergeRequest {
+  repo: string;
+  number: number;
+  method: MergeMethod;
+  headSha: string;
+}
+
+/** `POST /api/prs/auto-merge`. `method` is required to arm (`enable: true`) and ignored to disarm. */
+export interface PrAutoMergeRequest {
+  repo: string;
+  number: number;
+  enable: boolean;
+  method?: MergeMethod;
+}
+
+/** `POST /api/prs/update-branch` — GitHub's update-branch (base merged into head), never a rebase. `headSha` is sent as `expected_head_sha`. */
+export interface PrUpdateBranchRequest {
+  repo: string;
+  number: number;
+  headSha: string;
+}
+
+/** What a PR write did. `already-merged` is a merge that GitHub refused because the PR was merged already — by a second click serialised behind the first,
+ *  or by somebody on github.com — which the re-read proves; `noop` is a disarm of a PR with no auto-merge armed, which makes no mutation at all. */
+export type PrWriteOutcome = 'merged' | 'already-merged' | 'auto-merge-enabled' | 'auto-merge-disabled' | 'noop' | 'update-requested';
+
+/**
+ * The answer of the three PR writes (`200`, or `202` for update-branch). The write landed — that is what the status says. `pr` is the PR as the write's own
+ * single-PR re-read found it, or `null` when the PR is no longer open (merged, closed) or the re-read failed; `reread` says which. A failed re-read is never
+ * an error, for the same reason as `JiraIssueWriteResult`'s: the write cannot be un-happened, and an error would invite a retry of one that already stood.
+ */
+export interface PrWriteResult {
+  ok: true;
+  outcome: PrWriteOutcome;
+  pr: PullRequestRow | null;
+  reread: boolean;
+}
+
 // ── Jira ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 typed two fields at their empty value so phase 5 could widen them without a
 // rename: `JiraIssueDetail.session` is now `JiraLiveSession | null` and `JiraStatusPayload.live` a key → `JiraLiveSession` map, both filled by the controller from

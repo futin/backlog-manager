@@ -1,3 +1,5 @@
+import type { MergeMethod } from '../../../shared/types';
+
 /**
  * A thin client over `fetch` for the two dozen lines of GitHub's REST API this
  * app uses (task-45, spec §5.1). Its own file, no Nest decorators and no
@@ -333,6 +335,32 @@ export class GithubClient {
     const bad = refuseRepo<unknown>(repo, this.rate);
     if (bad !== null) return bad;
     return this.request<unknown>('DELETE', `${API}/repos/${repo}/issues/${number}/labels/${encodeURIComponent(name)}`, opts);
+  }
+
+  /**
+   * Merge one pull request — the PRs page's merge (Plan B). `sha` is the head the page read: GitHub answers `409` when the head has moved since, so a merge
+   * can never land a commit nobody looked at. `405` is GitHub's "not mergeable" (protection, required checks, already merged) and comes back as the value it
+   * is; the caller re-reads the PR to tell an already-merged one from a refusal. The method is GitHub's own word (`squash` / `merge` / `rebase`).
+   */
+  async mergePull(
+    repo: string,
+    number: number,
+    body: { merge_method: MergeMethod; sha: string },
+    opts: { token: string }
+  ): Promise<GithubResponse<{ sha: string; merged: boolean; message: string }>> {
+    const bad = refuseRepo<{ sha: string; merged: boolean; message: string }>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request('PUT', `${API}/repos/${repo}/pulls/${number}/merge`, { ...opts, body });
+  }
+
+  /**
+   * GitHub's update-branch — merge the base into the head on GitHub's side, never a rebase and never local git. `202` means GitHub accepted it and will do
+   * it asynchronously; `expected_head_sha` makes a head that moved since the read a `422` instead of an update of a branch nobody looked at.
+   */
+  async updatePullBranch(repo: string, number: number, expectedHeadSha: string, opts: { token: string }): Promise<GithubResponse<{ message: string }>> {
+    const bad = refuseRepo<{ message: string }>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request('PUT', `${API}/repos/${repo}/pulls/${number}/update-branch`, { ...opts, body: { expected_head_sha: expectedHeadSha } });
   }
 
   private async request<T>(

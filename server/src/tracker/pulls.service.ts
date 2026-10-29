@@ -1,12 +1,23 @@
 import { Injectable } from '@nestjs/common';
 
-import { GithubClient, isRepo } from './github.client';
+import { GithubClient, isRepo, type GithubResponse } from './github.client';
 import { TrackerPollerService, failureVerdict, type Access, type FailureVerdict } from './poller.service';
-import { readPullList } from './pulls.query';
+import { readPull, readPullList, setAutoMerge, type PullOne } from './pulls.query';
 import { githubToken } from './token.util';
 import { resolveSource } from '../items/sources/resolve.util';
 import { RegistryService, registryProjectsOr503 } from '../registry/registry.service';
-import { MERGE_METHODS, type MergeMethod, type PrRepoView, type PullRequestRow, type PullRequestsPayload } from '../../../shared/types';
+import {
+  MERGE_METHODS,
+  type MergeMethod,
+  type PrAutoMergeRequest,
+  type PrMergeRequest,
+  type PrRepoView,
+  type PrUpdateBranchRequest,
+  type PrWriteOutcome,
+  type PrWriteResult,
+  type PullRequestRow,
+  type PullRequestsPayload
+} from '../../../shared/types';
 
 /**
  * The PRs page's cache (spec 2026-10-29-source-sections-design.md, "PR list freshness"): per repo, in memory, lost on restart, filled ON DEMAND.
@@ -32,6 +43,10 @@ import { MERGE_METHODS, type MergeMethod, type PrRepoView, type PullRequestRow, 
  * and sets `access`/`detail` from `failureVerdict` — the poller's one failure rule, applied unchanged, so a GraphQL rate limit reads exactly as a REST one
  * does on the board. A page that blanked its list on a 502 would trade a stale-but-labelled answer for no answer, which is never the better one.
  *
+ * A failed read still counts against the TTL (ruling R6): freshness is judged from the later of `polledAt` and `attemptedAt`, the time of the last read
+ * of either outcome. Without it a repo answering 502 would be re-queried on every `GET` — two tabs, two queries a minute each — which is exactly the cost the
+ * TTL exists to cap; a failing repo is retried once a minute like a healthy one.
+ *
  * ## Rate limits
  *
  * Values, never sleeps inside a request. An hourly-limit verdict puts this repo's ENTRY to sleep until the reset; GraphQL's primary budget is a separate pool
@@ -53,6 +68,8 @@ export const PR_TTL_MS = 60_000;
 interface PrEntry {
   /** Epoch ms of the last SUCCESSFUL read; `null` before one. */
   polledAt: number | null;
+  /** Epoch ms of the last list read of EITHER outcome; `null` before one. What the TTL is measured from, with `polledAt` (R6). */
+  attemptedAt: number | null;
   access: Access;
   detail: string | null;
   /** Epoch ms before which this repo gets no PR request — a rate limit's reset or a secondary backoff this cache met itself. */
@@ -61,6 +78,33 @@ interface PrEntry {
   total: number;
   methods: MergeMethod[];
   autoMergeAllowed: boolean;
+}
+
+/** A PR write's refusal: the HTTP status the route answers and the sentence it carries as `{ error }`. */
+export interface PrWriteRefusal {
+  ok: false;
+  status: number;
+  error: string;
+}
+
+/** What a PR write hands its route: the result with the success status (`200`, or `202` for update-branch), or the refusal. */
+export type PrWriteAnswer = { ok: true; status: 200 | 202; result: PrWriteResult } | PrWriteRefusal;
+
+/** `GithubSource.ready`'s sentence for the same fact, so the two write surfaces say it alike. */
+const NO_TOKEN = 'BM_GITHUB_TOKEN is not set on this machine';
+
+/** A 2xx with no error — GraphQL's refusals arrive as a `200` with `error` set, so the status alone is not success. */
+function succeeded(res: GithubResponse<unknown>): boolean {
+  return res.status >= 200 && res.status < 300 && res.error === null;
+}
+
+/** The row the cache should hold for a re-read PR: the row while it is open, `null` (a removal) once merged or closed. */
+function openRow(one: PullOne): PullRequestRow | null {
+  return one.state === 'OPEN' ? one.row : null;
+}
+
+function answered(status: 200 | 202, outcome: PrWriteOutcome, re: PullOne | null): PrWriteAnswer {
+  return { ok: true, status, result: { ok: true, outcome, pr: re === null ? null : openRow(re), reread: re !== null } };
 }
 
 /** The kinds `resolveSource` is asked to honour here — the poller's and the trackers route's set. */
@@ -76,6 +120,8 @@ export class PullRequestsService {
   private readonly entries = new Map<string, PrEntry>();
   /** The read in flight per repo, so a second caller joins it instead of sending its own query. Removed when it settles. */
   private readonly reading = new Map<string, Promise<void>>();
+  /** The write chain per `<repo>#<number>` (`serialise`). */
+  private readonly chains = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly registry: RegistryService,
@@ -94,14 +140,7 @@ export class PullRequestsService {
     const token = githubToken();
     if (token === null) return { token: false, repos: [] };
 
-    // Repo → its first registered project's path, in registry order. Resolved per call, as everywhere else: a marker committed a second ago counts.
-    const repos = new Map<string, string>();
-    for (const project of registryProjectsOr503(this.registry)) {
-      const resolved = resolveSource(project.path, KNOWN);
-      if (resolved.kind !== 'tracker') continue;
-      const repo = resolved.marker.repo;
-      if (isRepo(repo) && !repos.has(repo)) repos.set(repo, project.path);
-    }
+    const repos = this.registeredRepos();
 
     // Every repo's read starts synchronously inside `map` (no await before `refresh` registers its promise), which is what lets a concurrent `list()`
     // find the in-flight read and join it.
@@ -153,10 +192,170 @@ export class PullRequestsService {
     if (verdict.secondary) this.poller.noteSecondary(repo, verdict.sleepUntil);
   }
 
+  /**
+   * `POST /api/prs/merge`. GitHub's `200` is `merged`. A refusal re-reads the PR first: a re-read that says `MERGED` turns it into `200 already-merged` —
+   * the second of two clicks, serialised behind the first by `serialise`, meets GitHub's `405` on a PR that is no longer open, and that is the answer the
+   * person wanted, not an error — and any other refusal is answered after its re-read is spliced, so a `409` (head moved) leaves the cache holding the head
+   * the page must now show. A successful merge splices the PR out even when its re-read fails, because GitHub's `200` already said it is merged.
+   */
+  merge(req: PrMergeRequest, now: number = Date.now()): Promise<PrWriteAnswer> {
+    return this.write(req.repo, req.number, now, async (token) => {
+      const res = await this.client.mergePull(req.repo, req.number, { merge_method: req.method, sha: req.headSha }, { token });
+      if (succeeded(res)) {
+        const re = await this.reread(req.repo, req.number, token, now);
+        if (re === null) this.splice(req.repo, null, req.number);
+        return answered(200, 'merged', re);
+      }
+      const refusal = this.refusal(req.repo, res, now);
+      if (refusal.status === 429) return refusal;
+      const re = await this.reread(req.repo, req.number, token, now);
+      if (re?.state === 'MERGED') return answered(200, 'already-merged', re);
+      return refusal;
+    });
+  }
+
+  /**
+   * `POST /api/prs/auto-merge`. The PR is read FIRST — the mutations take its node id, which never leaves the server, and the read says whether anything is
+   * armed — and that read is spliced. A disarm of a PR with nothing armed is `200 noop` with no mutation sent. GitHub's refusal of the mutation (auto-merge
+   * off on the repo, a PR already clean to merge) is a typed GraphQL error on a `200`, answered `409` with its text.
+   */
+  autoMerge(req: PrAutoMergeRequest, now: number = Date.now()): Promise<PrWriteAnswer> {
+    return this.write(req.repo, req.number, now, async (token) => {
+      const before = await readPull(this.client, req.repo, req.number, { token });
+      if (!succeeded(before) || before.data === null) return this.refusal(req.repo, before, now);
+      this.splice(req.repo, openRow(before.data), req.number);
+      if (!req.enable && before.data.row.autoMerge === null) return answered(200, 'noop', before.data);
+
+      const change = req.enable ? { enable: true as const, method: req.method ?? 'merge' } : { enable: false as const };
+      const res = await setAutoMerge(this.client, before.data.id, change, { token });
+      if (!succeeded(res)) {
+        const refusal = this.refusal(req.repo, res, now);
+        if (refusal.status !== 429) await this.reread(req.repo, req.number, token, now);
+        return refusal;
+      }
+      return answered(200, req.enable ? 'auto-merge-enabled' : 'auto-merge-disabled', await this.reread(req.repo, req.number, token, now));
+    });
+  }
+
+  /**
+   * `POST /api/prs/update-branch`. GitHub's `202` is `update-requested`: the update runs asynchronously on GitHub, so the immediate re-read may still show the
+   * old head — the page shows `updating…` until a read shows a new one. A `422` (head moved, a fork that does not allow edits) is a `409` with GitHub's text.
+   */
+  updateBranch(req: PrUpdateBranchRequest, now: number = Date.now()): Promise<PrWriteAnswer> {
+    return this.write(req.repo, req.number, now, async (token) => {
+      const res = await this.client.updatePullBranch(req.repo, req.number, req.headSha, { token });
+      if (succeeded(res)) return answered(202, 'update-requested', await this.reread(req.repo, req.number, token, now));
+      const refusal = this.refusal(req.repo, res, now);
+      if (refusal.status !== 429) await this.reread(req.repo, req.number, token, now);
+      return refusal;
+    });
+  }
+
+  /**
+   * The refusal ladder every PR write shares, in its order. Outside the chain: `404` for a repo no registered project resolves to (the registry is read per
+   * call, so an unreadable one is `registryProjectsOr503`'s 503, as `GET /api/prs` answers), then `503` for no token — both facts about this machine that no
+   * waiting changes. Inside `serialise('<repo>#<number>')`, re-judged when the write's turn comes rather than when it was queued: `409` sync off (the
+   * poller's `syncOffBlock` sentence, its one home), `429` while the repo is asleep — this cache's own sleep or the poller's secondary one — and only then
+   * `fn`, the GitHub calls. Nothing before `fn` makes an outbound call.
+   */
+  private async write(repo: string, number: number, now: number, fn: (token: string) => Promise<PrWriteAnswer>): Promise<PrWriteAnswer> {
+    const path = this.registeredRepos().get(repo);
+    if (path === undefined) return { ok: false, status: 404, error: `${repo} is not the repo of a registered GitHub project` };
+    const token = githubToken();
+    if (token === null) return { ok: false, status: 503, error: NO_TOKEN };
+    return this.serialise(`${repo}#${number}`, async () => {
+      const off = this.poller.syncOffBlock(path);
+      if (off !== null) return { ok: false, status: 409, error: off };
+      const asleep = this.asleepDetail(repo, now);
+      if (asleep !== null) return { ok: false, status: 429, error: asleep };
+      return fn(token);
+    });
+  }
+
+  /**
+   * A failed GitHub answer → the write's refusal. A limit (`failureVerdict`'s rule, the poller's one, unchanged) is `429` and puts the repo to sleep through
+   * `noteSleep` — ruling R4: the PR-cache entry, created empty when none exists, and the poller's repo too for a secondary limit — so the next write and the
+   * next list read make no request until it ends. A `401`/`403` that is not a limit is a token without the permission this write needs: a fine-grained token's
+   * write permissions cannot be read back, so this is where a person learns it, from GitHub's own message. GitHub refusing the write on its merits — REST's
+   * `405`/`409`/`422`, or a typed GraphQL error on a `200` — is `409` with GitHub's text. Anything else (a 5xx, a transport failure, a 404) is `502`.
+   */
+  private refusal(repo: string, res: GithubResponse<unknown>, now: number): PrWriteRefusal {
+    const message = res.error ?? `HTTP ${res.status}`;
+    const verdict = failureVerdict(res, now);
+    if (verdict !== null && verdict.sleepUntil !== null) {
+      this.noteSleep(repo, verdict);
+      return { ok: false, status: 429, error: verdict.detail ?? message };
+    }
+    if (res.status === 401 || res.status === 403) return { ok: false, status: 502, error: `the token lacks permission for this — ${message}` };
+    if (res.status === 405 || res.status === 409 || res.status === 422 || (res.status === 200 && res.error !== null)) {
+      return { ok: false, status: 409, error: message };
+    }
+    return { ok: false, status: 502, error: message };
+  }
+
+  /**
+   * The write's own single-PR read, spliced into the cache — the PR's row when it is open, its removal when it is merged or closed. `null` when the read
+   * failed, which no write turns into an error (the write has landed or been refused already; the answer says `reread: false`). A limit met here still
+   * sleeps the repo.
+   */
+  private async reread(repo: string, number: number, token: string, now: number): Promise<PullOne | null> {
+    const res = await readPull(this.client, repo, number, { token });
+    if (!succeeded(res) || res.data === null) {
+      const verdict = failureVerdict(res, now);
+      if (verdict !== null) this.noteSleep(repo, verdict);
+      return null;
+    }
+    this.splice(repo, openRow(res.data), number);
+    return res.data;
+  }
+
+  /**
+   * Run `fn` after every write already queued for this `<repo>#<number>` — `GithubSource.serialise`'s shape. The chain survives a refusal (`then(fn, fn)`),
+   * and the entry is dropped once it is the tail again, so the map holds only the PRs being written right now. Per PR, not per repo: a merge of #12 is never
+   * queued behind a merge of #7.
+   */
+  private serialise<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.chains.get(key) ?? Promise.resolve();
+    const next = previous.then(fn, fn);
+    const settled = next.then(
+      () => undefined,
+      () => undefined
+    );
+    this.chains.set(key, settled);
+    void settled.then(() => {
+      if (this.chains.get(key) === settled) this.chains.delete(key);
+    });
+    return next;
+  }
+
+  /** The sentence a write is refused with while `repo` is asleep, or `null` when it is awake: the entry's own verdict for this cache's sleep, the poller's
+   *  secondary backoff (worded as `view` words it) for one only the poller met. */
+  private asleepDetail(repo: string, now: number): string | null {
+    const until = this.sleepingUntil(repo, now);
+    if (until === null) return null;
+    const entry = this.entries.get(repo);
+    if (entry?.sleepUntil != null && entry.sleepUntil > now && entry.detail !== null) return entry.detail;
+    return `secondary rate limit — backing off until ${new Date(until).toISOString()}`;
+  }
+
+  /** Repo → its FIRST registered project's path, in registry order — the path `syncOffBlock` is asked about. Resolved per call, as everywhere else: a
+   *  marker committed a second ago counts. Throws `registryProjectsOr503`'s 503 for a registry that cannot be read. */
+  private registeredRepos(): Map<string, string> {
+    const repos = new Map<string, string>();
+    for (const project of registryProjectsOr503(this.registry)) {
+      const resolved = resolveSource(project.path, KNOWN);
+      if (resolved.kind !== 'tracker') continue;
+      const repo = resolved.marker.repo;
+      if (isRepo(repo) && !repos.has(repo)) repos.set(repo, project.path);
+    }
+    return repos;
+  }
+
   /** Read `repo` unless its entry is fresh or it is asleep; join the read already in flight when there is one. */
   private refresh(repo: string, now: number, token: string): Promise<void> {
     const entry = this.entries.get(repo);
-    if (entry?.polledAt != null && now - entry.polledAt < PR_TTL_MS) return Promise.resolve();
+    const last = Math.max(entry?.polledAt ?? -Infinity, entry?.attemptedAt ?? -Infinity);
+    if (now - last < PR_TTL_MS) return Promise.resolve();
     if (this.sleepingUntil(repo, now) !== null) return Promise.resolve();
     const inFlight = this.reading.get(repo);
     if (inFlight !== undefined) return inFlight;
@@ -168,6 +367,7 @@ export class PullRequestsService {
   private async read(repo: string, now: number, token: string): Promise<void> {
     const res = await readPullList(this.client, repo, { token });
     const entry = this.entryOf(repo);
+    entry.attemptedAt = now;
     const verdict = failureVerdict(res, now);
     if (verdict !== null || res.data === null) {
       // `data` null on a 2xx cannot happen through `readPullList` (it maps a missing repository to a 404) — counted as an error rather than trusted.
@@ -200,7 +400,7 @@ export class PullRequestsService {
   private entryOf(repo: string): PrEntry {
     let entry = this.entries.get(repo);
     if (entry === undefined) {
-      entry = { polledAt: null, access: 'ok', detail: null, sleepUntil: null, prs: [], total: 0, methods: [], autoMergeAllowed: false };
+      entry = { polledAt: null, attemptedAt: null, access: 'ok', detail: null, sleepUntil: null, prs: [], total: 0, methods: [], autoMergeAllowed: false };
       this.entries.set(repo, entry);
     }
     return entry;

@@ -183,6 +183,23 @@ describe('PullRequestsService.list', () => {
     expect(numbers(y)).toEqual([12]);
   });
 
+  it('a failed read counts against the TTL too, so a failing repo is not re-read on every GET', async () => {
+    const { gh, prs } = rig();
+    gh.failNext = { fragment: '/graphql', status: 502, message: 'Bad gateway', repo: FAKE_REPO };
+    const first = await prs.list(NOW);
+    expect(view(first.repos, FAKE_REPO)).toMatchObject({ access: 'error', polledAt: null });
+
+    clock = NOW + 30_000;
+    await prs.list(clock);
+    expect(lists(gh, FAKE_REPO)).toBe(1);
+    expect(lists(gh, 'futin/y')).toBe(1);
+
+    clock = NOW + 60_000;
+    const retried = await prs.list(clock);
+    expect(lists(gh, FAKE_REPO)).toBe(2);
+    expect(view(retried.repos, FAKE_REPO)).toMatchObject({ access: 'ok', polledAt: new Date(NOW + 60_000).toISOString() });
+  });
+
   it('a rate limit sleeps that one repo until its reset', async () => {
     const { gh, prs } = rig();
     const reset = NOW / 1000 + 900;

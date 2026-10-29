@@ -3780,6 +3780,48 @@ the workflow offers, `no identity` before an assign is attempted, the first comp
 than sent, and a failure after a landed write says so in its own sentence (`— the assign stands`, `— the Jira writes stand`) because the write is not
 undone and a retry must not be invited as though it were. Unassign, assigning anyone else, a comment and a field edit remain a new rule apiece.
 
+## The board's pull-request writes are merge, auto-merge and update-branch, nothing else, and each re-reads the PR
+
+The PRs page ([spec](../superpowers/specs/2026-10-29-source-sections-design.md), Goal 2; Plan B, task 4) gives this server its third surface that changes
+somebody else's data, after the tracker items and the two Jira writes, and this rule is what keeps it at three calls: **merge** (REST
+`PUT /repos/{repo}/pulls/{n}/merge`), **update-branch** (REST `PUT .../update-branch`) and **auto-merge** (GraphQL `enablePullRequestAutoMerge` /
+`disablePullRequestAutoMerge`), behind `POST /api/prs/merge`, `/auto-merge` and `/update-branch` in `server/src/tracker/pulls.controller.ts`. Close,
+reopen, approve, comment, edit, label or delete a branch is a new rule and a new section here, never another route that "fits the pattern" — for the same
+reason as Jira's: a token that can merge into somebody's `main` is the sharpest thing this server holds, and what it may do with it should be countable.
+
+**GitHub API calls, never local git.** Merge and update-branch are requests to `api.github.com` through the one `GithubClient`; the server checks nothing out,
+fetches nothing and pushes nothing, so [the server never writes git](#the-server-never-writes-git) holds unchanged. Update-branch is GitHub's own (the base
+merged into the head), not a rebase, and it runs on GitHub after the `202`.
+
+**Guarded like every write, tailnet included.** Each POST carries `SameOriginPostGuard` per route (`application/json` and a same-origin `Origin`), and the
+global Host allowlist has already answered — so a tailnet host the allowlist admits may merge exactly as loopback may. There is no loopback-only rule for
+these: the person on the tailnet is the same person, and a write the board offers on one host and refuses on another would be a board that lies about what
+its buttons do. `test/agents-origin-guard.test.ts` holds the three routes in `GUARDED`.
+
+**Serialised per `<repo>#<number>`.** `PullRequestsService.serialise` is `GithubSource.serialise`'s shape — `previous.then(fn, fn)`, the entry dropped once it
+is the tail again — keyed by the PR, never by the repo (a merge of #12 is never queued behind one of #7) and never by the GraphQL node id, which the auto-merge
+mutation needs, the server reads fresh for that one call, and which never leaves the server. Sync off and the sleep are judged INSIDE the chain, when the
+write's turn comes, as `writeChain` judges sync off for the item writes.
+
+**The refusal ladder, in order:** `400` a malformed body · `404` a repo no registered project resolves to · `503` no token · inside the chain `409` sync off
+— `syncOffBlock(path)` of the repo's first registered project, the sentence's one server home, never a copy · `429` the repo asleep · then GitHub's answer:
+a refusal on its merits (REST `405`/`409`/`422`, or a typed GraphQL error on a `200`) is `409` with GitHub's message; a `401`/`403` that is not a limit is
+`502 the token lacks permission for this — <GitHub's message>`, because a fine-grained token's write permissions cannot be read back and this is where a
+person learns the token is short, so the page disables nothing on a guess; a limit is `429` and sleeps the repo (`failureVerdict`, the poller's one rule;
+ruling R4 creates the PR-cache entry when none exists, and a secondary limit sleeps the poller's repo too); anything else is `502`. Nothing before the
+GitHub call makes an outbound request.
+
+**Each re-reads the PR.** After every outcome but a limit, the write reads the single PR again and splices it into the PR cache — its row while open, its
+removal once merged or closed — rather than patching the cached row to what the person expected: a merge queue, a required check or GitHub's own
+`mergeable` recomputation can make the PR something other than what was asked for. The answer carries that row as `pr` and `reread`; a failed re-read is
+`reread: false` and never an error, because the write has already happened ([the Jira rule](#the-boards-jira-writes-are-assign-and-transition-nothing-else)).
+A merge's `200` splices the PR out even when its re-read fails — GitHub's answer already said it is merged.
+
+**Why the second merge is `already-merged`.** Two clicks on Merge, two tabs, or a merge raced from github.com: the second request is serialised behind the
+first here, or simply arrives after GitHub merged it, and GitHub answers `405` for a PR that is no longer open. That is exactly the state the person asked
+for, so the merge's refusal path re-reads first, and a re-read that says `MERGED` answers `200 already-merged`. An error there would invite the person to
+retry a merge that already stood. A disarm of a PR with no auto-merge armed is `200 noop` and sends no mutation, for the same reason.
+
 ## A Jira session is remembered in server memory only, and Stop is the one hand that clears it early
 
 Phase 5's Run starts a Claude session for a Jira ticket, and the board has to show which tickets have one going and refuse a second. This server keeps that
