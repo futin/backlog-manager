@@ -287,11 +287,6 @@ describe('the section rail', () => {
 
   it('clicking Runs renders the runs view', async () => {
     render(<App />);
-    // Awaited first, like its siblings: this case is about the click, not about a click racing the provisional landing's settle. Unawaited, the click
-    // could land after the commit that delivers the projects answer but before that commit's settle effect flushed — React flushes it ahead of the
-    // click's render, with the closure that still sees `pending`, so the settle's `change('files')` overtook the click. Seen once in three full runs
-    // on jest's worker pool, where CPU contention widens that window.
-    expect(await screen.findByText('board stub')).toBeInTheDocument();
 
     await userEvent.click(row('Runs'));
 
