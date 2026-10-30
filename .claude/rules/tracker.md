@@ -105,11 +105,13 @@ paths: ["server/src/tracker/**"]
   the third** (`PullRequestsService`, `server/src/tracker/pulls.service.ts`): in memory, per DISTINCT repo, lost on restart, and ON DEMAND — no timer, interval
   or sweep; a read happens only inside `GET /api/prs` or a write's re-read — served while younger than `PR_TTL_MS` (60 s), with one in-flight read per repo
   shared by concurrent callers. `polledAt` moves on a successful read only; a failure keeps the last rows and sets `access`/`detail` from `failureVerdict`.
-  An hourly-limit verdict sleeps that repo's entry (`noteSleep`, which a write's verdict reaches too, creating an empty entry); a secondary one also calls
-  `poller.noteSecondary`, and the poller's `secondaryUntil` sleeps the entry in turn — `noteSecondary` also sets the poller's repo `access: 'rate-limited'`
+  An hourly-limit verdict sleeps ONE POOL of that repo's entry, `rest` or `graphql` — the one the failed request spent (#395) — through `noteSleep`, which a
+  write's verdict reaches too, creating an empty entry; the list read, a re-read and auto-merge check `graphql`, merge and update-branch `rest` plus the
+  poller's own REST sleep (`poller.restSleep`), and only a `graphql` sleep is the list's `access`/`detail`. A secondary one also calls
+  `poller.noteSecondary`, and the poller's `secondaryUntil` sleeps both pools in turn — `noteSecondary` also sets the poller's repo `access: 'rate-limited'`
   and the secondary detail, as its own verdict does. A typed GraphQL `RATE_LIMITED` is a limit whatever `remaining` says (`GithubResponse.rateLimited`).
   `splice` puts a write's re-read row in place without moving `polledAt`, counts down `total` on a removal and up only on a complete list, and bumps the
-  entry's `splices`: a list read that lands with a different count drops its rows (the attempt still counts), and a successful read clears `sleepUntil` only
+  entry's `splices`: a list read that lands with a different count drops its rows (the attempt still counts), and a successful read clears the `graphql` sleep only
   when it has run out. An `update-requested` sets `dueAt = now + PR_UPDATING_MS` (`shared/types.ts`, also the client's `UPDATING_MS`): `refresh` reads an
   entry past its `dueAt` inside the TTL too, still joining a read in flight. Each write reads its clock when its serialised turn comes. Why:
   [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-and-pull-request-caches-are-the-three-caches-in-this-server-whose-age-is-a-rendered-value)
@@ -128,9 +130,9 @@ paths: ["server/src/tracker/**"]
   `{ repo, number, enable, method? }` and `/update-branch` `{ repo, number, headSha }`, each with `@UseGuards(SameOriginPostGuard)` per route; the controller
   validates (`400`: `isRepo`, positive integer `number`, `method` in `MERGE_METHODS` — required when `enable` — `headSha` 40 lowercase hex, boolean `enable`)
   and `PullRequestsService` does the rest: `404` for a repo no registered project resolves to, `503` no token, then inside `serialise('<repo>#<number>')`
-  (`GithubSource.serialise`'s shape) `409` `syncOffBlock(path)` of the repo's first registered project, `429` while `sleepingUntil` (the entry's own sleep
-  or the poller's `secondaryUntil`) is ahead, then the GitHub calls — REST `GithubClient.mergePull` (`merge_method`, `sha`) and `updatePullBranch`
-  (`expected_head_sha`), GraphQL `readPull` + `setAutoMerge`. `refusal` maps a failed answer: a `failureVerdict` limit → `429` and `noteSleep` (R4);
+  (`GithubSource.serialise`'s shape) `409` `syncOffBlock(path)` of the repo's first registered project, `429` while `sleepingUntil` of the pool the write spends (the entry's
+  own sleep in that pool, the poller's `secondaryUntil`, and for merge and update-branch the poller's `restSleep`) is ahead, then the GitHub calls — REST `GithubClient.mergePull` (`merge_method`, `sha`) and `updatePullBranch`
+  (`expected_head_sha`), GraphQL `readPull` + `setAutoMerge`. `refusal` maps a failed answer: a `failureVerdict` limit → `429` and `noteSleep` of that pool (R4);
   `401`/`403` → `502 the token lacks permission for this — <message>`; `405`/`409`/`422` or a `200` with `error` → `409` with GitHub's message; anything else
   → `502`. Every outcome but a limit re-reads through `readPull` and `splice`s (open row, or removal when merged/closed); a merge refusal whose re-read is
   `MERGED` answers `200 already-merged`, a merge `200` splices the PR out even if its re-read failed, and a disarm with nothing armed is `200 noop` with no
