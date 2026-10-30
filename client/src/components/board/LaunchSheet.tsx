@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import {
   EXECUTE_FINISH_OPTIONS,
+  LAUNCH_SURFACE_OPTIONS,
   dispatchAgent,
   fetchAgentPlan,
   fetchBranches,
@@ -17,10 +18,11 @@ import { staleTakeover } from '../../lib/tracker';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 import { RunOn } from '../ui/RunOn';
+import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
 import { finishClause } from '../../../../shared/agent';
-import type { BacklogItem, ExecuteFinish, PermissionMode } from '../../../../shared/types';
+import type { BacklogItem, ExecuteFinish, ItemDispatchResult, LaunchSurface, PermissionMode } from '../../../../shared/types';
 
 /**
  * LaunchSheet — the one extra tap between a card and a running Claude.
@@ -44,6 +46,13 @@ import type { BacklogItem, ExecuteFinish, PermissionMode } from '../../../../sha
  * (the server 400s one) and draws only the clause line, which then reads the commit rule the server appends. Under PR, for either action, two Switches —
  * auto-merge, and fix-if-it-fails beneath it — ride as booleans beside `finish`/`base` and change the clause line as they flip. They are the §8.2/§8.6 Switch
  * row the remote-control toggle already uses.
+ *
+ * An execute or a groom on the home machine may open in the Claude desktop app instead of the dashboard's headless `claude`: an "Open in" Dashboard |
+ * Desktop control, the §8.2/§8.6 pill `Segmented`, drawn only when the plan carries `launchSurface` — home's dashboard said `desktopAvailable` — and
+ * preselected from it, the dashboard's own Shared default. It is hidden, and no `surface` sent, once a remote machine is picked: that dashboard's answer
+ * describes only its own Mac, and one from before desktop launches would start a headless session while this sheet said Desktop. The app takes none of
+ * permission mode, model, effort or remote control, so under Desktop those controls are disabled, not hidden, beside a line that says so. A desktop launch
+ * comes back with no session id — the app mints its own — so the sheet says where it went instead of linking to a session.
  */
 export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () => void }) {
   const { settings } = useSettings();
@@ -77,14 +86,18 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   // and no Finish row is drawn then.
   const [pickedFinish, setFinish] = useState<ExecuteFinish>(settings.executeDefaultFinish);
   const [finishSeededFor, setFinishSeededFor] = useState<typeof plan>(null);
+  // The surface pick seeds alongside, from the plan's `launchSurface` — the dashboard's own default, never this board's Settings and never the last launch —
+  // and for the same reason in render: an effect would paint one frame of Dashboard on a sheet whose default is Desktop.
+  const [pickedSurface, setSurface] = useState<LaunchSurface>('dashboard');
   if (plan !== null && plan !== finishSeededFor) {
     setFinishSeededFor(plan);
     setFinish(plan.action === 'groom' ? settings.groomDefaultFinish : settings.executeDefaultFinish);
+    setSurface(plan.launchSurface ?? 'dashboard');
   }
   // Never stored, never seeded from a previous launch: a base is a fact about one repository's branches, so every open starts on `'main'`.
   const [base, setBase] = useState<string>('main');
   const { busy, error, run } = useAction();
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [launched, setLaunched] = useState<ItemDispatchResult | null>(null);
 
   // `prompt` and `mode` are editable, so they are state seeded from the plan rather than read off it: once per fetched plan, keyed on the plan object
   // itself, so a re-render of the parent never overwrites what was typed. The stale-answer guard is `useFetched`'s.
@@ -105,6 +118,10 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   // A groom ignores the lock: it never reaches a remote machine with a finish, so the lock has nothing to say about it.
   const finish: ExecuteFinish = isExecute && runOn.lock.prOnly ? 'pr' : pickedFinish;
   const isPr = hasFinish && finish === 'pr';
+  // Whether the Dashboard | Desktop control is drawn — and so whether `surface` is sent at all. Home only, and only once the offers have answered, the way a
+  // groom's Finish row waits: a suggested remote landing a moment later would otherwise take away a control the person had already picked from.
+  const offersDesktop = plan?.launchSurface !== undefined && !runOn.remote && !runOn.loading;
+  const desktop = offersDesktop && pickedSurface === 'desktop';
 
   // Auto-merge and fix exist only under a PR finish. Each time the derived finish BECOMES PR — the open with a PR default, a pick, a switch to a remote
   // execute — both re-seed from Settings, and leaving PR clears both, so a toggle flipped under one PR visit never rides into the next. Fix seeds on only
@@ -166,14 +183,16 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           ...(hasFinish ? (finish === 'pr' ? { finish, base, autoMerge, fix: autoMerge && fix } : { finish }) : {}),
           // Only a remote pick names its machine; home sends no key at all, so a home-only board's request is byte-identical to what it was before the
           // picker existed (Review Focus 1).
-          ...runOn.request
+          ...runOn.request,
+          // Only when the control was drawn: a sheet that offered no choice sends no key, so its spawn body is byte-identical to one from before the control.
+          ...(offersDesktop ? { surface: pickedSurface } : {})
         }),
-      { onSuccess: (r) => setSessionId(r.sessionId) }
+      { onSuccess: setLaunched }
     );
   };
 
   const blocked = plan?.blocked ?? planError;
-  const form = sessionId === null && (blocked === null || blocked === undefined) && plan !== null;
+  const form = launched === null && (blocked === null || blocked === undefined) && plan !== null;
 
   const takeover = staleTakeover(item, Date.now());
 
@@ -201,18 +220,27 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
               cancel
             </Chip>
             <Chip size={28} variant="ink" disabled={busy || prompt.trim() === '' || runOn.blocked} onClick={launch}>
-              {busy ? 'launching…' : runOn.remote ? `Start on ${runOn.label}` : 'launch'}
+              {busy ? 'launching…' : runOn.remote ? `Start on ${runOn.label}` : desktop ? 'open in desktop' : 'launch'}
             </Chip>
           </>
         ) : null
       }
     >
-      {sessionId !== null ? (
+      {launched !== null && launched.surface === 'desktop' ? (
+        /* No id to link to: the app mints its own. The dashboard's row appears on its next scan, and the session is the app's to follow and to stop —
+           the board's Stop & release keys on a dispatch record, which a desktop launch never writes. */
+        <>
+          <div className="sheet-ok">Opened in the desktop app</div>
+          <div className="sheet-note">
+            Follow it there — the dashboard lists it in a few seconds. Its permission prompts wait in the app on this Mac, and the board cannot stop it.
+          </div>
+        </>
+      ) : launched !== null ? (
         /* The form is gone on purpose: the session exists, and a second
            Launch would start a second one on the same item. */
         <>
-          <div className="sheet-ok">launched · {sessionId}</div>
-          <a className="sheet-link" href={sessionUrl(settings.linkBase, sessionId)} target="_blank" rel="noreferrer">
+          <div className="sheet-ok">launched · {launched.sessionId}</div>
+          <a className="sheet-link" href={sessionUrl(settings.linkBase, launched.sessionId)} target="_blank" rel="noreferrer">
             open in dashboard ↗
           </a>
           <div className="sheet-note">Its questions appear there — and on your phone, if the dashboard's hooks are installed.</div>
@@ -227,6 +255,15 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
               `RunOn` draws nothing below two machines, which is a home-only board's whole sheet unchanged. */}
           {runOn.offers !== null && <RunOn offers={runOn.offers} value={runOn.machine} onChange={runOn.pick} />}
           {runOn.note !== null && <div className="sheet-note">{runOn.note}</div>}
+
+          {/* A div, not the label the other fields use, the way JiraBranchSection wraps its Segmented: a label's click goes to its first labelable
+              descendant, so clicking "Open in" would press Dashboard. The group names itself through its own aria-label. */}
+          {offersDesktop && (
+            <div className="sheet-field">
+              <span className="set-name">Open in</span>
+              <Segmented<LaunchSurface> pill label="Open in" value={pickedSurface} options={LAUNCH_SURFACE_OPTIONS} onChange={setSurface} />
+            </div>
+          )}
 
           <label className="sheet-field">
             <span className="set-name">Project</span>
@@ -312,6 +349,7 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
                 value={mode}
                 onChange={setMode}
                 options={plan.allowedModes.map((m) => ({ value: m, label: m }))}
+                disabled={desktop}
               />
             </label>
 
@@ -322,20 +360,23 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
                 so an unknown name costs the flag, not the launch. */}
             <label className="sheet-field">
               <span className="set-name">Model</span>
-              <Select label="Model" value={model} onChange={setModel} options={runOn.modelOptions} />
+              <Select label="Model" value={model} onChange={setModel} options={runOn.modelOptions} disabled={desktop} />
             </label>
 
             <label className="sheet-field">
               <span className="set-name">Effort</span>
-              <Select label="Effort" value={effort} onChange={setEffort} options={runOn.effortOptions} />
+              <Select label="Effort" value={effort} onChange={setEffort} options={runOn.effortOptions} disabled={desktop} />
             </label>
           </div>
+          {/* Disabled rather than dropped, and said here rather than left to a `title`: the picks stay as they were, so switching back to Dashboard
+              launches with them, and the person sees before launching that the app will not read them. */}
+          {desktop && <div className="sheet-note">The desktop app uses its own permission mode, model and effort — these and remote control do not apply.</div>}
 
           {/* A Switch, not a checkbox: §8's standing rule is that a raised
               control marks a STATE, and this is one that persists for the
               length of the session it launches. */}
           <div className="sheet-check">
-            <Switch checked={remoteControl} onChange={setRemoteControl} label="remote control" />
+            <Switch checked={remoteControl} onChange={setRemoteControl} label="remote control" disabled={desktop} />
             <span>remote control — the Claude phone app can see and drive it</span>
           </div>
 
