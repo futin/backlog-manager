@@ -88,7 +88,9 @@ only lock.
 `review` is one of the eleven item writes, and its label IS read as exclusion, unlike `queue`'s: `backlog.mjs review <id> on|off` is its one caller, run by
 `backlog-execute` in `pr` mode right after it pushes an item's branch (the claim is released then, and the issue stays open until the PR merges) and by a person
 when a PR closes unmerged. `plan`/`dispatch` refuse a mapped `inReview` item with `a PR is open for this item` (`inReviewBlock`, `shared/agent.ts`), and the
-orchestrator gate turns it `ungroomed` with the same sentence.
+orchestrator gate turns it `ungroomed` with the same sentence. The label is LIFTED by derivation, never by a write (#411): the mapper drops `inReview` while
+`TrackerPollerService.reviewLifted` says a PR referencing the issue (`Closes`/`Fixes`/`Resolves`/`Refs #<n>`) merged into the default branch and none is still
+open — the case a `Refs #<n>` PR leaves behind, since it closes nothing.
 
 `plan-review` is the label a tick's unattended groom leaves on the plan it writes, and it is read as exclusion exactly as `in-review` is: `planReviewBlock`
 (`shared/agent.ts`) makes `plan`/`dispatch` refuse a mapped `planReview` item with `this plan awaits review`, always AFTER `inReviewBlock`, and the orchestrator

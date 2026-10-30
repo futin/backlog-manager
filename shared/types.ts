@@ -317,7 +317,9 @@ export interface BacklogItem {
   /**
    * The `in-review` label, for a TRACKER item only (execute pr-mode spec, decision 9): a PR for this item is open and the work lands when it merges, so
    * the issue stays open and unclaimed in the meantime. **Unlike `queued`, gates DO read it** — the board's two per-item dispatch ladders, the
-   * orchestrator's queue and execute's refusal all skip such an item, because an open unclaimed issue otherwise looks ready to every machine.
+   * orchestrator's queue and execute's refusal all skip such an item, because an open unclaimed issue otherwise looks ready to every machine. Absent despite
+   * the label once a referencing PR merged into the default branch and none is open (#411, `TrackerPollerService.reviewLifted`) — the label outlives a
+   * `Refs #<n>` merge, the review does not.
    *
    * **Optional, `true` or absent, and never `false`,** by the same rule as `queued` and `runnerFix`: the mapper is the only writer.
    */

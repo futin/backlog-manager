@@ -265,6 +265,14 @@ export class GithubClient {
     return this.request<GithubIssue>('GET', `${API}/repos/${repo}/issues/${number}`, opts);
   }
 
+  /** One pull request, for the one field the issues endpoint leaves off a PR row: its BASE. The poller asks it once per merged PR that references an issue
+   *  still labelled `in-review` (#411), to tell a merge into the default branch — the work landed, the review is over — from one into a feature branch. */
+  async pull(repo: string, number: number, opts: { token: string }): Promise<GithubResponse<GithubPull>> {
+    const bad = refuseRepo<GithubPull>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request<GithubPull>('GET', `${API}/repos/${repo}/pulls/${number}`, opts);
+  }
+
   /** One page of ONE issue's comments — the claim protocol's read. Paginated
    *  the way `issues` is: this returns a page and its `next` link, and the
    *  caller follows the cursor with `page()`. A per-issue read rather than the
@@ -512,8 +520,10 @@ function nextLink(link: string | null): string | null {
  * without leaving these two files.
  *
  * `pull_request` is present exactly when the row is a PR, which the issues
- * endpoint returns alongside real issues; it is typed as `unknown` because
- * nothing reads its contents — only whether it is there.
+ * endpoint returns alongside real issues. The mapper reads only whether it is
+ * there; the poller's PR index (#411) also reads `merged_at`, the one fact the
+ * issues endpoint carries about a merge — the base it merged into is not on
+ * the row, and is `pull()`'s to answer.
  */
 export interface GithubIssue {
   number: number;
@@ -527,12 +537,18 @@ export interface GithubIssue {
   closed_at?: string | null;
   labels: ({ name: string } | string)[];
   assignees?: { login: string }[] | null;
-  pull_request?: unknown;
+  pull_request?: { url?: string; merged_at?: string | null } | null;
   /** The issue AUTHOR's relationship to the repository, as GitHub states it on every issue it returns — `GithubComment.author_association`'s vocabulary.
    *  `mapIssue` reads it (#341): only the author and accounts with write access can edit an issue body, so an author outside `OWNER`/`MEMBER`/`COLLABORATOR`
    *  is the one case whose body nobody trusted wrote. Optional, and absent read as "not stated", for the comment field's reason: only a hand-built issue
    *  carries none. */
   author_association?: string;
+}
+
+/** The pull-request fields the review lift reads (#411): where it merged, and what the repo's default branch is — both on `base`, so one GET answers both. */
+export interface GithubPull {
+  number: number;
+  base?: { ref?: string; repo?: { default_branch?: string } | null } | null;
 }
 
 /**

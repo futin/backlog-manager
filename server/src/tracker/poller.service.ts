@@ -5,7 +5,7 @@ import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/comm
 
 import { claimsByIssue } from './claim';
 import { GithubClient, isRepo, type GithubComment, type GithubIssue, type GithubResponse } from './github.client';
-import { TRACKER_LABELS, TRACKER_LABEL_NAMES } from './labels';
+import { IN_REVIEW_LABEL, TRACKER_LABELS, TRACKER_LABEL_NAMES } from './labels';
 import { intervalFor } from './sync-config.util';
 import { githubToken } from './token.util';
 import { resolveSource } from '../items/sources/resolve.util';
@@ -127,6 +127,39 @@ export function sinceFor(mark: string | null): string | null {
 /** How many stamps `RepoState.bodyStamps` keeps per issue (bug #234). A groom's read-to-write window spans its own claim writes plus whatever else touches
  *  the issue meanwhile — a handful of stamps, not dozens — so 32 is generous, and still a few KB for a busy repo. */
 const BODY_STAMPS_PER_ISSUE = 32;
+
+/**
+ * The issue numbers a PR body names after a reference keyword (#411): `close`/`closes`/`closed`, `fix`/`fixes`/`fixed`, `resolve`/`resolves`/`resolved` —
+ * GitHub's own closing keywords — plus `ref`/`refs`, which execute's `pr` mode writes for a PR into anything but the default branch, and which closes
+ * nothing. Case-insensitive, an optional colon, then `#<n>`.
+ *
+ * A BARE `#n` is not a reference and is deliberately not read: a PR that mentions an issue in passing ("follow-up to #266") says nothing about whether that
+ * issue's review is over, and #365 mentioned #266 while #266 was still waiting on a person. `\b` on both sides of the keyword keeps `prefixes #266` out, and
+ * the greedy digit run means `#310` is 310 — never 31. Same-repo references only: `owner/name#n` names another repo's issue, which no cache here holds.
+ */
+export function pullRefs(body: string | null | undefined): number[] {
+  if (typeof body !== 'string') return [];
+  const out: number[] = [];
+  for (const match of body.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\b:?\s+#(\d+)\b/gi)) {
+    const n = Number(match[1]);
+    if (Number.isSafeInteger(n) && n > 0 && !out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+/** Whether an issue carries a label, either shape GitHub sends — `mapIssue`'s `labelNames` reading, kept local because that file imports this one. */
+function hasLabel(issue: GithubIssue, name: string): boolean {
+  return (issue.labels ?? []).some((label) => (typeof label === 'string' ? label : label?.name) === name);
+}
+
+/** One PR as the issues endpoint describes it, kept for the review lift (#411) and nothing else — see `RepoState.pulls`. */
+interface PullEntry {
+  open: boolean;
+  /** `pull_request.merged_at` — `null` for an open PR and for one closed without merging. */
+  mergedAt: string | null;
+  /** `pullRefs(body)`: the issues this PR says it is for. */
+  refs: readonly number[];
+}
 
 /** sha256 of an issue body, `null` read as the empty body — the same reading `patchBody` compares against. Exported so the writer and the reader
  *  cannot hash two different ways. */
@@ -297,6 +330,17 @@ interface RepoState {
    * on the first tick after `sleepUntil`, not five minutes after that.
    */
   lastSyncAt: number | null;
+  /**
+   * The PRs the issues endpoint returned, by number — a slim index, never a second copy of the rows (#411). The issues read has always carried every PR in
+   * the repo and `absorbIssues` dropped them; this keeps three facts from each so the `in-review` label can be lifted by derivation once the work it guards
+   * has landed. Upserted like `issues`, so `since`'s inclusive re-send moves an entry from open to merged; the hwm rule is untouched (a PR moves no mark).
+   */
+  pulls: Map<number, PullEntry>;
+  /**
+   * Per MERGED PR number: did it merge into the repo's default branch? Learned by one `GET /pulls/<n>` per PR, for the life of the process — a merged PR's
+   * base can no longer change, so the answer is never re-asked. Absent means "not known yet", which `reviewLifted` reads as not lifted.
+   */
+  pullBases: Map<number, boolean>;
 }
 
 @Injectable()
@@ -456,6 +500,26 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     const state = this.repos.get(repo);
     if (state === undefined) return [];
     return [...state.issues.values()].sort((a, b) => a.number - b.number);
+  }
+
+  /**
+   * Has the review the `in-review` label guards already ended (#411)? True only when at least one PR referencing the issue (`pullRefs`) merged into the
+   * repo's DEFAULT branch and no referencing PR is still open. Everything else is `false`: no referencing PR, only PRs closed unmerged (the person's
+   * `review <n> off` stays the exit there, as decision 9 says), a merge into a feature branch, and a base not learned yet.
+   *
+   * Read by `mapIssue` through `GithubSource`, which is the whole point: the label is lifted by DERIVATION, never by a write — the server writes tracker items
+   * only through the eleven guarded routes, and a merge seen by the poller is not one of them. Every gate that reads `inReview` inherits the answer.
+   */
+  reviewLifted(repo: string, number: number): boolean {
+    const state = this.repos.get(repo);
+    if (state === undefined) return false;
+    let landed = false;
+    for (const [pr, pull] of state.pulls) {
+      if (!pull.refs.includes(number)) continue;
+      if (pull.open) return false;
+      if (pull.mergedAt !== null && state.pullBases.get(pr) === true) landed = true;
+    }
+    return landed;
   }
 
   /** One cached issue, or `undefined` — the body route's whole lookup. */
@@ -725,7 +789,9 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
         labelsEnsured: false,
         sleepUntil: null,
         secondaryUntil: null,
-        lastSyncAt: null
+        lastSyncAt: null,
+        pulls: new Map(),
+        pullBases: new Map()
       };
       this.repos.set(repo, state);
     }
@@ -828,6 +894,9 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // been recorded as this repo's `access` — and a rate-limited repo must not
     // go on to spend requests on labels either.
     if (!(await this.reconcileClaimedIssues(repo, token, state))) return;
+
+    // After the reconcile, for the same reason: a failure here is recorded as `access`, and a limited repo must not spend requests on labels either.
+    if (!(await this.learnReviewBases(repo, token, state))) return;
 
     // The bootstrap, after the first sync that proved the repo is readable
     // (spec §5.2). Phase 2's one write to GitHub.
@@ -939,6 +1008,36 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     return true;
   }
 
+  /**
+   * Learn the base of every merged PR that could lift an `in-review` label (#411): for each cached issue carrying the label with NO open referencing PR, ask
+   * `GET /pulls/<n>` of each merged referencing PR whose base this process does not know yet. An issue without the label costs nothing, an issue with an open
+   * referencing PR costs nothing (it cannot be lifted whatever the bases say), and a PR is asked about once — so a quiet repo spends zero requests here.
+   *
+   * A failed answer goes through `handleFailure` and returns `false`, asking about no further PR this tick: the base stays unknown, the label stays read, and
+   * the next sync asks again. A `404` is NOT a failure: the PR is gone (or the token lost sight of it) while the repo-wide read that just succeeded proves the
+   * REPO is readable, and marking it `not-found` would blank the board over one row. It stays unknown, and is asked again next tick, exactly like a failure
+   * that records nothing.
+   */
+  private async learnReviewBases(repo: string, token: string, state: RepoState): Promise<boolean> {
+    for (const issue of [...state.issues.values()].sort((a, b) => a.number - b.number)) {
+      if (!hasLabel(issue, IN_REVIEW_LABEL)) continue;
+      const refs = [...state.pulls.entries()].filter(([, pull]) => pull.refs.includes(issue.number));
+      if (refs.some(([, pull]) => pull.open)) continue;
+      for (const [number, pull] of refs) {
+        if (pull.mergedAt === null || state.pullBases.has(number)) continue;
+        const res = await this.client.pull(repo, number, { token });
+        if (res.status === 404) continue;
+        if (this.handleFailure(state, res)) return false;
+        const base = res.data?.base;
+        const ref = base?.ref;
+        const fallback = base?.repo?.default_branch;
+        if (res.status !== 200 || typeof ref !== 'string' || typeof fallback !== 'string') continue;
+        state.pullBases.set(number, ref === fallback);
+      }
+    }
+    return true;
+  }
+
   /** Upsert by issue number, dropping pull requests, and move the high-water
    *  mark. `since` is INCLUSIVE, so the newest issue comes back on the next
    *  poll too — which is exactly why this is an upsert into a Map keyed by
@@ -950,7 +1049,14 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       // The issues endpoint returns PRs as well. Dropped here as well as in
       // the mapper: here so the cache does not grow a copy of every PR in the
       // repo, there so no other reader of the cache has to remember.
-      if (issue.pull_request !== undefined && issue.pull_request !== null) continue;
+      if (issue.pull_request !== undefined && issue.pull_request !== null) {
+        // Not an item — but the review lift's evidence (#411), so three facts are kept in the PR index before the row is dropped.
+        if (typeof issue.number === 'number') {
+          const mergedAt = typeof issue.pull_request.merged_at === 'string' ? issue.pull_request.merged_at : null;
+          state.pulls.set(issue.number, { open: issue.state === 'open', mergedAt, refs: pullRefs(issue.body) });
+        }
+        continue;
+      }
       state.issues.set(issue.number, issue);
       recordBodyStamp(state, issue);
       if (typeof issue.updated_at === 'string' && (state.hwm === null || issue.updated_at > state.hwm)) {

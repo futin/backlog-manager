@@ -299,8 +299,9 @@ The worktree stays where it is: the PR may need follow-up fixes there. The final
 - the PR URL — or the exact `gh pr create` command and why it was not run;
 - the branch and the absolute worktree path;
 - **tracker:** that `in-review` is on `#<n>` and comes off by itself when the PR merges and closes the issue; that a PR closed without merging leaves it on an
-  open issue, removed with `backlog.mjs review <n> off`; with `Refs #<n>`, that the issue must be closed by hand once the work reaches the default branch, and
-  the label removed then. If the label write failed: that the guard is missing, and the command to add it;
+  open issue, removed with `backlog.mjs review <n> off`; with `Refs #<n>`, that the guard stops blocking by itself once a referencing PR has merged into the
+  default branch and none is open (the board derives it; the label stays), and that the issue must still be closed by hand when the work is complete. If the
+  label write failed: that the guard is missing, and the command to add it;
 - **files:** "merge this PR before draining the backlog" — until it merges the item is still in `open/` on `<base>`, and an orchestrator run would execute it
   again. That is a known limitation: a files project has no label to carry a guard. Not printed when the auto-merge wait saw the PR merge;
 - **with `--auto-merge`:** the one `auto-merge:` outcome line and every fix commit (`<short sha> <subject>`, or `fix commits: none`), as
@@ -319,7 +320,7 @@ The design spec (`docs/superpowers/specs/2026-10-21-execute-pr-mode-design.md`) 
 - **Decision 8, the tracker issue closes when the PR merges** — no archive, the claim held through review and push, then comment and release, no `move` (§5,
   §8).
 - **Decision 9, the `in-review` label guards a tracker item while its PR is open** — added after a successful push, read by every gate, removed by the merge
-  or by the person (§3, §8, §9).
+  or by the person (§3, §8, §9); since #411 also lifted, without a write, once a referencing PR merged into the default branch and none is open.
 
 And the calls the spec made itself: the mode is read once and never re-read in the new tree (§1); commands reach the tree by `cd`, never a new flag (§2); a
 permission denial stops only the git and `gh` steps — a tracker item's `backlog.mjs` steps still run — and hands over the remaining commands (§8); the
