@@ -54,7 +54,9 @@ const WARNING_CLOCK_MS = 15_000;
  * **Writes and their outcomes.** A row asks the page to run a write (`write`); the page records the one-line outcome under `<repo>#<number>` — the server's
  * own word through `outcomeLine`, or a refusal's sentence verbatim (`prs-api`'s `errorOf`) — then re-reads, after success AND failure, because a refusal
  * such as a moved head is exactly when the row is out of date. The outcome lives here and not in the row because a merge's re-read takes the PR off the open
- * list: a repo keeps a `#12 merged` line for a PR that left it, or the most important outcome on the page would vanish with the row that earned it.
+ * list: a repo keeps a `#12 merged` line for a PR that left it, or the most important outcome on the page would vanish with the row that earned it. A PR's
+ * line is cleared the moment its next write leaves, and a repo shows only its newest `DEPARTED_KEEP` departed lines, so a page left mounted through many
+ * writes does not pile them up (#396).
  *
  * **`updating…`.** GitHub answers update-branch with 202 and merges later, so the page marks the PR at the head SHA it asked from (`UpdateMark`) and the row
  * says `updating…` while `isUpdating` — until a read shows a new head, or `UPDATING_MS` pass. At that moment the page re-reads once (a timer per mark), so the
@@ -132,6 +134,14 @@ export default function PullRequestsView({ onWorking, onOpenSettings }: { onWork
   const write = useCallback(
     async (key: string, sha: string, call: () => Promise<PrWriteResult>): Promise<void> => {
       setInFlight((prev) => new Set(prev).add(key));
+      // The last outcome answered the last write; a new one is leaving, so the old line goes now rather than standing beside a write it says nothing about
+      // (the Jira modal clears its error the same way). Dropping the key also makes the re-add below land last, which is the order `departedOutcomes` caps by.
+      setOutcomes((prev) => {
+        if (!(key in prev)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
       try {
         let outcome: PrOutcome;
         try {

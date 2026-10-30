@@ -1,6 +1,7 @@
 import {
   columnCounts,
   compactKeys,
+  DEPARTED_KEEP,
   departedOutcomes,
   drawableLayout,
   isNoAccess,
@@ -280,6 +281,20 @@ describe('page-level readings', () => {
   it('departedOutcomes does not match a repo whose name is a prefix of another', () => {
     const shown = [repo({ repo: 'a/x' })];
     expect(departedOutcomes({ 'a/xy#1': { text: 'merged', kind: 'ok' } }, shown)).toEqual([]);
+  });
+
+  it('departedOutcomes keeps only the newest DEPARTED_KEEP lines per repo, in the order they were recorded', () => {
+    expect(DEPARTED_KEEP).toBe(3);
+    const shown = [repo({ repo: 'a/x' }), repo({ repo: 'b/y' })];
+    const outcomes: Record<string, PrOutcome> = {
+      'a/x#1': { text: 'merged', kind: 'ok' },
+      'b/y#7': { text: 'merged', kind: 'ok' },
+      'a/x#2': { text: 'GitHub said no', kind: 'error' },
+      'a/x#3': { text: 'merged', kind: 'ok' },
+      'a/x#4': { text: 'merged', kind: 'ok' }
+    };
+    expect(departedOutcomes(outcomes, shown).map((d) => d.key)).toEqual(['b/y#7', 'a/x#2', 'a/x#3', 'a/x#4']);
+    expect(departedOutcomes(outcomes, [shown[0]]).map((d) => d.key)).toEqual(['a/x#2', 'a/x#3', 'a/x#4']);
   });
 });
 
