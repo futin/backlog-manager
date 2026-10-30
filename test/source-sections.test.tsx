@@ -89,6 +89,7 @@ const answer = (body: unknown, ok = true, status = 200) => Promise.resolve({ ok,
 
 beforeEach(() => {
   localStorage.clear();
+  window.history.replaceState(null, '', '/');
   projectsAnswer = BOTH;
   jiraUnconfigured = false;
   global.fetch = jest.fn((input: RequestInfo | URL) => {
@@ -233,6 +234,80 @@ describe('settling a provisional landing', () => {
     await flush();
     expect(rows()).not.toContain('GitHub');
     expect(current()).toBe('Files');
+  });
+
+  /*
+    The pin's settle is its own question, not the section's (#399): a deep link, a click before the first projects answer and a failed read followed by a
+    click each end the provisional SECTION, and none of them may leave the pin unsettled — nor let an unrelated `update()` write the clamped `github` down
+    as a real pin while it waits.
+  */
+  const landing = (): unknown => (stored(SETTINGS_STORAGE_KEY) as { landing?: unknown } | null)?.landing;
+  const clickRow = (name: string): void => {
+    const row = within(rail())
+      .getAllByRole('button')
+      .find((b) => b.classList.contains('rail-link') && b.textContent === name);
+    if (!row) throw new Error(`no ${name} row`);
+    act(() => row.click());
+  };
+
+  it('legacy board pin settles under a deep link, which still wins the screen', async () => {
+    store(SETTINGS_STORAGE_KEY, { landing: 'board' });
+    window.history.replaceState(null, '', '/?section=runs');
+    projectsAnswer = FILES;
+    render(<App />);
+    expect(await screen.findByText('runs stub')).toBeInTheDocument();
+    await flush();
+    expect(current()).toBe('Runs');
+    expect(landing()).toBe('files');
+  });
+
+  it('a deep-linked Settings scope does not write the clamped github while the answer is held', async () => {
+    store(SETTINGS_STORAGE_KEY, { landing: 'board' });
+    window.history.replaceState(null, '', '/?section=settings&settings=shared');
+    const held = deferred<unknown[]>();
+    projectsAnswer = held.promise;
+    render(<App />);
+    await flush();
+    expect((stored(SETTINGS_STORAGE_KEY) as { settingsScope?: unknown }).settingsScope).toBe('shared');
+    expect(landing()).toBe('board');
+
+    await act(async () => held.resolve(FILES));
+    await flush();
+    expect(landing()).toBe('files');
+  });
+
+  it('legacy board pin settles after a click made before the first projects answer', async () => {
+    store(SETTINGS_STORAGE_KEY, { landing: 'board' });
+    const held = deferred<unknown[]>();
+    projectsAnswer = held.promise;
+    render(<App />);
+    await flush();
+    clickRow('Runs');
+    await flush();
+
+    await act(async () => held.resolve(FILES));
+    await flush();
+    expect(current()).toBe('Runs');
+    expect(landing()).toBe('files');
+  });
+
+  it('legacy board pin waits through a failed read and a click, then settles on the first answer', async () => {
+    store(SETTINGS_STORAGE_KEY, { landing: 'board' });
+    projectsAnswer = 500;
+    render(<App />);
+    await flush();
+    clickRow('Runs');
+    await flush();
+    expect(current()).toBe('Runs');
+    expect(landing()).toBe('board');
+
+    projectsAnswer = FILES;
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await flush();
+    expect(current()).toBe('Runs');
+    expect(landing()).toBe('files');
   });
 });
 

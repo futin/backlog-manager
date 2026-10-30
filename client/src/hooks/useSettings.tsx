@@ -7,6 +7,11 @@ interface SettingsControl {
   settings: Settings;
   /** Merge a partial change. Always re-clamped, so no caller can store a bad value. */
   update: (patch: Partial<Settings>) => void;
+  /**
+   * The stored `landing` while it still names a legacy `board`/`archive` — which `settings.landing` reads as `github` — or `null`. The shell settles it on
+   * the first projects answer (`App`); a write to `landing` is the only thing that ends it.
+   */
+  legacyLanding: 'board' | 'archive' | null;
 }
 
 const SettingsContext = createContext<SettingsControl | null>(null);
@@ -22,8 +27,19 @@ const SettingsContext = createContext<SettingsControl | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [stored, setStored] = usePersistedState<Settings>(SETTINGS_STORAGE_KEY, DEFAULT_SETTINGS);
   const settings = useMemo(() => clampSettings(stored), [stored]);
+  const raw = (stored as { landing?: unknown }).landing;
+  const legacyLanding: SettingsControl['legacyLanding'] = raw === 'board' || raw === 'archive' ? raw : null;
 
-  const update = useCallback((patch: Partial<Settings>) => setStored(clampSettings({ ...settings, ...patch })), [settings, setStored]);
+  // The clamp's `board`/`archive` → `github` is a READ-time alias, and must never be written back by accident (#399): a patch that does not name `landing`
+  // carries a raw legacy value through unchanged, so the first Settings change of a load cannot store `github` as a real pin before the shell has settled
+  // the legacy one to the source this machine actually has. A patch that names `landing` is the reader's (or the settle's) choice, written as given.
+  const update = useCallback(
+    (patch: Partial<Settings>) => {
+      const next = clampSettings({ ...settings, ...patch });
+      setStored(legacyLanding !== null && !('landing' in patch) ? ({ ...next, landing: legacyLanding } as unknown as Settings) : next);
+    },
+    [settings, legacyLanding, setStored]
+  );
 
   // Theme, density, text scale and content width are all pure CSS: everything
   // downstream keys off these four root values, so no component re-renders when
@@ -43,7 +59,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     root.style.setProperty('--font-scale', String(settings.fontScale / 100));
   }, [settings.theme, settings.density, settings.contentWidth, settings.fontScale]);
 
-  const value = useMemo(() => ({ settings, update }), [settings, update]);
+  const value = useMemo(() => ({ settings, update, legacyLanding }), [settings, update, legacyLanding]);
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }
 
@@ -54,5 +70,5 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
  */
 export function useSettings(): SettingsControl {
   const ctx = useContext(SettingsContext);
-  return ctx ?? { settings: DEFAULT_SETTINGS, update: () => {} };
+  return ctx ?? { settings: DEFAULT_SETTINGS, update: () => {}, legacyLanding: null };
 }
