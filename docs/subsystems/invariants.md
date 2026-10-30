@@ -3415,9 +3415,12 @@ A machine with no stored section, or one that stored a root `board`/`archive` fr
 gives it a PROVISIONAL GitHub — the one value that needs no answer, and today's Board is GitHub › Board — and the shell paints the loading shape, neither the
 row nor the board, until the first projects answer settles it once: a page-named landing goes to GitHub when this machine has a GitHub project and to the first
 drawn source otherwise (`settleSection`), anything else to `firstDrawn`. Drawing the guess instead would flash a GitHub row and board on every load of a
-files-only machine before taking them back. A legacy `Opens on` pin is rewritten to where it settled: left as the clamped `github`, the next `update()` — any
-Settings change — would store it as a real GitHub pin, and that machine would draw a held GitHub row on every load with `Opens on` naming a source it does not
-have. A click made before the answer clears the provisional mark, so the settle never yanks a reader back. An old `?section=board` deep link names no section
+files-only machine before taking them back. A legacy `Opens on` pin is rewritten to GitHub when this machine has a GitHub project, else the first drawn
+source: written as the clamped `github`, it would be a real GitHub pin, and that machine would draw a held GitHub row on every load with `Opens on` naming a
+source it does not have. So `SettingsProvider` treats the clamp's alias as read-time only — an `update()` that does not name `landing` carries the raw
+`board`/`archive` through — and the pin settles on its own effect, keyed on the provider's `legacyLanding` and the answer, never on the provisional section
+(#399): a deep link, an early click and a failed read followed by a click each end the section's guess, and once the pin rode on that guess's lifetime all
+three left it unsettled. A click made before the answer clears the provisional mark, so the settle never yanks a reader back. An old `?section=board` deep link names no section
 and is ignored, like any unknown one.
 
 `Opens on` offers Files and GitHub under the same answer (`landingOptions`), keeping a stored pin's option so a native select never shows a value with no

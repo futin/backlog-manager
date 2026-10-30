@@ -354,7 +354,8 @@ export const CONTENT_WIDTHS: readonly ContentWidth[] = ['fixed', 'full'];
  * `board` and `archive` are the one exception to "falls back to `last`" (source-sections spec, "Migrating stored values"): they were sections until the
  * source rows, so a pin on either is a reader's real choice of the work view, and dropping it to `last` would throw that away. They map to `github` — today's
  * Board is GitHub › Board — through `legacyLanding` below. The shell still treats such a pin as PROVISIONAL, because it reads the raw stored blob, sees
- * the legacy name, and settles it on the projects answer; this clamp only keeps the blob a valid `Settings`.
+ * the legacy name, and settles it on the projects answer; this clamp only keeps the blob a valid `Settings`. Until then `SettingsProvider` carries the raw
+ * value — it exposes it as `legacyLanding` and keeps any `update()` that does not name `landing` from writing this alias back (#399).
  */
 const LANDINGS: readonly Landing[] = ['last', ...SECTIONS];
 function legacyLanding(v: unknown): unknown {
