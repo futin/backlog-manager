@@ -62,7 +62,8 @@ export function PrRow({
           {warning !== null && <Pill tone="warn">{warning}</Pill>}
         </div>
       )}
-      <PrActions repo={repo} pr={pr} onWrite={onWrite} variant="full" busy={busy} />
+      {/* `onMerge` reaches nothing from here: the merge Confirm is page state (`PrLayoutProps.confirming`) that this row is not handed. */}
+      <PrActions repo={repo} pr={pr} updating={updating} outcome={outcome} busy={busy === true} onMerge={() => undefined} onWrite={onWrite} />
       <PrOutcomeLine outcome={outcome} updating={updating} />
     </li>
   );

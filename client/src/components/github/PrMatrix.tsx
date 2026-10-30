@@ -131,7 +131,15 @@ function MatrixRow({ r, props, open, onToggle }: { r: RankedPr; props: PrLayoutP
         <tr className="prs-matrix-expand" data-testid={`pr-expand-${key}`}>
           <td colSpan={COLUMN_COUNT}>
             <div className="prs-matrix-expand-body">
-              <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="full" busy={props.inFlight.has(key)} />
+              <PrActions
+                repo={repo}
+                pr={pr}
+                updating={updating}
+                outcome={outcome}
+                busy={props.inFlight.has(key)}
+                onMerge={() => props.setConfirming(key)}
+                onWrite={(call) => props.write(key, pr.headSha, call)}
+              />
               <a className="prs-open" href={pr.url} target="_blank" rel="noreferrer noopener">
                 Open on GitHub ↗
               </a>

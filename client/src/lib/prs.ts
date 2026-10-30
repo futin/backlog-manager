@@ -111,7 +111,7 @@ export function autoMergeBlock(pr: PullRequestRow, repo: PrRepoView): string | n
  */
 export const PR_KEYS = ['merge', 'auto-merge', 'update', 'open'] as const;
 
-/** One of the strip's keys. (`lib/pr-layouts.ts` still carries a three-member type of this name until its only caller is replaced; nothing imports both.) */
+/** One of the strip's keys. */
 export type PrKey = (typeof PR_KEYS)[number];
 
 /**

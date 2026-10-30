@@ -81,6 +81,8 @@ export default function PullRequestsView({ onWorking, onOpenSettings }: { onWork
   const [outcomes, setOutcomes] = useState<Record<string, PrOutcome>>({});
   const [marks, setMarks] = useState<Record<string, UpdateMark>>({});
   const [inFlight, setInFlight] = useState<ReadonlySet<string>>(() => new Set());
+  // The one open merge Confirm on the page, by `<repo>#<number>` — page state beside the outcomes and marks, so a layout switch cannot strand one.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const dropMark = useCallback((key: string) => {
@@ -172,7 +174,7 @@ export default function PullRequestsView({ onWorking, onOpenSettings }: { onWork
 
   const [stored, setStored] = usePersistedState<PrLayout>(PR_LAYOUT_KEY, 'inbox');
   const layout = parseLayout(stored);
-  const props: PrLayoutProps = { repos: shown, outcomes, marks, now, ctx, write, inFlight };
+  const props: PrLayoutProps = { repos: shown, outcomes, marks, now, ctx, write, inFlight, confirming, setConfirming };
 
   return (
     <div className="prs">

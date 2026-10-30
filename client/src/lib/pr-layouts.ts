@@ -262,34 +262,6 @@ export function emptyRepoNote(repos: readonly PrRepoView[], outcomes: Record<str
   return empty.length === 0 ? null : `${empty.length} ${empty.length === 1 ? 'repo' : 'repos'} with no open PRs`;
 }
 
-/** A key on a row's compact action strip: the three writes `PrActions` offers, which `lib/prs.ts`' `*Block`s disable with a reason. */
-export type PrKey = 'merge' | 'update' | 'auto-merge';
-
-/**
- * Which keys a PR's compact strip offers and which one is the primary (the filled one). This only PICKS: whether a key is disabled, and the reason it says,
- * stays `mergeBlock` / `updateBlock` / `autoMergeBlock`'s, so a compact strip and the full one cannot disagree about what is refused.
- *
- * `merge` is always offered. `update` is offered when GitHub says the PR is behind. `auto-merge` is offered when the repo allows it OR the PR already has it
- * armed — an armed PR on a repo whose setting was turned off since must still offer the way to disarm it (`autoMergeBlock`'s own rule).
- *
- * The primary is the one thing a person most likely wants to do: update a behind PR (nothing else is sensible until it has) — but only when `updateBlock`
- * would let the click through, since a filled key that is disabled is the opposite of a primary; a draft that is behind still qualifies, because
- * `updateBlock` does not refuse a draft. Else merge a PR that is Quiet, not a draft, not blocked by this page's own reasons and whose checks are not still
- * running: a Quiet PR with checks pending is one whose auto-merge is armed (an unarmed one is Worth a look), and GitHub will merge that one itself — a
- * manual merge is likely refused while required checks run. A PR with anything wrong has no primary — the row's verdict is what the eye should land on, not a
- * bright Merge button. The primary is listed first; the rest keep `merge, update, auto-merge` order.
- */
-export function compactKeys(pr: PullRequestRow, repo: PrRepoView): { keys: PrKey[]; primary: PrKey | null } {
-  const offered: PrKey[] = ['merge'];
-  if (pr.mergeState === 'behind') offered.push('update');
-  if (repo.autoMergeAllowed || pr.autoMerge !== null) offered.push('auto-merge');
-  let primary: PrKey | null = null;
-  if (pr.mergeState === 'behind' && updateBlock(pr, repo, false) === null) primary = 'update';
-  else if (prLevel(pr) === 'quiet' && !pr.draft && pr.checks !== 'pending' && mergeBlock(pr, repo) === null) primary = 'merge';
-  const keys = primary === null ? offered : [primary, ...offered.filter((k) => k !== primary)];
-  return { keys, primary };
-}
-
 /**
  * The key on a row's strip that is the filled one — `update`, `merge` or none. The key SET is `lib/prs.ts`' (`PR_KEYS`, always four); this only picks the one
  * a person most likely wants next, and whether any key is disabled, and why, stays `mergeBlock` / `updateBlock` / `autoMergeBlock`'s, so the strip and its

@@ -72,9 +72,7 @@ function ItemMeta({ r, now }: { r: RankedPr; now: number }) {
 
 function LoudItem({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
   const { pr, repo, key } = r;
-  /* The compact `Merge…` opens the full strip (method select, Merge, Confirm) inside this wrapper; the wrapper then takes the item's full width and drops under
-     the text, because the spec has the full strip open "inline under the item" and a select plus a Confirm do not fit the narrow right-hand column. */
-  const [stripOpen, setStripOpen] = useState(false);
+  const updating = isUpdating(props.marks[key], pr, props.now);
   const warning = prRunWarning(pr, repo.repo, props.ctx, props.now);
   const { verdict, steps } = prVerdict(prProblems(pr, warning));
   return (
@@ -100,17 +98,18 @@ function LoudItem({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
         )}
         <ItemMeta r={r} now={props.now} />
       </div>
-      <div className={stripOpen ? 'prs-inbox-keys prs-inbox-keys-open' : 'prs-inbox-keys'}>
+      <div className="prs-inbox-keys">
         <PrActions
           repo={repo}
           pr={pr}
-          onWrite={(call) => props.write(key, pr.headSha, call)}
-          variant="compact"
-          onOpen={() => setStripOpen(true)}
+          updating={updating}
+          outcome={props.outcomes[key]}
           busy={props.inFlight.has(key)}
+          onMerge={() => props.setConfirming(key)}
+          onWrite={(call) => props.write(key, pr.headSha, call)}
         />
       </div>
-      <PrOutcomeLine outcome={props.outcomes[key]} updating={isUpdating(props.marks[key], pr, props.now)} />
+      <PrOutcomeLine outcome={props.outcomes[key]} updating={updating} />
     </li>
   );
 }
@@ -118,6 +117,7 @@ function LoudItem({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
 function QuietLine({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
   const { pr, repo, key } = r;
   const [expanded, setExpanded] = useState(false);
+  const updating = isUpdating(props.marks[key], pr, props.now);
   const warning = prRunWarning(pr, repo.repo, props.ctx, props.now);
   const facts = quietFacts(pr);
   return (
@@ -144,10 +144,18 @@ function QuietLine({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
           Actions
         </button>
       </div>
-      <PrOutcomeLine outcome={props.outcomes[key]} updating={isUpdating(props.marks[key], pr, props.now)} />
+      <PrOutcomeLine outcome={props.outcomes[key]} updating={updating} />
       {expanded && (
         <div className="prs-inbox-quiet-actions">
-          <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="compact" busy={props.inFlight.has(key)} />
+          <PrActions
+            repo={repo}
+            pr={pr}
+            updating={updating}
+            outcome={props.outcomes[key]}
+            busy={props.inFlight.has(key)}
+            onMerge={() => props.setConfirming(key)}
+            onWrite={(call) => props.write(key, pr.headSha, call)}
+          />
         </div>
       )}
     </li>

@@ -1,189 +1,147 @@
-import { useId, useState } from 'react';
+import { useId } from 'react';
+import type { ReactNode } from 'react';
 
 import { Chip } from '../ui/Chip';
-import { Confirm } from '../ui/Confirm';
-import { Select } from '../ui/Select';
-import { useMountedRef } from '../../hooks/useMountedRef';
-import { compactKeys, type PrKey } from '../../lib/pr-layouts';
-import { autoMergeBlock, defaultMethod, mergeBlock, updateBlock } from '../../lib/prs';
-import { mergePr, setAutoMerge, updateBranch } from '../../lib/prs-api';
-import type { MergeMethod, PrRepoView, PrWriteResult, PullRequestRow } from '../../../../shared/types';
+import { primaryKey } from '../../lib/pr-layouts';
+import { PR_KEYS, autoMergeBlock, defaultMethod, mergeBlock, updateBlock, whyLine, type PrKey, type PrOutcome } from '../../lib/prs';
+import { setAutoMerge, updateBranch } from '../../lib/prs-api';
+import type { PrAutoMergeRequest, PrRepoView, PrWriteResult, PullRequestRow } from '../../../../shared/types';
+
+/** The three keys that are writes; `open` is the link and has no block. */
+type WriteKey = Exclude<PrKey, 'open'>;
 
 /**
- * The three writes a pull request offers on GitHub › PRs, as one strip every layout draws (.claude/DESIGN.md §8.11, "Row anatomy" and "Layouts"; spec
- * `2026-10-29-prs-layouts-design.md`, "Writes and outcomes"). `variant="full"` is the strip Cards has always had: the merge-method select, Merge, Enable /
- * Disable auto-merge and Update branch. `variant="compact"` is Inbox's: the two or three keys `compactKeys` picked for this PR, the primary one filled, plus
- * an `Open ↗` link — a front for this same component, never a second implementation of the writes, so the two cannot disagree about what is refused or sent.
+ * The one key strip every GitHub › PRs layout draws beside a pull request (.claude/DESIGN.md §8.11, "Actions and their reasons"; spec
+ * `2026-10-30-prs-page-fixes-design.md`, "One key strip, one foot"): `Merge · Auto-merge · Update · Open ↗`, in `PR_KEYS` order, on every PR in every layout —
+ * never one more, one fewer, or reordered. A person who has learned the strip on one row has learned it on all of them, so which keys a PR offers is not this
+ * component's call: a key that cannot be used stays in its place, greyed, and says why.
  *
- * A blocked action is disabled AND says why in text beside it (`.prs-why`), wired to the button as its `aria-describedby` — a reason only in a tooltip
- * cannot be read on a phone, which is half of where this board is read. The reasons are `lib/prs.ts`' (`mergeBlock`, `updateBlock`, `autoMergeBlock`), in
- * their precedence order; this component only places them. A sync-off repo's reason is the short `sync off` on each action, because the repo heading already
- * carries the server's full sentence once. The compact strip shows the same reasons, so a disabled key is never a silent dead end.
+ * **The primary.** At most one key is filled (`ink`), the one `primaryKey` says a person most likely wants next — `Update` on a behind PR, `Merge` on a clean
+ * quiet one, none on a PR with anything wrong, where the row's verdict is what the eye should land on. The rest are `outline`. `Open ↗` is never the primary:
+ * it is the way out to GitHub, not a write.
  *
- * Merge is the one write that cannot be taken back, so it asks first through `Confirm` — inline, in place of the Merge chip, naming the PR, its base and the
- * method the click would use. `Confirm` joins `useDialogEscape` itself; this component binds no key. Auto-merge and update branch do not ask: arming is undone
- * by the same control, and an update-branch is GitHub merging base into head, which the next push or merge simply includes. The compact `Merge…` is not the
- * merge: it opens the full strip in place, where the method is visible and the Confirm is one click further, so a small key can never merge by itself.
+ * **A blocked key is `aria-disabled`, never `disabled`.** `disabled` drops a button from the tab order and so out of a screen reader's reach, and every reason
+ * here is a specific, fixable thing (`sync off`, `auto-merge not enabled on the repo`, `checks failing`). So the key keeps its focus, a click guard makes it
+ * inert, its reason is its `title` and — because a tooltip cannot be read on a phone or announced reliably — the text of a visually hidden span its
+ * `aria-describedby` points at: `GatedChip`'s pattern, by hand here because these keys are not dispatch gates. The reasons are `lib/prs.ts`' (`mergeBlock`,
+ * `autoMergeBlock`, `updateBlock`), in their precedence order; this component only places them.
  *
- * While a write is in flight every action is disabled, until the page's re-read after it lands: a second click would send the head SHA the first write may
- * already have moved, and GitHub's 409 for that is a refusal the page caused itself. The write and its outcome are the page's (`onWrite`) — this component
- * hands it the call and records nothing — so an outcome outlives a row the re-read removed. `busy`, `confirming` and the picked method live here and survive
- * the compact strip opening into the full one, so a click on `Merge…` never forgets a write already in flight. They do NOT survive this component unmounting,
- * which is why the page's in-flight set arrives as the `busy` prop: a fold, a collapse or a layout switch drops the local state and the page's answer holds
- * the keys until its re-read lands.
+ * **The why-line** under the keys is `whyLine`'s: only the reasons a row does not already state elsewhere — the repo's and the token's (`sync off` once, not
+ * three times), never the PR's own facts, which its chips, cells and verdict already say. `omitUpdatingReason` drops `updating…` from it for a layout that
+ * prints that word in a cell of its own (Matrix's Base column), so one row does not say it twice.
+ *
+ * **Merge only asks.** `Merge` is the one write that cannot be taken back, so its key sends nothing: it calls `onMerge`, the page records this row as the
+ * confirming one, and `PrFoot` draws the Confirm under the row — the key itself neither swaps out nor changes its label, so the strip does not jump under the
+ * pointer. Auto-merge and Update do not ask: arming is undone by the same key, and an update-branch is GitHub merging base into head, which the next push or
+ * merge simply includes. `Auto-merge` is a toggle — `pressed` while armed, reading `Auto-merge ✓` with the tick `aria-hidden` so its name stays `Auto-merge`
+ * either way — and arms with the repo's default method, leaving `method` out of the request entirely when the repo allows none.
+ *
+ * **In flight.** While a write of this PR runs, `busy` sets `disabled` on the three write keys — momentary, with no reason worth reading — and `Open ↗` stays a
+ * link. `busy` is the page's in-flight set (`PrLayoutProps.inFlight`) and nothing else: this component keeps no busy state of its own, because a strip that
+ * unmounts (an Inbox filter, a Matrix collapse, a layout switch) would forget it, and a key that came back while the write still ran would send a head SHA the
+ * write may already have moved. The write and its outcome are the page's too (`onWrite`), so an outcome outlives a row the re-read removed.
  */
 export function PrActions({
   repo,
   pr,
+  updating,
+  outcome,
+  busy,
+  onMerge,
   onWrite,
-  variant,
-  onOpen,
-  busy: pending = false
+  omitUpdatingReason = false
 }: {
   repo: PrRepoView;
   pr: PullRequestRow;
+  /** The page's word that an update-branch of this PR is still landing — `updateBlock` reads it, and so does the primary. */
+  updating: boolean;
+  /** This PR's last outcome, for `whyLine`: an `updating` outcome already says `updating…`, so the why-line does not. */
+  outcome: PrOutcome | undefined;
+  /** A write of this PR is in flight (the page's `inFlight`). */
+  busy: boolean;
+  /** `Merge` was clicked: the page makes this row the confirming one. Sends nothing. */
+  onMerge: () => void;
   /** Runs one write for this PR and resolves once its outcome is recorded and the page has re-read. Never rejects. */
   onWrite: (call: () => Promise<PrWriteResult>) => Promise<void>;
-  variant: 'full' | 'compact';
-  /**
-   * Called once when the compact strip's `Merge…` opens the full one, so a layout can give the opened strip the room it needs (Inbox: the item's full width).
-   */
-  onOpen?: () => void;
-  /**
-   * The page's own word that a write of THIS PR is still running, OR'd with the local one. The local `busy` dies with this component — an Inbox fold, a Matrix
-   * collapse and a layout switch each unmount the strip — and a key that came back while its write was still in flight would send a head SHA the write may
-   * already have moved. The page owns the in-flight set (`PrLayoutProps.inFlight`), so a strip drawn after the write started is born disabled.
-   */
-  busy?: boolean;
+  /** Leave `updating…` off the why-line, for a layout that already prints it beside the row (Matrix's Base cell). */
+  omitUpdatingReason?: boolean;
 }) {
   const ids = useId();
-  const mounted = useMountedRef();
-  const [localBusy, setBusy] = useState(false);
-  const busy = localBusy || pending;
-  const [confirming, setConfirming] = useState(false);
-  /* The compact strip's `Merge…` opens the full strip in place; nothing closes it again, because the page's re-read is what changes a PR's keys. */
-  const [expanded, setExpanded] = useState(false);
-  /* The picked method, honoured only while the repo still allows it: a repo setting changed on github.com between two reads must not leave the select
-     sending a method GitHub would refuse, so a stale pick falls back to the repo's default rather than being kept. */
-  const [picked, setPicked] = useState<MergeMethod | null>(null);
-  const method = picked !== null && repo.methods.includes(picked) ? picked : defaultMethod(repo.methods);
-
-  const run = (call: () => Promise<PrWriteResult>): void => {
-    setBusy(true);
-    void onWrite(call).finally(() => {
-      if (mounted.current) setBusy(false);
-    });
-  };
-
-  const merge = mergeBlock(pr, repo);
-  const update = updateBlock(pr, repo, false);
-  const autoMerge = autoMergeBlock(pr, repo);
+  const primary = primaryKey(pr, repo, updating);
   const armed = pr.autoMerge !== null;
 
-  /** A blocked action's reason, beside it and named as its description. */
-  const why = (reason: string | null, suffix: string) =>
-    reason === null ? null : (
-      <span id={`${ids}-${suffix}`} className="prs-why">
-        {reason}
-      </span>
-    );
-  const describedBy = (reason: string | null, suffix: string): string | undefined => (reason === null ? undefined : `${ids}-${suffix}`);
+  const arm = (): void => {
+    const target = { repo: repo.repo, number: pr.number };
+    const method = defaultMethod(repo.methods);
+    // Built rather than spread with `method: method ?? undefined`, so a repo that allows no method sends a request with no `method` key at all — what the
+    // server's request shape says, rather than relying on the serializer to drop an `undefined`.
+    const body: PrAutoMergeRequest = armed ? { ...target, enable: false } : method === null ? { ...target, enable: true } : { ...target, enable: true, method };
+    void onWrite(() => setAutoMerge(body));
+  };
 
-  const runUpdate = (): void => run(() => updateBranch({ repo: repo.repo, number: pr.number, headSha: pr.headSha }));
-  const runAutoMerge = (): void =>
-    run(() =>
-      setAutoMerge(
-        armed ? { repo: repo.repo, number: pr.number, enable: false } : { repo: repo.repo, number: pr.number, enable: true, method: method ?? undefined }
-      )
-    );
-  const autoLabel = armed ? 'Disable auto-merge' : 'Enable auto-merge';
-
-  if (variant === 'compact' && !expanded) {
-    const { keys, primary } = compactKeys(pr, repo);
-    const spec: Record<PrKey, { label: string; reason: string | null; suffix: string; onClick: () => void }> = {
-      merge: {
-        label: 'Merge…',
-        reason: merge,
-        suffix: 'merge',
-        onClick: () => {
-          setExpanded(true);
-          onOpen?.();
-        }
-      },
-      update: { label: 'Update branch', reason: update, suffix: 'update', onClick: runUpdate },
-      'auto-merge': { label: autoLabel, reason: autoMerge, suffix: 'auto', onClick: runAutoMerge }
-    };
-    return (
-      <div className="prs-actions">
-        {keys.map((key) => {
-          const s = spec[key];
-          return (
-            <span key={key} className="prs-action">
-              <Chip
-                size={28}
-                variant={key === primary ? 'ink' : undefined}
-                disabled={busy || s.reason !== null}
-                aria-describedby={describedBy(s.reason, s.suffix)}
-                onClick={s.onClick}
-              >
-                {s.label}
-              </Chip>
-              {why(s.reason, s.suffix)}
-            </span>
-          );
-        })}
-        <a className="prs-open" href={pr.url} target="_blank" rel="noreferrer">
-          Open ↗
-        </a>
-      </div>
-    );
-  }
+  const keys: Record<WriteKey, { label: ReactNode; block: string | null; act: () => void }> = {
+    merge: { label: 'Merge', block: mergeBlock(pr, repo), act: onMerge },
+    'auto-merge': {
+      label: armed ? (
+        <>
+          Auto-merge<span aria-hidden="true"> ✓</span>
+        </>
+      ) : (
+        'Auto-merge'
+      ),
+      block: autoMergeBlock(pr, repo),
+      act: arm
+    },
+    update: {
+      label: 'Update',
+      block: updateBlock(pr, repo, updating),
+      act: () => void onWrite(() => updateBranch({ repo: repo.repo, number: pr.number, headSha: pr.headSha }))
+    }
+  };
+  const reasonId = (key: WriteKey): string => `${ids}-${key}`;
+  const blocked = (Object.keys(keys) as WriteKey[]).filter((key) => keys[key].block !== null);
+  const reasons = whyLine(pr, repo, updating, outcome?.kind).filter((reason) => !(omitUpdatingReason && reason === 'updating…'));
 
   return (
-    <div className="prs-actions">
-      {method !== null && (
-        <Select<MergeMethod>
-          label="Merge method"
-          value={method}
-          options={repo.methods.map((m) => ({ value: m, label: m }))}
-          onChange={setPicked}
-          disabled={busy || confirming}
-        />
-      )}
-      <span className="prs-action">
-        {confirming && method !== null ? (
-          <Confirm
-            label={`Confirm merge of #${pr.number}`}
-            acceptLabel="Merge"
-            dismissLabel="Cancel"
-            testId="pr-merge-confirm"
-            onDismiss={() => setConfirming(false)}
-            onAccept={() => {
-              setConfirming(false);
-              run(() => mergePr({ repo: repo.repo, number: pr.number, method, headSha: pr.headSha }));
-            }}
-          >
-            {`Merge #${pr.number} into ${pr.base} (${method})?`}
-          </Confirm>
-        ) : (
-          <Chip size={28} variant="ink" disabled={busy || merge !== null} aria-describedby={describedBy(merge, 'merge')} onClick={() => setConfirming(true)}>
-            Merge
-          </Chip>
-        )}
-        {!confirming && why(merge, 'merge')}
-      </span>
-      <span className="prs-action">
-        <Chip size={28} disabled={busy || autoMerge !== null} aria-describedby={describedBy(autoMerge, 'auto')} onClick={runAutoMerge}>
-          {autoLabel}
-        </Chip>
-        {why(autoMerge, 'auto')}
-      </span>
-      <span className="prs-action">
-        <Chip size={28} disabled={busy || update !== null} aria-describedby={describedBy(update, 'update')} onClick={runUpdate}>
-          Update branch
-        </Chip>
-        {why(update, 'update')}
-      </span>
+    <div className="prs-keys-side" data-testid={`pr-keys-${repo.repo}#${pr.number}`}>
+      <div className="prs-keys">
+        {PR_KEYS.map((key) => {
+          if (key === 'open') {
+            return (
+              <Chip key={key} as="a" size={28} href={pr.url}>
+                Open ↗
+              </Chip>
+            );
+          }
+          const { label, block, act } = keys[key];
+          return (
+            <Chip
+              key={key}
+              size={28}
+              variant={key === primary ? 'ink' : 'outline'}
+              pressed={key === 'auto-merge' ? armed : undefined}
+              disabled={busy}
+              title={block ?? undefined}
+              aria-disabled={block === null ? undefined : 'true'}
+              aria-describedby={block === null ? undefined : reasonId(key)}
+              onClick={() => {
+                // The other half of `aria-disabled`: the browser does not stop a click on a control that is only labelled disabled, so this does.
+                if (block === null) act();
+              }}
+            >
+              {label}
+            </Chip>
+          );
+        })}
+      </div>
+      {/* Siblings of the keys, not children: inside a button the reason would become part of its accessible name, and a key named `Merge checks failing`
+          is not a key called Merge. Visually hidden, because the visible copy is the why-line's job and it says only what the row does not. */}
+      {blocked.map((key) => (
+        <span key={key} id={reasonId(key)} className="sr-only">
+          {keys[key].block}
+        </span>
+      ))}
+      {reasons.length > 0 && <p className="prs-why">{reasons.join(' · ')}</p>}
     </div>
   );
 }
