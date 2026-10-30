@@ -445,30 +445,107 @@ describe('PullRequestsService freshness around writes', () => {
     expect(lists(gh, 'futin/y')).toBe(2);
   });
 
-  it("a write's rate limit met while a list read is out survives that read's success", async () => {
+  it("a repo's first list read, still out when a merge lands, does not put the merged PR on the page (#398)", async () => {
+    const { gh, prs } = rig();
+    const seven = fakePr(gh, FAKE_REPO, 7);
+
+    // Cold: no entry exists yet. The first list query answers with #7 still open and is delivered only on release.
+    const release = gh.holdAnswers('PullRequests');
+    const reading = prs.list(NOW);
+    await settle();
+    expect(lists(gh, FAKE_REPO)).toBe(1);
+
+    const merged = await prs.merge({ repo: FAKE_REPO, number: 7, method: 'squash', headSha: seven.headRefOid });
+    expect(merged).toMatchObject({ ok: true, status: 200 });
+    release();
+    // The read predates the merge, so its rows are dropped: the repo shows nothing read yet rather than a list with the merged #7 in it.
+    const landed = view((await reading).repos, FAKE_REPO);
+    expect(landed).toMatchObject({ polledAt: null, prs: [] });
+
+    // The next read after the TTL is stored as usual, and GitHub no longer lists #7.
+    const later = view((await prs.list(NOW + PR_TTL_MS)).repos, FAKE_REPO);
+    expect(numbers(later)).toEqual([9]);
+    expect(later.polledAt).toBe(new Date(NOW + PR_TTL_MS).toISOString());
+  });
+
+  it("a write's GraphQL rate limit met while a list read is out survives that read's success", async () => {
     const { gh, prs } = rig();
     await prs.list(NOW);
-    const seven = fakePr(gh, FAKE_REPO, 7);
 
     clock = NOW + 60_000;
     const release = gh.holdAnswers('PullRequests');
     const reading = prs.list(clock);
     await settle();
 
-    gh.failNext = { fragment: '/pulls/7/merge', status: 429, message: 'API rate limit exceeded', headers: { 'retry-after': '600' } };
-    const refused = await prs.merge({ repo: FAKE_REPO, number: 7, method: 'squash', headSha: seven.headRefOid });
+    const reset = Math.floor(clock / 1000) + 600;
+    gh.failNext = {
+      fragment: '/graphql',
+      repo: FAKE_REPO,
+      operation: 'PullRequest',
+      graphqlError: { type: 'RATE_LIMITED', message: 'API rate limit exceeded' },
+      headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(reset) }
+    };
+    const refused = await prs.autoMerge({ repo: FAKE_REPO, number: 7, enable: true, method: 'squash' });
     expect(refused).toMatchObject({ ok: false, status: 429 });
     release();
     const landed = view((await reading).repos, FAKE_REPO);
     expect(landed).toMatchObject({ access: 'rate-limited', detail: (refused as { error: string }).error });
 
-    // Past the TTL, still before the write's reset: no list query and no write go out.
+    // Past the TTL, still before the write's reset: no list query and no GraphQL write go out.
     clock = NOW + 125_000;
-    const xCalls = (): number => gh.calls.filter((c) => c.repo === FAKE_REPO || c.url.includes(`/repos/${FAKE_REPO}/`)).length;
-    const sent = xCalls();
-    expect(await prs.updateBranch({ repo: FAKE_REPO, number: 7, headSha: seven.headRefOid })).toMatchObject({ ok: false, status: 429 });
+    const sent = gh.graphqlCalls(undefined, FAKE_REPO).length;
+    expect(await prs.autoMerge({ repo: FAKE_REPO, number: 7, enable: false })).toMatchObject({ ok: false, status: 429 });
     await prs.list(clock);
-    expect(xCalls()).toBe(sent);
+    expect(gh.graphqlCalls(undefined, FAKE_REPO)).toHaveLength(sent);
+  });
+
+  it('a REST limit a merge meets sleeps the REST writes only: the GraphQL list read and auto-merge still go out', async () => {
+    const { gh, prs } = rig();
+    await prs.list(NOW);
+    const seven = fakePr(gh, FAKE_REPO, 7);
+
+    clock = NOW + 60_000;
+    gh.failNext = { fragment: '/pulls/7/merge', status: 429, message: 'API rate limit exceeded', headers: { 'retry-after': '600' } };
+    expect(await prs.merge({ repo: FAKE_REPO, number: 7, method: 'squash', headSha: seven.headRefOid })).toMatchObject({ ok: false, status: 429 });
+
+    const listed = view((await prs.list(clock)).repos, FAKE_REPO);
+    expect(lists(gh, FAKE_REPO)).toBe(2);
+    expect(listed).toMatchObject({ access: 'ok', detail: null });
+    expect(numbers(listed)).toEqual([9, 7]);
+
+    const updates = gh.matching('/pulls/7/update-branch').length;
+    expect(await prs.updateBranch({ repo: FAKE_REPO, number: 7, headSha: seven.headRefOid })).toMatchObject({ ok: false, status: 429 });
+    expect(gh.matching('/pulls/7/update-branch')).toHaveLength(updates);
+    expect(await prs.autoMerge({ repo: FAKE_REPO, number: 7, enable: true, method: 'squash' })).toMatchObject({ ok: true });
+  });
+
+  it('a GraphQL limit the list read meets leaves the REST writes awake', async () => {
+    const { gh, prs } = rig();
+    gh.failNext = { fragment: '/graphql', repo: FAKE_REPO, graphqlError: { type: 'RATE_LIMITED', message: 'API rate limit exceeded' } };
+    expect(view((await prs.list(NOW)).repos, FAKE_REPO).access).toBe('rate-limited');
+
+    const seven = fakePr(gh, FAKE_REPO, 7);
+    const answer = await prs.updateBranch({ repo: FAKE_REPO, number: 7, headSha: seven.headRefOid });
+    expect(answer).toMatchObject({ ok: true, status: 202 });
+    expect(gh.matching('/pulls/7/update-branch', 'PUT')).toHaveLength(1);
+  });
+
+  it("the poller's REST sleep refuses a REST write with no request, and leaves the GraphQL list read alone", async () => {
+    const { gh, poller, prs } = rig();
+    const reset = NOW / 1000 + 900;
+    gh.failNext = { fragment: `/repos/${FAKE_REPO}/issues`, status: 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(reset) } };
+    await poller.tick();
+    poller.disarm();
+
+    const seven = fakePr(gh, FAKE_REPO, 7);
+    const before = gh.matching('/pulls/7/merge').length;
+    const refused = await prs.merge({ repo: FAKE_REPO, number: 7, method: 'squash', headSha: seven.headRefOid });
+    expect(refused).toEqual({ ok: false, status: 429, error: `rate limit reached — resets ${new Date(reset * 1000).toISOString()}` });
+    expect(gh.matching('/pulls/7/merge')).toHaveLength(before);
+
+    const listed = view((await prs.list(NOW)).repos, FAKE_REPO);
+    expect(lists(gh, FAKE_REPO)).toBe(1);
+    expect(listed).toMatchObject({ access: 'ok', detail: null });
   });
 
   it('a typed GraphQL RATE_LIMITED is a limit even with points left, slept on until the pool resets', async () => {

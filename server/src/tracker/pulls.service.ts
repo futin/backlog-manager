@@ -63,10 +63,13 @@ import {
  *
  * ## Rate limits
  *
- * Values, never sleeps inside a request. An hourly-limit verdict puts this repo's ENTRY to sleep until the reset; GraphQL's primary budget is a separate pool
- * from REST's, so it does not touch the issue poller. A secondary verdict is shared — GitHub counts it per token, across both APIs — so it also goes to
- * `poller.noteSecondary`, and the poller's own `secondaryUntil` is read here before a request, which is the other direction of the same sharing. A repo
- * asleep either way is served from its entry (or an empty view) with the sleep as `detail`, and gets no request.
+ * Values, never sleeps inside a request. An hourly-limit verdict puts ONE POOL of this repo's entry to sleep until the reset — `rest` or `graphql`, the pool
+ * the failed request spent (#395) — because GitHub counts the two primary budgets apart (ruling R1): a merge that exhausts REST must not put the GraphQL list
+ * read to sleep, and a GraphQL limit must not refuse a REST merge. Every request checks the pool it spends: the list read, a write's re-read and auto-merge
+ * check `graphql`; merge and update-branch check `rest`, and that rung also reads the issue poller's own sleep (`poller.restSleep`), since the poller spends
+ * the same REST pool. Only a `graphql` sleep is the list's `access`/`detail`. A secondary verdict is shared — GitHub counts it per token, across both APIs —
+ * so it also goes to `poller.noteSecondary`, and the poller's own `secondaryUntil` is read here before every request, which is the other direction of the
+ * same sharing. A repo asleep is served from its entry (or an empty view) with the sleep as `detail`, and gets no request in that pool.
  *
  * ## One view per repo
  *
@@ -78,16 +81,26 @@ import {
  *  per repo and a second tab costs nothing. */
 export const PR_TTL_MS = 60_000;
 
+/** The two primary rate-limit pools a PR request spends from — GitHub counts them apart (ruling R1). */
+type PrPool = 'rest' | 'graphql';
+
+/** One pool's sleep: the reset, and the verdict's sentence a request refused under it carries. */
+interface PoolSleep {
+  until: number;
+  detail: string | null;
+}
+
 /** One repo's cached state. Created by the first read or the first sleep (`noteSleep`), whichever comes first. */
 interface PrEntry {
   /** Epoch ms of the last SUCCESSFUL read; `null` before one. */
   polledAt: number | null;
   /** Epoch ms of the last list read of EITHER outcome; `null` before one. What the TTL is measured from, with `polledAt` (R6). */
   attemptedAt: number | null;
+  /** The LIST's state — the list read's verdict, or a `graphql` sleep's — never a `rest` sleep's, which says nothing about whether the list can be read. */
   access: Access;
   detail: string | null;
-  /** Epoch ms before which this repo gets no PR request — a rate limit's reset or a secondary backoff this cache met itself. */
-  sleepUntil: number | null;
+  /** Per pool, the limit this cache met itself (an hourly reset or a secondary backoff), before whose end that pool gets no request; `null` when none. */
+  sleeps: Record<PrPool, PoolSleep | null>;
   /** Epoch ms at which the entry is due again although its TTL has not run out — set by an accepted update-branch (`PR_UPDATING_MS`); cleared by a read
    *  that started at or after it. `null` when only the TTL decides. */
   dueAt: number | null;
@@ -177,13 +190,15 @@ export class PullRequestsService {
    * when absent, or — `row` null, the re-read said `MERGED` or `CLOSED` — remove it. `total` follows so `truncated` stays true to the list: a removal of a
    * held row counts down, and an add counts up only when the list was COMPLETE — on a list truncated at 100, a PR absent from the page is one GitHub's
    * `totalCount` already counted, and counting it again would overshoot. `polledAt` does NOT move, because it is the age of the list read and a splice
-   * re-read one row. A repo with no successful read yet is left alone: one row would draw as the whole list.
+   * re-read one row. A repo with no successful read yet keeps no row — one row would draw as the whole list — but still counts the splice (#398): its
+   * first read may be in flight, carrying the state from before this write. No entry at all means no read was ever started, since `read` creates one.
    */
   splice(repo: string, row: PullRequestRow | null, number: number): void {
     const entry = this.entries.get(repo);
-    if (entry === undefined || entry.polledAt === null) return;
-    // Counted before anything else, a no-op removal included: a read in flight may still hold the row this splice found absent.
+    if (entry === undefined) return;
+    // Counted before anything else, a no-op removal and a never-read entry included: a read in flight may still hold the row this splice found absent.
     entry.splices += 1;
+    if (entry.polledAt === null) return;
     const at = entry.prs.findIndex((p) => p.number === number);
     if (row === null) {
       if (at === -1) return;
@@ -204,14 +219,18 @@ export class PullRequestsService {
   /**
    * Apply a limit verdict to a repo's entry — creating an empty, never-read entry when there is none (ruling R4: a write can meet a limit before any list
    * read did, and the sleep must not be lost to that ordering). A verdict that is not a limit is ignored here: a write's 409 or 422 is that write's answer,
-   * not the repo's connection state. Never shortens a sleep already set. A secondary verdict also sleeps the issue poller's repo.
+   * not the repo's connection state. Sleeps `pool`, the one the failed request spent, and never shortens a sleep already set there. Only a `graphql` sleep
+   * becomes the list's `access`/`detail`. A secondary verdict also sleeps the issue poller's repo — and, through its `secondaryUntil`, both pools here.
    */
-  noteSleep(repo: string, verdict: FailureVerdict): void {
+  noteSleep(repo: string, verdict: FailureVerdict, pool: PrPool): void {
     if (verdict.sleepUntil === null) return;
     const entry = this.entryOf(repo);
-    entry.access = verdict.access;
-    entry.detail = verdict.detail;
-    if (entry.sleepUntil === null || verdict.sleepUntil > entry.sleepUntil) entry.sleepUntil = verdict.sleepUntil;
+    if (pool === 'graphql') {
+      entry.access = verdict.access;
+      entry.detail = verdict.detail;
+    }
+    const held = entry.sleeps[pool];
+    if (held === null || verdict.sleepUntil > held.until) entry.sleeps[pool] = { until: verdict.sleepUntil, detail: verdict.detail };
     if (verdict.secondary) this.poller.noteSecondary(repo, verdict.sleepUntil);
   }
 
@@ -222,14 +241,14 @@ export class PullRequestsService {
    * the page must now show. A successful merge splices the PR out even when its re-read fails, because GitHub's `200` already said it is merged.
    */
   merge(req: PrMergeRequest, at?: number): Promise<PrWriteAnswer> {
-    return this.write(req.repo, req.number, at, async (token, now) => {
+    return this.write(req.repo, req.number, at, 'rest', async (token, now) => {
       const res = await this.client.mergePull(req.repo, req.number, { merge_method: req.method, sha: req.headSha }, { token });
       if (succeeded(res)) {
         const re = await this.reread(req.repo, req.number, token, now);
         if (re === null) this.splice(req.repo, null, req.number);
         return answered(200, 'merged', re);
       }
-      const refusal = this.refusal(req.repo, res, now);
+      const refusal = this.refusal(req.repo, res, now, 'rest');
       if (refusal.status === 429) return refusal;
       const re = await this.reread(req.repo, req.number, token, now);
       if (re?.state === 'MERGED') return answered(200, 'already-merged', re);
@@ -243,16 +262,16 @@ export class PullRequestsService {
    * off on the repo, a PR already clean to merge) is a typed GraphQL error on a `200`, answered `409` with its text.
    */
   autoMerge(req: PrAutoMergeRequest, at?: number): Promise<PrWriteAnswer> {
-    return this.write(req.repo, req.number, at, async (token, now) => {
+    return this.write(req.repo, req.number, at, 'graphql', async (token, now) => {
       const before = await readPull(this.client, req.repo, req.number, { token });
-      if (!succeeded(before) || before.data === null) return this.refusal(req.repo, before, now);
+      if (!succeeded(before) || before.data === null) return this.refusal(req.repo, before, now, 'graphql');
       this.splice(req.repo, openRow(before.data), req.number);
       if (!req.enable && before.data.row.autoMerge === null) return answered(200, 'noop', before.data);
 
       const change = req.enable ? { enable: true as const, method: req.method ?? 'merge' } : { enable: false as const };
       const res = await setAutoMerge(this.client, before.data.id, change, { token });
       if (!succeeded(res)) {
-        const refusal = this.refusal(req.repo, res, now);
+        const refusal = this.refusal(req.repo, res, now, 'graphql');
         if (refusal.status !== 429) await this.reread(req.repo, req.number, token, now);
         return refusal;
       }
@@ -266,14 +285,14 @@ export class PullRequestsService {
    * the repo's entry is made due at the same moment (`dueAt`). A `422` (head moved, a fork that does not allow edits) is a `409` with GitHub's text.
    */
   updateBranch(req: PrUpdateBranchRequest, at?: number): Promise<PrWriteAnswer> {
-    return this.write(req.repo, req.number, at, async (token, now) => {
+    return this.write(req.repo, req.number, at, 'rest', async (token, now) => {
       const res = await this.client.updatePullBranch(req.repo, req.number, req.headSha, { token });
       if (succeeded(res)) {
         const re = await this.reread(req.repo, req.number, token, now);
         this.dueBy(req.repo, now + PR_UPDATING_MS);
         return answered(202, 'update-requested', re);
       }
-      const refusal = this.refusal(req.repo, res, now);
+      const refusal = this.refusal(req.repo, res, now, 'rest');
       if (refusal.status !== 429) await this.reread(req.repo, req.number, token, now);
       return refusal;
     });
@@ -283,8 +302,9 @@ export class PullRequestsService {
    * The refusal ladder every PR write shares, in its order. Outside the chain: `404` for a repo no registered project resolves to (the registry is read per
    * call, so an unreadable one is `registryProjectsOr503`'s 503, as `GET /api/prs` answers), then `503` for no token — both facts about this machine that no
    * waiting changes. Inside `serialise('<repo>#<number>')`, re-judged when the write's turn comes rather than when it was queued: `409` sync off (the
-   * poller's `syncOffBlock` sentence, its one home), `429` while the repo is asleep — this cache's own sleep or the poller's secondary one — and only then
-   * `fn`, the GitHub calls. Nothing before `fn` makes an outbound call.
+   * poller's `syncOffBlock` sentence, its one home), `429` while `pool` — the one the write's own call spends — is asleep: this cache's sleep in that pool,
+   * the poller's secondary one, and for `rest` the poller's own REST sleep (#395) — and only then `fn`, the GitHub calls. Nothing before `fn` makes an
+   * outbound call. A write's re-read is GraphQL and is not judged here: it fails on its own, and the write's answer says `reread: false`.
    *
    * The clock is read when the write's turn comes, not when it was queued: a write behind another waits one GitHub round trip or more, and a `now` from
    * before that wait would judge the asleep check — and the sleep its own answer sets — against a moment already past. `at` pins it for a case.
@@ -293,6 +313,7 @@ export class PullRequestsService {
     repo: string,
     number: number,
     at: number | undefined,
+    pool: PrPool,
     fn: (token: string, now: number) => Promise<PrWriteAnswer>
   ): Promise<PrWriteAnswer> {
     const path = this.registeredRepos().get(repo);
@@ -303,7 +324,7 @@ export class PullRequestsService {
       const now = at ?? Date.now();
       const off = this.poller.syncOffBlock(path);
       if (off !== null) return { ok: false, status: 409, error: off };
-      const asleep = this.asleepDetail(repo, now);
+      const asleep = this.asleepDetail(repo, now, pool);
       if (asleep !== null) return { ok: false, status: 429, error: asleep };
       return fn(token, now);
     });
@@ -317,17 +338,17 @@ export class PullRequestsService {
   }
 
   /**
-   * A failed GitHub answer → the write's refusal. A limit (`failureVerdict`'s rule, the poller's one, unchanged) is `429` and puts the repo to sleep through
-   * `noteSleep` — ruling R4: the PR-cache entry, created empty when none exists, and the poller's repo too for a secondary limit — so the next write and the
-   * next list read make no request until it ends. A `401`/`403` that is not a limit is a token without the permission this write needs: a fine-grained token's
+   * A failed GitHub answer → the write's refusal. A limit (`failureVerdict`'s rule, the poller's one, unchanged) is `429` and puts `pool` — the one the
+   * failed call spent — to sleep through `noteSleep` — ruling R4: the PR-cache entry, created empty when none exists, and the poller's repo too for a
+   * secondary limit — so the next request from that pool makes none until it ends. A `401`/`403` that is not a limit is a token without the permission this write needs: a fine-grained token's
    * write permissions cannot be read back, so this is where a person learns it, from GitHub's own message. GitHub refusing the write on its merits — REST's
    * `405`/`409`/`422`, or a typed GraphQL error on a `200` — is `409` with GitHub's text. Anything else (a 5xx, a transport failure, a 404) is `502`.
    */
-  private refusal(repo: string, res: GithubResponse<unknown>, now: number): PrWriteRefusal {
+  private refusal(repo: string, res: GithubResponse<unknown>, now: number, pool: PrPool): PrWriteRefusal {
     const message = res.error ?? `HTTP ${res.status}`;
     const verdict = failureVerdict(res, now);
     if (verdict !== null && verdict.sleepUntil !== null) {
-      this.noteSleep(repo, verdict);
+      this.noteSleep(repo, verdict, pool);
       return { ok: false, status: 429, error: verdict.detail ?? message };
     }
     if (res.status === 401 || res.status === 403) return { ok: false, status: 502, error: `the token lacks permission for this — ${message}` };
@@ -340,13 +361,13 @@ export class PullRequestsService {
   /**
    * The write's own single-PR read, spliced into the cache — the PR's row when it is open, its removal when it is merged or closed. `null` when the read
    * failed, which no write turns into an error (the write has landed or been refused already; the answer says `reread: false`). A limit met here still
-   * sleeps the repo.
+   * sleeps the repo's `graphql` pool, the one the read spent.
    */
   private async reread(repo: string, number: number, token: string, now: number): Promise<PullOne | null> {
     const res = await readPull(this.client, repo, number, { token });
     if (!succeeded(res) || res.data === null) {
       const verdict = failureVerdict(res, now);
-      if (verdict !== null) this.noteSleep(repo, verdict);
+      if (verdict !== null) this.noteSleep(repo, verdict, 'graphql');
       return null;
     }
     this.splice(repo, openRow(res.data), number);
@@ -372,13 +393,15 @@ export class PullRequestsService {
     return next;
   }
 
-  /** The sentence a write is refused with while `repo` is asleep, or `null` when it is awake: the entry's own verdict for this cache's sleep, the poller's
-   *  secondary backoff (worded as `view` words it) for one only the poller met. */
-  private asleepDetail(repo: string, now: number): string | null {
-    const until = this.sleepingUntil(repo, now);
+  /** The sentence a write is refused with while `pool` is asleep on `repo`, or `null` when it is awake: the verdict of this cache's own sleep in that pool,
+   *  then for `rest` the poller's own sentence, then the poller's secondary backoff (worded as `view` words it) for one only the poller met. */
+  private asleepDetail(repo: string, now: number, pool: PrPool): string | null {
+    const until = this.sleepingUntil(repo, now, pool);
     if (until === null) return null;
-    const entry = this.entries.get(repo);
-    if (entry?.sleepUntil != null && entry.sleepUntil > now && entry.detail !== null) return entry.detail;
+    const own = this.entries.get(repo)?.sleeps[pool];
+    if (own != null && own.until > now && own.detail !== null) return own.detail;
+    const rest = pool === 'rest' ? this.poller.restSleep(repo) : null;
+    if (rest !== null && rest.detail !== null) return rest.detail;
     return `secondary rate limit — backing off until ${new Date(until).toISOString()}`;
   }
 
@@ -402,7 +425,7 @@ export class PullRequestsService {
     const last = Math.max(entry?.polledAt ?? -Infinity, entry?.attemptedAt ?? -Infinity);
     const due = entry?.dueAt != null && now >= entry.dueAt;
     if (now - last < PR_TTL_MS && !due) return Promise.resolve();
-    if (this.sleepingUntil(repo, now) !== null) return Promise.resolve();
+    if (this.sleepingUntil(repo, now, 'graphql') !== null) return Promise.resolve();
     const inFlight = this.reading.get(repo);
     if (inFlight !== undefined) return inFlight;
     const read = this.read(repo, now, token).finally(() => this.reading.delete(repo));
@@ -411,9 +434,10 @@ export class PullRequestsService {
   }
 
   private async read(repo: string, now: number, token: string): Promise<void> {
-    const splices = this.entries.get(repo)?.splices ?? 0;
-    const res = await readPullList(this.client, repo, { token });
+    // The entry is made before the request goes out, not when it lands: a splice while a repo's FIRST read is out must find something to count on (#398).
     const entry = this.entryOf(repo);
+    const splices = entry.splices;
+    const res = await readPullList(this.client, repo, { token });
     entry.attemptedAt = now;
     // A read that started at or after the due time answers it; one that started before (a `dueAt` set while it was out) does not — its answer predates
     // the update it was meant to see. It is answered by a read that FAILED (retrying a failing repo on every GET is what the TTL exists to stop) or one
@@ -426,13 +450,15 @@ export class PullRequestsService {
       const v = verdict ?? { access: 'error' as const, detail: res.error ?? 'empty answer from GitHub', sleepUntil: null, secondary: false };
       entry.access = v.access;
       entry.detail = v.detail;
-      this.noteSleep(repo, v);
+      this.noteSleep(repo, v, 'graphql');
       return;
     }
     const list = res.data;
-    // A sleep set while this read was out (a write's limit, R4) is still ahead and still the repo's state; only one that has run out is cleared.
-    if (entry.sleepUntil === null || entry.sleepUntil <= now) {
-      entry.sleepUntil = null;
+    // A GraphQL sleep set while this read was out (a write's limit, R4) is still ahead and still the list's state; only one that has run out is cleared.
+    // A `rest` sleep is left alone either way: this read spent nothing from that pool, so its success refutes nothing there.
+    const graphql = entry.sleeps.graphql;
+    if (graphql === null || graphql.until <= now) {
+      entry.sleeps.graphql = null;
       entry.access = 'ok';
       entry.detail = null;
     }
@@ -449,11 +475,13 @@ export class PullRequestsService {
     entry.total = list.totalCount;
   }
 
-  /** The later of this cache's own sleep and the poller's secondary one, when either is still ahead of `now`; else `null`. */
-  private sleepingUntil(repo: string, now: number): number | null {
-    const own = this.entries.get(repo)?.sleepUntil ?? null;
+  /** The latest of this cache's own sleep in `pool`, the poller's secondary one and — for `rest` only — the poller's own REST sleep, when any is still
+   *  ahead of `now`; else `null`. */
+  private sleepingUntil(repo: string, now: number, pool: PrPool): number | null {
+    const own = this.entries.get(repo)?.sleeps[pool]?.until ?? null;
     const shared = this.poller.secondaryUntil(repo);
-    const until = Math.max(own ?? 0, shared ?? 0);
+    const rest = pool === 'rest' ? (this.poller.restSleep(repo)?.until ?? null) : null;
+    const until = Math.max(own ?? 0, shared ?? 0, rest ?? 0);
     return until > now ? until : null;
   }
 
@@ -465,7 +493,7 @@ export class PullRequestsService {
         attemptedAt: null,
         access: 'ok',
         detail: null,
-        sleepUntil: null,
+        sleeps: { rest: null, graphql: null },
         dueAt: null,
         splices: 0,
         prs: [],
@@ -484,7 +512,7 @@ export class PullRequestsService {
     let detail = entry?.detail ?? null;
     // A sleep the poller noted and this cache never met has no verdict on the entry; it is still why no request was made, so it is what the row says.
     const shared = this.poller.secondaryUntil(repo);
-    const ownAhead = entry?.sleepUntil != null && entry.sleepUntil > now;
+    const ownAhead = entry?.sleeps.graphql != null && entry.sleeps.graphql.until > now;
     if (!ownAhead && shared !== null && shared > now) {
       access = 'rate-limited';
       detail = `secondary rate limit — backing off until ${new Date(shared).toISOString()}`;

@@ -3545,7 +3545,9 @@ Two rules keep a write and the TTL from contradicting each other (the Plan B fix
 after it answers, so the page re-reads once when the mark ends — and a re-read served from the 60 s TTL would bring back the head the update has since
 moved, with the row's actions enabled on it, which is the self-caused 409 the row's busy rule exists to prevent. And a list read that lands after a write
 spliced the repo drops its rows (it still counts as an attempt): it carries GitHub's state from before the write, and storing it would put a merged PR back
-on the page for a whole TTL. A successful read likewise clears only a sleep that has run out — one a write recorded while the read was out is newer news.
+on the page for a whole TTL. That holds for a repo's FIRST read too (#398): the read makes the entry before its request goes out, and a splice on an entry
+with no successful read keeps no row but still counts. A successful read likewise clears only a sleep that has run out — one a write recorded while the read
+was out is newer news.
 
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
 board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip
@@ -3830,10 +3832,12 @@ mutation needs, the server reads fresh for that one call, and which never leaves
 write's turn comes, as `writeChain` judges sync off for the item writes.
 
 **The refusal ladder, in order:** `400` a malformed body · `404` a repo no registered project resolves to · `503` no token · inside the chain `409` sync off
-— `syncOffBlock(path)` of the repo's first registered project, the sentence's one server home, never a copy · `429` the repo asleep · then GitHub's answer:
+— `syncOffBlock(path)` of the repo's first registered project, the sentence's one server home, never a copy · `429` the repo asleep in the pool the write spends (#395: `rest` for merge and update-branch, which also reads the
+issue poller's own REST sleep, `graphql` for auto-merge — GitHub counts the two primary budgets apart, so a REST limit never sleeps the GraphQL list read and a
+GraphQL limit never refuses a REST merge) · then GitHub's answer:
 a refusal on its merits (REST `405`/`409`/`422`, or a typed GraphQL error on a `200`) is `409` with GitHub's message; a `401`/`403` that is not a limit is
 `502 the token lacks permission for this — <GitHub's message>`, because a fine-grained token's write permissions cannot be read back and this is where a
-person learns the token is short, so the page disables nothing on a guess; a limit is `429` and sleeps the repo (`failureVerdict`, the poller's one rule;
+person learns the token is short, so the page disables nothing on a guess; a limit is `429` and sleeps that pool of the repo (`failureVerdict`, the poller's one rule;
 ruling R4 creates the PR-cache entry when none exists, and a secondary limit sleeps the poller's repo too); anything else is `502`. Nothing before the
 GitHub call makes an outbound request.
 

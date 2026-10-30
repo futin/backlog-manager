@@ -500,7 +500,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   behind an inline `Confirm` (`Merge #<n> into <base> (<method>)?`), `Enable`/`Disable auto-merge` and `Update branch`; a blocked one is disabled with its
   reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync off` on each for a sync-off repo) in text beside it and as its `aria-describedby`, never a
   tooltip alone. A write disables the row's actions until the page has re-read, after success and failure alike; its outcome is one line — `outcomeLine`, or
-  the server's refusal verbatim — held by the page per `<repo>#<number>`, so a merged PR that left the list keeps a `#12 merged` line under its repo. An
+  the server's refusal verbatim — held by the page per `<repo>#<number>`, so a merged PR that left the list keeps a `#12 merged` line under its repo — the newest three per repo (`DEPARTED_KEEP`), and a PR's line clears when
+  its next write leaves. An
   update-branch's 202 marks the PR at the head SHA it was asked from: the row reads `updating…` while `isUpdating`, until a read shows a new head or
   `UPDATING_MS` (30 s, `PR_UPDATING_MS` in `shared/types.ts`) pass, and at that moment the page re-reads once — a read the server answers from GitHub,
   because the update made the repo due at that same moment. `updateBlock` reads `no permission to update` for a PR that cannot be updated while behind. The page reports the rail cursor as Board and Archive do (`useReportWorking`).

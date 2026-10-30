@@ -288,6 +288,43 @@ describe('PullRequestsView — merge', () => {
     expect(screen.getByTestId('pr-repo-futin/y')).toHaveTextContent('#12 merged');
   });
 
+  it("clears a PR's outcome the moment its next write leaves", async () => {
+    answerPost = () => ({ status: 409, body: { error: 'Head branch was modified. Review and try the merge again.' } });
+    const { user } = await mount();
+    await user.click(action('futin/y#12', 'Merge'));
+    await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
+    expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('Head branch was modified');
+
+    let release: (v: Response) => void = () => {};
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/prs' && init?.method !== 'POST') return respond(200, payload);
+      return new Promise<Response>((r) => {
+        release = r;
+      });
+    }) as unknown as typeof fetch;
+    await user.click(action('futin/y#12', 'Enable auto-merge'));
+    expect(within(row('futin/y#12')).queryByTestId('pr-outcome')).toBeNull();
+    await act(async () => {
+      release({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, outcome: 'auto-merge-enabled', pr: null, reread: true }) } as Response);
+    });
+    await flush();
+    expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('auto-merge armed');
+  });
+
+  it('keeps only the newest three departed lines on a repo', async () => {
+    const prs = [12, 13, 14, 15].map((number) => ({ ...PR12, number }));
+    payload.repos[1] = repo({ repo: 'futin/y', prs, total: prs.length });
+    const { user } = await mount();
+    for (const number of [12, 13, 14, 15]) {
+      payload = { ...payload, repos: [payload.repos[0], repo({ repo: 'futin/y', prs: payload.repos[1].prs.filter((p) => p.number !== number) })] };
+      await user.click(action(`futin/y#${number}`, 'Merge'));
+      await clickAndSettle(within(row(`futin/y#${number}`)).getByTestId('pr-merge-confirm-accept'));
+    }
+    const card = screen.getByTestId('pr-repo-futin/y');
+    expect(card).not.toHaveTextContent('#12 merged');
+    for (const number of [13, 14, 15]) expect(card).toHaveTextContent(`#${number} merged`);
+  });
+
   it("offers only the repo's methods, defaults to the first allowed, and sends the one picked", async () => {
     payload.repos[0].prs = [PR7, { ...PR9, crossRepository: false }];
     const { user } = await mount();
