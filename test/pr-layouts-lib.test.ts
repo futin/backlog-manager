@@ -331,7 +331,7 @@ describe('compactKeys', () => {
 
   it('a behind PR whose update the strip would refuse has no primary — a filled key that is disabled would be the opposite of the merge rule', () => {
     const behind = row({ mergeState: 'behind', canUpdateBranch: false });
-    expect(updateBlock(behind, repo())).toBe('no permission to update');
+    expect(updateBlock(behind, repo(), false)).toBe('no permission to update');
     expect(compactKeys(behind, repo()).primary).toBeNull();
     expect(compactKeys(behind, repo()).keys).toEqual(['merge', 'update', 'auto-merge']);
     const synced = repo({ syncOff: 'sync is off for futin/x — turn it on in GitHub › Settings' });
@@ -340,7 +340,7 @@ describe('compactKeys', () => {
 
   it('a draft that is behind still makes update the primary, because updateBlock does not refuse a draft', () => {
     const draftBehind = row({ draft: true, mergeState: 'behind', canUpdateBranch: true });
-    expect(updateBlock(draftBehind, repo())).toBeNull();
+    expect(updateBlock(draftBehind, repo(), false)).toBeNull();
     expect(compactKeys(draftBehind, repo()).primary).toBe('update');
   });
 

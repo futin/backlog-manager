@@ -71,22 +71,81 @@ export function mergeBlock(pr: PullRequestRow, repo: PrRepoView): string | null 
  * Why Update branch is disabled, or `null`. `canUpdateBranch` is GitHub's `viewerCanUpdateBranch`, which is false for "already up to date" and for "this
  * token may not" alike — so the row's `mergeState` tells them apart: a PR GitHub says is BEHIND its base is not up to date, and the only reason left is
  * that this token may not update it. Any other state reads up to date, which is what it almost always is.
+ *
+ * `updating` is the PRESENCE of the row's update mark, not `isUpdating`'s clock, and it is asked second: GitHub answers an update-branch with a 202 and does
+ * the merge later, and the moment the branch lands `viewerCanUpdateBranch` turns false — so without the mark the row would flip from a disabled `Update` to
+ * `already up to date` for the whole of the wait, a claim the page cannot yet make. Asking after `sync off` (the repo's say outranks everything) and before the
+ * fork rule (a mark only exists because an update was accepted, so that rule cannot have held) makes `updating…` the answer for the mark's whole life, whatever
+ * `canUpdateBranch` says. Presence rather than the clock so a page tick can never free the key before the timer's own judgement lands.
  */
-export function updateBlock(pr: PullRequestRow, repo: PrRepoView): string | null {
+export function updateBlock(pr: PullRequestRow, repo: PrRepoView, updating: boolean): string | null {
   if (repo.syncOff !== null) return 'sync off';
+  if (updating) return 'updating…';
   if (pr.crossRepository && !pr.maintainerCanModify) return 'fork does not allow edits';
   if (!pr.canUpdateBranch) return pr.mergeState === 'behind' ? 'no permission to update' : 'already up to date';
   return null;
 }
 
 /**
- * Why the auto-merge toggle is disabled, or `null`. Only ENABLING needs the repo's setting: disarming an armed one must stay possible after somebody turns
- * the repo setting off, or a PR would be left armed with no way to take it back from this page. `sync off` blocks both directions, as it blocks every write.
+ * Why the auto-merge toggle is disabled, or `null`. Only ENABLING needs the PR to be in a state GitHub would merge, and the repo's setting: disarming an armed
+ * one must stay possible whatever the PR has become since and after somebody turns the repo setting off, or a PR would be left armed with no way to take it
+ * back from this page. So an armed PR answers `sync off` or nothing — `sync off` blocks both directions, as it blocks every write.
+ *
+ * An unarmed PR is asked in `mergeBlock`'s own order — draft, conflicting, failing checks — and the repo's setting last, so the two keys agree on which
+ * reason a person should fix first: arming a draft, a conflicting or a failing PR is refused because GitHub would not merge it as things stand and the key
+ * would lie. The repo setting is the one reason that is not about the PR, which is why it is the last thing said.
  */
 export function autoMergeBlock(pr: PullRequestRow, repo: PrRepoView): string | null {
   if (repo.syncOff !== null) return 'sync off';
-  if (pr.autoMerge === null && !repo.autoMergeAllowed) return 'auto-merge not enabled on the repo';
+  if (pr.autoMerge !== null) return null;
+  if (pr.draft) return 'draft';
+  if (pr.mergeable === 'conflicting') return 'not mergeable';
+  if (pr.checks === 'failure') return 'checks failing';
+  if (!repo.autoMergeAllowed) return 'auto-merge not enabled on the repo';
   return null;
+}
+
+/**
+ * The strip's keys, in the order they are drawn — one list for every layout, so Inbox, Matrix and Cards cannot disagree on what comes first. `open` is the link
+ * to the PR on GitHub; the other three are the write controls, each with a block above (`open` has none, a link is never disabled).
+ */
+export const PR_KEYS = ['merge', 'auto-merge', 'update', 'open'] as const;
+
+/** One of the strip's keys. (`lib/pr-layouts.ts` still carries a three-member type of this name until its only caller is replaced; nothing imports both.) */
+export type PrKey = (typeof PR_KEYS)[number];
+
+/**
+ * The reasons a row's why-line may carry: the ones that come from the REPO or from the token's permissions, rather than from the PR's own facts. A closed set
+ * and not a rule over the block's text so that a new reason is a deliberate choice about whether the line says it — `draft`, `not mergeable`,
+ * `checks failing` and `already up to date` are the row's facts, which its chips, cells and verdict already draw or imply, so repeating them under the keys
+ * would say the same thing twice. `updating…` is in the set because it is not on a chip: the line is where it is said, unless the row's outcome says it.
+ */
+export const REPO_REASONS: ReadonlySet<string> = new Set([
+  'sync off',
+  'no merge method allowed',
+  'auto-merge not enabled on the repo',
+  'fork does not allow edits',
+  'no permission to update',
+  'updating…'
+]);
+
+/**
+ * The reasons the row writes under its keys, in key order — Merge's, auto-merge's, Update's — each once, so a sync-off repo, which blocks all three, says
+ * `sync off` a single time. It reads the three blocks and never the repo's own fields, so it says exactly what the keys' titles say: a draft PR on a repo with no merge
+ * method has `draft` on Merge, which is not on the line, and the line is empty rather than telling a second story about a key that already has one.
+ *
+ * `updating…` is dropped when the row's last outcome is the `updating` one: that outcome line already says it, and two copies of one word on a row read as two
+ * updates. A later write (`auto-merge armed`, say) replaces the outcome, and the line then carries `updating…` again for as long as the mark holds — which is
+ * why the caller hands in the outcome's `kind` and not a boolean about the mark alone. `outcomeKind` is `undefined` for a row with no outcome.
+ */
+export function whyLine(pr: PullRequestRow, repo: PrRepoView, updating: boolean, outcomeKind: PrOutcome['kind'] | undefined): string[] {
+  const reasons: string[] = [];
+  for (const reason of [mergeBlock(pr, repo), autoMergeBlock(pr, repo), updateBlock(pr, repo, updating)]) {
+    if (reason === null || !REPO_REASONS.has(reason) || reasons.includes(reason)) continue;
+    if (reason === 'updating…' && outcomeKind === 'updating') continue;
+    reasons.push(reason);
+  }
+  return reasons;
 }
 
 /** The method the merge control starts on: the first the repo allows, in `MERGE_METHODS` order (squash, merge, rebase), or `null` when it allows none. */

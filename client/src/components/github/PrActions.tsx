@@ -76,7 +76,7 @@ export function PrActions({
   };
 
   const merge = mergeBlock(pr, repo);
-  const update = updateBlock(pr, repo);
+  const update = updateBlock(pr, repo, false);
   const autoMerge = autoMergeBlock(pr, repo);
   const armed = pr.autoMerge !== null;
 

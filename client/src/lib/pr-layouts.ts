@@ -255,7 +255,7 @@ export function compactKeys(pr: PullRequestRow, repo: PrRepoView): { keys: PrKey
   if (pr.mergeState === 'behind') offered.push('update');
   if (repo.autoMergeAllowed || pr.autoMerge !== null) offered.push('auto-merge');
   let primary: PrKey | null = null;
-  if (pr.mergeState === 'behind' && updateBlock(pr, repo) === null) primary = 'update';
+  if (pr.mergeState === 'behind' && updateBlock(pr, repo, false) === null) primary = 'update';
   else if (prLevel(pr) === 'quiet' && !pr.draft && pr.checks !== 'pending' && mergeBlock(pr, repo) === null) primary = 'merge';
   const keys = primary === null ? offered : [primary, ...offered.filter((k) => k !== primary)];
   return { keys, primary };
