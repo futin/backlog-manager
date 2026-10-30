@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { Dot } from '../ui/Dot';
 import { Pill } from '../ui/Pill';
 import { PrActions } from './PrActions';
-import { PrOutcomeLine } from './PrOutcomeLine';
+import { PrFoot } from './PrFoot';
 import { PrRepoNotes } from './PrRepoNotes';
 import type { PrLayoutProps } from './pr-layout-props';
 import {
@@ -21,39 +21,38 @@ import {
   type RankedPr
 } from '../../lib/pr-layouts';
 import { prRunWarning } from '../../lib/pr-run';
-import { isUpdating } from '../../lib/prs';
+import type { PrWriteResult } from '../../../../shared/types';
 
 /**
- * GitHub › PRs, Inbox layout (.claude/DESIGN.md §8.11; spec `2026-10-29-prs-layouts-design.md`, "Inbox"): the dashboard Git inbox's shape for pull requests —
- * three count tiles that filter, the PRs that need a person as full items, everything else as one line each. It decides nothing: the level, the rank, the
- * verdict and the steps are `lib/pr-layouts.ts`'s, the run warning is `lib/pr-run.ts`'s, and every write is `PrActions`'s, so the three layouts cannot triage
- * one PR three ways.
+ * GitHub › PRs, Inbox layout (.claude/DESIGN.md §8.11; specs `2026-10-29-prs-layouts-design.md`, "Inbox", and `2026-10-30-prs-page-fixes-design.md`,
+ * "Inbox"): the dashboard Git inbox's shape for pull requests — three count tiles that filter, the PRs that need a person first, everything else after a
+ * `Quiet` heading. It decides nothing: the level, the rank, the verdict and the steps are `lib/pr-layouts.ts`'s, the run warning is `lib/pr-run.ts`'s, and
+ * every write is `PrActions`' and `PrFoot`'s, so the three layouts cannot triage one PR three ways.
  *
  * **Tiles are toggles.** A `<button aria-pressed>` per level — dot, count, label. Clicking one filters, clicking it again clears. The filter is held here as a
  * LEVEL, not as a list of keys, so a PR that a re-read moves out of the selected level simply leaves the list and the empty filter says
  * `No pull request at this level.` — a tile that still selected a PR the data no longer puts there would be lying. A tile for an empty level stays drawn, so
- * the person who selected it can see why the list is empty and click it off.
+ * the person who selected it can see why the list is empty and click it off. A filter that hides the row whose Confirm is open closes that Confirm: a row out
+ * of the list is out of the list, whatever took it, and a Confirm nothing draws would still hold the Escape stack.
  *
- * **Every item is keyed by `<repo>#<number>`, never by index.** Two repos can each have a `#7`, and a re-read reorders the list; `PrActions` keeps a write in
- * flight and an open `Confirm` in its own state, and an item that remounted because its position changed would drop the very Confirm a person is reading.
+ * **Every row is keyed by `<repo>#<number>`, never by index.** Two repos can each have a `#7`, and a re-read reorders the list; a row that remounted because
+ * its position changed would lose its place under the person's eye. The open Confirm is the page's (`PrLayoutProps.confirming`), so it follows the key, not
+ * the position.
  *
- * **A loud item** (Needs you, Worth a look): dot, `#n` link, title, repo; the verdict, then the steps (the calm ones muted — the run warning and `Approved.`
- * are worth reading beside a problem, not acting on); `author · head → base · age`; the compact actions on the right, which wrap under on a narrow window.
- * **A quiet line** is dot, `#n`, title, repo, `quietFacts` and — when a run is still working the branch — the warning in the warn tone, because a clean
- * `backlog/<id>` PR an orchestrator run has not finished with is exactly a Quiet PR. Its actions are one click further: a separate toggle button
- * (`aria-expanded`) beside the link, NOT a button wrapping it, because a link inside a button is invalid interactive nesting. The strip is UNMOUNTED when the
- * line is folded: an open `Confirm` joins `useDialogEscape`'s stack while it is drawn, and one that stayed mounted under `hidden` would swallow the next Escape
- * unseen ("Escape has one owner, and the topmost dialog is the only one that closes"). The fold forgets the strip's own busy state, so the page's in-flight set
- * (`PrLayoutProps.inFlight`) holds the keys disabled until its re-read lands. The outcome line is drawn whether or not the line is open —
- * a collapsed part never hides the result of a write (spec, "What every layout carries").
+ * **One row, loud or quiet.** Dot, `#n` link, title, repo; the fact line — the verdict and its steps for a loud row (the calm ones muted: `Approved.` is worth
+ * reading beside a problem, not acting on), `quietFacts` for a quiet one, nothing when there is nothing; the meta line `author · head → base · age` with the
+ * run warning as one warn pill after it; then the foot (the Confirm, then the outcome line). The four keys and their why-line are the row's right-hand side,
+ * top-aligned with the title, and wrap under the text when the title would get less than 320 px — and always below the narrow breakpoint. The run warning is
+ * said once, as that pill, so a loud row asks `prProblems` for its steps without it. A quiet row used to fold its keys behind an `Actions` toggle; the
+ * fixed four keys are the point of this layout, so it carries them like every other row and its `#n` is a link and nothing more.
  *
  * **Can't read.** A shown repo whose last read was `rate-limited` or `error` keeps its rows — still ranked, still actionable, a failed refresh is no reason to
- * stop offering a merge — and gets one extra line with its `detail`. The notes (`PrRepoNotes`) carry what is not a PR: outcomes of merged ones, the sync-off
- * sentence, `showing n of total`.
+ * stop offering a merge. Its `Can't read` line, like every note that is not a PR (outcomes of merged ones, the sync-off sentence, `showing n of total`), is
+ * `PrRepoNotes`'.
  */
 
-/** `author · head → base · age` — the line under a loud item's verdict. */
-function ItemMeta({ r, now }: { r: RankedPr; now: number }) {
+/** `author · head → base · age`, then the run warning when a run still works the branch — the line under a row's facts. */
+function RowMeta({ r, now, warning }: { r: RankedPr; now: number; warning: string | null }) {
   const age = ageText(r.pr.updatedAt, now);
   return (
     <div className="prs-meta">
@@ -66,18 +65,23 @@ function ItemMeta({ r, now }: { r: RankedPr; now: number }) {
           <span>{age}</span>
         </>
       )}
+      {warning !== null && <Pill tone="warn">{warning}</Pill>}
     </div>
   );
 }
 
-function LoudItem({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
+function InboxRow({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
   const { pr, repo, key } = r;
-  const updating = isUpdating(props.marks[key], pr, props.now);
+  // The mark's presence, not its clock: `Update` frees, and `updating…` leaves the row, only when the page's timer has judged the re-read.
+  const updating = props.marks[key] !== undefined;
+  const outcome = props.outcomes[key];
   const warning = prRunWarning(pr, repo.repo, props.ctx, props.now);
-  const { verdict, steps } = prVerdict(prProblems(pr, warning));
+  const write = (call: () => Promise<PrWriteResult>) => props.write(key, pr.headSha, call);
+  const { verdict, steps } = r.level === 'quiet' ? { verdict: null, steps: [] } : prVerdict(prProblems(pr, null));
+  const facts = r.level === 'quiet' ? quietFacts(pr) : '';
   return (
-    <li className="prs-inbox-item" data-testid={`pr-item-${key}`}>
-      <div className="prs-inbox-main">
+    <li className="prs-row" data-testid={`pr-row-${key}`}>
+      <div className="prs-row-main">
         <div className="prs-row-title">
           <Dot size={10} tone={LEVEL_DOT[r.level]} />
           <a className="prs-num" href={pr.url} target="_blank" rel="noreferrer noopener">
@@ -96,68 +100,27 @@ function LoudItem({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
             ))}
           </ul>
         )}
-        <ItemMeta r={r} now={props.now} />
-      </div>
-      <div className="prs-inbox-keys">
-        <PrActions
+        {facts !== '' && <p className="prs-inbox-facts">{facts}</p>}
+        <RowMeta r={r} now={props.now} warning={warning} />
+        <PrFoot
           repo={repo}
           pr={pr}
+          outcome={outcome}
           updating={updating}
-          outcome={props.outcomes[key]}
-          busy={props.inFlight.has(key)}
-          onMerge={() => props.setConfirming(key)}
-          onWrite={(call) => props.write(key, pr.headSha, call)}
+          confirming={props.confirming === key}
+          onDismiss={() => props.setConfirming(null)}
+          onWrite={write}
         />
       </div>
-      <PrOutcomeLine outcome={props.outcomes[key]} updating={updating} />
-    </li>
-  );
-}
-
-function QuietLine({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
-  const { pr, repo, key } = r;
-  const [expanded, setExpanded] = useState(false);
-  const updating = isUpdating(props.marks[key], pr, props.now);
-  const warning = prRunWarning(pr, repo.repo, props.ctx, props.now);
-  const facts = quietFacts(pr);
-  return (
-    <li className="prs-inbox-quiet" data-testid={`pr-quiet-${key}`}>
-      <div className="prs-inbox-quiet-row">
-        <span className="prs-inbox-quiet-text">
-          <Dot size={10} tone={LEVEL_DOT[r.level]} />
-          <a className="prs-num" href={pr.url} target="_blank" rel="noreferrer noopener">
-            #{pr.number}
-          </a>
-          <span className="prs-title">{pr.title}</span>
-          <span className="prs-inbox-repo">{repo.repo}</span>
-          {facts !== '' && <span className="prs-inbox-facts">{facts}</span>}
-          {warning !== null && <Pill tone="warn">{warning}</Pill>}
-        </span>
-        {/* The visible word is part of the accessible name (label-in-name); `aria-expanded` carries open versus folded, so the word never has to change. */}
-        <button
-          type="button"
-          className="prs-textlink prs-inbox-toggle"
-          aria-expanded={expanded}
-          aria-label={`Actions for #${pr.number}`}
-          onClick={() => setExpanded((open) => !open)}
-        >
-          Actions
-        </button>
-      </div>
-      <PrOutcomeLine outcome={props.outcomes[key]} updating={updating} />
-      {expanded && (
-        <div className="prs-inbox-quiet-actions">
-          <PrActions
-            repo={repo}
-            pr={pr}
-            updating={updating}
-            outcome={props.outcomes[key]}
-            busy={props.inFlight.has(key)}
-            onMerge={() => props.setConfirming(key)}
-            onWrite={(call) => props.write(key, pr.headSha, call)}
-          />
-        </div>
-      )}
+      <PrActions
+        repo={repo}
+        pr={pr}
+        updating={updating}
+        outcome={outcome}
+        busy={props.inFlight.has(key)}
+        onMerge={() => props.setConfirming(key)}
+        onWrite={write}
+      />
     </li>
   );
 }
@@ -173,11 +136,18 @@ export function PrInbox(props: PrLayoutProps) {
   const loud = visible.filter((r) => r.level !== 'quiet');
   const quiet = visible.filter((r) => r.level === 'quiet');
 
+  // A filter that hides the confirming row closes its Confirm. Only a row still ranked counts: one the re-read dropped is the page's to close.
+  const { confirming, setConfirming } = props;
+  const hidden = confirming !== null && ranked.some((r) => r.key === confirming) && !visible.some((r) => r.key === confirming);
+  useEffect(() => {
+    if (hidden) setConfirming(null);
+  }, [hidden, setConfirming]);
+
   return (
     <div className="prs-inbox" data-testid="pr-inbox">
       <PrRepoNotes repos={repos} outcomes={outcomes} part="above" />
       {/* With nothing ranked there are no tiles to draw. `no open pull requests` claims a read nobody got while a shown repo failed, so it waits for a clean
-          read (Matrix says the same, `PrMatrix`); the `Can't read` list below is then the page's whole answer. */}
+          read (Matrix says the same, `PrMatrix`); the `Can't read` lines below are then the page's whole answer. */}
       {ranked.length === 0 ? (
         failures.length === 0 && <p className="prs-status">no open pull requests</p>
       ) : (
@@ -201,7 +171,7 @@ export function PrInbox(props: PrLayoutProps) {
           {loud.length > 0 && (
             <ul className="prs-inbox-list">
               {loud.map((r) => (
-                <LoudItem key={r.key} r={r} props={props} />
+                <InboxRow key={r.key} r={r} props={props} />
               ))}
             </ul>
           )}
@@ -210,23 +180,11 @@ export function PrInbox(props: PrLayoutProps) {
               <h3 className="prs-inbox-heading">Quiet</h3>
               <ul className="prs-inbox-list">
                 {quiet.map((r) => (
-                  <QuietLine key={r.key} r={r} props={props} />
+                  <InboxRow key={r.key} r={r} props={props} />
                 ))}
               </ul>
             </>
           )}
-        </>
-      )}
-      {failures.length > 0 && (
-        <>
-          <h3 className="prs-inbox-heading">Can&apos;t read</h3>
-          <ul className="prs-inbox-list">
-            {failures.map((repo) => (
-              <li key={repo.repo} className="prs-inbox-cantread" data-testid={`pr-cantread-${repo.repo}`}>
-                {`${repo.repo} — ${repo.detail ?? repo.access}`}
-              </li>
-            ))}
-          </ul>
         </>
       )}
       <PrRepoNotes repos={repos} outcomes={outcomes} part="below" />

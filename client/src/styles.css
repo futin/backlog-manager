@@ -2932,10 +2932,20 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-note { font-size: 13px; color: var(--ink2); line-height: 1.45; margin-bottom: 12px }
 .prs-note-bad { color: var(--red) }
 .prs-list { list-style: none; margin: 0; padding: 0 }
-.prs-row { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; min-width: 0 }
+/* One row anatomy for Inbox and Cards (spec `2026-10-30-prs-page-fixes-design.md`): the text on the left, the four keys and their why-line on the right,
+   top-aligned with the title. The text keeps a 320 px basis, so the keys drop under it whenever the title would get less — the title is never squeezed to
+   make room for keys — and always below the narrow breakpoint, left-aligned there. The foot (Confirm, outcome) lives in the text column, never the keys'. */
+.prs-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; padding: 16px 0; min-width: 0 }
 .prs-row + .prs-row { border-top: 1px solid var(--hairline) }
 .prs-row:first-child { padding-top: 0 }
 .prs-row:last-child { padding-bottom: 0 }
+.prs-row-main { display: flex; flex-direction: column; gap: 6px; flex: 1 1 320px; min-width: 0 }
+.prs-keys-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: 0 1 auto; min-width: 0 }
+.prs-keys { display: flex; flex-wrap: wrap; gap: 8px }
+.prs-foot { display: flex; flex-direction: column; gap: 8px; margin-top: 8px }
+@media (max-width: 700px) {
+  .prs-keys-side { flex: 1 0 100%; align-items: flex-start }
+}
 .prs-row-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 15px; font-weight: 500; color: var(--ink) }
 .prs-num { color: var(--ink2); text-decoration: none; flex: none }
 .prs-num:hover { text-decoration: underline }
@@ -2946,7 +2956,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px }
 /* An action and its reason travel together, so a wrap never strands a reason under the wrong button. */
 .prs-action { display: inline-flex; align-items: center; gap: 6px }
-.prs-why { font-size: 12px; color: var(--ink3) }
+.prs-why { font-size: 12px; color: var(--ink2) }
 .prs-open { font-size: 13px; color: var(--ink2); text-decoration: none }
 .prs-open:hover { text-decoration: underline }
 .prs-outcome { font-size: 13px; color: var(--ink2); line-height: 1.45 }
@@ -2954,7 +2964,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
 
 /* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The tiles are plain bordered buttons — a selected one takes the ink border, never a fill, so a level's dot stays
-   the only colour on it. Items are boxless with a hairline BETWEEN them, as `.prs-row` is; the compact keys sit on the right and wrap under on a narrow window.
+   the only colour on it. Its rows are the shared `.prs-row` above, boxless with a hairline between them.
    Muted steps use --ink3, the calm ones a step down from the problems, which stay --ink2. Own `.prs-inbox*`, `.prs-tile*` and `.prs-notes*` classes only — a
    `.ui-*` primitive is never restyled from here (guard 7). */
 .prs-inbox { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
@@ -2968,33 +2978,18 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-tile-n { color: var(--ink); font-weight: 600 }
 .prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0 }
 .prs-inbox-heading { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
-.prs-inbox-item { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; padding: 16px 0; min-width: 0 }
-.prs-inbox-item + .prs-inbox-item, .prs-inbox-quiet + .prs-inbox-quiet { border-top: 1px solid var(--hairline) }
-.prs-inbox-item:first-child { padding-top: 0 }
-.prs-inbox-main { display: flex; flex-direction: column; gap: 6px; flex: 1 1 320px; min-width: 0 }
-.prs-inbox-keys { flex: 0 1 auto; min-width: 0 }
-.prs-inbox-keys-open { flex: 1 0 100% }
-.prs-inbox-item > .prs-outcome { flex: 1 0 100% }
 .prs-inbox-repo { flex: none; font-size: 13px; font-weight: 400; color: var(--ink3) }
 .prs-inbox-verdict { font-size: 14px; color: var(--ink); line-height: 1.45 }
 .prs-inbox-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px }
 .prs-inbox-step { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-inbox-step-calm { color: var(--ink3) }
-.prs-inbox-quiet { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; min-width: 0 }
-/* A quiet line is two columns, not one wrapping row: in a single `flex-wrap` row each item breaks on its max-content size before anything shrinks, so a long
-   title forced the `Actions` toggle onto a line of its own at every width. The text column wraps INSIDE itself (`flex: 1 1 auto; min-width: 0`) and the toggle
-   stays `flex: none` beside it, at the top right of the first line on a desktop and on a 375 px phone alike. */
-.prs-inbox-quiet-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 14px; color: var(--ink) }
-.prs-inbox-quiet-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; flex: 1 1 auto; min-width: 0 }
 .prs-inbox-facts { font-size: 13px; color: var(--ink3) }
-/* One text-link look for the page's two inline controls — the toolbar's `GitHub › Settings` and a quiet line's `Actions` toggle. `.set-link` is §8.6's 36 px
-   bordered row control and reads as a button inside a sentence, so this page keeps its own (a PRs class, not a restyle of `.set-link`). */
+/* One text-link look for the page's inline controls — the toolbar's `GitHub › Settings`. `.set-link` is §8.6's 36 px bordered row control and reads as a
+   button inside a sentence, so this page keeps its own (a PRs class, not a restyle of `.set-link`). */
 .prs-textlink {
   border: 0; background: none; padding: 0; font: inherit; color: var(--ink2); text-decoration: underline; text-underline-offset: 2px; cursor: pointer
 }
 .prs-textlink:hover { color: var(--ink) }
-.prs-inbox-toggle { flex: none; padding: 0 4px; font-size: 13px }
-.prs-inbox-cantread { padding: 4px 0; font-size: 13px; color: var(--ink2) }
 .prs-notes { display: flex; flex-direction: column; gap: 4px }
 .prs-notes-line { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-notes-error { color: var(--red) }
