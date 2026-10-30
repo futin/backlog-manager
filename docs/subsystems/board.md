@@ -483,33 +483,35 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   `runBlock` after the run block, never hidden, since it is a per-project block rather than an environment one — and so is the toolbar's Orchestrate chip,
   whose click re-asks nothing for this reason because no status refetch could clear it — alone, or beside a visibility block, since #272 put both controls
   on `GatedChip`'s one rule.
-- **The PRs page** (GitHub › PRs, [spec](../superpowers/specs/2026-10-29-source-sections-design.md) Goal 2; DESIGN.md §8.11). `PullRequestsView` lists every
-  open pull request of the registered GitHub repos — forks and other authors included — drawn as Inbox, Matrix or Cards (below). Its one read is
-  `usePullRequests` (`GET /api/prs`, every 60 s after the last answer, plus mount and focus), mounted by this page and by GitHub › Settings' Access card: the
-  server's PR cache has no timer, so with neither open there are no PR reads at all. A repo the token cannot read (`forbidden` or `not-found`, `splitReach` in
-  `lib/pr-layouts.ts`) is handed to no layout and left out of `N open`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings`
-  (`onOpenSettings`, threaded from `App`), whose `Access` card (`GithubAccessGroup`, the hook's second mount) lists each with GitHub's `detail` and the token
-  fix; a rate-limited or `error` repo is transient and stays. The layout is a `Segmented` in the toolbar, stored per device (`PR_LAYOUT_KEY`; an unknown word is
-  Inbox; Matrix is wide-only — a narrow window draws a stored `matrix` as Inbox and keeps the word, `drawableLayout`). **Inbox** (default) ranks every shown PR
-  across repos (`rankPrs`: level, severity, newest) under three filtering count tiles; a loud PR (Needs you, Worth a look) is an item with a verdict, steps and
-  the compact keys `compactKeys` picks (`Merge…` swaps them for the full strip in place), a Quiet one a line with its own `Actions` toggle beside the `#n` link;
-  failing repos add a `Can't read` line. **Matrix** is a table, a column per check with a failure count in its header, whose row toggles one expansion holding
-  the full strip. **Cards** is the per-repo page described next. All three draw the same `PrActions` and `PrOutcomeLine`, and `PrRepoNotes` says the merged
-  outcomes, `sync off` sentence and `showing n of total` once for Inbox and Matrix; a PR's keys stay disabled while its write runs in any layout, because the
-  page owns an in-flight set keyed `<repo>#<number>`, and a folded or collapsed strip is unmounted so its Confirm leaves the Escape stack. In Cards a repo's
-  heading carries `polled N s ago` (`pollAge`), a `sync off` pill beside the server's full sentence (`syncOff`, `syncOffBlock`'s one home) when its sync is
-  off, the last read's `detail` when it was not `ok`, `showing 100 of N` when GitHub had more than one page, or `no open pull requests`; a token-less server
-  reads `no token — set BM_GITHUB_TOKEN in .env and restart`. A row (`PrRow`) is `#<n>` (to github.com, a new tab), the title, the author, `head → base`, the
-  `prChips` and — while a live or paused run, a remote launch or a live claim is still working the branch (`prRunWarning`, from what the Board already polls)
-  — a warn-toned warning that leaves every action enabled. Its actions are a method `Select` (the repo's allowed methods, seeded by `defaultMethod`), `Merge`
-  behind an inline `Confirm` (`Merge #<n> into <base> (<method>)?`), `Enable`/`Disable auto-merge` and `Update branch`; a blocked one is disabled with its
-  reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync off` on each for a sync-off repo) in text beside it and as its `aria-describedby`, never a
-  tooltip alone. A write disables the row's actions until the page has re-read, after success and failure alike; its outcome is one line — `outcomeLine`, or
-  the server's refusal verbatim — held by the page per `<repo>#<number>`, so a merged PR that left the list keeps a `#12 merged` line under its repo — the newest three per repo (`DEPARTED_KEEP`), and a PR's line clears when
-  its next write leaves. An
-  update-branch's 202 marks the PR at the head SHA it was asked from: the row reads `updating…` while `isUpdating`, until a read shows a new head or
-  `UPDATING_MS` (30 s, `PR_UPDATING_MS` in `shared/types.ts`) pass, and at that moment the page re-reads once — a read the server answers from GitHub,
-  because the update made the repo due at that same moment. `updateBlock` reads `no permission to update` for a PR that cannot be updated while behind. The page reports the rail cursor as Board and Archive do (`useReportWorking`).
+- **The PRs page** (GitHub › PRs, [spec](../superpowers/specs/2026-10-29-source-sections-design.md) Goal 2, reshaped by [the fixes
+  spec](../superpowers/specs/2026-10-30-prs-page-fixes-design.md); DESIGN.md §8.11). `PullRequestsView` lists every open pull request of the registered GitHub
+  repos — forks and other authors included — drawn as Inbox, Matrix or Cards (below). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
+  last answer, plus mount and focus), mounted by this page and by GitHub › Settings' Access card: the server's PR cache has no timer, so with neither open there
+  are no PR reads at all. A repo the token cannot read (`forbidden` or `not-found`, `splitReach` in `lib/pr-layouts.ts`) is handed to no layout and left out of
+  `N open`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card
+  (`GithubAccessGroup`, the hook's second mount) lists each with GitHub's `detail` and the token fix; a rate-limited or `error` repo is transient, keeps its
+  rows and is said once below the list as `Can't read · <repo> — <detail>` in every layout, never as a row. The layout is a `Segmented` in the toolbar offering
+  all three at every width (`PR_LAYOUT_OPTIONS`), stored per device (`PR_LAYOUT_KEY`; an unknown word is Inbox). **Inbox** (default) ranks every shown PR across
+  repos (`rankPrs`: level, severity, newest) under three filtering count tiles, every row one `prs-row` — the fact line (a loud row's verdict and steps, a quiet
+  row's `quietFacts`), then `author · head → base · age` with the run warning as a warn pill. **Matrix** is a table, a column per check with a failure count in
+  its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; its row toggles one expansion, pinned to the box's visible width, holding
+  the key strip and the foot. **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`); a repo read cleanly with none is counted in the
+  toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — `Merge`, `Auto-merge`, `Update`, `Open ↗`, one
+  of them filled by `primaryKey` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
+  the method `Select` inside it, then `PrOutcomeLine`. A blocked key is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
+  off` on each for a sync-off repo) as its `title` and its `aria-describedby`; a key is `disabled` outright only while its PR's write runs, because the page
+  owns an in-flight set keyed `<repo>#<number>`. The page holds ONE `confirming` key, so a second `Merge` moves the Confirm, and a write leaving, a layout
+  switch, a re-read that drops the PR or blocks the merge, a filter hiding the row or a collapse closes it, nothing sent. `PrRepoNotes` says the merged
+  outcomes, the `sync off` sentence and `showing n of total` once above Inbox and Matrix, then the `Can't read` lines below; Cards says the first three in each
+  card. A token-less server reads `no token — set BM_GITHUB_TOKEN in .env and restart`. A row's chips are `prChips`, and while a live or paused run, a remote
+  launch or a live claim is still working the branch (`prRunWarning`, from what the Board already polls) it carries a warn pill that leaves every action
+  enabled. A write's outcome is one line — `outcomeLine`, or the server's refusal verbatim — held by the page per `<repo>#<number>`, so a merged PR that left
+  the list keeps a `#12 merged` line — the newest three per repo (`DEPARTED_KEEP`) — and a PR's line clears when its next write leaves. An update-branch's 202
+  marks the PR at the head SHA it was asked from (`UpdateMark`): the row reads `updating…` while the mark is present — Matrix in its Base cell only — and a read
+  that shows a new head drops it and says `branch updated`; `UPDATING_MS` (30 s, `PR_UPDATING_MS` in `shared/types.ts`) after the update the page re-reads once
+  and judges that answer — a read the server answers from GitHub, because the update made the repo due at that same moment — and a same head or a failed read
+  just drops the mark. `updateBlock` reads `no permission to update` for a PR that cannot be updated while behind. The page reports the rail cursor as Board and
+  Archive do (`useReportWorking`).
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live
@@ -675,11 +677,11 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   and `useFilesPage`/`useGithubPage` with their setters, module stores on `useJiraPage`'s shape.
 - `components/github/` — `GithubSettingsView` (GitHub › Settings), `GithubSyncGroup`, its `Sync` card, and `GithubAccessGroup`, its `Access` card;
   `PullRequestsView` (GitHub › PRs) and the three layouts it switches between — `PrInbox`, `PrMatrix`, `PrCards` — over the shared `PrActions` (merge,
-  auto-merge, update branch), `PrOutcomeLine` and `PrRepoNotes`; `PrRow`, one open pull request; `components/settings/SourcesGroup.tsx` is the Shared report.
+  auto-merge, update, open), `PrFoot` (the merge Confirm, then `PrOutcomeLine`) and `PrRepoNotes`; `components/settings/SourcesGroup.tsx` is the Shared report.
 - `lib/prs.ts`, `lib/pr-run.ts`, `lib/prs-api.ts` and `hooks/usePullRequests.ts` — the PRs page's derivations (chips, the three blocks, the default method,
-  `isUpdating`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read; `lib/pr-layouts.ts` is the layout key, its
-  stored choice, `splitReach` (which hides the repos the token cannot read), and every Inbox and Matrix derivation: a PR's level, severity, verdict and rank,
-  `compactKeys`, the Matrix cells, tones and column counts.
+  `UpdateMark`, `whyLine`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read; `lib/pr-layouts.ts` is the layout key, its
+  options (`PR_LAYOUT_OPTIONS`) and stored choice, `splitReach` (which hides the repos the token cannot read), `cardRepos` and `emptyRepoNote`, and every Inbox
+  and Matrix derivation: a PR's level, severity, verdict and rank, `primaryKey`, the Matrix cells, tones and column counts.
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
   explanatory line, and a committed marker changes on a commit rather than on a poll.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.

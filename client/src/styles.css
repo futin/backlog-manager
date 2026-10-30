@@ -2952,12 +2952,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; color: var(--ink2) }
 .prs-branches { overflow-wrap: anywhere }
 .prs-chips { display: flex; flex-wrap: wrap; gap: 6px }
-.prs-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px }
-/* An action and its reason travel together, so a wrap never strands a reason under the wrong button. */
-.prs-action { display: inline-flex; align-items: center; gap: 6px }
 .prs-why { font-size: 12px; color: var(--ink2) }
-.prs-open { font-size: 13px; color: var(--ink2); text-decoration: none }
-.prs-open:hover { text-decoration: underline }
 .prs-outcome { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-outcome-error { color: var(--red) }
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
