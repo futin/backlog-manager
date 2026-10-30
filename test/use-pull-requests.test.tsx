@@ -148,6 +148,49 @@ describe('usePullRequests', () => {
     expect(result.current.error).toBeNull();
     expect(result.current.data).toEqual(payload('futin/y'));
   });
+
+  it('refresh resolves the payload it stored, so a caller can judge the re-read it just awaited', async () => {
+    // The mount read and the refresh answer different repos, so a resolved value that is really the stale `data` (or the mount's payload) cannot pass.
+    const fn = jest
+      .fn()
+      .mockImplementationOnce(() => Promise.resolve(res(200, payload('futin/mounted'))))
+      .mockImplementation(() => Promise.resolve(res(200, payload('futin/refreshed'))));
+    global.fetch = fn as unknown as typeof fetch;
+    const { result } = renderHook(() => usePullRequests());
+    await flush();
+    expect(result.current.data).toEqual(payload('futin/mounted'));
+
+    let resolved: PullRequestsPayload | null | undefined;
+    await act(async () => {
+      resolved = await result.current.refresh();
+    });
+
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(resolved).toEqual(payload('futin/refreshed'));
+    expect(result.current.data).toEqual(resolved);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('refresh resolves null when the read rejects, with the rejection already in error and the last data kept', async () => {
+    const fn = jest
+      .fn()
+      .mockImplementationOnce(() => Promise.resolve(res(200, payload('futin/mounted'))))
+      .mockImplementation(() => Promise.reject(new Error('stub: the refresh could not connect')));
+    global.fetch = fn as unknown as typeof fetch;
+    const { result } = renderHook(() => usePullRequests());
+    await flush();
+    expect(result.current.data).toEqual(payload('futin/mounted'));
+
+    let resolved: PullRequestsPayload | null | undefined;
+    await act(async () => {
+      resolved = await result.current.refresh();
+    });
+
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(resolved).toBeNull();
+    expect(result.current.error).toBe('stub: the refresh could not connect');
+    expect(result.current.data).toEqual(payload('futin/mounted'));
+  });
 });
 
 describe('prs-api', () => {

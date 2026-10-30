@@ -2928,14 +2928,23 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-status-error { color: var(--red) }
 .prs-repo-inner { display: flex; flex-direction: column; min-width: 0 }
 .prs-repo-sub { display: flex; flex-wrap: wrap; gap: 4px 12px }
-/* The repo's own notes under its head — the sync-off sentence, a failed read's detail. Readable without hover: on a phone there is none. */
+/* The repo's own note under its head — the sync-off sentence. Readable without hover: on a phone there is none. */
 .prs-note { font-size: 13px; color: var(--ink2); line-height: 1.45; margin-bottom: 12px }
-.prs-note-bad { color: var(--red) }
 .prs-list { list-style: none; margin: 0; padding: 0 }
-.prs-row { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; min-width: 0 }
+/* One row anatomy for Inbox and Cards (spec `2026-10-30-prs-page-fixes-design.md`): the text on the left, the four keys and their why-line on the right,
+   top-aligned with the title. The text keeps a 320 px basis, so the keys drop under it whenever the title would get less — the title is never squeezed to
+   make room for keys — and always below the narrow breakpoint, left-aligned there. The foot (Confirm, outcome) lives in the text column, never the keys'. */
+.prs-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; padding: 16px 0; min-width: 0 }
 .prs-row + .prs-row { border-top: 1px solid var(--hairline) }
 .prs-row:first-child { padding-top: 0 }
 .prs-row:last-child { padding-bottom: 0 }
+.prs-row-main { display: flex; flex-direction: column; gap: 6px; flex: 1 1 320px; min-width: 0 }
+.prs-keys-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: 0 1 auto; min-width: 0 }
+.prs-keys { display: flex; flex-wrap: wrap; gap: 8px }
+.prs-foot { display: flex; flex-direction: column; gap: 8px; margin-top: 8px }
+@media (max-width: 700px) {
+  .prs-keys-side { flex: 1 0 100%; align-items: flex-start }
+}
 .prs-row-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 15px; font-weight: 500; color: var(--ink) }
 .prs-num { color: var(--ink2); text-decoration: none; flex: none }
 .prs-num:hover { text-decoration: underline }
@@ -2943,18 +2952,13 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; color: var(--ink2) }
 .prs-branches { overflow-wrap: anywhere }
 .prs-chips { display: flex; flex-wrap: wrap; gap: 6px }
-.prs-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px }
-/* An action and its reason travel together, so a wrap never strands a reason under the wrong button. */
-.prs-action { display: inline-flex; align-items: center; gap: 6px }
-.prs-why { font-size: 12px; color: var(--ink3) }
-.prs-open { font-size: 13px; color: var(--ink2); text-decoration: none }
-.prs-open:hover { text-decoration: underline }
+.prs-why { font-size: 12px; color: var(--ink2) }
 .prs-outcome { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-outcome-error { color: var(--red) }
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
 
 /* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The tiles are plain bordered buttons — a selected one takes the ink border, never a fill, so a level's dot stays
-   the only colour on it. Items are boxless with a hairline BETWEEN them, as `.prs-row` is; the compact keys sit on the right and wrap under on a narrow window.
+   the only colour on it. Its rows are the shared `.prs-row` above, boxless with a hairline between them.
    Muted steps use --ink3, the calm ones a step down from the problems, which stay --ink2. Own `.prs-inbox*`, `.prs-tile*` and `.prs-notes*` classes only — a
    `.ui-*` primitive is never restyled from here (guard 7). */
 .prs-inbox { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
@@ -2968,33 +2972,18 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-tile-n { color: var(--ink); font-weight: 600 }
 .prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0 }
 .prs-inbox-heading { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
-.prs-inbox-item { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; padding: 16px 0; min-width: 0 }
-.prs-inbox-item + .prs-inbox-item, .prs-inbox-quiet + .prs-inbox-quiet { border-top: 1px solid var(--hairline) }
-.prs-inbox-item:first-child { padding-top: 0 }
-.prs-inbox-main { display: flex; flex-direction: column; gap: 6px; flex: 1 1 320px; min-width: 0 }
-.prs-inbox-keys { flex: 0 1 auto; min-width: 0 }
-.prs-inbox-keys-open { flex: 1 0 100% }
-.prs-inbox-item > .prs-outcome { flex: 1 0 100% }
 .prs-inbox-repo { flex: none; font-size: 13px; font-weight: 400; color: var(--ink3) }
 .prs-inbox-verdict { font-size: 14px; color: var(--ink); line-height: 1.45 }
 .prs-inbox-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px }
 .prs-inbox-step { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-inbox-step-calm { color: var(--ink3) }
-.prs-inbox-quiet { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; min-width: 0 }
-/* A quiet line is two columns, not one wrapping row: in a single `flex-wrap` row each item breaks on its max-content size before anything shrinks, so a long
-   title forced the `Actions` toggle onto a line of its own at every width. The text column wraps INSIDE itself (`flex: 1 1 auto; min-width: 0`) and the toggle
-   stays `flex: none` beside it, at the top right of the first line on a desktop and on a 375 px phone alike. */
-.prs-inbox-quiet-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 14px; color: var(--ink) }
-.prs-inbox-quiet-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; flex: 1 1 auto; min-width: 0 }
 .prs-inbox-facts { font-size: 13px; color: var(--ink3) }
-/* One text-link look for the page's two inline controls — the toolbar's `GitHub › Settings` and a quiet line's `Actions` toggle. `.set-link` is §8.6's 36 px
-   bordered row control and reads as a button inside a sentence, so this page keeps its own (a PRs class, not a restyle of `.set-link`). */
+/* One text-link look for the page's inline controls — the toolbar's `GitHub › Settings`. `.set-link` is §8.6's 36 px bordered row control and reads as a
+   button inside a sentence, so this page keeps its own (a PRs class, not a restyle of `.set-link`). */
 .prs-textlink {
   border: 0; background: none; padding: 0; font: inherit; color: var(--ink2); text-decoration: underline; text-underline-offset: 2px; cursor: pointer
 }
 .prs-textlink:hover { color: var(--ink) }
-.prs-inbox-toggle { flex: none; padding: 0 4px; font-size: 13px }
-.prs-inbox-cantread { padding: 4px 0; font-size: 13px; color: var(--ink2) }
 .prs-notes { display: flex; flex-direction: column; gap: 4px }
 .prs-notes-line { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-notes-error { color: var(--red) }
@@ -3005,16 +2994,18 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-toolbar-note { margin: 0; font-size: 13px; color: var(--ink2) }
 .prs-toolbar-age { margin-left: auto; font-size: 13px; color: var(--ink2) }
 
-/* GitHub › PRs, Matrix layout (§8.11; spec 2026-10-29-prs-layouts-design.md, "Matrix"). One `<table>` inside `ui/Ledger`'s overflow box, one row per PR, one
-   column per check. Colour is for a problem only: ok and na stay in ink (--ink2 / --ink3), bad is --red, meh --amber-ink and live --live-ink — the §8.2 TEXT
+/* GitHub › PRs, Matrix layout (§8.11; specs 2026-10-29-prs-layouts-design.md and 2026-10-30-prs-page-fixes-design.md, "Matrix"). One `<table>` inside the
+   page's own scroll box, one row per PR, one column per check. Colour is for a problem only: ok and na stay in ink (--ink2 / --ink3), bad is --red, meh --amber-ink and live --live-ink — the §8.2 TEXT
    tokens, never the --amber / --green marks, which do not clear 4.5:1 as text on paper. The cell's word is always printed, so a tone is never the only carrier.
    A row is the toggle that opens the expansion under it, so it takes the pointer and a focus ring. Own `.prs-matrix*` / `.prs-cell-*` classes only — design
    guard 7 forbids restyling a `.ui-*` primitive from here. */
 .prs-matrix { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
 /* The cell geometry is the dashboard's Management matrices' (`.git-mx`), which this layout was ported from: 14 px rows, cells centred on the row, the header
-   in `--ink2` at 400 over a hairline, and the PR column taking every spare pixel (`width: 100%`) while its two lines ellipsize rather than wrap — so a long
-   title never pushes the evidence columns out of the sheet's scroll box. The sheet (`Sheet`, §8.4's "every table scrolls inside its own sheet") is the card. */
-.prs-matrix-table { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink2) }
+   in `--ink2` at 400 over a hairline. Matrix is drawn at every width, so the table is as wide as its columns want (`max-content`, never less than the box) and
+   the box scrolls sideways rather than squeezing the evidence; the box is a size container, so the pinned blocks and the PR column's cap can be measured
+   against what is visible (`cqw`). The sheet (`Sheet`, §8.4's "every table scrolls inside its own sheet") is the card. */
+.prs-matrix-scroll { overflow-x: auto; container-type: inline-size; min-width: 0 }
+.prs-matrix-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink2) }
 .prs-matrix-table th {
   text-align: left; font-size: 12px; font-weight: 400; color: var(--ink2); padding: 0 12px 12px 0; white-space: nowrap;
   border-bottom: 1px solid var(--hairline)
@@ -3026,24 +3017,32 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* Width as padding, not `width`: a table squeezed below its columns' sum shrinks a cell to its min-content, and a `width` is not min-content — padding is.
    Without this the dot sat flush against `#n` on a window just wide enough to offer Matrix. The left 12 px keeps the dot clear of the open row's ink bar. */
 .prs-matrix-table .prs-matrix-dot { width: 10px; padding-left: 12px; padding-right: 12px }
+/* The dot and PR cells stay put while the evidence scrolls under them, so each carries its row's ground — the sheet's, hover's, or the open row's — and
+   nothing scrolling beneath shows through. 34 px is the dot column's 12 + 10 + 12. */
+.prs-matrix-sticky { position: sticky; z-index: 1; background: var(--strip) }
+.prs-matrix-table .prs-matrix-dot.prs-matrix-sticky { left: 0 }
+.prs-matrix-table .prs-matrix-pr.prs-matrix-sticky { left: 34px }
 .prs-matrix-row { cursor: pointer }
 .prs-matrix-row:hover td { background: var(--strip-hi) }
 .prs-matrix-row:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px }
-/* The open row and its expansion read as one block, as the dashboard's do: one `--strip-hi` ground under both, and an inset ink bar on the left edge. */
+/* The open row and its expansion read as one block, as the dashboard's do: one `--strip-hi` ground under both, and an inset ink bar on the left edge — on the
+   expansion it rides the pinned block, so it stays in view while the table is scrolled. */
 .prs-matrix-row[aria-expanded="true"] td, .prs-matrix-expand td { background: var(--strip-hi) }
-.prs-matrix-row[aria-expanded="true"] td:first-child, .prs-matrix-expand td { box-shadow: inset 3px 0 0 var(--ink) }
-.prs-matrix-pr { width: 100%; min-width: 200px }
-/* `width: 0; min-width: 100%` takes both lines out of the column's min-content, so the table sizes the column from the room left and the text ellipsizes
-   inside it — the dashboard's `.git-mx-rn` trick. Without it a long title IS the column's min-content and the table overflows instead. */
-.prs-matrix-pr .prs-row-title, .prs-matrix-pr .prs-meta { width: 0; min-width: 100%; flex-wrap: nowrap }
+.prs-matrix-row[aria-expanded="true"] td:first-child, .prs-matrix-expand .prs-matrix-pinned { box-shadow: inset 3px 0 0 var(--ink) }
+/* The cap is on a block inside the cell, never on the `<td>` — CSS leaves `max-width` on a table cell undefined and Chrome ignores it. The dot and PR cells
+   together take at most 60 % of the box (34 px dot, 12 px of the PR cell's padding), and the 200 px floor yields to that cap, so a 375 px phone keeps about
+   120 px of evidence in view; the title wraps inside it rather than ellipsizing. */
+.prs-matrix-pr-inner { min-width: min(200px, calc(60cqw - 46px)); max-width: calc(60cqw - 46px) }
 .prs-matrix-pr .prs-row-title { font-size: 14px }
-.prs-matrix-pr .prs-title, .prs-matrix-pr .prs-branches { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .prs-matrix-pr .prs-meta { margin-top: 3px; font-size: 12px; color: var(--ink3) }
 .prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
 .prs-matrix-outcome td, .prs-matrix-expand td { border-top: 0; padding-top: 0 }
-/* 34 px is the dot column's 12 + 10 + 12, so the strip starts under the PR's `#n` rather than under the dot. */
-.prs-matrix-expand-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 0 0 6px 34px }
-.prs-matrix-fail td { color: var(--ink3) }
+/* The expansion and a collapsed row's outcome are one cell across every column; their content is pinned to the box's visible width, so the keys, the
+   Confirm and the outcome never sit off-screen while the table is scrolled. 34 px starts them under the PR's `#n` rather than under the dot. */
+.prs-matrix-pinned { position: sticky; left: 0; width: 100cqw; box-sizing: border-box; padding-left: 34px }
+.prs-matrix-expand .prs-matrix-pinned { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding-bottom: 6px }
+.prs-matrix-expand .prs-keys-side { align-items: flex-start }
+.prs-matrix-expand .prs-foot { margin-top: 2px }
 .prs-matrix-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12px }
 .prs-cell-ok { color: var(--ink2) }
 .prs-cell-bad { color: var(--red) }
@@ -3136,8 +3135,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 @media (max-width: 1100px) { .ui-figure-strip { grid-template-columns: repeat(3, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .ui-figure-strip, .ui-figure-strip-3 { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 
-/* Chip — §7's filter chip and this board's 32 px control. */
+/* Chip — §7's filter chip and this board's 32 px control. `text-decoration: none` is for `as="a"`: a button and a label draw no underline of their own,
+   but an anchor takes the browser's default one, and nothing global resets it — so the link chip would be the one chip with a line under its label. */
 .ui-chip {
+  text-decoration: none;
   display: inline-flex; align-items: center; gap: 6px;
   height: 32px; padding: 0 12px; border-radius: 12px;
   font-size: 13px; font-weight: 500; white-space: nowrap;

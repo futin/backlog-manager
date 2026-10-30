@@ -24,4 +24,12 @@ export interface PrLayoutProps {
    * own busy state dies with the strip.
    */
   inFlight: ReadonlySet<string>;
+  /**
+   * The `<repo>#<number>` of the one row whose merge Confirm is open, or `null`. Page state, not a row's, so there is one Confirm on the page: `Merge` on a
+   * second row moves it, and a layout switch or a re-read that drops the row cannot leave one behind that nothing draws (Escape would still find it on the
+   * stack). A row draws it in its foot (`PrFoot`) while this names it.
+   */
+  confirming: string | null;
+  /** `Merge` sets this row's key; Cancel, Escape and the page's `write` (when the write leaving is this row's) clear it. */
+  setConfirming: (key: string | null) => void;
 }

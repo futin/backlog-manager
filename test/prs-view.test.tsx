@@ -68,7 +68,16 @@ function pr(over: Partial<PullRequestRow> & Pick<PullRequestRow, 'number'>): Pul
   };
 }
 
-const PR7 = pr({ number: 7, title: 'Draft the importer', author: 'ana', head: 'feature/importer', headSha: SHA7, base: 'main', draft: true, updatedAt: ago(20 * 60_000) });
+const PR7 = pr({
+  number: 7,
+  title: 'Draft the importer',
+  author: 'ana',
+  head: 'feature/importer',
+  headSha: SHA7,
+  base: 'main',
+  draft: true,
+  updatedAt: ago(20 * 60_000)
+});
 const PR9 = pr({
   number: 9,
   title: 'Fix the fork',
@@ -194,7 +203,8 @@ async function mount(props: { onOpenSettings?: () => void } = {}) {
 
 const row = (key: string): HTMLElement => screen.getByTestId(`pr-row-${key}`);
 const action = (key: string, name: string | RegExp): HTMLElement => within(row(key)).getByRole('button', { name });
-const keysIn = (root: ParentNode = document): string[] => [...root.querySelectorAll('[data-testid^="pr-row-"]')].map((el) => el.getAttribute('data-testid') ?? '');
+const keysIn = (root: ParentNode = document): string[] =>
+  [...root.querySelectorAll('[data-testid^="pr-row-"]')].map((el) => el.getAttribute('data-testid') ?? '');
 
 describe('PullRequestsView — grouping and the rows', () => {
   beforeEach(() => storeLayout('cards'));
@@ -239,10 +249,19 @@ describe('PullRequestsView — grouping and the rows', () => {
     expect(screen.getByTestId('pr-repo-futin/y')).not.toHaveTextContent('showing');
   });
 
-  it('says so for a repo with no open pull requests', async () => {
+  it('draws no card for an ok repo that lists nothing', async () => {
     payload.repos.push(repo({ repo: 'futin/z', prs: [], total: 0 }));
     await mount();
-    expect(screen.getByTestId('pr-repo-futin/z')).toHaveTextContent('no open pull requests');
+    expect(screen.queryByTestId('pr-repo-futin/z')).toBeNull();
+    expect(screen.getByTestId('pr-repo-futin/x')).toBeInTheDocument();
+    expect(screen.getByTestId('pr-repo-futin/y')).toBeInTheDocument();
+  });
+
+  it('says no open pull requests once, and draws no card, when every repo lists nothing', async () => {
+    payload = { ...basePayload(), repos: [repo({ repo: 'futin/x', prs: [], total: 0 }), repo({ repo: 'futin/y', prs: [], total: 0 })] };
+    await mount();
+    expect(screen.getAllByText('no open pull requests')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-testid^="pr-repo-"]')).toHaveLength(0);
   });
 
   it('shows the instruction and no repo when there is no token', async () => {
@@ -252,24 +271,59 @@ describe('PullRequestsView — grouping and the rows', () => {
     expect(document.querySelectorAll('[data-testid^="pr-repo-"]')).toHaveLength(0);
   });
 
-  it("draws a repo's detail when its last read was not ok", async () => {
+  it("keeps a failed repo's card for its rows and says it could not read it once, under the cards", async () => {
     payload.repos[1] = { ...payload.repos[1], access: 'rate-limited', detail: 'rate limited — retrying at 12:30' };
     await mount();
-    expect(screen.getByTestId('pr-repo-futin/y')).toHaveTextContent('rate limited — retrying at 12:30');
-    expect(screen.getByTestId('pr-repo-futin/x')).not.toHaveTextContent('rate limited');
+    expect(screen.getByTestId('pr-repo-futin/y')).not.toHaveTextContent('rate limited');
+    expect(screen.getByTestId('pr-cantread-futin/y')).toHaveTextContent("Can't read · futin/y — rate limited — retrying at 12:30");
+    expect(screen.getByTestId('pr-repo-futin/x')).toBeInTheDocument();
+  });
+
+  it('draws only the line, and no card, for a failed repo that lists nothing', async () => {
+    payload.repos[1] = { ...payload.repos[1], access: 'rate-limited', detail: 'rate limited — retrying at 12:30', prs: [], total: 0 };
+    await mount();
+    expect(screen.queryByTestId('pr-repo-futin/y')).toBeNull();
+    expect(screen.getByTestId('pr-cantread-futin/y')).toBeInTheDocument();
+    expect(screen.getByTestId('pr-repo-futin/x')).toBeInTheDocument();
+  });
+
+  it('keeps the card of a repo whose only PR departed, with the outcome and no empty reading', async () => {
+    const { user } = await mount();
+    payload = { ...basePayload(), repos: [basePayload().repos[0], repo({ repo: 'futin/y', prs: [], total: 0 })] };
+    await user.click(action('futin/y#12', 'Merge'));
+    await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
+    const card = screen.getByTestId('pr-repo-futin/y');
+    expect(card).toHaveTextContent('#12 merged');
+    expect(card).not.toHaveTextContent('showing');
+    expect(card).not.toHaveTextContent('no open pull requests');
+  });
+
+  it("draws no page-level truncated or departed line beside the cards' own (spec 249)", async () => {
+    const { user } = await mount();
+    payload = {
+      ...basePayload(),
+      repos: [repo({ repo: 'futin/x', prs: basePayload().repos[0].prs, total: 5, truncated: true }), repo({ repo: 'futin/y', prs: [], total: 0 })]
+    };
+    await user.click(action('futin/y#12', 'Merge'));
+    await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
+    expect(screen.getByTestId('pr-repo-futin/x')).toHaveTextContent('showing 2 of 5');
+    expect(document.querySelectorAll('[data-testid^="pr-truncated-"]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-testid^="pr-departed-"]')).toHaveLength(0);
   });
 });
 
 describe('PullRequestsView — merge', () => {
   beforeEach(() => storeLayout('cards'));
 
-  it('asks before merging, sends nothing on dismiss, and one POST on accept', async () => {
+  it('asks before merging, with the method inside the Confirm, sends nothing on dismiss, and one POST on accept', async () => {
     const { user } = await mount();
     await user.click(action('futin/y#12', 'Merge'));
     const confirm = within(row('futin/y#12')).getByTestId('pr-merge-confirm');
-    expect(confirm).toHaveTextContent('Merge #12 into main (squash)?');
+    expect(confirm).toHaveTextContent('Merge #12 into main?');
+    expect(within(confirm).getByRole('combobox', { name: 'Merge method' })).toHaveValue('squash');
     await user.click(within(confirm).getByTestId('pr-merge-confirm-dismiss'));
     expect(posts).toEqual([]);
+    expect(screen.queryByTestId('pr-merge-confirm')).toBeNull();
 
     const before = reads;
     await user.click(action('futin/y#12', 'Merge'));
@@ -277,6 +331,27 @@ describe('PullRequestsView — merge', () => {
     expect(posts).toEqual([{ url: '/api/prs/merge', body: { repo: 'futin/y', number: 12, method: 'squash', headSha: SHA12 } }]);
     expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('merged');
     expect(reads).toBe(before + 1);
+  });
+
+  it('closes the Confirm before the merge POST is answered', async () => {
+    let release: (v: Response) => void = () => {};
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/prs' && init?.method !== 'POST') return respond(200, payload);
+      posts.push({ url: String(input), body: JSON.parse(String(init?.body)) as unknown });
+      return new Promise<Response>((r) => {
+        release = r;
+      });
+    }) as unknown as typeof fetch;
+    const { user } = await mount();
+    await user.click(action('futin/y#12', 'Merge'));
+    await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
+    expect(posts).toHaveLength(1);
+    expect(screen.queryByTestId('pr-merge-confirm')).toBeNull();
+    await act(async () => {
+      release({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, outcome: 'merged', pr: null, reread: true }) } as Response);
+    });
+    await flush();
+    expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('merged');
   });
 
   it('keeps the outcome on the page when the re-read no longer lists the PR', async () => {
@@ -302,7 +377,7 @@ describe('PullRequestsView — merge', () => {
         release = r;
       });
     }) as unknown as typeof fetch;
-    await user.click(action('futin/y#12', 'Enable auto-merge'));
+    await user.click(action('futin/y#12', 'Auto-merge'));
     expect(within(row('futin/y#12')).queryByTestId('pr-outcome')).toBeNull();
     await act(async () => {
       release({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, outcome: 'auto-merge-enabled', pr: null, reread: true }) } as Response);
@@ -328,12 +403,13 @@ describe('PullRequestsView — merge', () => {
   it("offers only the repo's methods, defaults to the first allowed, and sends the one picked", async () => {
     payload.repos[0].prs = [PR7, { ...PR9, crossRepository: false }];
     const { user } = await mount();
-    const select = within(row('futin/x#9')).getByRole('combobox', { name: 'Merge method' }) as HTMLSelectElement;
+    await user.click(action('futin/x#9', 'Merge'));
+    const confirm = within(row('futin/x#9')).getByTestId('pr-merge-confirm');
+    const select = within(confirm).getByRole('combobox', { name: 'Merge method' }) as HTMLSelectElement;
     expect([...select.options].map((o) => o.value)).toEqual(['merge', 'rebase']);
     expect(select.value).toBe('merge');
     await user.selectOptions(select, 'rebase');
-    await user.click(action('futin/x#9', 'Merge'));
-    expect(within(row('futin/x#9')).getByTestId('pr-merge-confirm')).toHaveTextContent('Merge #9 into develop (rebase)?');
+    expect(confirm).toHaveTextContent('Merge #9 into develop?');
     await clickAndSettle(within(row('futin/x#9')).getByTestId('pr-merge-confirm-accept'));
     expect(posts.map((p) => p.body)).toEqual([{ repo: 'futin/x', number: 9, method: 'rebase', headSha: SHA9 }]);
   });
@@ -345,6 +421,7 @@ describe('PullRequestsView — merge', () => {
     await user.click(action('futin/y#12', 'Merge'));
     await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
     expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent(/^Head branch was modified\. Review and try the merge again\.$/);
+    expect(screen.queryByTestId('pr-merge-confirm')).toBeNull();
     expect(reads).toBe(before + 1);
   });
 
@@ -366,31 +443,34 @@ describe('PullRequestsView — blocked actions', () => {
     payload.repos[1] = { ...payload.repos[1], syncOff: SYNC_OFF_Y };
     payload.repos[0] = { ...payload.repos[0], autoMergeAllowed: true };
     await mount();
-    for (const name of ['Merge', 'Enable auto-merge', 'Update branch']) {
-      const button = action('futin/y#12', name);
-      expect(button).toBeDisabled();
-      expect(button).toHaveAccessibleDescription('sync off');
+    for (const name of ['Merge', 'Auto-merge', 'Update']) {
+      const key = action('futin/y#12', name);
+      expect(key).toHaveAttribute('aria-disabled', 'true');
+      expect(key).toHaveAccessibleDescription('sync off');
     }
     const heading = screen.getByTestId('pr-head-futin/y');
     expect(within(heading).getByText('sync off')).toBeInTheDocument();
     expect(heading.textContent?.split(SYNC_OFF_Y).length).toBe(2);
-    expect(action('futin/x#9', 'Merge')).toBeEnabled();
-    expect(action('futin/x#9', 'Enable auto-merge')).toBeEnabled();
+    expect(action('futin/x#9', 'Merge')).not.toHaveAttribute('aria-disabled');
+    expect(action('futin/x#9', 'Auto-merge')).not.toHaveAttribute('aria-disabled');
     expect(screen.getByTestId('pr-repo-futin/x')).not.toHaveTextContent('sync off');
   });
 
-  it('says why each blocked action is disabled, beside it', async () => {
+  it("puts a PR's own reason on the key and a repo's reason on the why-line", async () => {
+    payload.repos[1].prs = [{ ...PR12, checks: 'failure' }];
     await mount();
-    expect(action('futin/x#7', 'Merge')).toBeDisabled();
+    const merge = action('futin/y#12', 'Merge');
+    expect(merge).toHaveAttribute('aria-disabled', 'true');
+    expect(merge).toHaveAttribute('title', 'checks failing');
+    expect(merge).toHaveAccessibleDescription('checks failing');
+    expect(within(row('futin/y#12')).queryByText('checks failing', { selector: '.prs-why' })).toBeNull();
     expect(action('futin/x#7', 'Merge')).toHaveAccessibleDescription('draft');
-    expect(within(row('futin/x#7')).getByText('draft', { selector: '.prs-why' })).toBeVisible();
-    expect(action('futin/x#9', 'Update branch')).toBeDisabled();
-    expect(action('futin/x#9', 'Update branch')).toHaveAccessibleDescription('fork does not allow edits');
-    expect(action('futin/x#9', 'Enable auto-merge')).toBeDisabled();
-    expect(action('futin/x#9', 'Enable auto-merge')).toHaveAccessibleDescription('auto-merge not enabled on the repo');
-    expect(action('futin/y#12', 'Merge')).toBeEnabled();
-    expect(action('futin/y#12', 'Enable auto-merge')).toBeEnabled();
-    expect(action('futin/y#12', 'Update branch')).toBeEnabled();
+    expect(action('futin/x#9', 'Update')).toHaveAccessibleDescription('fork does not allow edits');
+    const auto = action('futin/x#9', 'Auto-merge');
+    expect(auto).toHaveAttribute('aria-disabled', 'true');
+    expect(auto).toHaveAccessibleDescription('auto-merge not enabled on the repo');
+    expect(within(row('futin/x#9')).getByText(/auto-merge not enabled on the repo/, { selector: '.prs-why' })).toBeVisible();
+    expect(action('futin/y#12', 'Update')).not.toHaveAttribute('aria-disabled');
   });
 
   it('disables every action of a row while its write is in flight', async () => {
@@ -402,10 +482,10 @@ describe('PullRequestsView — blocked actions', () => {
       });
     }) as unknown as typeof fetch;
     const { user } = await mount();
-    await user.click(action('futin/y#12', 'Update branch'));
+    await user.click(action('futin/y#12', 'Update'));
     expect(action('futin/y#12', 'Merge')).toBeDisabled();
-    expect(action('futin/y#12', 'Enable auto-merge')).toBeDisabled();
-    expect(action('futin/y#12', 'Update branch')).toBeDisabled();
+    expect(action('futin/y#12', 'Auto-merge')).toBeDisabled();
+    expect(action('futin/y#12', 'Update')).toBeDisabled();
     expect(action('futin/x#9', 'Merge')).toBeEnabled();
     await act(async () => {
       release({ ok: true, status: 202, json: () => Promise.resolve({ ok: true, outcome: 'update-requested', pr: null, reread: false }) } as Response);
@@ -421,24 +501,27 @@ describe('PullRequestsView — auto-merge and update branch', () => {
   it('arms auto-merge with the picked method', async () => {
     answerPost = () => ({ status: 200, body: { ok: true, outcome: 'auto-merge-enabled', pr: null, reread: true } });
     const { user } = await mount();
-    await clickAndSettle(action('futin/y#12', 'Enable auto-merge'));
+    await clickAndSettle(action('futin/y#12', 'Auto-merge'));
     expect(posts).toEqual([{ url: '/api/prs/auto-merge', body: { repo: 'futin/y', number: 12, enable: true, method: 'squash' } }]);
     expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('auto-merge armed');
   });
 
-  it('offers Disable on an armed PR and sends enable: false', async () => {
+  it('reads Auto-merge ✓ on an armed PR, and a click sends enable: false', async () => {
     payload.repos[1].prs = [{ ...PR12, autoMerge: { method: 'merge', enabledAt: ago(3_600_000) } }];
     answerPost = () => ({ status: 200, body: { ok: true, outcome: 'auto-merge-disabled', pr: null, reread: true } });
-    const { user } = await mount();
+    await mount();
     expect(within(row('futin/y#12')).getByText('auto-merge · merge')).toBeInTheDocument();
-    await clickAndSettle(action('futin/y#12', 'Disable auto-merge'));
+    const auto = action('futin/y#12', 'Auto-merge');
+    expect(auto).toHaveTextContent('Auto-merge ✓');
+    expect(auto).toHaveAttribute('aria-pressed', 'true');
+    await clickAndSettle(auto);
     expect(posts.map((p) => p.body)).toEqual([{ repo: 'futin/y', number: 12, enable: false }]);
   });
 
-  it('shows updating… until a re-read brings a new head SHA', async () => {
+  it('says branch updated once a re-read brings a new head SHA, and still says it 30 s and a read later', async () => {
     answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
-    const { user } = await mount();
-    await clickAndSettle(action('futin/y#12', 'Update branch'));
+    await mount();
+    await clickAndSettle(action('futin/y#12', 'Update'));
     expect(posts).toEqual([{ url: '/api/prs/update-branch', body: { repo: 'futin/y', number: 12, headSha: SHA12 } }]);
     expect(row('futin/y#12')).toHaveTextContent('updating…');
 
@@ -448,12 +531,127 @@ describe('PullRequestsView — auto-merge and update branch', () => {
     });
     await flush();
     expect(row('futin/y#12')).not.toHaveTextContent('updating…');
+    expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('branch updated');
+
+    const before = reads;
+    await act(async () => {
+      jest.advanceTimersByTime(UPDATING_MS);
+    });
+    await flush();
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await flush();
+    expect(reads).toBeGreaterThan(before);
+    expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('branch updated');
+  });
+
+  it("says branch updated when the timer's own re-read brings the new head, and frees Update only once that re-read is in", async () => {
+    answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
+    await mount();
+    await clickAndSettle(action('futin/y#12', 'Update'));
+    expect(action('futin/y#12', 'Update')).toHaveAttribute('aria-disabled', 'true');
+
+    let release: (v: Response) => void = () => {};
+    const ok = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/prs' && init?.method !== 'POST') {
+        reads += 1;
+        return new Promise<Response>((r) => {
+          release = r;
+        });
+      }
+      return (ok as jest.Mock)(input, init) as Promise<Response>;
+    }) as unknown as typeof fetch;
+    const before = reads;
+    await act(async () => {
+      jest.advanceTimersByTime(UPDATING_MS);
+    });
+    await flush();
+    expect(reads).toBe(before + 1);
+    expect(action('futin/y#12', 'Update')).toHaveAttribute('aria-disabled', 'true');
+
+    payload.repos[1].prs = [{ ...PR12, headSha: 'd'.repeat(40) }];
+    const answer = JSON.parse(JSON.stringify(payload)) as unknown;
+    await act(async () => {
+      release({ ok: true, status: 200, json: () => Promise.resolve(answer) } as Response);
+      await drain();
+    });
+    await flush();
+    expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('branch updated');
+    expect(row('futin/y#12')).not.toHaveTextContent('updating…');
+    expect(action('futin/y#12', 'Update')).not.toHaveAttribute('aria-disabled');
+  });
+
+  it("drops the mark and clears updating… when the timer's re-read rejects", async () => {
+    answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
+    await mount();
+    await clickAndSettle(action('futin/y#12', 'Update'));
+    expect(row('futin/y#12')).toHaveTextContent('updating…');
+    const ok = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/prs' && init?.method !== 'POST') return Promise.reject(new Error('network down'));
+      return (ok as jest.Mock)(input, init) as Promise<Response>;
+    }) as unknown as typeof fetch;
+    await act(async () => {
+      jest.advanceTimersByTime(UPDATING_MS);
+    });
+    await flush();
+    expect(row('futin/y#12')).not.toHaveTextContent('updating…');
+    expect(action('futin/y#12', 'Update')).not.toHaveAttribute('aria-disabled');
+  });
+
+  it("sends nothing and logs nothing when the page unmounts while the timer's re-read is pending (Review Focus 1)", async () => {
+    answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
+    const { unmount } = await mount();
+    await clickAndSettle(action('futin/y#12', 'Update'));
+    let release: (v: Response) => void = () => {};
+    let gone = false;
+    let sentAfter = 0;
+    const ok = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (gone) sentAfter += 1;
+      if (String(input) === '/api/prs' && init?.method !== 'POST') {
+        reads += 1;
+        return new Promise<Response>((r) => {
+          release = r;
+        });
+      }
+      return (ok as jest.Mock)(input, init) as Promise<Response>;
+    }) as unknown as typeof fetch;
+    const errors = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const before = reads;
+      await act(async () => {
+        jest.advanceTimersByTime(UPDATING_MS);
+      });
+      await flush();
+      expect(reads).toBe(before + 1);
+
+      unmount();
+      gone = true;
+      payload.repos[1].prs = [{ ...PR12, headSha: 'd'.repeat(40) }];
+      const answer = JSON.parse(JSON.stringify(payload)) as unknown;
+      await act(async () => {
+        release({ ok: true, status: 200, json: () => Promise.resolve(answer) } as Response);
+        await drain();
+      });
+      await act(async () => {
+        jest.advanceTimersByTime(UPDATING_MS * 2);
+        await drain();
+      });
+      expect(sentAfter).toBe(0);
+      expect(reads).toBe(before + 1);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it('clears updating… after 30 s on the same SHA, with one extra read at that moment', async () => {
     answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
     const { user } = await mount();
-    await clickAndSettle(action('futin/y#12', 'Update branch'));
+    await clickAndSettle(action('futin/y#12', 'Update'));
     expect(row('futin/y#12')).toHaveTextContent('updating…');
     const before = reads;
 
@@ -492,7 +690,7 @@ describe('PullRequestsView — run-in-progress warning', () => {
     expect(row('futin/x#9')).not.toHaveTextContent('run in progress');
     expect(row('futin/x#7')).not.toHaveTextContent('run in progress');
     expect(action('futin/y#12', 'Merge')).toBeEnabled();
-    expect(action('futin/y#12', 'Update branch')).toBeEnabled();
+    expect(action('futin/y#12', 'Update')).toBeEnabled();
   });
 });
 
@@ -503,9 +701,16 @@ describe('PullRequestsView — run-in-progress warning', () => {
 
 const switcher = (): HTMLElement => screen.getByRole('group', { name: 'Layout' });
 const stored = (): unknown => JSON.parse(localStorage.getItem(PR_LAYOUT_KEY) ?? 'null');
-const FORBIDDEN_Z = repo({ repo: 'futin/z', access: 'forbidden', detail: 'the token cannot read futin/z', polledAt: ago(5_000), prs: [pr({ number: 31, title: 'Hidden by reach' })], total: 4 });
+const FORBIDDEN_Z = repo({
+  repo: 'futin/z',
+  access: 'forbidden',
+  detail: 'the token cannot read futin/z',
+  polledAt: ago(5_000),
+  prs: [pr({ number: 31, title: 'Hidden by reach' })],
+  total: 4
+});
 
-/** Answers `window.matchMedia` as a phone (`useNarrow`'s query), for the one case that needs it. */
+/** Answers `window.matchMedia` as a phone, for the one case that pins Matrix at every width. */
 function stubNarrow(): void {
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -524,7 +729,11 @@ describe('PullRequestsView — the layout switcher', () => {
     expect(screen.getByTestId('pr-inbox')).toBeInTheDocument();
     expect(screen.queryByTestId('pr-matrix')).toBeNull();
     expect(document.querySelectorAll('[data-testid^="pr-repo-"]')).toHaveLength(0);
-    expect(within(switcher()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Inbox', 'Matrix', 'Cards']);
+    expect(
+      within(switcher())
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['Inbox', 'Matrix', 'Cards']);
     expect(within(switcher()).getByRole('button', { name: 'Inbox' })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -541,14 +750,18 @@ describe('PullRequestsView — the layout switcher', () => {
     expect(within(switcher()).getByRole('button', { name: 'Matrix' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('draws a stored Matrix as Inbox on a narrow window, offers no Matrix, and leaves the stored choice alone', async () => {
+  it('draws a stored Matrix on a narrow window too, with the three layouts on offer', async () => {
     storeLayout('matrix');
     stubNarrow();
     await mount();
-    expect(screen.getByTestId('pr-inbox')).toBeInTheDocument();
-    expect(screen.queryByTestId('pr-matrix')).toBeNull();
-    expect(within(switcher()).queryByRole('button', { name: 'Matrix' })).toBeNull();
-    expect(within(switcher()).getByRole('button', { name: 'Inbox' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('pr-matrix')).toBeInTheDocument();
+    expect(screen.queryByTestId('pr-inbox')).toBeNull();
+    expect(
+      within(switcher())
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['Inbox', 'Matrix', 'Cards']);
+    expect(within(switcher()).getByRole('button', { name: 'Matrix' })).toHaveAttribute('aria-pressed', 'true');
     expect(stored()).toBe('matrix');
   });
 
@@ -586,11 +799,12 @@ describe('PullRequestsView — repos the token cannot read', () => {
     expect(screen.getByTestId('pr-toolbar')).toHaveTextContent('2 repos hidden — no access');
   });
 
-  it('keeps a rate-limited repo shown, with its detail', async () => {
+  it("keeps a rate-limited repo shown, and says it can't read it", async () => {
     storeLayout('cards');
     payload.repos[1] = { ...payload.repos[1], access: 'rate-limited', detail: 'rate limited — retrying at 12:30' };
     await mount();
-    expect(screen.getByTestId('pr-repo-futin/y')).toHaveTextContent('rate limited — retrying at 12:30');
+    expect(screen.getByTestId('pr-repo-futin/y')).toBeInTheDocument();
+    expect(screen.getByTestId('pr-cantread-futin/y')).toHaveTextContent('rate limited — retrying at 12:30');
     expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('hidden');
   });
 
@@ -634,6 +848,52 @@ describe('PullRequestsView — repos the token cannot read', () => {
   });
 });
 
+describe('PullRequestsView — the Cards toolbar count', () => {
+  const EMPTY_W = repo({ repo: 'futin/w', prs: [], total: 0 });
+  /** The toolbar's own parts after the switcher, by class, in document order. */
+  const parts = (): string[] => [...screen.getByTestId('pr-toolbar').children].map((el) => el.className).filter((c) => c.startsWith('prs-toolbar-'));
+
+  it('counts one ok empty repo, after the hidden-repos note and before the age', async () => {
+    storeLayout('cards');
+    payload.repos.push(EMPTY_W, FORBIDDEN_Z);
+    await mount({ onOpenSettings: () => {} });
+    expect(parts()).toEqual(['prs-toolbar-note', 'prs-toolbar-note', 'prs-toolbar-age']);
+    const notes = screen.getByTestId('pr-toolbar').querySelectorAll('.prs-toolbar-note');
+    expect(notes[0]).toHaveTextContent('1 repo hidden — no access');
+    expect(notes[1]).toHaveTextContent(/^1 repo with no open PRs$/);
+  });
+
+  it('counts two in the plural, in place of the hidden-repos note when there is none', async () => {
+    storeLayout('cards');
+    payload.repos.push(EMPTY_W, repo({ repo: 'futin/v', prs: [], total: 0 }));
+    await mount();
+    expect(parts()).toEqual(['prs-toolbar-note', 'prs-toolbar-age']);
+    expect(screen.getByTestId('pr-toolbar')).toHaveTextContent('2 repos with no open PRs');
+  });
+
+  it.each(['inbox', 'matrix'] as const)('draws no count in %s', async (layout) => {
+    storeLayout(layout);
+    payload.repos.push(EMPTY_W);
+    await mount();
+    expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('with no open PRs');
+  });
+
+  it('draws no count when every shown repo lists nothing', async () => {
+    storeLayout('cards');
+    payload = { ...basePayload(), repos: [repo({ repo: 'futin/x', prs: [], total: 0 }), EMPTY_W] };
+    await mount();
+    expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('with no open PRs');
+    expect(screen.getAllByText('no open pull requests')).toHaveLength(1);
+  });
+
+  it('does not count a repo not read yet', async () => {
+    storeLayout('cards');
+    payload.repos.push(repo({ repo: 'futin/w', polledAt: null, prs: [], total: 0 }));
+    await mount();
+    expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('with no open PRs');
+  });
+});
+
 describe('PullRequestsView — the page owns marks, outcomes and writes', () => {
   const switchTo = async (user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> => {
     await user.click(within(switcher()).getByRole('button', { name }));
@@ -643,14 +903,54 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
     storeLayout('cards');
     answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
     const { user } = await mount();
-    await clickAndSettle(action('futin/y#12', 'Update branch'));
+    await clickAndSettle(action('futin/y#12', 'Update'));
     expect(row('futin/y#12')).toHaveTextContent('updating…');
 
     await switchTo(user, 'Inbox');
-    expect(screen.getByTestId('pr-quiet-futin/y#12')).toHaveTextContent('updating…');
+    expect(row('futin/y#12')).toHaveTextContent('updating…');
     await switchTo(user, 'Matrix');
     expect(screen.getByTestId('pr-mrow-futin/y#12')).toHaveTextContent('updating…');
-    expect(screen.getByTestId('pr-outcome')).toHaveTextContent('updating…');
+  });
+
+  it('closes an open Confirm when the layout changes', async () => {
+    storeLayout('cards');
+    const { user } = await mount();
+    await user.click(action('futin/y#12', 'Merge'));
+    expect(screen.getByTestId('pr-merge-confirm')).toBeInTheDocument();
+    await switchTo(user, 'Inbox');
+    expect(screen.queryByTestId('pr-merge-confirm')).toBeNull();
+    await switchTo(user, 'Cards');
+    expect(screen.queryByTestId('pr-merge-confirm')).toBeNull();
+    expect(posts).toEqual([]);
+  });
+
+  it('closes the Confirm when a re-read makes its PR unmergeable, and it stays closed once the PR recovers', async () => {
+    storeLayout('cards');
+    const { user } = await mount();
+    await user.click(action('futin/y#12', 'Merge'));
+    expect(screen.getByTestId('pr-merge-confirm')).toBeInTheDocument();
+    payload.repos[1].prs = [{ ...PR12, checks: 'failure' }];
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await flush();
+    expect(screen.queryByTestId('pr-merge-confirm')).toBeNull();
+    payload.repos[1].prs = [PR12];
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await flush();
+    expect(screen.queryByTestId('pr-merge-confirm')).toBeNull();
+    expect(posts).toEqual([]);
+  });
+
+  it("closes the first PR's Confirm when Merge is pressed on a second", async () => {
+    storeLayout('cards');
+    const { user } = await mount();
+    await user.click(action('futin/y#12', 'Merge'));
+    await user.click(action('futin/x#9', 'Merge'));
+    expect(screen.getAllByTestId('pr-merge-confirm')).toHaveLength(1);
+    expect(within(row('futin/x#9')).getByTestId('pr-merge-confirm')).toBeInTheDocument();
   });
 
   type Layout = 'cards' | 'inbox' | 'matrix';
@@ -659,20 +959,12 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
   /** Opens whatever holds the strip for futin/y#12 in this layout and runs one write through it, by clicks alone. */
   async function runWrite(user: ReturnType<typeof userEvent.setup>, layout: Layout, kind: Kind): Promise<void> {
     let strip: HTMLElement;
-    if (layout === 'cards') strip = row('futin/y#12');
-    else if (layout === 'matrix') {
+    if (layout === 'matrix') {
       await user.click(screen.getByTestId('pr-mrow-futin/y#12'));
       strip = screen.getByTestId('pr-expand-futin/y#12');
-    } else if (kind === 'update') {
-      // A behind PR is a loud item: its compact keys are drawn without opening anything.
-      strip = screen.getByTestId('pr-item-futin/y#12');
-    } else {
-      await user.click(screen.getByRole('button', { name: 'Actions for #12' }));
-      strip = screen.getByTestId('pr-quiet-futin/y#12');
-      if (kind === 'merge') await user.click(within(strip).getByRole('button', { name: 'Merge…' }));
-    }
-    if (kind === 'update') await clickAndSettle(within(strip).getByRole('button', { name: 'Update branch' }));
-    else if (kind === 'auto-merge') await clickAndSettle(within(strip).getByRole('button', { name: 'Enable auto-merge' }));
+    } else strip = row('futin/y#12');
+    if (kind === 'update') await clickAndSettle(within(strip).getByRole('button', { name: 'Update' }));
+    else if (kind === 'auto-merge') await clickAndSettle(within(strip).getByRole('button', { name: 'Auto-merge' }));
     else {
       await user.click(within(strip).getByRole('button', { name: 'Merge' }));
       await clickAndSettle(within(strip).getByTestId('pr-merge-confirm-accept'));
@@ -700,7 +992,9 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
     }
   };
 
-  const CASES = (['cards', 'inbox', 'matrix'] as const).flatMap((layout) => (['merge', 'auto-merge', 'update'] as const).map((kind) => [layout, kind] as const));
+  const CASES = (['cards', 'inbox', 'matrix'] as const).flatMap((layout) =>
+    (['merge', 'auto-merge', 'update'] as const).map((kind) => [layout, kind] as const)
+  );
 
   it.each(CASES)('%s: %s sends the same POST and leaves the same outcome line', async (layout, kind) => {
     storeLayout(layout);
@@ -710,6 +1004,12 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
     const { user } = await mount();
     await runWrite(user, layout, kind);
     expect(posts).toEqual([{ url: w.url, body: w.body }]);
+    if (layout === 'matrix' && kind === 'update') {
+      // Matrix says `updating…` in the Base cell alone (spec `2026-10-30-prs-page-fixes-design.md`), never as an outcome line too.
+      expect(screen.queryAllByTestId('pr-outcome')).toHaveLength(0);
+      expect(screen.getByTestId('pr-mrow-futin/y#12')).toHaveTextContent('updating…');
+      return;
+    }
     const lines = screen.getAllByTestId('pr-outcome');
     expect(lines).toHaveLength(1);
     expect(lines[0]).toHaveTextContent(w.says);
@@ -727,30 +1027,23 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
     const { user } = await mount();
 
     await user.click(screen.getByTestId('pr-mrow-futin/y#12'));
-    await user.click(within(screen.getByTestId('pr-expand-futin/y#12')).getByRole('button', { name: 'Update branch' }));
+    await user.click(within(screen.getByTestId('pr-expand-futin/y#12')).getByRole('button', { name: 'Update' }));
 
     // Cards: a full strip drawn after the write started — every key of that PR is still off, the neighbour's are not.
     await switchTo(user, 'Cards');
-    for (const name of ['Merge', 'Enable auto-merge', 'Update branch']) expect(action('futin/y#12', name)).toBeDisabled();
+    for (const name of ['Merge', 'Auto-merge', 'Update']) expect(action('futin/y#12', name)).toBeDisabled();
     expect(action('futin/x#9', 'Merge')).toBeEnabled();
 
-    // Inbox: the quiet line's strip is unmounted when folded, and a fold must not forget the write.
+    // Inbox: a strip mounted fresh by the switch must not forget the write either.
     await switchTo(user, 'Inbox');
-    await user.click(screen.getByRole('button', { name: 'Actions for #12' }));
-    const quiet = screen.getByTestId('pr-quiet-futin/y#12');
-    expect(within(quiet).getByRole('button', { name: 'Merge…' })).toBeDisabled();
-    expect(within(quiet).getByRole('button', { name: 'Enable auto-merge' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: 'Actions for #12' }));
-    await user.click(screen.getByRole('button', { name: 'Actions for #12' }));
-    expect(within(screen.getByTestId('pr-quiet-futin/y#12')).getByRole('button', { name: 'Merge…' })).toBeDisabled();
+    for (const name of ['Merge', 'Auto-merge', 'Update']) expect(action('futin/y#12', name)).toBeDisabled();
 
     await act(async () => {
       release({ ok: true, status: 202, json: () => Promise.resolve({ ok: true, outcome: 'update-requested', pr: null, reread: false }) } as Response);
     });
     await flush();
-    const after = screen.getByTestId('pr-quiet-futin/y#12');
-    expect(within(after).getByRole('button', { name: 'Merge…' })).toBeEnabled();
-    expect(within(after).getByRole('button', { name: 'Enable auto-merge' })).toBeEnabled();
+    expect(action('futin/y#12', 'Merge')).toBeEnabled();
+    expect(action('futin/y#12', 'Auto-merge')).toBeEnabled();
   });
 
   /** A write that ENDS badly must release its PR as surely as one that ends well, or its keys stay dead until a reload. */
@@ -787,18 +1080,9 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
       // Cards is the layout the write started in, so it is reached by leaving and returning — the strip is a fresh mount either way.
       await switchTo(user, layout === 'matrix' ? 'Matrix' : 'Inbox');
       if (layout === 'cards') await switchTo(user, 'Cards');
-      if (layout === 'inbox') {
-        await user.click(screen.getByRole('button', { name: 'Actions for #12' }));
-        const quiet = screen.getByTestId('pr-quiet-futin/y#12');
-        expect(within(quiet).getByRole('button', { name: 'Merge…' })).toBeEnabled();
-        expect(within(quiet).getByRole('button', { name: 'Enable auto-merge' })).toBeEnabled();
-      } else if (layout === 'matrix') {
-        await user.click(screen.getByTestId('pr-mrow-futin/y#12'));
-        const strip = screen.getByTestId('pr-expand-futin/y#12');
-        for (const name of ['Merge', 'Enable auto-merge', 'Update branch']) expect(within(strip).getByRole('button', { name })).toBeEnabled();
-      } else {
-        for (const name of ['Merge', 'Enable auto-merge', 'Update branch']) expect(action('futin/y#12', name)).toBeEnabled();
-      }
+      if (layout === 'matrix') await user.click(screen.getByTestId('pr-mrow-futin/y#12'));
+      const strip = layout === 'matrix' ? screen.getByTestId('pr-expand-futin/y#12') : row('futin/y#12');
+      for (const name of ['Merge', 'Auto-merge', 'Update']) expect(within(strip).getByRole('button', { name })).toBeEnabled();
     });
   });
 });

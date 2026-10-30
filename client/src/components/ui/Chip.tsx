@@ -22,7 +22,11 @@ export type ChipSize = 32 | 28;
  * is really a checkbox). A `<label>` takes no `aria-pressed` and no `disabled`,
  * so neither is emitted there — the control inside carries both.
  *
- * The ref reaches the BUTTON (and nothing, for `as: 'label'`). It exists for one
+ * `as: 'a'` is the chip that is really a link — the PRs page's `Open ↗`. It wears the same classes, so a link-out and the controls beside it cannot
+ * disagree about a radius, opens in a new tab with `rel="noreferrer"`, and — like the label — draws no `aria-pressed`, no `type` and no `disabled`, none of
+ * which an anchor has.
+ *
+ * The ref reaches the BUTTON (and nothing, for `as: 'label'` or `as: 'a'`). It exists for one
  * job: a chip that opens a `Popover` is that popover's `anchor` — the press on it
  * is not "outside", and Escape hands focus back to it — and the Jira board's
  * picker (Jira phase 2) is the first chip to open one. A wrapper element would
@@ -33,7 +37,9 @@ export type ChipProps = {
   variant?: ChipVariant;
   size?: ChipSize;
   pressed?: boolean;
-  as?: 'button' | 'label';
+  as?: 'button' | 'label' | 'a';
+  /** The link target, read only under `as: 'a'`; destructured off the pass-through either way so a button never carries one. */
+  href?: string;
   icon?: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
@@ -50,7 +56,7 @@ export type ChipProps = {
 } & { [k: `data-${string}`]: string | number | boolean | undefined } & { [k: `aria-${string}`]: string | number | boolean | undefined };
 
 export const Chip = forwardRef<HTMLButtonElement, ChipProps>(function Chip(
-  { children, variant = 'outline', size = 32, pressed, as = 'button', icon, onClick, disabled, title, type = 'button', ...rest },
+  { children, variant = 'outline', size = 32, pressed, as = 'button', href, icon, onClick, disabled, title, type = 'button', ...rest },
   ref
 ) {
   const className = ['ui-chip', `ui-chip-${variant}`, size === 28 ? 'ui-chip-28' : 'ui-chip-32', pressed ? 'on' : null].filter(Boolean).join(' ');
@@ -71,6 +77,14 @@ export const Chip = forwardRef<HTMLButtonElement, ChipProps>(function Chip(
       <label className={className} title={title} {...rest}>
         {body}
       </label>
+    );
+  }
+  if (as === 'a') {
+    // `target`/`rel` are fixed here, not props: a chip link is always a link OUT of the board, and `noreferrer` is the half of the pair a caller would forget.
+    return (
+      <a className={className} href={href} target="_blank" rel="noreferrer" title={title} onClick={onClick} {...rest}>
+        {body}
+      </a>
     );
   }
   return (

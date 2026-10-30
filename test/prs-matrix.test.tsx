@@ -3,6 +3,7 @@
  */
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import '@testing-library/jest-dom';
 
 import { PrMatrix } from '../client/src/components/github/PrMatrix';
@@ -12,9 +13,12 @@ import type { OrchestratorRun, ProjectSummary, PrRepoView, PullRequestRow, RunQu
 
 /**
  * GitHub › PRs, Matrix layout (`.claude/DESIGN.md` §8.11; spec `2026-10-29-prs-layouts-design.md`, "Matrix" and "Writes and outcomes"). `PrMatrix` is rendered with
- * fixture props and a `jest.fn` write. What must hold: the header counts the rows whose cell is a problem, a cell reports its own fact whatever the row's rank,
- * one row's expansion is open at a time and is UNMOUNTED (not hidden) when it closes, a click on a link or control inside a row never toggles, every element is
- * keyed by `<repo>#<number>`, an outcome line is visible while its row is collapsed, and a repo whose read failed keeps its rows and adds one muted row.
+ * fixture props and a `jest.fn` write — or, for every case that opens a Confirm, inside `Harness`, which holds the confirming key the way the page does (spec
+ * `2026-10-30-prs-page-fixes-design.md`, "Matrix"). What must hold: the header counts the rows whose cell is a problem, a cell reports its own fact whatever
+ * the row's rank, one row's expansion is open at a time and is UNMOUNTED (not hidden) when it closes — closing its Confirm with it — a click on a link or
+ * control inside a row never toggles, every element is keyed by `<repo>#<number>`, an outcome is drawn once (inside the open block, or as its own row while
+ * collapsed), `updating…` is said only in the Base cell, the table scrolls sideways with its first two columns pinned, and a repo whose read failed keeps its
+ * rows and is a `Can't read` line below the table.
  */
 
 const NOW = Date.parse('2026-10-29T12:00:00Z');
@@ -62,7 +66,18 @@ function repo(name: string, prs: PullRequestRow[], over: Partial<PrRepoView> = {
 const EMPTY_CTX: PrLayoutProps['ctx'] = { projects: [], items: [], runs: [], remote: [], remoteStarting: [] };
 
 function props(repos: PrRepoView[], over: Partial<PrLayoutProps> = {}): PrLayoutProps {
-  return { repos, outcomes: {}, marks: {}, now: NOW, ctx: EMPTY_CTX, write: jest.fn(() => Promise.resolve()), inFlight: new Set(), ...over };
+  return {
+    repos,
+    outcomes: {},
+    marks: {},
+    now: NOW,
+    ctx: EMPTY_CTX,
+    write: jest.fn(() => Promise.resolve()),
+    inFlight: new Set(),
+    confirming: null,
+    setConfirming: jest.fn(),
+    ...over
+  };
 }
 
 /** One failing, one behind, one clean PR on one repo. */
@@ -70,6 +85,30 @@ const failing = pr({ number: 1, title: 'failing one', checks: 'failure' });
 const behind = pr({ number: 2, title: 'behind one', mergeState: 'behind', url: 'https://github.com/a/x/pull/2' });
 const clean = pr({ number: 3, title: 'clean one', url: 'https://github.com/a/x/pull/3' });
 const trio = () => repo('a/x', [clean, behind, failing]);
+
+/** The page's half of the Confirm, mirrored, as in `prs-inbox.test.tsx`; `confirming-key` shows the state. */
+function Harness(p: Omit<PrLayoutProps, 'confirming' | 'setConfirming'>) {
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const write: PrLayoutProps['write'] = (key, sha, call) => {
+    if (confirming === key) setConfirming(null);
+    return p.write(key, sha, call);
+  };
+  return (
+    <>
+      <output data-testid="confirming-key">{confirming ?? ''}</output>
+      <PrMatrix {...p} write={write} confirming={confirming} setConfirming={setConfirming} />
+    </>
+  );
+}
+
+function hp(repos: PrRepoView[], over: Partial<PrLayoutProps> = {}) {
+  const { confirming: _c, setConfirming: _s, ...rest } = props(repos, over);
+  return rest;
+}
+
+/** The `Merge` key of an open expansion — the Confirm's accept is also named `Merge`, so the key is found in the strip. */
+const mergeKey = (key: string) =>
+  within(screen.getByTestId(`pr-expand-${key}`).querySelector('.prs-keys-side') as HTMLElement).getByRole('button', { name: 'Merge' });
 
 const row = (key: string) => screen.getByTestId(`pr-mrow-${key}`);
 const rowIds = () => screen.getAllByTestId(/^pr-mrow-/).map((el) => el.getAttribute('data-testid'));
@@ -119,11 +158,12 @@ describe('PrMatrix — header, cells and order', () => {
   });
 
   it('shows updating… in the Base cell while a mark holds, in place of behind', () => {
-    const marks = { 'a/x#2': { sha: SHA, until: NOW + 10_000 } };
+    const marks = { 'a/x#2': { sha: SHA } };
     render(<PrMatrix {...props([repo('a/x', [behind])], { marks })} />);
     expect(within(row('a/x#2')).getByText('updating…')).toHaveClass('prs-cell-live');
     expect(within(row('a/x#2')).queryByText('behind')).not.toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Base' })).toBeInTheDocument();
+    // The header counts facts, not motion (`columnCounts`): the marked row is still behind, so the header keeps its `1` from the click to the re-read.
+    expect(screen.getByRole('columnheader', { name: 'Base 1' })).toBeInTheDocument();
   });
 
   it('names the five tones in a legend under the table', () => {
@@ -137,28 +177,79 @@ describe('PrMatrix — header, cells and order', () => {
     expect(screen.getByText('no open pull requests')).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
+
+  it('counts two behind rows under Base while one of them is updating', () => {
+    const other = pr({ number: 4, mergeState: 'behind', headSha: 'd'.repeat(40), url: 'https://github.com/a/x/pull/4' });
+    render(<PrMatrix {...props([repo('a/x', [behind, other])], { marks: { 'a/x#2': { sha: SHA } } })} />);
+    expect(screen.getByRole('columnheader', { name: 'Base 2' })).toBeInTheDocument();
+  });
+
+  it('puts the table in its own scroll box, with the dot and PR cells sticky', () => {
+    render(<PrMatrix {...props([trio()])} />);
+    const table = screen.getByRole('table');
+    expect(table.parentElement).toHaveClass('prs-matrix-scroll');
+    const cells = row('a/x#1').querySelectorAll('td');
+    expect(cells[0]).toHaveClass('prs-matrix-sticky');
+    expect(cells[1]).toHaveClass('prs-matrix-sticky');
+    expect(cells[2]).not.toHaveClass('prs-matrix-sticky');
+    const heads = screen.getAllByRole('columnheader');
+    expect(heads[0]).toHaveClass('prs-matrix-sticky');
+    expect(heads[1]).toHaveClass('prs-matrix-sticky');
+  });
 });
 
 describe('PrMatrix — the expansion', () => {
-  it('opens the PR actions under a row on click and reaches the merge confirm through Merge', async () => {
+  it('opens the four keys under a row on click and reaches the merge confirm through Merge', async () => {
     const user = userEvent.setup();
-    render(<PrMatrix {...props([repo('a/x', [clean])])} />);
+    render(<Harness {...hp([repo('a/x', [clean])])} />);
     expect(screen.queryByTestId('pr-expand-a/x#3')).not.toBeInTheDocument();
     await user.click(row('a/x#3'));
     expect(row('a/x#3')).toHaveAttribute('aria-expanded', 'true');
     const expansion = screen.getByTestId('pr-expand-a/x#3');
-    expect(within(expansion).getByRole('link', { name: 'Open on GitHub ↗' })).toHaveAttribute('href', 'https://github.com/a/x/pull/3');
-    await user.click(within(expansion).getByRole('button', { name: 'Merge' }));
+    const keys = within(expansion.querySelector('.prs-keys') as HTMLElement);
+    expect(keys.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Merge', 'Auto-merge', 'Update']);
+    expect(keys.getByRole('link', { name: 'Open ↗' })).toHaveAttribute('href', 'https://github.com/a/x/pull/3');
+    await user.click(mergeKey('a/x#3'));
     expect(within(expansion).getByTestId('pr-merge-confirm')).toBeInTheDocument();
+  });
+
+  it('draws the why-line in the expansion when a repo reason holds', async () => {
+    const user = userEvent.setup();
+    render(<PrMatrix {...props([repo('a/x', [clean], { autoMergeAllowed: false })])} />);
+    await user.click(row('a/x#3'));
+    expect(screen.getByTestId('pr-expand-a/x#3').querySelector('.prs-why')).toHaveTextContent('auto-merge not enabled on the repo');
+  });
+
+  it('pins the expansion block to the visible width', async () => {
+    const user = userEvent.setup();
+    render(<PrMatrix {...props([repo('a/x', [clean])])} />);
+    await user.click(row('a/x#3'));
+    const cell = screen.getByTestId('pr-expand-a/x#3').querySelector('td') as HTMLElement;
+    expect(cell.firstElementChild).toHaveClass('prs-matrix-pinned');
+  });
+
+  it('closes the Confirm when its row collapses', async () => {
+    const user = userEvent.setup();
+    render(<Harness {...hp([repo('a/x', [clean])])} />);
+    await user.click(row('a/x#3'));
+    await user.click(mergeKey('a/x#3'));
+    expect(screen.getByTestId('confirming-key')).toHaveTextContent('a/x#3');
+    await user.click(row('a/x#3'));
+    expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
+    expect(screen.getByTestId('confirming-key')).toHaveTextContent(/^$/);
+    // Re-opened, the row starts from its keys, not from a Confirm the state still remembered.
+    await user.click(row('a/x#3'));
+    expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
   });
 
   it('closes the first expansion when a second row opens, and UNMOUNTS it with its Confirm', async () => {
     const user = userEvent.setup();
-    render(<PrMatrix {...props([repo('a/x', [clean, pr({ number: 8, url: 'https://github.com/a/x/pull/8' })])])} />);
+    render(<Harness {...hp([repo('a/x', [clean, pr({ number: 8, url: 'https://github.com/a/x/pull/8' })])])} />);
     await user.click(row('a/x#3'));
-    await user.click(within(screen.getByTestId('pr-expand-a/x#3')).getByRole('button', { name: 'Merge' }));
+    await user.click(mergeKey('a/x#3'));
     expect(screen.getByTestId('pr-merge-confirm')).toBeInTheDocument();
     await user.click(row('a/x#8'));
+    expect(screen.getByTestId('confirming-key')).toHaveTextContent(/^$/);
     expect(screen.queryByTestId('pr-expand-a/x#3')).not.toBeInTheDocument();
     expect(row('a/x#3')).toHaveAttribute('aria-expanded', 'false');
     // Unmounted, not hidden: a Confirm left in a hidden subtree would still sit on useDialogEscape's stack.
@@ -205,10 +296,11 @@ describe('PrMatrix — the expansion', () => {
 
   it('does not toggle on a click inside the expansion', async () => {
     const user = userEvent.setup();
-    render(<PrMatrix {...props([repo('a/x', [clean])])} />);
+    render(<Harness {...hp([repo('a/x', [clean])])} />);
     await user.click(row('a/x#3'));
-    const expansion = screen.getByTestId('pr-expand-a/x#3');
-    await user.click(within(expansion).getByRole('combobox', { name: 'Merge method' }));
+    await user.click(mergeKey('a/x#3'));
+    const confirm = screen.getByTestId('pr-merge-confirm');
+    await user.click(within(confirm).getByRole('combobox', { name: 'Merge method' }));
     expect(screen.getByTestId('pr-expand-a/x#3')).toBeInTheDocument();
   });
 
@@ -228,7 +320,7 @@ describe('PrMatrix — the expansion', () => {
     const write = jest.fn(() => Promise.resolve());
     render(<PrMatrix {...props([repo('a/x', [behind])], { write })} />);
     await user.click(row('a/x#2'));
-    await user.click(within(screen.getByTestId('pr-expand-a/x#2')).getByRole('button', { name: 'Update branch' }));
+    await user.click(within(screen.getByTestId('pr-expand-a/x#2')).getByRole('button', { name: 'Update' }));
     expect(write).toHaveBeenCalledWith('a/x#2', SHA, expect.any(Function));
   });
 });
@@ -238,12 +330,12 @@ describe('PrMatrix — keys', () => {
     const user = userEvent.setup();
     const ax = pr({ number: 7, checks: 'failure', updatedAt: '2026-10-29T11:30:00Z', url: 'https://github.com/a/x/pull/7' });
     const ay = pr({ number: 7, review: 'review-required', url: 'https://github.com/a/y/pull/7' });
-    const { rerender } = render(<PrMatrix {...props([repo('a/x', [ax]), repo('a/y', [ay])])} />);
+    const { rerender } = render(<Harness {...hp([repo('a/x', [ax]), repo('a/y', [ay])])} />);
     expect(rowIds()).toEqual(['pr-mrow-a/x#7', 'pr-mrow-a/y#7']);
     await user.click(row('a/y#7'));
-    await user.click(within(screen.getByTestId('pr-expand-a/y#7')).getByRole('button', { name: 'Merge' }));
+    await user.click(mergeKey('a/y#7'));
     expect(screen.getByTestId('pr-merge-confirm')).toBeInTheDocument();
-    rerender(<PrMatrix {...props([repo('a/x', []), repo('a/y', [{ ...ay }])])} />);
+    rerender(<Harness {...hp([repo('a/x', []), repo('a/y', [{ ...ay }])])} />);
     expect(screen.queryByTestId('pr-mrow-a/x#7')).not.toBeInTheDocument();
     expect(row('a/y#7')).toHaveAttribute('aria-expanded', 'true');
     expect(within(screen.getByTestId('pr-expand-a/y#7')).getByTestId('pr-merge-confirm')).toBeInTheDocument();
@@ -253,20 +345,51 @@ describe('PrMatrix — keys', () => {
     const { rerender } = render(<PrMatrix {...props([trio()])} />);
     const before = row('a/x#3');
     // The clean PR gains failing checks and moves from last to first.
-    rerender(<PrMatrix {...props([repo('a/x', [pr({ number: 3, title: 'clean one', checks: 'failure', updatedAt: '2026-10-29T11:59:00Z' }), behind, failing])])} />);
+    rerender(
+      <PrMatrix {...props([repo('a/x', [pr({ number: 3, title: 'clean one', checks: 'failure', updatedAt: '2026-10-29T11:59:00Z' }), behind, failing])])} />
+    );
     expect(rowIds()).toEqual(['pr-mrow-a/x#3', 'pr-mrow-a/x#1', 'pr-mrow-a/x#2']);
     expect(row('a/x#3')).toBe(before);
   });
 });
 
 describe('PrMatrix — outcomes, run warning and failing repos', () => {
-  it('draws an outcome under its row while the row is collapsed, outside the expansion', async () => {
+  it('draws an outcome as its own pinned row while collapsed, and inside the expansion, with no outcome row, while open', async () => {
     const user = userEvent.setup();
     render(<PrMatrix {...props([trio()], { outcomes: { 'a/x#3': { text: 'auto-merge off', kind: 'ok' } } })} />);
     expect(screen.getByTestId('pr-outcome')).toHaveTextContent('auto-merge off');
-    expect(row('a/x#3').nextElementSibling).toContainElement(screen.getByTestId('pr-outcome'));
+    const outcomeRow = row('a/x#3').nextElementSibling as HTMLElement;
+    expect(outcomeRow).toHaveClass('prs-matrix-outcome');
+    expect(outcomeRow).toContainElement(screen.getByTestId('pr-outcome'));
+    expect((outcomeRow.querySelector('td') as HTMLElement).firstElementChild).toHaveClass('prs-matrix-pinned');
+    expect(document.querySelectorAll('.prs-matrix-outcome')).toHaveLength(1);
     await user.click(row('a/x#3'));
-    expect(screen.getByTestId('pr-expand-a/x#3')).not.toContainElement(screen.getByTestId('pr-outcome'));
+    expect(screen.getAllByTestId('pr-outcome')).toHaveLength(1);
+    expect(screen.getByTestId('pr-expand-a/x#3')).toContainElement(screen.getByTestId('pr-outcome'));
+    expect(document.querySelector('.prs-matrix-outcome')).toBeNull();
+  });
+
+  it('says updating… in the Base cell only: no outcome row or line, collapsed or open, and Update says why it waits', async () => {
+    const user = userEvent.setup();
+    const marks = { 'a/x#2': { sha: SHA } };
+    render(<PrMatrix {...props([repo('a/x', [behind])], { marks, outcomes: { 'a/x#2': { text: 'updating…', kind: 'updating' } } })} />);
+    expect(within(row('a/x#2')).getByText('updating…')).toBeInTheDocument();
+    expect(document.querySelector('.prs-matrix-outcome')).toBeNull();
+    expect(screen.queryByTestId('pr-outcome')).not.toBeInTheDocument();
+    await user.click(row('a/x#2'));
+    const expansion = screen.getByTestId('pr-expand-a/x#2');
+    expect(screen.queryByTestId('pr-outcome')).not.toBeInTheDocument();
+    const update = within(expansion).getByRole('button', { name: 'Update' });
+    expect(update).toHaveAttribute('aria-disabled', 'true');
+    expect(update).toHaveAttribute('title', 'updating…');
+    expect(expansion.querySelector('.prs-why')?.textContent ?? '').not.toContain('updating…');
+  });
+
+  it('draws branch updated as an outcome row under the collapsed row', () => {
+    render(<PrMatrix {...props([repo('a/x', [behind])], { outcomes: { 'a/x#2': { text: 'branch updated', kind: 'ok' } } })} />);
+    const outcomeRow = row('a/x#2').nextElementSibling as HTMLElement;
+    expect(outcomeRow).toHaveClass('prs-matrix-outcome');
+    expect(outcomeRow).toHaveTextContent('branch updated');
   });
 
   it('draws no extra row for a PR with no outcome line', () => {
@@ -289,33 +412,44 @@ describe('PrMatrix — outcomes, run warning and failing repos', () => {
     const ctx: PrLayoutProps['ctx'] = {
       ...EMPTY_CTX,
       projects: [{ name: 'x', path: '/p/x', repo: 'a/x' }] as unknown as ProjectSummary[],
-      runs: [{ runId: 'r1', project: '/p/x', status: 'running', base: 'main', queue: [{ id: '42', title: 't', stage: 'pending' } as RunQueueItem] } as OrchestratorRun]
+      runs: [
+        {
+          runId: 'r1',
+          project: '/p/x',
+          status: 'running',
+          base: 'main',
+          queue: [{ id: '42', title: 't', stage: 'pending' } as RunQueueItem]
+        } as OrchestratorRun
+      ]
     };
     expect(prRunWarning(runPr, 'a/x', ctx, NOW)).toBe('run in progress on this machine');
     render(<PrMatrix {...props([repo('a/x', [runPr])], { ctx })} />);
     expect(row('a/x#9')).toHaveTextContent('run in progress on this machine');
   });
 
-  it('keeps a rate-limited repo’s rows AND draws one muted row with its detail', () => {
+  it("keeps a rate-limited repo's rows, draws no muted row for it, and says Can't read below the table", () => {
     const limited = repo('a/x', [failing, clean], { access: 'rate-limited', detail: 'GitHub rate limit reached' });
     render(<PrMatrix {...props([limited])} />);
     expect(rowIds()).toEqual(['pr-mrow-a/x#1', 'pr-mrow-a/x#3']);
-    const fail = screen.getByTestId('pr-mfail-a/x');
-    expect(fail).toHaveTextContent('a/x');
-    expect(fail).toHaveTextContent('GitHub rate limit reached');
-    expect(fail.firstElementChild).toBeEmptyDOMElement();
-    // The detail spans the check columns.
-    expect(fail.querySelector('td[colspan="5"]')).toHaveTextContent('GitHub rate limit reached');
+    expect(document.querySelector('.prs-matrix-fail')).toBeNull();
+    expect(screen.queryByTestId(/^pr-mfail-/)).not.toBeInTheDocument();
+    const line = screen.getByTestId('pr-cantread-a/x');
+    expect(line).toHaveTextContent("Can't read · a/x — GitHub rate limit reached");
+    expect(screen.getByRole('table').compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('draws only the muted row for a failing repo that holds no PR, and no empty-state sentence for it', () => {
+  it("draws only the Can't read line for a failing repo that holds no PR, and no empty-state sentence for it", () => {
     render(<PrMatrix {...props([repo('a/x', [clean]), repo('a/y', [], { access: 'error', detail: 'boom' })])} />);
-    expect(screen.getByTestId('pr-mfail-a/y')).toHaveTextContent('boom');
+    expect(screen.getByTestId('pr-cantread-a/y')).toHaveTextContent("Can't read · a/y — boom");
+    expect(rowIds()).toEqual(['pr-mrow-a/x#3']);
     expect(screen.queryByText('no open pull requests')).not.toBeInTheDocument();
   });
 
-  it('still draws the table (not the empty sentence) when the only shown repo failed', () => {
+  it('draws no table, no empty sentence and no legend when the only shown repo failed — only the line', () => {
     render(<PrMatrix {...props([repo('a/y', [], { access: 'rate-limited', detail: 'slow down' })])} />);
-    expect(screen.getByTestId('pr-mfail-a/y')).toHaveTextContent('slow down');
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.queryByText('no open pull requests')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pr-matrix-legend')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pr-cantread-a/y')).toHaveTextContent("Can't read · a/y — slow down");
   });
 });

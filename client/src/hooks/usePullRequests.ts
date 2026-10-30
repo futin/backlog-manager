@@ -22,20 +22,29 @@ export const PRS_POLL_MS = 60_000;
  * A failed read after a success keeps the last `data` and sets `error` beside it: the page draws the rows it has and says the refresh failed, instead of
  * blanking a list a person is part-way through reading. The next answer clears `error`. `refresh` resolves whatever happened — the task catches its own
  * failure — so a caller can `await` it after a write without a `try`. State is set only while mounted (`useMountedRef`): a read can land after the page is gone.
+ *
+ * What `refresh` resolves is the payload it just stored, or `null` when the read rejected (after `error` was set) or the page is already gone. A caller that
+ * awaits a re-read and then judges it — the page's 30 s update timer asks whether the answer it just waited for carries a changed row — must judge THAT
+ * answer: the hook's `data` as the caller's closure sees it is the render before the await, so reading it afterwards compares the old rows with themselves.
+ * `null` is the one value for "there is no fresh answer to judge", so the caller needs neither a `try` nor a second look at `error` to tell it apart.
  */
-export function usePullRequests(): { data: PullRequestsPayload | null; error: string | null; refresh: () => Promise<unknown> } {
+export function usePullRequests(): { data: PullRequestsPayload | null; error: string | null; refresh: () => Promise<PullRequestsPayload | null> } {
   const [data, setData] = useState<PullRequestsPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useMountedRef();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<PullRequestsPayload | null> => {
     try {
       const fresh = await fetchPullRequests();
-      if (!mountedRef.current) return;
+      // An unmounted page stored nothing, so it resolves nothing either: a payload handed back here would be one no `data` ever held.
+      if (!mountedRef.current) return null;
       setData(fresh);
       setError(null);
+      return fresh;
     } catch (e) {
+      // `error` is set BEFORE the `null` resolves, so a caller that sees `null` finds the reason already stored.
       if (mountedRef.current) setError(e instanceof Error ? e.message : String(e));
+      return null;
     }
   }, [mountedRef]);
 

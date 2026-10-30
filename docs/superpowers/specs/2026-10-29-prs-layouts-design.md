@@ -2,6 +2,8 @@
 
 Date: 2026-10-29. Status: approved (autopilot gate, after doc-review round 1 — `docs/superpowers/reviews/2026-10-29-prs-layouts-design-review-1.md`). Mockups (sample rows, daylight theme): https://claude.ai/artifact/JGHYN5bT7oaU8uute4W82h
 
+Superseded in part: the key strip, the foot, the narrow Matrix and the Cards empty states are redrawn by [the fixes spec](2026-10-30-prs-page-fixes-design.md), which wins where the two disagree.
+
 ## Intent
 
 GitHub › PRs (`.claude/DESIGN.md` §8.11, shipped in #394) draws one card per registered GitHub repo. With eight repos and a handful of PRs, the page is mostly

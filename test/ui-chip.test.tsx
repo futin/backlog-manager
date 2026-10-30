@@ -74,6 +74,42 @@ describe('Chip', () => {
     expect(chip).not.toHaveAttribute('aria-pressed');
   });
 
+  /*
+    The PRs page draws each pull request's `Open ↗` key as a chip that is really
+    a link, so the anchor must wear exactly the chip classes — nothing pressed
+    it, so no `on`, and no extra family — and open the page in a new tab with
+    `noreferrer`, the pair every link-out on this board carries. A `pressed`
+    anchor still takes `on`, as a `<label>` does: the class derivation is shared.
+  */
+  it('renders an anchor under as="a" with the chip classes, href, target and rel', () => {
+    render(
+      <Chip as="a" href="https://github.com/acme/widgets/pull/7" variant="outline" size={28}>
+        Open ↗
+      </Chip>
+    );
+
+    const chip = screen.getByRole('link', { name: 'Open ↗' });
+    expect(chip.tagName).toBe('A');
+    expect(chip.className).toBe('ui-chip ui-chip-outline ui-chip-28');
+    expect(chip).toHaveAttribute('href', 'https://github.com/acme/widgets/pull/7');
+    expect(chip).toHaveAttribute('target', '_blank');
+    expect(chip).toHaveAttribute('rel', 'noreferrer');
+  });
+
+  it('passes title and data-* through on the anchor and draws no type or aria-pressed, even when pressed', () => {
+    render(
+      <Chip as="a" href="https://example.test/x" pressed title="Open on GitHub" data-testid="pr-open">
+        Open ↗
+      </Chip>
+    );
+
+    const chip = screen.getByTestId('pr-open');
+    expect(chip.tagName).toBe('A');
+    expect(chip).toHaveAttribute('title', 'Open on GitHub');
+    expect(chip).not.toHaveAttribute('type');
+    expect(chip).not.toHaveAttribute('aria-pressed');
+  });
+
   it('hides the icon from the accessible name', () => {
     render(<Chip icon={<span>●</span>}>Runs</Chip>);
 
