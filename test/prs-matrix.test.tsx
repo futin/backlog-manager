@@ -158,7 +158,7 @@ describe('PrMatrix — header, cells and order', () => {
   });
 
   it('shows updating… in the Base cell while a mark holds, in place of behind', () => {
-    const marks = { 'a/x#2': { sha: SHA, until: NOW + 10_000 } };
+    const marks = { 'a/x#2': { sha: SHA } };
     render(<PrMatrix {...props([repo('a/x', [behind])], { marks })} />);
     expect(within(row('a/x#2')).getByText('updating…')).toHaveClass('prs-cell-live');
     expect(within(row('a/x#2')).queryByText('behind')).not.toBeInTheDocument();
@@ -180,7 +180,7 @@ describe('PrMatrix — header, cells and order', () => {
 
   it('counts two behind rows under Base while one of them is updating', () => {
     const other = pr({ number: 4, mergeState: 'behind', headSha: 'd'.repeat(40), url: 'https://github.com/a/x/pull/4' });
-    render(<PrMatrix {...props([repo('a/x', [behind, other])], { marks: { 'a/x#2': { sha: SHA, until: NOW + 10_000 } } })} />);
+    render(<PrMatrix {...props([repo('a/x', [behind, other])], { marks: { 'a/x#2': { sha: SHA } } })} />);
     expect(screen.getByRole('columnheader', { name: 'Base 2' })).toBeInTheDocument();
   });
 
@@ -345,7 +345,9 @@ describe('PrMatrix — keys', () => {
     const { rerender } = render(<PrMatrix {...props([trio()])} />);
     const before = row('a/x#3');
     // The clean PR gains failing checks and moves from last to first.
-    rerender(<PrMatrix {...props([repo('a/x', [pr({ number: 3, title: 'clean one', checks: 'failure', updatedAt: '2026-10-29T11:59:00Z' }), behind, failing])])} />);
+    rerender(
+      <PrMatrix {...props([repo('a/x', [pr({ number: 3, title: 'clean one', checks: 'failure', updatedAt: '2026-10-29T11:59:00Z' }), behind, failing])])} />
+    );
     expect(rowIds()).toEqual(['pr-mrow-a/x#3', 'pr-mrow-a/x#1', 'pr-mrow-a/x#2']);
     expect(row('a/x#3')).toBe(before);
   });
@@ -369,7 +371,7 @@ describe('PrMatrix — outcomes, run warning and failing repos', () => {
 
   it('says updating… in the Base cell only: no outcome row or line, collapsed or open, and Update says why it waits', async () => {
     const user = userEvent.setup();
-    const marks = { 'a/x#2': { sha: SHA, until: NOW + 10_000 } };
+    const marks = { 'a/x#2': { sha: SHA } };
     render(<PrMatrix {...props([repo('a/x', [behind])], { marks, outcomes: { 'a/x#2': { text: 'updating…', kind: 'updating' } } })} />);
     expect(within(row('a/x#2')).getByText('updating…')).toBeInTheDocument();
     expect(document.querySelector('.prs-matrix-outcome')).toBeNull();
@@ -410,7 +412,15 @@ describe('PrMatrix — outcomes, run warning and failing repos', () => {
     const ctx: PrLayoutProps['ctx'] = {
       ...EMPTY_CTX,
       projects: [{ name: 'x', path: '/p/x', repo: 'a/x' }] as unknown as ProjectSummary[],
-      runs: [{ runId: 'r1', project: '/p/x', status: 'running', base: 'main', queue: [{ id: '42', title: 't', stage: 'pending' } as RunQueueItem] } as OrchestratorRun]
+      runs: [
+        {
+          runId: 'r1',
+          project: '/p/x',
+          status: 'running',
+          base: 'main',
+          queue: [{ id: '42', title: 't', stage: 'pending' } as RunQueueItem]
+        } as OrchestratorRun
+      ]
     };
     expect(prRunWarning(runPr, 'a/x', ctx, NOW)).toBe('run in progress on this machine');
     render(<PrMatrix {...props([repo('a/x', [runPr])], { ctx })} />);

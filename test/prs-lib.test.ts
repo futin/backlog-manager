@@ -1,7 +1,6 @@
 import {
   defaultMethod,
   groupRepos,
-  isUpdating,
   autoMergeBlock,
   mergeBlock,
   outcomeLine,
@@ -280,16 +279,9 @@ describe('defaultMethod', () => {
   });
 });
 
-describe('isUpdating', () => {
-  const row = pr({ headSha: 'b'.repeat(40) });
-  const mark = { sha: 'b'.repeat(40), until: 1_000_000 };
-
-  it('holds while the head is the one the update was asked at and the window is open', () => {
+describe('UPDATING_MS', () => {
+  it('is the 30 s the page waits before its one re-read of a marked PR', () => {
     expect(UPDATING_MS).toBe(30_000);
-    expect(isUpdating(mark, row, mark.until - 1)).toBe(true);
-    expect(isUpdating(mark, row, mark.until)).toBe(false);
-    expect(isUpdating(mark, pr({ headSha: 'c'.repeat(40) }), mark.until - 1)).toBe(false);
-    expect(isUpdating(undefined, row, 0)).toBe(false);
   });
 });
 

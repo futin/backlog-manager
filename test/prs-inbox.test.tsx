@@ -212,9 +212,7 @@ describe('PrInbox — items', () => {
 
   it('draws an outcome line under a loud and under a quiet row', () => {
     render(
-      <PrInbox
-        {...props([trio()], { outcomes: { 'a/x#1': { text: 'auto-merge armed', kind: 'ok' }, 'a/x#3': { text: 'auto-merge off', kind: 'ok' } } })}
-      />
+      <PrInbox {...props([trio()], { outcomes: { 'a/x#1': { text: 'auto-merge armed', kind: 'ok' }, 'a/x#3': { text: 'auto-merge off', kind: 'ok' } } })} />
     );
     expect(within(screen.getByTestId('pr-row-a/x#1')).getByTestId('pr-outcome')).toHaveTextContent('auto-merge armed');
     expect(within(screen.getByTestId('pr-row-a/x#3')).getByTestId('pr-outcome')).toHaveTextContent('auto-merge off');
@@ -234,7 +232,11 @@ describe('PrInbox — one row vocabulary', () => {
     expect(keyNames(quiet)).toEqual(KEYS);
     // The row's text block has exactly one link, `#n`; `Open ↗` is the keys column's.
     const main = quiet.querySelector('.prs-row-main') as HTMLElement;
-    expect(within(main).getAllByRole('link').map((a) => a.textContent)).toEqual(['#3']);
+    expect(
+      within(main)
+        .getAllByRole('link')
+        .map((a) => a.textContent)
+    ).toEqual(['#3']);
     expect(document.querySelector('[aria-expanded]')).toBeNull();
     expect(within(quiet).queryByRole('button', { name: /Actions for/ })).not.toBeInTheDocument();
   });
@@ -248,7 +250,7 @@ describe('PrInbox — one row vocabulary', () => {
   });
 
   it('says updating… on the why-line once a later outcome replaced the updating one, and only on the outcome line while it has not', () => {
-    const marks = { 'a/x#2': { sha: SHA, until: NOW + 30_000 } };
+    const marks = { 'a/x#2': { sha: SHA } };
     const { unmount } = render(<PrInbox {...props([trio()], { marks, outcomes: { 'a/x#2': { text: 'auto-merge armed', kind: 'ok' } } })} />);
     let row = screen.getByTestId('pr-row-a/x#2');
     expect(row.querySelector('.prs-why')).toHaveTextContent(/^updating…$/);
@@ -261,7 +263,7 @@ describe('PrInbox — one row vocabulary', () => {
   });
 
   it('draws both the updating… reason and an error that landed during the mark (Review Focus 5)', () => {
-    const marks = { 'a/x#2': { sha: SHA, until: NOW + 30_000 } };
+    const marks = { 'a/x#2': { sha: SHA } };
     render(<PrInbox {...props([trio()], { marks, outcomes: { 'a/x#2': { text: 'refused', kind: 'error' } } })} />);
     const row = screen.getByTestId('pr-row-a/x#2');
     expect(row.querySelector('.prs-why')).toHaveTextContent(/^updating…$/);
@@ -275,17 +277,32 @@ describe('PrInbox — one row vocabulary', () => {
     const runCtx: PrLayoutProps['ctx'] = {
       ...EMPTY_CTX,
       projects: [{ name: 'x', path: '/p/x', repo: 'a/x' }] as unknown as ProjectSummary[],
-      runs: [{ runId: 'r1', project: '/p/x', status: 'running', base: 'main', queue: [{ id: '42', title: 't', stage: 'pending' } as RunQueueItem] } as OrchestratorRun]
+      runs: [
+        {
+          runId: 'r1',
+          project: '/p/x',
+          status: 'running',
+          base: 'main',
+          queue: [{ id: '42', title: 't', stage: 'pending' } as RunQueueItem]
+        } as OrchestratorRun
+      ]
     };
     render(<PrInbox {...props([repo('a/x', [runPr])], { ctx: runCtx })} />);
     const row = screen.getByTestId('pr-row-a/x#9');
     const meta = row.querySelector('.prs-meta') as HTMLElement;
     // The separators are their own spans, spaced by the flex gap, so the line is read part by part.
-    expect(Array.from(meta.children).map((el) => el.textContent)).toEqual(['futin', '·', 'backlog/42 → main', '·', '2h ago', 'run in progress on this machine']);
+    expect(Array.from(meta.children).map((el) => el.textContent)).toEqual([
+      'futin',
+      '·',
+      'backlog/42 → main',
+      '·',
+      '2h ago',
+      'run in progress on this machine'
+    ]);
     expect(within(row).getAllByText('run in progress on this machine')).toHaveLength(1);
   });
 
-  it('opens one Confirm on the page, in the second row\'s foot under its text and not in its keys column', async () => {
+  it("opens one Confirm on the page, in the second row's foot under its text and not in its keys column", async () => {
     const user = userEvent.setup();
     const one = pr({ number: 5, review: 'review-required', url: 'https://github.com/a/x/pull/5' });
     const two = pr({ number: 6, review: 'review-required', url: 'https://github.com/a/x/pull/6', updatedAt: '2026-10-29T10:00:00Z' });
@@ -342,7 +359,15 @@ describe('PrInbox — one row vocabulary', () => {
     const runCtx: PrLayoutProps['ctx'] = {
       ...EMPTY_CTX,
       projects: [{ name: 'x', path: '/p/x', repo: 'a/x' }] as unknown as ProjectSummary[],
-      runs: [{ runId: 'r1', project: '/p/x', status: 'running', base: 'main', queue: [{ id: '42', title: 't', stage: 'pending' } as RunQueueItem] } as OrchestratorRun]
+      runs: [
+        {
+          runId: 'r1',
+          project: '/p/x',
+          status: 'running',
+          base: 'main',
+          queue: [{ id: '42', title: 't', stage: 'pending' } as RunQueueItem]
+        } as OrchestratorRun
+      ]
     };
     const warning = prRunWarning(runPr, 'a/x', runCtx, NOW);
     expect(warning).toBe('run in progress on this machine');

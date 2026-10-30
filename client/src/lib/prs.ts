@@ -19,12 +19,11 @@ export interface PrOutcome {
 }
 
 /**
- * An `update-requested` mark: the head SHA the update was asked at, and when the row stops saying `updating…` if that head never moved. Here rather than in the
- * page because every layout reads it through `isUpdating`, and a layout switch mid-update must keep the mark.
+ * An `update-requested` mark: the head SHA the update was asked at. Its PRESENCE is `updating…` — no clock of its own; the page's timer and its reads decide
+ * when it goes. Here rather than in the page because every layout reads it, and a layout switch mid-update must keep the mark.
  */
 export interface UpdateMark {
   sha: string;
-  until: number;
 }
 
 /** A chip a row draws: the label is the whole claim, the tone is `Pill`'s vocabulary. */
@@ -72,7 +71,7 @@ export function mergeBlock(pr: PullRequestRow, repo: PrRepoView): string | null 
  * token may not" alike — so the row's `mergeState` tells them apart: a PR GitHub says is BEHIND its base is not up to date, and the only reason left is
  * that this token may not update it. Any other state reads up to date, which is what it almost always is.
  *
- * `updating` is the PRESENCE of the row's update mark, not `isUpdating`'s clock, and it is asked second: GitHub answers an update-branch with a 202 and does
+ * `updating` is the PRESENCE of the row's update mark, and it is asked second: GitHub answers an update-branch with a 202 and does
  * the merge later, and the moment the branch lands `viewerCanUpdateBranch` turns false — so without the mark the row would flip from a disabled `Update` to
  * `already up to date` for the whole of the wait, a claim the page cannot yet make. Asking after `sync off` (the repo's say outranks everything) and before the
  * fork rule (a mark only exists because an update was accepted, so that rule cannot have held) makes `updating…` the answer for the mark's whole life, whatever
@@ -154,16 +153,12 @@ export function defaultMethod(methods: readonly MergeMethod[]): MergeMethod | nu
 }
 
 /**
- * How long a row says `updating…` after an update-branch was accepted. GitHub answers 202 and does the merge later; the row stays marked until the head SHA
- * moves (the poll saw it land) or this runs out, whichever is first, so a slow update does not leave the spinner up forever. The number lives in `shared/`
+ * How long a row waits on an update-branch before the page re-reads once and judges it. GitHub answers 202 and does the merge later; the row stays marked
+ * until a read shows the head moved (the poll saw it land) or this timer's read says it did not, so a slow update does not leave the spinner up forever. The
+ * number lives in `shared/`
  * (`PR_UPDATING_MS`) because the server makes the repo's cache entry due again at the same moment — the page's one re-read must reach GitHub, not the TTL.
  */
 export const UPDATING_MS = PR_UPDATING_MS;
-
-/** Is this PR still waiting on an update-branch it asked for? The mark is keyed by the head SHA it was made at, so a head that moved clears it by itself. */
-export function isUpdating(mark: { sha: string; until: number } | undefined, pr: PullRequestRow, now: number): boolean {
-  return mark !== undefined && pr.headSha === mark.sha && now < mark.until;
-}
 
 function newest(prs: readonly PullRequestRow[]): number {
   return prs.reduce((max, pr) => Math.max(max, Date.parse(pr.updatedAt) || 0), 0);

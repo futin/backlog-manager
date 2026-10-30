@@ -307,7 +307,7 @@ const NA: MatrixCell = { text: '—', tone: 'na' };
 
 /**
  * A PR's five Matrix cells. Each cell reports ITS OWN fact and ignores `draft` and the row's level (spec, Matrix): a draft with failing checks has a red Checks
- * cell — the dot says Quiet, because the dot is the triage and the cells are the evidence. `updating` is the page's mark (`isUpdating`), which Base shows in
+ * cell — the dot says Quiet, because the dot is the triage and the cells are the evidence. `updating` is the page's mark (present = updating), which Base shows in
  * place of `behind` because the update has been asked for.
  *
  * Mergeable carries the one fact no other column can: a `blocked` / `unstable` state nothing else names. That is `levelFacts`' own unnamed-block test, so the
