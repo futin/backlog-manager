@@ -74,7 +74,9 @@ paths: ["client/src/**"]
   true, or while the answer is unknown and that section is on screen and not `provisional`. `resolveLegacySection` (`lib/source-page.ts`) maps a stored
   `board`/`archive` to `github` with that page and anything unrecognised to `FALLBACK_SECTION` (`github`) with none, both provisional. `App` moves nothing while
   `drawn` is null; once it is known a provisional landing settles once, through `change` (`settleSection` for a page-named one, `firstDrawn` — Files, then
-  GitHub, else Runs — otherwise), a legacy pin is rewritten to where it settled with `update({ landing })`, and a source section whose row is gone falls to
+  GitHub, else Runs — otherwise), a legacy pin (`useSettings().legacyLanding`, the raw `board`/`archive`) is rewritten by its own effect on `[drawn,
+  legacyLanding]` with `update({ landing: settleSection('github', drawn) })` — never through `pending`, which a deep link or a click clears — while
+  `update` carries the raw value through any patch not naming `landing`, and a source section whose row is gone falls to
   `firstDrawn`; a provisional landing renders `SectionLoading` until it settles. The pages are `FILES_PAGES` (`board | archive`) and `GITHUB_PAGES` (`board |
   prs | archive | settings`), each with its key and guard, held by `useFilesPage`/`useGithubPage` (`hooks/useSourcePage.ts`), module stores like `useJiraPage`'s; the
   Sources card's `GitHub › Settings ↗` link is `onOpenGithubPage` (`setGithubPage(p)` then `change('github')`, built once in `App`), drawn only while

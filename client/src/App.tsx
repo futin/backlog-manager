@@ -89,7 +89,7 @@ export function App() {
  * landing preference has to be readable before the first section paints.
  */
 function AppShell() {
-  const { settings, update } = useSettings();
+  const { settings, update, legacyLanding } = useSettings();
   // Remembered across loads: reopening on the section you left is what you want
   // from a board you come back to.
   const [, setStored] = usePersistedState<Section>(SECTION_KEY, FALLBACK_SECTION);
@@ -124,13 +124,12 @@ function AppShell() {
     StrictMode's second run of the initializer writes the same values again. Held in state rather than derived, because what clears it is an event (the
     first projects answer, or the reader picking a section), not a value.
 
-    `fromPin` says the guess came from the `landing` pin rather than the section key — only ever a legacy `board`/`archive` pin, since `clampSettings`
-    turns any other unrecognised pin into `last`. Such a pin is settled in Settings as well as on screen (see the settle effect), because the blob still
-    says `github` after the clamp, and the first `update()` from anywhere would write that down as a real GitHub pin.
+    A legacy `board`/`archive` PIN is settled in Settings as well, but not through `pending`: the section is a guess about this load's screen, which a deep
+    link or a click legitimately ends, while the pin is a stored preference nothing on screen settles. It has its own lifetime — `legacyLanding`, from the
+    provider — and its own effect below (#399).
   */
   const [initial] = useState(() => {
     if (link.section !== null) return { section: link.section, pending: null };
-    const fromPin = settings.landing !== 'last';
     const raw =
       settings.landing === 'last' ? readRaw(SECTION_KEY) : ((readRaw(SETTINGS_STORAGE_KEY) as { landing?: unknown } | undefined)?.landing ?? settings.landing);
     const r = resolveLegacySection(raw);
@@ -138,10 +137,10 @@ function AppShell() {
       setFilesPage(r.page);
       setGithubPage(r.page);
     }
-    return { section: r.section, pending: r.provisional ? { page: r.page, fromPin } : null };
+    return { section: r.section, pending: r.provisional ? { page: r.page } : null };
   });
   const [section, setSection] = useState<Section>(initial.section);
-  const [pending, setPending] = useState<{ page: 'board' | 'archive' | null; fromPin: boolean } | null>(initial.pending);
+  const [pending, setPending] = useState<{ page: 'board' | 'archive' | null } | null>(initial.pending);
   /*
     The section and `pending` as last WRITTEN, ahead of the render that will show them — written in the same breath as each `setSection`/`setPending`, read
     by the two effects below to tell whether their closure is behind. It is: a click can land between a commit and that commit's passive effects (a
@@ -240,14 +239,21 @@ function AppShell() {
     if (pending !== null) {
       const settled = pending.page === null ? firstDrawn(drawn) : settleSection(section, drawn);
       change(settled);
-      // A legacy pin is rewritten to where it settled. Left as the clamped `github`, the next `update()` — any Settings change, a Settings-tree scope
-      // pick — would store it as a REAL GitHub pin, and a files-only machine would then draw a held GitHub row and board on every load until the answer
-      // took them back: the flicker the spec's Fallback forbids, with `Opens on` reading GitHub on a machine that has none.
-      if (pending.fromPin) update({ landing: settled });
       return;
     }
     if (isSourceSection(section) && !drawn[section]) change(firstDrawn(drawn));
   }, [drawn, section, pending]);
+
+  /*
+    A legacy `board`/`archive` pin is rewritten to where it settles: GitHub when this machine has a GitHub project, else the first drawn source. Written
+    down, rather than left to the clamp's read-time `github`, so `Opens on` never reads GitHub on a machine that has none and a files-only machine never
+    draws a held GitHub row and board on a later load — the flicker the spec's Fallback forbids. It reads neither the section, `pending` nor the deep link,
+    so a deep-linked load, a click before the first answer and a failed read followed by a click all reach it (#399); the provider keeps any other
+    `update()` from writing `github` meanwhile. Runs once: the write ends `legacyLanding`. With the projects answer unknown it waits, like the settle above.
+  */
+  useEffect(() => {
+    if (drawn !== null && legacyLanding !== null) update({ landing: settleSection('github', drawn) });
+  }, [drawn, legacyLanding]);
 
   /*
     The Jira section's hold-and-fall (Jira phase 2, spec §6.1). `resolveLegacySection` takes a stored `jira` like any section — it runs in the initializer
@@ -275,7 +281,7 @@ function AppShell() {
     }
     // No projects answer yet: land on the provisional fallback, exactly as an absent stored section would, and let the settle above correct it.
     change(FALLBACK_SECTION);
-    const fallback = { page: null, fromPin: false };
+    const fallback = { page: null };
     intent.current = { section: FALLBACK_SECTION, pending: fallback };
     setPending(fallback);
   }, [jiraConfigured, section]);
