@@ -94,7 +94,8 @@ Every direct push to `main` is refused, and in this repo that is more than habit
 ## Releases
 
 `.github/workflows/release.yml` is a thin caller of release-kit's reusable `release.yml` (`@v1`, with `kit-ref: v1` kept equal to that ref) in
-`mode: rollup`, run each night at 04:00 UTC (`schedule`, `0 4 * * *`) and on `workflow_dispatch` — the same caller the dashboard has, but for its header
+`mode: rollup`, run each night at 04:17 UTC (`schedule`, `17 4 * * *`; off the hour, since GitHub delays and drops scheduled runs under top-of-hour
+load) and on `workflow_dispatch` — the same caller the dashboard has, but for its header
 comment. A merge into `main` releases nothing by itself. Design: this repo's
 `docs/superpowers/specs/2026-10-16-release-versioning-design.md`, which adopts the dashboard's `2026-10-15-release-pipeline-design.md` §Phase C unchanged. It
 needs both `contents: write` (the tag push and the Release) and `pull-requests: read` — setting `contents` alone drops `pull-requests` to none and the PR
