@@ -153,7 +153,8 @@ leaves the PR open, auto-merge armed if it was armed, and the tree kept. Each pa
     write is reported with the command, never retried another way.
   - **groom, files project:** nothing — the merged item file is the plan on `<base>`.
   - **execute:** nothing on the issue. With `Closes #<n>` GitHub closes it and `in-review` goes with it; with `Refs #<n>` the issue stays open with
-    `in-review` on, and the final message lists pr-mode §9's hand steps as it does without auto-merge. A files item reached `done/` on `<base>` with the
+    `in-review` on — no longer blocking once the merge was into the default branch — and the final message lists pr-mode §9's hand steps as it does without
+    auto-merge. A files item reached `done/` on `<base>` with the
     merge, so §9's "merge this PR before draining the backlog" line is not printed.
 - **Closed.** Stop and report. Auto-merge ended with the PR. Groom on a tracker project leaves `plan-review` on, and the final message says so with the
   `plan-review <issue> off` command.

@@ -141,7 +141,7 @@ export class GithubSource implements ItemSource, ItemWriter {
     const items: BacklogItem[] = [];
     const errors: string[] = [];
     for (const issue of this.poller.issues(repo)) {
-      const mapped = mapIssue(issue, repo, project, claims.get(issue.number) ?? []);
+      const mapped = mapIssue(issue, repo, project, claims.get(issue.number) ?? [], this.poller.reviewLifted(repo, issue.number));
       // `null` is a pull request, which the issues endpoint returns alongside
       // real issues and which is not an item at all — dropped silently,
       // because there is nothing wrong with the repo containing PRs.
@@ -196,7 +196,13 @@ export class GithubSource implements ItemSource, ItemWriter {
     if (found === null) return null;
     const project = registry.projects.find((p) => this.repoOf(p) === found.repo);
     if (project === undefined) return null;
-    const mapped = mapIssue(found.issue, found.repo, project, claimsFor(found.issue.number, this.poller.comments(found.repo)));
+    const mapped = mapIssue(
+      found.issue,
+      found.repo,
+      project,
+      claimsFor(found.issue.number, this.poller.comments(found.repo)),
+      this.poller.reviewLifted(found.repo, found.issue.number)
+    );
     return mapped === null ? null : mapped.item;
   }
 

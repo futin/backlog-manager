@@ -2209,7 +2209,8 @@ function trackerCandidates(projectRoot, { ids, drift = false, base = BASE_REF_DE
 // button, the server's dispatch ladder, this gate and execute's own refusal all say it, so a change there is a change here.
 const IN_REVIEW_REASON = 'a PR is open for this item';
 
-// A tracker issue labelled `in-review` has a pushed branch and an open PR, and sits open and UNCLAIMED until the PR merges and `Closes #<n>` shuts it.
+// A tracker issue labelled `in-review` has a pushed branch and an open PR, and sits open and UNCLAIMED until the PR merges and `Closes #<n>` shuts it —
+// or, for a `Refs #<n>` PR that closes nothing, until the server's mapper sees it merged into the default branch and stops sending `inReview` (#411).
 // To every other gate it reads ready, so without this a run on any machine would execute it a second time. It turns the verdict `ungroomed` with the
 // reason first — the shape `applyStaleMarks` gives a stale-plan mark — so no new verdict reaches `RunStage`, the run file or anything that reads one, and
 // the driver skips it at pre-flight like any other ungroomed item. Unlike a stale mark it applies to an already-ungroomed item too: "a PR is open" is the

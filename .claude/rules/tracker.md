@@ -95,7 +95,10 @@ paths: ["server/src/tracker/**"]
   eventually consistent, and a mark moved past a row a lagging response missed excludes that row until restart (brickwright#28, 2026-09-29). **Every issue holding an unreleased cached claim is re-read per tick, and that list is the truth for its comments**
   (bug-55) — conditional on a per-issue ETag whose remembered ids a `304` is reconciled against, a comment younger than `RECONCILE_GRACE_MS` kept even when
   absent, `commentsHwm` never moved by it, a `404` read as an empty list — because the repo-wide `since` read can never see a deletion, and `forgetComment`
-  only ever hears of the loser THIS process deleted.
+  only ever hears of the loser THIS process deleted. **The PRs the issues read returns are indexed, never cached as rows** (#411): `RepoState.pulls` keeps
+  `open`, `merged_at`, `closed_at` and `pullRefs(body)` per PR, `pullBases` one `GET /pulls/<n>` answer per merged PR for the process (asked only for a
+  still-labelled `in-review` issue's `decidingPull` — the LATEST closed referencing PR, none open — a `404` skipped without touching `access`), and
+  `reviewLifted` is what `mapIssue` drops `inReview` on.
   Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The eleven labels
   live in `server/src/tracker/labels.ts`, are created idempotently on a repo's first successful sync — phase 2's one write to GitHub — and agree with
   `connect`'s issue forms by a source-reading guard (`test/tracker-labels.test.ts`), never an import. **The Jira board caches are the second**

@@ -550,7 +550,8 @@ item's claim at dispatch (`itemClaimBlock`) where it never re-checks a files ite
 **An `in-review` issue keeps its control, disabled with `a PR is open for this item`** (execute `pr` mode). `inReviewBlock` (`shared/agent.ts`) reads the
 mapped `inReview` flag after `progressBlock` and before `runClaimBlock`, and the server's `plan`/`dispatch` read the same helper. The label goes on once execute
 has pushed a `pr`-mode branch — the moment its claim is released and the still-open issue would otherwise read ready — and comes off when the PR merges and
-closes the issue, or by `backlog.mjs review <id> off`. A files item never carries it.
+closes the issue, or by `backlog.mjs review <id> off`. A `Refs #<n>` PR closes nothing, so the flag is also lifted without a write once the latest closed
+referencing PR merged into the default branch and none is open (#411, `TrackerPollerService.reviewLifted`) — the label stays, the card reads ready. A files item never carries it.
 
 **A plan that awaits review keeps the control too, disabled with `this plan awaits review`** (backlog-tick, #330). `planReviewBlock` (`shared/agent.ts`) is the
 next rung, after `inReviewBlock` and before the run claim, so an item carrying both says the PR. It reads `BacklogItem.planReview`, which — unlike `inReview` —
