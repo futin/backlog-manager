@@ -3822,10 +3822,12 @@ mutation needs, the server reads fresh for that one call, and which never leaves
 write's turn comes, as `writeChain` judges sync off for the item writes.
 
 **The refusal ladder, in order:** `400` a malformed body · `404` a repo no registered project resolves to · `503` no token · inside the chain `409` sync off
-— `syncOffBlock(path)` of the repo's first registered project, the sentence's one server home, never a copy · `429` the repo asleep · then GitHub's answer:
+— `syncOffBlock(path)` of the repo's first registered project, the sentence's one server home, never a copy · `429` the repo asleep in the pool the write spends (#395: `rest` for merge and update-branch, which also reads the
+issue poller's own REST sleep, `graphql` for auto-merge — GitHub counts the two primary budgets apart, so a REST limit never sleeps the GraphQL list read and a
+GraphQL limit never refuses a REST merge) · then GitHub's answer:
 a refusal on its merits (REST `405`/`409`/`422`, or a typed GraphQL error on a `200`) is `409` with GitHub's message; a `401`/`403` that is not a limit is
 `502 the token lacks permission for this — <GitHub's message>`, because a fine-grained token's write permissions cannot be read back and this is where a
-person learns the token is short, so the page disables nothing on a guess; a limit is `429` and sleeps the repo (`failureVerdict`, the poller's one rule;
+person learns the token is short, so the page disables nothing on a guess; a limit is `429` and sleeps that pool of the repo (`failureVerdict`, the poller's one rule;
 ruling R4 creates the PR-cache entry when none exists, and a secondary limit sleeps the poller's repo too); anything else is `502`. Nothing before the
 GitHub call makes an outbound request.
 

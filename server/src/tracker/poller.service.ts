@@ -1013,6 +1013,17 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   }
 
   /**
+   * This poller's own sleep on `repo` — the REST pool it spends, hourly or secondary — with the sentence it left on the repo, or `null` when none is ahead.
+   * What the PR cache's REST writes read before their request (#395): they spend the same REST pool, so a limit this poller met is theirs too. The PR list
+   * read does not read it, because GraphQL's primary budget is a separate pool; a secondary one reaches it through `secondaryUntil`.
+   */
+  restSleep(repo: string): { until: number; detail: string | null } | null {
+    const state = this.repos.get(repo);
+    if (state === undefined || state.sleepUntil === null || Date.now() >= state.sleepUntil) return null;
+    return { until: state.sleepUntil, detail: state.detail };
+  }
+
+  /**
    * Turn a failed response into this repo's `access`/`detail`, and say whether
    * the caller should stop. `failureVerdict` holds the whole mapping; this applies it to one repo's state.
    */
