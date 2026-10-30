@@ -76,9 +76,10 @@ describe('Chip', () => {
 
   /*
     The PRs page draws each pull request's `Open ↗` key as a chip that is really
-    a link, so the anchor must wear exactly the chip classes — no `on`, no extra
-    family — and open the page in a new tab with `noreferrer`, the pair every
-    link-out on this board carries.
+    a link, so the anchor must wear exactly the chip classes — nothing pressed
+    it, so no `on`, and no extra family — and open the page in a new tab with
+    `noreferrer`, the pair every link-out on this board carries. A `pressed`
+    anchor still takes `on`, as a `<label>` does: the class derivation is shared.
   */
   it('renders an anchor under as="a" with the chip classes, href, target and rel', () => {
     render(

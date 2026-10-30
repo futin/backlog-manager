@@ -3136,8 +3136,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 @media (max-width: 1100px) { .ui-figure-strip { grid-template-columns: repeat(3, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .ui-figure-strip, .ui-figure-strip-3 { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 
-/* Chip — §7's filter chip and this board's 32 px control. */
+/* Chip — §7's filter chip and this board's 32 px control. `text-decoration: none` is for `as="a"`: a button and a label draw no underline of their own,
+   but an anchor takes the browser's default one, and nothing global resets it — so the link chip would be the one chip with a line under its label. */
 .ui-chip {
+  text-decoration: none;
   display: inline-flex; align-items: center; gap: 6px;
   height: 32px; padding: 0 12px; border-radius: 12px;
   font-size: 13px; font-weight: 500; white-space: nowrap;
