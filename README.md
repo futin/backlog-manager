@@ -26,6 +26,34 @@ watchdog that resumes a crashed run.
   pause, resume or stop a run, and save its own server-side settings under `~/.backlog-manager/settings/` (the run watchdog's, the tick breaker's, the remote
   dashboards list, the Jira setup, the shared time zone); every item on screen is rendered from what is already on disk. A project connected to a tracker
   has no item files at all: there the skills' writes reach GitHub through this app's API, which holds the credential — see [Architecture](#architecture).
+- **Its writes outside your disk are a short, closed list.** A tracker project's issues, through eleven guarded `/api/items/*` routes; an open pull request's
+  merge, auto-merge and update-branch, from GitHub › PRs; a Jira issue's assignee and status. Nothing else is written to GitHub or Jira, and the server never
+  writes git.
+
+## What the board shows
+
+Five sections behind a side rail, each loaded on first visit. A source's section is drawn only while some registered project has that source.
+
+- **Files** and **GitHub** — a Board and an Archive per source. The Board is four kanban columns by type; a card carries its derived state (groomed, claimed,
+  in review, queued for a run) and the one action it allows. A filter picks out the plans a tick groomed that wait for a person's approval (`plan-review`); a
+  tracker plan is approved from its modal, a files plan by a prompt the modal copies. Items untouched for 30 days move to Archive on their own
+  ([what leaves the Board](docs/subsystems/board.md#what-leaves-the-board)).
+- **GitHub › PRs** — every open pull request on the registered GitHub repos, drawn as Inbox, Matrix or Cards, with chips for draft, review, checks, conflicts,
+  behind-base and auto-merge. Merge (with a method pick and an inline confirm), arm or disarm auto-merge, and update the branch from the row; a blocked action
+  is disabled with its reason beside it. GitHub › Settings holds each repo's sync interval.
+- **Jira** — drawn only while the three `BM_JIRA_*` credentials are set. Board shows the synced Jira boards, with assign and transition; Setup holds the boards,
+  the repositories each project maps to, and the skills a Run can start. A card's Run ▾ starts a session in the ticket's worktree, or copies its prompt.
+- **Runs** — History (live and finished orchestrator runs, their cost, time and rework, with pause, resume and stop), Watchdog (the sweeper that resumes a
+  crashed run) and Ticks (each project's tick record, its halt, and its Reset).
+- **Settings** — Local (this browser), Shared (this machine: time zone, tick caps, each source's token status) and Dashboards (the home dashboard's gates and the other
+  machines this board can launch on).
+
+Two chips sit above the well while a source is connected: the GitHub poller's POLL and API meters, and Jira's. A version chip at the foot of the rail opens a
+**What's new** drawer with every release ([releases](docs/subsystems/releases.md)).
+
+Tracker behaviour worth knowing: a claim is one issue comment per session, and the lowest live comment id wins; an issue filed by someone outside the repo
+cannot be executed until a groom of ours pins its body; and an `in-review` item becomes ready again by itself once the latest PR referencing it (`Closes`,
+`Fixes`, `Resolves` or `Refs #n`) merged into the default branch.
 
 **Docs.** [`docs/overview.md`](docs/overview.md) is the map and the one place that lists them all: the architecture in brief, the rationale behind the rules
 ([`docs/subsystems/invariants.md`](docs/subsystems/invariants.md)), and the two procedures — [running the app](docs/workflows/development.md) and
@@ -105,7 +133,7 @@ Everything lives in `.env`, and `.env.example` documents each key — except the
 | `BM_AGENTS_DOCKER_URL`        | `http://host.docker.internal:4173`                  | The same origin as seen from inside the server container. Set it when that default does not reach your host — under WSL2 it resolves and then refuses, and the bridge gateways refuse it too, so use one of the host's own interface IPs (prefer a tailnet address, which survives a reboot)                                                                                                                                                                                                                                                                                                       |
 | `BM_AGENTS_TOKEN`             | empty                                               | Sent as `Authorization: Bearer …` when the dashboard sets `ANSWER_TOKEN`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `BM_AGENTS_TOKEN_<NAME>`      | empty                                               | A remote dashboard's bearer token: `BM_AGENTS_TOKEN_` plus the name of its Settings › Dashboards entry, uppercased (`BM_AGENTS_TOKEN_PRO` for `Pro`). Read per call, and a missing one sends no `Authorization` header — the tailnet path needs none. Never typed into the board, which reports only whether it is set ([setup](docs/workflows/remote-machine.md)). Not in `.env.example` |
-| `BM_GITHUB_TOKEN`             | empty                                               | The credential the tracker poller reads for every project whose committed `backlog/source.json` names GitHub. Issue read access plus label write; absent is a supported state (the poller stays disarmed and the Sources card says `no token`). Process-only — it reaches no payload, no URL and no log line, and the browser never talks to GitHub                                                                                                                                                                                                                                                |
+| `BM_GITHUB_TOKEN`             | empty                                               | The credential the tracker poller and GitHub › PRs read for every project whose committed `backlog/source.json` names GitHub. A fine-grained token needs Issues read and write, Pull requests read and write, Contents write, Checks and Commit statuses read (a classic one, `repo`); `.env.example` says why each. A write the token may not make fails with GitHub's own message. Absent is a supported state (the poller stays disarmed and the Sources card says `no token`). Process-only — it reaches no payload, no URL and no log line, and the browser never talks to GitHub |
 | `BM_JIRA_SITE`                | empty                                               | The Jira Cloud site, as a hostname only (`acme.atlassian.net`) — no scheme, path, port or query; the server always speaks `https://` and builds every URL itself. One of three Jira credentials, all or none: any one missing or blank reads as not configured, and the Jira poller stays disarmed ([doc](docs/subsystems/jira.md))                                                                                                                                                                                                                                                                |
 | `BM_JIRA_EMAIL`               | empty                                               | The Atlassian account `BM_JIRA_TOKEN` belongs to — half of the Basic credential, so it stays in the server process exactly as the token does                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `BM_JIRA_TOKEN`               | empty                                               | An Atlassian API token: a scoped one needs `read:jira-work`, `write:jira-work` and `read:jira-user`, a classic one works as it is. Process-only — no route returns it or the email, and the browser never talks to Jira                                                                                                                                                                                                                                                                                                                                                                            |
@@ -135,6 +163,11 @@ Off until you set `BM_AGENTS=on` (plus `BM_AGENTS_URL`, or `BM_AGENTS_DOCKER_URL
 sets `ANSWER_TOKEN`). **Settings ▸ Dashboards** (Home's detail) reports exactly which gate is closed and what to do about it. The action is derived from the item file, not
 from the click, so an ungroomed bug cannot be executed by asking nicely — and nothing here ever writes an item: the spawned session runs the skills, which
 remain the only writers.
+
+On a Mac whose dashboard can open sessions in the Claude desktop app (its `/api/health` says `desktopAvailable`), the launch sheet for a single item's execute
+or groom also offers **Dashboard | Desktop**, preselected from the dashboard's own default. Desktop hands the session to the app on that Mac instead of the
+dashboard's headless `claude`; the app mints its own session id, so the board keeps no dispatch record for it, and the session is the app's to follow and stop.
+Home only — a launch on another machine never offers it.
 
 A second machine that runs its own dashboard and its own board can take that work too: add it on Settings ▸ Dashboards, and every launch sheet for a tracker
 project registered on both boards grows a `Run on` group with a card per machine. The server calls the remote dashboard — never the browser — under the same
@@ -281,20 +314,20 @@ and the orchestrator read exactly the same shapes either way. Connect one with `
 command in a connected project, and a refused connection is exit `5` saying so. Move an existing files project with `backlog.mjs import github`; it writes the
 marker first, one issue per item, and deletes the files only once every cross-link has been rewritten.
 
-Five seams, one doc each:
+Six docs, one per seam plus the rationale:
 
 - [**The API**](docs/subsystems/api.md) — Nest, every route under `/api`. Reads the registry, each project's store and the orchestrator's run state; the only
-  thing here that can spawn a session, and only when `BM_AGENTS` says so.
+  thing here that can spawn a session, and only when `BM_AGENTS` says so. Its tracker module also holds the GitHub › PRs cache (one GraphQL query per repo,
+  kept 60 s, fetched on demand) behind `GET /api/prs` and its three guarded writes.
 - [**The board**](docs/subsystems/board.md) — the React SPA: five lazy sections behind a side rail, with most of what you see derived in the browser from whole
   corpora.
 - [**The skills**](docs/subsystems/skills.md) — the eight published skills, their five CLIs, and the reviewer agent the orchestrator dispatches before a merge.
-- [**Jira**](docs/subsystems/jira.md) — the server half of the Jira Cloud integration: a client, a board poller and its caches, and read routes under
-  `/api/jira` (nine), plus eight guarded POSTs: six config writes to `jira.json` (`/boards`, `/boards/delete`, `/repos`, `/repo-defaults`, `/skills`,
-  `/skills/delete`) and, since phase 3, two writes to Jira itself (`/issue/assign` and `/issue/transition`) — the only writes this server makes to Jira; since
-  phase 5a, the Run half in `agents/` (`POST /api/agents/dispatch-jira` and `/jira-stop`) with an in-memory map of live Jira sessions; and, since phase 4, the
-  `jira` skill (`jira.mjs`) that reaches those routes from any session, and on a Run makes the ticket's git worktree in a mapped repo (`jira.mjs worktree`, git
-  only).
-- [**Invariant rationale**](docs/subsystems/invariants.md) — the rules all four are held to, and the failure each one encodes.
+- [**Jira**](docs/subsystems/jira.md) — the Jira Cloud integration: a client, a board poller and its caches, nine read routes under `/api/jira`, six guarded
+  config writes to `jira.json`, the two writes to Jira itself (`/issue/assign` and `/issue/transition`), the Run half in `agents/`
+  (`POST /api/agents/dispatch-jira` and `/jira-stop`) with an in-memory map of live Jira sessions, and the `jira` skill (`jira.mjs`) that reaches those routes
+  from any session and, on a Run, makes the ticket's git worktree in a mapped repo.
+- [**Releases**](docs/subsystems/releases.md) — the rail's version chip and its What's new drawer, read from this checkout's release tags.
+- [**Invariant rationale**](docs/subsystems/invariants.md) — the rules the other five are held to, and the failure each one encodes.
 
 [`docs/overview.md`](docs/overview.md) is the map, and the one place that lists every doc.
 
@@ -318,6 +351,16 @@ everything else runs in node.
 
 Ports, binds, what the container mounts and the failure modes each of those has are in [`docs/workflows/development.md`](docs/workflows/development.md).
 
+### Pull requests and releases
+
+`main` merges squash-only, so a PR's title becomes the commit, and `ci / pr-title` checks it: `feat|fix|perf` (`!` allowed) or
+`docs|chore|test|refactor|ci|build`, an optional lowercase `(scope)`, then `: ` and a description. A `feat`, `fix` or `perf` PR also needs a `## What's new`
+section in its body (or `None — <reason>`), which becomes its release note. CI ([`docs/workflows/ci.md`](docs/workflows/ci.md)) runs the full suite on every
+code PR and a scoped one on a docs-only or skills-only PR, so there is no need to run all of `pnpm test` locally before pushing.
+
+Releases are nightly rollups: `.github/workflows/release.yml` runs at 04:17 UTC and cuts one version for everything merged that day. A skill edit reaches
+other sessions only after it is pushed and `pnpm run plugin:sync` reinstalls the plugin ([publishing](docs/workflows/publishing.md)).
+
 ## Repo layout
 
 | Path       | Contents                                                                                                                                                                                                                                 |
@@ -325,11 +368,13 @@ Ports, binds, what the container mounts and the failure modes each of those has 
 | `skills/`  | The eight published skills — the plugin's skill root ([doc](docs/subsystems/skills.md))                                                                                                                                                  |
 | `agents/`  | The plugin's own agents; today just the orchestrator's reviewer ([doc](docs/subsystems/skills.md))                                                                                                                                       |
 | `server/`  | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader, the tracker poller, the tick breaker's routes, the release tags reader, the remote dashboards ([doc](docs/subsystems/api.md)), the Jira routes ([doc](docs/subsystems/jira.md))                               |
-| `client/`  | React SPA — side rail, board, run chip, runs, archive, Jira, settings ([doc](docs/subsystems/board.md))                                                                                                                                        |
+| `client/`  | React SPA — side rail, Files and GitHub boards and archives, GitHub › PRs, run chip, runs, Jira, settings, What's new ([doc](docs/subsystems/board.md))                                                                                       |
 | `shared/`  | Types, the derivations both sides must agree on (`agent.ts`), the Jira branch-name rule (`jira-branch.ts`), theme tokens                                                                                                                                                               |
 | `backlog/` | This repo's own backlog marker — its items are GitHub issues since the repo connected itself to a tracker                                                                                                                                |
 | `scripts/` | `sync-plugin.mjs` ([doc](docs/workflows/publishing.md)), `test-all.mjs` and `test-tmpdir.mjs`, the per-run temp root `test:skills` runs through ([doc](docs/workflows/development.md)), `tailnet.mjs`, the `tailscale serve` wrapper, and `ci-scope.mjs`, CI's one check command ([doc](docs/workflows/ci.md)) |
+| `test/`    | Jest suites, flat; many read the client or server tree and pin its shape ([doc](docs/workflows/development.md))                                                                                                                         |
 | `docs/`    | The reference docs — start at [`overview.md`](docs/overview.md); `superpowers/` is the design spec and implementation plans                                                                                                              |
+| `audits/`  | Dated whole-repo audit reports                                                                                                                                                                                                           |
 
 ## Screenshot
 
@@ -352,5 +397,5 @@ drop the image at `docs/board.png`._
     - .env.example
     - pnpm-workspace.yaml
   kind: readme
-  verified: 89449e00e7317c0a5e13792120b7cd2d22863a1b
+  verified: 405d80e42e22aef58f2a8d6445f9c2b27e0b6b6f
 -->
