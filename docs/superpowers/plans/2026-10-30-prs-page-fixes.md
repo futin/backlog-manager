@@ -85,7 +85,7 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
   - `as="a"` with `href` draws an `<a>` (role `link`) whose class list is exactly the three chip classes for `variant="outline"` and `size={28}`, with
     `href` equal to the one given, `target` `_blank`, `rel` `noreferrer`.
   - The anchor passes `title` and a `data-testid` through and carries no `type` and no `aria-pressed`, even with `pressed`.
-  - The existing eight cases stand.
+  - The existing seven cases stand.
 
 - [ ] **Step 2: Run the suite; the two new cases fail (an anchor is not drawn)**
 - [ ] **Step 3: Add the `a` branch in `Chip.tsx` and the two props; edit the `Chip` row in `board.md:98`**
@@ -97,10 +97,10 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
 
 **Files:**
 - Modify: `client/src/lib/prs.ts` (`updateBlock` 75–80, `autoMergeBlock` 86–90; add `PR_KEYS`, `PrKey`, `whyLine` beside them)
-- Modify: `client/src/components/github/PrActions.tsx` (the one `updateBlock(pr, repo)` call gains a third argument `false` for now — Task 5 replaces
-  this file's body)
-- Modify: `client/src/lib/pr-layouts.ts:237` (`PrKey` is deleted here and imported from `./prs`; `compactKeys`'s `updateBlock` call gains `false` — Task 3
-  deletes `compactKeys`)
+- Modify: `client/src/components/github/PrActions.tsx` (the one `updateBlock(pr, repo)` call gains a third argument `false` for now, and line 7's `type PrKey`
+  import moves to `../../lib/prs` — Task 5 replaces this file's body)
+- Modify: `client/src/lib/pr-layouts.ts:237` (`PrKey` is deleted here and imported from `./prs`; `compactKeys`'s `updateBlock` call gains `false`; `compactKeys`
+  stays, importing `PrKey` from `./prs`, until Task 5 rewrites its only caller, `PrActions.tsx:102`)
 - Test: `test/prs-lib.test.ts`
 
 **Interfaces:**
@@ -112,12 +112,13 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
     'behind'` else `already up to date`; else `null`.
   - `autoMergeBlock(pr, repo): string | null` — unarmed (`pr.autoMerge === null`): `sync off`, `draft`, `not mergeable` (conflicting), `checks failing`,
     `auto-merge not enabled on the repo`, first match; armed: `sync off` only, else `null`.
-  - `whyLine(pr: PullRequestRow, repo: PrRepoView, updating: boolean, outcomeKind: PrOutcome['kind'] | undefined): string[]` — the row's repo and
-    permission reasons, in key order, each once: when `repo.syncOff !== null` the whole answer is `['sync off']`; else merge's
-    `no merge method allowed` when `repo.methods.length === 0`, then auto-merge's `auto-merge not enabled on the repo` when unarmed and
-    `!repo.autoMergeAllowed`, then update's one reason: `updating…` when `updating` and `outcomeKind !== 'updating'`, else (when not updating) the
-    `fork does not allow edits` / `no permission to update` answer `updateBlock` gives, else nothing. `draft`, `not mergeable`, `checks failing`,
-    `already up to date` never appear: the row's facts say them.
+  - `whyLine(pr: PullRequestRow, repo: PrRepoView, updating: boolean, outcomeKind: PrOutcome['kind'] | undefined): string[]` — the three blocks'
+    answers, `mergeBlock(pr, repo)`, `autoMergeBlock(pr, repo)`, `updateBlock(pr, repo, updating)`, in that order, kept only when the answer is in
+    `REPO_REASONS` (an exported `ReadonlySet<string>`: `sync off`, `no merge method allowed`, `auto-merge not enabled on the repo`,
+    `fork does not allow edits`, `no permission to update`, `updating…`), each once (`sync off` from three blocks is one entry), and `updating…`
+    dropped when `outcomeKind === 'updating'`. The line reads the blocks, never the repo fields, so it says exactly what the keys' titles say (spec
+    83–84): a draft PR on a repo with no merge method has `draft` on `Merge` and nothing on the line. `draft`, `not mergeable`, `checks failing`,
+    `already up to date` are never in the set: the row's facts say them.
 
 - [ ] **Step 1: Write the failing cases in `test/prs-lib.test.ts`** (rewrite the two `updateBlock` cases at 98–111 to the three-argument signature; add)
 
@@ -130,8 +131,9 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
   - `whyLine`: sync-off repo with no methods and no auto-merge → `['sync off']` only; quiet clean PR on a repo with `autoMergeAllowed` false →
     `['auto-merge not enabled on the repo']`; `methods: []` and `autoMergeAllowed` false → both, merge's first; fork with `maintainerCanModify` false →
     `['fork does not allow edits']`; behind, `canUpdateBranch` false, own repo → `['no permission to update']`; failing checks on a clean repo → `[]`;
+    a draft PR on a repo with `methods: []` → `[]` (the key says `draft`), and the same PR not draft → `['no merge method allowed']`;
     behind updatable PR, updating, outcome kind `updating` → `[]`; same with outcome kind `ok` → `['updating…']`; same with outcome `undefined` →
-    `['updating…']`.
+    `['updating…']` (spec 218's `a PR with the mark → []` is the kind-`updating` case; the prose at spec 81–82 wins).
   - `PR_KEYS` is exactly `['merge', 'auto-merge', 'update', 'open']`.
 
 - [ ] **Step 2: Run `test/prs-lib.test.ts`; the new cases fail**
@@ -143,8 +145,9 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
 ### Task 3: Layout derivations — the primary key, the options, the counts, Cards' repo set
 
 **Files:**
-- Modify: `client/src/lib/pr-layouts.ts` (`drawableLayout` 179–181 and `layoutOptions` 184–191 go; `compactKeys` 253–262 goes; `columnCounts` 329–336
-  loses its callback; add `PR_LAYOUT_OPTIONS`, `primaryKey`, `cardRepos`, `emptyRepoNote`)
+- Modify: `client/src/lib/pr-layouts.ts` (`drawableLayout` 179–181 and `layoutOptions` 184–191 go; `compactKeys` 253–262 stays, untested, until
+  Task 5 — its only caller is `PrActions.tsx:102`, which Task 5 rewrites, so every suite keeps compiling under ts-jest; `columnCounts` 329–336 loses its
+  callback; add `PR_LAYOUT_OPTIONS`, `primaryKey`, `cardRepos`, `emptyRepoNote`)
 - Modify: `client/src/components/github/PullRequestsView.tsx:176,202` and `client/src/components/github/PrMatrix.tsx:40,151–154` only as far as the
   deleted names force it: the page's `layout` becomes `parseLayout(stored)` and the switcher's options `PR_LAYOUT_OPTIONS` (the `useNarrow` call at 175
   and its import go with them); Matrix's `counts` becomes `columnCounts(ranked)`. The page's behaviour cases are Task 10's.
@@ -164,7 +167,8 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
     at least one row or at least one departed outcome (`departedOutcomes(outcomes, [repo])`).
   - `emptyRepoNote(repos: readonly PrRepoView[], outcomes: Record<string, PrOutcome>): string | null` — counts the repos with `access === 'ok'`,
     `polledAt !== null`, no rows and no departed outcome (a sync-off empty repo counts; an unread one does not); `null` for 0, `1 repo with no open PRs`
-    for 1, `N repos with no open PRs` above.
+    for 1, `N repos with no open PRs` above — and `null` whenever `cardRepos(repos, outcomes)` is empty: no card is drawn, and the page says
+    `no open pull requests` instead (spec 246).
 
 - [ ] **Step 1: Write the failing cases in `test/pr-layouts-lib.test.ts`** (the `compactKeys` describe at 301–356 becomes `primaryKey`; the two layout cases
   at 239–251 go; the `columnCounts` describe at 402–412 loses its callback)
@@ -177,11 +181,12 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
   - `cardRepos`: `[a/x with one row, a/y empty ok, a/z empty with a departed outcome a/z#4]` → `[a/x, a/z]`.
   - `emptyRepoNote`: no empty repo → `null`; one empty ok repo → `1 repo with no open PRs`; two, one of them sync-off → `2 repos with no open PRs`; an
     empty repo whose `polledAt` is `null` is not counted; an empty repo with a departed outcome is not counted; an empty repo with `access`
-    `rate-limited` is not counted.
+    `rate-limited` is not counted; two empty ok repos and nothing else → `null`, not `2 repos with no open PRs` (no card is drawn).
 
 - [ ] **Step 2: Run `test/pr-layouts-lib.test.ts`; the new cases fail**
-- [ ] **Step 3: Implement the signatures above; delete the three functions; patch the page and Matrix call sites**
-- [ ] **Step 4: Run `test/pr-layouts-lib.test.ts`; green** (`prs-view`'s narrow-switcher case at 544 goes red here and is rewritten in Task 10)
+- [ ] **Step 3: Implement the signatures above; delete `drawableLayout` and `layoutOptions`; patch the page and Matrix call sites**
+- [ ] **Step 4: Run `test/pr-layouts-lib.test.ts`; green** (`prs-view`'s narrow-switcher case at 544 goes red here and is rewritten in Task 10; every other
+  suite still compiles, because `compactKeys` and `PrKey` are still exported)
 - [ ] **Step 5: Commit** — `git add client/src/lib/pr-layouts.ts client/src/components/github/PullRequestsView.tsx client/src/components/github/PrMatrix.tsx
   test/pr-layouts-lib.test.ts`, `git commit -m "feat(client): primaryKey, the three-option switcher and Cards' repo set"`
 
@@ -215,9 +220,10 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
 - Modify: `client/src/components/github/pr-layout-props.ts` (`PrLayoutProps` gains `confirming: string | null` and `setConfirming: (key: string | null)
   => void`)
 - Modify: `client/src/components/github/PrActions.tsx` (whole body: one variant; the `compact` branch 101–140 and the `full` branch 142–188 go)
+- Modify: `client/src/lib/pr-layouts.ts` (`compactKeys` goes with its last caller)
 - Create: `client/src/components/github/PrFoot.tsx`
 - Modify: `client/src/components/github/PullRequestsView.tsx` (a `confirming` state beside `outcomes`/`marks`/`inFlight` at 82–85, handed down with its
-  setter in the props object at 222–230; nothing more — Task 10 adds the closing rules)
+  setter in the props object at 177; nothing more — Task 10 adds the closing rules)
 - Modify, call sites only: `client/src/components/github/PrRow.tsx`, `PrInbox.tsx` (`LoudItem` 73–116, `QuietLine` 118–155), `PrMatrix.tsx`
   (`MatrixRow` 130–141) — each `<PrActions variant=… onOpen=…>` becomes the new props so typecheck stays green; their own rewrites are Tasks 7–9.
 - Test: `test/prs-actions.test.tsx` (rewrite: the `compact` and `full` describes go)
@@ -247,7 +253,8 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
 
 - [ ] **Step 1: Write the failing cases in `test/prs-actions.test.tsx`** — a harness component holding `confirming: string | null` in state and drawing
   `PrActions` with `onMerge={() => setConfirming(key)}` and `PrFoot` with `confirming={confirming === key}` and `onDismiss={() => setConfirming(null)}`; its
-  `onWrite` runs the call and then clears `confirming` when it matches (the page's rule, mirrored); the fetch stub records `posts: { url; body }[]`.
+  `onWrite` clears `confirming` when it matches and then runs the call (the page's order, mirrored: the Confirm is gone before the POST is answered);
+  the fetch stub records `posts: { url; body }[]`.
 
   - Four keys in `PR_KEYS` order by accessible name: `Merge`, `Auto-merge`, `Update`, `Open ↗`; `Open ↗` is a link to `pr.url` with `target` `_blank`.
   - On a behind updatable PR `Update` has `ui-chip-ink` and the other three `ui-chip-outline`; on a failing PR no key has `ui-chip-ink`.
@@ -274,7 +281,7 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
 - [ ] **Step 4: Run `test/prs-actions.test.tsx` and `pnpm run typecheck`; both green** (`prs-inbox` and `prs-matrix` go red on their compact-strip and
   full-strip cases until Tasks 7 and 8)
 - [ ] **Step 5: Commit** — `git add client/src/components/github/pr-layout-props.ts client/src/components/github/PrActions.tsx
-  client/src/components/github/PrFoot.tsx client/src/components/github/PullRequestsView.tsx client/src/components/github/PrRow.tsx
+  client/src/lib/pr-layouts.ts client/src/components/github/PrFoot.tsx client/src/components/github/PullRequestsView.tsx client/src/components/github/PrRow.tsx
   client/src/components/github/PrInbox.tsx client/src/components/github/PrMatrix.tsx test/prs-actions.test.tsx`,
   `git commit -m "feat(client): one key strip and one foot for every PR row"`
 
@@ -293,7 +300,8 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
   lines alone (Cards). Renders `null` when its part has nothing.
 
 - [ ] **Step 1: Implement the third part and the `Can't read` lines**
-- [ ] **Step 2: `pnpm run typecheck`; green**
+- [ ] **Step 2: `pnpm run typecheck`; green** (`test/prs-inbox.test.tsx` 279–291 goes red here — Inbox's own list at 212–223 and this line share
+  `pr-cantread-<repo>` — and is rewritten in Task 7, which deletes that list)
 - [ ] **Step 3: Commit** — `git add client/src/components/github/PrRepoNotes.tsx`, `git commit -m "feat(client): PrRepoNotes draws the Can't read lines"`
 
 ### Task 7: Inbox
@@ -316,7 +324,10 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
   `align-items: flex-end`), `.prs-keys` (8 px gap), `.prs-why` (12 px, `--ink2`), `.prs-foot` (8 px above); under `NARROW_QUERY` (the 700 px media
   block) the side wraps under the main at full width, keys left-aligned.
 
-- [ ] **Step 1: Write the failing cases in `test/prs-inbox.test.tsx`** (rewrite 165–179, 223–235, 254–277, 279–291; keep the rest)
+- [ ] **Step 1: Write the failing cases in `test/prs-inbox.test.tsx`** (rewrite 149–163, 165–179, 223–235, 236–252, 254–277,
+  279–291 — the cases that drove the `Actions` toggle or the folded strip; every other case stands after one mechanical pass: every `pr-item-<key>` and
+  `pr-quiet-<key>` lookup becomes `pr-row-<key>` (127–148, 180–197, 213–221), `Merge…` / `Update branch` / `Enable auto-merge` become `Merge` /
+  `Update` / `Auto-merge` (184), and a case that opens a Confirm runs under the harness)
 
   - A loud row and a quiet row each draw four keys; the quiet row has one link (`#n`) and no `aria-expanded` anywhere.
   - A row draws `.prs-why` only when a repo reason holds: a clean PR on a repo with `autoMergeAllowed` false draws it; the same PR on a repo with it true
@@ -378,7 +389,8 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
   - The table's parent is `.prs-matrix-scroll`; the dot and PR cells of a row carry `prs-matrix-sticky`; the expansion's cell content and the outcome
     row's cell content carry `prs-matrix-pinned`.
   - Opening a row, clicking `Merge`, then toggling the row closed: no `pr-merge-confirm`, and the harness's `confirming` is `null`.
-  - Every toggle, link and key case at 155–261 stands.
+  - Every toggle, link and key case at 155–261 stands after one mechanical pass: `Update branch` → `Update` (231); 206–213 clicks the `Merge` key first
+    and then the `combobox` inside `pr-merge-confirm`; 155–168 and 237–251, which open a Confirm, run under the harness.
 
 - [ ] **Step 2: Run `test/prs-matrix.test.tsx`; the new cases fail**
 - [ ] **Step 3: Implement; write the CSS**
@@ -403,7 +415,8 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
   `cardRepos` is empty and `transientFailures(repos)` is empty, `<p className="prs-status">no open pull requests</p>`. `RepoSheet` keeps `pr-repo-<repo>`
   and `pr-head-<repo>`, the repo name, `polled N ago`, `showing N of M`, the `sync off` pill and sentence; the red `detail` line (51) and the
   `no open pull requests` reading go. Each row is `<li className="prs-row" data-testid="pr-row-<key>">` with `.prs-row-main` (title with `#n` linked,
-  meta `author · head → base · age`, the chips from `prChips(pr)` with the run warning as a `Pill tone="warn"` among them, then `PrFoot`) and
+  meta `author · head → base · age` (the age is deliberate: Cards has no Updated column), the chips from `prChips(pr)` with the run warning as a
+  `Pill tone="warn"` among them, then `PrFoot`) and
   `<PrActions>` as the side. Departed outcomes stay the card's last lines (72–76).
 
 - [ ] **Step 1: Write the failing Cards cases in `test/prs-view.test.tsx`** (rewrite 242 and 255 in place and add three beside them; the describe's other
@@ -416,8 +429,10 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
   - The same repo `rate-limited` with `prs: []` → no `pr-repo-futin/y`, `pr-cantread-futin/y` drawn, `pr-repo-futin/x` drawn.
   - A repo whose only PR departed: merge `futin/y#12` through the Confirm's accept, as 314 does, with the re-read listing `futin/y` with `prs: []` →
     `pr-repo-futin/y` stays, reads `#12 merged`, and reads neither `showing` nor `no open pull requests`.
+  - Spec 249: `futin/x` truncated (`total: 5`, two rows) beside the departed `futin/y#12` of the case above → `pr-repo-futin/x` reads `showing 2 of 5`,
+    no `pr-truncated-*` anywhere, and no `pr-departed-*` outside `pr-repo-futin/y` (`PrRepoNotes` `failures` draws neither).
 
-- [ ] **Step 2: Run the describe; the five cases fail**
+- [ ] **Step 2: Run the describe; the six cases fail**
 - [ ] **Step 3: Implement; delete `PrRow.tsx`**
 - [ ] **Step 4: Run the describe, `pnpm run typecheck` and `test/design-guards.test.ts`; green**
 - [ ] **Step 5: Commit** — `git add client/src/components/github/PrCards.tsx client/src/styles.css test/prs-view.test.tsx`,
@@ -455,8 +470,9 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
     hidden-repos note when one is drawn and before `prs-toolbar-age`; two such repos → `2 repos with no open PRs`; the note is absent in Inbox and Matrix
     for the same payload; every shown repo clean and listing nothing → no count note; a repo not yet read (`polledAt` null, no rows) is not counted.
   - Stored `matrix` on a narrow window draws `pr-matrix` and the switcher offers three options.
-  - Merge: `Merge` opens `pr-merge-confirm` with a `Select` inside it; dismiss sends nothing; accept sends one POST with the picked method; the 409 and
-    502 cases stand.
+  - Merge: `Merge` opens `pr-merge-confirm` with a `Select` inside it; dismiss sends nothing; accept sends one POST with the picked method, and
+    `pr-merge-confirm` is gone before that POST is answered; the 409 and 502 cases stand, and the 409 one also asserts no `pr-merge-confirm` once the
+    outcome line reads.
   - Blocked actions: a PR-fact reason (failing checks) is on `Merge`'s `title` and `aria-describedby` and not on `.prs-why`; a repo reason
     (`autoMergeAllowed` false) is on `.prs-why`; sync-off disables all three buttons with `sync off`.
   - Armed PR reads `Auto-merge ✓` and a click sends `enable: false`.
@@ -464,8 +480,9 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
   - The timer's own re-read answers a new head → `branch updated`, and the mark is dropped after that re-read (the `Update` key is enabled again).
   - Review Focus 2: the timer's re-read rejects → the mark drops and `updating…` clears.
   - Same-head after 30 s clears `updating…` with one extra read (today's case, with `refresh` judged by its payload).
-  - Review Focus 1: unmount before 30 s, then advance the timers: no state update warning (`console.error` spy stays unused) and no fetch beyond the ones
-    already counted.
+  - Review Focus 1: the 30 s timer fires with the page mounted and the stub holds its re-read pending; unmount while it is pending; then answer that GET
+    with a new head: the promise settles without rejection, `console.error` stays unused, and no GET or POST is sent after the unmount (the reads count
+    is the one the timer made). Unmounting before the timer proves nothing: the cleanup at 116–122 clears the timers and React 18 warns on nothing.
   - Layout switch keeps marks and in-flight keys (today's two cases) and closes an open Confirm.
   - A re-read that turns the confirming PR's `checks` to `failure` closes the Confirm; nothing is sent.
   - `Merge` on a second PR closes the first's Confirm; one `pr-merge-confirm` on the page.
@@ -486,7 +503,8 @@ Five inputs the spec implies and no spec test case exercises; each gets its test
   what Tasks 5–10 built; "The warning chip" (556) only where the pill moved to the meta line.
 - Modify: `docs/subsystems/board.md` 481–507 (the PRs paragraph, rewritten whole), 673–677 (the `lib/` paragraph: `compactKeys` → `primaryKey`,
   `whyLine`, `cardRepos`, `emptyRepoNote`, `PR_LAYOUT_OPTIONS`).
-- Modify: `.claude/rules/board.md:19` — the Escape bullet names GitHub › PRs' `Merge` Confirm as opened by `PrActions` and drawn by `PrFoot`, no longer
+- Modify: `.claude/rules/board.md:19` (the `PrRow` mention; the bullet starts at 11) — the Escape bullet names GitHub › PRs' `Merge` Confirm as opened by
+  `PrActions` and drawn by `PrFoot`, no longer
   `PrRow`; the headline byte-equal with CLAUDE.md's stays.
 - Modify: `docs/superpowers/specs/2026-10-29-prs-layouts-design.md:3` — one line after the status: superseded in the named sections by
   `2026-10-30-prs-page-fixes-design.md`.
