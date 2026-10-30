@@ -154,7 +154,18 @@ function isUnvetted(section: Section, issue: GithubIssue, claims: readonly Parse
   return pinned === null || pinned.record.pin !== bodyHash(issue.body);
 }
 
-export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProject, claims: readonly ParsedClaim[]): MappedIssue | null {
+/**
+ * `reviewLifted` is the poller's answer for this issue (#411, `TrackerPollerService.reviewLifted`): the work the `in-review` label guards has merged into
+ * the default branch and no referencing PR is open. It overrides the label rather than removing it — this function writes nothing — and defaults to `false`
+ * so a caller with no poller reads the label as it stands.
+ */
+export function mapIssue(
+  issue: GithubIssue,
+  repo: string,
+  project: RegistryProject,
+  claims: readonly ParsedClaim[],
+  reviewLifted = false
+): MappedIssue | null {
   if (issue.pull_request !== undefined && issue.pull_request !== null) return null;
 
   const errors: string[] = [];
@@ -175,7 +186,9 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
   const kind = kindLabel === undefined ? '' : kindLabel.slice('kind:'.length);
   const runnerFix = names.includes('runner-fix');
   const queued = names.includes(QUEUED_LABEL);
-  const inReview = names.includes(IN_REVIEW_LABEL);
+  // The label, unless the poller has seen its review end (#411): a `Refs #<n>` PR merged into the default branch closes nothing, so the label outlived it
+  // and every gate read "a PR is open for this item" with none open. Still CONSUMED below either way — a lifted label is not a tag.
+  const inReview = names.includes(IN_REVIEW_LABEL) && !reviewLifted;
   const planReview = names.includes(PLAN_REVIEW_LABEL);
 
   // Every label that is not a type, a kind, the runner-fix marker, the

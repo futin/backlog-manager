@@ -1793,7 +1793,15 @@ answer:
   mapped to `inReview: true`. Execute in `pr` mode releases its claim once the branch is pushed, and the issue stays open until the PR merges, so without
   this rung the item reads ready and a click starts a second execution of work already waiting on a reviewer. Unlike `progressBlock` it lives in `shared/` and
   the server reads it too — `plan` and `dispatch()` refuse with the same sentence, `a PR is open for this item` — because the label is on the tracker, where
-  any machine's spawn can see it. A files item never carries the flag; its PR guard is a named known limitation.
+  any machine's spawn can see it. A files item never carries the flag; its PR guard is a named known limitation. **The guard ends when the work lands, label or
+  no label** (#411): a partial fix ships as `Refs #<n>`, which closes nothing, so after #362 merged #266 kept its label and read "a PR is open" with none
+  open, until a person noticed. The mapper now drops `inReview` while `TrackerPollerService.reviewLifted` holds — a PR whose body references the issue after a
+  keyword (`pullRefs`: GitHub's closing words plus `ref`/`refs`; a bare `#n` mention never counts) merged into the repo's default branch, no referencing PR
+  is open, and that merge is the most recently closed referencing PR (`decidingPull`). The latest, never any: groom's `pr`-mode plan PR says `Refs #<n>` and
+  merges into main before execute runs, so "any merged PR" would lift the guard over an execute PR later closed unmerged and run the item twice. Derived, never written: the server's tracker writes are the eleven guarded routes and a merge the poller sees is not one, so the label stays on the
+  issue and `review <n> off` stays the person's tidy-up. The issues read already carries every PR with `merged_at`; only the BASE needs `GET /pulls/<n>`, made
+  once per merged PR that could lift a still-labelled issue and cached for the process, a failure leaving the guard on. A latest merge into a feature branch, a
+  latest PR closed unmerged and a base not yet learned all keep it — the first two because the work has not reached the default branch.
 - **An outsider filed this item and no groom has pinned its body** — `unvettedBlock` (`shared/agent.ts`, #341): a tracker bug or task whose author is not
   OWNER, MEMBER or COLLABORATOR, mapped to `unvetted: true` until a live claim of ours carries `pin` equal to the body's hash. It reads `UNVETTED_REASON`, and
   the server's `plan` and `dispatch()` refuse with the same sentence, for the same reason the open PR does: the mark is derived from the tracker, which any
@@ -4012,7 +4020,8 @@ proceeds unless the probe refuses.
 gate, the per-URN chain, a literal boolean or a 400, and a removal's 404 answered as success. The label exists because `pr` mode leaves a tracker issue OPEN
 and UNCLAIMED once its branch is pushed: the claim is released after the push, and the issue closes only when the PR merges and `Closes #<n>` shuts it. In that
 window every gate would read the item as ready and start a second execution of work already waiting on a reviewer. Execute runs `backlog.mjs review <id> on`
-right after a successful push, PR or not; a person runs `review <id> off` when the PR closes unmerged. Every per-item gate reads the mapped `inReview` flag
+right after a successful push, PR or not; a person runs `review <id> off` when the PR closes unmerged, and a `Refs #<n>` PR merged into the default branch
+lifts the flag by derivation without touching the label (#411, the "A PR for this item is open" rung). Every per-item gate reads the mapped `inReview` flag
 through one sentence, `a PR is open for this item` (`IN_REVIEW_REASON`, `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and execute's skill
 text): the board's Run button, the server's `plan`/`dispatch` ladder (an uncoded 409) and the orchestrator gate, which turns the item `ungroomed` with that
 reason so no new verdict reaches the run's stages. A files project has no label to carry, so `review` is tracker-only and a files item's PR guard is a named

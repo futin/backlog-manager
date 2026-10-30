@@ -516,7 +516,8 @@ export const IN_REVIEW_REASON = 'a PR is open for this item';
 
 /**
  * Why this item cannot be dispatched because a PR for it is open, or null. A tracker issue carries `inReview` while its `in-review` label is on: execute in
- * `pr` mode adds the label after a successful push, and the issue then sits open and UNCLAIMED until the PR merges and `Closes #<n>` shuts it. Without this
+ * `pr` mode adds the label after a successful push, and the issue then sits open and UNCLAIMED until the PR merges and `Closes #<n>` shuts it. A `Refs #<n>`
+ * merge closes nothing, so the mapper drops the flag itself once such a PR has landed on the default branch (#411) — this rung never sees a stale label. Without this
  * rung that open, unclaimed issue reads ready to every gate, and a click would start a second execution of work already waiting on a reviewer.
  *
  * Per-item, beside `runClaimBlock` and read by both ladders — the client's `DispatchButton` (after the in-progress block, before the run claim: the label is

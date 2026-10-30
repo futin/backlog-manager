@@ -41,8 +41,8 @@ the diff (at most two fix rounds), pushes that branch and opens a pull request i
 force-pushes, and under an `[orchestrator-run` marker ignores the mode entirely — inside a run the orchestrator still owns git. `base` is the trigger's
 `--base`, else the remote's default branch (`origin/HEAD`), else `main`. An unknown or doubled `--finish` stops execute rather than falling back to either mode.
 In a tracker project nothing is archived: the claim is held through the review, and after the push
-`backlog.mjs review <id> on` puts the `in-review` label on, so every gate reads the open issue as `a PR is open for this item` until the PR merges and closes
-it. The board's execute launch sheet is where the flag normally comes from: its Finish picker (seeded from the `executeDefaultFinish` setting) and Base select
+`backlog.mjs review <id> on` puts the `in-review` label on, so every gate reads the open issue as `a PR is open for this item` until the PR merges — a
+`Closes #<n>` merge shuts the issue, and a `Refs #<n>` one into the default branch lifts the guard by derivation (#411) while the issue stays open. The board's execute launch sheet is where the flag normally comes from: its Finish picker (seeded from the `executeDefaultFinish` setting) and Base select
 make the server append the clause, and a typed trigger carries the same flag by hand.
 `--auto-merge` and `--fix` ride beside `--finish pr` (never beside `in-place`, and `--fix` only with `--auto-merge`): after the PR is open, execute arms GitHub
 auto-merge on it (`gh pr merge <pr> --auto --<method>`, squash over merge over rebase, only when the repo's `allow_auto_merge` is on), waits up to 45

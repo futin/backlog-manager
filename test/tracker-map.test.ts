@@ -178,6 +178,20 @@ describe('issue → BacklogItem', () => {
     expect('inReview' in (plain?.item ?? {})).toBe(false);
   });
 
+  /* #411: the poller's `reviewLifted` — a referencing PR merged into the default branch and none open — overrides a label nobody took off. Lifted means the
+     key is ABSENT, never `false`, so every `'inReview' in item` reader agrees; and the label is still consumed, never resurfacing as a tag. */
+  it('drops inReview when the review is lifted, and lifting without the label adds nothing', () => {
+    const labelled = { labels: [{ name: 'type:task' }, { name: 'in-review' }] };
+    expect(mapIssue(issue(labelled), REPO, project, [], false)?.item.inReview).toBe(true);
+
+    const lifted = mapIssue(issue(labelled), REPO, project, [], true);
+    expect('inReview' in (lifted?.item ?? {})).toBe(false);
+    expect(lifted?.item.tags).toEqual([]);
+
+    const plain = mapIssue(issue({ labels: [{ name: 'type:task' }] }), REPO, project, [], true);
+    expect('inReview' in (plain?.item ?? {})).toBe(false);
+  });
+
   /* plan-review (backlog-tick): the same `true | absent` shape as `inReview`, consumed for the same reason. The first case carries BOTH labels so a swapped
      mapping fails; unlike `inReview` it has a second writer (the files scan), which is why the flag's doc comment says so. */
   it('reads plan-review as planReview: true beside inReview: true, so a swapped mapping fails', () => {
