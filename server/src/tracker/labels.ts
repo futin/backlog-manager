@@ -23,8 +23,8 @@
  * that gates DO read: a PR is open for the item, so the dispatch ladders, the
  * orchestrator's queue and execute's refusal all skip it — an open, unclaimed
  * issue would otherwise look ready to every machine while its work waits in review.
- * It stops being READ once a referencing PR has merged into the default branch
- * and none is open (#411): a `Refs #<n>` merge closes nothing and takes no label
+ * It stops being READ once the latest closed referencing PR merged into the
+ * default branch and none is open (#411): a `Refs #<n>` merge closes nothing and takes no label
  * off, so the mapper derives the lift instead of anything writing it.
  *
  * Created by the POLLER, the first time a repo syncs successfully and any is

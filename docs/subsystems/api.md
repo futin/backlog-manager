@@ -89,8 +89,9 @@ only lock.
 `backlog-execute` in `pr` mode right after it pushes an item's branch (the claim is released then, and the issue stays open until the PR merges) and by a person
 when a PR closes unmerged. `plan`/`dispatch` refuse a mapped `inReview` item with `a PR is open for this item` (`inReviewBlock`, `shared/agent.ts`), and the
 orchestrator gate turns it `ungroomed` with the same sentence. The label is LIFTED by derivation, never by a write (#411): the mapper drops `inReview` while
-`TrackerPollerService.reviewLifted` says a PR referencing the issue (`Closes`/`Fixes`/`Resolves`/`Refs #<n>`) merged into the default branch and none is still
-open — the case a `Refs #<n>` PR leaves behind, since it closes nothing.
+`TrackerPollerService.reviewLifted` says no PR referencing the issue (`Closes`/`Fixes`/`Resolves`/`Refs #<n>`) is still open and the most recently closed one
+merged into the default branch — the case a `Refs #<n>` PR leaves behind, since it closes nothing. The latest decides, never any: groom's plan PR is an older
+`Refs #<n>` merge into main.
 
 `plan-review` is the label a tick's unattended groom leaves on the plan it writes, and it is read as exclusion exactly as `in-review` is: `planReviewBlock`
 (`shared/agent.ts`) makes `plan`/`dispatch` refuse a mapped `planReview` item with `this plan awaits review`, always AFTER `inReviewBlock`, and the orchestrator

@@ -157,8 +157,28 @@ interface PullEntry {
   open: boolean;
   /** `pull_request.merged_at` — `null` for an open PR and for one closed without merging. */
   mergedAt: string | null;
+  /** The row's `closed_at` (falling back to `mergedAt`) — `null` while open. Orders the referencing PRs so the LATEST one closed decides (`decidingPull`). */
+  closedAt: string | null;
   /** `pullRefs(body)`: the issues this PR says it is for. */
   refs: readonly number[];
+}
+
+/**
+ * The referencing PR whose outcome decides an issue's review lift (#411): `'open'` when any PR referencing it is still open, `null` when none references it,
+ * otherwise the most recently closed one (ties to the higher PR number). The LATEST, never any: groom's `pr`-mode plan PR says `Refs #<n>` and merges into
+ * the default branch before execute ever runs, so "any merged PR" would read an execute PR later closed unmerged — or merged into a feature base — as
+ * lifted, and the item would be executed a second time.
+ */
+function decidingPull(pulls: ReadonlyMap<number, PullEntry>, issue: number): 'open' | [number, PullEntry] | null {
+  let latest: [number, PullEntry] | null = null;
+  for (const [pr, pull] of pulls) {
+    if (!pull.refs.includes(issue)) continue;
+    if (pull.open) return 'open';
+    const at = pull.closedAt ?? '';
+    const best = latest?.[1].closedAt ?? '';
+    if (latest === null || at > best || (at === best && pr > latest[0])) latest = [pr, pull];
+  }
+  return latest;
 }
 
 /** sha256 of an issue body, `null` read as the empty body — the same reading `patchBody` compares against. Exported so the writer and the reader
@@ -503,9 +523,10 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   }
 
   /**
-   * Has the review the `in-review` label guards already ended (#411)? True only when at least one PR referencing the issue (`pullRefs`) merged into the
-   * repo's DEFAULT branch and no referencing PR is still open. Everything else is `false`: no referencing PR, only PRs closed unmerged (the person's
-   * `review <n> off` stays the exit there, as decision 9 says), a merge into a feature branch, and a base not learned yet.
+   * Has the review the `in-review` label guards already ended (#411)? True only when no PR referencing the issue (`pullRefs`) is still open and the most
+   * recently closed one (`decidingPull`) merged into the repo's DEFAULT branch. Everything else is `false`: no referencing PR, a latest PR closed unmerged
+   * (the person's `review <n> off` stays the exit there, as decision 9 says) — even with an older merged one, such as groom's plan PR, behind it — a latest
+   * merge into a feature branch, and a base not learned yet.
    *
    * Read by `mapIssue` through `GithubSource`, which is the whole point: the label is lifted by DERIVATION, never by a write — the server writes tracker items
    * only through the eleven guarded routes, and a merge seen by the poller is not one of them. Every gate that reads `inReview` inherits the answer.
@@ -513,13 +534,10 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   reviewLifted(repo: string, number: number): boolean {
     const state = this.repos.get(repo);
     if (state === undefined) return false;
-    let landed = false;
-    for (const [pr, pull] of state.pulls) {
-      if (!pull.refs.includes(number)) continue;
-      if (pull.open) return false;
-      if (pull.mergedAt !== null && state.pullBases.get(pr) === true) landed = true;
-    }
-    return landed;
+    const deciding = decidingPull(state.pulls, number);
+    if (deciding === null || deciding === 'open') return false;
+    const [pr, pull] = deciding;
+    return pull.mergedAt !== null && state.pullBases.get(pr) === true;
   }
 
   /** One cached issue, or `undefined` — the body route's whole lookup. */
@@ -1009,9 +1027,10 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   }
 
   /**
-   * Learn the base of every merged PR that could lift an `in-review` label (#411): for each cached issue carrying the label with NO open referencing PR, ask
-   * `GET /pulls/<n>` of each merged referencing PR whose base this process does not know yet. An issue without the label costs nothing, an issue with an open
-   * referencing PR costs nothing (it cannot be lifted whatever the bases say), and a PR is asked about once — so a quiet repo spends zero requests here.
+   * Learn the base of the one PR that could lift an `in-review` label (#411): for each cached issue carrying the label, ask `GET /pulls/<n>` of its
+   * `decidingPull` when that PR merged and this process does not know its base yet. An issue without the label costs nothing, an issue with an open
+   * referencing PR or a latest PR closed unmerged costs nothing (it cannot be lifted whatever the bases say), and a PR is asked about once — so a quiet repo
+   * spends zero requests here.
    *
    * A failed answer goes through `handleFailure` and returns `false`, asking about no further PR this tick: the base stays unknown, the label stays read, and
    * the next sync asks again. A `404` is NOT a failure: the PR is gone (or the token lost sight of it) while the repo-wide read that just succeeded proves the
@@ -1021,19 +1040,18 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   private async learnReviewBases(repo: string, token: string, state: RepoState): Promise<boolean> {
     for (const issue of [...state.issues.values()].sort((a, b) => a.number - b.number)) {
       if (!hasLabel(issue, IN_REVIEW_LABEL)) continue;
-      const refs = [...state.pulls.entries()].filter(([, pull]) => pull.refs.includes(issue.number));
-      if (refs.some(([, pull]) => pull.open)) continue;
-      for (const [number, pull] of refs) {
-        if (pull.mergedAt === null || state.pullBases.has(number)) continue;
-        const res = await this.client.pull(repo, number, { token });
-        if (res.status === 404) continue;
-        if (this.handleFailure(state, res)) return false;
-        const base = res.data?.base;
-        const ref = base?.ref;
-        const fallback = base?.repo?.default_branch;
-        if (res.status !== 200 || typeof ref !== 'string' || typeof fallback !== 'string') continue;
-        state.pullBases.set(number, ref === fallback);
-      }
+      const deciding = decidingPull(state.pulls, issue.number);
+      if (deciding === null || deciding === 'open') continue;
+      const [number, pull] = deciding;
+      if (pull.mergedAt === null || state.pullBases.has(number)) continue;
+      const res = await this.client.pull(repo, number, { token });
+      if (res.status === 404) continue;
+      if (this.handleFailure(state, res)) return false;
+      const base = res.data?.base;
+      const ref = base?.ref;
+      const fallback = base?.repo?.default_branch;
+      if (res.status !== 200 || typeof ref !== 'string' || typeof fallback !== 'string') continue;
+      state.pullBases.set(number, ref === fallback);
     }
     return true;
   }
@@ -1050,10 +1068,12 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       // the mapper: here so the cache does not grow a copy of every PR in the
       // repo, there so no other reader of the cache has to remember.
       if (issue.pull_request !== undefined && issue.pull_request !== null) {
-        // Not an item — but the review lift's evidence (#411), so three facts are kept in the PR index before the row is dropped.
+        // Not an item — but the review lift's evidence (#411), so four facts are kept in the PR index before the row is dropped.
         if (typeof issue.number === 'number') {
+          const open = issue.state === 'open';
           const mergedAt = typeof issue.pull_request.merged_at === 'string' ? issue.pull_request.merged_at : null;
-          state.pulls.set(issue.number, { open: issue.state === 'open', mergedAt, refs: pullRefs(issue.body) });
+          const closedAt = open ? null : typeof issue.closed_at === 'string' ? issue.closed_at : mergedAt;
+          state.pulls.set(issue.number, { open, mergedAt, closedAt, refs: pullRefs(issue.body) });
         }
         continue;
       }

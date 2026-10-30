@@ -1796,11 +1796,12 @@ answer:
   any machine's spawn can see it. A files item never carries the flag; its PR guard is a named known limitation. **The guard ends when the work lands, label or
   no label** (#411): a partial fix ships as `Refs #<n>`, which closes nothing, so after #362 merged #266 kept its label and read "a PR is open" with none
   open, until a person noticed. The mapper now drops `inReview` while `TrackerPollerService.reviewLifted` holds — a PR whose body references the issue after a
-  keyword (`pullRefs`: GitHub's closing words plus `ref`/`refs`; a bare `#n` mention never counts) merged into the repo's default branch, and no referencing PR
-  is open. Derived, never written: the server's tracker writes are the eleven guarded routes and a merge the poller sees is not one, so the label stays on the
+  keyword (`pullRefs`: GitHub's closing words plus `ref`/`refs`; a bare `#n` mention never counts) merged into the repo's default branch, no referencing PR
+  is open, and that merge is the most recently closed referencing PR (`decidingPull`). The latest, never any: groom's `pr`-mode plan PR says `Refs #<n>` and
+  merges into main before execute runs, so "any merged PR" would lift the guard over an execute PR later closed unmerged and run the item twice. Derived, never written: the server's tracker writes are the eleven guarded routes and a merge the poller sees is not one, so the label stays on the
   issue and `review <n> off` stays the person's tidy-up. The issues read already carries every PR with `merged_at`; only the BASE needs `GET /pulls/<n>`, made
-  once per merged PR that could lift a still-labelled issue and cached for the process, a failure leaving the guard on. A merge into a feature branch, a PR
-  closed unmerged and a base not yet learned all keep it — the first two because the work has not reached the default branch.
+  once per merged PR that could lift a still-labelled issue and cached for the process, a failure leaving the guard on. A latest merge into a feature branch, a
+  latest PR closed unmerged and a base not yet learned all keep it — the first two because the work has not reached the default branch.
 - **An outsider filed this item and no groom has pinned its body** — `unvettedBlock` (`shared/agent.ts`, #341): a tracker bug or task whose author is not
   OWNER, MEMBER or COLLABORATOR, mapped to `unvetted: true` until a live claim of ours carries `pin` equal to the body's hash. It reads `UNVETTED_REASON`, and
   the server's `plan` and `dispatch()` refuse with the same sentence, for the same reason the open PR does: the mark is derived from the tracker, which any

@@ -88,9 +88,16 @@ const issue = (number: number, over: Record<string, unknown> = {}): Record<strin
   ...over
 });
 
-/** A PR as the ISSUES endpoint returns it: an issue-shaped row whose `pull_request` carries `merged_at`, and no base. */
-const pr = (number: number, body: string, merged: string | null, state = merged === null ? 'open' : 'closed'): Record<string, unknown> => ({
-  ...issue(number, { body, state, labels: [], updated_at: '2026-10-25T00:00:00Z' }),
+/** A PR as the ISSUES endpoint returns it: an issue-shaped row whose `pull_request` carries `merged_at`, and no base. `closed_at` defaults to the merge
+ *  time — a closed-unmerged row passes its own when a case needs the order. */
+const pr = (
+  number: number,
+  body: string,
+  merged: string | null,
+  state = merged === null ? 'open' : 'closed',
+  closedAt: string | null = state === 'closed' ? merged : null
+): Record<string, unknown> => ({
+  ...issue(number, { body, state, labels: [], updated_at: '2026-10-25T00:00:00Z', closed_at: closedAt }),
   pull_request: { url: `https://api.github.com/repos/futin/x/pulls/${number}`, merged_at: merged }
 });
 
@@ -219,6 +226,40 @@ describe('reviewLifted', () => {
     await p.tick();
     expect(p.reviewLifted('futin/x', 266)).toBe(false);
     expect(pullCalls(calls)).toHaveLength(0);
+    p.disarm();
+  });
+
+  // groom's `pr`-mode plan PR says `Refs #<n>` and merges into main BEFORE execute runs: the latest closed PR decides, never any merged one.
+  it('is false when the latest referencing PR closed unmerged, even with an older one merged into main', async () => {
+    const { poller: p, calls } = poller([
+      ['/pulls/350', pull(350, 'main')],
+      ['/issues?', { status: 200, body: [issue(266), pr(350, 'Refs #266', '2026-10-20T09:00:00Z'), pr(362, 'Refs #266', null, 'closed', MERGED)] }]
+    ]);
+    await p.tick();
+    expect(p.reviewLifted('futin/x', 266)).toBe(false);
+    expect(pullCalls(calls)).toHaveLength(0);
+    p.disarm();
+  });
+
+  it('is false when the latest referencing PR merged into a feature base, even with an older one merged into main', async () => {
+    const { poller: p, calls } = poller([
+      ['/pulls/350', pull(350, 'main')],
+      ['/pulls/362', pull(362, 'feature/x')],
+      ['/issues?', { status: 200, body: [issue(266), pr(350, 'Refs #266', '2026-10-20T09:00:00Z'), pr(362, 'Refs #266', MERGED)] }]
+    ]);
+    await p.tick();
+    expect(p.reviewLifted('futin/x', 266)).toBe(false);
+    expect(pullCalls(calls)).toHaveLength(1);
+    p.disarm();
+  });
+
+  it('is true when the latest referencing PR merged into main after an earlier one closed unmerged', async () => {
+    const { poller: p } = poller([
+      ['/pulls/362', pull(362, 'main')],
+      ['/issues?', { status: 200, body: [issue(266), pr(355, 'Refs #266', null, 'closed', '2026-10-20T09:00:00Z'), pr(362, 'Refs #266', MERGED)] }]
+    ]);
+    await p.tick();
+    expect(p.reviewLifted('futin/x', 266)).toBe(true);
     p.disarm();
   });
 
