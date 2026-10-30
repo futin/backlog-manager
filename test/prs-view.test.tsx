@@ -68,7 +68,16 @@ function pr(over: Partial<PullRequestRow> & Pick<PullRequestRow, 'number'>): Pul
   };
 }
 
-const PR7 = pr({ number: 7, title: 'Draft the importer', author: 'ana', head: 'feature/importer', headSha: SHA7, base: 'main', draft: true, updatedAt: ago(20 * 60_000) });
+const PR7 = pr({
+  number: 7,
+  title: 'Draft the importer',
+  author: 'ana',
+  head: 'feature/importer',
+  headSha: SHA7,
+  base: 'main',
+  draft: true,
+  updatedAt: ago(20 * 60_000)
+});
 const PR9 = pr({
   number: 9,
   title: 'Fix the fork',
@@ -194,7 +203,8 @@ async function mount(props: { onOpenSettings?: () => void } = {}) {
 
 const row = (key: string): HTMLElement => screen.getByTestId(`pr-row-${key}`);
 const action = (key: string, name: string | RegExp): HTMLElement => within(row(key)).getByRole('button', { name });
-const keysIn = (root: ParentNode = document): string[] => [...root.querySelectorAll('[data-testid^="pr-row-"]')].map((el) => el.getAttribute('data-testid') ?? '');
+const keysIn = (root: ParentNode = document): string[] =>
+  [...root.querySelectorAll('[data-testid^="pr-row-"]')].map((el) => el.getAttribute('data-testid') ?? '');
 
 describe('PullRequestsView — grouping and the rows', () => {
   beforeEach(() => storeLayout('cards'));
@@ -239,10 +249,19 @@ describe('PullRequestsView — grouping and the rows', () => {
     expect(screen.getByTestId('pr-repo-futin/y')).not.toHaveTextContent('showing');
   });
 
-  it('says so for a repo with no open pull requests', async () => {
+  it('draws no card for an ok repo that lists nothing', async () => {
     payload.repos.push(repo({ repo: 'futin/z', prs: [], total: 0 }));
     await mount();
-    expect(screen.getByTestId('pr-repo-futin/z')).toHaveTextContent('no open pull requests');
+    expect(screen.queryByTestId('pr-repo-futin/z')).toBeNull();
+    expect(screen.getByTestId('pr-repo-futin/x')).toBeInTheDocument();
+    expect(screen.getByTestId('pr-repo-futin/y')).toBeInTheDocument();
+  });
+
+  it('says no open pull requests once, and draws no card, when every repo lists nothing', async () => {
+    payload = { ...basePayload(), repos: [repo({ repo: 'futin/x', prs: [], total: 0 }), repo({ repo: 'futin/y', prs: [], total: 0 })] };
+    await mount();
+    expect(screen.getAllByText('no open pull requests')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-testid^="pr-repo-"]')).toHaveLength(0);
   });
 
   it('shows the instruction and no repo when there is no token', async () => {
@@ -252,11 +271,44 @@ describe('PullRequestsView — grouping and the rows', () => {
     expect(document.querySelectorAll('[data-testid^="pr-repo-"]')).toHaveLength(0);
   });
 
-  it("draws a repo's detail when its last read was not ok", async () => {
+  it("keeps a failed repo's card for its rows and says it could not read it once, under the cards", async () => {
     payload.repos[1] = { ...payload.repos[1], access: 'rate-limited', detail: 'rate limited — retrying at 12:30' };
     await mount();
-    expect(screen.getByTestId('pr-repo-futin/y')).toHaveTextContent('rate limited — retrying at 12:30');
-    expect(screen.getByTestId('pr-repo-futin/x')).not.toHaveTextContent('rate limited');
+    expect(screen.getByTestId('pr-repo-futin/y')).not.toHaveTextContent('rate limited');
+    expect(screen.getByTestId('pr-cantread-futin/y')).toHaveTextContent("Can't read · futin/y — rate limited — retrying at 12:30");
+    expect(screen.getByTestId('pr-repo-futin/x')).toBeInTheDocument();
+  });
+
+  it('draws only the line, and no card, for a failed repo that lists nothing', async () => {
+    payload.repos[1] = { ...payload.repos[1], access: 'rate-limited', detail: 'rate limited — retrying at 12:30', prs: [], total: 0 };
+    await mount();
+    expect(screen.queryByTestId('pr-repo-futin/y')).toBeNull();
+    expect(screen.getByTestId('pr-cantread-futin/y')).toBeInTheDocument();
+    expect(screen.getByTestId('pr-repo-futin/x')).toBeInTheDocument();
+  });
+
+  it('keeps the card of a repo whose only PR departed, with the outcome and no empty reading', async () => {
+    const { user } = await mount();
+    payload = { ...basePayload(), repos: [basePayload().repos[0], repo({ repo: 'futin/y', prs: [], total: 0 })] };
+    await user.click(action('futin/y#12', 'Merge'));
+    await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
+    const card = screen.getByTestId('pr-repo-futin/y');
+    expect(card).toHaveTextContent('#12 merged');
+    expect(card).not.toHaveTextContent('showing');
+    expect(card).not.toHaveTextContent('no open pull requests');
+  });
+
+  it("draws no page-level truncated or departed line beside the cards' own (spec 249)", async () => {
+    const { user } = await mount();
+    payload = {
+      ...basePayload(),
+      repos: [repo({ repo: 'futin/x', prs: basePayload().repos[0].prs, total: 5, truncated: true }), repo({ repo: 'futin/y', prs: [], total: 0 })]
+    };
+    await user.click(action('futin/y#12', 'Merge'));
+    await clickAndSettle(within(row('futin/y#12')).getByTestId('pr-merge-confirm-accept'));
+    expect(screen.getByTestId('pr-repo-futin/x')).toHaveTextContent('showing 2 of 5');
+    expect(document.querySelectorAll('[data-testid^="pr-truncated-"]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-testid^="pr-departed-"]')).toHaveLength(0);
   });
 });
 
@@ -503,7 +555,14 @@ describe('PullRequestsView — run-in-progress warning', () => {
 
 const switcher = (): HTMLElement => screen.getByRole('group', { name: 'Layout' });
 const stored = (): unknown => JSON.parse(localStorage.getItem(PR_LAYOUT_KEY) ?? 'null');
-const FORBIDDEN_Z = repo({ repo: 'futin/z', access: 'forbidden', detail: 'the token cannot read futin/z', polledAt: ago(5_000), prs: [pr({ number: 31, title: 'Hidden by reach' })], total: 4 });
+const FORBIDDEN_Z = repo({
+  repo: 'futin/z',
+  access: 'forbidden',
+  detail: 'the token cannot read futin/z',
+  polledAt: ago(5_000),
+  prs: [pr({ number: 31, title: 'Hidden by reach' })],
+  total: 4
+});
 
 /** Answers `window.matchMedia` as a phone (`useNarrow`'s query), for the one case that needs it. */
 function stubNarrow(): void {
@@ -524,7 +583,11 @@ describe('PullRequestsView — the layout switcher', () => {
     expect(screen.getByTestId('pr-inbox')).toBeInTheDocument();
     expect(screen.queryByTestId('pr-matrix')).toBeNull();
     expect(document.querySelectorAll('[data-testid^="pr-repo-"]')).toHaveLength(0);
-    expect(within(switcher()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Inbox', 'Matrix', 'Cards']);
+    expect(
+      within(switcher())
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['Inbox', 'Matrix', 'Cards']);
     expect(within(switcher()).getByRole('button', { name: 'Inbox' })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -700,7 +763,9 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
     }
   };
 
-  const CASES = (['cards', 'inbox', 'matrix'] as const).flatMap((layout) => (['merge', 'auto-merge', 'update'] as const).map((kind) => [layout, kind] as const));
+  const CASES = (['cards', 'inbox', 'matrix'] as const).flatMap((layout) =>
+    (['merge', 'auto-merge', 'update'] as const).map((kind) => [layout, kind] as const)
+  );
 
   it.each(CASES)('%s: %s sends the same POST and leaves the same outcome line', async (layout, kind) => {
     storeLayout(layout);

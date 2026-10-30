@@ -2928,9 +2928,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-status-error { color: var(--red) }
 .prs-repo-inner { display: flex; flex-direction: column; min-width: 0 }
 .prs-repo-sub { display: flex; flex-wrap: wrap; gap: 4px 12px }
-/* The repo's own notes under its head — the sync-off sentence, a failed read's detail. Readable without hover: on a phone there is none. */
+/* The repo's own note under its head — the sync-off sentence. Readable without hover: on a phone there is none. */
 .prs-note { font-size: 13px; color: var(--ink2); line-height: 1.45; margin-bottom: 12px }
-.prs-note-bad { color: var(--red) }
 .prs-list { list-style: none; margin: 0; padding: 0 }
 /* One row anatomy for Inbox and Cards (spec `2026-10-30-prs-page-fixes-design.md`): the text on the left, the four keys and their why-line on the right,
    top-aligned with the title. The text keeps a 320 px basis, so the keys drop under it whenever the title would get less — the title is never squeezed to
