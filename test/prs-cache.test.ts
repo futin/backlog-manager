@@ -445,6 +445,29 @@ describe('PullRequestsService freshness around writes', () => {
     expect(lists(gh, 'futin/y')).toBe(2);
   });
 
+  it("a repo's first list read, still out when a merge lands, does not put the merged PR on the page (#398)", async () => {
+    const { gh, prs } = rig();
+    const seven = fakePr(gh, FAKE_REPO, 7);
+
+    // Cold: no entry exists yet. The first list query answers with #7 still open and is delivered only on release.
+    const release = gh.holdAnswers('PullRequests');
+    const reading = prs.list(NOW);
+    await settle();
+    expect(lists(gh, FAKE_REPO)).toBe(1);
+
+    const merged = await prs.merge({ repo: FAKE_REPO, number: 7, method: 'squash', headSha: seven.headRefOid });
+    expect(merged).toMatchObject({ ok: true, status: 200 });
+    release();
+    // The read predates the merge, so its rows are dropped: the repo shows nothing read yet rather than a list with the merged #7 in it.
+    const landed = view((await reading).repos, FAKE_REPO);
+    expect(landed).toMatchObject({ polledAt: null, prs: [] });
+
+    // The next read after the TTL is stored as usual, and GitHub no longer lists #7.
+    const later = view((await prs.list(NOW + PR_TTL_MS)).repos, FAKE_REPO);
+    expect(numbers(later)).toEqual([9]);
+    expect(later.polledAt).toBe(new Date(NOW + PR_TTL_MS).toISOString());
+  });
+
   it("a write's GraphQL rate limit met while a list read is out survives that read's success", async () => {
     const { gh, prs } = rig();
     await prs.list(NOW);
