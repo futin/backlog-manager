@@ -40,7 +40,8 @@ answer on a failure, and `drawnSources` (`client/src/lib/sources.ts`) turns it i
 project under GitHub and a `files`, `unsupported` or source-less one under Files, as display grouping only. The rail draws a source row while its flag is true,
 or while the answer is unknown and that section is on screen and not provisional. `App` moves nothing while the answer is unknown; once it exists, a provisional
 landing settles once (`settleSection` for a page-named one, `firstDrawn` — Files, then GitHub, else Runs — otherwise) and a legacy `Opens on` pin is rewritten
-to where it settled; a source section whose row the answer no longer draws falls to `firstDrawn`. Until a provisional landing settles the well draws the
+to GitHub when this machine has a GitHub project, else the first drawn source — on its own effect, keyed on the provider's `legacyLanding`, so a deep link or an
+early click that ends the provisional section never leaves the pin unsettled (#399); a source section whose row the answer no longer draws falls to `firstDrawn`. Until a provisional landing settles the well draws the
 section's loading shape, so a files-only machine never flashes a GitHub board. Settings' `Opens on` offers Files and GitHub only while drawn (`landingOptions`),
 keeping a stored pin's option. Why:
 [invariants.md](invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree).
