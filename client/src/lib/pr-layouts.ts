@@ -204,16 +204,33 @@ export function newestPolledAt(shown: readonly PrRepoView[]): string | null {
   return best;
 }
 
+/** How many departed lines a repo keeps: the newest ones. A page left open through a dozen merges would otherwise grow a dozen lines at the repo's foot (#396). */
+export const DEPARTED_KEEP = 3;
+
 /**
  * The finished outcomes of PRs a write of this page took off the list (merged), still owed a line: the key's repo is shown, the PR is no longer listed, and the
  * outcome is not `updating…` (an updating PR with no row left has nothing to be updating). Lifted from `RepoSheet` so a page-level layout can say them too.
  * Matched on `<repo>#`, never a bare prefix, so `a/x` does not claim `a/xy#1`.
+ *
+ * Only the newest `DEPARTED_KEEP` per repo are returned, in the order they were recorded. "Newest" is the record's own key order: `PullRequestsView` deletes a
+ * key when its next write leaves and re-adds it when that write settles, so insertion order is completion order — no timestamp is stored to sort by.
  */
 export function departedOutcomes(outcomes: Record<string, PrOutcome>, shown: readonly PrRepoView[]): { key: string; outcome: PrOutcome }[] {
   const listed = new Set(shown.flatMap((repo) => repo.prs.map((pr) => `${repo.repo}#${pr.number}`)));
-  return Object.entries(outcomes)
-    .filter(([key, outcome]) => outcome.kind !== 'updating' && !listed.has(key) && shown.some((repo) => key.startsWith(`${repo.repo}#`)))
-    .map(([key, outcome]) => ({ key, outcome }));
+  const departed = Object.entries(outcomes).filter(
+    ([key, outcome]) => outcome.kind !== 'updating' && !listed.has(key) && shown.some((repo) => key.startsWith(`${repo.repo}#`))
+  );
+  const left = new Map<string, number>();
+  const kept: { key: string; outcome: PrOutcome }[] = [];
+  for (let i = departed.length - 1; i >= 0; i -= 1) {
+    const [key, outcome] = departed[i];
+    const repo = key.slice(0, key.lastIndexOf('#'));
+    const n = left.get(repo) ?? 0;
+    if (n >= DEPARTED_KEEP) continue;
+    left.set(repo, n + 1);
+    kept.unshift({ key, outcome });
+  }
+  return kept;
 }
 
 /** A key on a row's compact action strip: the three writes `PrActions` offers, which `lib/prs.ts`' `*Block`s disable with a reason. */
