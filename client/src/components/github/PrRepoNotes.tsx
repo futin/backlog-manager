@@ -22,7 +22,7 @@ import type { PrRepoView } from '../../../../shared/types';
 export function PrRepoNotes({
   repos,
   outcomes,
-  part,
+  part
 }: {
   repos: readonly PrRepoView[];
   outcomes: Record<string, PrOutcome>;
