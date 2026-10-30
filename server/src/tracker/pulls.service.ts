@@ -190,13 +190,15 @@ export class PullRequestsService {
    * when absent, or — `row` null, the re-read said `MERGED` or `CLOSED` — remove it. `total` follows so `truncated` stays true to the list: a removal of a
    * held row counts down, and an add counts up only when the list was COMPLETE — on a list truncated at 100, a PR absent from the page is one GitHub's
    * `totalCount` already counted, and counting it again would overshoot. `polledAt` does NOT move, because it is the age of the list read and a splice
-   * re-read one row. A repo with no successful read yet is left alone: one row would draw as the whole list.
+   * re-read one row. A repo with no successful read yet keeps no row — one row would draw as the whole list — but still counts the splice (#398): its
+   * first read may be in flight, carrying the state from before this write. No entry at all means no read was ever started, since `read` creates one.
    */
   splice(repo: string, row: PullRequestRow | null, number: number): void {
     const entry = this.entries.get(repo);
-    if (entry === undefined || entry.polledAt === null) return;
-    // Counted before anything else, a no-op removal included: a read in flight may still hold the row this splice found absent.
+    if (entry === undefined) return;
+    // Counted before anything else, a no-op removal and a never-read entry included: a read in flight may still hold the row this splice found absent.
     entry.splices += 1;
+    if (entry.polledAt === null) return;
     const at = entry.prs.findIndex((p) => p.number === number);
     if (row === null) {
       if (at === -1) return;
@@ -432,9 +434,10 @@ export class PullRequestsService {
   }
 
   private async read(repo: string, now: number, token: string): Promise<void> {
-    const splices = this.entries.get(repo)?.splices ?? 0;
-    const res = await readPullList(this.client, repo, { token });
+    // The entry is made before the request goes out, not when it lands: a splice while a repo's FIRST read is out must find something to count on (#398).
     const entry = this.entryOf(repo);
+    const splices = entry.splices;
+    const res = await readPullList(this.client, repo, { token });
     entry.attemptedAt = now;
     // A read that started at or after the due time answers it; one that started before (a `dueAt` set while it was out) does not — its answer predates
     // the update it was meant to see. It is answered by a read that FAILED (retrying a failing repo on every GET is what the TTL exists to stop) or one

@@ -3537,7 +3537,9 @@ Two rules keep a write and the TTL from contradicting each other (the Plan B fix
 after it answers, so the page re-reads once when the mark ends — and a re-read served from the 60 s TTL would bring back the head the update has since
 moved, with the row's actions enabled on it, which is the self-caused 409 the row's busy rule exists to prevent. And a list read that lands after a write
 spliced the repo drops its rows (it still counts as an attempt): it carries GitHub's state from before the write, and storing it would put a merged PR back
-on the page for a whole TTL. A successful read likewise clears only a sleep that has run out — one a write recorded while the read was out is newer news.
+on the page for a whole TTL. That holds for a repo's FIRST read too (#398): the read makes the entry before its request goes out, and a splice on an entry
+with no successful read keeps no row but still counts. A successful read likewise clears only a sleep that has run out — one a write recorded while the read
+was out is newer news.
 
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
 board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip
