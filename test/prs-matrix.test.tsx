@@ -123,7 +123,8 @@ describe('PrMatrix — header, cells and order', () => {
     render(<PrMatrix {...props([repo('a/x', [behind])], { marks })} />);
     expect(within(row('a/x#2')).getByText('updating…')).toHaveClass('prs-cell-live');
     expect(within(row('a/x#2')).queryByText('behind')).not.toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Base' })).toBeInTheDocument();
+    // The header counts facts, not motion (`columnCounts`): the marked row is still behind, so the header keeps its `1` from the click to the re-read.
+    expect(screen.getByRole('columnheader', { name: 'Base 1' })).toBeInTheDocument();
   });
 
   it('names the five tones in a legend under the table', () => {

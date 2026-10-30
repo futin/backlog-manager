@@ -1,19 +1,20 @@
 import {
+  cardRepos,
   columnCounts,
-  compactKeys,
   DEPARTED_KEEP,
   departedOutcomes,
-  drawableLayout,
+  emptyRepoNote,
   isNoAccess,
   LEVEL_DOT,
-  layoutOptions,
   levelCounts,
   MATRIX_COLUMNS,
   MATRIX_LABEL,
   matrixCells,
   newestPolledAt,
   parseLayout,
+  PR_LAYOUT_OPTIONS,
   prLevel,
+  primaryKey,
   prProblems,
   prSeverity,
   prVerdict,
@@ -236,17 +237,14 @@ describe('layout key', () => {
     for (const v of ['bogus', null, 3, undefined, {}]) expect(parseLayout(v)).toBe('inbox');
   });
 
-  it('drawableLayout draws a stored matrix as inbox when narrow, and nothing else changes', () => {
-    expect(drawableLayout('matrix', true)).toBe('inbox');
-    expect(drawableLayout('matrix', false)).toBe('matrix');
-    expect(drawableLayout('cards', true)).toBe('cards');
-    expect(drawableLayout('inbox', true)).toBe('inbox');
-  });
-
-  it('layoutOptions offers matrix only when wide', () => {
-    expect(layoutOptions(true).map((o) => o.value)).toEqual(['inbox', 'cards']);
-    expect(layoutOptions(false).map((o) => o.value)).toEqual(['inbox', 'matrix', 'cards']);
-    expect(layoutOptions(false).map((o) => o.label)).toEqual(['Inbox', 'Matrix', 'Cards']);
+  it('PR_LAYOUT_OPTIONS offers the three layouts in the switcher\'s order, every one of them at every width', () => {
+    expect(PR_LAYOUT_OPTIONS).toEqual([
+      { value: 'inbox', label: 'Inbox' },
+      { value: 'matrix', label: 'Matrix' },
+      { value: 'cards', label: 'Cards' }
+    ]);
+    // The options are the whole of `PrLayout`: a value `parseLayout` can return is a value the switcher can show as selected.
+    expect(PR_LAYOUT_OPTIONS.map((o) => o.value)).toEqual(['inbox', 'matrix', 'cards'].map(parseLayout));
   });
 });
 
@@ -298,60 +296,150 @@ describe('page-level readings', () => {
   });
 });
 
-describe('compactKeys', () => {
-  it('a behind PR on an auto-merge repo offers update first, then merge and auto-merge', () => {
+describe('primaryKey', () => {
+  it('a behind PR whose update the strip would let through has update as its primary', () => {
     const pr = row({ mergeState: 'behind', canUpdateBranch: true });
-    expect(compactKeys(pr, repo({ autoMergeAllowed: true }))).toEqual({ keys: ['update', 'merge', 'auto-merge'], primary: 'update' });
+    expect(updateBlock(pr, repo({ autoMergeAllowed: true }), false)).toBeNull();
+    expect(primaryKey(pr, repo({ autoMergeAllowed: true }), false)).toBe('update');
   });
 
-  it('a ready quiet PR on a repo without auto-merge offers merge alone, as the primary', () => {
-    expect(compactKeys(row({ review: 'approved', checks: 'success' }), repo({ autoMergeAllowed: false }))).toEqual({ keys: ['merge'], primary: 'merge' });
+  it('a ready quiet PR on a repo without auto-merge has merge as its primary', () => {
+    expect(primaryKey(row({ review: 'approved', checks: 'success' }), repo({ autoMergeAllowed: false }), false)).toBe('merge');
   });
 
   it('a PR merge would refuse has no primary, and the refusal is the one the action strip already says', () => {
     const failing = row({ checks: 'failure' });
     const r = repo();
     expect(mergeBlock(failing, r)).toBe('checks failing');
-    expect(compactKeys(failing, r).primary).toBeNull();
-    expect(compactKeys(failing, r).keys).toEqual(['merge', 'auto-merge']);
+    expect(primaryKey(failing, r, false)).toBeNull();
   });
 
   it('a draft has no primary', () => {
-    expect(compactKeys(row({ draft: true }), repo()).primary).toBeNull();
+    expect(primaryKey(row({ draft: true }), repo(), false)).toBeNull();
   });
 
   it('a quiet PR that is not ready for a person (worth a look) has no primary either, unless it is behind', () => {
-    expect(compactKeys(row({ review: 'review-required' }), repo()).primary).toBeNull();
+    expect(primaryKey(row({ review: 'review-required' }), repo(), false)).toBeNull();
   });
 
-  it('armed auto-merge still offers auto-merge on a repo whose setting is now off, so it can be disarmed', () => {
+  it('armed auto-merge keeps the merge primary on a repo whose setting is now off: the primary reads the PR and mergeBlock, not the setting', () => {
     const armed = row({ autoMerge: { method: 'squash', enabledAt: '2026-10-29T09:00:00Z' } });
-    expect(compactKeys(armed, repo({ autoMergeAllowed: false })).keys).toContain('auto-merge');
+    expect(mergeBlock(armed, repo({ autoMergeAllowed: false }))).toBeNull();
+    expect(primaryKey(armed, repo({ autoMergeAllowed: false }), false)).toBe('merge');
   });
 
   it('a behind PR whose update the strip would refuse has no primary — a filled key that is disabled would be the opposite of the merge rule', () => {
     const behind = row({ mergeState: 'behind', canUpdateBranch: false });
     expect(updateBlock(behind, repo(), false)).toBe('no permission to update');
-    expect(compactKeys(behind, repo()).primary).toBeNull();
-    expect(compactKeys(behind, repo()).keys).toEqual(['merge', 'update', 'auto-merge']);
+    expect(primaryKey(behind, repo(), false)).toBeNull();
     const synced = repo({ syncOff: 'sync is off for futin/x — turn it on in GitHub › Settings' });
-    expect(compactKeys(row({ mergeState: 'behind', canUpdateBranch: true }), synced).primary).toBeNull();
+    expect(primaryKey(row({ mergeState: 'behind', canUpdateBranch: true }), synced, false)).toBeNull();
   });
 
   it('a draft that is behind still makes update the primary, because updateBlock does not refuse a draft', () => {
     const draftBehind = row({ draft: true, mergeState: 'behind', canUpdateBranch: true });
     expect(updateBlock(draftBehind, repo(), false)).toBeNull();
-    expect(compactKeys(draftBehind, repo()).primary).toBe('update');
+    expect(primaryKey(draftBehind, repo(), false)).toBe('update');
+  });
+
+  it('a behind PR that is updating has no primary: the update was asked for, and a behind PR is never quiet enough for merge to take over', () => {
+    const behind = row({ mergeState: 'behind', canUpdateBranch: true });
+    expect(updateBlock(behind, repo(), true)).toBe('updating…');
+    // The pair pins the third argument: the same PR and repo, asked before and after the mark.
+    expect(primaryKey(behind, repo(), false)).toBe('update');
+    expect(primaryKey(behind, repo(), true)).toBeNull();
+    // A draft is quiet, so it is the case where `merge` could have taken over — it does not, because a draft is refused by mergeBlock.
+    const draftBehind = row({ draft: true, mergeState: 'behind', canUpdateBranch: true });
+    expect(primaryKey(draftBehind, repo(), true)).toBeNull();
   });
 
   it('a quiet PR whose auto-merge is armed and whose checks are pending has no merge primary: GitHub will merge it itself', () => {
     const armed = row({ autoMerge: { method: 'squash', enabledAt: '2026-10-29T09:00:00Z' }, checks: 'pending', mergeState: 'blocked' });
     expect(prLevel(armed)).toBe('quiet');
-    expect(compactKeys(armed, repo({ autoMergeAllowed: true })).primary).toBeNull();
+    expect(primaryKey(armed, repo({ autoMergeAllowed: true }), false)).toBeNull();
   });
 
   it('a repo with no allowed method has no merge primary', () => {
-    expect(compactKeys(row({ review: 'approved', checks: 'success' }), repo({ methods: [] })).primary).toBeNull();
+    expect(primaryKey(row({ review: 'approved', checks: 'success' }), repo({ methods: [] }), false)).toBeNull();
+  });
+});
+
+describe('cardRepos', () => {
+  const populated = repo({ repo: 'a/x', prs: [row({ number: 41, headSha: 'b'.repeat(40) })], total: 1 });
+  const emptyOk = repo({ repo: 'a/y', polledAt: '2026-10-29T10:20:00Z' });
+  const emptyDeparted = repo({ repo: 'a/z', polledAt: '2026-10-29T10:30:00Z' });
+  const outcomes: Record<string, PrOutcome> = { 'a/z#4': { text: 'merged', kind: 'ok' } };
+
+  it('keeps a repo with a row and a repo with a departed outcome, drops an empty one, and keeps the order it was given', () => {
+    expect(cardRepos([populated, emptyOk, emptyDeparted], outcomes).map((r) => r.repo)).toEqual(['a/x', 'a/z']);
+    // The order is the caller's (`groupRepos`'), not a sort: the same three, reversed, come back reversed.
+    expect(cardRepos([emptyDeparted, emptyOk, populated], outcomes).map((r) => r.repo)).toEqual(['a/z', 'a/x']);
+  });
+
+  it('returns the repo objects themselves, so a card reads the same fields the page does', () => {
+    const [first, second] = cardRepos([populated, emptyOk, emptyDeparted], outcomes);
+    expect(first).toBe(populated);
+    expect(second).toBe(emptyDeparted);
+  });
+
+  it('an updating outcome is not a departed line, so an empty repo that only has one is not a card', () => {
+    expect(cardRepos([emptyOk], { 'a/y#9': { text: 'updating…', kind: 'updating' } })).toEqual([]);
+  });
+
+  it('no repos and no outcomes draw no card', () => {
+    expect(cardRepos([], {})).toEqual([]);
+  });
+});
+
+describe('emptyRepoNote', () => {
+  // Every case but the all-empty ones carries a populated repo, so a card is drawn and the COUNT rule is what the case tests.
+  const populated = repo({ repo: 'a/x', prs: [row({ number: 31, headSha: 'c'.repeat(40) })], total: 1 });
+  const emptyOk = repo({ repo: 'a/e1', polledAt: '2026-10-29T10:21:00Z' });
+  const emptySyncOff = repo({ repo: 'a/e2', polledAt: '2026-10-29T10:22:00Z', syncOff: 'sync is off for a/e2 — turn it on in GitHub › Settings' });
+  const emptyUnread = repo({ repo: 'a/e3', polledAt: null });
+  const emptyDeparted = repo({ repo: 'a/e4', polledAt: '2026-10-29T10:24:00Z' });
+  const emptyLimited = repo({ repo: 'a/e5', polledAt: '2026-10-29T10:25:00Z', access: 'rate-limited', detail: 'GitHub rate limit reached' });
+  const emptyOk2 = repo({ repo: 'a/e6', polledAt: '2026-10-29T10:26:00Z' });
+  const departed: Record<string, PrOutcome> = { 'a/e4#9': { text: 'merged', kind: 'ok' } };
+
+  it('says nothing when no repo is empty', () => {
+    expect(emptyRepoNote([populated], {})).toBeNull();
+    expect(emptyRepoNote([], {})).toBeNull();
+  });
+
+  it('counts one empty ok repo beside a card: `1 repo with no open PRs`', () => {
+    expect(emptyRepoNote([populated, emptyOk], {})).toBe('1 repo with no open PRs');
+  });
+
+  it('counts a sync-off empty repo — it was read, and it has nothing open: `2 repos with no open PRs`', () => {
+    expect(emptyRepoNote([populated, emptyOk, emptySyncOff], {})).toBe('2 repos with no open PRs');
+  });
+
+  it('does not count an empty repo that has not been read yet: it may have PRs this page has not seen', () => {
+    expect(emptyRepoNote([populated, emptyUnread], {})).toBeNull();
+    expect(emptyRepoNote([populated, emptyOk, emptyUnread], {})).toBe('1 repo with no open PRs');
+  });
+
+  it('does not count an empty repo that has a departed outcome: it is a card, with its line', () => {
+    expect(emptyRepoNote([populated, emptyDeparted], departed)).toBeNull();
+    expect(emptyRepoNote([populated, emptyOk, emptyDeparted], departed)).toBe('1 repo with no open PRs');
+  });
+
+  it('does not count a repo whose last read failed: it is not known to be empty, it has its own `Can\'t read` line', () => {
+    expect(emptyRepoNote([populated, emptyLimited], {})).toBeNull();
+    expect(emptyRepoNote([populated, emptyOk, emptyLimited], {})).toBe('1 repo with no open PRs');
+  });
+
+  it('is null when nothing is drawn at all: two empty ok repos and nothing else is `no open pull requests`, not a count of two', () => {
+    expect(cardRepos([emptyOk, emptyOk2], {})).toEqual([]);
+    expect(transientFailures([emptyOk, emptyOk2])).toEqual([]);
+    expect(emptyRepoNote([emptyOk, emptyOk2], {})).toBeNull();
+    expect(emptyRepoNote([emptyOk], {})).toBeNull();
+  });
+
+  it('keeps the count when a failed repo is drawn beside the empty ok ones: the `Can\'t read` line is drawn, `no open pull requests` is not', () => {
+    expect(emptyRepoNote([emptyOk, emptyLimited], {})).toBe('1 repo with no open PRs');
+    expect(emptyRepoNote([emptyOk, emptyOk2, emptyLimited], {})).toBe('2 repos with no open PRs');
   });
 });
 
@@ -402,12 +490,18 @@ describe('matrixCells', () => {
 describe('columnCounts', () => {
   it('counts the rows whose cell is bad or meh, per column', () => {
     const r = repo({ prs: [row({ number: 1, checks: 'failure' }), row({ number: 2, review: 'review-required' }), row({ number: 3, review: 'approved', checks: 'success' })] });
-    expect(columnCounts(rankPrs([r]), () => false)).toEqual({ checks: 1, review: 1, mergeable: 0, base: 0, autoMerge: 0 });
+    expect(columnCounts(rankPrs([r]))).toEqual({ checks: 1, review: 1, mergeable: 0, base: 0, autoMerge: 0 });
   });
 
-  it('reads the updating mark by key: an updating behind row is in motion, not behind', () => {
-    const r = repo({ prs: [row({ number: 1, mergeState: 'behind' }), row({ number: 2, mergeState: 'behind' })] });
-    expect(columnCounts(rankPrs([r]), (key) => key === 'futin/x#1').base).toBe(1);
+  it('counts a behind row in Base whether or not its update was asked for: the header says how many are behind, the cell says what is happening to one', () => {
+    // Two behind rows. One of them is being updated — the page knows that, `columnCounts` no longer asks — and both still count.
+    const r = repo({
+      prs: [row({ number: 1, mergeState: 'behind', headSha: 'd'.repeat(40) }), row({ number: 2, mergeState: 'behind', headSha: 'e'.repeat(40) })]
+    });
+    const ranked = rankPrs([r]);
+    expect(matrixCells(ranked[0].pr, true).base).toEqual({ text: 'updating…', tone: 'live' });
+    expect(matrixCells(ranked[1].pr, false).base).toEqual({ text: 'behind', tone: 'meh' });
+    expect(columnCounts(ranked).base).toBe(2);
   });
 });
 

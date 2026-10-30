@@ -144,14 +144,11 @@ function MatrixRow({ r, props, open, onToggle }: { r: RankedPr; props: PrLayoutP
 }
 
 export function PrMatrix(props: PrLayoutProps) {
-  const { repos, outcomes, marks, now } = props;
+  const { repos, outcomes } = props;
   const [openKey, setOpenKey] = useState<string | null>(null);
   const ranked = useMemo(() => rankPrs(repos), [repos]);
   const failures = transientFailures(repos);
-  const counts = useMemo(() => {
-    const byKey = new Map(ranked.map((r) => [r.key, isUpdating(marks[r.key], r.pr, now)]));
-    return columnCounts(ranked, (key) => byKey.get(key) === true);
-  }, [ranked, marks, now]);
+  const counts = useMemo(() => columnCounts(ranked), [ranked]);
 
   return (
     <div className="prs-matrix" data-testid="pr-matrix">

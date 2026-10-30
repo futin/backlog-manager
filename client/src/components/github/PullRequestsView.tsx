@@ -8,13 +8,12 @@ import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';
 import { useBoard } from '../../hooks/useBoard';
-import { useNarrow } from '../../hooks/useNarrow';
 import { useNow } from '../../hooks/useNow';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { usePullRequests } from '../../hooks/usePullRequests';
 import { useReportWorking } from '../../hooks/useReportWorking';
-import { drawableLayout, layoutOptions, newestPolledAt, parseLayout, PR_LAYOUT_KEY, splitReach, type PrLayout } from '../../lib/pr-layouts';
+import { newestPolledAt, parseLayout, PR_LAYOUT_KEY, PR_LAYOUT_OPTIONS, splitReach, type PrLayout } from '../../lib/pr-layouts';
 import type { PrRunContext } from '../../lib/pr-run';
 import { groupRepos, outcomeLine, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
 import type { PrWriteResult } from '../../../../shared/types';
@@ -172,8 +171,7 @@ export default function PullRequestsView({ onWorking, onOpenSettings }: { onWork
   const open = shown.reduce((n, r) => n + r.total, 0);
 
   const [stored, setStored] = usePersistedState<PrLayout>(PR_LAYOUT_KEY, 'inbox');
-  const narrow = useNarrow();
-  const layout = drawableLayout(parseLayout(stored), narrow);
+  const layout = parseLayout(stored);
   const props: PrLayoutProps = { repos: shown, outcomes, marks, now, ctx, write, inFlight };
 
   return (
@@ -199,7 +197,7 @@ export default function PullRequestsView({ onWorking, onOpenSettings }: { onWork
           ) : (
             <>
               <div className="prs-toolbar" data-testid="pr-toolbar">
-                <Segmented<PrLayout> label="Layout" value={layout} options={layoutOptions(narrow)} onChange={setStored} track />
+                <Segmented<PrLayout> label="Layout" value={layout} options={PR_LAYOUT_OPTIONS} onChange={setStored} track />
                 {hidden.length > 0 && (
                   <p className="prs-toolbar-note">
                     {`${hidden.length} ${hidden.length === 1 ? 'repo' : 'repos'} hidden — no access`}

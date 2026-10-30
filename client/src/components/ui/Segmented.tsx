@@ -24,7 +24,8 @@ export function Segmented<T extends string | number>({
   track
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  /** `readonly`: the component only maps it, so a module-level constant list (GitHub › PRs' `PR_LAYOUT_OPTIONS`) can be handed in as is. */
+  options: readonly { value: T; label: string }[];
   onChange: (v: T) => void;
   /** For a setting the server can't act on — the switch would flip and do nothing. */
   disabled?: boolean;

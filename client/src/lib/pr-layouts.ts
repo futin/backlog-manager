@@ -173,22 +173,16 @@ export function parseLayout(v: unknown): PrLayout {
 }
 
 /**
- * The layout a window can draw. Matrix is wide-only, so a narrow window draws a stored `matrix` as Inbox — and the stored value is not rewritten, so the
- * choice comes back the next time the window is wide (the dashboard's `drawableGitLayout` rule).
+ * The switcher's options: all three layouts, at every width. Matrix used to be wide-only — a narrow window drew a stored `matrix` as Inbox and the switcher
+ * left it out — but Matrix now scrolls sideways inside its own box when the pane is narrower than its columns (spec, "Width"), and an option that vanished
+ * with the window size made the stored choice and the drawn layout two different things. So there is no width rule left to derive: one constant list the
+ * `Segmented` takes as is, in the order the toolbar reads, and a stored `matrix` draws Matrix wherever the window is.
  */
-export function drawableLayout(stored: PrLayout, narrow: boolean): PrLayout {
-  return narrow && stored === 'matrix' ? 'inbox' : stored;
-}
-
-/** The switcher's options: Matrix only where it can be drawn. */
-export function layoutOptions(narrow: boolean): { value: PrLayout; label: string }[] {
-  const all: { value: PrLayout; label: string }[] = [
-    { value: 'inbox', label: 'Inbox' },
-    { value: 'matrix', label: 'Matrix' },
-    { value: 'cards', label: 'Cards' }
-  ];
-  return narrow ? all.filter((o) => o.value !== 'matrix') : all;
-}
+export const PR_LAYOUT_OPTIONS: ReadonlyArray<{ value: PrLayout; label: string }> = [
+  { value: 'inbox', label: 'Inbox' },
+  { value: 'matrix', label: 'Matrix' },
+  { value: 'cards', label: 'Cards' }
+];
 
 /** Shown repos whose last read failed for a reason that may pass (`rate-limited`, `error`): still drawn, with what went wrong beside the last answer. */
 export function transientFailures(shown: readonly PrRepoView[]): PrRepoView[] {
@@ -233,6 +227,41 @@ export function departedOutcomes(outcomes: Record<string, PrOutcome>, shown: rea
   return kept;
 }
 
+/**
+ * The repos Cards draws a sheet for, in the order given (`groupRepos`'): a repo that lists at least one PR, or that has no PR left but still owes a departed
+ * outcome line (`departedOutcomes(outcomes, [repo])`, which is asked per repo so the `<repo>#` match and the `DEPARTED_KEEP` cut stay its own). A repo whose
+ * last PR has just merged keeps its card for as long as that outcome lives, so `#12 merged` stays where the row was instead of the whole sheet vanishing under
+ * the person who clicked Merge; an empty repo with nothing to say is not drawn, and `emptyRepoNote` counts it instead.
+ *
+ * It does not look at `access`: a failed repo with rows from an earlier read keeps its card (the last answer is still shown, beside the `Can't read` line),
+ * and a failed repo with none is a line, not a sheet — which falls out of "no rows, no departed outcome" without a rule of its own.
+ */
+export function cardRepos(repos: readonly PrRepoView[], outcomes: Record<string, PrOutcome>): PrRepoView[] {
+  return repos.filter((repo) => repo.prs.length > 0 || departedOutcomes(outcomes, [repo]).length > 0);
+}
+
+/**
+ * Cards' toolbar note, `N repos with no open PRs` (`1 repo with no open PRs`): how many repos were read cleanly, hold nothing and are therefore not drawn.
+ * `null` when that count is 0, and `null` when nothing is drawn at all.
+ *
+ * **The count.** A repo counts when `access` is `ok`, it has been read (`polledAt` is not `null`), it lists no PR and owes no departed outcome — exactly a repo
+ * `cardRepos` leaves out whose emptiness is a fact. A repo not read yet is NOT counted: unknown is not empty, and the first poll may still list PRs for it. A
+ * failed repo (`rate-limited`, `error`) is not counted either — it may well have PRs this page cannot see, and it has its own `Can't read` line. A sync-off
+ * repo that lists none IS counted: it was read, it is empty, and "sync is off" is not a reason to say it has PRs.
+ *
+ * **The guard.** When no card is drawn and no failed repo is drawn, Cards says `no open pull requests` itself, and that sentence already says what a count of
+ * two empty repos would — so the note stays out of its way. The guard is the same two lists Cards' empty state reads, `cardRepos` and `transientFailures`,
+ * so the note and the sentence cannot both draw or both stay away. A failed repo beside the empty ok ones changes it: Cards draws the `Can't read` line, not
+ * `no open pull requests`, so the count is the only place the empty ones are accounted for.
+ */
+export function emptyRepoNote(repos: readonly PrRepoView[], outcomes: Record<string, PrOutcome>): string | null {
+  if (cardRepos(repos, outcomes).length === 0 && transientFailures(repos).length === 0) return null;
+  const empty = repos.filter(
+    (repo) => repo.access === 'ok' && repo.polledAt !== null && repo.prs.length === 0 && departedOutcomes(outcomes, [repo]).length === 0
+  );
+  return empty.length === 0 ? null : `${empty.length} ${empty.length === 1 ? 'repo' : 'repos'} with no open PRs`;
+}
+
 /** A key on a row's compact action strip: the three writes `PrActions` offers, which `lib/prs.ts`' `*Block`s disable with a reason. */
 export type PrKey = 'merge' | 'update' | 'auto-merge';
 
@@ -259,6 +288,28 @@ export function compactKeys(pr: PullRequestRow, repo: PrRepoView): { keys: PrKey
   else if (prLevel(pr) === 'quiet' && !pr.draft && pr.checks !== 'pending' && mergeBlock(pr, repo) === null) primary = 'merge';
   const keys = primary === null ? offered : [primary, ...offered.filter((k) => k !== primary)];
   return { keys, primary };
+}
+
+/**
+ * The key on a row's strip that is the filled one — `update`, `merge` or none. The key SET is `lib/prs.ts`' (`PR_KEYS`, always four); this only picks the one
+ * a person most likely wants next, and whether any key is disabled, and why, stays `mergeBlock` / `updateBlock` / `autoMergeBlock`'s, so the strip and its
+ * primary cannot disagree about what is refused.
+ *
+ * `update` when GitHub says the PR is behind and `updateBlock(pr, repo, updating)` lets the click through — nothing else is sensible until the branch has
+ * moved. A filled key that is disabled would be the opposite of a primary, so a behind PR whose update is refused has none, and so does one whose update was
+ * just asked for: `updating` is the page's mark, and `updateBlock` is the one reader of it (it answers `updating…`), so this does not test the flag a second
+ * time — the primary goes with the key it pointed at, and the two cannot disagree about whether `Update` is open. A behind PR that is updating does not fall
+ * through to `merge` either, because a behind PR is Worth a look, never Quiet — except a draft, which is Quiet and is stopped by the `!pr.draft` test (a draft
+ * that is behind still gets `update`: `updateBlock` does not refuse a draft).
+ *
+ * Else `merge` for a PR that is Quiet, not a draft, whose checks are not still running and whose `mergeBlock` is null. A Quiet PR with checks pending is one
+ * whose auto-merge is armed (an unarmed one is Worth a look), and GitHub will merge it itself — a manual merge is likely refused while required checks run.
+ * A PR with anything wrong has no primary: the row's verdict is what the eye should land on, not a bright Merge button.
+ */
+export function primaryKey(pr: PullRequestRow, repo: PrRepoView, updating: boolean): 'merge' | 'update' | null {
+  if (pr.mergeState === 'behind' && updateBlock(pr, repo, updating) === null) return 'update';
+  if (prLevel(pr) === 'quiet' && !pr.draft && pr.checks !== 'pending' && mergeBlock(pr, repo) === null) return 'merge';
+  return null;
 }
 
 /** How a Matrix cell is drawn: healthy, needs you, worth a look, in motion (pending / computing / updating), and not applicable. Colour is for failure only. */
@@ -325,11 +376,16 @@ export function matrixCells(pr: PullRequestRow, updating: boolean): Record<Matri
   return { checks, review, mergeable, base, autoMerge };
 }
 
-/** Per column, how many rows' cells are `bad` or `meh` — the number a Matrix header shows. `updating` is asked by key, the way the rows themselves ask it. */
-export function columnCounts(ranked: readonly RankedPr[], updating: (key: string) => boolean): Record<MatrixColumn, number> {
+/**
+ * Per column, how many rows' cells are `bad` or `meh` — the number a Matrix header shows. It counts FACTS, not motion: the cells are read as they stand with no
+ * update asked for (`matrixCells(pr, false)`), so a behind PR whose update is in flight still counts under Base and the header holds steady from the click to
+ * the re-read that shows the branch moved. The row's own Base cell still says `updating…`; only the header ignores the mark, which is why it takes no
+ * per-key callback any more.
+ */
+export function columnCounts(ranked: readonly RankedPr[]): Record<MatrixColumn, number> {
   const counts: Record<MatrixColumn, number> = { checks: 0, review: 0, mergeable: 0, base: 0, autoMerge: 0 };
   for (const r of ranked) {
-    const cells = matrixCells(r.pr, updating(r.key));
+    const cells = matrixCells(r.pr, false);
     for (const column of MATRIX_COLUMNS) if (cells[column].tone === 'bad' || cells[column].tone === 'meh') counts[column] += 1;
   }
   return counts;
