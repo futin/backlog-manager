@@ -231,7 +231,9 @@ the machine is `home`.
 
 - `GET /api/agents/status` — whether dispatch is on and whether `../claude-agents-dashboard` answered.
 - `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt. An execute plan's and a groom plan's prompt have no
-  closing clause: the finish clause is the sheet's picker, not editable text (only a capture's keeps its commit rule in the text).
+  closing clause: the finish clause is the sheet's picker, not editable text (only a capture's keeps its commit rule in the text). An execute or a groom plan
+  carries `launchSurface` (`dashboard` | `desktop`) only while HOME's dashboard `/api/health` says `desktopAvailable: true`; its value is that answer's
+  `launchSurfaceDefault`, `dashboard` when the dashboard sends none or one outside the two. Absent, the sheet draws no Dashboard | Desktop control.
 - `POST /api/agents/dispatch` — spawns the session in that dashboard. An execute or a home groom dispatch also takes `finish` (`in-place` | `pr`, absent
   meaning in-place), `base` (a local branch, proved server-side, legal only with `pr` and required by it) and, only with `pr`, the booleans `autoMerge` and
   `fix` (`fix` needs `autoMerge`; each a 400 otherwise, `autoMerge and fix apply only to finish pr` / `fix requires autoMerge`); the server appends the finish
@@ -239,6 +241,16 @@ the machine is `home`.
   on a groom sent to a remote machine, is a 400. Both `dispatch` and `orchestrate` take an optional
   `machine`: absent or `home` is the launch above, byte for byte, and a remote's `name` sends it to that machine's dashboard — see "Launching on another
   machine".
+  An execute or a groom dispatch also takes an optional `surface` (`dashboard` | `desktop`, claude-agents-dashboard's desktop-launch spec, decision 7),
+  forwarded to the dashboard's `POST /api/spawn` as sent and absent from its body when the request has none — so a request without it spawns byte for byte as
+  before. `desktop` opens the session in the Claude desktop app on this Mac instead of the dashboard's headless `claude`: anything but the two values is a 400
+  (`surface must be dashboard or desktop`), as is `desktop` on a capture or with a remote `machine`, and `desktop` while home's dashboard does not say
+  `desktopAvailable` is a 409. A desktop launch answers `{ surface: 'desktop' }` with **no session id** — the app mints its own — so the server writes no
+  dispatch record for it: abort and the holder claim key on that id, and the session is the app's to follow and to stop. The dashboard's desktop refusals
+  are relayed in plain words (`desktop.util.ts`, `desktopSpawnError`, keyed on the dashboard's own status before `5xx` collapses to `502`); any other is
+  relayed verbatim, the prompt cap among them. That cap is the dashboard's 4000 characters on both surfaces, under this board's own `PROMPT_MAX` of 8000: the
+  board adds no second check, and the finish clause stays the prompt's tail — an over-long prompt is refused by the dashboard, never cut here. Orchestrate,
+  resume, the watchdog's resume, abort, stop and Jira dispatch never send `surface`, and a desktop answer to any of them is a `502` (`headless()`).
 - `POST /api/agents/orchestrate` — spawns a headless `/backlog-orchestrate` run for one project. The prompt is composed server-side, so a caller can influence
   which items, which modes and which base branch, and nothing else. A TRACKER project is accepted since task-47: `resolveIds` proves its ids against
   `ItemsService` rather than against a directory scan, accepts `#31` / the URN / a bare `31`, and **emits bare digits alone**, so the prompt never carries a

@@ -54,6 +54,8 @@ interface DashboardHealth {
   remoteAnswer?: unknown;
   spawnAvailable?: unknown;
   spawnMaxPermission?: unknown;
+  desktopAvailable?: unknown;
+  launchSurfaceDefault?: unknown;
 }
 
 interface DashboardManagement {
@@ -115,7 +117,11 @@ export class DashboardStatusService {
       reachable: true,
       remoteAnswer: health.remoteAnswer === true,
       spawnAvailable: health.spawnAvailable === true,
-      spawnMaxPermission: asMode(health.spawnMaxPermission)
+      spawnMaxPermission: asMode(health.spawnMaxPermission),
+      // Both absent unless the dashboard sent them, the encoding `MachineHealth` gives them, so a dashboard from before desktop launches yields exactly the
+      // object it always did. Strict on both: anything but literal `true` is no desktop, and a default outside the two surfaces is no default.
+      ...(health.desktopAvailable === true ? { desktopAvailable: true as const } : {}),
+      ...(health.launchSurfaceDefault === 'dashboard' || health.launchSurfaceDefault === 'desktop' ? { launchSurfaceDefault: health.launchSurfaceDefault } : {})
     };
   }
 

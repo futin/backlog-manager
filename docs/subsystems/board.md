@@ -180,7 +180,12 @@ not hidden, while Auto-merge is off, and turning Auto-merge off takes Fix with i
 the rows wait for `useRunOn`'s `loading` to clear — until the offers answer `runOn` reads home, and a suggested remote landing a moment later would take a
 Finish the person had already touched away. Below the editable body a read-only line shows the closing clause exactly as the server will append it, tracking
 every control; `finish` is sent on every execute launch (and a home groom's), `base`, `autoMerge` and `fix` only under PR, and `fix` only as `autoMerge &&
-fix`. A capture sheet keeps its closing rule inside the editable text. The toolbar Orchestrate control opens
+fix`. A capture sheet keeps its closing rule inside the editable text. An execute's or a groom's sheet on home also draws an **Open in** Dashboard |
+Desktop pill `Segmented` when the plan carries `launchSurface` (home's dashboard said `desktopAvailable`), preselected from it — the dashboard's own Shared
+default, never this board's Settings and never the last launch — and sends its pick as `surface`; a sheet that drew no control sends no key. A remote pick
+hides it, and it waits for `useRunOn`'s `loading` the way a groom's Finish does. Under Desktop, permission mode, model, effort and remote control are
+disabled, not hidden, beside a line saying the app uses its own, and the launch button reads `open in desktop`; the answer carries no session id, so the
+sheet says `Opened in the desktop app` instead of linking to a session. The toolbar Orchestrate control opens
 `OrchestrateSheet`, three steps inside a `FormSheet`, with Start on the last one alone so it never sits under a scroll region whose length is the project's
 queue. The sheet itself holds only `step`: the run's state, its three reads and Start are `hooks/useOrchestrateDraft.ts`'s, the derivations
 `lib/orchestrate-draft.ts`'s, and each step is a presentational view under `board/orchestrate/` — `ItemsStep`, `OrderStep`, `ModesStep` — over the one

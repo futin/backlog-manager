@@ -7,6 +7,7 @@ import { DispatchRecordsService } from '../items/dispatch-records.service';
 import { proveBaseBranch } from '../items/base-branch.util';
 import { authHeaders, dashboardError, readAgentsConfig, type AgentsConfig } from './config.util';
 import { itemClaimBlock } from './dashboard-sessions.util';
+import { desktopSpawnError } from './desktop.util';
 import { machineChoiceBlock, remoteDefaultModel, remoteGateBlock } from './machine-choice.util';
 import { DashboardStatusService } from './dashboard-status.service';
 import { DashboardsService, type Machine } from './dashboards/dashboards.service';
@@ -41,6 +42,8 @@ import type {
   AgentPlan,
   AgentsStatus,
   BacklogItem,
+  ItemDispatchResult,
+  LaunchSurface,
   OrchestratorRun,
   PauseResult,
   PermissionMode,
@@ -225,6 +228,28 @@ type SameKeys<A, B> = [Exclude<keyof A, keyof B>, Exclude<keyof B, keyof A>] ext
 type Assert<T extends true> = T;
 export type OrchestrateRequestKeysMatch = Assert<SameKeys<AgentOrchestrateRequest, StartOrchestrateRequest>>;
 
+/** `spawnInProject`'s options — every one-session launch's. `launchInProject` adds the item dispatch's `surface`. */
+interface LaunchOpts {
+  prompt: string;
+  name: string;
+  permissionMode: string;
+  maxPermission: PermissionMode | null;
+  model?: unknown;
+  effort?: unknown;
+  remoteControl: boolean;
+  machine?: Machine;
+  remotePath?: string;
+}
+
+/**
+ * A launch that has to have started a headless session. Every launch but an item dispatch sends no `surface`, and the dashboard answers such a body with an
+ * id, so a desktop answer here is a dashboard breaking its contract — the 502 `spawn returned no session id` a missing id has always been.
+ */
+function headless(result: ItemDispatchResult): AgentDispatchResult {
+  if (result.surface === 'desktop') throw new HttpException({ error: 'spawn returned no session id' }, 502);
+  return result;
+}
+
 @Injectable()
 export class AgentsService {
   constructor(
@@ -356,7 +381,12 @@ export class AgentsService {
         planReviewBlock(item) ??
         runClaimBlock(item, runs, starting) ??
         this.poller.syncOffBlock(item.projectPath) ??
-        undefined
+        undefined,
+      // Home's dashboard alone is asked (`status()`), and only an execute or a groom may open in the desktop app — a capture, like every launch that is not
+      // an item dispatch, stays headless. Absent unless that dashboard says `desktopAvailable`, so a dashboard from before desktop launches draws no control.
+      ...((action === 'execute' || action === 'groom') && status.desktopAvailable === true
+        ? { launchSurface: status.launchSurfaceDefault ?? 'dashboard' }
+        : {})
     };
   }
 
@@ -366,7 +396,7 @@ export class AgentsService {
    * long the reader took: the item may have been groomed, archived, or
    * rewritten in between, and the answer must come from the file as it is now.
    */
-  async dispatch(req: AgentDispatchRequest): Promise<AgentDispatchResult> {
+  async dispatch(req: AgentDispatchRequest): Promise<ItemDispatchResult> {
     const prompt = typeof req.prompt === 'string' ? req.prompt.trim() : '';
     if (prompt === '') throw new HttpException({ error: 'prompt is required' }, 400);
     if (prompt.length > PROMPT_MAX) {
@@ -428,6 +458,19 @@ export class AgentsService {
     if (req.fix === true && req.autoMerge !== true) {
       throw new HttpException({ error: 'fix requires autoMerge' }, 400);
     }
+    // The surface — the sheet's Dashboard | Desktop control, drawn only from `AgentPlan.launchSurface`. Shape rules, so they run here with the others. Refused
+    // rather than dropped, the dashboard's own reasoning for its `bad surface`: a headless launch the person believed was opening in the desktop app is
+    // worse than a 400. Desktop is an item launch on THIS machine only: `desktopAvailable` describes the Mac that answered, and a remote dashboard from
+    // before desktop launches would ignore the field and start a headless session while the sheet said Desktop.
+    if (req.surface !== undefined && req.surface !== 'dashboard' && req.surface !== 'desktop') {
+      throw new HttpException({ error: 'surface must be dashboard or desktop' }, 400);
+    }
+    if (req.surface === 'desktop' && req.action !== 'execute' && req.action !== 'groom') {
+      throw new HttpException({ error: 'only an execute or a groom can open in the desktop app' }, 400);
+    }
+    if (req.surface === 'desktop' && !m.home) {
+      throw new HttpException({ error: `the desktop app opens only on this machine, not on ${m.label}` }, 400);
+    }
     //   8. An execute or groom body carrying a `--finish`, `--base`, `--auto-merge` or `--fix` token. The pickers and checkboxes are the only channel for any
     //      of them: the clause appended below is built from validated values alone, so a typed `--finish pr` under an In place pick would reach the skill
     //      beside `COMMIT_RULE` (which carries no token) and push, a typed `--base develop` beside the clause's own `--base main` would leave the session
@@ -485,6 +528,11 @@ export class AgentsService {
       // contacted, so there is no gateway to be bad. That case and "answered
       // and said no" both get 409 — a state the reader can go and change.
       throw new HttpException({ error: blocked }, status.enabled && !status.reachable ? 502 : 409);
+    }
+    // Right after the gate, from the same read: home's dashboard has stopped offering the desktop app since the sheet's plan was read (the app was removed,
+    // or the dashboard rolled back). Uncoded 409, a state the reader changes by picking Dashboard — the dashboard's own 501 would say the same, later.
+    if (req.surface === 'desktop' && status.desktopAvailable !== true) {
+      throw new HttpException({ error: "the desktop app is not available on this machine's dashboard — launch on Dashboard instead" }, 409);
     }
 
     // The in-review block (spec decision 9), re-checked for the reason the run claim below is: the sheet's plan was read once, and execute in `pr` mode
@@ -557,7 +605,7 @@ export class AgentsService {
     // for a remote launch too (the plan's "Base proof" decision): the server never fetches, and the PR the remote opens targets the shared repo's branch.
     const base = finish === 'pr' ? await proveBaseBranch(req.base, item.projectPath) : '';
 
-    const spawned = await this.spawnInProject(item.projectPath, {
+    const spawned = await this.launchInProject(item.projectPath, {
       // An execute's or groom's body is the sheet's text as sent and the clause follows it, built from `finish`, the proved `base` and the two validated
       // booleans alone — see composePrompt's note on why the clause is not in the editable body. A groom body from a tab that predates the move still ends
       // in `COMMIT_RULE`, so one trailing copy is stripped first: the in-place clause puts the same bytes back, and a PR finish does not end up with a
@@ -571,8 +619,12 @@ export class AgentsService {
       effort: req.effort,
       remoteControl: req.remoteControl,
       machine: m,
-      remotePath
+      remotePath,
+      surface: req.surface
     });
+    // A desktop launch ends here. It has no session id — the app mints its own — so there is nothing to remember: abort and the holder claim key on the id
+    // a dispatch record stores, and the session is the app's to stop. And it is home-only (above), so there is no remote starting entry to mark.
+    if (spawned.surface === 'desktop') return spawned;
     // #225 — remembered, because this id is the one the spawned session claims its issue under (`claude -p --session-id`), and without it nothing on
     // the board can later tell "the board started the session holding this claim" from "somebody at a terminal did". Only after a spawn that came
     // back with an id: a refused spawn started nothing to remember.
@@ -603,20 +655,17 @@ export class AgentsService {
    * one literal for both, in the same order, so the two can never drift into differently shaped requests. The caller has already 400'd a remote model or
    * effort outside the machine's lists, so `pickFrom` against those lists only ever keeps a pick or fills the default here.
    */
-  async spawnInProject(
-    projectPath: string,
-    opts: {
-      prompt: string;
-      name: string;
-      permissionMode: string;
-      maxPermission: PermissionMode | null;
-      model?: unknown;
-      effort?: unknown;
-      remoteControl: boolean;
-      machine?: Machine;
-      remotePath?: string;
-    }
-  ): Promise<AgentDispatchResult> {
+  async spawnInProject(projectPath: string, opts: LaunchOpts): Promise<AgentDispatchResult> {
+    return headless(await this.launchInProject(projectPath, opts));
+  }
+
+  /**
+   * `spawnInProject` with a `surface`: item dispatch's call, the one launch that may open in the desktop app and so the one caller that must handle an
+   * answer with no session id. `surface` is put on the spawn body exactly as it came — absent stays absent, so a launch from a sheet that drew no control
+   * is byte-identical to one from before it existed. On `desktop` the dashboard ignores name, model, effort, permission mode and remote control; they are
+   * still sent, because the dashboard is the one that decides what a desktop launch reads, and an old client's fields must not break it.
+   */
+  async launchInProject(projectPath: string, opts: LaunchOpts & { surface?: LaunchSurface }): Promise<ItemDispatchResult> {
     const remote = opts.machine !== undefined && !opts.machine.home ? opts.machine : null;
     const cfg = remote === null ? readAgentsConfig() : remote.cfg;
     const map = remote === null ? await this.dashboardStatus.projectMap(cfg) : await this.dashboardStatus.projectMap(cfg, REMOTE_BUDGET.managementMs);
@@ -631,7 +680,7 @@ export class AgentsService {
       throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
     }
 
-    return this.spawn(cfg, {
+    return this.launch(cfg, {
       project: dirName,
       prompt: opts.prompt,
       name: opts.name,
@@ -646,7 +695,8 @@ export class AgentsService {
       effort: pickFrom(opts.effort, remote === null ? EFFORTS : remote.efforts),
       // Strictly `=== true`, matching the dashboard's own parse rule for this
       // field: anything else means off.
-      remoteControl: opts.remoteControl === true
+      remoteControl: opts.remoteControl === true,
+      ...(opts.surface === undefined ? {} : { surface: opts.surface })
     });
   }
 
@@ -1581,6 +1631,16 @@ export class AgentsService {
    * not multiply into two slightly different tellings of the same call.
    */
   private async spawn(cfg: AgentsConfig, spawnBody: Record<string, unknown>): Promise<AgentDispatchResult> {
+    return headless(await this.launch(cfg, spawnBody));
+  }
+
+  /**
+   * `spawn` with the dashboard's whole answer: a headless launch's id, or `{ surface: 'desktop' }` for a body that asked for the desktop app and was
+   * answered that way. Only `launchInProject` calls it directly; every other launch goes through `spawn`, whose `headless` turns a desktop answer it never
+   * asked for into the 502 a missing id always was.
+   */
+  private async launch(cfg: AgentsConfig, spawnBody: Record<string, unknown>): Promise<ItemDispatchResult> {
+    const desktop = spawnBody.surface === 'desktop';
     // Only the call itself is inside the try — deliberately not the `json()`
     // read or the two `throw`s below it. Those already map their own failure
     // to a status this app chose, and pulling them in here would re-map their
@@ -1608,12 +1668,15 @@ export class AgentsService {
       throw new HttpException({ error: dashboardError(e, 'the dashboard spawn call', SPAWN_TIMEOUT_MS) }, 502);
     }
 
-    const body = (await res.json().catch(() => null)) as { sessionId?: unknown; error?: unknown } | null;
+    const body = (await res.json().catch(() => null)) as { sessionId?: unknown; surface?: unknown; error?: unknown } | null;
     if (!res.ok) {
       // Verbatim. The dashboard's rejections are short and specific ("too many
       // launches in flight", "unknown project: …"); paraphrasing them would
       // only lose the one detail the reader needs.
-      const error = typeof body?.error === 'string' ? body.error : `spawn answered ${res.status}`;
+      const relayed = typeof body?.error === 'string' ? body.error : `spawn answered ${res.status}`;
+      // A desktop launch's refusals are the one exception to "verbatim": the dashboard's are codes for its own form (`open failed`), and here would read
+      // as the board's failure — `desktopSpawnError` says why, and relays anything it does not name unchanged.
+      const error = desktop ? desktopSpawnError(res.status, relayed) : relayed;
       // The message is verbatim; the status is not, because the number alone
       // can lie about whose fault it is. A dashboard 401 would mean OUR
       // BM_AGENTS_TOKEN is wrong, not that the browser's own request failed to
@@ -1624,6 +1687,9 @@ export class AgentsService {
       const httpStatus = res.status >= 400 && res.status < 500 ? res.status : 502;
       throw new HttpException({ error }, httpStatus);
     }
+    // Only a body that asked for the desktop app may come back without an id. A dashboard from before desktop launches ignores `surface` and answers a
+    // bare `{ sessionId }` — a headless session really did start, so it is reported as one (and recorded by dispatch), not dressed up as a desktop launch.
+    if (desktop && body?.surface === 'desktop' && typeof body.sessionId !== 'string') return { surface: 'desktop' };
     if (typeof body?.sessionId !== 'string') {
       throw new HttpException({ error: 'spawn returned no session id' }, 502);
     }

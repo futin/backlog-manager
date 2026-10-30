@@ -6,6 +6,8 @@ import type {
   AgentsStatus,
   ExecuteFinish,
   ItemAbortResult,
+  ItemDispatchResult,
+  LaunchSurface,
   MergeCheckResult,
   OrchestratorArchivePayload,
   OrchestratorArchiveRun,
@@ -144,8 +146,9 @@ export async function fetchAgentPlan(itemPath: string): Promise<AgentPlan> {
   );
 }
 
-export async function dispatchAgent(req: AgentDispatchRequest): Promise<AgentDispatchResult> {
-  return unwrap<AgentDispatchResult>(
+/** A headless launch's `{ sessionId }`, or `{ surface: 'desktop' }` — which carries no id, so a caller narrows on `surface` before reading one. */
+export async function dispatchAgent(req: AgentDispatchRequest): Promise<ItemDispatchResult> {
+  return unwrap<ItemDispatchResult>(
     await fetch('/api/agents/dispatch', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -439,6 +442,12 @@ export const EFFORT_OPTIONS: { value: string; label: string }[] = [{ value: '', 
  */
 const EXECUTE_FINISH_LABELS: Record<ExecuteFinish, string> = { 'in-place': 'In place', pr: 'PR' };
 export const EXECUTE_FINISH_OPTIONS: { value: ExecuteFinish; label: string }[] = EXECUTE_FINISHES.map((f) => ({ value: f, label: EXECUTE_FINISH_LABELS[f] }));
+
+/** The launch sheet's Dashboard | Desktop control, in the dashboard launch form's own order and words. */
+export const LAUNCH_SURFACE_OPTIONS: { value: LaunchSurface; label: string }[] = [
+  { value: 'dashboard', label: 'Dashboard' },
+  { value: 'desktop', label: 'Desktop' }
+];
 
 /**
  * The model and effort a launch body carries, as spreadable fields: the key is ABSENT for the `default` option rather than present-and-empty, which is the
