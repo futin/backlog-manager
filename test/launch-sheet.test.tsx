@@ -834,3 +834,86 @@ describe('LaunchSheet', () => {
     expect(screen.queryByText(/takes over a stale claim/)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * The Dashboard | Desktop control (claude-agents-dashboard's desktop-launch spec, decision 7). Drawn only when the plan carries `launchSurface`, which the
+ * server sets only for an execute or a groom while home's dashboard says `desktopAvailable`; preselected from it; hidden, with no `surface` sent, on a remote
+ * machine. Under Desktop the four fields the app ignores are disabled with a line saying so, and the answer, which has no session id, is told apart from a
+ * headless one.
+ */
+describe('open in', () => {
+  const dispatched = async (calls: { url: string; body: unknown }[]): Promise<Record<string, unknown>> => {
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/dispatch'))).toBe(true));
+    return calls.find((c) => c.url.endsWith('/dispatch'))?.body as Record<string, unknown>;
+  };
+  const ignored = () => [
+    screen.getByLabelText('Permission mode'),
+    screen.getByLabelText('Model'),
+    screen.getByLabelText('Effort'),
+    screen.getByRole('switch', { name: 'remote control' })
+  ];
+  const NOTE = 'The desktop app uses its own permission mode, model and effort — these and remote control do not apply.';
+
+  it('draws nothing and sends no surface when the plan offers no choice', async () => {
+    const calls = stub({});
+    await openSheet();
+    expect(screen.queryByRole('group', { name: 'Open in' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'launch' }));
+    expect(await dispatched(calls)).not.toHaveProperty('surface');
+  });
+
+  it('preselects Desktop from the plan, disables what the app ignores, and says where the session went', async () => {
+    const calls = stub({ plan: { ...PLAN, launchSurface: 'desktop' }, dispatch: { ok: true, body: { surface: 'desktop' } } });
+    renderSheet({ item: ITEM, onClose: () => {} });
+    const open = await screen.findByRole('button', { name: 'open in desktop' });
+    await waitFor(() => expect(open).toBeEnabled());
+    expect(screen.getByRole('button', { name: 'Desktop' })).toHaveAttribute('aria-pressed', 'true');
+    for (const el of ignored()) expect(el).toBeDisabled();
+    expect(screen.getByText(NOTE)).toBeInTheDocument();
+
+    await userEvent.click(open);
+    expect((await dispatched(calls)).surface).toBe('desktop');
+    expect(await screen.findByText('Opened in the desktop app')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /open in dashboard/ })).not.toBeInTheDocument();
+  });
+
+  it('preselects Dashboard from the plan, and a switch either way follows the pick', async () => {
+    const calls = stub({ plan: { ...PLAN, launchSurface: 'dashboard' } });
+    await openSheet();
+    expect(screen.getByRole('button', { name: 'Dashboard' })).toHaveAttribute('aria-pressed', 'true');
+    for (const el of ignored()) expect(el).toBeEnabled();
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Desktop' }));
+    for (const el of ignored()) expect(el).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'open in desktop' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Dashboard' }));
+    for (const el of ignored()) expect(el).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'launch' }));
+    expect((await dispatched(calls)).surface).toBe('dashboard');
+    expect(await screen.findByRole('link', { name: /open in dashboard/ })).toBeInTheDocument();
+  });
+
+  it('hides the control and sends no surface on a remote machine', async () => {
+    const calls = stub({ plan: { ...PLAN, launchSurface: 'desktop' }, offers: proSuggested(), branches: ['main'] });
+    renderSheet({ item: ITEM, onClose: () => {} });
+    const start = await screen.findByRole('button', { name: 'Start on Pro' });
+    await waitFor(() => expect(start).toBeEnabled());
+    expect(screen.queryByRole('group', { name: 'Open in' })).not.toBeInTheDocument();
+    for (const el of ignored()) expect(el).toBeEnabled();
+    await userEvent.click(start);
+    const body = await dispatched(calls);
+    expect(body.machine).toBe('Pro');
+    expect(body).not.toHaveProperty('surface');
+  });
+
+  it('draws the control again, still on its pick, when the person switches back to home', async () => {
+    stub({ plan: { ...PLAN, launchSurface: 'desktop' }, offers: proSuggested(), branches: ['main'] });
+    renderSheet({ item: ITEM, onClose: () => {} });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+    await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+    expect(screen.getByRole('button', { name: 'Desktop' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'open in desktop' })).toBeInTheDocument();
+  });
+});

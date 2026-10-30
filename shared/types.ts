@@ -1088,6 +1088,10 @@ export interface AgentsStatus {
   projectPaths: string[];
   /** Why `reachable` is false. Rendered verbatim in Settings. */
   error?: string;
+  /** The dashboard's `desktopAvailable`, see `MachineHealth`. */
+  desktopAvailable?: true;
+  /** The dashboard's `launchSurfaceDefault`, see `MachineHealth`. */
+  launchSurfaceDefault?: LaunchSurface;
 }
 
 /**
@@ -1116,7 +1120,20 @@ export interface AgentPlan {
    * minutes stale — the sheet renders this instead of a Launch button.
    */
   blocked?: string;
+  /**
+   * Present only when this launch may open in the Claude desktop app instead of the dashboard's headless `claude`: the item's step is an execute or a groom,
+   * and HOME's dashboard says `desktopAvailable`. Its value is that dashboard's `launchSurfaceDefault`, which the sheet's Dashboard | Desktop control
+   * preselects. Absent, the sheet draws no control and sends no `surface`. The sheet also hides it once a remote machine is picked: `desktopAvailable`
+   * describes the Mac that answered, and only home's dashboard is asked (see `AgentDispatchRequest.surface`).
+   */
+  launchSurface?: LaunchSurface;
 }
+
+/**
+ * Where a launch runs: the dashboard's own headless `claude -p`, or a session the Claude desktop app starts from the `claude://code/new` link the dashboard
+ * opens on its Mac. The dashboard's own type, mirrored (`claude-agents-dashboard` `shared/types.ts`); this board builds no `claude://` link itself.
+ */
+export type LaunchSurface = 'dashboard' | 'desktop';
 
 /** Body of `POST /api/agents/dispatch`. */
 export interface AgentDispatchRequest {
@@ -1154,12 +1171,29 @@ export interface AgentDispatchRequest {
    */
   machine?: string;
   remoteControl: boolean;
+  /**
+   * Where the session opens — sent only when the sheet drew its Dashboard | Desktop control (`AgentPlan.launchSurface`), and forwarded to the dashboard's
+   * `POST /api/spawn` as it came. Absent is a dashboard launch and a spawn body without the key, byte for byte what it was before the control existed.
+   * `desktop` is legal only for an execute or a groom on the home machine (a 400 otherwise), and only while home's dashboard says `desktopAvailable` (a 409).
+   */
+  surface?: LaunchSurface;
 }
 
-/** 201 body of `POST /api/agents/dispatch` — the dashboard's minted session id. */
+/**
+ * 201 body of a headless launch — the dashboard's minted session id. Every launch but a desktop item dispatch answers this: orchestrate, resume, abort and the
+ * Jira Run never send a `surface`. `surface` is never present on the wire; it is typed so `ItemDispatchResult` can be narrowed on it.
+ */
 export interface AgentDispatchResult {
   sessionId: string;
+  surface?: 'dashboard';
 }
+
+/**
+ * 201 body of `POST /api/agents/dispatch`: a headless launch's `{ sessionId }`, or `{ surface: 'desktop' }` for a launch the desktop app took. That one
+ * carries no id — the app mints its own — so the board records no dispatch for it (abort and the holder claim key on the id) and the sheet says where it
+ * went instead of linking to a session.
+ */
+export type ItemDispatchResult = AgentDispatchResult | { surface: 'desktop' };
 
 /**
  * Body of `POST /api/agents/orchestrate` (Task 9), as the client composes it — the board's "drain the queue" call: one project, no item, no caller-supplied
@@ -2318,6 +2352,13 @@ export interface MachineHealth {
   spawnMaxPermission: PermissionMode | null;
   /** Why `reachable` is false. Rendered verbatim. */
   error?: string;
+  /**
+   * The dashboard's own `desktopAvailable`: its Mac can open the Claude desktop app. **Absent, never `false`** — the dashboard's own encoding for a flag an
+   * older build does not send — so a dashboard from before desktop launches reads exactly as one that says no. It describes only the Mac that answered.
+   */
+  desktopAvailable?: true;
+  /** The dashboard's `launchSurfaceDefault` (its Shared setting), when it sent a known one. Only ever a preselection; see `AgentPlan.launchSurface`. */
+  launchSurfaceDefault?: LaunchSurface;
 }
 
 /** One machine's health plus its usage and how old that usage is; `usage` is `null` past the freshness limit, `usageAgeMs` is `null` only when never obtained. */

@@ -7,7 +7,7 @@ import { WatchdogService } from './watchdog.service';
 import { StartingRunsService } from '../orchestrator/starting-runs.service';
 import { RemoteStartingService } from '../orchestrator/remote-starting.service';
 import { isAgentAction } from '../../../shared/agent';
-import type { AgentBranchesPayload, AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, MergeCheckResult, PauseResult, StopResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
+import type { AgentBranchesPayload, AgentDispatchRequest, AgentDispatchResult, AgentPlan, ItemDispatchResult, AgentsStatus, MergeCheckResult, PauseResult, StopResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 
 /**
  * Under /api like every other controller — test/vite-proxy.test.ts asserts it
@@ -65,7 +65,7 @@ export class AgentsController {
    */
   @UseGuards(SameOriginPostGuard)
   @Post('dispatch')
-  dispatch(@Body() body: Partial<AgentDispatchRequest> | undefined): Promise<AgentDispatchResult> {
+  dispatch(@Body() body: Partial<AgentDispatchRequest> | undefined): Promise<ItemDispatchResult> {
     const itemPath = typeof body?.itemPath === 'string' ? body.itemPath.trim() : '';
     if (itemPath === '') throw new HttpException({ error: 'itemPath is required' }, 400);
     // `isAgentAction` (shared/agent.ts), not a hand-written comparison chain:
@@ -100,7 +100,10 @@ export class AgentsController {
       // Unvalidated here as well: which machines exist is the settings file's answer, read per request by the service (`unknown machine "<x>"`). Absent is
       // home, and the client omits it for home, so a home launch reaches the service exactly as it did before multi-dashboard.
       machine: body.machine,
-      remoteControl: body.remoteControl === true
+      remoteControl: body.remoteControl === true,
+      // Unvalidated here too: the service refuses a value outside the two surfaces, a desktop pick on anything but an execute or a groom, on a remote
+      // machine, or while home's dashboard offers no desktop app — it holds the action and the machine, which this shape check does not.
+      surface: body.surface
     });
   }
 
