@@ -164,6 +164,16 @@ describe('pullRefs — the issue numbers a PR body names after a keyword', () =>
   it('answers nothing for a null body', () => {
     expect(pullRefs(null)).toEqual([]);
   });
+
+  // `owner/name#n` names another repo's issue, which no cache here holds (#428).
+  it.each([
+    ['Closes other/repo#12', []],
+    ['Refs other/repo#12', []],
+    ['Closes other/repo#13 and closes #12', [12]],
+    ['Closes other/repo#12 and closes #12', [12]]
+  ])('reads same-repo references only: %j → %j', (body, expected) => {
+    expect(pullRefs(body)).toEqual(expected);
+  });
 });
 
 describe('the PR index', () => {
@@ -260,6 +270,49 @@ describe('reviewLifted', () => {
     ]);
     await p.tick();
     expect(p.reviewLifted('futin/x', 266)).toBe(true);
+    p.disarm();
+  });
+
+  // Same closed_at, so the PR number alone decides. Each case runs in both row orders, so a tie left to the Map's insertion order fails one of them (#428).
+  const TIED = '2026-10-01T00:00:00Z';
+
+  it.each([
+    ['#5 then #9', [5, 9]],
+    ['#9 then #5', [9, 5]]
+  ])('a tie on closed_at goes to the higher PR number: #9 merged into main lifts (%s)', async (_order, numbers) => {
+    const rows = { 5: pr(5, 'Refs #266', null, 'closed', TIED), 9: pr(9, 'Refs #266', TIED) } as Record<number, unknown>;
+    const { poller: p } = poller([
+      ['/pulls/9', pull(9, 'main')],
+      ['/issues?', { status: 200, body: [issue(266), ...numbers.map((n) => rows[n])] }]
+    ]);
+    await p.tick();
+    expect(p.reviewLifted('futin/x', 266)).toBe(true);
+    p.disarm();
+  });
+
+  it.each([
+    ['#5 then #9', [5, 9]],
+    ['#9 then #5', [9, 5]]
+  ])('a tie on closed_at goes to the higher PR number: #9 closed unmerged does not lift (%s)', async (_order, numbers) => {
+    const rows = { 5: pr(5, 'Refs #266', TIED), 9: pr(9, 'Refs #266', null, 'closed', TIED) } as Record<number, unknown>;
+    const { poller: p, calls } = poller([
+      ['/pulls/5', pull(5, 'main')],
+      ['/issues?', { status: 200, body: [issue(266), ...numbers.map((n) => rows[n])] }]
+    ]);
+    await p.tick();
+    expect(p.reviewLifted('futin/x', 266)).toBe(false);
+    expect(pullCalls(calls)).toHaveLength(0);
+    p.disarm();
+  });
+
+  it('is false when the merged PR references the same number in another repo', async () => {
+    const { poller: p, calls } = poller([
+      ['/pulls/362', pull(362, 'main')],
+      ['/issues?', { status: 200, body: [issue(266), pr(362, 'Closes other/repo#266', MERGED)] }]
+    ]);
+    await p.tick();
+    expect(p.reviewLifted('futin/x', 266)).toBe(false);
+    expect(pullCalls(calls)).toHaveLength(0);
     p.disarm();
   });
 

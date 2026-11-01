@@ -572,7 +572,7 @@ test('git worktree remove: ignored build output alone removes cleanly, and a fai
   // The two assumptions the §9 prose rests on, measured rather than asserted,
   // because the prose tells an unattended session which commands are pointless
   // (`--force`, `prune`) in a state it cannot inspect afterwards.
-  if (process.getuid?.() === 0) return; // root ignores the 0555 bit the second case needs
+  if (process.getuid?.() === 0) return t.skip('root ignores the 0555 bit the second case needs');
 
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-wt-')));
   const repo = path.join(root, 'main');
