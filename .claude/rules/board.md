@@ -57,8 +57,9 @@ paths: ["client/src/**"]
   `GET /api/jira` says configured.** `jira` sits in `SECTIONS` (`lib/sections.ts`) between `github` and `runs` UNCONDITIONALLY — `resolveLegacySection`
   (`lib/source-page.ts`) runs in a `useState` initializer, before the status exists — and the conditional half is the shell's alone. `SideRail`'s `drawn` skips
   the row unless the shell's one `useJira` (`JiraProvider`) says `configured: true`, or the status is unknown (`data` null) while `jira` is the section on
-  screen. `App`'s hold-and-fall effect moves a `jira` section, through `change`, on `configured === false` and on nothing else — to `firstDrawn`
-  (`lib/sources.ts`) of the projects answer, or to the provisional `FALLBACK_SECTION` while that answer is unknown, for the settle to correct; unknown holds,
+  screen. `App`'s hold-and-fall effect moves a `jira` section on `configured === false` and on nothing else — through `change` to `firstDrawn`
+  (`lib/sources.ts`) of the projects answer, or, unwritten, to the provisional `FALLBACK_SECTION` while that answer is unknown, for the settle to correct;
+  unknown holds,
   drawn in `JiraView`'s `loading…` or `Jira unavailable` shape. The page is `JIRA_PAGES` (`board | setup`), `JIRA_PAGE_KEY` and `isJiraPage` in
   `lib/jira-page.ts`, held by `hooks/useJiraPage.ts` — `useRunsMode`'s module store, because the rail's `RailTree` and the in-page links are two mounted
   writers. The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
@@ -72,7 +73,8 @@ paths: ["client/src/**"]
   on a failure, and its `drawn` (`drawnSources`, `lib/sources.ts`) is `null` while unknown. `sourceSectionOf` puts `github` under GitHub and `files`,
   `unsupported` and a null source under Files — display grouping only, never a source of its own. `SideRail`'s `drawn` takes a source row when `drawn[id]` is
   true, or while the answer is unknown and that section is on screen and not `provisional`. `resolveLegacySection` (`lib/source-page.ts`) maps a stored
-  `board`/`archive` to `github` with that page and anything unrecognised to `FALLBACK_SECTION` (`github`) with none, both provisional. `App` moves nothing while
+  `board`/`archive` to `github` with that page and anything unrecognised to `FALLBACK_SECTION` (`github`) with none, both provisional, and neither written to
+  the section key, which only `writeSection` writes: a pick, a deep link or a settle (#401). `App` moves nothing while
   `drawn` is null; once it is known a provisional landing settles once, through `change` (`settleSection` for a page-named one, `firstDrawn` — Files, then
   GitHub, else Runs — otherwise), a legacy pin (`useSettings().legacyLanding`, the raw `board`/`archive`) is rewritten by its own effect on `[drawn,
   legacyLanding]` with `update({ landing: settleSection('github', drawn) })` — never through `pending`, which a deep link or a click clears — while

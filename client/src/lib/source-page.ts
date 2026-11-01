@@ -35,8 +35,8 @@ export function isGithubPage(v: unknown): v is GithubPage {
 
 /**
  * Where an unrecognised, absent or legacy section lands BEFORE the projects answer exists (spec, Fallback). A constant, because it is read in the shell's
- * `useState` initializer and as the section key's persisted default, both before any answer; and GitHub, because today's Board is GitHub › Board. It is a
- * provisional landing either way: the shell settles it on the first projects answer, so a machine with no GitHub project never stays on it.
+ * `useState` initializer, before any answer; and GitHub, because today's Board is GitHub › Board. It is a provisional landing either way: the shell settles
+ * it on the first projects answer, so a machine with no GitHub project never stays on it, and it is never written to the section key (#401).
  */
 export const FALLBACK_SECTION: Section = 'github';
 

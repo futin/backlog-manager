@@ -20,7 +20,6 @@ import { setFilesPage, setGithubPage, useFilesPage, useGithubPage } from './hook
 import { TrackersProvider } from './hooks/TrackersContext';
 import { TimeZoneProvider } from './hooks/TimeZoneContext';
 import { useNarrow } from './hooks/useNarrow';
-import { usePersistedState } from './hooks/usePersistedState';
 import { setRunsMode } from './hooks/useRunsMode';
 
 // Lazy: each section's chunk loads only when it is opened.
@@ -32,7 +31,7 @@ const SettingsView = lazy(() => import('./components/settings/SettingsView'));
 const GithubSettingsView = lazy(() => import('./components/github/GithubSettingsView'));
 const PullRequestsView = lazy(() => import('./components/github/PullRequestsView'));
 
-/** The stored section's key. Read raw once, in the shell's initializer, as well as through `usePersistedState` — see `readRaw`. */
+/** The stored section's key. Read raw once, in the shell's initializer (`readRaw`), and written only by `writeSection`. */
 const SECTION_KEY = 'backlog-manager.section';
 
 /**
@@ -42,8 +41,8 @@ const SECTION_KEY = 'backlog-manager.section';
 export const RELEASES_LAST_SEEN_KEY = 'backlog-manager.releases-last-seen';
 
 /**
- * A stored value exactly as some build wrote it, or `undefined` when the key is absent or unreadable. The initializer needs the difference `usePersistedState`
- * hides: that hook answers an absent key with its fallback, and an absent key is a PROVISIONAL landing (nothing was chosen) where a stored `github` is not.
+ * A stored value exactly as some build wrote it, or `undefined` when the key is absent or unreadable. The initializer needs the difference a fallback would
+ * hide: an absent key is a PROVISIONAL landing (nothing was chosen) where a stored `github` is not.
  * The same is true of the `landing` pin, which `clampSettings` has already mapped from a legacy `board`/`archive` to `github` by the time `useSettings`
  * hands it over — so a real `github` pin and a legacy one are told apart only here, on the raw blob.
  */
@@ -53,6 +52,18 @@ function readRaw(key: string): unknown {
     return raw ? (JSON.parse(raw) as unknown) : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Records a section the reader picked or a landing settled on. A plain write, called only at those moments, rather than `usePersistedState`, whose mount effect
+ * writes its fallback when the key is absent: that stored a guessed `github` as if it were a pick, and the next load held it instead of settling it (#401).
+ */
+function writeSection(s: Section): void {
+  try {
+    localStorage.setItem(SECTION_KEY, JSON.stringify(s));
+  } catch {
+    /* ignore: private mode / quota */
   }
 }
 
@@ -90,13 +101,12 @@ export function App() {
  */
 function AppShell() {
   const { settings, update, legacyLanding } = useSettings();
-  // Remembered across loads: reopening on the section you left is what you want
-  // from a board you come back to.
-  const [, setStored] = usePersistedState<Section>(SECTION_KEY, FALLBACK_SECTION);
   /*
+    The section is remembered across loads (`writeSection`): reopening on the section you left is what you want from a board you come back to.
+
     A `landing` other than 'last' pins the opening section. Resolved once, in the
     initializer, so there is no flash of the previously-open section — and only
-    the *initial* value, never the stored one: `stored` keeps recording every
+    the *initial* value, never the stored one: the key keeps recording every
     change underneath, so switching the setting back to 'last' finds a real last
     section rather than whatever was current when the override was turned on.
 
@@ -162,10 +172,10 @@ function AppShell() {
     if (link.settingsScope !== null) update({ settingsScope: link.settingsScope });
   }, []);
   // Recorded as a click on the rail would record it, and taken out of the address bar so a reload inside the app reopens where the reader has gone since.
-  // Mount only: `link` never changes, and `setStored` is a fresh closure every render.
+  // Mount only: `link` never changes.
   useEffect(() => {
     if (link.section === null) return;
-    setStored(link.section);
+    writeSection(link.section);
     const { pathname, search, hash } = window.location;
     window.history.replaceState(window.history.state, '', withoutDeepLink(pathname, search, hash));
   }, []);
@@ -177,22 +187,29 @@ function AppShell() {
     in the shell would double the requests on all three pages to learn what the page on screen already knows. `undefined` is "nobody has said" — Settings,
     which polls nothing, and any view before its first report — and the rail reads it as not working.
 
-    A view that unmounts reports nothing on its way out, so a report has to be dropped for it. `change` does that on a section CHANGE, so a Board that
+    A view that unmounts reports nothing on its way out, so a report has to be dropped for it. The effect below does that on a VIEW change, so a Board that
     said `true` neither blinks the cursor over Settings nor comes back with the Board before the new mount has said anything — and only on a change: a
-    click on the section already open (the rail's own row, a Runs tree pick) leaves the view mounted, its report effect has no reason to run again, and
-    resetting there would stand the cursor solid over a run that is still working. Every report also carries the section that made it, read back only
-    while that section is open, because the reset alone can lose a race: a poll that landed just before the click leaves the old view's report effect
-    pending, React flushes it after the click's own update is queued, and the old view's `true` lands on top of the reset. Tagged, it lands and is
-    ignored.
+    click on the view already open (the rail's own row, a Runs tree pick) leaves it mounted, its report effect has no reason to run again, and resetting
+    there would stand the cursor solid over a run that is still working. Every report also carries the view that made it, read back only while that view
+    is open, so an old view's report never shows on the one commit between the switch and the reset.
   */
   /*
-    Since the source rows a report is tagged by VIEW — the section, and for a source section its page — not by section alone: GitHub › Board and
-    GitHub › Archive are one section now, and a pick in the GitHub tree swaps the view without a section change, so `change` has no reset to make there.
-    The tag is what keeps the Board's last `true` from standing over the Archive that replaced it.
+    A report is tagged by VIEW — the section, and for a source section its page — not by section alone: GitHub › Board and GitHub › Archive are one
+    section, and a pick in the GitHub tree swaps the view without a section change. The tag alone was not enough: it hides the Board's last `true` while a
+    page that reports nothing is open, but that `true` is still there, under the Board's own tag, when the tree brings a new Board back (#401).
   */
   const view = section === 'files' ? `files:${filesPage}` : section === 'github' ? `github:${githubPage}` : section;
   const [pulse, setPulse] = useState<{ view: string; working: boolean } | null>(null);
   const working = pulse !== null && pulse.view === view ? pulse.working : undefined;
+  /*
+    Conditional, because a view's report effect runs BEFORE this one, the parent's, in the same commit: an unconditional `setPulse(null)` would wipe the new
+    view's own first report, and `useReportWorking` keys on the boolean, so it would never say it again. Being an effect also settles the race with the OLD
+    view: a poll that landed just before the switch leaves that view's report effect pending, React flushes it ahead of the switch's render, and it lands
+    before this runs.
+  */
+  useEffect(() => {
+    setPulse((p) => (p !== null && p.view !== view ? null : p));
+  }, [view]);
   // One stable callback per reporting view: the views' report effect lists `onWorking` as a dependency, and an inline arrow would re-run it on
   // every render of this shell.
   const report = useMemo(() => {
@@ -210,10 +227,9 @@ function AppShell() {
   // A section the reader (or a link, or the shell's own fall) moved to is never provisional: clearing `pending` here is what keeps a click made before the
   // first projects answer from being yanked back to wherever the settle below would have put the guess.
   const change = (s: Section): void => {
-    if (s !== section) setPulse(null);
     intent.current = { section: s, pending: null };
     setSection(s);
-    setStored(s);
+    writeSection(s);
     setPending(null);
   };
 
@@ -230,7 +246,7 @@ function AppShell() {
       last files project unregistered. Keyed on the state, like the Jira fall, so a focus reload that drops the row is the same case as a first answer that
       never had it.
 
-    `change` is left out of the dependencies for the Jira fall's reason: a fresh closure every render, reading the values listed.
+    `change` is left out of the dependencies for the Jira fall's reason: a fresh closure every render, reading no value of its own.
   */
   const drawn = useProjectsContext().drawn;
   useEffect(() => {
@@ -258,8 +274,9 @@ function AppShell() {
   /*
     The Jira section's hold-and-fall (Jira phase 2, spec §6.1). `resolveLegacySection` takes a stored `jira` like any section — it runs in the initializer
     above, long before `GET /api/jira` has answered — so whether Jira is really there is decided here, on the status, and only one answer decides it: an answer
-    that says `configured: false` while Jira is the section moves the shell to the first drawn source row (Runs when there is none; the provisional GitHub,
-    settled by the effect above, while the projects answer is unknown), through `change`, so the section key records it too. Nothing else moves it. While the
+    that says `configured: false` while Jira is the section moves the shell to the first drawn source row (Runs when there is none), through `change`, so the
+    section key records it too — or, while the projects answer is unknown, to the provisional GitHub the effect above settles, which is a guess and is not
+    recorded: the key keeps `jira` until the settle writes a real section. Nothing else moves it. While the
     status is unknown (not answered yet, or every read so far failed: `data` null) the section is HELD, drawn in `JiraView`'s loading or unavailable shape, and
     the rail keeps its row — a network blip at load must not throw away the section a reader left on a configured machine (Review Focus 5). A failure after a
     `configured: true` keeps that answer (`useJira` keeps the last payload), so it holds as well.
@@ -267,7 +284,7 @@ function AppShell() {
     Keyed on the STATE (`configured === false` with `jira` current) rather than on a remembered previous value: it fires on the transition into
     `configured: false`, which is the case the spec names, and also covers the one other way the pair could arise — a `change('jira')` landing while the
     status already says unconfigured — where falling is equally right, since the rail draws no row there to stand on. `change` is left out of the
-    dependencies: it is a fresh closure every render, and the two values it reads are the two listed.
+    dependencies: it is a fresh closure every render, reading no value of its own.
 
     A `landing: 'jira'` preference takes the same fall: it seeds the initializer exactly as a stored section does, and the preference itself is left as
     set — the machine may get its credentials back.
@@ -279,10 +296,11 @@ function AppShell() {
       change(firstDrawn(drawn));
       return;
     }
-    // No projects answer yet: land on the provisional fallback, exactly as an absent stored section would, and let the settle above correct it.
-    change(FALLBACK_SECTION);
+    // No projects answer yet: land on the provisional fallback, exactly as an absent stored section would, and let the settle above correct it. Not through
+    // `change`, which would write the guess to the section key (#401).
     const fallback = { page: null };
     intent.current = { section: FALLBACK_SECTION, pending: fallback };
+    setSection(FALLBACK_SECTION);
     setPending(fallback);
   }, [jiraConfigured, section]);
 

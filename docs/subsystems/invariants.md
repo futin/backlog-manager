@@ -3421,7 +3421,8 @@ source it does not have. So `SettingsProvider` treats the clamp's alias as read-
 `board`/`archive` through — and the pin settles on its own effect, keyed on the provider's `legacyLanding` and the answer, never on the provisional section
 (#399): a deep link, an early click and a failed read followed by a click each end the section's guess, and once the pin rode on that guess's lifetime all
 three left it unsettled. A click made before the answer clears the provisional mark, so the settle never yanks a reader back. An old `?section=board` deep link names no section
-and is ignored, like any unknown one.
+and is ignored, like any unknown one. The guess is never written to the section key (#401): stored, it would read as a real section on the next load, so a
+load whose projects read never answered would leave the next one holding a GitHub row instead of settling it.
 
 `Opens on` offers Files and GitHub under the same answer (`landingOptions`), keeping a stored pin's option so a native select never shows a value with no
 option; the pin itself takes the fall at load.
