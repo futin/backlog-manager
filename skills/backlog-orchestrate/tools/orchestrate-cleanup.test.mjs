@@ -194,7 +194,7 @@ test('cleanup 3b (remove-then-verify, real directories): a finished delete is pr
   assert.equal(fs.existsSync(half), false);
   assert.deepEqual(orch.finishFailedDelete(half), { gone: true, error: null }, 'an already-absent path is already finished');
 
-  if (process.getuid?.() === 0) return; // root ignores the 0555 bit the survivor needs
+  if (process.getuid?.() === 0) return t.skip('root ignores the 0555 bit the survivor needs');
   const locked = path.join(dir, 'locked');
   fs.mkdirSync(path.join(locked, 'inner'), { recursive: true });
   fs.writeFileSync(path.join(locked, 'inner', 'file.txt'), 'x\n');
@@ -206,7 +206,7 @@ test('cleanup 3b (remove-then-verify, real directories): a finished delete is pr
 });
 
 test('cleanup 3c: a delete git cannot finish, run for real — unregistered, the directory survives, the entry quotes the error, the branch still goes', (t) => {
-  if (process.getuid?.() === 0) return; // root ignores the 0555 bit that makes git's delete fail
+  if (process.getuid?.() === 0) return t.skip('root ignores the 0555 bit that makes git’s delete fail');
   const fx = mergedFixture(t, { touches: ['locked/file.txt'] });
   const tree = path.join(fx.project, '.worktrees', CL_ID);
   // Tracked and unmodified, so git's clean check passes; the 0555 directory is what the delete cannot finish — and what `rm`
@@ -230,6 +230,31 @@ test('cleanup 3c: a delete git cannot finish, run for real — unregistered, the
     assert.equal(out.branchDeleted, true, 'the registration is gone, so the merged branch is deletable');
   } finally {
     fs.chmodSync(path.join(tree, 'locked'), 0o755);
+  }
+});
+
+test('under uid 0 the three tests that need the 0555 bit report skip, never a pass that checked nothing (#428)', () => {
+  // Node's runner reports a bare `return` as a pass, so a root run looked like it had proved what it never ran. Each file runs in its own child with `getuid`
+  // answering 0 — the child's own check is all this reads, so the case holds for a real root too — and NODE_TEST_CONTEXT goes, or a child under `node --test`
+  // would answer in the parent's serialized protocol instead of TAP.
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const cases = [
+    ['orchestrate-cleanup.test.mjs', ['cleanup 3b', 'cleanup 3c']],
+    ['orchestrate-usage.test.mjs', ['git worktree remove: ignored build output']]
+  ];
+  for (const [file, names] of cases) {
+    const patterns = names.map((name) => `--test-name-pattern=^${name}`);
+    const out = spawnSync(
+      process.execPath,
+      ['--import=data:text/javascript,process.getuid=()=>0', '--test-reporter=tap', ...patterns, path.join(path.dirname(SCRIPT), file)],
+      { encoding: 'utf8', env }
+    );
+    assert.equal(out.status, 0, out.stderr);
+    for (const name of names) {
+      const line = out.stdout.split('\n').find((l) => /^\s*(not )?ok \d+ - /.test(l) && l.includes(name));
+      assert.match(line ?? '', /^\s*ok \d+ - .* # SKIP root ignores the 0555 bit/, `${name} under uid 0:\n${out.stdout}`);
+    }
   }
 });
 

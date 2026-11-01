@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
@@ -11,6 +13,7 @@ import { classify, jestSuitePaths, makePlan, mentions, nodeSuitePaths, pathToken
 // case by case, and the last block runs the selection against this repo's REAL suites — the guards named there are the ones that read docs and skills today.
 // Nothing here runs a suite: the CLI cases are `--dry-run`, because this file is itself inside `test:skills`.
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'ci-scope.mjs');
+const REPO_ROOT = join(dirname(CLI), '..');
 
 test('classify sorts docs, skills and everything else', () => {
   const cases = {
@@ -161,7 +164,7 @@ test('the suite lists come from the real tree: jest from test/, node from test:s
 });
 
 test("this repo's doc and skill guards are selected by the files they read", () => {
-  const { jest } = readSuites();
+  const { jest, node } = readSuites();
   const picks = (file) => selectSuites([file], jest, { wide: file.startsWith('skills/') || file.startsWith('agents/') });
   const expect = {
     'CLAUDE.md': ['test/claude-rules.test.ts', 'test/dialog-count-docs.test.ts'],
@@ -177,6 +180,41 @@ test("this repo's doc and skill guards are selected by the files they read", () 
     const picked = picks(file);
     for (const g of guards) assert.ok(picked.includes(g), `${file} should select ${g}`);
   }
+
+  // The node half: a docs-only PR runs these through test-tmpdir.mjs by path, so a selected suite that is not on disk would fail the PR for nothing (#428).
+  const docs = ['CLAUDE.md', 'docs/subsystems/invariants.md'];
+  const nodePicked = selectSuites(docs, node);
+  for (const g of ['skills/backlog/tools/backlog.test.mjs', 'skills/backlog-orchestrate/tools/orchestrate-prompts.test.mjs']) {
+    assert.ok(nodePicked.includes(g), `the docs list should select ${g}`);
+  }
+  for (const f of nodePicked) assert.ok(existsSync(join(REPO_ROOT, f)), `${f} is not on disk`);
+  assert.deepEqual(makePlan(docs, { jest, node }).steps.at(-1).args, ['scripts/test-tmpdir.mjs', ...nodePicked]);
+});
+
+// A `pnpm` first on PATH that logs its first argument and exits `code`, so the CLI runs its real plan with nothing behind it. `main` answers through the
+// process's exit status, so that status is what these read.
+function fakePnpm(t, code) {
+  const dir = mkdtempSync(join(tmpdir(), 'ci-scope-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const log = join(dir, 'calls.log');
+  writeFileSync(join(dir, 'pnpm'), `#!/bin/sh\necho "$1" >> "${log}"\nexit ${code}\n`, { mode: 0o755 });
+  return { PATH: `${dir}${delimiter}${process.env.PATH}`, calls: () => readFileSync(log, 'utf8').trim().split('\n') };
+}
+
+test('main returns 1 when a step exits non-zero, and runs no step after it', (t) => {
+  const pnpm = fakePnpm(t, 1);
+  const out = spawnSync(process.execPath, [CLI, '--files', 'server/src/main.ts'], { encoding: 'utf8', env: { ...process.env, PATH: pnpm.PATH } });
+  assert.equal(out.status, 1, out.stdout);
+  assert.match(out.stdout, /::error::check failed: pnpm typecheck/);
+  assert.deepEqual(pnpm.calls(), ['typecheck']);
+});
+
+test('main returns 0 when every step exits 0, and runs them all', (t) => {
+  const pnpm = fakePnpm(t, 0);
+  const out = spawnSync(process.execPath, [CLI, '--files', 'server/src/main.ts'], { encoding: 'utf8', env: { ...process.env, PATH: pnpm.PATH } });
+  assert.equal(out.status, 0, out.stdout);
+  assert.doesNotMatch(out.stdout, /::error::/);
+  assert.deepEqual(pnpm.calls(), ['typecheck', 'build', 'test']);
 });
 
 test('the CLI prints the plan under --dry-run and runs nothing', () => {

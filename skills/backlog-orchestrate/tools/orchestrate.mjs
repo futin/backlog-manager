@@ -885,8 +885,9 @@ function runLockTimeoutMs() {
 
 // The stamp at `file` when the lock can be broken — its holder is dead, its
 // stamp is unreadable, or it is older than any critical section can be —
-// else `null`. The stamp is what `breakRunLock` checks it is removing.
-function runLockBreakable(file) {
+// else `null`. The stamp is what `breakRunLock` checks it is removing. Exported
+// for its suite only, as `breakRunLock` is: the race they close has no CLI path.
+export function runLockBreakable(file) {
   let text;
   let mtimeMs;
   try {
@@ -911,7 +912,7 @@ function runLockBreakable(file) {
 // another waiter broke the judged lock first and this rename took the fresh
 // one it created. A link refused with EEXIST means a third process holds the
 // lock now; the aside is then dropped, as the stale lock it replaced was.
-function breakRunLock(file, judged) {
+export function breakRunLock(file, judged) {
   const aside = `${file}.broken-${process.pid}-${Date.now()}`;
   try {
     fs.renameSync(file, aside);
