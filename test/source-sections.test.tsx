@@ -311,6 +311,52 @@ describe('settling a provisional landing', () => {
   });
 });
 
+/*
+  #401. The section key holds what the reader picked or where a landing settled, never a guess. A key written while the guess stood would read as a real
+  section on the next load, which holds it instead of settling it: a load whose projects read never answered would leave the next one drawing a GitHub row.
+*/
+describe('a guess is never written to the section key', () => {
+  it('no key stays no key until the answer settles it', async () => {
+    const held = deferred<unknown[]>();
+    projectsAnswer = held.promise;
+    render(<App />);
+    await flush();
+    expect(localStorage.getItem(SECTION_KEY)).toBeNull();
+
+    await act(async () => {
+      held.resolve(FILES);
+    });
+    await flush();
+    expect(current()).toBe('Files');
+    expect(stored(SECTION_KEY)).toBe('files');
+  });
+
+  it('no key stays no key through a failed projects read', async () => {
+    projectsAnswer = 500;
+    render(<App />);
+    await flush();
+    expect(localStorage.getItem(SECTION_KEY)).toBeNull();
+  });
+
+  it('the Jira fall leaves the stored section until the answer settles it', async () => {
+    store(SECTION_KEY, 'jira');
+    jiraUnconfigured = true;
+    const held = deferred<unknown[]>();
+    projectsAnswer = held.promise;
+    render(<App />);
+    await flush();
+    expect(rows()).not.toContain('Jira');
+    expect(stored(SECTION_KEY)).toBe('jira');
+
+    await act(async () => {
+      held.resolve(BOTH);
+    });
+    await flush();
+    expect(current()).toBe('Files');
+    expect(stored(SECTION_KEY)).toBe('files');
+  });
+});
+
 describe('holding and falling', () => {
   it('unknown projects answer holds the stored source section', async () => {
     store(SECTION_KEY, 'github');

@@ -13,7 +13,7 @@ import type { OrchestratorRunsPayload } from '../../../shared/types';
  * `onWorking`.
  *
  * The effect is keyed on the BOOLEAN, not on the arrays: the arrays are new on every poll, and re-reporting an unchanged answer every five seconds would
- * re-render the shell for nothing. Nothing is reported on unmount — `App` drops the value itself on a section change, which is the only way a view leaves.
+ * re-render the shell for nothing. Nothing is reported on unmount — `App` drops the value itself on a view change, which is the only way a view leaves.
  * `onWorking` is optional so every existing render of these views (their own suites) needs no change.
  */
 export function useReportWorking(
