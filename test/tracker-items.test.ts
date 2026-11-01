@@ -333,3 +333,59 @@ describe('GET /api/trackers', () => {
     }
   });
 });
+
+/*
+ * #400: the two routes used to disagree about this marker — `/api/trackers` said `unsupported`, `/api/projects` said `github` — so the Sources card filed the
+ * project under Files while the rail filed it under GitHub. The real `GithubSource`, because whether a marker can be honoured is that adapter's own answer.
+ */
+describe('a github marker with no valid repo', () => {
+  let app: INestApplication;
+  let badRepo: string;
+  let noRepo: string;
+  let valid: string;
+
+  beforeEach(async () => {
+    badRepo = project('bad-repo', JSON.stringify({ kind: 'github', repo: 'not a repo' }));
+    noRepo = project('no-repo', JSON.stringify({ kind: 'github' }));
+    valid = project('valid-repo', GITHUB_MARKER);
+    app = await build(makeRegistry([{ name: 'bad', path: badRepo }, { name: 'none', path: noRepo }, { name: 'valid', path: valid }]));
+    await app.get(TrackerPollerService).tick();
+  });
+
+  afterEach(async () => {
+    app.get(TrackerPollerService).disarm();
+    await app.close();
+  });
+
+  it('/api/projects and /api/trackers give the same answer, per path', async () => {
+    const projects = (await request(app.getHttpServer()).get('/api/projects').expect(200)).body as ProjectSummary[];
+    const trackers = ((await request(app.getHttpServer()).get('/api/trackers').expect(200)).body as TrackersPayload).projects;
+    for (const [path, source] of [[badRepo, 'unsupported'], [noRepo, 'unsupported'], [valid, 'github']] as const) {
+      expect(projects.find((p) => p.path === path)?.source).toBe(source);
+      expect(trackers.find((p) => p.path === path)?.source).toBe(source);
+    }
+  });
+
+  it('a broken row has zero counts, is not missing, and has no connection', async () => {
+    const projects = (await request(app.getHttpServer()).get('/api/projects').expect(200)).body as ProjectSummary[];
+    for (const path of [badRepo, noRepo]) {
+      expect(projects.find((p) => p.path === path)).toMatchObject({
+        missing: false,
+        counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+        repo: null,
+        polledAt: null,
+        access: null,
+        detail: null,
+        interval: null
+      });
+    }
+  });
+
+  it('/api/items holds exactly one error per broken project, and no item from either', async () => {
+    const index = (await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex;
+    for (const path of [badRepo, noRepo]) {
+      expect(index.errors.filter((e) => e.startsWith(path))).toEqual([`${path}: backlog/source.json names no valid "repo" (expected "owner/name")`]);
+      expect(index.items.filter((i) => i.projectPath === path)).toEqual([]);
+    }
+  });
+});

@@ -126,33 +126,39 @@ describe('errorSource', () => {
     { name: 'b', path: '/w/b', source: 'github', repo: 'futin/b' },
     { name: 'bb', path: '/w/bb', source: 'files', repo: null },
     { name: 'c', path: '/w/c', source: 'unsupported', repo: null },
-    { name: 'nested', path: '/w/a/vendor/n', source: 'github', repo: 'futin/n' }
+    { name: 'd', path: '/w/d', source: 'unsupported', repo: null },
+    { name: 'nested', path: '/w/b/vendor/n', source: 'files', repo: null }
   ] as ProjectSummary[];
 
   const URN_WARNING = `${issueUrn('futin/b', 7)}: 2 type labels (bug, task) — using bug`;
-  const BAD_REPO = '/w/b: backlog/source.json names no valid "repo" (expected "owner/name")';
+  // The server answers `unsupported` for a marker with no valid repo (#400), so `/w/d` is this error's normal owner. `STALE_REPO` is the one way a github row
+  // can still meet it: the shell reads `/api/projects` on mount and focus while the index keeps polling, so a marker broken in between reaches a row that has
+  // not heard yet, and the error goes where that row is drawn.
+  const BAD_REPO = '/w/d: backlog/source.json names no valid "repo" (expected "owner/name")';
+  const STALE_REPO = '/w/b: backlog/source.json names no valid "repo" (expected "owner/name")';
   const BAD_FILE = '/w/a/backlog/bugs/open/bug-3-x.md: frontmatter has no closing --- line';
   const PREFIX_TWIN = '/w/bb/backlog/ideas/open/idea-1-y.md: frontmatter has no closing --- line';
   const BAD_MARKER = '/w/c/backlog/source.json: invalid JSON (Unexpected token)';
-  const NESTED = '/w/a/vendor/n: backlog/source.json names no valid "repo" (expected "owner/name")';
+  const NESTED = '/w/b/vendor/n/backlog/bugs/open/bug-1-z.md: frontmatter has no closing --- line';
   const NOBODY = 'registry.json: something nobody owns';
 
   it.each([
     ['a GitHub issue URN goes to GitHub', URN_WARNING, 'github'],
-    ['a github project path goes to GitHub', BAD_REPO, 'github'],
+    ['a github project path goes to GitHub', STALE_REPO, 'github'],
+    ['a marker with no valid repo goes to Files, where its unsupported project is drawn (#400)', BAD_REPO, 'files'],
     ['a file inside a files project goes to Files', BAD_FILE, 'files'],
     ['a path that only shares a prefix with a github project goes to its own project, not that one', PREFIX_TWIN, 'files'],
     ['an unsupported marker goes to Files, where its project is drawn', BAD_MARKER, 'files'],
-    ['the longest registered path wins for a nested project', NESTED, 'github'],
+    ['the longest registered path wins for a nested project', NESTED, 'files'],
     ['an error naming nothing registered goes to Files', NOBODY, 'files']
   ] as const)('%s', (_name, error, section) => {
     expect(errorSource(error, projects)).toBe(section);
   });
 
   it('narrowToSource splits a mixed error list between the two pages, order kept', () => {
-    const index = { items: [], errors: [BAD_FILE, URN_WARNING, NOBODY, BAD_REPO, BAD_MARKER] } as unknown as ItemsIndex;
-    expect(narrowToSource(index, projects, 'files')!.errors).toEqual([BAD_FILE, NOBODY, BAD_MARKER]);
-    expect(narrowToSource(index, projects, 'github')!.errors).toEqual([URN_WARNING, BAD_REPO]);
+    const index = { items: [], errors: [BAD_FILE, URN_WARNING, NOBODY, BAD_REPO, STALE_REPO, BAD_MARKER] } as unknown as ItemsIndex;
+    expect(narrowToSource(index, projects, 'files')!.errors).toEqual([BAD_FILE, NOBODY, BAD_REPO, BAD_MARKER]);
+    expect(narrowToSource(index, projects, 'github')!.errors).toEqual([URN_WARNING, STALE_REPO]);
   });
 
   it('routes a URN to GitHub before the registry has answered, and a path to Files', () => {

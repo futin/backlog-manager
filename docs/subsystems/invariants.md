@@ -2849,7 +2849,11 @@ reverse — "we could not read the marker, so show what is on disk" sounds like 
 old item files sitting in every clone, and a build that cannot honour the marker would render those files as ghosts beside the real items on another machine's
 board — two boards disagreeing about what is open, with nothing on either saying which is wrong. So an unsupported project contributes no items at all, its
 `/api/projects` row reads `source: 'unsupported'` with all-zero counts, and the reason travels once in `ItemsIndex.errors`, prefixed with the marker's absolute
-path the way a scan error is prefixed with the item file's. `missing` keeps its old meaning exactly — no `backlog/` directory at all — so an unsupported
+path the way a scan error is prefixed with the item file's. A `github` marker with no valid `repo` is the same state reached one layer later (#400): the
+resolver answers `tracker` because it never reads adapter schemas, and the adapter's `ItemSource.canHonour` says no, so `/api/projects` and `sourceOf` agree with
+`/api/trackers` on `unsupported`. They used to say `github`, and the Sources card and the rail filed one project under two sources. `isTrackerProject` and
+`writerFor` still answer tracker and writer for it, on purpose: a broken marker must never read as files, and the write refusal is what names the bad repo.
+`missing` keeps its old meaning exactly — no `backlog/` directory at all — so an unsupported
 project is `missing: false` and a storeless one is `missing: true` with `source: null`. An explicit `{"kind":"files"}` IS honoured: writing the default down
 must not be a way to opt out of it, and `files` never has to be registered for that to work.
 
@@ -3393,12 +3397,12 @@ the shell's own legacy-landing initializer are separate writers.
 
 Whether a row is drawn is a question about the registry, not the tracker. `ProjectsProvider` reads `GET /api/projects` once for the shell and hands
 `drawnSources` out, rather than deriving it from `TrackersPayload.projects`. That payload does list every registered project, but it is the tracker's view of
-them — it calls a GitHub marker with an invalid repo `unsupported` where `/api/projects` says `github` — and the rail's rows must agree with the registry. It reads on mount and focus and never polls — the registry moves on a `register`, not on a clock — and keeps its last answer on a failure, so a blip cannot
+them, on its own read schedule, and the rail's rows must agree with the registry. It reads on mount and focus and never polls — the registry moves on a `register`, not on a clock — and keeps its last answer on a failure, so a blip cannot
 take a row away. An `unsupported` project and one with no source sit under Files as display grouping only, never as a source of their own: what they have to
 show is file errors, and Files is the source with a place to show them. The index's `errors` are split the same way, by what each one names
 (`errorSource`): every error the server sends starts with its subject, so a `gh:<owner/name>#<n>` URN — a warning about one GitHub issue — goes to GitHub, an
-error starting with a registered project's path goes wherever that project is drawn (a github project's invalid-repo marker to GitHub, an `unsupported`
-project's unreadable marker to Files), and only an error naming nothing registered falls to Files. Keeping every error on Files, as the first cut did, showed
+error starting with a registered project's path goes wherever that project is drawn (an `unsupported` project's unreadable or invalid-repo marker to Files),
+and only an error naming nothing registered falls to Files. Keeping every error on Files, as the first cut did, showed
 GitHub's warnings on a page that does not draw their items — and on a machine with only GitHub projects, where the Files row is never drawn, nowhere at all.
 
 ### Three states, and hold-and-fall

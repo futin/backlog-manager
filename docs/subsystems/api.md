@@ -27,7 +27,10 @@ A project's source is resolved per request from its own committed `backlog/sourc
 rule the registry read follows, for the same reason. No marker means `files`, the implicit source, which never has to be registered for that to work; a
 `{"kind":"github","repo":"owner/name"}` marker resolves to the GitHub adapter (task-45). A marker that is present and cannot be honoured — malformed, no string
 `kind`, or a kind with no adapter here — resolves `unsupported`: the project contributes **no items** and exactly one error (prefixed with the marker's path,
-like every scan error), and its `/api/projects` row reads `source: 'unsupported'` with zero counts and `missing: false`. It never reads as `files`; a tracker
+like every scan error), and its `/api/projects` row reads `source: 'unsupported'` with zero counts and `missing: false`. A `github` marker with no valid `repo`
+resolves `tracker`, because the resolver does not read adapter schemas, but `ItemSource.canHonour` refuses it, so `/api/projects`, `/api/trackers` and
+`ItemsService.sourceOf` all answer `unsupported` and the adapter's `list` supplies the one error (`<path>: backlog/source.json names no valid "repo" …`); the
+write routes still reach `writerFor`, whose refusal names the bad repo. It never reads as `files`; a tracker
 project whose marker this build cannot read would otherwise render a stale clone's files as ghosts. A project with no store at all still reads `missing: true`
 and `source: null`. `ItemsService` dispatches over the registered adapters and refuses two claiming one kind at boot.
 

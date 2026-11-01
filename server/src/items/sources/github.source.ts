@@ -217,6 +217,11 @@ export class GithubSource implements ItemSource, ItemWriter {
     return this.poller.summary(repo);
   }
 
+  /** A repo is the one thing this adapter needs from a marker. Everything it does starts from `owner/name`, and with no valid one there is no issue to read. */
+  canHonour(marker: SourceMarker | null): boolean {
+    return isRepo(marker?.repo);
+  }
+
   /* =====================================================================
    * ItemWriter (task-46, spec §6.2)
    * ===================================================================== */

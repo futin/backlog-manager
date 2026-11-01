@@ -75,9 +75,9 @@ export function SourcesGroup({ onOpenGithubPage, onOpenJiraPage }: { onOpenGithu
           )
         }
       >
-        {/* Gated on the rail's `drawn`, never on `counts`: the counts read `/api/trackers`, which calls a github marker with an invalid repo
-            `unsupported` while `/api/projects` — the rail — calls it `github` and draws the row. "Drawn only while the section it opens is drawn" is
-            the rail's fact, so it is read where the rail reads it; unknown (`null`) draws no link, as the rail draws no row on a guess. */}
+        {/* Gated on the rail's `drawn`, never on `counts`: the counts read `/api/trackers` and the rail reads `/api/projects`, two separate fetches that can be
+            out of step. "Drawn only while the section it opens is drawn" is the rail's fact, so it is read where the rail reads it; unknown (`null`) draws no
+            link, as the rail draws no row on a guess. */}
         {drawn?.github === true && onOpenGithubPage && (
           // A button, not an anchor: the destination is the shell's own state, not an href (the watchdog card's `Runs › Watchdog ↗` is the precedent).
           <button type="button" className="set-link" onClick={() => onOpenGithubPage('settings')}>

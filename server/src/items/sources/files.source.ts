@@ -40,6 +40,11 @@ export class FilesSource implements ItemSource {
     return { repo: null, polledAt: null, access: null, detail: null, interval: null };
   }
 
+  /** Always: the marker is ignored (see `list`), so none of it can be wrong. */
+  canHonour(_marker: SourceMarker | null): boolean {
+    return true;
+  }
+
   /**
    * One item's body, frontmatter stripped (the client already holds every
    * frontmatter field from the index). Falls back to the raw file when the

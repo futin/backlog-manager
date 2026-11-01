@@ -189,6 +189,14 @@ describe('POST /api/agents/orchestrate — mergeMode', () => {
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
   });
 
+  it("case pr-2b: mergeMode: 'pr' on a github marker with an invalid repo 400s, and spawns nothing (#400)", async () => {
+    const sent = stubDashboard();
+    writeFileSync(join(projectPath, 'backlog', 'source.json'), JSON.stringify({ kind: 'github', repo: 'not a repo' }));
+    const res = await post({ project: projectPath, mergeMode: 'pr' }).expect(400);
+    expect(res.body.error).toBe("mergeMode pr needs a tracker project — this project's backlog is not backed by a GitHub repo");
+    expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
+  });
+
   it("case pr-3: the 400 for an unrecognised mergeMode lists every mode, built from MERGE_MODES", async () => {
     stubDashboard();
     const res = await post({ project: projectPath, mergeMode: 'nonsense' }).expect(400);

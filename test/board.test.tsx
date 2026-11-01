@@ -1281,6 +1281,8 @@ describe('BoardView source filter', () => {
 
   it('an error naming a GitHub issue or a github project warns on GitHub, never on Files (final review I1)', async () => {
     const urn = 'gh:futin/ghproj#4: 2 type labels (bug, task) — using bug';
+    // The server calls this marker `unsupported` once it reads it (#400); a github row meets the error only while the shell's projects read is behind the
+    // index's.
     const badRepo = '/abs/ghproj: backlog/source.json names no valid "repo" (expected "owner/name")';
     (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);

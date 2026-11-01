@@ -193,8 +193,8 @@ describe('the GitHub row', () => {
   });
 
   it('gates the link on the rail`s drawn answer, not the tracker counts (final review M3)', async () => {
-    // A github marker with an invalid repo: `/api/trackers` calls it `unsupported` (counted under Files, `0 projects` here) while `/api/projects` — the
-    // rail — calls it `github` and draws the row. The link follows the rail, because the rail is what it lands on.
+    // Two reads out of step: the counts come from `/api/trackers`, the rail from `/api/projects`, fetched separately. Here the tracker rows count no github
+    // project (`0 projects`) while the rail still draws the row. The link follows the rail, because the rail is what it lands on.
     payload = { platforms: [TOKEN], projects: [beta] };
     await renderCard(UNCONFIGURED, { files: true, github: true });
     expect(within(rowOf('GitHub')).getByRole('button', { name: /GitHub › Settings/ })).toBeInTheDocument();
