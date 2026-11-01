@@ -86,8 +86,8 @@ const ISSUE_URN_PREFIX = 'gh:';
  * - `gh:<owner/name>#<n>: …` — a warning about one GitHub issue (`mapIssue`'s several-type-labels note). Only the GitHub adapter mints a URN, so it is
  *   GitHub's, without asking the registry — which also keeps it on GitHub before the projects read has answered.
  * - `<project path>: …` or `<a path inside it>: …` — a project's own complaint (the GitHub adapter's `names no valid "repo"`, the files scanner's unreadable
- *   item file, the resolver's unreadable `backlog/source.json`). It goes where that project is drawn, by `sourceSectionOf` — so a github project's bad
- *   marker is GitHub's, and an `unsupported` one's is Files', beside the project the rail files it under. Matched on the path plus a `/` or `:` boundary, so
+ *   item file, the resolver's unreadable `backlog/source.json`). It goes where that project is drawn, by `sourceSectionOf` — so a bad marker of either kind,
+ *   whose project the server calls `unsupported`, is Files', beside the project the rail files it under. Matched on the path plus a `/` or `:` boundary, so
  *   `/w/bb` is never claimed by `/w/b`, and the longest registered path wins, so a project nested inside another's checkout keeps its own errors.
  * - anything else — no project to attribute it to — goes to Files, the page that showed every error before the split.
  */

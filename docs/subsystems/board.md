@@ -388,7 +388,7 @@ committing `backlog/source.json`, so what the card offers instead of a button is
 the repo read off that project's `origin` per request. It never shows the token — only whether one is set, and whose login it is. Its two links, `GitHub ›
 Settings ↗` and `Jira › Setup ↗`, are the shell's pairs (`onOpenGithubPage`, `onOpenJiraPage`) threaded down through `SettingsView` and `SharedPage`, and each
 is drawn only while the section it opens is drawn — GitHub's while the rail's projects answer draws its row (`useProjectsContext().drawn`, not the tracker
-counts, which call an invalid-repo marker `unsupported`), Jira's while configured. The sync interval the old `Trackers`
+counts, a separate fetch that can be out of step with it), Jira's while configured. The sync interval the old `Trackers`
 card carried (#17) is GitHub › Settings' now (below).
 
 **Dashboards** is the one page that writes the machine list (`DashboardsPage`, drawn to `.claude/DESIGN.md` §8.6): the Suggest card (`SuggestCard` — the three

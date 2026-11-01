@@ -67,8 +67,9 @@ export class TrackerController {
       } else if (resolved.kind === 'tracker' || resolved.kind === 'unsupported') {
         // A marker that is present and cannot be honoured — malformed, or a
         // `github` marker with no usable `repo`. `unsupported` here matches
-        // exactly what `/api/projects` says about the same project, rather
-        // than inventing a second vocabulary for the same state.
+        // exactly what `/api/projects` says about the same project (since #400,
+        // through `ItemSource.canHonour`), rather than inventing a second
+        // vocabulary for the same state.
         row.source = 'unsupported';
       } else if (resolved.kind === 'files') {
         row.source = 'files';

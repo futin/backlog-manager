@@ -82,6 +82,17 @@ export interface ItemSource {
   summary(project: RegistryProject, marker: SourceMarker | null): Promise<SourceSummary>;
 
   /**
+   * Whether this adapter can serve a project carrying this marker (#400). `resolveSource` answers `tracker` for any marker whose `kind` is known and never
+   * reads the rest of it, because resolving and validating are two jobs — so "this kind has an adapter" and "this marker can be honoured" are separate questions, and
+   * this is the second one, asked of the only code that knows the adapter's schema. `ItemsService` spells a `false` as `unsupported`, the word
+   * `ProjectSummary.source` keeps for "a marker IS present but cannot be honoured".
+   *
+   * Synchronous because `ItemsService.sourceOf` is, and three synchronous callers depend on it. Required, so the compiler is the checklist for the next
+   * adapter.
+   */
+  canHonour(marker: SourceMarker | null): boolean;
+
+  /**
    * One item by the ref that identifies it — a filesystem path for `files`, a
    * `gh:<owner>/<repo>#<n>` URN for a tracker — or `null` when this adapter
    * will not serve it (task-46).

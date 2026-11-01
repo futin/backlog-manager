@@ -428,7 +428,8 @@ export interface ProjectSummary {
    *   fifth string: "this project has no backlog at all" is already `missing`'s
    *   news, and a second spelling of it would be a second thing to keep true.
    * - `'unsupported'` when a marker IS present but cannot be honoured —
-   *   malformed, no string `kind`, or a kind no adapter in this build serves.
+   *   malformed, no string `kind`, a kind no adapter in this build serves, or
+   *   one its adapter refuses (a `github` marker with no valid `repo`).
    *   The reason travels in `ItemsIndex.errors`, prefixed with the marker's
    *   path like every other scan error; it never travels here, because a
    *   summary that carried it would be the second home of a message the index

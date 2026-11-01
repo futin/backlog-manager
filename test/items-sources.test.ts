@@ -39,6 +39,9 @@ class DuplicateFilesSource implements ItemSource {
   async find(): Promise<null> {
     return null;
   }
+  canHonour(): boolean {
+    return true;
+  }
 }
 
 describe('ItemsService construction', () => {
@@ -56,9 +59,12 @@ describe('ItemsService construction', () => {
  * `known` set. Real marker files on disk, because the resolution table is about what a marker says.
  */
 describe('ItemsService.sourceOf', () => {
-  /** An adapter that only has to carry a kind; `sourceOf` never calls it. */
+  /** An adapter that only has to carry a kind and say whether it can honour a marker; `sourceOf` calls nothing else. */
   class StubSource implements ItemSource {
-    constructor(readonly kind: 'files' | 'github') {}
+    constructor(
+      readonly kind: 'files' | 'github',
+      private readonly honours: boolean = true
+    ) {}
     async list(): Promise<{ items: []; errors: [] }> {
       return { items: [], errors: [] };
     }
@@ -71,6 +77,9 @@ describe('ItemsService.sourceOf', () => {
     async find(): Promise<null> {
       return null;
     }
+    canHonour(): boolean {
+      return this.honours;
+    }
   }
 
   const dirs: string[] = [];
@@ -78,11 +87,11 @@ describe('ItemsService.sourceOf', () => {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
 
-  function serviceWith(marker: string | undefined): { service: ItemsService; path: string } {
+  function serviceWith(marker: string | undefined, trackerHonours = true): { service: ItemsService; path: string } {
     const path = makeProject('src', [], marker);
     dirs.push(path);
     const reg = { load: () => ({ projects: [{ name: 'p', path, createdAt: '2026-01-01' }] }) } as unknown as RegistryService;
-    return { service: new ItemsService(reg, [new StubSource('files'), new StubSource('github')]), path };
+    return { service: new ItemsService(reg, [new StubSource('files'), new StubSource('github', trackerHonours)]), path };
   }
 
   it("answers 'github' for a tracker marker, 'files' for no marker, and 'unsupported' for a kind no adapter serves", () => {
@@ -92,6 +101,14 @@ describe('ItemsService.sourceOf', () => {
     expect(files.service.sourceOf(files.path)).toBe('files');
     const odd = serviceWith(JSON.stringify({ kind: 'gitlab' }));
     expect(odd.service.sourceOf(odd.path)).toBe('unsupported');
+  });
+
+  it("answers 'unsupported' for a tracker marker its adapter refuses, and 'github' for one it accepts (#400)", () => {
+    const marker = JSON.stringify({ kind: 'github', repo: 'o/r' });
+    const refused = serviceWith(marker, false);
+    expect(refused.service.sourceOf(refused.path)).toBe('unsupported');
+    const accepted = serviceWith(marker, true);
+    expect(accepted.service.sourceOf(accepted.path)).toBe('github');
   });
 
   it('answers null for a project the registry does not hold', () => {

@@ -2,7 +2,7 @@ import { HttpException, Inject, Injectable } from '@nestjs/common';
 
 import { RegistryService, registryProjectsOr503 } from '../registry/registry.service';
 import { resolveSource } from './sources/resolve.util';
-import type { SourceMarker } from './sources/resolve.util';
+import type { ResolvedSource, SourceMarker } from './sources/resolve.util';
 import { parseUrn } from '../tracker/map-issue';
 import { ITEM_SOURCES, type ItemSource, type ItemWriter, type SourceSummary } from './sources/source';
 import { uncommittedItemPaths } from './uncommitted.util';
@@ -74,6 +74,23 @@ export class ItemsService {
     return this.sources.get(resolved.kind === 'files' ? 'files' : resolved.marker.kind);
   }
 
+  /**
+   * One resolved source as `ProjectSummary.source` spells it, with the adapter and marker to read when there is something to read — the one home of that
+   * answer, so `projects()` and `sourceOf()` cannot disagree. `unsupported` covers three things: a marker the resolver refused, a kind nobody serves
+   * (unreachable while `known` is built from the same map, the belt `index()` wears), and a marker the adapter cannot honour (#400) — a github marker with no
+   * valid repo. That last one is what `/api/trackers` has always answered; asking the adapter is what keeps this class from importing `isRepo`.
+   */
+  private readingOf(
+    resolved: ResolvedSource
+  ): { source: 'unsupported' | null; adapter?: undefined } | { source: SourceKind; adapter: ItemSource; marker: SourceMarker | null } {
+    if (resolved.kind === 'missing') return { source: null };
+    if (resolved.kind === 'unsupported') return { source: 'unsupported' };
+    const adapter = this.adapterFor(resolved);
+    const marker = resolved.kind === 'tracker' ? resolved.marker : null;
+    if (adapter === undefined || !adapter.canHonour(marker)) return { source: 'unsupported' };
+    return { source: adapter.kind, adapter, marker };
+  }
+
   async index(): Promise<ItemsIndex> {
     const items: ItemsIndex['items'] = [];
     const errors: string[] = [];
@@ -120,48 +137,35 @@ export class ItemsService {
       // `refactors` to `Section` broke this line until it was listed, which is
       // exactly the reminder a new section should get.
       const counts: SectionCounts = { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 };
-      let source: ProjectSummary['source'] = null;
       // The four connection fields default to their non-tracker answer, which
       // is also the right answer for `missing` and for `unsupported`: neither
       // has an adapter to ask, and neither has a connection.
       let connection: SourceSummary = { repo: null, polledAt: null, access: null, detail: null, interval: null };
 
-      if (resolved.kind === 'unsupported') {
-        // Counts stay at zero and the reason is NOT repeated here: it travels
-        // in ItemsIndex.errors, which is the one home for "why this project
-        // contributed nothing". `'unsupported'` never reads as `'files'`.
-        source = 'unsupported';
-      } else if (resolved.kind !== 'missing') {
-        const adapter = this.adapterFor(resolved);
-        if (adapter === undefined) {
-          // Unreachable while `known` is built from this same map, and the
-          // same belt `index()` wears: a kind nobody serves reads as
-          // `unsupported` here rather than as a summary claiming a source
-          // that answered nothing.
-          source = 'unsupported';
-        } else {
-          // The adapter's own `kind`, not the marker's string — the summary
-          // field means "which adapter produced this project's items", so
-          // reading it off the adapter that just produced them is the honest
-          // answer AND the one the compiler can check. This is where the
-          // second of task-43's two casts used to be (task-45).
-          source = adapter.kind;
-          const marker = resolved.kind === 'tracker' ? resolved.marker : null;
-          for (const it of (await adapter.list(project, marker)).items) {
-            // "open" counts: done items are history. out-of-scope is terminal
-            // and counts as itself — its number is how many were declined.
-            if (it.status === 'done') continue;
-            counts[it.section]++;
-          }
-          // The connection half (spec §5.4), asked of the same adapter in the
-          // same pass: four nulls from files, the live tracker state from a
-          // tracker. Spread rather than copied field by field, so a fifth
-          // field on `SourceSummary` reaches the payload without an edit here.
-          connection = await adapter.summary(project, marker);
+      // An `unsupported` row's counts stay at zero and the reason is NOT
+      // repeated here: it travels in ItemsIndex.errors, which is the one home
+      // for "why this project contributed nothing". `'unsupported'` never reads
+      // as `'files'`. `source` is the adapter's own `kind`, not the marker's
+      // string — the summary field means "which adapter produced this project's
+      // items", so reading it off that adapter is the honest answer AND the one
+      // the compiler can check. This is where the second of task-43's two casts
+      // used to be (task-45).
+      const reading = this.readingOf(resolved);
+      if (reading.adapter !== undefined) {
+        for (const it of (await reading.adapter.list(project, reading.marker)).items) {
+          // "open" counts: done items are history. out-of-scope is terminal
+          // and counts as itself — its number is how many were declined.
+          if (it.status === 'done') continue;
+          counts[it.section]++;
         }
+        // The connection half (spec §5.4), asked of the same adapter in the
+        // same pass: four nulls from files, the live tracker state from a
+        // tracker. Spread rather than copied field by field, so a fifth
+        // field on `SourceSummary` reaches the payload without an edit here.
+        connection = await reading.adapter.summary(project, reading.marker);
       }
 
-      summaries.push({ name: project.name, path: project.path, createdAt: project.createdAt, missing, counts, source, ...connection });
+      summaries.push({ name: project.name, path: project.path, createdAt: project.createdAt, missing, counts, source: reading.source, ...connection });
     }
     return summaries;
   }
@@ -282,7 +286,8 @@ export class ItemsService {
 
   /**
    * What one registered project's source resolves to, as `ProjectSummary.source` spells it: the kind of the adapter that serves it, `'unsupported'` for a
-   * marker this build cannot honour, `null` for a project that is not registered or has no `backlog/` at all.
+   * marker this build cannot honour (a github marker with no valid repo among them, #400), `null` for a project that is not registered or has no `backlog/`
+   * at all.
    *
    * It exists so a caller outside this class (PR-mode's `resolveMergeMode`, which must refuse `pr` off a GitHub-backed project) asks the question through
    * the one `known` set this build resolves with, instead of handing `resolveSource` a second, hand-built set that would drift the day a source is added.
@@ -292,12 +297,7 @@ export class ItemsService {
   sourceOf(projectPath: string): SourceKind | 'unsupported' | null {
     const entry = this.registry.load().projects.find((p) => p.path === projectPath);
     if (entry === undefined) return null;
-    const resolved = resolveSource(entry.path, this.known);
-    if (resolved.kind === 'missing') return null;
-    if (resolved.kind === 'unsupported') return 'unsupported';
-    // `known` IS the adapter map's key set, so a tracker marker always has an adapter and its `kind` is a `SourceKind`; the `?? 'unsupported'` is the
-    // unreachable branch `index()` also guards, answered conservatively rather than with a cast.
-    return this.adapterFor(resolved)?.kind ?? 'unsupported';
+    return this.readingOf(resolveSource(entry.path, this.known)).source;
   }
 
   /**
