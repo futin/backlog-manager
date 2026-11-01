@@ -219,6 +219,19 @@ describe('prs-api', () => {
     await expect(mergePr({ repo: 'futin/y', number: 3, method: 'merge', headSha: 'b'.repeat(40) })).resolves.toEqual(ok);
   });
 
+  it('a 200 whose body is not the payload rejects with the one sentence, never resolving something the page would read as rows', async () => {
+    // A proxy's HTML page: the body does not parse as JSON at all.
+    global.fetch = jest.fn(() =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected token <')) } as Response)
+    ) as unknown as typeof fetch;
+    await expect(fetchPullRequests()).rejects.toThrow(new Error('unexpected /api/prs response'));
+
+    for (const body of ['<html>', {}]) {
+      global.fetch = jest.fn(() => Promise.resolve(res(200, body))) as unknown as typeof fetch;
+      await expect(fetchPullRequests()).rejects.toThrow(new Error('unexpected /api/prs response'));
+    }
+  });
+
   it('a 200 whose body is not a write result goes down the error path, never resolving a garbage outcome', async () => {
     // A proxy's HTML page: the body does not parse as JSON at all.
     global.fetch = jest.fn(() =>

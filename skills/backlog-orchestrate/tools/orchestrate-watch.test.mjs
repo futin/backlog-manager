@@ -1087,6 +1087,53 @@ test('verify breaks a run lock whose holder pid is dead, writes its rows, and le
   assert.deepEqual(fs.readdirSync(path.dirname(runLockFile(home, project))).filter((n) => n.startsWith('run.json.lock')), []);
 });
 
+// A lock file in a directory of its own, `ageMs` old by mtime — the only clock `runLockBreakable` reads.
+function lockStamp(t, text, ageMs = 0) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-break-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'run.json.lock');
+  fs.writeFileSync(file, text);
+  const at = (Date.now() - ageMs) / 1000;
+  fs.utimesSync(file, at, at);
+  return file;
+}
+
+test('a run lock older than 30 s is breakable though its pid is alive — that pid has been reused; a younger one is waited on (#428)', (t) => {
+  const stamp = `${process.pid}\n2026-10-01T00:00:00Z\n`;
+  assert.equal(orch.runLockBreakable(lockStamp(t, stamp, 31_000)), stamp);
+  assert.equal(orch.runLockBreakable(lockStamp(t, stamp, 25_000)), null);
+  assert.equal(orch.runLockBreakable(lockStamp(t, stamp)), null);
+});
+
+test('a fresh run lock whose first line is not a positive integer pid is breakable — it names no process to wait for (#428)', (t) => {
+  // `0` and `-1` are the sharp ones: `process.kill` accepts both, so without the check they read as alive and hold every writer out until the deadline.
+  for (const first of ['abc', '0', '-1', '1.5', '']) {
+    const stamp = `${first}\n2026-10-01T00:00:00Z\n`;
+    assert.equal(orch.runLockBreakable(lockStamp(t, stamp)), stamp, JSON.stringify(first));
+  }
+});
+
+test('breakRunLock removes the lock it judged, and puts back a lock replaced after the judgement (#428)', (t) => {
+  const stale = `not-a-pid\n2026-10-01T00:00:00Z\n`;
+  const judgedAndKept = lockStamp(t, stale);
+  orch.breakRunLock(judgedAndKept, orch.runLockBreakable(judgedAndKept));
+  assert.deepEqual(fs.readdirSync(path.dirname(judgedAndKept)), []);
+
+  // Another waiter broke the stale lock and took its own between this waiter's judgement and its break.
+  const replaced = lockStamp(t, stale);
+  const judged = orch.runLockBreakable(replaced);
+  const fresh = `${process.pid}\n2026-10-01T00:00:01Z\n`;
+  fs.writeFileSync(replaced, fresh);
+  orch.breakRunLock(replaced, judged);
+  assert.equal(fs.readFileSync(replaced, 'utf8'), fresh);
+  assert.deepEqual(fs.readdirSync(path.dirname(replaced)), ['run.json.lock'], 'the aside was left behind');
+
+  // Released between the judgement and the break: nothing to do, and no throw.
+  fs.rmSync(replaced);
+  orch.breakRunLock(replaced, judged);
+  assert.deepEqual(fs.readdirSync(path.dirname(replaced)), []);
+});
+
 test('verify exits 1 naming run.json.lock when a live holder keeps the lock past BM_RUN_LOCK_TIMEOUT_MS, leaving run.json byte-identical', async (t) => {
   const { home, project } = orchFixture(t);
   seedReadyTask(project, 'task-1', 'Some task');
