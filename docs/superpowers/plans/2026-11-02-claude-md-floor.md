@@ -46,7 +46,7 @@ the source of every rule number below.
 
 **Files:**
 - Modify: `test/helpers/rule-tiers.ts` (`compareTiers`, header comment lines 4-9 and the `compareTiers` doc comment)
-- Modify: `test/claude-rules.test.ts` (header comment lines 6-17; the cases at :323 and :340)
+- Modify: `test/claude-rules.test.ts` (header comment lines 6-17; the existing `compareTiers` fixture at :267-284; the cases at :323 and :340)
 
 **Interfaces:**
 - Produces: `compareTiers(one: TierBullet[], two: { file: string; bullets: TierBullet[] }[]): { missingInRules: string[]; multiHomed: string[] }` —
@@ -62,12 +62,15 @@ the source of every rule number below.
   - `headline-homed-twice`: tier two files `x` and `y` each hold the same unlinked bullet `- **Same rule** text` → `multiHomed` is
     `['Same rule → x, y']`.
   - `anchor-homed-twice` (existing behaviour, kept): same anchor in files `x` and `y` → `multiHomed` names the anchor with both files.
-- [ ] **Step 2: Run** `pnpm run test:jest -- claude-rules` — expected: the first three FAIL (the type still has `missingInClaude`; unlinked bullets are
-  keyed by `undefined`).
+  - Rewrite the existing fixture at `:267-284` to the new shape: drop every `missingInClaude`; its three subcases become `{ missingInRules: ['Y\tH2'],
+    multiHomed: [] }`, `{ missingInRules: [], multiHomed: ['X → a, b'] }`, and (the `H1` / `H1 ` drift) `{ missingInRules: ['X\tH1'], multiHomed: [] }`.
+- [ ] **Step 2: Run** `pnpm run test:jest -- claude-rules` — expected: four FAIL — the first three new fixtures and the rewritten `:267` fixture (the
+  result still carries `missingInClaude`; unlinked bullets are keyed by `undefined`).
 - [ ] **Step 3: Implement** the new `compareTiers` per the Interfaces block.
 - [ ] **Step 4: Change the real-tree cases.** The `:323` case: a rule-file bullet has 0 or 1 anchors; 0 is allowed only when its joined text is at most
-  `UNLINKED_WORD_CAP` words, more than 1 is always an offender. The `:340` case: renamed to state the subset contract, asserts
-  `{ missingInRules: [], multiHomed: [] }`. Add a fixture for the `:323` predicate: a 0-anchor bullet of 80 words passes, 81 words fails, 2 anchors fails.
+  `UNLINKED_WORD_CAP` words, more than 1 is always an offender. The `:340` case: renamed to state the subset contract, passes
+  `one = tierOne(CLAUDE_MD).linked` ONLY (seven keep-list rules — #1, 18, 25, 42, 74, 76, 80 — are unlinked with no rule-file home, and must not be
+  reported), and asserts `{ missingInRules: [], multiHomed: [] }`. The `-\t${headline}` key exists for tier-two multi-home detection alone. Add a fixture for the `:323` predicate: a 0-anchor bullet of 80 words passes, 81 words fails, 2 anchors fails.
 - [ ] **Step 5: Rewrite the two header comments** to the subset contract (tier one is a declared subset; the table in Task 3 is what covers the routes
   that never `Read` a fenced file). Keep the rest of each comment.
 - [ ] **Step 6: Run** `pnpm run test:jest -- claude-rules` — expected: PASS (today's same-set tree satisfies the subset).
@@ -115,11 +118,16 @@ the source of every rule number below.
   file under a glob by any route that does not `Read` it (`codegraph_explore`, `Write`, `Grep`, `Glob`), read that rule file.
 - Produces: `pathTableOf(claudeMd: string): Map<string, string[]>` exported from `test/helpers/rule-tiers.ts` — rule file name → globs, parsed from that
   section only.
+- Produces: `compareTable(table: Map<string, string[]>, rules: Map<string, string[]>): { missingInTable: string[]; missingOnDisk: string[];
+  mismatched: string[] }` exported from `test/helpers/rule-tiers.ts` — pure, so the guard is fixtured, not only run over the real tree. `mismatched`
+  entries are the file name; globs compare as ordered lists.
 
 - [ ] **Step 1: Write failing tests:**
   - fixture `pathTableOf` reads `| \`a.md\` | \`x/**\`, \`y.ts\` |` as `a.md → ['x/**', 'y.ts']` and ignores tables outside `## Rule files`.
-  - real tree, `the rule-file table and .claude/rules are the same set both ways, globs equal to paths:` — reports files missing on either side and any
-    row whose globs differ from that file's `pathsOf`.
+  - fixture `compareTable`: table `{a.md: ['x/**'], b.md: ['y/**']}` against rules `{a.md: ['x/**', 'z.ts'], c.md: ['w/**']}` →
+    `{ missingInTable: ['c.md'], missingOnDisk: ['b.md'], mismatched: ['a.md'] }`; identical maps → all three empty.
+  - real tree, `the rule-file table and .claude/rules are the same set both ways, globs equal to paths:` — `compareTable(pathTableOf(CLAUDE_MD), <name →
+    pathsOf>)` is all-empty.
   - real tree, `CLAUDE.md stays under its budget`: `Buffer.byteLength(CLAUDE_MD) <= 14_336`; failure message:
     `CLAUDE.md is <n> B, over its 14 KB budget — move a rule down a tier into its .claude/rules file; do not compress wording.`
   - `dialog-count-docs.test.ts`: `CLAUDE.md keeps the headline` becomes `board.md keeps the headline`, same string asserted against
