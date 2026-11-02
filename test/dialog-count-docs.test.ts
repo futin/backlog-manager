@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * task-40's test case 6. The Escape rule is stated at three depths — the headline in `CLAUDE.md`, the mechanism bullet in `.claude/rules/board.md`, the
- * reasoning in `invariants.md` — and the one thing that can silently rot is the COUNT: the code had three callers, the docs said four for as long as it took
- * someone to notice. The count lives in the second and third tiers; the headline is pinned only so a reader arriving from CLAUDE.md still finds the rule.
+ * task-40's test case 6. The Escape rule is stated at two depths — the mechanism bullet in `.claude/rules/board.md`, the reasoning in `invariants.md` —
+ * and the one thing that can silently rot is the COUNT: the code had three callers, the docs said four for as long as it took someone to notice. Its
+ * headline left `CLAUDE.md` on 2026-11-02 (the rule is fenced to `client/src/**`); the headline is pinned in `board.md` so the bullet the count lives in
+ * stays findable by name.
  *
  * Jira phase 2 moved the count from three to five — `JiraIssueModal` composes `ui/Modal` and `JiraBoardSheet` composes `ui/FormSheet`, so both joined the
  * stack through the shells, by construction, with no line of `useDialogEscape` changed — which is exactly the edit this suite exists to catch half-made.
@@ -21,7 +22,6 @@ import { join } from 'node:path';
  * a test that pinned whole paragraphs would fail on every rewording and teach the next person to delete it.
  */
 const ROOT = join(__dirname, '..');
-const CLAUDE = readFileSync(join(ROOT, 'CLAUDE.md'), 'utf8');
 const BOARD_RULES = readFileSync(join(ROOT, '.claude', 'rules', 'board.md'), 'utf8');
 const INVARIANTS = readFileSync(join(ROOT, 'docs', 'subsystems', 'invariants.md'), 'utf8');
 
@@ -73,8 +73,8 @@ describe('the Escape rule reads eight dialogs, not three, four, five, six or sev
     expect(bullet).toMatch(/never a dialog/);
   });
 
-  it('CLAUDE.md keeps the headline', () => {
-    expect(CLAUDE).toContain('- **Escape has one owner, and the topmost dialog is the only one that closes.**');
+  it('board.md keeps the headline', () => {
+    expect(BOARD_RULES).toContain('- **Escape has one owner, and the topmost dialog is the only one that closes.**');
   });
 
   /* The half a doc edit cannot state on its own: the hook's own doc comment is

@@ -168,3 +168,33 @@ export function ruleBulletOffenders(bullets: TierBullet[]): string[] {
     return [];
   });
 }
+
+/**
+ * CLAUDE.md's `## Rule files` table as rule file → globs. Read from that section only — the Commands table above it has the same `| `x` | `y` |` shape — and
+ * only from rows whose first cell is a backticked `*.md`, so the header and separator rows fall out without being named.
+ */
+export function pathTableOf(claudeMd: string): Map<string, string[]> {
+  const start = claudeMd.indexOf('\n## Rule files\n');
+  if (start === -1) return new Map();
+  const end = claudeMd.indexOf('\n## ', start + 1);
+  const section = claudeMd.slice(start, end === -1 ? undefined : end);
+  const table = new Map<string, string[]>();
+  for (const line of section.split('\n')) {
+    const cells = line.split('|').map((c) => c.trim());
+    const file = /^`([\w.-]+\.md)`$/.exec(cells[1] ?? '');
+    if (file) table.set(file[1], [...(cells[2] ?? '').matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+  }
+  return table;
+}
+
+/** The table against the rule files on disk, both ways; globs compare as ordered lists, so a reordered `paths:` is a mismatch too. */
+export function compareTable(
+  table: Map<string, string[]>,
+  rules: Map<string, string[]>
+): { missingInTable: string[]; missingOnDisk: string[]; mismatched: string[] } {
+  return {
+    missingInTable: [...rules.keys()].filter((f) => !table.has(f)),
+    missingOnDisk: [...table.keys()].filter((f) => !rules.has(f)),
+    mismatched: [...table].filter(([f, globs]) => rules.has(f) && globs.join('\n') !== rules.get(f)!.join('\n')).map(([f]) => f)
+  };
+}

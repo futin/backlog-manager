@@ -167,7 +167,7 @@ test("this repo's doc and skill guards are selected by the files they read", () 
   const { jest, node } = readSuites();
   const picks = (file) => selectSuites([file], jest, { wide: file.startsWith('skills/') || file.startsWith('agents/') });
   const expect = {
-    'CLAUDE.md': ['test/claude-rules.test.ts', 'test/dialog-count-docs.test.ts'],
+    'CLAUDE.md': ['test/claude-rules.test.ts'],
     '.claude/rules/board.md': ['test/claude-rules.test.ts', 'test/dialog-count-docs.test.ts'],
     'docs/subsystems/invariants.md': ['test/dialog-count-docs.test.ts'],
     'skills/backlog-orchestrate/SKILL.md': ['test/default-model.test.ts', 'test/skills-plugin-root.test.ts', 'test/skill-plugin-root.test.ts'],
