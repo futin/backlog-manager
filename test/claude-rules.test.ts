@@ -93,7 +93,8 @@ const RULES = ruleFilesIn(RULES_DIR);
 /**
  * Bytes, not words: the floor is billed in tokens and bytes track them; words would let long identifiers through. The spec suggested 14 KB against an
  * ~11 KB target that assumed fourteen cross-cutting rules; the fence audit kept 38 + 2 (docs/superpowers/reviews/2026-11-02-claude-md-floor-fence-audit.md),
- * which measured 18.4 KB, so the budget is that plus ~1 KB of headroom. Raise it only in a reviewed change — the cheaper move is a rule down a tier.
+ * which measured 18.4 KB, so the budget is that plus ~1 KB of headroom. Raise it only in a reviewed change — the cheaper move is a rule down a tier,
+ * and the first rules to re-check are the 24 the audit kept unverified (its Keep-list section), before any new rule is demoted.
  */
 const CLAUDE_MD_BUDGET = 19 * 1024;
 
@@ -163,8 +164,8 @@ function invariantAnchors(): Set<string> {
 /**
  * A `paths:` glob as a regex over repo-relative paths. Hand-rolled because there is
  * no matcher in the dependency tree (`minimatch` is not a direct dependency and pnpm's
- * layout does not expose transitive ones), and because the three shapes task-35 writes
- * are the whole grammar: `dir/**`, `dir/*.ts`, and a literal path.
+ * layout does not expose transitive ones), and because the four shapes the rule files write
+ * are the whole grammar: `dir/**`, `dir/*.ts`, a mid-filename star (`dir/watchdog-*.ts`, since 2026-11-02), and a literal path.
  *
  * `**` crosses directory separators, `*` does not — the same distinction the loader
  * itself documents. `dir/**` also matches `dir` itself, so a rule scoped to a

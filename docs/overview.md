@@ -149,8 +149,7 @@ the reasoning. If the tiers ever disagree, the code and its tests decide — but
 
 Moved from CLAUDE.md on 2026-11-02, which now keeps one line per seam.
 
-One line per seam. The mechanism lives in the subsystem docs linked below; the reasoning behind the rules in the next section lives in
-[docs/subsystems/invariants.md](subsystems/invariants.md). The doc map is [docs/overview.md](overview.md).
+The mechanism lives in the subsystem docs linked below, the reasoning behind every rule in [docs/subsystems/invariants.md](subsystems/invariants.md).
 
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
   adapters, and the ten guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this server makes to

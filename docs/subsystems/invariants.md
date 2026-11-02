@@ -3101,7 +3101,7 @@ can introduce, and `test/claude-rules.test.ts` fails naming any file that has no
 **Why one home for the mechanism.** Three STATEMENTS of one rule was the drift the pointer design avoided: a rule file that restated a rule would have been a
 third copy, free to drift from both CLAUDE.md and this file, and `backlog-execute`'s contract sweep would have had to visit it. Three TIERS is not that. Each
 tier says something the other two do not — the headline that the rule exists and what it forbids, the mechanism how it is implemented, this file why — and
-`test/claude-rules.test.ts` pins the seams: a rule file is bullets and nothing else, each anchored into this file exactly once; CLAUDE.md's headlines are a
+`test/claude-rules.test.ts` pins the seams: a rule file is bullets and nothing else, each anchored into this file at most once; CLAUDE.md's headlines are a
 subset of the rule files' bullets, byte-equal, with one home per anchor, or per headline for an unanchored bullet; CLAUDE.md's `## Rule files` table equals the
 rule files' `paths:`; a linked CLAUDE.md bullet is a headline and a link, and any other one is at most 80 words, so mechanism cannot creep back into CLAUDE.md
 by any door. Because tier two states contract, the contract sweep visits `.claude/rules/*.md` — the one cost the pointer design declined, paid knowingly.
@@ -3207,17 +3207,18 @@ matcher treats `dir/**` as "the directory and everything under it".
 
 `test/claude-rules.test.ts` reads `.claude/rules/*.md` and CLAUDE.md as SOURCE — no YAML parser, no glob library; the frontmatter under test is one inline array
 a parser would hand back verbatim, and a multi-line `paths:` list deliberately reads as empty and fails the first case loudly, because nobody has proved the
-loader accepts that shape. Six guards run over the real tree. Every file declares a non-empty `paths:`, because a rule file without one loads at `session_start`
-in every session. Every `docs/subsystems/invariants.md#…` anchor a rule file cites resolves to a real `##`/`###` heading of this file, with the slugifier itself
-checked against a heading known to round-trip, so a broken slugifier cannot pass by matching nothing against nothing. Every glob matches at least one file
-_today_ — tracked or untracked-but-not-ignored, since a rule arriving in the same commit as the directory it scopes is the ordinary way a rule arrives — because
-a pattern that matches nothing is a rule that never fires and fails silently forever; the matcher is hand-rolled over the three shapes the files use (`dir/**`,
-which also names the directory itself, `dir/*.ts`, a literal path). Then the tier guards: a rule file is bullets and nothing else, each citing at most one
-anchor, an unanchored one at most 80 words; every (anchor, headline) CLAUDE.md states is in a rule file — a subset since 2026-11-02, the same multiset before —
-with one home per anchor, or per headline for an unanchored bullet; CLAUDE.md's `## Rule files` table and the rule files' `paths:` are the same map both ways;
-CLAUDE.md stays under its byte budget; and a linked CLAUDE.md bullet is a headline and a link, while any other bullet — bold-led or plain, the plain shape since
-2026-09-22 — is at most 80 words. The parsers both tiers are read through (`test/helpers/rule-tiers.ts`) are pinned on string fixtures first, in the same file,
-for the same reason the slugifier is: a parser that produced nothing would match nothing against nothing and pass every guard while asserting exactly zero.
+loader accepts that shape. These guards run over the real tree. Every file declares a non-empty `paths:`, because a rule file without one loads at
+`session_start` in every session. Every `docs/subsystems/invariants.md#…` anchor a rule file cites resolves to a real `##`/`###` heading of this file, with the
+slugifier itself checked against a heading known to round-trip, so a broken slugifier cannot pass by matching nothing against nothing. Every glob matches at
+least one file _today_ — tracked or untracked-but-not-ignored, since a rule arriving in the same commit as the directory it scopes is the ordinary way a rule
+arrives — because a pattern that matches nothing is a rule that never fires and fails silently forever; the matcher is hand-rolled over the four shapes the
+files use (`dir/**`, which also names the directory itself, `dir/*.ts`, a mid-filename star such as `dir/watchdog-*.ts`, a literal path). Then the tier guards:
+a rule file is bullets and nothing else, each citing at most one anchor, an unanchored one at most 80 words; every (anchor, headline) CLAUDE.md states is in a
+rule file — a subset since 2026-11-02, the same multiset before — with one home per anchor, or per headline for an unanchored bullet; CLAUDE.md's `## Rule
+files` table and the rule files' `paths:` are the same map both ways; CLAUDE.md stays under its byte budget; and a linked CLAUDE.md bullet is a headline and a
+link, while any other bullet — bold-led or plain, the plain shape since 2026-09-22 — is at most 80 words. The parsers both tiers are read through
+(`test/helpers/rule-tiers.ts`) are pinned on string fixtures first, in the same file, for the same reason the slugifier is: a parser that produced nothing would
+match nothing against nothing and pass every guard while asserting exactly zero.
 
 "Passes on nothing" is now history, kept because the reason it changed is the point. Under task-35's pointer design the suite passed **vacuously** on an absent
 or empty directory, and that was deliberate: P3 could have come back negative, in which case the correct deliverable was zero rule files and a recorded
