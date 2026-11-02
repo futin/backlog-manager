@@ -1,7 +1,7 @@
 import { API, GithubClient } from '../server/src/tracker/github.client';
 import { failureVerdict } from '../server/src/tracker/poller.service';
 import { PR_LIST_QUERY, readPull, readPullList, setAutoMerge, toRow, type GqlPullRequest } from '../server/src/tracker/pulls.query';
-import { FAKE_REPO, FakeGithub } from './helpers/github';
+import { CHECKS_REFUSED, FAKE_REPO, FakeGithub } from './helpers/github';
 
 /**
  * `GithubClient.graphql`, the PR queries in `pulls.query.ts`, and the fake GitHub's PR surface (Plan B, Task 2).
@@ -101,6 +101,20 @@ describe('GithubClient.graphql', () => {
       const res = await answer({ type: 'FORBIDDEN', message: 'Resource not accessible by integration' });
       expect(res.status).toBe(403);
       expect(res.error).toBe('Resource not accessible by integration');
+    });
+
+    it('a FORBIDDEN on one field keeps the data GitHub delivered and exposes the pathed errors beside it', async () => {
+      // A fine-grained token without `Checks`/`Commit statuses` on a private repo: the whole list comes back, `statusCheckRollup` `null` on the refused
+      // PR, and a typed error pointing at that field. The status is still restated (403) and `error` still set, but `data` is no longer thrown away —
+      // the caller, which knows what the query asked for, decides whether the answer is usable without that field.
+      const path = ['repository', 'pullRequests', 'nodes', 0, 'commits', 'nodes', 0, 'commit', 'statusCheckRollup'];
+      const body = { data: { repository: { pullRequests: { nodes: [{ number: 7 }] } } }, errors: [{ type: 'FORBIDDEN', message: CHECKS_REFUSED, path }] };
+      const client = new GithubClient(byUrl(() => ({ status: 200, body })));
+      const res = await client.graphql<{ repository: { pullRequests: { nodes: { number: number }[] } } }>('query PullRequests { x }', {}, { token: TOKEN });
+      expect(res.status).toBe(403);
+      expect(res.error).toBe(CHECKS_REFUSED);
+      expect(res.data?.repository.pullRequests.nodes[0].number).toBe(7);
+      expect(res.errors).toEqual([{ type: 'FORBIDDEN', message: CHECKS_REFUSED, path }]);
     });
 
     it('NOT_FOUND is a 404', async () => {
@@ -289,6 +303,13 @@ describe('toRow', () => {
     expect(toRow({ ...NODE_7, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }).checks).toBe('none');
   });
 
+  it('a rollup the token may not read is checks unknown, not none', () => {
+    // The same `null` on the wire as "no checks" — only the error beside it tells them apart, so the caller says which it was.
+    const refused = { ...NODE_7, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } };
+    expect(toRow(refused, true).checks).toBe('unknown');
+    expect(toRow(refused, false).checks).toBe('none');
+  });
+
   it('a deleted author is null', () => {
     expect(toRow({ ...NODE_7, author: null }).author).toBeNull();
   });
@@ -356,6 +377,50 @@ describe('the PR queries against the fake', () => {
     expect(res.data).toBeNull();
   });
 
+  it('a token that may not read checks still gets the list: refused rows read checks unknown, and the list says why', async () => {
+    // A fine-grained PAT without `Checks`/`Commit statuses` on a private repo (lookout, 2026-11-02). GitHub answers the whole list, with
+    // `statusCheckRollup` refused per PR; dropping the list for that turned one missing permission into "no access" and hid the repo from the PRs page.
+    const gh = new FakeGithub();
+    gh.addPr(FAKE_REPO, { number: 7, rollup: 'SUCCESS' });
+    gh.addPr(FAKE_REPO, { number: 9, rollup: null });
+    gh.refuseChecks = true;
+    const res = await readPullList(new GithubClient(gh.fetch), FAKE_REPO, { token: TOKEN });
+    expect(res.status).toBe(200);
+    expect(res.error).toBeNull();
+    // #9 is the newer, so it leads; its `null` rollup is the real answer (no checks), and only #7 — the one the error's path names — is unknown.
+    expect(res.data?.rows.map((r) => [r.number, r.checks])).toEqual([
+      [9, 'none'],
+      [7, 'unknown']
+    ]);
+    expect(res.data?.checksDetail).toBe(CHECKS_REFUSED);
+    expect(res.data?.squashMergeAllowed).toBe(true);
+  });
+
+  it('a list whose checks all read carries no checksDetail', async () => {
+    const gh = new FakeGithub();
+    gh.addPr(FAKE_REPO, { number: 7 });
+    const res = await readPullList(new GithubClient(gh.fetch), FAKE_REPO, { token: TOKEN });
+    expect(res.data?.checksDetail).toBeNull();
+    expect(res.data?.rows[0].checks).toBe('success');
+  });
+
+  it('a FORBIDDEN anywhere but statusCheckRollup still fails the read, and so does one beside any other error', async () => {
+    const whole = { data: { repository: null }, errors: [{ type: 'FORBIDDEN', message: 'Resource not accessible by integration', path: ['repository'] }] };
+    const res = await readPullList(new GithubClient(byUrl(() => ({ status: 200, body: whole }))), FAKE_REPO, { token: TOKEN });
+    expect(res.status).toBe(403);
+    expect(res.data).toBeNull();
+    expect(res.error).toBe('Resource not accessible by integration');
+
+    const checks = ['repository', 'pullRequests', 'nodes', 0, 'commits', 'nodes', 0, 'commit', 'statusCheckRollup'];
+    const mixed = {
+      data: { repository: { pullRequests: { totalCount: 0, nodes: [] } } },
+      errors: [{ type: 'FORBIDDEN', message: CHECKS_REFUSED, path: checks }, { type: 'NOT_FOUND', message: 'something else', path: ['repository', 'x'] }]
+    };
+    const both = await readPullList(new GithubClient(byUrl(() => ({ status: 200, body: mixed }))), FAKE_REPO, { token: TOKEN });
+    expect(both.status).toBe(403);
+    expect(both.data).toBeNull();
+  });
+
   it('the single read sees any state and carries the node id beside the row', async () => {
     const gh = new FakeGithub();
     const x7 = gh.addPr(FAKE_REPO, { number: 7, title: 'seven' });
@@ -370,6 +435,18 @@ describe('the PR queries against the fake', () => {
 
     const missing = await readPull(new GithubClient(gh.fetch), FAKE_REPO, 99, { token: TOKEN });
     expect(missing.status).toBe(404);
+  });
+
+  it('the single read under refused checks keeps the PR, marks its checks unknown and says why', async () => {
+    const gh = new FakeGithub();
+    const x7 = gh.addPr(FAKE_REPO, { number: 7, rollup: 'FAILURE' });
+    gh.refuseChecks = true;
+    const res = await readPull(new GithubClient(gh.fetch), FAKE_REPO, 7, { token: TOKEN });
+    expect(res.status).toBe(200);
+    expect(res.error).toBeNull();
+    expect(res.data?.id).toBe(x7.id);
+    expect(res.data?.row.checks).toBe('unknown');
+    expect(res.data?.checksDetail).toBe(CHECKS_REFUSED);
   });
 
   it('arms and disarms auto-merge by node id, and a repo with it off answers GitHub text', async () => {

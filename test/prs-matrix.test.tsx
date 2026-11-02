@@ -59,6 +59,7 @@ function repo(name: string, prs: PullRequestRow[], over: Partial<PrRepoView> = {
     prs,
     total: prs.length,
     truncated: false,
+    checksDetail: null,
     ...over
   };
 }

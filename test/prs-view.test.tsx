@@ -111,6 +111,7 @@ function repo(over: Partial<PrRepoView> & Pick<PrRepoView, 'repo'>): PrRepoView 
     prs: [],
     total: 0,
     truncated: false,
+    checksDetail: null,
     ...over
   };
 }

@@ -74,6 +74,10 @@ export interface GithubResponse<T> {
   /** A typed GraphQL `RATE_LIMITED` (`graphql()` only; absent everywhere else). GitHub sends it when a query would cost MORE points than are left, so
    *  `remaining` can still be above zero — and `failureVerdict` reads this bit, not `remaining`, as the limit it is. */
   rateLimited?: boolean;
+  /** A 200's `errors` array, as GitHub sent it (`graphql()` only; absent everywhere else, and absent on a GraphQL answer without errors). Beside `error`,
+   *  which is their messages joined, because GraphQL errors are PER FIELD: one on a field deep in `data` leaves the rest of the answer whole, and only the
+   *  raw `path`s let a caller decide whether what GitHub did deliver is still the answer it asked for. */
+  errors?: GraphqlError[];
 }
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -83,10 +87,12 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 type Pool = 'rest' | 'graphql';
 
 /** One GraphQL error as GitHub sends it in a 200's `errors` array. `type` is present on the errors this file maps to a status; a schema or syntax error
- *  carries none. */
-interface GraphqlError {
+ *  carries none. `path` is the field the error is about, from the query's root (`['repository', 'pullRequests', 'nodes', 3, …]`), present on every error
+ *  raised while resolving a field — which is how a caller tells a refusal of ONE field from a refusal of the whole answer (`pulls.query.ts`). */
+export interface GraphqlError {
   type?: string;
   message?: string;
+  path?: (string | number)[];
 }
 
 /**
@@ -125,8 +131,13 @@ export class GithubClient {
    * Keeps this file's three rules. The host is `API`; the response's headers are recorded into the GraphQL pool (`graphqlRate`) and handed back as THIS
    * answer's `rate`, so `failureVerdict` reads GraphQL's own remaining/reset; nothing throws. A non-200 (a secondary limit's 403, a 502) is normalised by
    * `request()` exactly as REST's is, so `retryAfter` and `secondary` arrive as values. A 200 whose body carries `errors` sets `error` to their messages
-   * joined, `data` to `null`, and restates the first typed error `GRAPHQL_STATUS` knows as that status. A 200 with neither `errors` nor `data` comes back
-   * as `status: 200, error: null, data: null` — a success with nothing in it, which every caller null-checks.
+   * joined, restates the first typed error `GRAPHQL_STATUS` knows as that status, and keeps `data` AS GITHUB DELIVERED IT — `null` when the whole answer
+   * was refused, whole but for `null` at the refused field when one field was — with the raw `errors` beside it. GraphQL refuses per field: a fine-grained
+   * token without `Checks` and `Commit statuses` reads every PR of a private repo and is refused only its `statusCheckRollup`, and blanking `data` on that
+   * turned one unreadable field into a repo the PRs page hid (2026-11-02). The CALLER decides whether a partial answer is still an answer —
+   * `pulls.query.ts`'s two reads do, for that one field and no other — and every other caller reads `error !== null` as the failure it is and never looks
+   * at `data`. A 200 with neither `errors` nor `data` comes back as `status: 200, error: null, data: null` — a success with nothing in it, which every
+   * caller null-checks.
    */
   async graphql<T>(query: string, variables: Record<string, unknown>, opts: { token: string }): Promise<GithubResponse<T>> {
     const res = await this.request<{ data?: T | null; errors?: GraphqlError[] }>('POST', `${API}/graphql`, {
@@ -142,7 +153,8 @@ export class GithubClient {
     const status = typed === undefined ? 200 : GRAPHQL_STATUS[typed.type as string];
     // REST tells a secondary limit apart by its sentence (`request()`); GraphQL sends that same sentence under `RATE_LIMITED`, so it is read the same way.
     const secondary = typed?.type === 'RATE_LIMITED' && /secondary rate limit/i.test(message);
-    return { ...res, status, data: null, error: message, secondary, ...(typed?.type === 'RATE_LIMITED' ? { rateLimited: true } : {}) };
+    const data = res.data.data ?? null;
+    return { ...res, status, data, errors, error: message, secondary, ...(typed?.type === 'RATE_LIMITED' ? { rateLimited: true } : {}) };
   }
 
   /**

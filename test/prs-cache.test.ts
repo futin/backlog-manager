@@ -7,7 +7,7 @@ import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { PR_TTL_MS, PullRequestsService } from '../server/src/tracker/pulls.service';
 import { writeSyncInterval } from '../server/src/tracker/sync-config.util';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
-import { FAKE_REPO, FakeGithub } from './helpers/github';
+import { CHECKS_REFUSED, FAKE_REPO, FakeGithub } from './helpers/github';
 import { makeProject } from './helpers/store';
 import type { RegistryService } from '../server/src/registry/registry.service';
 import { PR_UPDATING_MS, type PrRepoView, type PullRequestRow } from '../shared/types';
@@ -305,6 +305,33 @@ describe('PullRequestsService.list', () => {
     expect(view(out.repos, FAKE_REPO)).toMatchObject({ methods: ['merge', 'rebase'], autoMergeAllowed: false });
     expect(view(out.repos, 'futin/y')).toMatchObject({ methods: ['squash', 'merge', 'rebase'], autoMergeAllowed: true });
   });
+
+  it('a token that may not read checks keeps the repo readable: access ok, every row with checks unknown, the refusal as checksDetail', async () => {
+    // The lookout case (2026-11-02): a fine-grained PAT without `Checks`/`Commit statuses` on a private repo. The list is whole but for the rollups,
+    // and a repo that is readable must not be reported `forbidden` — that hid it from the PRs page and listed it under "Not readable".
+    const { gh, prs } = rig();
+    gh.refuseChecks = true;
+    const { repos } = await prs.list(NOW);
+    const x = view(repos, FAKE_REPO);
+    expect(x.access).toBe('ok');
+    expect(x.detail).toBeNull();
+    expect(numbers(x)).toEqual([9, 7]);
+    expect(x.prs.map((p) => p.checks)).toEqual(['unknown', 'unknown']);
+    expect(x.checksDetail).toBe(CHECKS_REFUSED);
+    expect(x.polledAt).toBe(new Date(NOW).toISOString());
+    expect(view(repos, 'futin/y').checksDetail).toBe(CHECKS_REFUSED);
+  });
+
+  it('checksDetail is null while every check reads, and clears again once the token can read them', async () => {
+    const { gh, prs } = rig();
+    expect(view((await prs.list(NOW)).repos, FAKE_REPO).checksDetail).toBeNull();
+    gh.refuseChecks = true;
+    clock = NOW + PR_TTL_MS;
+    expect(view((await prs.list(clock)).repos, FAKE_REPO).checksDetail).toBe(CHECKS_REFUSED);
+    gh.refuseChecks = false;
+    clock = NOW + 2 * PR_TTL_MS;
+    expect(view((await prs.list(clock)).repos, FAKE_REPO).checksDetail).toBeNull();
+  });
 });
 
 describe('PullRequestsService.splice', () => {
@@ -564,6 +591,20 @@ describe('PullRequestsService freshness around writes', () => {
     await prs.list(clock);
     expect(lists(gh, FAKE_REPO)).toBe(1);
     expect(lists(gh, 'futin/y')).toBe(2);
+  });
+
+  it("a write's re-read under refused checks still splices the row, with its checks unknown", async () => {
+    const { gh, prs } = rig();
+    await prs.list(NOW);
+    gh.refuseChecks = true;
+    const armed = await prs.autoMerge({ repo: FAKE_REPO, number: 7, enable: true, method: 'squash' });
+    expect(armed).toMatchObject({ ok: true });
+    const x = view((await prs.list(NOW)).repos, FAKE_REPO);
+    const seven = x.prs.find((p) => p.number === 7);
+    expect(seven?.autoMerge?.method).toBe('squash');
+    expect(seven?.checks).toBe('unknown');
+    expect(x.access).toBe('ok');
+    expect(lists(gh, FAKE_REPO)).toBe(1);
   });
 
   it('a write reads the clock when its turn comes, so the limit its predecessor met is judged from then', async () => {

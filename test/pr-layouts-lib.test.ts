@@ -66,6 +66,7 @@ function repo(over: Partial<PrRepoView> = {}): PrRepoView {
     prs: [],
     total: 0,
     truncated: false,
+    checksDetail: null,
     ...over
   };
 }
@@ -93,6 +94,7 @@ describe('prLevel', () => {
     ['behind', { mergeState: 'behind' }, 'worth-a-look'],
     ['review required', { review: 'review-required' }, 'worth-a-look'],
     ['checks pending', { checks: 'pending' }, 'worth-a-look'],
+    ['checks the token may not read', { checks: 'unknown' }, 'quiet'],
     ['checks pending with auto-merge armed', { checks: 'pending', autoMerge: { method: 'squash', enabledAt: '2026-10-29T09:00:00Z' } }, 'quiet'],
     ['mergeable unknown', { mergeable: 'unknown' }, 'worth-a-look'],
     ['blocked with nothing to name it', { mergeState: 'blocked' }, 'worth-a-look'],
@@ -120,6 +122,7 @@ describe('prSeverity', () => {
     [{ mergeState: 'behind' }, 0],
     [{ review: 'review-required' }, 1],
     [{ checks: 'pending' }, 2],
+    [{ checks: 'unknown' }, null],
     [{ mergeable: 'unknown' }, 3],
     [{ mergeState: 'blocked' }, 4],
     [{ review: 'approved', checks: 'success' }, null],
@@ -166,6 +169,11 @@ describe('prProblems and prVerdict', () => {
     expect(prProblems(row({ checks: 'success' }), null)).toEqual([{ text: 'Checks are passing.', calm: true }]);
   });
 
+  it('checks the token may not read are no fact at all: no problem, and no `Checks are passing.` either', () => {
+    expect(prProblems(row({ checks: 'unknown' }), null)).toEqual([]);
+    expect(prProblems(row({ checks: 'unknown', review: 'approved' }), null)).toEqual([{ text: 'Approved.', calm: true }]);
+  });
+
   it('a clean quiet PR has no verdict', () => {
     expect(prVerdict(prProblems(row(), null))).toEqual({ verdict: null, steps: [] });
   });
@@ -178,6 +186,7 @@ describe('prProblems and prVerdict', () => {
 describe('quietFacts', () => {
   it('is the chips vocabulary, joined', () => {
     expect(quietFacts(row({ draft: true, review: 'approved', checks: 'success' }))).toBe('draft · approved · checks passing');
+    expect(quietFacts(row({ review: 'approved', checks: 'unknown' }))).toBe('approved · checks unknown');
   });
 });
 
@@ -453,6 +462,8 @@ describe('matrixCells', () => {
     expect(matrixCells(row({ checks: 'success' }), false).checks).toEqual({ text: 'passing', tone: 'ok' });
     expect(matrixCells(row({ checks: 'pending' }), false).checks).toEqual({ text: 'running', tone: 'live' });
     expect(matrixCells(row({ checks: 'none' }), false).checks).toEqual({ text: '—', tone: 'na' });
+    // Never `running` or `passing`: the token could not read them, and a cell that guessed would be a claim GitHub refused to make.
+    expect(matrixCells(row({ checks: 'unknown' }), false).checks).toEqual({ text: 'unknown', tone: 'na' });
     expect(matrixCells(row({ review: 'approved' }), false).review).toEqual({ text: 'approved', tone: 'ok' });
     expect(matrixCells(row({ review: 'changes-requested' }), false).review).toEqual({ text: 'changes', tone: 'bad' });
     expect(matrixCells(row({ review: 'review-required' }), false).review).toEqual({ text: 'required', tone: 'meh' });

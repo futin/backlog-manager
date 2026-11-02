@@ -30,6 +30,14 @@ Reference implementation to port FROM (behaviour and visual language, not code t
 6. GitHub › Settings gets an **Access** card beside Sync listing those repos, the error GitHub gave, and how to fix it (no age — see the Access card).
 7. A hidden repo comes back on its own: the next read that answers `ok` puts it back on every layout and takes it off the Access card, with no button.
 
+> **Refused checks are not a refused repo — 2026-11-02.** The `forbidden` the facts below record for brickwright, ixray and lookout was not the token failing
+> to read their pull requests: it reads them in full and is refused one field, each head commit's `statusCheckRollup`, because the fine-grained token lacks
+> `Checks: Read-only` and `Commit statuses: Read-only` on a private repo. GitHub reports that as a `FORBIDDEN` on that field BESIDE a whole answer, and
+> `github.client.ts` blanked the whole answer on any error, so three readable repos were hidden. Now `pulls.query.ts` keeps such a list: every refused row's
+> `checks` is `unknown` (a fifth value beside `success`/`failure`/`pending`/`none` — Quiet on its other facts, `checks unknown` as its chip and Matrix cell,
+> no fact of its own), `PrRepoView.checksDetail` carries GitHub's sentence, the repo stays `ok` and drawn, and the Access card gains a second list, `Checks not
+> readable`, with a `warn` pill `N without checks` and a fix note naming all four permissions. Goals 5–7 and the no-access list are unchanged.
+
 ## Non-goals
 
 - No repo filter (decided: tiles only for now).
@@ -174,6 +182,8 @@ A second card in `GithubSettingsView`, beside `Sync` (DESIGN §8.6 card language
 - Drawn only when ≥1 repo is no-access. Title `Access` with a bad pill `N without access`.
 - Lead: the token cannot read pull requests on these repos, so the PRs page leaves them out; each comes back on its own once it can.
 - One row per no-access repo: name and `detail` in `--red` (no age, see below).
+- (2026-11-02) Then a second lead, `Checks not readable`, with a `warn` pill `N without checks` in the head and one row per repo whose `checksDetail` is set,
+  in the same red; the fix note below names **Checks: Read-only** and **Commit statuses: Read-only** too. Drawn on its own when no repo is no-access.
 - A fix note naming the fine-grained token's repository access and two permissions: **Pull requests: Read and write** (the list, update branch and
   auto-merge) and **Contents: Read and write** (merge — the server merges through REST `PUT …/pulls/{n}/merge`, which GitHub files under Contents), and
   that the variable is `BM_GITHUB_TOKEN`. It never shows or hints at the token's value.

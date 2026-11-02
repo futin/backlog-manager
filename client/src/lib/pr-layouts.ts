@@ -67,6 +67,10 @@ interface LevelFact {
  *
  * The unnamed block is only added when the list is otherwise empty AND the checks are not pending: running checks are a name for a `blocked` state even when
  * auto-merge being armed means they are not a fact of their own.
+ *
+ * `checks: 'unknown'` — the token may not read them (`PrRepoView.checksDetail`) — is no fact at all, like `none`: the page knows nothing about those checks
+ * and claims nothing, so such a PR is Quiet on its other facts and its row says `checks unknown` (`prChips`). Not `pending`: that would put every PR of the
+ * repo in Worth a look for as long as the token lacks the permission, which is a Settings problem, said once on GitHub › Settings' Access card.
  */
 function levelFacts(pr: PullRequestRow): LevelFact[] {
   const facts: LevelFact[] = [];
@@ -321,7 +325,10 @@ export function matrixCells(pr: PullRequestRow, updating: boolean): Record<Matri
         ? { text: 'failing', tone: 'bad' }
         : pr.checks === 'pending'
           ? { text: 'running', tone: 'live' }
-          : NA;
+          : pr.checks === 'unknown'
+            ? // Said in words rather than `—`: the dash means "no checks", and here there may well be some this token cannot read.
+              { text: 'unknown', tone: 'na' }
+            : NA;
   const review: MatrixCell =
     pr.review === 'approved'
       ? { text: 'approved', tone: 'ok' }
