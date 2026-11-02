@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**"]
+paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "docker-compose.yml", "shared/jira-branch.ts", "server/src/agents/session-stop.util.ts"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
@@ -103,3 +103,4 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**"]
   jira and never back: `jira/` imports nothing from `agents/` except `SameOriginPostGuard`, which is why the dispatch, the stop and the reconciler live in
   `agents/` while the map does not. Why:
   [invariants.md](docs/subsystems/invariants.md#a-jira-session-is-remembered-in-server-memory-only-and-stop-is-the-one-hand-that-clears-it-early)
+- **`jira.mjs` writes no file of its own**; its one exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo.

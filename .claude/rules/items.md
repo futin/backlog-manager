@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/releases/**"]
+paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/releases/**", "server/src/agents/items-abort.*.ts", "server/src/tracker/tracker.controller.ts", "shared/types.ts", "Dockerfile"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
@@ -92,3 +92,5 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
   `/api/health` answers in tens of milliseconds while `/api/items` waits out a 1 s git, and a grep that fails on `execFileSync`, `spawnSync` or `execSync`
   anywhere under `server/src`. The synchronous `fs` reads (`readFileSync`, `readdirSync`, `statSync`) stay synchronous on purpose — they were not the
   bottleneck. Why: [invariants.md](docs/subsystems/invariants.md#the-server-never-spawns-git-synchronously-in-a-request-path)
+- **Item bodies are served through a registry-built allowlist** (`allow.util.ts`); a file outside every registered `backlog/` 404s.
+- **`releases/` is read-only and git only**: `GET /api/releases` reads this checkout's release tags for the rail's version chip, and calls out to nothing.

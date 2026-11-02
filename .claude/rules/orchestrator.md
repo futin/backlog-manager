@@ -1,5 +1,5 @@
 ---
-paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/agent.ts"]
+paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/agent.ts", "skills/backlog-retro/tools/lib/paths.mjs", "skills/backlog-retro/tools/lib/reviews.mjs", "server/src/agents/agents.*.ts", "server/src/agents/orchestrate-args.service.ts", "server/src/tracker/map-issue.ts", "client/src/lib/remote-starting.ts", "client/src/components/RunControls.tsx"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
@@ -204,3 +204,5 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   item, ONE line for the whole batch when the API is down. No gate, queue builder, preflight or claim reads the label; the mapper sets `BacklogItem.queued` and
   only the card reads it, as `queuedReading`'s `'live' | 'stale' | null`. A `files` project makes no label call on any path. Why:
   [invariants.md](docs/subsystems/invariants.md#orchestratorqueued-is-a-plan-never-a-claim)
+- **The server's `orchestrator/` module is a read-only view of the run-state directory**, save the two files it writes there (`pause-control.util.ts`,
+  `watchdog-config.util.ts`) and the third, which `POST /api/trackers/sync` (`tracker-sync.controller.ts`) writes.

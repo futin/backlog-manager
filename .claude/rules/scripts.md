@@ -1,5 +1,5 @@
 ---
-paths: ["scripts/**", "package.json", "pnpm-workspace.yaml"]
+paths: ["scripts/**", "package.json", "pnpm-workspace.yaml", "docker-compose*.yml"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
@@ -14,3 +14,4 @@ paths: ["scripts/**", "package.json", "pnpm-workspace.yaml"]
   not "simplify" `test` back to bare jest: jest's `testMatch` can never reach `skills/*/tools/*.test.mjs`, the whole of this repo's single-writer tooling. The
   two named scripts stay the single copy of what each runner runs; neither runner short-circuits the other; the script has no test of its own on purpose. Why:
   [invariants.md](docs/subsystems/invariants.md#pnpm-test-is-the-union-of-both-runners)
+- **`allowBuilds` in `pnpm-workspace.yaml` lists `esbuild`**; a skipped build surfaces as Vite failing to start.

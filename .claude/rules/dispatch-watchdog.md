@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/agents/**", "shared/agent.ts"]
+paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.ts", "docker-compose.yml", "skills/backlog-orchestrate/tools/orchestrate.mjs", "server/src/orchestrator/watchdog-*.ts", "server/src/orchestrator/orchestrator.controller.ts"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md

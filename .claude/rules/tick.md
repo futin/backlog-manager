@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/tick/**"]
+paths: ["server/src/tick/**", "skills/backlog-tick/tools/tick.mjs", "skills/backlog-tick/tools/tick-breaker.mjs"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md

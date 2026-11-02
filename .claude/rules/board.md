@@ -1,5 +1,5 @@
 ---
-paths: ["client/src/**"]
+paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.html", "server/src/security.ts", "server/src/agents/agents.service.ts", "server/src/orchestrator/remote-runs.util.ts"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
@@ -160,3 +160,7 @@ paths: ["client/src/**"]
   aimed at the soonest board's next sweep (`polledAt + interval + TRACKER_FETCH_SLACK_MS`, floored at `JIRA_STATUS_FLOOR_MS`), no timer while unconfigured or
   with no syncing board, and focus, timer and a Setup save's `reload` may overlap. `useJiraBoard` IS built on `useCoalescedFetch`. Why:
   [invariants.md](docs/subsystems/invariants.md#a-client-poller-built-on-usecoalescedfetch-never-has-two-of-its-own-requests-in-flight)
+- **`linkBase` becomes an href**, so `clampSettings` routes it through `clampOrigin` — URL-parsed, `http(s)` only. The one settings key a hand-edited
+  localStorage value could turn into script execution.
+- **Every derivation has one home in `lib/`, and every look more than one surface draws has one home in `components/ui/`.**
+- **Every component cites its `.claude/DESIGN.md` subsection in a header comment.**
