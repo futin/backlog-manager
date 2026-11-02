@@ -1,7 +1,19 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { anchorsOf, compareTiers, freeProse, headlineOf, joinWrapped, splitBullets, tierOne, tierTwo, wordCount } from './helpers/rule-tiers';
+import {
+  anchorsOf,
+  compareTiers,
+  freeProse,
+  headlineOf,
+  joinWrapped,
+  ruleBulletOffenders,
+  splitBullets,
+  tierOne,
+  tierTwo,
+  UNLINKED_WORD_CAP,
+  wordCount
+} from './helpers/rule-tiers';
 
 /**
  * `.claude/rules/*.md` hold the MECHANISM tier of this repo's rules: each file is the one home of the full bullet — headline, how the rule is implemented,
@@ -13,9 +25,10 @@ import { anchorsOf, compareTiers, freeProse, headlineOf, joinWrapped, splitBulle
  * context-floor increase for all of them, the one failure mode task-35 must never introduce); an anchor that no longer resolves lands the reader at the top
  * of a 3,000-line file; a glob that matches nothing never fires at all and nothing ever says so; mechanism that creeps back into CLAUDE.md is paid for by
  * every session, chat or headless, and nobody notices a file getting longer; a headline edited on one side only drifts the two tiers apart with no reader
- * positioned to see both. The three tier guards catch the last two: a rule file is bullets and nothing else, each anchored exactly once; tier one and tier
- * two are the same multiset of (anchor, headline) with one home per anchor; a linked CLAUDE.md bullet is a headline and a link, and a bullet without a
- * link — bold-led or plain — is short.
+ * positioned to see both. The three tier guards catch the last two: a rule file is bullets and nothing else, each anchored at most once and an unanchored one
+ * short; tier one is a subset of tier two — every (anchor, headline) CLAUDE.md states is in a rule file — with one home per anchor, or per headline for an
+ * unlinked bullet; a linked CLAUDE.md bullet is a headline and a link, and a bullet without a link — bold-led or plain — is short. Since 2026-11-02 a rule
+ * whose files all sit under one fence lives in its rule file alone (docs/superpowers/specs/2026-11-02-claude-md-floor-design.md).
  *
  * The suite reads the files as SOURCE, the way `test/csp.test.ts` and `test/compose-env.test.ts` read config files — there is no YAML parser in the
  * dependency tree, and the frontmatter under test is one inline array a parser would hand back verbatim anyway.
@@ -37,11 +50,6 @@ const CLAUDE_MD = readFileSync(join(REPO_ROOT, 'CLAUDE.md'), 'utf8');
  */
 const HEADLINE_ONLY = /^- \*\*(.+?)\*\* Why: \[invariants\.md\]\(docs\/subsystems\/invariants\.md#[\w-]+\)$/;
 
-/**
- * The most words a CLAUDE.md bullet may carry without a `Why:` link, bold-led or plain — the two side doors that would let mechanism back in: drop the link,
- * or drop the bold as well. The second door is not hypothetical: the "tests are flat" paragraph sat behind it at ~330 words until 2026-09-22.
- */
-const UNLINKED_WORD_CAP = 80;
 
 /**
  * Tier one's offenders, from the text of a CLAUDE.md: a linked bullet that is more than a headline and a link, or a bullet with no link — bold-led or plain —
@@ -264,22 +272,56 @@ describe('rule-tiers helpers', () => {
     expect(freeProse('# h\n\n- **A** x\n  cont\nStray sentence.\n- **B** y', 5)).toEqual([{ line: 9, text: 'Stray sentence.' }]);
   });
 
-  it('compareTiers names what is missing on either side and an anchor homed twice', () => {
+  it('compareTiers names what tier one states and tier two lacks, and an anchor homed twice', () => {
     const b = (anchor: string, headline: string) => ({ raw: '', joined: '', headline, anchors: [anchor], words: 0, line: 0 });
     expect(
       compareTiers([b('X', 'H1'), b('Y', 'H2'), b('Y', 'H2')], [{ file: 'a', bullets: [b('X', 'H1'), b('Y', 'H2')] }])
-    ).toEqual({ missingInRules: ['Y\tH2'], missingInClaude: [], multiHomed: [] });
+    ).toEqual({ missingInRules: ['Y\tH2'], multiHomed: [] });
     expect(
       compareTiers([b('X', 'H1')], [
         { file: 'a', bullets: [b('X', 'H1')] },
         { file: 'b', bullets: [b('X', 'H1')] }
       ])
-    ).toEqual({ missingInRules: [], missingInClaude: ['X\tH1'], multiHomed: ['X → a, b'] });
-    expect(compareTiers([b('X', 'H1')], [{ file: 'a', bullets: [b('X', 'H1 ')] }])).toEqual({
-      missingInRules: ['X\tH1'],
-      missingInClaude: ['X\tH1 '],
+    ).toEqual({ missingInRules: [], multiHomed: ['X → a, b'] });
+    expect(compareTiers([b('X', 'H1')], [{ file: 'a', bullets: [b('X', 'H1 ')] }])).toEqual({ missingInRules: ['X\tH1'], multiHomed: [] });
+  });
+
+  // Tier one is a declared SUBSET of tier two since 2026-11-02 (docs/superpowers/specs/2026-11-02-claude-md-floor-design.md): a subsystem rule lives in
+  // its rule file alone, so tier two holding what tier one does not is the normal case, not drift.
+  it('compareTiers treats tier one as a subset of tier two', () => {
+    const b = (anchor: string, headline: string) => ({ raw: '', joined: '', headline, anchors: [anchor], words: 0, line: 0 });
+    expect(compareTiers([b('A', 'Rule A')], [{ file: 'x', bullets: [b('A', 'Rule A'), b('B', 'Rule B')] }])).toEqual({
+      missingInRules: [],
       multiHomed: []
     });
+  });
+
+  it('compareTiers sees a headline that drifted by one character on the tier-two side', () => {
+    const b = (anchor: string, headline: string) => ({ raw: '', joined: '', headline, anchors: [anchor], words: 0, line: 0 });
+    expect(compareTiers([b('A', 'Rule A.')], [{ file: 'x', bullets: [b('A', 'Rule A')] }]).missingInRules).toEqual(['A\tRule A.']);
+  });
+
+  // An unlinked rule-file bullet has no anchor to be homed by, so one-home keys on its headline — or the same rule pasted into two files would pass.
+  it('compareTiers sees an unlinked headline homed in two rule files', () => {
+    const [same] = tierTwo('- **Same rule** text');
+    expect(compareTiers([], [{ file: 'x', bullets: [same] }, { file: 'y', bullets: [same] }])).toEqual({
+      missingInRules: [],
+      multiHomed: ['Same rule → x, y']
+    });
+  });
+
+  it('ruleBulletOffenders allows an unlinked bullet up to the word cap, never two anchors', () => {
+    const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(' ');
+    const link = (a: string) => `[invariants.md](docs/subsystems/invariants.md#${a})`;
+    const bullets = tierTwo(
+      [
+        `- **Linked** text Why: ${link('a')}`,
+        `- **${words(UNLINKED_WORD_CAP)}**`,
+        `- **${words(UNLINKED_WORD_CAP + 1)}**`,
+        `- **Twice** Why: ${link('a')} and ${link('b')}`
+      ].join('\n')
+    );
+    expect(ruleBulletOffenders(bullets)).toEqual([`3: ${UNLINKED_WORD_CAP + 1} words, no anchor`, '4: Twice cites 2 anchors']);
   });
 });
 
@@ -320,30 +362,26 @@ describe('.claude/rules', () => {
     expect(dead).toEqual([]);
   });
 
-  it('a rule file is bullets and nothing else, every one anchored into invariants.md exactly once', () => {
-    // The three failure shapes — a stray paragraph, a bullet with no link, a bullet with two — are pinned on fixtures by the `freeProse` and `anchorsOf`
-    // cases above; this case is the real tree.
+  it('a rule file is bullets and nothing else, each anchored at most once and an unanchored one short', () => {
+    // The failure shapes — a stray paragraph, a long bullet with no link, a bullet with two — are pinned on fixtures by the `freeProse` and
+    // `ruleBulletOffenders` cases above; this case is the real tree.
     const offenders: string[] = [];
     for (const file of RULES) {
       const body = bodyOf(file);
       const first = bodyStart(file) + 1;
       for (const prose of freeProse(body, first)) offenders.push(`${file.name}:${prose.line}: ${prose.text.slice(0, 60)}`);
-      for (const bullet of tierTwo(body, first)) {
-        if (bullet.anchors.length !== 1) {
-          offenders.push(`${file.name}: ${bullet.headline ?? bullet.joined.slice(0, 60)} cites ${bullet.anchors.length} anchors`);
-        }
-      }
+      for (const offender of ruleBulletOffenders(tierTwo(body, first))) offenders.push(`${file.name}:${offender}`);
     }
     expect(offenders).toEqual([]);
   });
 
-  it('CLAUDE.md headlines and rule-file bullets are the same set, one home per anchor', () => {
+  it('every linked CLAUDE.md headline is in its rule file byte-equal, and every rule has one home', () => {
     const one = tierOne(CLAUDE_MD).linked;
     const two = RULES.map((file) => ({
       file: file.name,
       bullets: tierTwo(bodyOf(file), bodyStart(file) + 1).filter((b) => b.headline !== null)
     }));
-    expect(compareTiers(one, two)).toEqual({ missingInRules: [], missingInClaude: [], multiHomed: [] });
+    expect(compareTiers(one, two)).toEqual({ missingInRules: [], multiHomed: [] });
   });
 
   it('a linked CLAUDE.md bullet is a headline and a link, and a bullet without a link is short', () => {
