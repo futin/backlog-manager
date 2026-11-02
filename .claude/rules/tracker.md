@@ -55,8 +55,8 @@ paths: ["server/src/tracker/**"]
   consulting its heartbeat ("any stamp, fresh or stale") and the counters from the newest claim regardless of release. Why:
   [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)
 - **An outsider's tracker issue is executable only while its body matches a pin a groom of ours wrote.** `trustedAssociation(assoc)`
-  (`server/src/tracker/claim.ts`) is the ONE trust rule over an `author_association`, for an issue and a claim comment alike — `OWNER`/`MEMBER`/`COLLABORATOR`,
-  or absent — and `trustedAuthor` calls it. `GithubIssue.author_association` is read off every issue. `mapIssue` sets `BacklogItem.unvetted: true`
+  (`server/src/tracker/claim.ts`) is the ONE trust rule over an `author_association`, for an issue, a claim comment and an attention comment alike —
+  `OWNER`/`MEMBER`/`COLLABORATOR`, or absent — and `trustedAuthor` and `parseAttention` call it. `GithubIssue.author_association` is read off every issue. `mapIssue` sets `BacklogItem.unvetted: true`
   (spread-absent otherwise, `planReview`'s rule, one writer) through `isUnvetted` exactly when the section is `bugs` or `tasks`, the issue's author is
   untrusted, and the newest PARSED claim whose `pin` is 64 lowercase hex (`PIN_SHAPE`) — released claims included, an outsider's claim comment already dropped
   by `parseClaim` — does not equal `bodyHash(issue.body)` (`poller.service.ts`, the one body hasher), or no such claim exists. `groomed` is untouched: still

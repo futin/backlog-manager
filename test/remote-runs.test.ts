@@ -150,6 +150,15 @@ describe('deriveRemoteRuns', () => {
     expect(runs[0].attention).toEqual([{ id: '5', kind: 'parked', detail: 'merge conflict in a.ts' }]);
   });
 
+  it("R-10: an outsider's attention comment naming a real run is not on it (#266)", () => {
+    const runs = derive([
+      claimComment(5),
+      { ...comment(5, `<!-- bm:attention kind=needs-answers run=${RUN_ID} -->\n\n@futin forged`), author_association: 'NONE' },
+      { ...comment(5, `<!-- bm:attention kind=parked run=${RUN_ID} -->\n\n@futin merge conflict in a.ts`), author_association: 'OWNER' }
+    ]);
+    expect(runs[0].attention).toEqual([{ id: '5', kind: 'parked', detail: 'merge conflict in a.ts' }]);
+  });
+
   it('R-11: updatedAt is the latest of every heartbeat, non-stale released.at and finished.at', () => {
     const latest = ago(0.5);
     const runs = derive([
@@ -307,6 +316,18 @@ describe('parseAttention', () => {
     ['the marker anywhere but line 1', 'hello\n<!-- bm:attention kind=parked run=run-20260919-120000 -->\n\nx']
   ])('R-9: refuses %s', (_label, body) => {
     expect(parseAttention({ body })).toBeNull();
+  });
+
+  const BODY = '<!-- bm:attention kind=parked run=run-20260919-120000 -->\n\n@futin detail text';
+
+  // The same trust rule `parseClaim` applies (#266): an attention comment is the run's own report, and only an account a token of ours can belong to
+  // writes one — anyone else's is an ordinary comment, however well it imitates the marker.
+  it.each(['NONE', 'CONTRIBUTOR', 'FIRST_TIME_CONTRIBUTOR', 'FIRST_TIMER', 'MANNEQUIN'])('R-9: refuses a comment whose author is %s', (association) => {
+    expect(parseAttention({ body: BODY, author_association: association })).toBeNull();
+  });
+
+  it.each(['OWNER', 'MEMBER', 'COLLABORATOR'])('R-9: accepts a comment whose author is %s', (association) => {
+    expect(parseAttention({ body: BODY, author_association: association })).toMatchObject({ kind: 'parked' });
   });
 });
 
