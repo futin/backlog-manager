@@ -29,7 +29,9 @@ the moment a session reads a file under its `paths:`.
 
 ## Goals
 
-- Cut the `CLAUDE.md` floor to roughly 9 KB (soft target — never compress a load-bearing rule to hit a number).
+- Cut the `CLAUDE.md` floor to roughly 11 KB (soft target — never compress a load-bearing rule to hit a number). The arithmetic: intro 845 B +
+  `## Commands` 3,042 B + Invariants preamble 476 B + the fourteen keep-list bullets ~3,200 B + Conventions heading and PR-title bullet 428 B ≈ 8.0 KB,
+  plus a trimmed `## Layout` (~1.5-2 KB) and the path → rule-file table (~1 KB).
 - Stop the regrowth mechanically: a new subsystem rule must not need a `CLAUDE.md` edit, and a guard must notice tier one creeping back up.
 - Lose no rule. Every bullet that leaves `CLAUDE.md` lands, byte-equal headline intact, in exactly one rule file.
 - Close the gap the headline list was quietly covering (see "The CodeGraph/Write gap").
@@ -99,7 +101,7 @@ file's `paths:` cover every file the rule governs? A failure is fixed narrowly:
 - **A rule that spans several subsystems** → it joins the `CLAUDE.md` keep-list, criterion (b).
 
 Each widening adds that rule file's bytes to every session touching the new glob, so prefer the narrowest glob that names the governed file. The plan
-records each failure and which way it was fixed; the final keep-list may therefore grow past fourteen, and the ~9 KB target stays soft.
+records each failure and which way it was fixed; the final keep-list may therefore grow past fourteen (~230 B each), and the ~11 KB target stays soft.
 
 ## The rest of `CLAUDE.md`
 
@@ -137,9 +139,9 @@ sessions are seen skipping it.
 - **Was:** `CLAUDE.md` headlines and rule-file headlines are the same set.
 - **Becomes:** every linked `CLAUDE.md` headline appears byte-equal (on the joined text) as a rule-file headline — tier one is a SUBSET of tier two —
   and every unlinked `CLAUDE.md` bullet stays under the existing word cap.
-- **New:** the path → rule-file table in `CLAUDE.md` names every file in `.claude/rules/` and its globs match each file's `paths:` exactly, so adding a
+- **New:** the path → rule-file table in `CLAUDE.md` and the files in `.claude/rules/` are the same set in both directions, and each row's globs match that file's `paths:` exactly, so adding a
   rule file without listing it, or changing a fence without updating the table, goes red.
-- **New:** a size budget on `CLAUDE.md` (suggest 12 KB — headroom over the ~9 KB target). The assertion is hard; "soft" means the number may be
+- **New:** a size budget on `CLAUDE.md` (suggest 14 KB — real headroom over the ~11 KB target, still under the 15 KB anti-goal). The assertion is hard; "soft" means the number may be
   raised in a reviewed change, and the failure message says to move a rule down a tier, not to compress wording.
 - **New:** one home per headline, not only per anchor — a joined headline appears in at most one rule file, so a bullet with no anchor cannot be
   homed twice unseen (today one-home is keyed on anchors only, `test/helpers/rule-tiers.ts:124`).
@@ -151,9 +153,9 @@ moves with it: it should pin the headline in `board.md`.
 
 ## Other surfaces that cite `CLAUDE.md`
 
-- Test comments refer to rules as "CLAUDE.md's …" in 21 files today — every hit of `grep -ln CLAUDE.md test/ test/helpers/`. Where the rule moves,
+- Test comments refer to rules as "CLAUDE.md's …" in 19 files today — every hit of `grep -rln CLAUDE.md test/`. Where the rule moves,
   the comment should point at its rule file.
-- The same-set contract is stated in prose, and each statement changes to the subset contract: `.claude/rules/tests.md:8-12` (bullet #104's mechanism —
+- The same-set contract is stated in prose, and each statement changes to the subset contract: `CLAUDE.md`'s own `## Invariants` preamble, `.claude/rules/tests.md:8-12` (bullet #104's mechanism —
   "one multiset", and itself guarded), `docs/subsystems/invariants.md` (the three-tier entries, around :3093, :3103-3105, :3215-3216, :3223),
   `docs/overview.md:16,30-32`, `test/helpers/rule-tiers.ts:4-9,124` and `test/claude-rules.test.ts:12-17`.
 - `docs/subsystems/invariants.md`, `docs/overview.md` and `.claude/rules/*.md` headers describe the three tiers ("the headline is in CLAUDE.md");
@@ -176,7 +178,7 @@ moves with it: it should pin the headline in `board.md`.
 
 ## Done looks like
 
-- `CLAUDE.md` at roughly 9 KB, re-measured with `/preload-audit` and the before/after stated.
+- `CLAUDE.md` at roughly 11 KB, re-measured with `/preload-audit` and the before/after stated.
 - The keep-list rules (fourteen, plus whatever the fence audit adds) in `CLAUDE.md`; every other former headline present in exactly one rule file; no
   rule text lost (a token-survival check over the old `## Invariants`, `## Layout` and `## Conventions` against the union of the new `CLAUDE.md`,
   `.claude/rules/` and `docs/overview.md` is the evidence).
