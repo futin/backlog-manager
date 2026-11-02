@@ -261,3 +261,20 @@ The 38 `## Invariants` bullets that stay in `CLAUDE.md`, by `#`, each headline i
 - #104 — Every `.claude/rules/` file carries `paths:` and is the one home of its rules' mechanism — never the reasoning.
 - L2 (new) — `agents/`, `tracker/` and `jira/` are the server's only outbound-calling modules
 - L24 (new) — Start orchestrator runs from the board, not by typing the trigger into a terminal.
+
+## Survival check and floor, before and after
+
+**Token survival.** Every token of four or more characters in `origin/main`'s `## Layout`, `## Invariants` and `## Conventions` (backticked spans kept
+whole; 1,146 tokens) was looked up in the union of the new `CLAUDE.md`, `.claude/rules/*.md` and `docs/overview.md`. Three were not found verbatim, all link
+targets the Layout move rebased from the repo root to `docs/`: `docs/subsystems/releases.md`, `docs/superpowers/specs/2026-09-06-backlog-retro-design.md` and
+`docs/superpowers/specs/2026-10-22-backlog-tick-design.md` now read `subsystems/releases.md`, `superpowers/specs/…` in `docs/overview.md`. Nothing was lost.
+
+**Floor** (`preload-audit`, uncalibrated, 3.0 B/token; confirm in a fresh session's context panel):
+
+| Surface                 | Before   | After    | Change   |
+| ----------------------- | -------- | -------- | -------- |
+| `CLAUDE.md`             | 37,952 B | 18,392 B | −19,560 B (−52 %) |
+| Memory-files subtotal   | 47,934 B | 28,374 B | −19,560 B |
+| `CLAUDE.md`, ~tokens    | ~12,651  | ~6,131   | ~−6,520 per session |
+
+The spec's ~11 KB target assumed 14 cross-cutting rules; the audit kept 38 + 2, so the guard's budget is 19 KB (Task 3 ruling, parked for review).
