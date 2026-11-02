@@ -13,7 +13,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | doc                                                  | what it is                                                                                                              |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | [README.md](../README.md)                            | the human front door — what this is, quick start, the surfaces                                                          |
-| [CLAUDE.md](../CLAUDE.md)                            | the normative index: one headline per rule — mechanism in `.claude/rules/`, reasoning in `subsystems/invariants.md`     |
+| [CLAUDE.md](../CLAUDE.md)                            | the floor every session pays: commands, one line per seam, the rule-file map, the cross-cutting rules                   |
 | [subsystems/api.md](subsystems/api.md)               | the Nest side: what each module owns, which reads are cached and which must never be                                    |
 | [subsystems/jira.md](subsystems/jira.md)             | the Jira integration's server half: the client, the board poller and its caches, the `/api/jira` read routes            |
 | [subsystems/board.md](subsystems/board.md)           | the client: the five sections, and what the browser derives rather than fetches                                         |
@@ -27,9 +27,10 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [workflows/remote-machine.md](workflows/remote-machine.md) | adding a second machine to the launch picker: its name, its tailnet reach, its allowlist and token, this board's `.env` |
 
 `.claude/rules/` sits beside that table rather than in it: eleven path-scoped files that a session loads automatically when it reads a file under their `paths:`
-glob, each the one home of the mechanism text for the rules scoped to its paths — CLAUDE.md keeps the headlines, `subsystems/invariants.md` the reasoning. They
-are guarded by `test/claude-rules.test.ts` rather than by `/docs-sync`, because what can rot in them is mechanical: a dead anchor, a glob that matches nothing,
-a headline that no longer matches CLAUDE.md's, an anchor homed in two files or in none.
+glob, each the one home of the rules scoped to its paths, mechanism included — CLAUDE.md keeps only the cross-cutting rules' headlines and a table of which file
+covers which paths, `subsystems/invariants.md` the reasoning. They are guarded by `test/claude-rules.test.ts` rather than by `/docs-sync`, because what can rot
+in them is mechanical: a dead anchor, a glob that matches nothing, a CLAUDE.md headline with no byte-equal copy in a rule file, a rule homed in two files, a
+table row that no longer matches its file's `paths:`.
 
 Deliberately not tracked, and each for a stated reason in [`.docs-sync.yml`](.docs-sync.yml): `backlog/` (the store's own items and README), `docs/superpowers/`
 (specs, plans, decision logs), `audits/` (dated findings), and `skills/` + `agents/` — those are the product, not documentation about it.
@@ -140,9 +141,76 @@ An install is a copy of the pushed `HEAD`, never the working tree; see [workflow
 
 ### Where the rules live
 
-[CLAUDE.md](../CLAUDE.md) carries every rule as one normative headline; the rule's mechanism lives in exactly one `.claude/rules/*.md` file, loaded when a
-session reads a file under its scope; and [subsystems/invariants.md](subsystems/invariants.md) carries the reasoning. If the tiers ever disagree, the code and
-its tests decide — but the disagreement itself is a bug worth fixing in the same sitting.
+Every rule lives in exactly one `.claude/rules/*.md` file, loaded when a session reads a file under its scope; [CLAUDE.md](../CLAUDE.md) repeats the headline
+only of a rule that matters whichever file is touched, and maps each rule file to its paths; and [subsystems/invariants.md](subsystems/invariants.md) carries
+the reasoning. If the tiers ever disagree, the code and its tests decide — but the disagreement itself is a bug worth fixing in the same sitting.
+
+### Every seam, in detail
+
+Moved from CLAUDE.md on 2026-11-02, which now keeps one line per seam.
+
+The mechanism lives in the subsystem docs linked below, the reasoning behind every rule in [docs/subsystems/invariants.md](subsystems/invariants.md).
+
+- `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
+  adapters, and the ten guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this server makes to
+  anybody's items), `agents/` (the dashboard calls — the item `abort` among them — plus the run watchdog, `POST /api/agents/dispatch-jira` and `/jira-stop`,
+  and the 60 s reconciler that keeps the Jira live map honest, and `agents/dashboards/` — `dashboards.json`'s reader/writer, the machine offers, health and
+  usage reads, and a card's or an Orchestrate run's launch and stop on another machine, whose outbound calls go to remote dashboards and remote boards and are
+  part of THIS module, not a fourth), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap,
+  the read-only `trackers` route and `tracker-sync.json`'s reader/writer, and the PRs page's on-demand per-repo PR cache behind `GET /api/prs` and its three
+  guarded writes, `POST /api/prs/merge`, `/auto-merge` and `/update-branch`), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read
+  routes under `/api/jira` — `GET /prompt`, `/refs` and `/worktrees` among them — `jira.json`'s six guarded write routes, `POST /api/jira/boards`,
+  `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the two writes to Jira itself,
+  `POST /api/jira/issue/assign` and `/issue/transition`, and the in-memory live map `JiraLiveService` (a session per ticket key, forgotten on restart),
+  → [docs/subsystems/jira.md](subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three — `orchestrator/` (a read-only
+  view of the run-state directory, plus the in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the
+  server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (three read-only Lookout widgets at `/api/hub/widgets` via
+  `lookout-widgets`, no actions), `releases/` (`GET /api/releases`, this checkout's release tags for the rail's version chip — read-only, git only — not an
+  outbound-calling module), `tick/` (`tick.json`'s reader/writer and the three `/api/ticks` routes — read-only on `~/.backlog-manager/tick/`, not an
+  outbound-calling module either), `settings/` (`settings/timezone.json`'s reader/writer and `GET`/`POST /api/settings/timezone`, the board's one shared
+  time zone), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
+  route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
+  → [docs/subsystems/api.md](subsystems/api.md)
+- `client/src/` — React SPA: five lazy sections behind a side rail (Files, GitHub, Jira, Runs, Settings — Files and GitHub each drawn only while a registered
+  project has that source, with Board and Archive under each; GitHub's tree is Board, PRs, Archive, Settings — PRs being the open pull requests of the
+  registered GitHub repos, drawn as Inbox, Matrix or Cards, with merge, auto-merge and update branch) that ends in a version chip opening the What's new
+  drawer ([releases](subsystems/releases.md)), one run chip in the board's band, and the three-step Orchestrate sheet.
+  Runs is THREE pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
+  on a board 1400 px or wider, that strip standing as a 320 px right rail instead) and
+  Watchdog, Ticks — switched by the rail's sub-nav tree alone, never by an in-page control. Every derivation has one home in `lib/`, and every look more than one
+  surface draws has one home in `components/ui/`. A connected tracker adds one shell-level chip — POLL and API meters in the strip above the well, or in
+  the rail bar below 700 px — and two item readings: the card's `untyped`/assignee/link-out/`queued` badge, and the item modal's age beside the cached body —
+  all derived in `lib/tracker.ts`, plus GitHub › Settings' `Sync` card, whose one control is each repo's sync interval, and the read-only `Sources` card on
+  Shared Settings (token, reach, connect commands, the Jira row). Jira is drawn only
+  while `GET /api/jira` says configured: a second shell chip beside the tracker's, and two pages under its rail entry — Board and Setup, switched by the tree
+  alone — all derived in `lib/jira.ts`. → [docs/subsystems/board.md](subsystems/board.md)
+- [`.claude/DESIGN.md`](../.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
+  cite its subsection in a header comment. Not a `.claude/rules/` file — those hold the mechanism tier for a path scope, every bullet anchored into
+  `invariants.md`.
+- `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`, `dispatchGate` and the run/watchdog predicates both sides must agree on), `theme.css`
+  (five theme palettes), `jira-branch.ts` (a Jira Run's branch-naming rules, which server and launch sheet both import; `jira.mjs` keeps its one hand copy).
+- `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`, `skills/backlog-execute/`, `skills/backlog-orchestrate/`, `skills/backlog-retro/`,
+  `skills/backlog-tick/`, `skills/jira/` — the skills this repo publishes. `skills/backlog/tools/backlog.mjs` is the registry's only writer;
+  `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run file's only writer. `skills/backlog-retro/tools/retro.mjs` reads the run-state directory, the
+  registry and — by recorded lease id — each run's driver transcript, and owns `~/.backlog-manager/retro/`
+  ([spec](superpowers/specs/2026-09-06-backlog-retro-design.md)). `skills/backlog-tick/tools/tick.mjs` decides one unattended unit of work per scheduled
+  tick (read-only against items, the run state and git) and owns `~/.backlog-manager/tick/`
+  ([spec](superpowers/specs/2026-10-22-backlog-tick-design.md)). `skills/jira/tools/jira.mjs` reads and moves one Jira ticket
+  through `/api/jira` and writes no file of its own; its one exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo.
+  **Start orchestrator runs from the board, not by typing the trigger into a terminal.** →
+  [docs/subsystems/skills.md](subsystems/skills.md)
+- `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
+  `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge, and `backlog-execute` before a `pr`-mode push.
+- `.claude/rules/` — eleven path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
+  mechanism text for the rules scoped to its paths; CLAUDE.md keeps the cross-cutting rules' headlines, `docs/subsystems/invariants.md` the reasoning. Guarded
+  by `test/claude-rules.test.ts`: bullets only, each anchored at most once, one home per linked rule, CLAUDE.md's headlines byte-equal with their rule-file
+  copies.
+- `backlog/` — this repo's own backlog, self-registered like any project. Tracker-backed: it holds the `source.json` marker, and its items are GitHub issues.
+- `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD, → [docs/workflows/publishing.md](workflows/publishing.md)), `test-all.mjs`
+  (`pnpm test`, → [docs/workflows/development.md](workflows/development.md)), `test-tmpdir.mjs` (the per-run temp root `test:skills` runs `node --test`
+  inside, same doc), `tailnet.mjs` (`pnpm run tailnet` — the `tailscale serve` wrapper) and `ci-scope.mjs` (CI's one check command — what a PR's diff can
+  break, → [docs/workflows/ci.md](workflows/ci.md#scoped-checks)).
+- `docs/` — the reference docs; `docs/superpowers/` holds the design spec and implementation plans this repo was built from.
 
 <!-- docs-sync:
   sources:

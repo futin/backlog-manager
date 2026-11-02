@@ -1,8 +1,8 @@
 ---
-paths: ["server/src/agents/**", "shared/agent.ts"]
+paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.ts", "docker-compose.yml", "skills/backlog-orchestrate/tools/orchestrate.mjs", "server/src/orchestrator/watchdog-*.ts", "server/src/orchestrator/orchestrator.controller.ts"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **A board-started run is visible before its run file exists, from server memory that is never written to disk.** `StartingRunsService` is a
   `Map<project, requestedAt>`, lost on restart on purpose, riding the payload as a separate top-level `starting` array — never a `status: 'starting'` member of

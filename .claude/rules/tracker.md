@@ -2,7 +2,7 @@
 paths: ["server/src/tracker/**"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.** `server/src/tracker/claim.ts` is the one implementation of
   what a claim IS (render, parse, `claimsFor`, `isLive`, `newestClaim`, `winner`, `currentClaim`, `heldClaim`);

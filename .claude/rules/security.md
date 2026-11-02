@@ -1,8 +1,8 @@
 ---
-paths: ["server/src/*.ts", "vite.config.ts", "docker-compose.yml"]
+paths: ["server/src/*.ts", "vite.config.ts", "docker-compose.yml", "server/src/jira/env.util.ts", "server/src/jira/refs.util.ts", "server/src/hub/**"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **Both processes bind `127.0.0.1` by default; loopback is the access control** (nothing has auth). `BM_BIND` is the single knob; compose sets `0.0.0.0`. Both
   halves are pinned: `test/vite-proxy.test.ts` imports the dev config, `test/server-bind.test.ts` reads `server/src/main.ts`'s SOURCE — a bare
@@ -20,3 +20,7 @@ paths: ["server/src/*.ts", "vite.config.ts", "docker-compose.yml"]
   `git -C <repo> worktree remove <path>`. The foreign repos `jira/refs.util.ts` reads are listed as of their last fetch, and say so. Under compose both
   project roots are mounted `:ro`; a host-run API has no such net, so a new git call under `server/src` is a read or it belongs to a session. Why:
   [invariants.md](docs/subsystems/invariants.md#the-server-never-writes-git)
+- **Container mounts land on host paths, read-only**, because the registry stores absolute host paths — and so does `jira.json`, whose mapped repos get a
+  second root, `BM_JIRA_REPO_ROOT`. Compose passes both roots as `BM_REPO_ROOTS`, so the server can tell a path outside every mount from a missing one.
+- **Editing `vite.config.ts` needs `docker compose restart client`.**
+- **`hub/` serves three read-only Lookout widgets at `/api/hub/widgets` via `lookout-widgets`, and no actions.**

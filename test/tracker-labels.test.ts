@@ -9,7 +9,7 @@ import { IN_REVIEW_LABEL, PLAN_REVIEW_LABEL, QUEUED_LABEL, TRACKER_LABELS, TRACK
  * command writes four issue forms that each pre-apply a `type:*` label.
  *
  * A skill's `tools/` is installed as a standalone copy of what was pushed,
- * with no build step and no path back into `server/`, and CLAUDE.md forbids
+ * with no build step and no path back into `server/`, and `.claude/rules/tracker.md` forbids
  * one skill's tools reaching into another's for exactly that reason. So the
  * agreement between the two lists is enforced the other way round: this suite
  * reads the SKILL'S SOURCE as text and asserts the labels its forms apply are

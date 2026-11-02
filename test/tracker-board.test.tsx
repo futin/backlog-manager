@@ -197,7 +197,7 @@ describe('dispatch on a tracker project', () => {
   /* The per-item blocks work for a tracker item for free, which is the other
      half of the lift: `progressBlock` reads the `started` a live claim fills,
      with no tracker-specific branch anywhere. DISABLED rather than hidden —
-     CLAUDE.md's rule — because it is a fact about the item, not the project. */
+     `.claude/rules/board.md`'s rule — because it is a fact about the item, not the project. */
   it('disables the control for an item a live claim holds', async () => {
     await renderBoard([item({}), issueItem({ groomed: true, started: daysAgoStamp(0), phase: 'groom' })]);
 
@@ -466,7 +466,7 @@ describe('the board’s own poll', () => {
 /**
  * #17 — a tracker project whose sync is `off` on this machine. Its cache stops moving, so the server refuses every write and spawn for it; the board says
  * why BEFORE the click, with the server's own sentence, and stops re-reading a payload nothing is refreshing. Disabled, never hidden: the block is a fact
- * about one project, not about the environment (CLAUDE.md's "environment-level blocks hide, per-item ones disable").
+ * about one project, not about the environment (`.claude/rules/board.md`'s "environment-level blocks hide, per-item ones disable").
  */
 describe('a tracker project whose sync is off (#17)', () => {
   const SENTENCE = 'sync is off for futin/x — turn it on in GitHub › Settings';

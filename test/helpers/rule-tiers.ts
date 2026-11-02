@@ -1,12 +1,14 @@
 /**
  * rule-tiers.ts — the one parser for the two prose tiers a rule in this repo is written in.
  *
- * A rule with a `Why:` link is stated at three depths, each with exactly one home: the HEADLINE (one bolded sentence, in CLAUDE.md, loaded by every session),
- * the MECHANISM (the full bullet — headline, how the rule is implemented, the same `Why:` link — in exactly one `.claude/rules/*.md`, loaded when a session
- * reads a file under that rule file's `paths:`), and the REASONING (`docs/subsystems/invariants.md#<anchor>`, read when a person follows the link). The
- * seams between tier one and tier two are what `test/claude-rules.test.ts` guards: the headline must be byte-equal on both sides, every anchor must have one
- * home, and CLAUDE.md must carry nothing past the headline — mechanism that creeps back into CLAUDE.md is paid for by every session, which is the cost the
- * split exists to remove (docs/superpowers/specs/2026-09-22-claude-md-three-tiers-design.md).
+ * A rule is stated at up to three depths, each with exactly one home: the MECHANISM (the full bullet — headline, how the rule is implemented, its `Why:`
+ * link — in exactly one `.claude/rules/*.md`, loaded when a session reads a file under that rule file's `paths:`), the REASONING
+ * (`docs/subsystems/invariants.md#<anchor>`, read when a person follows the link), and — only for a rule that matters whichever file is touched — the
+ * HEADLINE (one bolded sentence, in CLAUDE.md, loaded by every session). The seams between tier one and tier two are what `test/claude-rules.test.ts` guards:
+ * a headline CLAUDE.md states must be byte-equal in its one rule file, every rule must have one home, and CLAUDE.md must carry nothing past the headline —
+ * whatever CLAUDE.md holds is paid for by every session, which is the cost the split exists to remove
+ * (docs/superpowers/specs/2026-09-22-claude-md-three-tiers-design.md; tier one became a subset of tier two in
+ * docs/superpowers/specs/2026-11-02-claude-md-floor-design.md).
  *
  * Everything here is a function over a STRING, deliberately: the guards run the same parser over the real files and over inline fixtures, and a parser that
  * produced nothing would match nothing against nothing and pass every guard while asserting exactly zero — so the parsers are pinned on fixtures first. No
@@ -121,33 +123,78 @@ export function freeProse(ruleBody: string, firstLine = 1): { line: number; text
 }
 
 /**
- * The two tiers as multisets of `${anchor}\t${headline}`. `missingInRules` is what tier one states and tier two does not (a key present twice in tier one
- * and once in tier two is missing once); `missingInClaude` the reverse; `multiHomed` names an anchor whose tier-two bullets sit in more than one file.
+ * Tier one as a SUBSET of tier two, keyed `${anchor}\t${headline}` (an unlinked bullet keys as `-\t${headline}`). `missingInRules` is what tier one states
+ * and tier two does not — a key present twice in tier one and once in tier two is missing once. Tier two holding what tier one does not is the normal case
+ * since 2026-11-02: a rule whose files all sit under one rule file's fence lives in that file alone, and CLAUDE.md keeps only the rules that matter whichever
+ * file is touched (docs/superpowers/specs/2026-11-02-claude-md-floor-design.md). `multiHomed` names a rule whose tier-two bullets sit in more than one file,
+ * keyed by its anchor when it has one and by its headline when it does not — an unlinked bullet has no anchor to be homed by, so without the headline key
+ * the same rule pasted into two files would pass.
  */
 export function compareTiers(
   one: TierBullet[],
   two: { file: string; bullets: TierBullet[] }[]
-): { missingInRules: string[]; missingInClaude: string[]; multiHomed: string[] } {
-  const key = (b: TierBullet) => `${b.anchors[0]}\t${b.headline}`;
+): { missingInRules: string[]; multiHomed: string[] } {
+  const key = (b: TierBullet) => `${b.anchors[0] ?? '-'}\t${b.headline}`;
   const tally = (keys: string[]) => keys.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map<string, number>());
   const oneTally = tally(one.map(key));
   const twoTally = tally(two.flatMap((f) => f.bullets.map(key)));
-  const surplus = (from: Map<string, number>, against: Map<string, number>) =>
-    [...from].flatMap(([k, n]) => Array.from({ length: Math.max(0, n - (against.get(k) ?? 0)) }, () => k));
+  const missingInRules = [...oneTally].flatMap(([k, n]) => Array.from({ length: Math.max(0, n - (twoTally.get(k) ?? 0)) }, () => k));
 
   const homes = new Map<string, string[]>();
   for (const f of two) {
     for (const b of f.bullets) {
-      const anchor = b.anchors[0];
-      const files = homes.get(anchor) ?? [];
+      const home = b.anchors[0] ?? b.headline ?? b.joined;
+      const files = homes.get(home) ?? [];
       if (!files.includes(f.file)) files.push(f.file);
-      homes.set(anchor, files);
+      homes.set(home, files);
     }
   }
 
+  return { missingInRules, multiHomed: [...homes].filter(([, files]) => files.length > 1).map(([home, files]) => `${home} → ${files.join(', ')}`) };
+}
+
+/**
+ * The most words a bullet without a `Why:` link may carry, in either tier. In CLAUDE.md it is what stops mechanism creeping back as an unlinked bullet; in
+ * a rule file it is what lets a short rule with no reasoning to link — a homeless rule given a fence — sit there without an invariants.md entry, while a
+ * long one still needs one: past 80 words a rule has reasoning, and reasoning belongs in tier three.
+ */
+export const UNLINKED_WORD_CAP = 80;
+
+/** Rule-file bullets that break the anchor contract: two or more anchors, or none on a bullet over `UNLINKED_WORD_CAP` words. */
+export function ruleBulletOffenders(bullets: TierBullet[]): string[] {
+  return bullets.flatMap((b) => {
+    if (b.anchors.length > 1) return [`${b.line}: ${b.headline ?? b.joined.slice(0, 60)} cites ${b.anchors.length} anchors`];
+    if (b.anchors.length === 0 && b.words > UNLINKED_WORD_CAP) return [`${b.line}: ${b.words} words, no anchor`];
+    return [];
+  });
+}
+
+/**
+ * CLAUDE.md's `## Rule files` table as rule file → globs. Read from that section only — the Commands table above it has the same `| `x` | `y` |` shape — and
+ * only from rows whose first cell is a backticked `*.md`, so the header and separator rows fall out without being named.
+ */
+export function pathTableOf(claudeMd: string): Map<string, string[]> {
+  const start = claudeMd.indexOf('\n## Rule files\n');
+  if (start === -1) return new Map();
+  const end = claudeMd.indexOf('\n## ', start + 1);
+  const section = claudeMd.slice(start, end === -1 ? undefined : end);
+  const table = new Map<string, string[]>();
+  for (const line of section.split('\n')) {
+    const cells = line.split('|').map((c) => c.trim());
+    const file = /^`([\w.-]+\.md)`$/.exec(cells[1] ?? '');
+    if (file) table.set(file[1], [...(cells[2] ?? '').matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+  }
+  return table;
+}
+
+/** The table against the rule files on disk, both ways; globs compare as ordered lists, so a reordered `paths:` is a mismatch too. */
+export function compareTable(
+  table: Map<string, string[]>,
+  rules: Map<string, string[]>
+): { missingInTable: string[]; missingOnDisk: string[]; mismatched: string[] } {
   return {
-    missingInRules: surplus(oneTally, twoTally),
-    missingInClaude: surplus(twoTally, oneTally),
-    multiHomed: [...homes].filter(([, files]) => files.length > 1).map(([anchor, files]) => `${anchor} → ${files.join(', ')}`)
+    missingInTable: [...rules.keys()].filter((f) => !table.has(f)),
+    missingOnDisk: [...table.keys()].filter((f) => !rules.has(f)),
+    mismatched: [...table].filter(([f, globs]) => rules.has(f) && globs.join('\n') !== rules.get(f)!.join('\n')).map(([f]) => f)
   };
 }

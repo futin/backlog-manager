@@ -22,7 +22,7 @@ const ZONE = 'America/New_York';
  * each reading on its own.
  *
  * Every stamp is relative to one fixed `NOW`, passed to the model as its
- * `now` — never `Date.now()` (CLAUDE.md Conventions: a fixture date is
+ * `now` — never `Date.now()` (`.claude/rules/tests.md`: a fixture date is
  * relative to the clock the assertion runs under).
  */
 const NOW = Date.parse('2026-09-01T10:00:00.000Z');

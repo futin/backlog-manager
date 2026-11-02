@@ -6175,7 +6175,7 @@ test('a resumed import still deletes every item file last', async () => {
 // `import` is a one-shot, irreversible-by-hand migration: it deletes a project's whole item store once the issues exist. A session reaching for it reads
 // SKILL.md, not this file, so the command line has to be there in a copyable fence — and the two sentences that said phase 5 did not exist yet have to be
 // gone, because both of them send a reader looking for a command that is now right there.
-const REPO_CLAUDE_MD = fileURLToPath(new URL('../../../CLAUDE.md', import.meta.url))
+const SKILLS_RULES_MD = fileURLToPath(new URL('../../../.claude/rules/skills.md', import.meta.url))
 
 test('backlog/SKILL.md documents the import command in a copyable fence', () => {
   const text = fs.readFileSync(BACKLOG_SKILL_MD, 'utf8')
@@ -6191,14 +6191,15 @@ test('neither backlog/SKILL.md nor backlog.mjs still calls import a later phase'
   assert.ok(!fs.readFileSync(CLI_SOURCES['backlog.mjs'], 'utf8').includes('not built yet'), "backlog.mjs's connect refusal still says import is not built yet")
 })
 
-// The invariant bullet is where a session working anywhere in this repo meets the two rules that make the migration safe: the order the marker and the files
-// are written in, and what makes a re-run resume instead of duplicating.
-test('CLAUDE.md carries the import invariant bullet', () => {
+// The invariant bullet is where a session editing the skills meets the two rules that make the migration safe: the order the marker and the files are
+// written in, and what makes a re-run resume instead of duplicating. It lives in `.claude/rules/skills.md` since 2026-11-02, when CLAUDE.md kept only the
+// rules that matter whichever file is touched — `import` is `backlog.mjs`'s, under that file's `skills/**` fence.
+test('.claude/rules/skills.md carries the import invariant bullet', () => {
   const bullets = fs
-    .readFileSync(REPO_CLAUDE_MD, 'utf8')
+    .readFileSync(SKILLS_RULES_MD, 'utf8')
     .split('\n- ')
     .filter((bullet) => bullet.includes('marker first') && bullet.includes('bm:imported'))
-  assert.equal(bullets.length, 1, 'CLAUDE.md has no single invariant bullet naming both `marker first` and `bm:imported`')
+  assert.equal(bullets.length, 1, '.claude/rules/skills.md has no single invariant bullet naming both `marker first` and `bm:imported`')
 })
 
 // ── Groom drift (#322): the `groomed-at` anchor and the `drift` verb ──────────────────────────────────────────────────────────────────────────────────────

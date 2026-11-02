@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * `server/src/main.ts` holds the API half of CLAUDE.md's "both processes bind
+ * `server/src/main.ts` holds the API half of `.claude/rules/security.md`'s "both processes bind
  * `127.0.0.1` by default; loopback is the access control" — nothing in this
  * stack has auth, and `/api/items/body` reads every registered project's
  * backlog off disk while `/api/agents/*` can spawn Claude Code sessions. A

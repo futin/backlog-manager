@@ -1,8 +1,8 @@
 ---
-paths: ["skills/**", "agents/**"]
+paths: ["skills/**", "agents/**", "server/src/tick/tick.service.ts", "server/src/tick/tick-breaker.util.ts", "scripts/sync-plugin.mjs"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **`~/.backlog-manager/registry.json` has exactly one writer**: `skills/backlog/tools/backlog.mjs` (`init`/`new` upsert, plus `unregister`, the one removal
   path). The server re-reads it per request, never writes, never caches. What gets written is `registryRoot(root)`, not the root `resolveRoot` returned

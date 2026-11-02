@@ -10,8 +10,8 @@ import type { MachineOffer, MachineUsage, ProjectOffers } from '../shared/types'
 /**
  * `RunOn` — the "Run on" machine-card group (spec "The picker's look", DESIGN.md §8.9.5 / §7). Everything it draws arrives from `ProjectOffers` as the
  * server sent it, so these cases build offers and read the DOM; the wording of each derived string is `lib/dashboards.ts`'s and is pinned here through what
- * the card shows. The 5 h reset is `now`-relative, so the clock is fixed and the fixture is cut from it (CLAUDE.md: a fixture date is relative to the clock
- * the assertion runs under).
+ * the card shows. The 5 h reset is `now`-relative, so the clock is fixed and the fixture is cut from it (`.claude/rules/tests.md`: a fixture date is relative
+ * to the clock the assertion runs under).
  */
 const NOW = new Date('2026-10-23T12:00:00.000Z');
 const inMs = (ms: number): string => new Date(NOW.getTime() + ms).toISOString();

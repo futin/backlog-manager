@@ -167,7 +167,7 @@ test("this repo's doc and skill guards are selected by the files they read", () 
   const { jest, node } = readSuites();
   const picks = (file) => selectSuites([file], jest, { wide: file.startsWith('skills/') || file.startsWith('agents/') });
   const expect = {
-    'CLAUDE.md': ['test/claude-rules.test.ts', 'test/dialog-count-docs.test.ts'],
+    'CLAUDE.md': ['test/claude-rules.test.ts'],
     '.claude/rules/board.md': ['test/claude-rules.test.ts', 'test/dialog-count-docs.test.ts'],
     'docs/subsystems/invariants.md': ['test/dialog-count-docs.test.ts'],
     'skills/backlog-orchestrate/SKILL.md': ['test/default-model.test.ts', 'test/skills-plugin-root.test.ts', 'test/skill-plugin-root.test.ts'],
@@ -182,7 +182,8 @@ test("this repo's doc and skill guards are selected by the files they read", () 
   }
 
   // The node half: a docs-only PR runs these through test-tmpdir.mjs by path, so a selected suite that is not on disk would fail the PR for nothing (#428).
-  const docs = ['CLAUDE.md', 'docs/subsystems/invariants.md'];
+  // `.claude/rules/skills.md` is in the list because backlog.test.mjs's import-invariant case reads it, not CLAUDE.md, since the bullet moved there.
+  const docs = ['CLAUDE.md', '.claude/rules/skills.md', 'docs/subsystems/invariants.md'];
   const nodePicked = selectSuites(docs, node);
   for (const g of ['skills/backlog/tools/backlog.test.mjs', 'skills/backlog-orchestrate/tools/orchestrate-prompts.test.mjs']) {
     assert.ok(nodePicked.includes(g), `the docs list should select ${g}`);

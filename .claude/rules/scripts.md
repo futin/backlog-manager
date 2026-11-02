@@ -1,8 +1,8 @@
 ---
-paths: ["scripts/**", "package.json", "pnpm-workspace.yaml"]
+paths: ["scripts/**", "package.json", "pnpm-workspace.yaml", "docker-compose*.yml"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **The tailnet serve is a script, and its port is read where compose reads it.** `scripts/tailnet.mjs` (`pnpm run tailnet`, `up`/`status`/`down`) is the one
   sanctioned way past the loopback bind below; it resolves `BM_WEB_PORT` the way compose does — exported variable over `.env` over the compose default — because
@@ -14,3 +14,4 @@ paths: ["scripts/**", "package.json", "pnpm-workspace.yaml"]
   not "simplify" `test` back to bare jest: jest's `testMatch` can never reach `skills/*/tools/*.test.mjs`, the whole of this repo's single-writer tooling. The
   two named scripts stay the single copy of what each runner runs; neither runner short-circuits the other; the script has no test of its own on purpose. Why:
   [invariants.md](docs/subsystems/invariants.md#pnpm-test-is-the-union-of-both-runners)
+- **`allowBuilds` in `pnpm-workspace.yaml` lists `esbuild`**; a skipped build surfaces as Vite failing to start.

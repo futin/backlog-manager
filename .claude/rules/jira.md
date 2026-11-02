@@ -1,8 +1,8 @@
 ---
-paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**"]
+paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "docker-compose.yml", "shared/jira-branch.ts", "server/src/agents/session-stop.util.ts"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **`~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.** `readJiraConfig`
   (`server/src/jira/config.util.ts`; `BM_JIRA_FILE` overrides the path) is read fresh on every use and cached nowhere. A MISSING file and a parsed non-object
@@ -103,3 +103,4 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**"]
   jira and never back: `jira/` imports nothing from `agents/` except `SameOriginPostGuard`, which is why the dispatch, the stop and the reconciler live in
   `agents/` while the map does not. Why:
   [invariants.md](docs/subsystems/invariants.md#a-jira-session-is-remembered-in-server-memory-only-and-stop-is-the-one-hand-that-clears-it-early)
+- **`jira.mjs` writes no file of its own**; its one exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo.
