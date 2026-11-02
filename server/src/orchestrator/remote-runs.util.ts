@@ -10,7 +10,7 @@ import type {
   RunStage,
   RunVerification
 } from '../../../shared/types';
-import { claimsByIssue } from '../tracker/claim';
+import { claimsByIssue, trustedAssociation } from '../tracker/claim';
 import type { ParsedClaim } from '../tracker/claim';
 import type { GithubComment } from '../tracker/github.client';
 
@@ -171,8 +171,13 @@ export interface ParsedAttention {
  * comment is not an attention entry. The detail is everything after it with
  * the leading `@login ` mention removed: the mention exists to make a phone
  * buzz, and the Runs page already knows who it is talking to.
+ *
+ * Its author must pass `trustedAssociation`, the rule `parseClaim` applies (#266): `attention` posts through a token of ours, so a marker in an outsider's
+ * comment is an imitation — on a public tracker repo anyone can comment, and without this one forged line would hang a "needs answers" banner with text of
+ * the outsider's choosing on a real remote run.
  */
-export function parseAttention(comment: Pick<GithubComment, 'body'>): ParsedAttention | null {
+export function parseAttention(comment: Pick<GithubComment, 'body' | 'author_association'>): ParsedAttention | null {
+  if (!trustedAssociation(comment.author_association)) return null;
   const body = comment.body ?? '';
   const newline = body.indexOf('\n');
   const first = (newline === -1 ? body : body.slice(0, newline)).replace(/\r$/, '');

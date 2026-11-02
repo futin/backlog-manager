@@ -4282,7 +4282,8 @@ body a groom approved, so an issue's author could rewrite the plan after a perso
 (`OWNER`/`MEMBER`/`COLLABORATOR`) therefore means every possible editor of that body is trusted, and the only issues that need a vetting record are the ones an
 outsider filed. Gating every issue instead was weighed and rejected: it would have locked every already-groomed item on every tracker board until somebody
 re-groomed it, to close a hole that only exists for one kind of author. The trust rule is ONE function, `trustedAssociation`, shared with `trustedAuthor` —
-the claim-comment check #362 added — so "who is inside the repo" cannot mean one thing for a comment and another for an issue. Absent is trusted there for
+the claim-comment check #362 added — and with `parseAttention`, which drops an outsider's imitation of a `bm:attention` comment (#266), so "who is inside the
+repo" cannot mean one thing for a comment and another for an issue. Absent is trusted there for
 the same reason: every issue and comment the API returns states an association, so only an object built in a test lacks one.
 
 **Why the pin lives in the claim comment, and not in the body.** The obvious record — the `bm:groomed-at` footer `body` already writes — lives IN the body, and
@@ -4458,7 +4459,8 @@ Three more commands publish to the issue, each after the run file is written and
   finished run from a crashed one. `at` is the run file's own `updatedAt`, so the stamp and the journal name one instant.
 - **`attention` posts a comment** — `<!-- bm:attention kind=<kind> run=<runId> -->` on line 1, then `@<login> <detail>` — so a phone notification replaces the
   strip badge. The login comes from `GET /api/trackers`; without one the mention is omitted, never guessed. The marker's CLI literal and the server's
-  `ATTENTION_LINE` cannot import each other and agree through a source-reading guard (`test/remote-runs.test.ts`, G-1). **Known risk:** GitHub may not notify
+  `ATTENTION_LINE` cannot import each other and agree through a source-reading guard (`test/remote-runs.test.ts`, G-1). The server reads one only from an
+  author `trustedAssociation` accepts (#266), the rule a claim comment is held to — anyone can comment on a public repo. **Known risk:** GitHub may not notify
   a user of their own `@mention`, and the token is the user's own; the fix for that is a GitHub App identity (spec §15), not a workaround here.
 - **`heartbeat` heartbeats every claim the run still holds** — `claim` set and the stage not in `CLAIM_RELEASE_STAGES`, so `needs-answers` is included. Before
   this it stamped only `run.json`, and a review longer than fifteen minutes let the in-flight claim go stale and read as crashed on another machine.
