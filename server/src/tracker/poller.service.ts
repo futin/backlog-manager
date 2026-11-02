@@ -913,7 +913,8 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // go on to spend requests on labels either.
     if (!(await this.reconcileClaimedIssues(repo, token, state))) return;
 
-    // After the reconcile, for the same reason: a failure here is recorded as `access`, and a limited repo must not spend requests on labels either.
+    // After the reconcile, for the same reason: `false` here means a limit, recorded as `access`, and a limited repo must not spend requests on labels either.
+    // Any other failed PR read is that PR's alone (#421), so the labels below are still reached.
     if (!(await this.learnReviewBases(repo, token, state))) return;
 
     // The bootstrap, after the first sync that proved the repo is readable
@@ -1032,10 +1033,11 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
    * referencing PR or a latest PR closed unmerged costs nothing (it cannot be lifted whatever the bases say), and a PR is asked about once — so a quiet repo
    * spends zero requests here.
    *
-   * A failed answer goes through `handleFailure` and returns `false`, asking about no further PR this tick: the base stays unknown, the label stays read, and
-   * the next sync asks again. A `404` is NOT a failure: the PR is gone (or the token lost sight of it) while the repo-wide read that just succeeded proves the
-   * REPO is readable, and marking it `not-found` would blank the board over one row. It stays unknown, and is asked again next tick, exactly like a failure
-   * that records nothing.
+   * Only a limit (`failureVerdict`'s non-null `sleepUntil`, hourly or secondary) goes through `handleFailure` and returns `false`, asking about no further PR
+   * this tick: it is a fact about the whole repo's budget, and a limited repo must not spend more requests. Every other failed answer — a `404`, a 5xx, a
+   * transport failure, a 401 or 403 that is not a limit — is a fact about one PR (#421): the repo-wide reads that just succeeded prove the REPO is readable,
+   * so `access` and `detail` stay as they read, and the next PR is still asked about, since stopping would starve every later issue's base behind one PR that
+   * keeps failing. The base stays unknown, the label stays read, and the next sync asks again. A token really revoked is recorded by that sync's issues read.
    */
   private async learnReviewBases(repo: string, token: string, state: RepoState): Promise<boolean> {
     for (const issue of [...state.issues.values()].sort((a, b) => a.number - b.number)) {
@@ -1045,8 +1047,11 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       const [number, pull] = deciding;
       if (pull.mergedAt === null || state.pullBases.has(number)) continue;
       const res = await this.client.pull(repo, number, { token });
-      if (res.status === 404) continue;
-      if (this.handleFailure(state, res)) return false;
+      const verdict = failureVerdict(res, Date.now());
+      if (verdict !== null && verdict.sleepUntil !== null) {
+        this.handleFailure(state, res);
+        return false;
+      }
       const base = res.data?.base;
       const ref = base?.ref;
       const fallback = base?.repo?.default_branch;
