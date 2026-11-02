@@ -5,7 +5,7 @@ import { errorMessage, useAction } from '../../hooks/useAction';
 import { useAgents } from '../../hooks/useAgents';
 import { useFetched } from '../../hooks/useFetched';
 import { useSettings } from '../../hooks/useSettings';
-import { EFFORT_OPTIONS, MODEL_OPTIONS, modelEffortFlags, sessionUrl } from '../../lib/agents';
+import { EFFORT_OPTIONS, LAUNCH_SURFACE_OPTIONS, MODEL_OPTIONS, modelEffortFlags, sessionUrl } from '../../lib/agents';
 import {
   branchDispatchFields,
   defaultModeFor,
@@ -18,10 +18,11 @@ import {
 } from '../../lib/jira';
 import { clampMode, modesUpTo, projectDispatchGate } from '../../../../shared/agent';
 import { JIRA_BUILTIN_LABELS, jiraActionParam } from '../../../../shared/types';
-import type { JiraAction, JiraDispatchResult, JiraIssue, PermissionMode } from '../../../../shared/types';
+import type { JiraAction, JiraDispatchResult, JiraIssue, LaunchSurface, PermissionMode } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 import { JiraBranchSection, useBranchState } from './JiraBranchSection';
+import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
 
@@ -66,6 +67,12 @@ export const PREVIEW_SETTLE_MS = 350;
  * **Two writes ride along, both opt-in and both off.** `Assign to me` (disabled with a reason when the ticket is already the reader's, or `me` is not
  * known) and `Move to` (`leave as is` is `transitionId: null`). Neither is applied by this file: the server does it BEFORE the spawn — assign, then
  * transition, then the session — so a write that landed stands if the spawn then fails, and the refusal says so (`jiraWritesStand`).
+ *
+ * **Open in: Dashboard | Desktop** is the board `LaunchSheet`'s control (the §8.2/§8.6 pill `Segmented`), drawn only while home's dashboard says
+ * `desktopAvailable`, for any action, and preselected from its `launchSurfaceDefault` — seeded once, the first render the status is known, never from this
+ * board's Settings or the last launch. Without it no `surface` is sent. The dashboard runs a desktop launch's first turn headless and then hands it to the
+ * app, so permissions, model and effort still apply to that turn; only remote control does not (the dashboard forces it off), so its Switch is disabled
+ * and reads Off. The session still has an id and a live entry, so the started state links to it like any other.
  */
 export function JiraLaunchSheet({
   issue,
@@ -101,6 +108,14 @@ export function JiraLaunchSheet({
   const [assign, setAssign] = useState(false);
   const [transitionId, setTransitionId] = useState('');
   const [remoteControl, setRemoteControl] = useState(true);
+  // Seeded in render, not an effect, for the board sheet's reason: an effect would paint one frame of Dashboard on a sheet whose default is Desktop. `null`
+  // until the status first lands — the shell's `useAgents` may still be loading when the sheet opens.
+  const [pickedSurface, setSurface] = useState<LaunchSurface | null>(null);
+  if (pickedSurface === null && agents !== null) setSurface(agents.launchSurfaceDefault ?? 'dashboard');
+  const offersDesktop = agents?.desktopAvailable === true;
+  const desktop = offersDesktop && pickedSurface === 'desktop';
+  // Where the launch that landed went — the answer alone cannot say, because today's dashboard answers a desktop launch with an id like any other.
+  const [startedIn, setStartedIn] = useState<LaunchSurface>('dashboard');
   const [started, setStarted] = useState<JiraDispatchResult | null>(null);
 
   const actionKey = jiraActionParam(action);
@@ -203,10 +218,13 @@ export function JiraLaunchSheet({
           ...branchDispatchFields(branch.choice),
           ...modelEffortFlags(model, effort),
           permissionMode: mode,
-          remoteControl
+          // What the Switch DISPLAYS: disabled and Off under Desktop, where the dashboard would force it off anyway.
+          remoteControl: remoteControl && !desktop,
+          ...(offersDesktop && pickedSurface !== null ? { surface: pickedSurface } : {})
         }),
       {
         onSuccess: (result) => {
+          setStartedIn(desktop ? 'desktop' : 'dashboard');
           setStarted(result);
           onStarted();
         },
@@ -264,13 +282,25 @@ export function JiraLaunchSheet({
       {started !== null ? (
         /* The form is gone on purpose: the session exists, and a second Start would be a second one on the same ticket (the server refuses it, 409 — but
            the sheet never offers it). */
-        <>
-          <div className="sheet-ok">started · {started.sessionId}</div>
-          <a className="sheet-link" href={sessionUrl(settings.linkBase, started.sessionId)} target="_blank" rel="noreferrer">
-            open in dashboard ↗
-          </a>
-          <div className="sheet-note">Its questions appear there — and on your phone, if the dashboard's hooks are installed.</div>
-        </>
+        !('sessionId' in started) ? (
+          /* A dashboard from before the hand-over: the app minted the id, so there is nothing to link to and no strip on the card. */
+          <>
+            <div className="sheet-ok">Opened in the desktop app</div>
+            <div className="sheet-note">Follow it there — its permission prompts wait in the app on this Mac, and the board cannot stop it.</div>
+          </>
+        ) : (
+          <>
+            <div className="sheet-ok">started · {started.sessionId}</div>
+            <a className="sheet-link" href={sessionUrl(settings.linkBase, started.sessionId)} target="_blank" rel="noreferrer">
+              open in dashboard ↗
+            </a>
+            <div className="sheet-note">
+              {startedIn === 'desktop'
+                ? 'Its first turn runs in the dashboard, then it opens in the desktop app on this Mac — follow it there after that.'
+                : "Its questions appear there — and on your phone, if the dashboard's hooks are installed."}
+            </div>
+          </>
+        )
       ) : (
         <>
           <label className="sheet-field">
@@ -285,6 +315,15 @@ export function JiraLaunchSheet({
               options={actionOptions}
             />
           </label>
+
+          {/* A div, not a label, for the board sheet's reason: a label's click goes to its first labelable descendant, so clicking "Open in" would press
+              Dashboard. The group names itself through its own aria-label. */}
+          {offersDesktop && pickedSurface !== null && (
+            <div className="sheet-field">
+              <span className="set-name">Open in</span>
+              <Segmented<LaunchSurface> pill label="Open in" value={pickedSurface} options={LAUNCH_SURFACE_OPTIONS} onChange={setSurface} />
+            </div>
+          )}
 
           <div className="sheet-field">
             <span className="set-name">Repository</span>
@@ -359,9 +398,12 @@ export function JiraLaunchSheet({
 
           {/* A Switch, not a checkbox: §8's standing rule is that a raised control marks a STATE, and this one persists for the session it launches. */}
           <div className="sheet-check">
-            <Switch checked={remoteControl} onChange={setRemoteControl} label="Remote control" />
+            <Switch checked={remoteControl && !desktop} onChange={setRemoteControl} label="Remote control" disabled={desktop} />
             <span>remote control — the Claude phone app can see and drive it</span>
           </div>
+          {desktop && (
+            <div className="sheet-note">Its first turn runs here with these settings, then it opens in the desktop app — remote control does not apply there.</div>
+          )}
 
           {copyFailed && <div className="sheet-note">The clipboard refused — select the prompt above and copy it by hand.</div>}
           {error !== null && (

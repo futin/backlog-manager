@@ -3,7 +3,7 @@ import { HttpException, Injectable } from '@nestjs/common';
 
 import { environmentBlock, projectDispatchGate } from '../../../shared/agent';
 import { jiraSessionName } from '../../../shared/types';
-import type { JiraDispatchRequest, JiraDispatchResult, JiraIssueDetail, JiraWorkspace, PermissionMode } from '../../../shared/types';
+import type { ItemDispatchResult, JiraDispatchRequest, JiraDispatchResult, JiraIssueDetail, JiraWorkspace, PermissionMode } from '../../../shared/types';
 import { resolveWorkspace } from '../jira/branch-choice.util';
 import type { JiraBranchChoice } from '../jira/branch-choice.util';
 import { normaliseRepoPath, readJiraConfig } from '../jira/config.util';
@@ -39,7 +39,7 @@ const WRITES_STAND = ' — the Jira writes stand';
  *     no Jira read is needed to refuse an unmapped repo — `GET /api/jira/prompt` keys the same check off the detail it reads anyway; the two agree for every
  *     key Jira has not moved between projects. Same sentences as that route, so a preview and a Start refuse a request in the same words.
  *  3. the dashboard gate, `projectDispatchGate(status, repo)` — 409 with its reason, or 502 when dispatch is on and the dashboard is unreachable, which is
- *     `dispatch()`'s exact mapping.
+ *     `dispatch()`'s exact mapping. Then, from the same read, a `desktop` surface while the dashboard no longer says `desktopAvailable` — 409.
  *  3b. the branch choice against the repo's refs (spec §5.3), for every mode but `none`: a new branch whose name is already listed, or a continued one the
  *     mapped checkout holds, is a 409 — and so is the whole read, because it runs BEFORE the reservation: a refusal here has reserved nothing, assigned
  *     nothing, transitioned nothing and spawned nothing, and leaves the live map exactly as it found it. Refs the server cannot read (`available: false`) make
@@ -55,7 +55,7 @@ const WRITES_STAND = ' — the Jira writes stand';
  *     nothing and still bumps `updated`.
  *  7. the spawn, with the prompt composed AFTER the writes, so the session reads the status and assignee the ticket now has. Any failure from here — the
  *     re-read, the re-composition, the spawn — keeps its status and gains WRITES_STAND when a write landed.
- *  8. `live.confirm`, `reconciler.arm()` and the answer.
+ *  8. `live.confirm`, `reconciler.arm()` and the answer — or, for a desktop answer with no id, `live.release` and a `session: null` answer.
  *
  * Every failure from step 5 on runs through one `catch` that releases the reservation, so no failure class can leave a key `starting` until the 8-hour expiry
  * — a retry after any of them is a fresh Start, never a 409. `release` only drops a STARTING entry, so the catch cannot take down a session that did start.
@@ -89,6 +89,11 @@ export class JiraDispatchService {
     const gate = projectDispatchGate(status, repo);
     if (gate.control !== 'enabled') {
       throw new HttpException({ error: gate.reason }, status.enabled && !status.reachable ? 502 : 409);
+    }
+    // From the same read, item dispatch's check and sentence: home's dashboard stopped offering the desktop app since the sheet read the status. Before the
+    // reservation and before any Jira write, because picking Dashboard is a retry the reader makes at once.
+    if (req.surface === 'desktop' && status.desktopAvailable !== true) {
+      throw new HttpException({ error: "the desktop app is not available on this machine's dashboard — launch on Dashboard instead" }, 409);
     }
 
     // `none` names no branch and so has nothing to compare: it makes no git read at all.
@@ -141,22 +146,31 @@ export class JiraDispatchService {
     const wrote = assigned || transition !== null;
 
     let prompt = first.prompt;
-    let spawned: { sessionId: string };
+    let spawned: ItemDispatchResult;
     try {
       // Nothing written, nothing changed by us: the first composition already holds the ticket as it is, and re-reading it would spend three more Jira
       // calls of the 429 budget to learn nothing.
       if (wrote) prompt = this.composeAfterWrites(unwrapJira(await this.poller.issueDetail(req.key)), action, repo, workspace);
-      spawned = await this.agents.spawnInProject(repo, {
+      // `launchInProject`, not `spawnInProject`: only it carries a `surface`, and only it lets a desktop answer with no id through.
+      spawned = await this.agents.launchInProject(repo, {
         prompt,
         name: jiraSessionName(req.key),
         permissionMode: req.permissionMode,
         maxPermission,
         model: req.model,
         effort: req.effort,
-        remoteControl: req.remoteControl
+        remoteControl: req.remoteControl,
+        surface: req.surface
       });
     } catch (err) {
       throw wrote ? withSuffix(err, WRITES_STAND) : err;
+    }
+
+    // A dashboard from before the desktop hand-over: the app took the launch and minted its own id, so there is no session to confirm, watch or stop.
+    // Released, not left `starting`, or the key would refuse every Start until the 8-hour expiry. Today's dashboard answers an id and takes the path below.
+    if (!('sessionId' in spawned)) {
+      this.live.release(req.key);
+      return { surface: 'desktop', assigned, transitioned: transition?.name ?? null, session: null };
     }
 
     this.live.confirm(req.key, spawned.sessionId);
