@@ -204,7 +204,8 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge, and `backlog-execute` before a `pr`-mode push.
 - `.claude/rules/` — eleven path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
   mechanism text for the rules scoped to its paths; CLAUDE.md keeps the cross-cutting rules' headlines, `docs/subsystems/invariants.md` the reasoning. Guarded
-  by `test/claude-rules.test.ts`: bullets only, each anchored at most once, one home per rule, CLAUDE.md's headlines byte-equal with their rule-file copies.
+  by `test/claude-rules.test.ts`: bullets only, each anchored at most once, one home per linked rule, CLAUDE.md's headlines byte-equal with their rule-file
+  copies.
 - `backlog/` — this repo's own backlog, self-registered like any project. Tracker-backed: it holds the `source.json` marker, and its items are GitHub issues.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD, → [docs/workflows/publishing.md](workflows/publishing.md)), `test-all.mjs`
   (`pnpm test`, → [docs/workflows/development.md](workflows/development.md)), `test-tmpdir.mjs` (the per-run temp root `test:skills` runs `node --test`
