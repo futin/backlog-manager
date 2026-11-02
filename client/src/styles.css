@@ -1491,6 +1491,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The launch sheet's Branch section (§8.9.5): a control and the word about it on one line — the Continue select and its `behind` marker, a refusal and its
    `switch to Continue` chip — wrapping on a phone rather than pushing the sheet wider. */
 .jira-branch-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px }
+/* A branch picker (`BranchPicker`): its search field over the select, and the `N of M` count under both — one column, so a long branch name never shares
+   its line with the field that found it. A fixed width, not the content's: a native select is as wide as its widest option, so a search that narrows the
+   options would otherwise resize the control under every keystroke. The Continue line stretches so the picker has a width to take a share of. */
+.jira-branch-line:has(> .jira-branch-pick) { align-self: stretch }
+.jira-branch-pick { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; width: min(100%, 460px) }
+.jira-branch-pick > .set-text { width: 100%; min-width: 0 }
 
 /* Rendered item Markdown, at §6.1's scale: 15/400 body, 19/500 headings, code
    spans on --steel. The section headings are the store's fixed ## set

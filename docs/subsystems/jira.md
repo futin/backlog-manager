@@ -512,8 +512,8 @@ rule](invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-on
   / `No branch` — `No branch` is not offered for `execute`. Its one read is `fetchJiraRefs(repo, key)`; the line under the modes is `fetchAgeLine` (`as of last
   fetch, N min ago`, or `never fetched`), because the server lists refs and never fetches. The sheet opens on Continue when a branch already carries the key,
   else on New (`context` on No branch); New pre-fills the base (the path's stored base, else `origin/HEAD`, else the checkout's own branch) and the name from
-  the path's pattern (`branchSheetDefaults`); Continue lists `this ticket`'s branches over `other branches`, with a `behind` or `diverged` word for a stale
-  local copy. An unreadable repo swaps the age line for `branches unavailable — <path> <reason>` and the selects for text fields. `will work in <path>` is said
+  the path's pattern (`branchSheetDefaults`); Continue lists `this ticket`'s branches, then `worktrees`, `local` and `remote`-only ones (`branchPickerOptions`), with a `behind` or
+  `diverged` word for a stale local copy; it and the base select each carry a search field, since a big repo lists hundreds of `origin/*` branches. An unreadable repo swaps the age line for `branches unavailable — <path> <reason>` and the selects for text fields. `will work in <path>` is said
   when Continue picks a branch another tree holds, and `works in the mapped checkout itself — no branch, no worktree` for No branch, paths in `~` form
   (`displayPath`). `draftRefusal` judges the draft as the server will and blocks Start and Copy prompt in a `.sheet-blocked` line, with a `switch to Continue`
   chip when a New name exists; the server's own refusal reaches the Prompt field through the preview, and a refused Start is the sheet's `.sheet-error` alert.
