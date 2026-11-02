@@ -141,8 +141,9 @@ function escapeHtml(s: string): string {
  *    item, blockquote, table cell, heading, ...). An HTML comment span renders as
  *    nothing, because tracker bodies end in `<!-- bm:… -->` footers that are
  *    bookkeeping, not prose. Text around it in the same token renders as Markdown, because a block token that opens with a comment runs to the end of the
- *    line holding `-->`, or to the end of the document with no `-->` at all, and dropping that token lost the prose in it (#419); an unclosed `<!--` stays
- *    on screen as literal text, since a browser's reading of it would hide the rest of the body. Any other raw HTML — a pasted `<script>`, `<svg
+ *    line holding `-->`, or to the end of the document with no `-->` at all, and dropping that token lost the prose in it (#419). A span holds no second
+ *    opener, so a `-->` closes only the nearest `<!--` before it; any other `<!--` stays on screen as literal text, since a browser's reading of it would
+ *    hide the prose after it. Any other raw HTML — a pasted `<script>`, `<svg
  *    onload>`, `<iframe srcdoc>`, and the far commoner `Promise<void>` that
  *    marked also reads as a tag — renders as escaped literal text (#350):
  *    dropping it outright made a generic in prose vanish from the body.
@@ -173,7 +174,9 @@ marked.use({
       // The trim stops `<!-- a -->     indented` re-lexing as a code block. Encoding what is left of an opener keeps an unclosed one on screen, and it bounds
       // this recursion at one level: the nested parse can never meet a token that starts with a comment. It has to be `renderMarkdown`, never
       // `this.parser.parse(marked.lexer(rest))` — `walkTokens` runs only inside `marked.parse`, and without it an `escaped` text token is emitted verbatim.
-      const rest = text.replace(/<!--[\s\S]*?-->/g, '').trim().replace(/<!--/g, '&lt;!--');
+      // A span holds no opener of its own, so a stray `<!--` above a `bm:groomed-at` footer closes nothing: only the footer goes, and the prose between stays.
+      // `<!-->` and `<!--->` are whole comments to marked, so they are whole spans here, or they would come back as a `<p>` inside the paragraph they sit in.
+      const rest = text.replace(/<!--(?:-?>|(?:(?!<!--)[\s\S])*?-->)/g, '').trim().replace(/<!--/g, '&lt;!--');
       return rest ? renderMarkdown(rest) : '';
     },
     link({ href, title, tokens }) {
@@ -196,7 +199,8 @@ marked.use({
  *
  * `marked` is synchronous unless handed async extensions — none here — so the `async: false` cast is safe. The result is meant for
  * `dangerouslySetInnerHTML`: safe not because the source is "local" (an item body is LLM-written, not vetted), but because the `marked.use()` above never
- * emits raw HTML as markup — a comment span renders as nothing and the text around it as Markdown, any other tag as escaped text — and hand-builds every link/image tag with its href/src escaped,
+ * emits raw HTML as markup — a comment span renders as nothing and the text around it as Markdown, any other tag as escaped text — and hand-builds every
+ * link/image tag with its href/src escaped,
  * so neither a literal nor an entity-hidden scheme survives to reach the browser's own HTML parser.
  */
 export function renderMarkdown(source: string): string {

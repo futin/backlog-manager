@@ -273,6 +273,10 @@ describe('ItemModal', () => {
       ['the tail of a multi-line comment', '<!-- a\nb --> tail\nnext line\n\nnew para', '<p>tail</p>\n<p>next line</p>\n<p>new para</p>\n'],
       ['text between two comments', '<!-- a --> x <!-- b --> y', '<p>x  y</p>\n'],
       ['an unclosed comment after a closed one', '<!-- a --> x <!-- tail', '<p>x &lt;!-- tail</p>\n'],
+      // A groomed tracker body ends in a `bm:groomed-at` footer, so a stray opener above it is not unclosed to marked: the token runs to the footer's `-->`.
+      ['paragraphs between a stray opener and a footer', 'body\n\n<!--\nprose\n\nmore\n\n<!-- bm:groomed-at abc -->\n', '<p>body</p>\n<p>&lt;!--\nprose</p>\n<p>more</p>\n'],
+      ['nothing for an empty comment mid-paragraph', 'a <!--> b', '<p>a  b</p>\n'],
+      ['no new comment formed by stripping inside the token', '<!-- a --> <!<!-- x -->-- y -->', '<p>&lt;!-- y --&gt;</p>\n'],
       ['nothing when only comments remain', '<!-- a --> <!-- b -->', ''],
       ['Markdown in the text after a comment', '<!-- a --> **bold** tail', '<p><strong>bold</strong> tail</p>\n'],
       ['no code block from the gap after a comment', '<!-- a -->     indented', '<p>indented</p>\n'],
