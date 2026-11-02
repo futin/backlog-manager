@@ -27,8 +27,10 @@ function payload(repo: string): PullRequestsPayload {
         autoMergeAllowed: true,
         prs: [],
         total: 0,
-        truncated: false
+        truncated: false,
+        checksDetail: null
       }
+
     ]
   };
 }

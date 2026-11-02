@@ -110,6 +110,11 @@ interface PrEntry {
   total: number;
   methods: MergeMethod[];
   autoMergeAllowed: boolean;
+  /** GitHub's sentence for the `statusCheckRollup` this token may not read, from the last successful list read (`PullList.checksDetail`); `null` when every
+   *  rollup was delivered. Beside `access`, never folded into it: the token reads the PRs fine, so the repo stays `ok` and drawn, and only its checks are
+   *  `unknown`. Taken on every successful read, before the splice check — a write between the read's start and end changes rows, not what the token may
+   *  see. */
+  checksDetail: string | null;
 }
 
 /** A PR write's refusal: the HTTP status the route answers and the sentence it carries as `{ error }`. */
@@ -466,6 +471,9 @@ export class PullRequestsService {
     const allowed: Record<MergeMethod, boolean> = { squash: list.squashMergeAllowed, merge: list.mergeCommitAllowed, rebase: list.rebaseMergeAllowed };
     entry.methods = MERGE_METHODS.filter((m) => allowed[m]);
     entry.autoMergeAllowed = list.autoMergeAllowed;
+    // Neither is what the token may read: set or cleared by every successful list read, so granting the permission clears the Access card's row at the
+    // next poll without a restart.
+    entry.checksDetail = list.checksDetail;
     // A write spliced this repo while the read was out: its rows predate that write, so they are dropped and `polledAt` — the age of the rows held —
     // stays where it was. The attempt above still counts, so the next read waits the TTL like any other.
     if (entry.splices !== splices) return;
@@ -499,7 +507,8 @@ export class PullRequestsService {
         prs: [],
         total: 0,
         methods: [],
-        autoMergeAllowed: false
+        autoMergeAllowed: false,
+        checksDetail: null
       };
       this.entries.set(repo, entry);
     }
@@ -527,6 +536,8 @@ export class PullRequestsService {
       syncOff: this.poller.syncOffBlock(path),
       methods: entry?.methods ?? [],
       autoMergeAllowed: entry?.autoMergeAllowed ?? false,
+      checksDetail: entry?.checksDetail ?? null,
+
       prs: [...prs],
       total,
       truncated: total > prs.length

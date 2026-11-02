@@ -94,6 +94,7 @@ function prRepo(repo: string, over: Partial<PrRepoView> = {}): PrRepoView {
     prs: [],
     total: 0,
     truncated: false,
+    checksDetail: null,
     ...over
   };
 }
@@ -262,7 +263,7 @@ describe('GitHub › Settings: the Access card', () => {
     expect(within(c).getByText('1 repo readable.')).toBeInTheDocument();
   });
 
-  it('names the fix — repository access, both permissions and BM_GITHUB_TOKEN — and never a token value', async () => {
+  it('names the fix — repository access, all four permissions and BM_GITHUB_TOKEN — and never a token value', async () => {
     prs = { token: true, repos: [prRepo('futin/z', { access: 'forbidden', detail: 'nope' })] };
     await renderPage();
     await waitFor(() => expect(screen.getByText('Access')).toBeInTheDocument());
@@ -271,9 +272,52 @@ describe('GitHub › Settings: the Access card', () => {
     expect(text).toContain('BM_GITHUB_TOKEN');
     expect(text).toContain('Pull requests: Read and write');
     expect(text).toContain('Contents: Read and write');
+    // Check runs and commit statuses are their own permissions on a fine-grained token, and a private repo's rollup is unreadable without them (the
+    // lookout case, 2026-11-02). A note that named two of the four sent a person to fix the wrong thing.
+    expect(text).toContain('Checks: Read-only');
+    expect(text).toContain('Commit statuses: Read-only');
     expect(text).toMatch(/repository access/i);
     expect(text).not.toMatch(/gh[pousr]_[A-Za-z0-9]{10,}|github_pat_/);
   });
+
+  it('lists a repo whose checks the token may not read under its own row, and draws the card for that alone', async () => {
+    prs = { token: true, repos: [prRepo('futin/x'), prRepo('futin/y', { checksDetail: 'Resource not accessible by personal access token' })] };
+    await renderPage();
+    await waitFor(() => expect(screen.getByText('Access')).toBeInTheDocument());
+
+    const c = card();
+    // Readable, so not "without access": the pill says what is actually missing.
+    expect(within(c).queryByText(/without access/)).toBeNull();
+    expect(within(c).getByText('1 without checks')).toHaveClass('ui-pill-warn');
+    const y = within(c).getByText('futin/y').closest('.set-row') as HTMLElement;
+    expect(within(y).getByText('Resource not accessible by personal access token')).toHaveClass('set-error');
+    expect(within(c).queryByText('futin/x')).toBeNull();
+    // Both repos read; a refused rollup does not make a repo unreadable.
+    expect(within(c).getByText('2 repos readable.')).toBeInTheDocument();
+    expect(c.textContent).toContain('Checks: Read-only');
+  });
+
+  it('a repo without access and one without checks each sit under their own row, with both pills', async () => {
+    prs = {
+      token: true,
+      repos: [prRepo('futin/z', { access: 'forbidden', detail: 'nope' }), prRepo('futin/y', { checksDetail: 'Resource not accessible by personal access token' })]
+    };
+    await renderPage();
+    await waitFor(() => expect(screen.getByText('Access')).toBeInTheDocument());
+
+    const c = card();
+    expect(within(c).getByText('1 without access')).toHaveClass('ui-pill-bad');
+    expect(within(c).getByText('1 without checks')).toHaveClass('ui-pill-warn');
+    expect(within(c).getByText('Not readable')).toBeInTheDocument();
+    expect(within(c).getByText('Checks not readable')).toBeInTheDocument();
+    const z = within(c).getByText('futin/z').closest('.set-row') as HTMLElement;
+    expect(within(z).getByText('nope')).toHaveClass('set-error');
+    const y = within(c).getByText('futin/y').closest('.set-row') as HTMLElement;
+    expect(within(y).getByText('Resource not accessible by personal access token')).toHaveClass('set-error');
+    // z is hidden from the PRs page, y is on it: one readable.
+    expect(within(c).getByText('1 repo readable.')).toBeInTheDocument();
+  });
+
 
   it('draws no card with no token, even when repos say forbidden', async () => {
     prs = { token: false, repos: [prRepo('futin/z', { access: 'forbidden', detail: 'nope' })] };

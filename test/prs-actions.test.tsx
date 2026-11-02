@@ -37,6 +37,7 @@ function repo(name: string, over: Partial<PrRepoView> = {}): PrRepoView {
     prs: [],
     total: 0,
     truncated: false,
+    checksDetail: null,
     ...over
   };
 }

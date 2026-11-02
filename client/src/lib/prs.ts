@@ -35,7 +35,9 @@ export interface PrChip {
 /**
  * The chips of one row, in the order a person reads a PR: is it a draft, what do reviewers say, what do the checks say, can it merge, is it behind, is
  * auto-merge armed. `checks: 'none'` draws nothing — a repo with no checks has nothing to say, and `checks passing` there would be a claim GitHub never made.
- * `mergeable: 'unknown'` draws nothing either: GitHub is still computing it, which is a moment, not a state worth a chip.
+ * `checks: 'unknown'` DOES draw, neutral: the token may not read this repo's checks (`PrRepoView.checksDetail`), and a row that said nothing would read as a
+ * repo without checks, which is the one thing the page does not know. `mergeable: 'unknown'` draws nothing: GitHub is still computing it, which is a
+ * moment, not a state worth a chip.
  */
 export function prChips(pr: PullRequestRow): PrChip[] {
   const chips: PrChip[] = [];
@@ -46,6 +48,7 @@ export function prChips(pr: PullRequestRow): PrChip[] {
   if (pr.checks === 'success') chips.push({ label: 'checks passing', tone: 'done' });
   else if (pr.checks === 'failure') chips.push({ label: 'checks failing', tone: 'bad' });
   else if (pr.checks === 'pending') chips.push({ label: 'checks pending', tone: 'warn' });
+  else if (pr.checks === 'unknown') chips.push({ label: 'checks unknown', tone: 'neutral' });
   if (pr.mergeable === 'conflicting') chips.push({ label: 'conflicts', tone: 'bad' });
   if (pr.mergeState === 'behind') chips.push({ label: 'behind base', tone: 'warn' });
   if (pr.autoMerge !== null) chips.push({ label: `auto-merge · ${pr.autoMerge.method}`, tone: 'live' });

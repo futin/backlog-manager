@@ -169,7 +169,13 @@ page's one re-read after `updating…` reaches GitHub; a list read that lands af
 successful read clears only a `graphql` sleep that has run out. `pulls.controller.ts` serves the routes:
 
 - `GET /api/prs` → `PullRequestsPayload`, one view per distinct registered GitHub repo, `syncOff` a field and never a filter. Unguarded. No token is
-  `{ token: false, repos: [] }`; an unreadable registry is the 503 `/api/trackers` answers.
+  `{ token: false, repos: [] }`; an unreadable registry is the 503 `/api/trackers` answers. `checksDetail` is a field too, and the one partial GraphQL
+  answer the reads keep: a fine-grained token without `Checks: Read-only` and `Commit statuses: Read-only` reads a private repo's PRs in full and is refused
+  each head commit's `statusCheckRollup`, which GitHub reports as a `FORBIDDEN` on that field BESIDE the whole answer. `graphql()` keeps `data` as delivered
+  and exposes the raw `errors`; `pulls.query.ts`'s `checksRefusal` accepts the answer only when the repository was delivered and EVERY error is a `FORBIDDEN`
+  whose path ends at that field — then each refused row's `checks` is `unknown` (never `none`: the commit may well have checks) and GitHub's sentence is
+  `checksDetail`, set or cleared by every successful list read; any other error, or that one beside another, fails the read as before. Until 2026-11-02 the
+  client blanked `data` on any error, so three readable repos were hidden as `forbidden`.
 - `POST /api/prs/merge` `{ repo, number, method, headSha }` → REST `PUT /repos/{repo}/pulls/{n}/merge` with `merge_method` and `sha`; `200` `merged`, or
   `already-merged` when GitHub refused and the re-read says `MERGED`.
 - `POST /api/prs/auto-merge` `{ repo, number, enable, method? }` (`method` required to enable) → the single-PR read (node id, armed state), then
