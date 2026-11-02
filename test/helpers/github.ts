@@ -30,6 +30,9 @@ import type { ClaimRecord } from '../../shared/types';
 
 export const FAKE_REPO = 'futin/x';
 
+/** GitHub's sentence for a field a fine-grained token may not read — the one `refuseChecks` puts on every refused `statusCheckRollup`. */
+export const CHECKS_REFUSED = 'Resource not accessible by personal access token';
+
 export interface Call {
   method: string;
   url: string;
@@ -198,6 +201,14 @@ export class FakeGithub {
   /** Rows per page. GitHub's own maximum is 100; a case that wants to prove a
    *  caller follows `Link` lowers this to 1. */
   pageSize = 100;
+
+  /**
+   * When set, the token this fake stands for may read pull requests but not check runs or commit statuses — a fine-grained PAT without `Checks` and
+   * `Commit statuses` on a private repo. GitHub then answers the list and the single-PR query with a `200` whose `data` is whole except for
+   * `statusCheckRollup`, `null` on every PR whose head has checks, and one `errors` entry per such PR: `type: 'FORBIDDEN'`, `CHECKS_REFUSED`, and the
+   * `path` down to the refused field. The refusal is per field, so a PR without checks (`rollup: null`) draws no error — its `null` is the real answer.
+   */
+  refuseChecks = false;
   private listCount = 0;
 
   private nextIssue = 77;
@@ -322,7 +333,7 @@ export class FakeGithub {
       ...(withIdentity ? { id, state } : {}),
       ...fields,
       author: author === null ? null : { login: author },
-      commits: { nodes: [{ commit: { statusCheckRollup: rollup === null ? null : { state: rollup } } }] }
+      commits: { nodes: [{ commit: { statusCheckRollup: rollup === null || this.refuseChecks ? null : { state: rollup } } }] }
     };
   }
 
@@ -478,11 +489,19 @@ export class FakeGithub {
   /**
    * The four operations `pulls.query.ts` sends, told apart by operation name. Failures are GitHub's shape: a `200` whose `errors` carry a `type`
    * (`NOT_FOUND` for a repo or PR it cannot see, `UNPROCESSABLE` for a mutation refused on its merits) and whose `data` holds `null` where the answer
-   * would have been.
+   * would have been. A refusal of one FIELD (`refuseChecks`) is the same shape at a smaller scale: `data` is the whole answer with `null` at the field,
+   * and each error carries the `path` to it — the list's `['repository', 'pullRequests', 'nodes', i, …]`, the single read's `['repository', 'pullRequest', …]`.
    */
   private graphqlRoute(target: { operation: string; repo?: string }, body: Record<string, unknown> | undefined): { status: number; payload: unknown } {
     const vars = (body?.variables ?? {}) as Record<string, unknown>;
     const fail = (data: unknown, type: string, message: string) => ({ status: 200, payload: { data, errors: [{ type, message }] } });
+    const refused = (prs: FakePr[], pathTo: (i: number) => (string | number)[]): Record<string, unknown> => {
+      if (!this.refuseChecks) return {};
+      const errors = prs.flatMap((p, i) =>
+        p.rollup === null ? [] : [{ type: 'FORBIDDEN', message: CHECKS_REFUSED, path: [...pathTo(i), 'commits', 'nodes', 0, 'commit', 'statusCheckRollup'] }]
+      );
+      return errors.length === 0 ? {} : { errors };
+    };
 
     if (target.operation === 'PullRequests' || target.operation === 'PullRequest') {
       const repo = target.repo ?? '';
@@ -491,16 +510,16 @@ export class FakeGithub {
       if (target.operation === 'PullRequest') {
         const pr = all.find((p) => p.number === vars.number);
         if (pr === undefined) return fail({ repository: { pullRequest: null } }, 'NOT_FOUND', `Could not resolve to a PullRequest with the number of ${String(vars.number)}.`);
-        return { status: 200, payload: { data: { repository: { pullRequest: this.node(pr, true) } } } };
+        return { status: 200, payload: { data: { repository: { pullRequest: this.node(pr, true) } }, ...refused([pr], () => ['repository', 'pullRequest']) } };
       }
       // `states: OPEN`, `orderBy: UPDATED_AT DESC`, `first: 100` — what the list query asks for.
       const open = all.filter((p) => p.state === 'OPEN').sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+      const page = open.slice(0, 100);
       return {
         status: 200,
         payload: {
-          data: {
-            repository: { ...this.settingsOf(repo), pullRequests: { totalCount: open.length, nodes: open.slice(0, 100).map((p) => this.node(p, false)) } }
-          }
+          data: { repository: { ...this.settingsOf(repo), pullRequests: { totalCount: open.length, nodes: page.map((p) => this.node(p, false)) } } },
+          ...refused(page, (i) => ['repository', 'pullRequests', 'nodes', i])
         }
       };
     }

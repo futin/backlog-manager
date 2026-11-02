@@ -53,6 +53,7 @@ function repo(over: Partial<PrRepoView> = {}): PrRepoView {
     prs: [],
     total: 0,
     truncated: false,
+    checksDetail: null,
     ...over
   };
 }
@@ -92,6 +93,10 @@ describe('prChips', () => {
     ]);
   });
 
+  it('checks the token may not read are a neutral chip — said, because silence would read as "no checks"', () => {
+    expect(prChips(pr({ checks: 'unknown' }))).toEqual([{ label: 'checks unknown', tone: 'neutral' }]);
+  });
+
   it('draws no checks chip for checks: none, and nothing for a clean PR with no review', () => {
     expect(prChips(pr({ checks: 'none', review: null }))).toEqual([]);
   });
@@ -105,6 +110,11 @@ describe('the write blocks', () => {
     expect(mergeBlock(pr({ checks: 'failure' }), repo({ methods: [] }))).toBe('checks failing');
     expect(mergeBlock(pr(), repo({ methods: [] }))).toBe('no merge method allowed');
     expect(mergeBlock(pr({ mergeable: 'unknown', checks: 'pending' }), repo())).toBeNull();
+  });
+
+  it('checks the token may not read block nothing: merge and arming auto-merge both stay open', () => {
+    expect(mergeBlock(pr({ checks: 'unknown' }), repo())).toBeNull();
+    expect(autoMergeBlock(pr({ checks: 'unknown' }), repo())).toBeNull();
   });
 
   it('updateBlock: sync off, then a fork that forbids edits, then up to date', () => {

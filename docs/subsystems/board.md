@@ -419,7 +419,8 @@ Since #17 ([spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.m
 since the source-sections change it lives on **GitHub › Settings** (`GithubSettingsView`: a `Settings` band, `how often this machine asks GitHub about each
 repo`, with a `this machine` pill): a `Sync` card (`GithubSyncGroup`) holding a `Segmented` pill per `github` repo (`15s`, `1m`, `5m`, `off` —
 `SYNC_INTERVALS`' keys, never a second list) in the row's right slot, or `nothing registered yet`, with an `Access` card (`GithubAccessGroup`) beside it that
-appears only when the token cannot read some repo. It is a host card on a page outside Settings, which the scope
+appears only when the token cannot read some repo, or some repo's checks (`PrRepoView.checksDetail`; that repo is still drawn, every PR's `checks`
+`unknown`). It is a host card on a page outside Settings, which the scope
 rule allows: the control governs one source, so it lives in that source's section
 ([invariants.md](invariants.md#a-sources-own-settings-page-may-hold-a-host-card)). Connecting stays read-only; the interval is how often THIS machine asks
 GitHub, so it is the machine's, in `settings/tracker-sync.json`. `useTrackers().saveInterval` posts `POST /api/trackers/sync` and refetches, so the pill shows
@@ -490,8 +491,11 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   last answer, plus mount and focus), mounted by this page and by GitHub › Settings' Access card: the server's PR cache has no timer, so with neither open there
   are no PR reads at all. A repo the token cannot read (`forbidden` or `not-found`, `splitReach` in `lib/pr-layouts.ts`) is handed to no layout and left out of
   `N open`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card
-  (`GithubAccessGroup`, the hook's second mount) lists each with GitHub's `detail` and the token fix; a rate-limited or `error` repo is transient, keeps its
-  rows and is said once below the list as `Can't read · <repo> — <detail>` in every layout, never as a row. The layout is a `Segmented` in the toolbar offering
+  (`GithubAccessGroup`, the hook's second mount) lists each with GitHub's `detail` and the token fix; a repo the token reads whose checks it may not
+  (`checksDetail`, a `FORBIDDEN` on `statusCheckRollup` alone) is drawn like any other with every PR's `checks` `unknown` and listed on that card under
+  `Checks not readable`; a rate-limited or `error` repo is transient, keeps its rows and is said once below the list as `Can't read · <repo> — <detail>` in
+  every layout, never as a row.
+ The layout is a `Segmented` in the toolbar offering
   all three at every width (`PR_LAYOUT_OPTIONS`), stored per device (`PR_LAYOUT_KEY`; an unknown word is Inbox). **Inbox** (default) ranks every shown PR across
   repos (`rankPrs`: level, severity, newest) under three filtering count tiles, every row one `prs-row` — the fact line (a loud row's verdict and steps, a quiet
   row's `quietFacts`), then `author · head → base · age` with the run warning as a warn pill. **Matrix** is a table, a column per check with a failure count in

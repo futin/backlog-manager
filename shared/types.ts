@@ -623,8 +623,10 @@ export interface PullRequestRow {
   mergeState: string;
   /** `reviewDecision`; `null` when the repo requires no review. */
   review: 'approved' | 'changes-requested' | 'review-required' | null;
-  /** The head commit's `statusCheckRollup.state`; `none` when the commit has no checks at all. */
-  checks: 'success' | 'failure' | 'pending' | 'none';
+  /** The head commit's `statusCheckRollup.state`; `none` when the commit has no checks at all; `unknown` when this token may not read them — a
+   *  fine-grained token without `Checks: Read-only` and `Commit statuses: Read-only` on a private repo, which GitHub refuses per field while delivering the
+   *  rest of the PR (`PrRepoView.checksDetail` carries its sentence). Not `none`: the commit may well have checks, so the page claims nothing either way. */
+  checks: 'success' | 'failure' | 'pending' | 'none' | 'unknown';
   /** Armed auto-merge, or `null`. `enabledAt` is `''` in the one case GitHub's nullable `DateTime` comes back empty. */
   autoMerge: { method: MergeMethod; enabledAt: string } | null;
   /** GitHub's own `viewerCanUpdateBranch`: false when the head is already up to date with its base OR this token may not update it. */
@@ -657,7 +659,12 @@ export interface PrRepoView {
   total: number;
   /** `total > prs.length` — the page says how many it left out rather than paginating. */
   truncated: boolean;
+  /** GitHub's sentence for the check runs and commit statuses this token may not read, from the last successful list read, else `null`. Set, every row's
+   *  `checks` is `unknown` and the repo is still `access: 'ok'` — the PRs page keeps drawing it — and GitHub › Settings' Access card names the repo under
+   *  `Checks not readable`, beside the two permissions that fix it. A field and never an `access` state, because the token reads the PRs fine. */
+  checksDetail: string | null;
 }
+
 
 /** `GET /api/prs`'s answer. `token: false` means `BM_GITHUB_TOKEN` is unset, and then `repos` is empty and no request was made. */
 export interface PullRequestsPayload {
