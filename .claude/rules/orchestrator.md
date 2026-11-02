@@ -2,7 +2,7 @@
 paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/agent.ts", "skills/backlog-retro/tools/lib/paths.mjs", "skills/backlog-retro/tools/lib/reviews.mjs", "server/src/agents/agents.*.ts", "server/src/agents/orchestrate-args.service.ts", "server/src/tracker/map-issue.ts", "client/src/lib/remote-starting.ts", "client/src/components/RunControls.tsx"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **The orchestrator's run file has exactly one writer, one reader — the same relationship the registry has.**
   `skills/backlog-orchestrate/tools/orchestrate.mjs` is the writer, `server/src/orchestrator/` is the reader, and `run.json` lives outside the repo entirely,

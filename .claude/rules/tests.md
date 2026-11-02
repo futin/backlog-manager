@@ -2,16 +2,18 @@
 paths: ["test/**", ".claude/rules/**"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
-- **Every `.claude/rules/` file carries `paths:` and is the one home of its rules' mechanism — never the reasoning.** `paths:` is mandatory because a rule
-  file without one loads at `session_start` in every session — a context-floor increase on all of them, the one failure mode this mechanism can introduce.
-  Every Why-linked CLAUDE.md rule has exactly one rule-file home and its headline is byte-equal across the two tiers, pinned by `test/claude-rules.test.ts`:
-  a rule file is bullets and nothing else, each anchored exactly once; CLAUDE.md's linked headlines and the rule files' bullets are one multiset with one home
-  per anchor; a linked CLAUDE.md bullet is a headline and a link, any other bullet at most 80 words — so mechanism cannot creep back by any door. Measured,
-  not assumed (Claude Code 2.1.268): a glob fires for a headless `claude -p`, inside a linked worktree, and for a custom subagent's read; it does NOT fire for
-  `Write`, `Grep`/`Glob`, or a source read through `codegraph_explore` — the headline in CLAUDE.md is what covers that gap, and the reviewer is told to open the
-  matching rule files against every diff. `backlog-execute`'s contract sweep visits `.claude/rules/*.md`, because this tier states contract. Why:
+- **Every `.claude/rules/` file carries `paths:` and is the one home of its rules' mechanism — never the reasoning.** `paths:` is mandatory because a rule file
+  without one loads at `session_start` in every session — a context-floor increase on all of them, the one failure mode this mechanism can introduce. Every rule
+  has exactly one rule-file home, and CLAUDE.md keeps a headline only for a rule that matters whichever file is touched — byte-equal with its rule-file copy —
+  pinned by `test/claude-rules.test.ts`: a rule file is bullets and nothing else, each citing at most one anchor, an unanchored one at most 80 words;
+  CLAUDE.md's headlines are a subset of the rule files' bullets, with one home per anchor, or per headline for an unanchored bullet; a linked CLAUDE.md bullet
+  is a headline and a link, any other bullet at most 80 words; CLAUDE.md's `## Rule files` table equals the rule files' `paths:`, both ways; and CLAUDE.md stays
+  under a byte budget — so mechanism cannot creep back by any door. Measured, not assumed (Claude Code 2.1.268): a glob fires for a headless `claude -p`, inside
+  a linked worktree, and for a custom subagent's read; it does NOT fire for `Write`, `Grep`/`Glob`, or a source read through `codegraph_explore` — CLAUDE.md's
+  `## Rule files` table, which names the file to open before such an edit, is what covers that gap, and the reviewer is told to open the matching rule files
+  against every diff. `backlog-execute`'s contract sweep visits `.claude/rules/*.md`, because this tier states contract. Why:
   [invariants.md](docs/subsystems/invariants.md#path-scoped-clauderules-reach-a-headless-run-in-a-linked-worktree-task-35)
 - **A suite that hands an app to supertest listens once, on `127.0.0.1`, via `listenLoopback` (`test/helpers/app.ts`)** — never on the wildcard, never per
   request. supertest dials `http://127.0.0.1:<port>` unconditionally while a bare `listen(0)` binds `::`, so any process holding that port on `127.0.0.1`

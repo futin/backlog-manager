@@ -175,7 +175,7 @@ describe('DispatchButton', () => {
   /* Order preserved: an ENVIRONMENT-level block still hides the control
      outright, and a run claim must not resurrect it as a disabled button. That
      ordering is the "an environment-level block hides the dispatch control; the
-     per-item ones disable it" invariant (CLAUDE.md), and a new block folded in
+     per-item ones disable it" invariant (`.claude/rules/board.md`), and a new block folded in
      ahead of the hidden check is exactly how it would be lost. */
   it('still renders nothing when the environment hides the control, run claim or not', () => {
     const { container } = render(

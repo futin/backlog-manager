@@ -2,7 +2,7 @@
 paths: ["server/src/*.ts", "vite.config.ts", "docker-compose.yml", "server/src/jira/env.util.ts", "server/src/jira/refs.util.ts", "server/src/hub/**"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **Both processes bind `127.0.0.1` by default; loopback is the access control** (nothing has auth). `BM_BIND` is the single knob; compose sets `0.0.0.0`. Both
   halves are pinned: `test/vite-proxy.test.ts` imports the dev config, `test/server-bind.test.ts` reads `server/src/main.ts`'s SOURCE — a bare

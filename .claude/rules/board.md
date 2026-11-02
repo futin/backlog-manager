@@ -2,7 +2,7 @@
 paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.html", "server/src/security.ts", "server/src/agents/agents.service.ts", "server/src/orchestrator/remote-runs.util.ts"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **A starting entry blocks what a run file blocks, on every surface** (bug-21). `runClaimBlock` (`shared/agent.ts`) takes `starting` as a required third
   parameter, no `[]` default; the block is project-wide and deliberately coarse; the toolbar Orchestrate control hides on it; `POST /api/agents/orchestrate`

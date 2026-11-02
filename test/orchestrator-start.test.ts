@@ -404,7 +404,7 @@ describe('POST /api/agents/orchestrate', () => {
      held) and dies, having burned a session and told its user "never retry,
      go to --resume" for a run that never crashed.
 
-     CLAUDE.md's "One run per project, checked twice" is why this is the
+     `.claude/rules/dispatch-watchdog.md`'s "One run per project, checked twice" is why this is the
      server's business and not only the board's: `init`'s on-disk lock is the
      check that matters, and this endpoint is the second one precisely
      because a board click never goes through `init` before spawning. */
@@ -614,7 +614,7 @@ describe('POST /api/agents/orchestrate', () => {
   // the dashboard as a field of their own, they are composed into the one
   // prompt string the spawned session is started with. The invariant being
   // defended is "the orchestrate spawn prompt is a server-side constant"
-  // (CLAUDE.md) in its post-selector wording — the prompt is COMPOSED
+  // (`.claude/rules/dispatch-watchdog.md`) in its post-selector wording — the prompt is COMPOSED
   // server-side, and the only caller influence on it is a list of validated
   // ids naming this project's own open bugs and tasks. `prompt: 'rm -rf'`
   // is still dropped on the floor, which the "constant prompt" case above

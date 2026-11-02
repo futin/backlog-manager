@@ -2,7 +2,7 @@
 paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/releases/**", "server/src/agents/items-abort.*.ts", "server/src/tracker/tracker.controller.ts", "shared/types.ts", "Dockerfile"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **The eleven `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.** Every one of them is
   `@UseGuards(SameOriginPostGuard)` (`items-write.controller.ts`, one decorator on the class) and each is a thin pass-through to an `ItemWriter` method:

@@ -429,7 +429,7 @@ describe('orchestrate', () => {
      spellings a caller can hold — `#31`, the URN, and the bare number — and
      emits one, because `orchestrate.mjs` reads its argv as tokens and
      SKILL.md substitutes those tokens into fenced shell commands where `#`
-     opens a comment. That normalisation is the reason CLAUDE.md's `isItemId`
+     opens a comment. That normalisation is the reason `.claude/rules/dispatch-watchdog.md`'s `isItemId`
      paragraph can still say a `#` never reaches a shell, now that the refusal
      which used to guarantee it is gone. */
   const promptOf = (): string => {

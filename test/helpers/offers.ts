@@ -3,7 +3,7 @@
  * two sheets are tested against the same machines.
  *
  * Every date is cut from `Date.now()` AT CALL TIME and never written as a literal: the 5 h reset on a card is `now`-relative, so an absolute stamp would
- * expire the day its assertion starts reading it as "resets now" (CLAUDE.md: a fixture date is relative to the clock the assertion runs under).
+ * expire the day its assertion starts reading it as "resets now" (`.claude/rules/tests.md`: a fixture date is relative to the clock the assertion runs under).
  */
 import type { MachineOffer, ProjectOffers } from '../../shared/types';
 

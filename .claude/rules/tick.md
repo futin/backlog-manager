@@ -2,7 +2,7 @@
 paths: ["server/src/tick/**", "skills/backlog-tick/tools/tick.mjs", "skills/backlog-tick/tools/tick-breaker.mjs"]
 ---
 
-# Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
+# Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **`~/.backlog-manager/settings/tick.json` has exactly one writer, the server, and a file that cannot be read is never replaced.** The file is `$BM_TICK_FILE`,
   else `~/.backlog-manager/settings/tick.json`, shaped `{ haltAfter, maxPlans, maxPrs, resetAt: { <abs main-checkout path>: <ISO> } }`, and `writeTickFile` in

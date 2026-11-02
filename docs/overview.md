@@ -13,7 +13,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | doc                                                  | what it is                                                                                                              |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | [README.md](../README.md)                            | the human front door — what this is, quick start, the surfaces                                                          |
-| [CLAUDE.md](../CLAUDE.md)                            | the normative index: one headline per rule — mechanism in `.claude/rules/`, reasoning in `subsystems/invariants.md`     |
+| [CLAUDE.md](../CLAUDE.md)                            | the floor every session pays: commands, one line per seam, the rule-file map, the cross-cutting rules                   |
 | [subsystems/api.md](subsystems/api.md)               | the Nest side: what each module owns, which reads are cached and which must never be                                    |
 | [subsystems/jira.md](subsystems/jira.md)             | the Jira integration's server half: the client, the board poller and its caches, the `/api/jira` read routes            |
 | [subsystems/board.md](subsystems/board.md)           | the client: the five sections, and what the browser derives rather than fetches                                         |
@@ -27,9 +27,10 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [workflows/remote-machine.md](workflows/remote-machine.md) | adding a second machine to the launch picker: its name, its tailnet reach, its allowlist and token, this board's `.env` |
 
 `.claude/rules/` sits beside that table rather than in it: eleven path-scoped files that a session loads automatically when it reads a file under their `paths:`
-glob, each the one home of the mechanism text for the rules scoped to its paths — CLAUDE.md keeps the headlines, `subsystems/invariants.md` the reasoning. They
-are guarded by `test/claude-rules.test.ts` rather than by `/docs-sync`, because what can rot in them is mechanical: a dead anchor, a glob that matches nothing,
-a headline that no longer matches CLAUDE.md's, an anchor homed in two files or in none.
+glob, each the one home of the rules scoped to its paths, mechanism included — CLAUDE.md keeps only the cross-cutting rules' headlines and a table of which file
+covers which paths, `subsystems/invariants.md` the reasoning. They are guarded by `test/claude-rules.test.ts` rather than by `/docs-sync`, because what can rot
+in them is mechanical: a dead anchor, a glob that matches nothing, a CLAUDE.md headline with no byte-equal copy in a rule file, a rule homed in two files, a
+table row that no longer matches its file's `paths:`.
 
 Deliberately not tracked, and each for a stated reason in [`.docs-sync.yml`](.docs-sync.yml): `backlog/` (the store's own items and README), `docs/superpowers/`
 (specs, plans, decision logs), `audits/` (dated findings), and `skills/` + `agents/` — those are the product, not documentation about it.
@@ -140,9 +141,9 @@ An install is a copy of the pushed `HEAD`, never the working tree; see [workflow
 
 ### Where the rules live
 
-[CLAUDE.md](../CLAUDE.md) carries every rule as one normative headline; the rule's mechanism lives in exactly one `.claude/rules/*.md` file, loaded when a
-session reads a file under its scope; and [subsystems/invariants.md](subsystems/invariants.md) carries the reasoning. If the tiers ever disagree, the code and
-its tests decide — but the disagreement itself is a bug worth fixing in the same sitting.
+Every rule lives in exactly one `.claude/rules/*.md` file, loaded when a session reads a file under its scope; [CLAUDE.md](../CLAUDE.md) repeats the headline
+only of a rule that matters whichever file is touched, and maps each rule file to its paths; and [subsystems/invariants.md](subsystems/invariants.md) carries
+the reasoning. If the tiers ever disagree, the code and its tests decide — but the disagreement itself is a bug worth fixing in the same sitting.
 
 ### Every seam, in detail
 
@@ -202,8 +203,8 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
 - `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge, and `backlog-execute` before a `pr`-mode push.
 - `.claude/rules/` — eleven path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
-  mechanism text for the rules scoped to its paths; CLAUDE.md keeps each rule's headline, `docs/subsystems/invariants.md` its reasoning. Guarded by
-  `test/claude-rules.test.ts`: bullets only, each anchored exactly once, one home per anchor, headlines byte-equal with the ones below.
+  mechanism text for the rules scoped to its paths; CLAUDE.md keeps the cross-cutting rules' headlines, `docs/subsystems/invariants.md` the reasoning. Guarded
+  by `test/claude-rules.test.ts`: bullets only, each anchored at most once, one home per rule, CLAUDE.md's headlines byte-equal with their rule-file copies.
 - `backlog/` — this repo's own backlog, self-registered like any project. Tracker-backed: it holds the `source.json` marker, and its items are GitHub issues.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD, → [docs/workflows/publishing.md](workflows/publishing.md)), `test-all.mjs`
   (`pnpm test`, → [docs/workflows/development.md](workflows/development.md)), `test-tmpdir.mjs` (the per-run temp root `test:skills` runs `node --test`

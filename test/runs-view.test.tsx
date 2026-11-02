@@ -2650,7 +2650,7 @@ describe('RunsView · shape D (task-38)', () => {
  * guard that could only fail once is worth less than one that keeps failing.
  *
  * Both are the same rule in two places: **every derivation has one home**
- * (CLAUDE.md's `lib/` rule), and the redraw of a surface is exactly when a
+ * (`.claude/rules/board.md`'s `lib/` rule), and the redraw of a surface is exactly when a
  * second home gets added by accident — a page that needs "is this run
  * claimed" or "which dialog owns Escape" and writes the expression inline
  * rather than importing the one implementation.
@@ -2676,7 +2676,7 @@ describe('Runs · one home per derivation (task-38)', () => {
    * The predicates this redraw READS and may never grow a second copy of.
    * `runStatusChip` and `aggregateRuns` are the two the Runs page leans on
    * hardest; `runClaimBlock`, `runHoldsItem`, `itemDurationMs` and
-   * `watchdogStoodDown` are the four CLAUDE.md names outright as single
+   * `watchdogStoodDown` are the four `.claude/rules/board.md` names outright as single
    * implementations, each because two expressions that merely agreed once
    * survived a whole branch while one of them was widened.
    */
