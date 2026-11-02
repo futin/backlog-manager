@@ -239,8 +239,8 @@ describe('ItemModal', () => {
   });
 
   /* #350 — marked reads prose like `Promise<void>` as an inline HTML tag, and the renderer used to drop every HTML token, so the generic vanished from the
-     body. Raw HTML now renders as escaped text — never as markup, so the case above still holds — and only a comment renders as nothing, because tracker
-     bodies end in `<!-- bm:… -->` footers that are bookkeeping, not prose. */
+     body. Raw HTML now renders as escaped text — never as markup, so the case above still holds — and only a comment span renders as nothing, because tracker
+     bodies end in `<!-- bm:… -->` footers that are bookkeeping, not prose; text around it in the same token renders as Markdown (#419). */
   describe('raw HTML in a body (#350)', () => {
     it('keeps a generic in prose as literal text', () => {
       expect(renderMarkdown('returns Promise<void> here')).toContain('Promise&lt;void&gt;');
@@ -263,6 +263,45 @@ describe('ItemModal', () => {
       const html = renderMarkdown('a <!-- x --> b');
       expect(html).not.toMatch(/\bx\b/);
       expect(html).not.toContain('&lt;!--');
+    });
+
+    // #419 — a block html token runs to the end of the line holding `-->`, and an unclosed `<!--` runs to the end of the document, so a token that opens
+    // with a comment can hold prose. Each string is exact, because the shape of what survives (one paragraph or two, no `<pre>`) is the behaviour.
+    it.each([
+      ['prose after a comment on its line', '<!-- note --> visible text\n\nnext para', '<p>visible text</p>\n<p>next para</p>\n'],
+      ['paragraphs after an unclosed comment', 'first\n\n<!--\nsecond para\n\nthird para', '<p>first</p>\n<p>&lt;!--\nsecond para</p>\n<p>third para</p>\n'],
+      ['the tail of a multi-line comment', '<!-- a\nb --> tail\nnext line\n\nnew para', '<p>tail</p>\n<p>next line</p>\n<p>new para</p>\n'],
+      ['text between two comments', '<!-- a --> x <!-- b --> y', '<p>x  y</p>\n'],
+      ['an unclosed comment after a closed one', '<!-- a --> x <!-- tail', '<p>x &lt;!-- tail</p>\n'],
+      ['nothing when only comments remain', '<!-- a --> <!-- b -->', ''],
+      ['Markdown in the text after a comment', '<!-- a --> **bold** tail', '<p><strong>bold</strong> tail</p>\n'],
+      ['no code block from the gap after a comment', '<!-- a -->     indented', '<p>indented</p>\n'],
+      ['no new comment formed by stripping one', '<!<!-- x -->-- y -->', '<p>&lt;!-- y --&gt;</p>\n']
+    ])('renders %s', (_name, source, expected) => {
+      expect(renderMarkdown(source)).toBe(expected);
+    });
+
+    it('leaves a comment inside a code fence as literal text', () => {
+      expect(renderMarkdown('```\n<!-- keep -->\n```')).toContain('&lt;!-- keep --&gt;');
+    });
+
+    // The text around a comment is rendered by a nested parse, and it stays inert only because that parse is a full `marked.parse`. The second row is the
+    // one a `this.parser.parse(marked.lexer(rest))` route gets wrong: `walkTokens` never runs there, so an `escaped` text token is emitted verbatim.
+    it.each([
+      ['a tag after a comment', '<!-- a --> <img src=x onerror="window.__pwned=1">', 'img, [onerror]'],
+      ['an unclosed tag in an inline <script> after a comment', '<!-- a --> a <script> <img src=x onerror="window.__pwned=1"// </script> b', 'img, [onerror]'],
+      ['tags after an unclosed comment', '<!--\n<script>alert(1)</script>\n\n<img src=x onerror=a>', 'script, img, [onerror]']
+    ])('never builds an element from %s', (_name, source, query) => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown(source);
+      expect(host.querySelector(query)).toBeNull();
+    });
+
+    it('renders a disallowed link scheme after a comment as plain text', () => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown('<!-- a --> [x](javascript:alert(1))');
+      expect(host.querySelector('a')).toBeNull();
+      expect(host.textContent).toContain('x');
     });
 
     // marked flags every text token lexed between an inline raw-block opener (`<script>`, `<pre>`, `<style>`, `<textarea>`) and its closer as
