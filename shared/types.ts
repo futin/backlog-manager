@@ -1188,8 +1188,8 @@ export interface AgentDispatchRequest {
 }
 
 /**
- * 201 body of a headless launch — the dashboard's minted session id. Every launch but a desktop item dispatch answers this: orchestrate, resume, abort and the
- * Jira Run never send a `surface`. `surface` is never present on the wire; it is typed so `ItemDispatchResult` can be narrowed on it.
+ * 201 body of a headless launch — the dashboard's minted session id. Every launch but a desktop item dispatch or Jira Run answers this: orchestrate, resume
+ * and abort never send a `surface`. `surface` is never present on the wire; it is typed so `ItemDispatchResult` can be narrowed on it.
  */
 export interface AgentDispatchResult {
   sessionId: string;
@@ -1286,6 +1286,9 @@ export interface AgentBranchesPayload {
  * `mode` and the four fields after it are the branch choice (Jira repo/branch, spec §5.3), the same five `GET /api/jira/prompt` takes on its query: `mode` is
  * required — both routes 400 without it — and the rest ride only with the modes they belong to (`base` with `new`; `target` with `openMr` and `continue`;
  * `openMr` absent means `false`). The server checks the combinations; this is the wire shape.
+ *
+ * `surface` is the sheet's Open in pick, `AgentDispatchRequest.surface`'s rule for any Jira action: sent only when the sheet drew the control (home's
+ * dashboard says `desktopAvailable`), forwarded to `POST /api/spawn` as it came, and absent is a dashboard launch byte for byte as before the control existed.
  */
 export interface JiraDispatchRequest {
   key: string;
@@ -1302,18 +1305,21 @@ export interface JiraDispatchRequest {
   effort?: string;
   permissionMode: PermissionMode;
   remoteControl: boolean;
+  surface?: LaunchSurface;
 }
 
 /**
  * 200 body of `POST /api/agents/dispatch-jira`. `assigned` is false when no assign was asked AND when the ticket was already the caller's (no call was sent);
  * `transitioned` is the NAME of the transition applied, or `null`. `session` is what `JiraStatusPayload.live` will show for the key, so the sheet can draw it
  * without waiting for the status reload.
+ *
+ * A desktop launch answers the same shape: the dashboard runs its first turn headless and hands it to the app after, so it has an id and a live entry like
+ * any other. The `{ surface: 'desktop' }` arm is a dashboard from before that hand-over, whose app minted the id — nothing to confirm, so `session` is `null`.
  */
-export type JiraDispatchResult = AgentDispatchResult & {
-  assigned: boolean;
-  transitioned: string | null;
-  session: { name: string; startedAt: string; repo: string };
-};
+export type JiraDispatchResult = { assigned: boolean; transitioned: string | null } & (
+  | (AgentDispatchResult & { session: { name: string; startedAt: string; repo: string } })
+  | { surface: 'desktop'; session: null }
+);
 
 /**
  * 200 body of `POST /api/agents/pause` (task-17) — whether a pause request

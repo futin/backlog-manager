@@ -517,6 +517,77 @@ describe('JiraLaunchSheet — Start', () => {
   });
 });
 
+/*
+  Open in: Dashboard | Desktop — the board LaunchSheet's control, drawn from the agents status alone (home's dashboard says `desktopAvailable`) and preselected
+  from its `launchSurfaceDefault`. Under Desktop only remote control is disabled: the dashboard runs the first turn headless with the sheet's permissions,
+  model and effort, then hands the session to the app.
+*/
+describe('JiraLaunchSheet — Open in', () => {
+  const openIn = (): HTMLElement | null => within(dialog()).queryByRole('group', { name: 'Open in' });
+  const remote = (): HTMLElement => within(dialog()).getByRole('switch', { name: 'Remote control' });
+
+  it('draws no control and sends no surface while the dashboard does not say desktopAvailable', async () => {
+    await ready();
+    expect(openIn()).not.toBeInTheDocument();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).not.toHaveProperty('surface');
+  });
+
+  it('preselects Dashboard when the dashboard names no default, and sends it with remote control as picked', async () => {
+    server.agents = agents({ desktopAvailable: true });
+    await ready();
+    await waitFor(() => expect(openIn()).toBeInTheDocument());
+    expect(within(dialog()).getByRole('button', { name: 'Dashboard' })).toHaveAttribute('aria-pressed', 'true');
+    expect(remote()).toBeEnabled();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toMatchObject({ surface: 'dashboard', remoteControl: true });
+  });
+
+  it('preselects Desktop from the dashboard default, for a skill action too: remote control disabled and Off, the rest still live, and the surface sent', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'desktop' });
+    await ready({ initialAction: { skill: SKILL.id } });
+    await waitFor(() => expect(openIn()).toBeInTheDocument());
+    expect(within(dialog()).getByRole('button', { name: 'Desktop' })).toHaveAttribute('aria-pressed', 'true');
+    expect(remote()).toBeDisabled();
+    expect(remote()).toHaveAttribute('aria-checked', 'false');
+    expect(within(dialog()).getByRole('combobox', { name: 'Model' })).toBeEnabled();
+    expect(within(dialog()).getByRole('combobox', { name: 'Permissions' })).toBeEnabled();
+    expect(within(dialog()).getByText(/opens in the desktop app — remote control does not apply/)).toBeInTheDocument();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByText(/then it opens in the desktop app on this Mac/)).toBeInTheDocument();
+    expect(dispatchBody()).toMatchObject({ action: { skill: SKILL.id }, surface: 'desktop', remoteControl: false });
+    expect(within(dialog()).getByRole('link', { name: /open in dashboard/ })).toHaveAttribute('href', 'http://127.0.0.1:5174/?session=sess-9');
+  });
+
+  it('switching back to Dashboard gives remote control back as it was', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'desktop' });
+    await ready();
+    await waitFor(() => expect(openIn()).toBeInTheDocument());
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'Dashboard' }));
+    expect(remote()).toBeEnabled();
+    expect(remote()).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('an answer with no session id (a dashboard from before the hand-over) says it opened in the app, with no link', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'desktop' });
+    server.dispatch = {
+      status: 200,
+      body: { surface: 'desktop', assigned: false, transitioned: null, session: null } satisfies JiraDispatchResult
+    };
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByText('Opened in the desktop app')).toBeInTheDocument();
+    expect(within(dialog()).queryByRole('link', { name: /open in dashboard/ })).not.toBeInTheDocument();
+    expect(onStarted).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('JiraLaunchSheet — the branch', () => {
   const TWO = { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } };
   const modeButton = (name: string): HTMLElement => within(within(dialog()).getByRole('group', { name: 'Branch mode' })).getByRole('button', { name });
