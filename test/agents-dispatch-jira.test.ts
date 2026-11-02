@@ -61,6 +61,8 @@ interface Dashboard {
   spawn?: { ok?: boolean; status?: number; body?: unknown };
   healthDown?: boolean;
   projectPaths?: string[];
+  /** The health answer says `desktopAvailable: true` — a Mac whose dashboard can hand a launch to the desktop app. */
+  desktop?: boolean;
 }
 
 /** What the dashboard stub saw: every URL, the spawn bodies, and the Jira write log as it stood at the moment each spawn arrived. */
@@ -99,7 +101,7 @@ function stubDashboard(opts: Dashboard = {}): Sent {
         Promise.resolve(
           url.endsWith('/api/configs')
             ? { projects: (opts.projectPaths ?? [REPO]).map((path, i) => ({ dirName: `-dir-${i}`, name: `p${i}`, path, lastActiveMs: 1 })) }
-            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits', ...(opts.desktop ? { desktopAvailable: true } : {}) }
         )
     } as Response);
   }) as jest.Mock;
@@ -197,7 +199,8 @@ describe('refusals before the reservation — no Jira write, no spawn, nothing r
     ['a new branch with no base', { base: undefined }, 'base is required for a new branch'],
     ['a new branch that does not carry the key', { branch: 'export' }, 'branch must carry PAY-1'],
     ['a base with continue', { mode: 'continue' }, 'base is only for a new branch'],
-    ['an MR for context', { action: 'context', openMr: true }, 'openMr is only for execute with a branch']
+    ['an MR for context', { action: 'context', openMr: true }, 'openMr is only for execute with a branch'],
+    ['an unknown surface', { surface: 'terminal' }, 'surface must be dashboard or desktop']
   ])('400 for %s', async (_label, over, error) => {
     expect((await post({ ...BODY, ...over }).expect(400)).body).toEqual({ error });
     untouched();
@@ -588,5 +591,58 @@ describe('Start', () => {
     expect(sent.spawns).toHaveLength(1);
     expect(writes()).toEqual(['PUT /issue/PAY-1/assignee', 'POST /issue/PAY-1/transitions']);
     expect(live.get('PAY-1')).toMatchObject({ sessionId: 'sess-1' });
+  });
+});
+
+describe('Open in: the surface', () => {
+  it('a body with no surface spawns with no surface key — byte for byte the launch from before the control', async () => {
+    await build();
+    const sent = stubDashboard({ desktop: true });
+    await post(BODY).expect(200);
+    expect(sent.spawns[0]).not.toHaveProperty('surface');
+  });
+
+  it('desktop is forwarded to the spawn, for any action, and the session it answers is confirmed like any other', async () => {
+    await build();
+    const sent = stubDashboard({ desktop: true, spawn: { body: { surface: 'desktop', sessionId: 'sess-d' } } });
+    const res = await post({ ...BODY, ...NONE, action: { skill: SKILL.id }, surface: 'desktop' }).expect(200);
+    expect(sent.spawns[0]).toMatchObject({ surface: 'desktop', name: 'jira PAY-1' });
+    expect(res.body).toMatchObject({ sessionId: 'sess-d', session: { name: 'jira PAY-1', repo: REPO } });
+    expect(live.get('PAY-1')).toMatchObject({ sessionId: 'sess-d' });
+  });
+
+  it('dashboard is forwarded as it came', async () => {
+    await build();
+    const sent = stubDashboard({ desktop: true });
+    await post({ ...BODY, surface: 'dashboard' }).expect(200);
+    expect(sent.spawns[0]).toMatchObject({ surface: 'dashboard' });
+  });
+
+  it('409 for desktop once the dashboard stops saying desktopAvailable — before the reservation and before any Jira write', async () => {
+    await build();
+    const sent = stubDashboard();
+    const res = await post({ ...BODY, surface: 'desktop' }).expect(409);
+    expect(res.body).toEqual({ error: "the desktop app is not available on this machine's dashboard — launch on Dashboard instead" });
+    expect(writes()).toEqual([]);
+    expect(sent.spawns).toEqual([]);
+    expect(live.get('PAY-1')).toBeNull();
+  });
+
+  it('a desktop answer with no id (a dashboard from before the hand-over): 200 with `session: null`, the writes reported, and the key released', async () => {
+    await build();
+    const arm = jest.spyOn(app.get(JiraLiveReconciler), 'arm');
+    stubDashboard({ desktop: true, spawn: { body: { surface: 'desktop' } } });
+    const res = await post({ ...BODY, surface: 'desktop' }).expect(200);
+    expect(res.body).toEqual({ surface: 'desktop', assigned: true, transitioned: 'Start', session: null });
+    expect(live.get('PAY-1')).toBeNull();
+    expect(arm).not.toHaveBeenCalled();
+  });
+
+  it("a desktop refusal reads in the board's words, not the dashboard's code", async () => {
+    await build();
+    stubDashboard({ desktop: true, spawn: { ok: false, status: 501, body: { error: 'desktop app unavailable' } } });
+    const res = await post({ ...BODY, ...NONE, action: 'context', assign: false, transitionId: null, surface: 'desktop' }).expect(502);
+    expect(res.body).toEqual({ error: 'the desktop app is not available on this Mac — launch on Dashboard instead' });
+    expect(live.get('PAY-1')).toBeNull();
   });
 });

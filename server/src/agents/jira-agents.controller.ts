@@ -50,6 +50,12 @@ export class JiraAgentsController {
     // The branch choice is shape too (spec §5.3): `/prompt` refuses it in the same words, before it looks at the environment.
     const choice = parseBranchChoice(body, key, action);
     if (!choice.ok) throw new HttpException({ error: choice.error }, 400);
+    // Refused rather than dropped, item dispatch's reasoning in the same words: a headless launch the person believed was opening in the desktop app is
+    // worse than a 400. Any action may open there — a Jira Run is one session in one mapped repo on this machine, which is all the hand-over needs.
+    const surface = body.surface;
+    if (surface !== undefined && surface !== 'dashboard' && surface !== 'desktop') {
+      throw new HttpException({ error: 'surface must be dashboard or desktop' }, 400);
+    }
     return this.dispatcher.dispatch({
       key,
       repo,
@@ -61,7 +67,8 @@ export class JiraAgentsController {
       permissionMode: body.permissionMode as JiraDispatchRequest['permissionMode'],
       model: body.model as string | undefined,
       effort: body.effort as string | undefined,
-      remoteControl: body.remoteControl === true
+      remoteControl: body.remoteControl === true,
+      ...(surface === undefined ? {} : { surface })
     });
   }
 

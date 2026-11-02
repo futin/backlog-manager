@@ -259,7 +259,8 @@ the machine is `home`.
   are relayed in plain words (`desktop.util.ts`, `desktopSpawnError`, keyed on the dashboard's own status before `5xx` collapses to `502`); any other is
   relayed verbatim, the prompt cap among them. That cap is the dashboard's 4000 characters on both surfaces, under this board's own `PROMPT_MAX` of 8000: the
   board adds no second check, and the finish clause stays the prompt's tail — an over-long prompt is refused by the dashboard, never cut here. Orchestrate,
-  resume, the watchdog's resume, abort, stop and Jira dispatch never send `surface`, and a desktop answer to any of them is a `502` (`headless()`).
+  resume, the watchdog's resume, abort and stop never send `surface`, and a desktop answer to any of them is a `502` (`headless()`). Jira dispatch is the
+  second sender, below.
 - `POST /api/agents/orchestrate` — spawns a headless `/backlog-orchestrate` run for one project. The prompt is composed server-side, so a caller can influence
   which items, which modes and which base branch, and nothing else. A TRACKER project is accepted since task-47: `resolveIds` proves its ids against
   `ItemsService` rather than against a directory scan, accepts `#31` / the URN / a bare `31`, and **emits bare digits alone**, so the prompt never carries a
@@ -277,7 +278,8 @@ the machine is `home`.
 - `POST /api/agents/dispatch-jira` — a Jira ticket's Run (`jira-agents.controller.ts` → `JiraDispatchService.dispatch`): reserve the key in the live map, optionally
   assign and transition in Jira, then spawn a session in the mapped repository. The action is a pick from the body, never derived; the prompt is composed server-side
   by `composeJiraPrompt`. A failure after a Jira write says the write stands. Since the repo/branch work the body also carries the branch choice (`mode`,
-  `branch`, `base`, `openMr`, `target`, above), checked before anything is reserved or written. → [jira.md](jira.md#run-phase-5a)
+  `branch`, `base`, `openMr`, `target`, above), checked before anything is reserved or written. An optional `surface` (`dashboard` | `desktop`) is item
+  dispatch's, for any action: forwarded to the spawn as it came, `desktop` a 409 unless home's dashboard says `desktopAvailable`. → [jira.md](jira.md#run-phase-5a)
 - `POST /api/agents/jira-stop` — stops that key's live session through the dashboard (`session-stop.util.ts`, shared with the item abort) and clears its map entry;
   never calls Jira. `JiraLiveReconciler` clears entries whose session the dashboard no longer lists as working.
 - `GET /api/agents/watchdog`, `POST /api/agents/watchdog/config` — the run watchdog's live state, read out of this process's own memory and the settings file it

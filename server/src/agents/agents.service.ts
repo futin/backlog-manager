@@ -228,7 +228,7 @@ type SameKeys<A, B> = [Exclude<keyof A, keyof B>, Exclude<keyof B, keyof A>] ext
 type Assert<T extends true> = T;
 export type OrchestrateRequestKeysMatch = Assert<SameKeys<AgentOrchestrateRequest, StartOrchestrateRequest>>;
 
-/** `spawnInProject`'s options — every one-session launch's. `launchInProject` adds the item dispatch's `surface`. */
+/** `spawnInProject`'s options — every one-session launch's. `launchInProject` adds the `surface` item dispatch and the Jira Run send. */
 interface LaunchOpts {
   prompt: string;
   name: string;
@@ -242,7 +242,7 @@ interface LaunchOpts {
 }
 
 /**
- * A launch that has to have started a headless session. Every launch but an item dispatch sends no `surface`, and the dashboard answers such a body with an
+ * A launch that has to have started a headless session. Every launch but an item dispatch or a Jira Run sends no `surface`, and the dashboard answers such a body with an
  * id, so a desktop answer here is a dashboard breaking its contract — the 502 `spawn returned no session id` a missing id has always been.
  */
 function headless(result: ItemDispatchResult): AgentDispatchResult {
@@ -660,8 +660,8 @@ export class AgentsService {
   }
 
   /**
-   * `spawnInProject` with a `surface`: item dispatch's call, the one launch that may open in the desktop app and so the one caller that must handle an
-   * answer with no session id. `surface` is put on the spawn body exactly as it came — absent stays absent, so a launch from a sheet that drew no control
+   * `spawnInProject` with a `surface`: item dispatch's call and the Jira Run's, the two launches that may open in the desktop app and so the two callers
+   * that must handle an answer with no session id. `surface` is put on the spawn body exactly as it came — absent stays absent, so a launch from a sheet that drew no control
    * is byte-identical to one from before it existed. On `desktop` the dashboard ignores name, model, effort, permission mode and remote control; they are
    * still sent, because the dashboard is the one that decides what a desktop launch reads, and an old client's fields must not break it.
    */

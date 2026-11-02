@@ -407,22 +407,25 @@ and the poller never does.
 
 ### `POST /api/agents/dispatch-jira`
 
-`{ key, repo, action, assign, transitionId, mode, branch?, base?, openMr?, target?, permissionMode?, model?, effort?, remoteControl? }` → `JiraDispatchResult`
-(`sessionId`, `assigned`, `transitioned` — the transition's NAME or `null` — and `session`). The controller (`JiraAgentsController`, behind
+`{ key, repo, action, assign, transitionId, mode, branch?, base?, openMr?, target?, permissionMode?, model?, effort?, remoteControl?, surface? }` →
+`JiraDispatchResult` (`sessionId`, `assigned`, `transitioned` — the transition's NAME or `null` — and `session`). The controller (`JiraAgentsController`, behind
 `SameOriginPostGuard`, answering 200) checks the body's shape
 field by field; `JiraDispatchService.dispatch` then does, in this order: configured → `jira.json` readable → the skill exists → the repo mapped to the key's
-project → the dashboard gate (`projectDispatchGate`) → `live.reserve` → `no identity` if an assign is asked and the poller has no `me` → a FRESH issue read →
+project → the dashboard gate (`projectDispatchGate`) → a `desktop` surface while that same read lacks `desktopAvailable` (409) → `live.reserve` → `no identity` if an assign is asked and the poller has no `me` → a FRESH issue read →
 the transition is among the ones that read offers → the first composition fits → assign (skipped when the ticket is already mine) → transition → re-read and
-re-compose, only if something was written → spawn in the repo under the session name `jira <KEY>` → `confirm` and arm the reconciler. Everything that can be
+re-compose, only if something was written → spawn in the repo under the session name `jira <KEY>`, carrying `surface` as it came → `confirm` and arm the
+reconciler. The dashboard runs a `desktop` launch's first turn headless and then hands it to the app (`claude://resume`), answering an id like any other,
+so it confirms and reconciles the same way — the reconciler drops it once that turn ends. A dashboard from before the hand-over answers `{ surface:
+'desktop' }` with no id: the key is released and the answer is `{ surface: 'desktop', assigned, transitioned, session: null }`. Everything that can be
 refused is refused before the first write; any failure after the reservation releases it. The branch choice is parsed by the controller (`parseBranchChoice`, a
 400), and the repo's refs are read and judged (`resolveWorkspace`, a 409) after the mapping check and BEFORE `live.reserve`, so a refused choice has reserved
 nothing and written nothing.
 
 | status | `error` |
 | ------ | ------- |
-| 400 | `invalid issue key`; `action must be execute, context or { skill: <id> }`; `repo is required`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `target is only for openMr with continue`, a name failing Table A) |
+| 400 | `invalid issue key`; `action must be execute, context or { skill: <id> }`; `repo is required`; `surface must be dashboard or desktop`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `target is only for openMr with continue`, a name failing Table A) |
 | 503 | `Jira is not configured`; `no identity` |
-| 409 | `settings/jira.json <reason> — fix or delete it by hand`; `<branch> exists — switch to Continue`; `<branch> is checked out in the mapped checkout <repo>`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment` |
+| 409 | `settings/jira.json <reason> — fix or delete it by hand`; `the desktop app is not available on this machine's dashboard — launch on Dashboard instead`; `<branch> exists — switch to Continue`; `<branch> is checked out in the mapped checkout <repo>`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment` |
 | 400 | `unknown skill <id>`; `<repo> is not mapped to <PROJECT>`; `transition not offered`; `prompt too long` |
 | 502 | dispatch is on and the dashboard is unreachable (the gate's reason); a spawn the dashboard refused |
 | as §8 | the issue read, the assign and the transition, through `unwrapJira` / `jiraWriteOrThrow` — `retryAt` verbatim; an assign or transition failure is prefixed `assign: ` / `transition: ` |
@@ -458,7 +461,9 @@ section (eight dialogs). The browser still never talks to Jira or the dashboard:
   repository through `useFetched`), the ticket's transitions and assignee (`GET /issue/:key`, on open) and the agents status (`useAgents`, on open — never the
   Board's copy). `Start` is drawn only for a `disabled` or `enabled` `projectDispatchGate` answer and sends `dispatchJira` (`POST /api/agents/dispatch-jira`);
   `Copy prompt` needs the preview and a clipboard. The permission mode is derived — the pick, else `defaultModeFor(action)`, clamped to the host's ceiling —
-  and model and effort seed from Settings. Start stays HOME-ONLY under multi-dashboard: the sheet draws no machine picker and `dispatch-jira` takes no
+  and model and effort seed from Settings. While the agents status says `desktopAvailable`, an `Open in` Dashboard | Desktop pill (the board LaunchSheet's
+  control) sits under the action, for any action, seeded once from `launchSurfaceDefault`, and Start sends its pick as `surface`; under Desktop only remote
+  control is disabled (and sent Off) — permissions, model and effort still drive the headless first turn. Start stays HOME-ONLY under multi-dashboard: the sheet draws no machine picker and `dispatch-jira` takes no
   `machine`, because the mapped repository is a path in this machine's `jira.json` and means nothing on another. A landed Start calls `onStarted`, which reloads
   the shell's status (the strip) and nudges the board. The server
   applies `Assign to me` and `Move to` BEFORE the spawn, so a Start refused after a write landed ends its sentence `— the assign stands` or `— the Jira writes
