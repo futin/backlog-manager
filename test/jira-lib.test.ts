@@ -18,6 +18,7 @@ import {
   fetchJiraWorktrees,
   saveRepoDefaults,
   fetchAgeLine,
+  branchPickerOptions,
   branchSheetDefaults,
   branchRefusal,
   branchDraft,
@@ -1152,6 +1153,58 @@ describe('fetchAgeLine', () => {
   });
   it('a stamp in the future reads just now, never negative', () => {
     expect(fetchAgeLine(ago(-5 * 60_000), now)).toBe('as of last fetch, just now');
+  });
+});
+
+describe('branchPickerOptions', () => {
+  const b = (name: string, over: Partial<{ local: boolean; remote: boolean; worktree: string | null; ticket: boolean }> = {}) => ({
+    name,
+    local: true,
+    remote: true,
+    sync: null,
+    committedAt: '2026-10-20T12:00:00.000Z',
+    worktree: null,
+    ticket: false,
+    ...over
+  });
+  // The server's order: ticket branches first, then the rest by name — a remote-only branch sorts among the locals there.
+  const branches = [
+    b('feature/pay-131-x', { ticket: true }),
+    b('develop', { worktree: '/r' }),
+    b('feature/aaa-remote', { local: false }),
+    b('feature/investigation', { worktree: '/r/.claude/worktrees/inv' }),
+    b('hotfix/zzz'),
+    b('next-release', { local: false })
+  ];
+  const groups = (options: { value: string; group?: string }[]) => options.map((o) => [o.group, o.value]);
+
+  it('groups the ticket, then other trees, then local, then remote-only, keeping the server order inside each', () => {
+    expect(groups(branchPickerOptions(branches, '/r', ''))).toEqual([
+      ['this ticket', 'feature/pay-131-x'],
+      ['worktrees', 'feature/investigation'],
+      ['local', 'develop'],
+      ['local', 'hotfix/zzz'],
+      ['remote', 'feature/aaa-remote'],
+      ['remote', 'next-release']
+    ]);
+  });
+
+  it('the mapped checkout itself is local, not a worktree', () => {
+    expect(branchPickerOptions([b('develop', { worktree: '/r' })], '/r', '')[0].group).toBe('local');
+  });
+
+  it('filters by every whitespace-separated term, case-insensitively, and keeps the groups of what is left', () => {
+    expect(groups(branchPickerOptions(branches, '/r', 'FEATURE'))).toEqual([
+      ['this ticket', 'feature/pay-131-x'],
+      ['worktrees', 'feature/investigation'],
+      ['remote', 'feature/aaa-remote']
+    ]);
+    expect(groups(branchPickerOptions(branches, '/r', '  feat  inv '))).toEqual([['worktrees', 'feature/investigation']]);
+    expect(branchPickerOptions(branches, '/r', 'nothing-like-it')).toEqual([]);
+  });
+
+  it('labels each option by its name', () => {
+    expect(branchPickerOptions(branches, '/r', 'hotfix')).toEqual([{ value: 'hotfix/zzz', label: 'hotfix/zzz', group: 'local' }]);
   });
 });
 

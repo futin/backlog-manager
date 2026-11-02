@@ -1,9 +1,19 @@
 import { useState, type Dispatch, type SetStateAction } from 'react';
 
 import { useFetched, type Fetched } from '../../hooks/useFetched';
-import { branchChoiceOf, branchDraft, continueOffTicket, displayPath, draftRefusal, fetchAgeLine, fetchJiraRefs, type BranchDraft } from '../../lib/jira';
+import {
+  branchChoiceOf,
+  branchDraft,
+  branchPickerOptions,
+  continueOffTicket,
+  displayPath,
+  draftRefusal,
+  fetchAgeLine,
+  fetchJiraRefs,
+  type BranchDraft
+} from '../../lib/jira';
 import { jiraActionParam } from '../../../../shared/types';
-import type { JiraAction, JiraBranchChoice, JiraRepoDefaults, JiraRepoRefs } from '../../../../shared/types';
+import type { JiraAction, JiraBranchChoice, JiraRefBranch, JiraRepoDefaults, JiraRepoRefs } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
@@ -152,14 +162,13 @@ export function JiraBranchSection({
       {ready && draft.mode === 'continue' && (
         <div className="jira-branch-line">
           {listed !== null ? (
-            <Select
+            <BranchPicker
               label="Branch"
+              searchLabel="Search branches"
               value={draft.continueBranch}
               onChange={(continueBranch) => set({ continueBranch })}
-              options={withValue(draft.continueBranch, [
-                ...listed.branches.filter((b) => b.ticket).map((b) => ({ value: b.name, label: b.name, group: 'this ticket' })),
-                ...listed.branches.filter((b) => !b.ticket).map((b) => ({ value: b.name, label: b.name, group: 'other branches' }))
-              ])}
+              branches={listed.branches}
+              repo={listed.repo}
             />
           ) : (
             textField('Branch', draft.continueBranch, (continueBranch) => set({ continueBranch }))
@@ -184,22 +193,22 @@ export function JiraBranchSection({
 
       {ready && draft.mode === 'new' && (
         <div className="sheet-row">
-          <label className="sheet-field">
+          {/* A `div`, not the `label` its neighbours are: a label wrapping the picker would name its search field `Base` too, the select's own name. */}
+          <div className="sheet-field">
             <span className="set-name">Base</span>
             {listed !== null ? (
-              <Select
+              <BranchPicker
                 label="Base"
+                searchLabel="Search base branches"
                 value={draft.base}
                 onChange={(base) => set({ base })}
-                options={withValue(
-                  draft.base,
-                  names.map((n) => ({ value: n, label: n }))
-                )}
+                branches={listed.branches}
+                repo={listed.repo}
               />
             ) : (
               textField('Base', draft.base, (base) => set({ base }))
             )}
-          </label>
+          </div>
           <label className="sheet-field">
             <span className="set-name">Name</span>
             {textField('Name', draft.newBranch, (newBranch) => set({ newBranch }))}
@@ -242,5 +251,55 @@ export function JiraBranchSection({
         </label>
       )}
     </div>
+  );
+}
+
+/**
+ * A branch `Select` with a search field over it (DESIGN.md §8.6 — `.set-text` and `Select`, the 36 px family). A big repo lists hundreds of `origin/*`
+ * branches, and a native picker of that many is a scroll, not a choice; `branchPickerOptions` groups them (`this ticket`, `worktrees`, `local`, `remote`)
+ * and narrows them to what the search says. The select stays native for the reason `Select` gives — the platform picker is right on a phone.
+ *
+ * Searching never changes the choice on its own: the current value stays the select's first option, outside any group, while it does not match — a
+ * person who typed and then looked away must not find a different branch picked. `Enter` in the field takes the first match, because that is what a
+ * person typing a name and pressing Enter means; it is swallowed either way, so it never submits the sheet.
+ */
+function BranchPicker({
+  label,
+  searchLabel,
+  value,
+  onChange,
+  branches,
+  repo
+}: {
+  label: string;
+  searchLabel: string;
+  value: string;
+  onChange: (v: string) => void;
+  branches: readonly JiraRefBranch[];
+  repo: string;
+}) {
+  const [search, setSearch] = useState('');
+  const options = branchPickerOptions(branches, repo, search);
+  const shown = options.some((o) => o.value === value) ? options : [{ value, label: value === '' ? 'choose…' : value }, ...options];
+  return (
+    <span className="jira-branch-pick">
+      <input
+        className="set-text"
+        type="search"
+        aria-label={searchLabel}
+        placeholder={`search ${branches.length} ${branches.length === 1 ? 'branch' : 'branches'}…`}
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          if (options.length > 0) onChange(options[0].value);
+        }}
+      />
+      <Select label={label} value={value} onChange={onChange} options={shown} />
+      {search.trim() !== '' && (
+        <span className="sheet-static">{options.length === 0 ? 'no branch matches' : `${options.length} of ${branches.length}`}</span>
+      )}
+    </span>
   );
 }

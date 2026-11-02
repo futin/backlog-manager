@@ -16,6 +16,7 @@ import type {
   JiraIssueDetail,
   JiraLiveSession,
   JiraProjectRef,
+  JiraRefBranch,
   JiraRepoDefaults,
   JiraRepoDefaultsWriteResult,
   JiraRepoRefs,
@@ -932,6 +933,33 @@ export function fetchAgeLine(fetchedAt: string | null, now: number): string {
   if (ms < 3_600_000) return `${lead} ${Math.floor(ms / 60_000)} min ago`;
   if (ms < 48 * 3_600_000) return `${lead} ${Math.floor(ms / 3_600_000)} h ago`;
   return `${lead} ${Math.floor(ms / 86_400_000)} d ago`;
+}
+
+/** The launch sheet's branch picker groups, in the order they are drawn. */
+const BRANCH_GROUPS = ['this ticket', 'worktrees', 'local', 'remote'] as const;
+
+/**
+ * The launch sheet's branch picker options, grouped and filtered. A big repo lists hundreds of `origin/*` branches, and one alphabetical `other branches`
+ * group buried the few a person actually works on — so the groups are the ticket's own branches, then branches another tree holds (`worktrees`: the mapped
+ * checkout's own branch is `local`, since Continue refuses it anyway), then the rest of the local branches, then the ones that exist only on `origin`. Inside
+ * a group the server's order stands (ticket branches newest first, the rest by name).
+ *
+ * `filter` is what the person typed in the picker's search field: every whitespace-separated term must be a case-insensitive substring of the name, so
+ * `feat 266` finds `feature/timify-26664-bm-contacts-export`. A blank filter keeps every branch. Filtering never changes the choice — the caller keeps the
+ * current value visible even when it no longer matches.
+ */
+export function branchPickerOptions(
+  branches: readonly JiraRefBranch[],
+  repo: string,
+  filter: string
+): { value: string; label: string; group: (typeof BRANCH_GROUPS)[number] }[] {
+  const terms = filter.toLowerCase().split(/\s+/).filter((t) => t !== '');
+  const groupOf = (b: JiraRefBranch): (typeof BRANCH_GROUPS)[number] =>
+    b.ticket ? 'this ticket' : b.worktree !== null && b.worktree !== repo ? 'worktrees' : b.local ? 'local' : 'remote';
+  const matched = branches.filter((b) => terms.every((t) => b.name.toLowerCase().includes(t)));
+  return BRANCH_GROUPS.flatMap((group) =>
+    matched.filter((b) => groupOf(b) === group).map((b) => ({ value: b.name, label: b.name, group }))
+  );
 }
 
 /**

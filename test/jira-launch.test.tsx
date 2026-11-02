@@ -666,6 +666,45 @@ describe('JiraLaunchSheet — the branch', () => {
     expect(within(dialog()).getByText('behind')).toBeInTheDocument();
   });
 
+  it('the Continue picker groups worktrees and local branches over remote-only ones, and its search narrows them without changing the choice', async () => {
+    server.refs = (repo) => ({
+      status: 200,
+      body: refsOf(repo, [
+        refBranch('pay-131-x', { ticket: true }),
+        refBranch('feature/aaa-remote', { local: false }),
+        refBranch('feature/held', { worktree: '/r/.worktrees/held' })
+      ])
+    });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    const groupsOf = () =>
+      [...(field('Branch') as HTMLSelectElement).querySelectorAll('optgroup')].map((g) => [g.label, [...g.querySelectorAll('option')].map((o) => o.value)]);
+    expect(groupsOf()).toEqual([
+      ['this ticket', ['pay-131-x']],
+      ['worktrees', ['feature/held']],
+      ['local', ['develop']],
+      ['remote', ['feature/aaa-remote']]
+    ]);
+
+    const search = within(dialog()).getByLabelText('Search branches');
+    await userEvent.type(search, 'FEAT');
+    // The choice stands, drawn first and outside the groups, while it does not match.
+    expect(field('Branch').value).toBe('pay-131-x');
+    expect(groupsOf()).toEqual([
+      ['worktrees', ['feature/held']],
+      ['remote', ['feature/aaa-remote']]
+    ]);
+    expect(within(dialog()).getByText('2 of 4')).toBeInTheDocument();
+
+    await userEvent.type(search, ' held{Enter}');
+    expect(field('Branch').value).toBe('feature/held');
+    expect(await within(dialog()).findByText('will work in /r/.worktrees/held')).toBeInTheDocument();
+
+    await userEvent.clear(search);
+    await userEvent.type(search, 'zzz');
+    expect(within(dialog()).getByText('no branch matches')).toBeInTheDocument();
+  });
+
   // M7 (final review): the card and the modal find a tree by the key its branch carries, so a Continue on a key-less branch is said, not refused.
   it('says a Continue on a branch without the key makes a tree only Setup lists — never beside a refusal, and Start still goes', async () => {
     const hint = "this tree won't show on the card — it's listed under the repo in Setup";
