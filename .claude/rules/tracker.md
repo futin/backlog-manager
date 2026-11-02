@@ -97,7 +97,8 @@ paths: ["server/src/tracker/**"]
   absent, `commentsHwm` never moved by it, a `404` read as an empty list — because the repo-wide `since` read can never see a deletion, and `forgetComment`
   only ever hears of the loser THIS process deleted. **The PRs the issues read returns are indexed, never cached as rows** (#411): `RepoState.pulls` keeps
   `open`, `merged_at`, `closed_at` and `pullRefs(body)` per PR, `pullBases` one `GET /pulls/<n>` answer per merged PR for the process (asked only for a
-  still-labelled `in-review` issue's `decidingPull` — the LATEST closed referencing PR, none open — a `404` skipped without touching `access`), and
+  still-labelled `in-review` issue's `decidingPull` — the LATEST closed referencing PR, none open — a `404` skipped without touching `access`, and so is
+  every other failed read that is not a limit (#421), while a limit is recorded and stops the rest of the sync), and
   `reviewLifted` is what `mapIssue` drops `inReview` on.
   Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The eleven labels
   live in `server/src/tracker/labels.ts`, are created idempotently on a repo's first successful sync — phase 2's one write to GitHub — and agree with

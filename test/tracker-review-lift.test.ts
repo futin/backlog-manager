@@ -109,6 +109,7 @@ const pull = (number: number, base: string, defaultBranch = 'main'): Canned => (
 
 const MERGED = '2026-10-25T09:00:00Z';
 const pullCalls = (calls: Call[]): Call[] => calls.filter((c) => c.url.includes('/pulls/'));
+const labelCalls = (calls: Call[]): Call[] => calls.filter((c) => c.url.includes('/labels'));
 
 const ORIGINAL_TOKEN = process.env[GITHUB_TOKEN_ENV];
 
@@ -337,20 +338,100 @@ describe('reviewLifted', () => {
     ]);
     await p.tick();
     expect(p.reviewLifted('futin/x', 266)).toBe(false);
+    // One PR's answer says nothing about the repo the issues and comments reads just proved readable (#421).
+    expect(p.summary('futin/x').access).toBe('ok');
+    expect(p.summary('futin/x').detail).toBeNull();
     await p.tick();
     expect(p.reviewLifted('futin/x', 266)).toBe(true);
     expect(pullCalls(calls)).toHaveLength(2);
     p.disarm();
   });
 
-  it('stays false under a rate limit, and the repo sleeps as any limited read does', async () => {
-    const { poller: p } = poller([
+  it('stays false under a rate limit, asks about no further PR and spends nothing on labels, and the repo sleeps as any limited read does', async () => {
+    const { poller: p, calls } = poller([
       ['/pulls/362', { status: 403, body: { message: 'rate limited' }, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '9999999999' } }],
-      ['/issues?', { status: 200, body: [issue(266), pr(362, 'Refs #266', MERGED)] }]
+      ['/pulls/363', pull(363, 'main')],
+      ['/issues?', { status: 200, body: [issue(266), issue(267), pr(362, 'Refs #266', MERGED), pr(363, 'Refs #267', MERGED)] }]
     ]);
     await p.tick();
     expect(p.reviewLifted('futin/x', 266)).toBe(false);
     expect(p.summary('futin/x').access).toBe('rate-limited');
+    expect(pullCalls(calls)).toHaveLength(1);
+    expect(labelCalls(calls)).toHaveLength(0);
+    p.disarm();
+  });
+
+  it('stops at a secondary limit the way it stops at the hourly one', async () => {
+    const { poller: p, calls } = poller([
+      ['/pulls/362', { status: 403, body: { message: 'You have exceeded a secondary rate limit.' }, headers: { 'x-ratelimit-remaining': '4000' } }],
+      ['/pulls/363', pull(363, 'main')],
+      ['/issues?', { status: 200, body: [issue(266), issue(267), pr(362, 'Refs #266', MERGED), pr(363, 'Refs #267', MERGED)] }]
+    ]);
+    await p.tick();
+    expect(p.summary('futin/x').access).toBe('rate-limited');
+    expect(pullCalls(calls)).toHaveLength(1);
+    expect(labelCalls(calls)).toHaveLength(0);
+    p.disarm();
+  });
+
+  // The early return was the whole mechanism: a first sync stayed without labels for as long as one PR kept failing (#421).
+  it('still reaches the label bootstrap when one PR answers 502', async () => {
+    const { poller: p, calls } = poller([
+      ['/pulls/362', { status: 502, body: { message: 'Bad Gateway' } }],
+      ['/issues?', { status: 200, body: [issue(266), pr(362, 'Refs #266', MERGED)] }]
+    ]);
+    await p.tick();
+    const afterFirst = labelCalls(calls).length;
+    expect(afterFirst).toBeGreaterThan(0);
+    // No further `/labels` call on the next tick proves `labelsEnsured` went up, and not only that the request was made.
+    await p.tick();
+    expect(labelCalls(calls)).toHaveLength(afterFirst);
+    p.disarm();
+  });
+
+  it('does not let one failing PR starve a later issue', async () => {
+    const { poller: p, calls } = poller([
+      ['/pulls/362', { status: 500, body: { message: 'boom' } }],
+      ['/pulls/363', pull(363, 'main')],
+      ['/issues?', { status: 200, body: [issue(266), issue(267), pr(362, 'Refs #266', MERGED), pr(363, 'Refs #267', MERGED)] }]
+    ]);
+    await p.tick();
+    expect(p.reviewLifted('futin/x', 266)).toBe(false);
+    expect(p.reviewLifted('futin/x', 267)).toBe(true);
+    expect(p.summary('futin/x').access).toBe('ok');
+    expect(pullCalls(calls).map((c) => c.url.split('/pulls/')[1])).toEqual(['362', '363']);
+    p.disarm();
+  });
+
+  it('reads a transport failure on one PR as base unknown, and the next tick asks again', async () => {
+    const { poller: p, calls } = poller([
+      [
+        '/pulls/362',
+        (n) => {
+          if (n === 1) throw new TypeError('fetch failed');
+          return pull(362, 'main');
+        }
+      ],
+      ['/issues?', { status: 200, body: [issue(266), pr(362, 'Refs #266', MERGED)] }]
+    ]);
+    await p.tick();
+    expect(p.reviewLifted('futin/x', 266)).toBe(false);
+    expect(p.summary('futin/x').access).toBe('ok');
+    await p.tick();
+    expect(p.reviewLifted('futin/x', 266)).toBe(true);
+    expect(pullCalls(calls)).toHaveLength(2);
+    p.disarm();
+  });
+
+  // Not a limit: budget left, no `Retry-After`, a sentence that is not the secondary limit's. The same token just read the issues and comments.
+  it('reads a 403 that is not a limit as base unknown, never as a forbidden repo', async () => {
+    const { poller: p } = poller([
+      ['/pulls/362', { status: 403, body: { message: 'Resource not accessible by integration' }, headers: { 'x-ratelimit-remaining': '4000' } }],
+      ['/issues?', { status: 200, body: [issue(266), pr(362, 'Refs #266', MERGED)] }]
+    ]);
+    await p.tick();
+    expect(p.reviewLifted('futin/x', 266)).toBe(false);
+    expect(p.summary('futin/x').access).toBe('ok');
     p.disarm();
   });
 
