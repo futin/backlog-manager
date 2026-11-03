@@ -59,7 +59,8 @@ list of other machines a launch can go to, which the server alone reads and writ
 `--max-plans` / `--max-prs` flag still wins) and per-project resets, which travels
 server → tool like the control file: the server writes it through two guarded routes (`POST /api/ticks/config` and `/reset`), and `tick.mjs` only reads it.
 Last, `timezone.json`, the board's one shared time zone, which the server alone reads and writes through `POST /api/settings/timezone`; every reading
-of it is the client's, and no skill reads it.
+of it is the client's, and no skill reads it. Beside `settings/` sits `jira-links.json`, which links each Jira ticket to the agent sessions working it: the server alone
+reads and writes it, whole and atomically, and no skill reads it ([subsystems/jira.md](subsystems/jira.md#the-link-store)).
 
 ### The API — [full doc](subsystems/api.md)
 
@@ -90,10 +91,10 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   environment and reaches no payload.
 - **`jira/`** — the third outbound-calling module, and only while `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are all set: a Jira Cloud client on
   Atlassian's gateway, a poller that sweeps the boards in `~/.backlog-manager/settings/jira.json` into in-memory caches (the second cache whose age is
-  rendered), and nine read routes under `/api/jira` (`/prompt` composes a Run session's prompt; `/refs` and
-  `/worktrees` read a mapped repo's git), plus eight guarded POSTs — six config writes to `jira.json` (`/boards`, `/boards/delete`, `/repos`, since phase 5a
+  rendered), and ten read routes under `/api/jira` (`/prompt` composes a Run session's prompt; `/refs` and
+  `/worktrees` read a mapped repo's git; `/sessions` lists the linked sessions), plus eight guarded POSTs — six config writes to `jira.json` (`/boards`, `/boards/delete`, `/repos`, since phase 5a
   `/skills`, `/skills/delete`, and `/repo-defaults`) and, since phase 3, two writes to Jira itself (`/issue/assign` `{ key }`
-  and `/issue/transition` `{ key, transitionId }`), the only writes this server makes to Jira. An in-memory live map of Jira sessions sits here too, driven from
+  and `/issue/transition` `{ key, transitionId }`), the only writes this server makes to Jira. A link store of Jira sessions (several per ticket, kept in `~/.backlog-manager/jira-links.json`) sits here too, driven from
   `agents/` by `POST /api/agents/dispatch-jira` and `/jira-stop` — part of the
   [Jira integration](superpowers/specs/2026-10-15-jira-integration-design.md); [full doc](subsystems/jira.md).
 - **`registry/`** — read-only view of the registry file.
@@ -154,14 +155,14 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
   adapters, and the ten guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this server makes to
   anybody's items), `agents/` (the dashboard calls — the item `abort` among them — plus the run watchdog, `POST /api/agents/dispatch-jira` and `/jira-stop`,
-  and the 60 s reconciler that keeps the Jira live map honest, and `agents/dashboards/` — `dashboards.json`'s reader/writer, the machine offers, health and
+  and the 15 s / 60 s reconciler that keeps the Jira link store honest, and `agents/dashboards/` — `dashboards.json`'s reader/writer, the machine offers, health and
   usage reads, and a card's or an Orchestrate run's launch and stop on another machine, whose outbound calls go to remote dashboards and remote boards and are
   part of THIS module, not a fourth), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap,
   the read-only `trackers` route and `tracker-sync.json`'s reader/writer, and the PRs page's on-demand per-repo PR cache behind `GET /api/prs` and its three
-  guarded writes, `POST /api/prs/merge`, `/auto-merge` and `/update-branch`), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read
-  routes under `/api/jira` — `GET /prompt`, `/refs` and `/worktrees` among them — `jira.json`'s six guarded write routes, `POST /api/jira/boards`,
+  guarded writes, `POST /api/prs/merge`, `/auto-merge` and `/update-branch`), `jira/` (the Jira Cloud client, the board poller and its caches, the ten read
+  routes under `/api/jira` — `GET /prompt`, `/refs`, `/worktrees` and `/sessions` among them — `jira.json`'s six guarded write routes, `POST /api/jira/boards`,
   `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the two writes to Jira itself,
-  `POST /api/jira/issue/assign` and `/issue/transition`, and the in-memory live map `JiraLiveService` (a session per ticket key, forgotten on restart),
+  `POST /api/jira/issue/assign` and `/issue/transition`, and the persisted link store `JiraLiveService` (every session linked to a ticket key, live and ended, kept across a restart),
   → [docs/subsystems/jira.md](subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three — `orchestrator/` (a read-only
   view of the run-state directory, plus the in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the
   server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (three read-only Lookout widgets at `/api/hub/widgets` via

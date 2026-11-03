@@ -3876,40 +3876,62 @@ first here, or simply arrives after GitHub merged it, and GitHub answers `405` f
 for, so the merge's refusal path re-reads first, and a re-read that says `MERGED` answers `200 already-merged`. An error there would invite the person to
 retry a merge that already stood. A disarm of a PR with no auto-merge armed is `200 noop` and sends no mutation, for the same reason.
 
-## A Jira session is remembered in server memory only, and Stop is the one hand that clears it early
+<a id="a-jira-session-is-remembered-in-server-memory-only-and-stop-is-the-one-hand-that-clears-it-early"></a>
 
-Phase 5's Run starts a Claude session for a Jira ticket, and the board has to show which tickets have one going and refuse a second. This server keeps that
-fact in memory and nowhere else: `JiraLiveService` (`server/src/jira/live.service.ts` — the spec calls it `JiraService`; the plan ruled otherwise, so `jira/`
-has one service named for what it holds) is a `Map` with no I/O, and a restart forgets it. A session is a fact about a process on this machine, and the dashboard,
-not this server, is the place that knows whether it still runs; a persisted entry would outlive the process that knew, and would need a second mechanism to
-decide which claims to believe. The accepted cost is that after a restart a card shows no strip for a session that is still running, and a second Start on
-that key is then possible; `DispatchRecordsService` makes the same trade for the same reason.
+## A Jira session is a persisted link, and Stop, a quiet dashboard or the 8-hour backstop each end it
 
-**The order protects the one-session-per-ticket rule, and so does what the map refuses to evict.** The key is reserved (`sessionId: null`, `starting`)
-BEFORE the dispatch's first Jira write, by a synchronous check-and-set: of two Starts that both cleared the dashboard gate exactly one passes, because
-nothing can run between the check and the set. Reserving after the writes would let two requests each assign and transition the ticket before one found out it
-had lost. Every failure after the reservation releases it through one `catch`, so no failure class — a Jira error, a refused composition, a spawn that fails —
-leaves a key `starting` until the 8-hour expiry; a retry after any of them is a fresh Start, not a 409. `release` touches a `starting` entry and nothing else,
-so a late failure path can never drop a session that did start, and a Start whose own `reserve` was refused releases nothing, because the entry in the map is
-the OTHER request's. At the cap of 100 the oldest CONFIRMED entry is evicted, and a `starting` one never is: its spawn is in flight and will confirm or
-release it, and evicting it would let a second dispatch pass the gate while the first is still launching. When every slot is starting, `reserve` refuses and
-the caller says the map is busy. The 8-hour expiry is strict and lazy — read at the top of every call, no timer — and is the backstop for a session nobody
-stopped and the reconciler could not judge.
+Phase 5's Run starts a Claude session for a Jira ticket, and the board has to show which tickets have one going and refuse a second. The Jira sessions page asks
+for more than that: which sessions a ticket has had, and which need a person now. So the server keeps each ticket–session link in a file,
+`~/.backlog-manager/jira-links.json`, of which it is the one writer (written whole and atomically, a temp file and a `rename`, the registry's discipline without
+being a field of it). `JiraLiveService` (`server/src/jira/live.service.ts` — the spec calls it `JiraService`; the plan ruled otherwise, so `jira/` has one
+service named for what it holds) holds that state in memory, loads it once, and rewrites the file after every change but a `starting` reservation. What the file
+records is a LINK — the pair of a key and a session id, with the Run action, the repo, a snapshot of the ticket and how it ended — and the dashboard, not this
+server, is still the place that knows whether the process runs. A persisted link would outlive the process that knew, which is why it is never trusted on load:
+after a restart the reconciler resumes judging every live link, and a session that ended while the server was down is ended at the first reconcile, not on load.
+The `starting` reservation stays in memory only, for `DispatchRecordsService`'s reason — it records a request THIS process made, which no file can answer — and
+a restart frees the key.
 
-**Stop is the one deliberate hand, and the reconciler only agrees with the dashboard.** `POST /api/agents/jira-stop` asks the dashboard to stop the session and
-then forgets the key; it never calls Jira, because the ticket keeps its assignee and its status — what the confirm in the client says. A 200 and the
-dashboard's `no live session` 404 both mean the process is gone, and both clear the entry; any other answer is a 502 and the entry STAYS, because the
-session may still be running and a strip that said otherwise would invite a second Start on a busy repository. (The 404 that carries `remote answers
-disabled` is not "gone" — it says nothing about the session.) A session can also end without a Stop — it finished, it crashed, someone stopped it from the
-dashboard — and then the key would show a strip until the expiry. `JiraLiveReconciler` (`server/src/agents/jira-live.service.ts`) is what notices, and it
-lives in `agents/` because it calls the dashboard and `jira/` imports nothing from there; the dependency runs agents → jira and never back, which is also why the
-map is free of timers. It follows the run watchdog's shape: a `setTimeout` chain armed by `confirm`, pending only while some entry holds a session id,
-`unref`'d, never awaited by a request, and swallowing what it catches because it runs from a timer with nothing above it. One `GET /api/sessions` per tick
-(60 s); an entry stays only while its session is `working` or `question`, because the dashboard keeps an exited session as `idle` for its whole lookback, so
-"present" proves nothing and only "not busy" reads as ended. An entry younger than two minutes is never judged — a just-spawned session has no transcript, so
-the list does not carry it, and absent then means "not yet". A `starting` entry is never judged (its own Start settles it), a list that cannot be read leaves
-the map exactly as it was (an unreadable answer is not an answer), and a verdict clears an entry only if it still holds the session id it was judged for,
-since the list was read across an await in which a Stop and a fresh Start can have replaced it.
+**The file is machine-written history, so an unreadable one is set aside, not refused.** `jira.json` is hand-authored and irreplaceable, so its writers refuse
+with a 409 for as long as it cannot be read. This file's loss costs only past lines in a List, while refusing would stop every Run from linking until someone
+tidied it by hand. A file that does not parse, or whose `version` is not 1, therefore loads as empty with one warning and is renamed `jira-links.json.bad-<ISO>`
+at the first save, so a person can still read what was there; a boot that saves nothing leaves it exactly where it was. One unusable entry costs only itself,
+one level finer, the way the board and skill readers fall back. A save that throws is logged and nothing else: a launch must never fail because a history file
+could not be written, and the memory is the truth for this run of the server. Retention keeps the list from growing for ever — per key every live link and the
+20 newest ended ones, and a key whose newest end is over 90 days old with nothing live goes — and so do the caps on the suppressed and never-link lists.
+
+**The order protects the one-run-per-ticket rule, and so does what the store refuses to end.** The key is reserved (`starting`) BEFORE the dispatch's first Jira
+write, by a synchronous check-and-set: of two Starts that both cleared the dashboard gate exactly one passes, because nothing can run between the check and the
+set. Reserving after the writes would let two requests each assign and transition the ticket before one found out it had lost. The gate is about the Run on the
+key, so it reads `run` links alone: a session the user started on the ticket's branch outside this board is a link worth showing, and must neither block a Run
+nor offer a Stop the board did not start. Every failure after the reservation releases it through one `catch`, so no failure class leaves a key `starting` until
+the 8-hour backstop; `release` touches a `starting` entry and nothing else, so a late failure path can never drop a session that did start, and a Start whose
+own `reserve` was refused releases nothing, because the entry in the store is the OTHER request's. At the cap of 100 the oldest live link is ended as `expired`,
+never deleted — it keeps its line in the history — and a `starting` one is never touched: its spawn is in flight and will confirm or release it, and ending it
+would let a second dispatch pass the gate while the first is still launching. When every slot is starting, `reserve` refuses and the caller says the store is
+busy. A link that has ended stays ended: a late `confirm` for it does not revive it, because the Start it belonged to is over; only a re-attach does, from the
+dashboard's own row, below.
+
+**Stop names one session, and the reconciler only agrees with the dashboard.** A ticket can now hold several live sessions — the Run's and, later, one a person
+started on its branch — so `POST /api/agents/jira-stop` takes `{ key, sessionId }`: a bare key no longer says which to stop, and guessing the newest would stop
+something the person was working in. It refuses an id that is not a live link of that key with a 409 that says which of three things it was (a reservation,
+nothing live, or this id), asks the dashboard to stop the session and then ENDS that link as `stopped`; it never calls Jira, because the ticket keeps its
+assignee and its status — what the confirm in the client says. A 200 and the dashboard's `no live session` 404 both mean the process is gone, and both end the
+link; any other answer is a 502 and the link STAYS live, because the session may still be running and a strip that said otherwise would invite a second Start on
+a busy repository. (The 404 that carries `remote answers disabled` is not "gone" — it says nothing about the session.) A session can also end without a Stop —
+it finished, it crashed, someone stopped it from the dashboard. `JiraLiveReconciler` (`server/src/agents/jira-live.service.ts`) is what notices, and it lives in
+`agents/` because it calls the dashboard and `jira/` imports nothing from there; the dependency runs agents → jira and never back, which is also why the store
+is free of timers. It follows the run watchdog's shape: a `setTimeout` chain armed by `confirm` and at boot, pending only while some link is live or Setup maps
+a repo (detection and a re-attach read the rows even with nothing live), `unref`'d, never awaited by a request, and swallowing what it catches because it runs
+from a timer with nothing above it. One `GET /api/sessions?limit=50&lookback=168` per tick — 15 s while a Jira page is open, 60 s otherwise — and its rows are
+kept whole for the page. A link stays live only while its session is `working` or `question`, because the dashboard keeps an exited session as `idle` for its
+whole lookback, so "present" proves nothing and only "not busy" reads as ended. "Not busy" is not yet "ended": a session is Quiet after every finished turn, so
+the link records `quietSince`, the first tick that saw it quiet (cleared by any tick that sees it active), and ends only when that mark is two minutes old as
+well as the link itself — one clock would end a session between two turns of the same conversation. The list is capped, so an absent session is judged `gone`
+only from a list shorter than the cap; a full one proves nothing and the 8-hour backstop decides. An ended session the dashboard shows working again is
+re-attached on its own entry, the backstop's clock restarting, so a resumed session comes back without the history growing. A `starting` entry and a link
+younger than two minutes are never judged — a just-spawned session has no transcript, so the list does not carry it, and absent then means "not yet" — a list
+that cannot be read leaves the store exactly as it was (an unreadable answer is not an answer), and a verdict ends a link only if it still names the `(key,
+sessionId)` it was judged for, since the list was read across an await in which a Stop and a fresh Start can have replaced it.
 
 ## A tracker project has no item files, and that shows up in three places
 
