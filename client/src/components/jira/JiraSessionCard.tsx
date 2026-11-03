@@ -187,12 +187,17 @@ export function JiraSessionCard({
           {buttons.secondary !== null && (
             <OpenChip button={buttons.secondary} sessionId={sessionId} row={row} primary={false} onHandover={(id) => handover.run(() => openDesktopJira(id))} />
           )}
-          {link.how === 'branch' && (
-            <Chip size={28} variant="flat" disabled={busy} title="drop this link — the session itself is not touched" onClick={() => onUnlink(sessionId)}>
-              Unlink
-            </Chip>
+          {/* The session's own writes, pushed to the row's end as the mock draws Stop — apart from the two that only open it somewhere. */}
+          {(link.how === 'branch' || stoppable) && (
+            <span className="jira-sess-stop">
+              {link.how === 'branch' && (
+                <Chip size={28} variant="flat" disabled={busy} title="drop this link — the session itself is not touched" onClick={() => onUnlink(sessionId)}>
+                  Unlink
+                </Chip>
+              )}
+              {stoppable && <StopSession busy={busy || row?.stopState === 'stopping'} onStop={() => onStop(sessionId)} />}
+            </span>
           )}
-          {stoppable && <StopSession busy={busy || row?.stopState === 'stopping'} onStop={() => onStop(sessionId)} />}
         </div>
         {handover.error !== null && (
           <p className="jira-modal-error" role="alert">
@@ -253,7 +258,7 @@ export function StopSession({ busy, onStop }: { busy: boolean; onStop: () => voi
   if (status === null || !status.enabled) return null;
   if (!asking)
     return (
-      <Chip size={28} disabled={busy} title="end this session" onClick={() => setAsking(true)}>
+      <Chip size={28} variant="danger" disabled={busy} title="end this session" onClick={() => setAsking(true)}>
         Stop session
       </Chip>
     );
