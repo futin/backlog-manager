@@ -592,19 +592,24 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(screen.getByRole('button', { name: '1 session needs you' })).toBe(badge());
   });
 
-  it('counts one session once per ticket, however many times the payload lists the pair', () => {
+  it('counts one session once, however many times the payload lists it and however many tickets it is linked to', () => {
     render(
       tree(
         payload([
           { key: 'PAY-1', id: 's1', state: 'plan' },
           { key: 'PAY-1', id: 's1', state: 'plan' },
-          // The same session linked to a second ticket is a second row in the List, so a second count.
+          // The same session linked to a second ticket is a second row in the List, but the same person waiting once: the badge counts sessions (spec §5).
           { key: 'PAY-2', id: 's1', state: 'plan' },
           // A Starting reservation has no session id and cannot be waiting on anyone.
           { key: 'PAY-3', id: null, state: 'starting' }
         ])
       )
     );
+    expect(badge()).toHaveTextContent('1');
+  });
+
+  it('counts two different sessions on two tickets as two', () => {
+    render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }, { key: 'PAY-2', id: 's2', state: 'plan' }])));
     expect(badge()).toHaveTextContent('2');
   });
 

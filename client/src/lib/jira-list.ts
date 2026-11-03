@@ -321,7 +321,7 @@ export function needsYouCount(payload: JiraSessionsPayload | null): number | nul
   const seen = new Set<string>();
   for (const link of payload.links) {
     if (link.sessionId === null || link.endedAt !== null || !needsYou(link.state)) continue;
-    seen.add(`${link.key}:${link.sessionId}`);
+    seen.add(link.sessionId);
   }
   return seen.size;
 }
