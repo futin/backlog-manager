@@ -62,8 +62,8 @@ const ACTIVE = new Set(['working', 'question']);
  * idle server pays nothing and "no timer" is a checkable state. The next link is scheduled AFTER the tick's awaits finish, so two ticks cannot overlap by
  * construction, and the timer is `unref()`'d so a pending tick never keeps a dying process alive. The period is chosen when the link is scheduled: 15 s while
  * a Jira page was read in the last 30 s, else 60 s — and a read that OPENS the page (it was closed) replaces a pending slow timer at once, through
- * `onPageOpened`, so the first read after minutes away does not wait out a minute. `arm()` is called after `JiraLiveService.confirm`, and at boot, and is idempotent and self-gating — it
- * starts a chain only when there is something to watch, so every caller may call it without knowing either. A tick that leaves nothing to watch does not
+ * `onPageOpened`, so the first read after minutes away does not wait out a minute. `arm()` is called after `JiraLiveService.confirm`, and at boot, and is
+ * idempotent and self-gating — it starts a chain only when there is something to watch, so every caller may call it without knowing either. A tick that leaves nothing to watch does not
  * schedule the next one: that is the disarm.
  *
  * ## Never in a request's path, and never throws

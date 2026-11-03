@@ -100,7 +100,7 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `shared/jira-sessions.ts`, derived and never stored), the dashboard's `row` for a live one the dashboard lists (`null` for an ended or an unlisted one) and
   `stateSince`. It is memory only — it dials neither Jira nor the
   dashboard, so an unconfigured server answers it too, with no 503 — and `?open=1` (the Jira section's own read, never the rail badge's) tells the reconciler a
-  page is open.
+  page is open; a read that OPENS the page (`pageOpen` was false) fires `JiraLiveService.onPageOpened`, and the reconciler drops a pending 60 s timer for a 15 s one.
   The one-run gate is `run`-only. The dispatch RESERVES the key (`starting`, memory only, never written, dropped by a restart) before its first Jira write, and
   `reserve` is a synchronous check-and-set refusing while a live `run` link or a reservation holds the key — so of two Starts exactly one passes, the other 409s
   `<KEY> is starting` / `already has a session`; a live `branch` or `manual` link is the user's own and blocks nothing. Every failure after the reservation runs
