@@ -1510,6 +1510,12 @@ describe('lib/jira-deck', () => {
   const other = issue({ key: 'PAY-3', summary: 'Other' });
   const fold = foldBoard([top, child, other]);
 
+  it('boardAgents gives one session linked to two on-board tickets two entries with distinct ids', () => {
+    const entries = boardAgents(fold, answer([link('PAY-1', 's1', 'working', 3), link('PAY-3', 's1', 'working', 3)]), {});
+    expect(entries.map((e) => e.top.key).sort()).toEqual(['PAY-1', 'PAY-3']);
+    expect(new Set(entries.map((e) => e.id)).size).toBe(2);
+  });
+
   it('deckGroup puts the four wait states in Needs you, and the rest where §7.1 says', () => {
     expect(['plan', 'permission', 'reply', 'answer'].map((s) => deckGroup(s as Link['state']))).toEqual(['needs', 'needs', 'needs', 'needs']);
     expect(deckGroup('working')).toBe('working');
@@ -1585,5 +1591,8 @@ describe('lib/jira-deck', () => {
     const one = link('PAY-3', 'o', 'ended', 5, { endedAt: hoursAgo(2) });
     expect(endedLine([one], NOW)).toEqual({ text: 'run ended 2h ago', reopen: one });
     expect(endedLine([one, one], NOW)).toEqual({ text: '2 sessions', reopen: null });
+    // A detected or hand-made link reads `run` too: §7.1 words the row, and `branch ended` would read as a branch that ended.
+    const branch = link('PAY-3', 'b', 'ended', 5, { endedAt: hoursAgo(2), how: 'branch' });
+    expect(endedLine([branch], NOW)?.text).toBe('run ended 2h ago');
   });
 });

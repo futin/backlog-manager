@@ -72,7 +72,9 @@ export function boardAgents(fold: JiraFold, payload: JiraSessionsPayload | null,
     const hit = on.get(link.key);
     if (hit === undefined || link.sessionId === null || link.endedAt !== null || link.state === 'ended') continue;
     out.push({
-      id: link.sessionId,
+      // The pair, not the session: one session can be linked to several tickets (`/jira link` twice, a branch carrying two keys), and two cards on one
+      // board must not share a React key or a sort tiebreak. `starting:<KEY>` below cannot collide with `<KEY>:<id>` — a Jira key is never `starting`.
+      id: `${link.key}:${link.sessionId}`,
       state: link.state,
       group: deckGroup(link.state),
       ...hit,
@@ -167,7 +169,7 @@ export function boardShelves(fold: JiraFold, shown: ReadonlyMap<string, string[]
 }
 
 /**
- * A shelf row's extra line (§7.1): the newest ended session as `<how> ended <age> ago` with the session to Reopen, or `N sessions` when the ticket has been
+ * A shelf row's extra line (§7.1): the newest ended session as `run ended <age> ago` (spec §7.1 — whatever the link's `how`, the row says `run`) with the session to Reopen, or `N sessions` when the ticket has been
  * worked more than once — the row does not pick one of several to reopen, Detail's history lists them all. `null` for a ticket that has never had one.
  */
 export function endedLine(ended: readonly SessionLink[], now: number): { text: string; reopen: SessionLink | null } | null {
@@ -175,5 +177,5 @@ export function endedLine(ended: readonly SessionLink[], now: number): { text: s
   if (ended.length > 1) return { text: `${ended.length} sessions`, reopen: null };
   const [only] = ended;
   const age = pollAge(only.endedAt, now);
-  return { text: age === null ? `${only.how} ended` : `${only.how} ended ${age} ago`, reopen: only.sessionId === null ? null : only };
+  return { text: age === null ? 'run ended' : `run ended ${age} ago`, reopen: only.sessionId === null ? null : only };
 }

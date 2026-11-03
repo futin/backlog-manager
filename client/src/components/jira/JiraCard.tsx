@@ -168,7 +168,13 @@ export function JiraCard({
                   if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
                 }}
               >
-                <OpenChip button={openButtons(last.reopen, null, 'ended', { phone, wide: false }).primary} sessionId={last.reopen.sessionId} row={null} primary={false} onHandover={() => {}} />
+                <OpenChip
+                  button={openButtons(last.reopen, null, 'ended', { phone, wide: false }).primary}
+                  sessionId={last.reopen.sessionId}
+                  row={null}
+                  primary={false}
+                  onHandover={() => {}}
+                />
               </span>
             )}
           </div>
