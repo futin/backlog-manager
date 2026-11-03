@@ -2,7 +2,10 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { VersionChip } from 'ui-kit';
 
 import { useJiraContext } from '../hooks/JiraContext';
+import { setJiraListFilters } from '../hooks/useJiraListFilters';
+import { useJiraNeedsYou } from '../hooks/useJiraNeedsYou';
 import { useJiraPage } from '../hooks/useJiraPage';
+import { setJiraView } from '../hooks/useJiraView';
 import { useProjectsContext } from '../hooks/ProjectsContext';
 import { useFilesPage, useGithubPage } from '../hooks/useSourcePage';
 import { useNarrow } from '../hooks/useNarrow';
@@ -117,6 +120,10 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   // The Jira section's page — `useRunsMode`'s module store and its reason: this tree and the Board page's own `Set up` chip (threaded down from `App` as
   // `onOpenJiraPage`) are two mounted writers of one value, and a `usePersistedState` per caller would leave the other looking at a stale page.
   const [jiraPage, setJiraPage] = useJiraPage();
+  // The Jira row's Needs-you badge (spec §7.4, C4): the shell's one sessions answer, never a read of its own. It counts every linked ticket, so its click opens
+  // the List — the Board's deck shows the picked board only — with the chip and All tickets set, in the same handler that moves the page and the section.
+  // The three stores are module-level for this reason (`useJiraView`, `useJiraListFilters`): this is a writer that is not the page.
+  const needsYouCount = useJiraNeedsYou();
   /*
     The Jira row (Jira phase 2, spec §6.1) is drawn while `GET /api/jira` says `configured: true`, and in ONE other case: the status is still unknown (`data`
     null — not answered yet, or every read so far failed) and Jira is the section on screen. That is the shell's hold (`App`): a stored `jira` is kept until an
@@ -184,7 +191,7 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
 
       {(!narrow || menuOpen) &&
         SECTIONS.filter(drawn).map((id) => (
-          <div key={id}>
+          <div key={id} className={id === 'jira' ? 'rail-group' : undefined}>
             {id === 'settings' && <div className="rail-rule" aria-hidden="true" />}
             <button
               className={section === id ? 'rail-link on' : 'rail-link'}
@@ -197,6 +204,24 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
               <RailIcon section={id} />
               {RAIL_LABEL[id]}
             </button>
+            {/* A sibling of the row's button, never inside it: a button in a button is invalid, and the row keeps meaning "open Jira" while the badge means
+                "open what needs me". Hung over the row's right edge by `.rail-group`. Zero draws no element at all (§7.4). */}
+            {id === 'jira' && needsYouCount > 0 && (
+              <button
+                type="button"
+                className="rail-badge"
+                aria-label={`${needsYouCount} ${needsYouCount === 1 ? 'session needs' : 'sessions need'} you`}
+                onClick={() => {
+                  setJiraPage('board');
+                  setJiraView('list');
+                  setJiraListFilters({ chip: 'needs-you', allTickets: true });
+                  onChange('jira');
+                  setMenuOpen(false);
+                }}
+              >
+                {needsYouCount}
+              </button>
+            )}
             {id === 'files' && treeOpen('files') && (
               <RailTree
                 label="Files pages"

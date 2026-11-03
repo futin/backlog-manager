@@ -935,7 +935,7 @@ describe('the Repositories card — a path\'s worktrees', () => {
     statusAnswer = status({
       projects: PROJECTS,
       repos: { PAY: ['/home/ada/pay'] },
-      live: { 'PAY-1': { name: 'pay-1', startedAt: '2026-10-20T00:00:00Z', repo: '/home/ada/pay', starting: false } }
+      live: { 'PAY-1': { sessionId: 's1', name: 'pay-1', startedAt: '2026-10-20T00:00:00Z', repo: '/home/ada/pay', starting: false } }
     });
     worktreesAnswer = () =>
       answer({

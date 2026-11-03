@@ -7,13 +7,14 @@ import '@testing-library/jest-dom';
 
 import { JiraBoardView } from '../client/src/components/jira/JiraBoardView';
 import JiraView from '../client/src/components/jira/JiraView';
+import { JiraSessionsProvider } from '../client/src/hooks/JiraSessionsContext';
 import { JiraProvider } from '../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { JIRA_BOARD_KEY, bandSub } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
 import { daysAgoStamp } from './helpers/dates';
-import { JIRA_BUILTIN_LABELS, type AgentsStatus, type JiraBoardStatus, type JiraIssue, type JiraStatusPayload } from '../shared/types';
+import { JIRA_BUILTIN_LABELS, type AgentsStatus, type DashboardRow, type JiraBoardStatus, type JiraIssue, type JiraLiveSession, type JiraStatusPayload } from '../shared/types';
 
 /*
   Jira › Board (Jira phase 2; spec §6.2; DESIGN.md §8.9.1) — the real page over a mocked `fetch`, in the style of `tracker-board.test.tsx`: the band
@@ -150,6 +151,17 @@ let lists: Record<string, JiraIssue[]>;
 let requested: string[];
 /* `GET /api/jira/worktrees` — what the board reads once on mount and again when the set of live keys changes. */
 let worktreesAnswer: () => Promise<Response>;
+/* `GET /api/jira/sessions` — the section's one sessions poll (Jira sessions, Task 10); nothing linked unless a case says so. */
+let sessionsAnswer: () => unknown;
+/**
+ * The link the server keeps for a live Run — `JiraLiveService.snapshot()` is built from exactly these plus the `starting` reservations, so a status `live` entry
+ * with a session id always has one, and the default sessions answer below is derived from the status to keep the two fixtures from contradicting each other.
+ */
+const runLink = (key: string, l: JiraLiveSession, row: DashboardRow | null = null) => ({
+  key, sessionId: l.sessionId, how: 'run', action: 'context', name: l.name, repo: l.repo, branch: null, surface: 'dashboard', model: null, effort: null,
+  snapshot: { summary: 'x', type: 'Story', parentKey: null }, startedAt: l.startedAt, endedAt: null, endReason: null, quietSince: null, reattachedAt: null,
+  state: 'working', row, stateSince: l.startedAt
+});
 
 const ok = (body: unknown) =>
   Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve(typeof body === 'string' ? body : '') } as Response);
@@ -170,10 +182,16 @@ beforeEach(() => {
   lists = { [ALPHA.id]: ALPHA_ISSUES, [BETA.id]: BETA_ISSUES };
   requested = [];
   worktreesAnswer = () => ok({ worktrees: [], unavailable: [] });
+  sessionsAnswer = () => ({
+    links: Object.entries(statusAnswer.live).filter(([, l]) => !l.starting && l.sessionId !== null).map(([k, l]) => runLink(k, l)),
+    reachable: true,
+    rowsAt: null
+  });
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     requested.push(url);
     if (url === '/api/jira') return ok(statusAnswer);
+    if (url.startsWith('/api/jira/sessions')) return ok(sessionsAnswer());
     const m = /^\/api\/jira\/boards\/([^/]+)\/issues$/.exec(url);
     if (m !== null) {
       const id = decodeURIComponent(m[1]);
@@ -488,13 +506,18 @@ it('draws no page switch inside main', async () => {
   render(
     <main>
       <JiraProvider>
-        <JiraView onOpenJiraPage={jest.fn()} />
+        <JiraSessionsProvider open>
+          <JiraView onOpenJiraPage={jest.fn()} />
+        </JiraSessionsProvider>
       </JiraProvider>
     </main>
   );
   await screen.findByText('Refund partial captures');
   const main = document.querySelector('main') as HTMLElement;
-  expect(within(main).queryByRole('button', { name: /^(Board|Setup)$/ })).toBeNull();
+  // The Board | List switch is a view of THIS page, not a page (Jira sessions C1): its `Board` option lives in the `View` group and nowhere else.
+  expect(within(main).queryByRole('button', { name: 'Setup' })).toBeNull();
+  const boardButtons = within(main).queryAllByRole('button', { name: 'Board' });
+  expect(boardButtons.every((b) => b.closest('[role="group"]')?.getAttribute('aria-label') === 'View')).toBe(true);
   expect(within(main).queryByRole('tab')).toBeNull();
   expect(within(main).queryByRole('tablist')).toBeNull();
   // And the card's click goes to the slot the issue modal fills — no throw, no dialog from this page alone.
@@ -707,7 +730,7 @@ describe('the fold', () => {
   Run ▾ and the live strip (Jira phase 5, Task 10; spec §6.2, §7; DESIGN.md §8.9.1). Rendered through `JiraView`, because the launch sheet it opens is hosted
   one level above the page (the modal's own Run reaches the same sheet) — a card's pick and a modal's pick are one code path ending in one sheet.
 */
-describe('Run ▾ and the live strip', () => {
+describe('Run ▾ on the card, and the deck card for a live key', () => {
   const SKILL = { id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' };
   const MAPPED = { PAY: ['/Users/ada/pay'] };
   /** A session started three hours ago: the strip's elapsed reading is `3h` for the whole of a case. */
@@ -719,7 +742,9 @@ describe('Run ▾ and the live strip', () => {
     render(
       <SettingsProvider>
         <JiraProvider>
-          <JiraView onOpenJiraPage={jest.fn()} />
+          <JiraSessionsProvider open>
+            <JiraView onOpenJiraPage={jest.fn()} />
+          </JiraSessionsProvider>
         </JiraProvider>
       </SettingsProvider>
     );
@@ -727,7 +752,9 @@ describe('Run ▾ and the live strip', () => {
   }
 
   const runChip = (summary: string): HTMLElement => within(card(summary)).getByRole('button', { name: /^Run PAY-/ });
-  const strips = (summary: string): HTMLElement[] => Array.from(card(summary).querySelectorAll<HTMLElement>('.board-card-live'));
+  /** A live top has no shelf row any more (spec §7.1); its session is a deck card, found by the session's own key. */
+  const deckCards = (key: string): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>(`.jira-deck-card[data-key="${key}"]`));
+  const onShelves = (summary: string): boolean => screen.queryAllByText(summary).some((n) => n.closest('.board-card') !== null);
 
   it('an unmapped project draws a dashed chip whose title names Setup, and a click opens no menu and no modal', async () => {
     await renderRun({ repos: {} });
@@ -744,39 +771,52 @@ describe('Run ▾ and the live strip', () => {
     expect(runChip('Refund flows')).toBeEnabled();
   });
 
-  it('a live key draws a disabled chip titled with the key, and a strip naming the repo basename and the elapsed reading', async () => {
-    await renderRun({ live: { 'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } });
-    const chip = runChip('Refund partial captures');
-    expect(chip).toBeDisabled();
-    expect(chip).toHaveAttribute('title', 'a session is running on PAY-131');
-    const [strip] = strips('Refund partial captures');
+  it('a live key takes its card off the shelves and draws a deck card: strip, key, crumb naming the repo basename, and the elapsed reading', async () => {
+    await renderRun({ live: { 'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } });
+    const [deck] = await waitFor(() => {
+      const found = deckCards('PAY-131');
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    const strip = deck.querySelector('.board-card-live') as HTMLElement;
     expect(strip).toHaveClass('hatch');
-    expect(strip).toHaveTextContent('session · pay');
+    expect(strip).toHaveTextContent('Working');
     expect(strip).toHaveTextContent('3h');
+    expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
+    expect(onShelves('Refund partial captures')).toBe(false);
     // Another card is not the one with a session.
-    expect(strips('Refund flows')).toHaveLength(0);
+    expect(onShelves('Refund flows')).toBe(true);
+    expect(within(card('Refund flows')).getByRole('button', { name: /^Run PAY-/ })).toBeEnabled();
   });
 
-  it('a starting entry reads `starting` in the strip, and the chip is disabled just the same', async () => {
-    await renderRun({ live: { 'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: true } } });
-    const [strip] = strips('Refund partial captures');
-    expect(strip).toHaveTextContent('starting');
-    expect(strip).not.toHaveTextContent('3h');
-    expect(runChip('Refund partial captures')).toBeDisabled();
+  it('a starting entry is a deck card reading `Starting…` with no buttons, and its top is off the shelves just the same', async () => {
+    await renderRun({ live: { 'PAY-131': { sessionId: null, name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: true } } });
+    const [deck] = await waitFor(() => {
+      const found = deckCards('PAY-131');
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    expect(deck).toHaveAttribute('data-state', 'starting');
+    expect(deck.querySelector('.board-card-live')).toHaveTextContent('Starting…');
+    expect(within(deck).queryByRole('link')).toBeNull();
+    expect(onShelves('Refund partial captures')).toBe(false);
   });
 
-  // Grouped-board ruling: a folded issue is not a card, so the session on it would be invisible without this. The strip belongs to the top that holds it and
-  // names the folded key, and the top's own chip is not disabled for a session that is not its own.
-  it('a live issue folded under a top shows a strip on the top naming the folded key', async () => {
+  // Grouped-board ruling: a folded issue is not a card, so the session on it would be invisible without this. The deck card shows the session's OWN key and
+  // names the top it hangs under in its crumb; the top leaves the shelves, and the folded issue is still no shelf row.
+  it('a live issue folded under a top is a deck card on the folded key, naming the top in its crumb, and the top leaves the shelves', async () => {
     const top = issue({ key: 'PAY-160', summary: 'Top story', type: { name: 'Story', level: 0, subtask: false } });
     const under = issue({ key: 'PAY-162', summary: 'Folded sub-task', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-160', summary: 'Top story' } });
     lists[ALPHA.id] = [top, under];
-    await renderRun({ live: { 'PAY-162': { name: 'jira PAY-162', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } }, 'Top story');
-    const [strip] = strips('Top story');
-    expect(strip).toHaveTextContent('PAY-162');
-    expect(strip).toHaveTextContent('session · pay');
-    expect(runChip('Top story')).toBeEnabled();
-    expect(screen.queryByText('Folded sub-task')).not.toBeInTheDocument();
+    await renderRun({ live: { 'PAY-162': { sessionId: 's1', name: 'jira PAY-162', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } }, 'Folded sub-task');
+    const [deck] = await waitFor(() => {
+      const found = deckCards('PAY-162');
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('↳ PAY-160');
+    expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
+    expect(onShelves('Top story')).toBe(false);
   });
 
   it('a ready chip opens a menu: both built-ins, a rule, the skills by name, and the note', async () => {
@@ -874,7 +914,7 @@ describe('Run ▾ and the live strip', () => {
 
   // Spec §11: a resolved dispatch-jira reloads the status without waiting for the poll. `use-jira`'s probe re-implements `.then(reload)`, so only THIS case, through
   // the real `JiraView` -> `JiraLaunchSheet`'s `onStarted`, fails when that wiring loses its reload or its board nudge.
-  it('Start from a card\'s Run menu reads GET /api/jira once more and the board list once more, with no timer wait', async () => {
+  it('Start from a card\'s Run menu reads GET /api/jira, the sessions payload and the board list once more each, with no timer wait', async () => {
     await renderRun();
     const dispatched = global.fetch;
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -890,23 +930,30 @@ describe('Run ▾ and the live strip', () => {
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
     const start = await within(sheet).findByRole('button', { name: 'Start' });
     await waitFor(() => expect(start).toBeEnabled());
+    // The sessions payload is the second thing a landed Start must re-read (Detail's Start gate and the List's `canRun` read it, not the status).
+    const sessionsReads = (): number => requested.filter((u) => u.startsWith('/api/jira/sessions')).length;
     const statusBefore = statusReads();
     const boardBefore = boardRequests().length;
+    const sessionsBefore = sessionsReads();
 
     await userEvent.click(start);
     await waitFor(() => expect(requested).toContain('POST /api/agents/dispatch-jira'));
     await waitFor(() => expect(statusReads()).toBe(statusBefore + 1));
     await waitFor(() => expect(boardRequests().length).toBe(boardBefore + 1));
+    await waitFor(() => expect(sessionsReads()).toBe(sessionsBefore + 1));
     // Settled: nothing else follows (a second read would be the timer or a doubled trigger).
     await new Promise((r) => setTimeout(r, 50));
     expect(statusReads()).toBe(statusBefore + 1);
     expect(boardRequests().length).toBe(boardBefore + 1);
+    expect(sessionsReads()).toBe(sessionsBefore + 1);
   });
 
   // The modal's Stop is the other half: the modal reloads the status itself, and `JiraView`'s `onWrote` is what re-reads the board list. Both are pinned here
   // through the real page, since `jira-modal`'s cases hand the modal mock callbacks.
-  it('Stop from the modal reads GET /api/jira once more and the board list once more, and the strip is gone', async () => {
-    const live = { 'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } };
+  it('Stop from the modal reads GET /api/jira once more and the board list once more, and the deck card is gone', async () => {
+    const live = { 'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } };
+    // Stop is the Detail dialog's card's, and the card is the sessions payload's: the Run link the status' `live` implies, with a dashboard row that can end it.
+    sessionsAnswer = () => ({ links: [runLink('PAY-131', live['PAY-131'], { id: 's1', status: 'busy', stopState: 'ready' })], reachable: true, rowsAt: null });
     await renderRun({ live });
     const refund = (lists[ALPHA.id] ?? []).find((i) => i.key === 'PAY-131') as JiraIssue;
     const answered = global.fetch;
@@ -916,17 +963,16 @@ describe('Run ▾ and the live strip', () => {
       if (url === '/api/agents/jira-stop') {
         requested.push(`POST ${url}`);
         statusAnswer = status({ repos: MAPPED, skills: [SKILL] });
+        sessionsAnswer = () => ({ links: [], reachable: true, rowsAt: null });
         return ok({ ok: true });
       }
       return (answered as jest.Mock)(input, init);
     }) as unknown as typeof fetch;
     const statusReads = (): number => requested.filter((u) => u === '/api/jira').length;
-    expect(strips('Refund partial captures')).toHaveLength(1);
-    // Held before the modal opens: its title repeats the card's text, so a lookup by summary is ambiguous after.
-    const refundCard = card('Refund partial captures');
-    const stripsOnCard = (): number => refundCard.querySelectorAll('.board-card-live').length;
+    await waitFor(() => expect(deckCards('PAY-131')).toHaveLength(1));
 
-    await userEvent.click(refundCard);
+    // The deck card's summary opens Detail on the ticket.
+    await userEvent.click(within(deckCards('PAY-131')[0]).getByRole('button', { name: 'Refund partial captures' }));
     const modal = await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
     await userEvent.click(await within(modal).findByRole('button', { name: 'Stop session' }));
     const statusBefore = statusReads();
@@ -936,7 +982,8 @@ describe('Run ▾ and the live strip', () => {
     await waitFor(() => expect(requested).toContain('POST /api/agents/jira-stop'));
     await waitFor(() => expect(statusReads()).toBe(statusBefore + 1));
     await waitFor(() => expect(boardRequests().length).toBe(boardBefore + 1));
-    await waitFor(() => expect(stripsOnCard()).toBe(0));
+    await waitFor(() => expect(deckCards('PAY-131')).toHaveLength(0));
+    expect(onShelves('Refund partial captures')).toBe(true);
     await new Promise((r) => setTimeout(r, 50));
     expect(statusReads()).toBe(statusBefore + 1);
     expect(boardRequests().length).toBe(boardBefore + 1);
@@ -966,7 +1013,7 @@ describe('worktree chips on the card', () => {
   });
   const worktreeReads = (): number => requested.filter((u) => u === '/api/jira/worktrees').length;
   const chipOf = (summary: string): HTMLElement | null => card(summary).querySelector<HTMLElement>('.jira-card-tree');
-  const live = (key: string) => ({ [key]: { name: `jira ${key}`, startedAt: new Date().toISOString(), repo: '/home/ada/pay', starting: false } });
+  const live = (key: string) => ({ [key]: { sessionId: 's1', name: `jira ${key}`, startedAt: new Date().toISOString(), repo: '/home/ada/pay', starting: false } });
 
   async function renderBoard(over: Partial<JiraStatusPayload> = {}): Promise<void> {
     setJiraPage('board');
@@ -974,7 +1021,9 @@ describe('worktree chips on the card', () => {
     render(
       <SettingsProvider>
         <JiraProvider>
-          <JiraView onOpenJiraPage={jest.fn()} />
+          <JiraSessionsProvider open>
+            <JiraView onOpenJiraPage={jest.fn()} />
+          </JiraSessionsProvider>
         </JiraProvider>
       </SettingsProvider>
     );
@@ -1041,5 +1090,155 @@ describe('worktree chips on the card', () => {
     expect(document.querySelectorAll('.jira-card-tree')).toHaveLength(0);
     expect(screen.queryByText('git down')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+/*
+  The Board as an agent deck over status shelves (Jira sessions, Task 11; spec §7.1, C1, C8; DESIGN.md §8.9.1). Rendered through `JiraView`, which carries the
+  section's one sessions provider the deck reads. Sessions are links handed to the sessions answer with a state of their own; a `starting` one is not a link at
+  all but a status `live` reservation (it has no session id yet), as the server hands it out.
+*/
+describe('the agent deck and the status shelves', () => {
+  const hoursAgo = (h: number): string => new Date(Date.now() - h * 3_600_000).toISOString();
+  const reservation = (h: number, starting = false): JiraLiveSession => ({ sessionId: starting ? null : 's', name: 'jira run', startedAt: hoursAgo(h), repo: '/Users/ada/pay', starting });
+  const linkOn = (key: string, id: string, state: string, h: number) => ({
+    ...runLink(key, { ...reservation(h), sessionId: id }),
+    state
+  });
+
+  async function renderDeck(firstText: string): Promise<void> {
+    setJiraPage('board');
+    render(
+      <SettingsProvider>
+        <JiraProvider>
+          <JiraSessionsProvider open>
+            <JiraView onOpenJiraPage={jest.fn()} />
+          </JiraSessionsProvider>
+        </JiraProvider>
+      </SettingsProvider>
+    );
+    await screen.findByText(firstText);
+  }
+
+  const deckStates = (): string[] =>
+    Array.from(document.querySelectorAll('.jira-deck-card')).map((c) => `${c.getAttribute('data-key')}:${c.getAttribute('data-state')}`);
+  const shelfRows = (label: string): number => column(label).querySelectorAll('.board-card').length;
+  const todos = (n: number): JiraIssue[] =>
+    Array.from({ length: n }, (_, i) => issue({ key: `PAY-${300 + i}`, summary: `Todo ${i}`, updated: daysAgoStamp(i + 1) }));
+  const dones = (n: number): JiraIssue[] =>
+    Array.from({ length: n }, (_, i) =>
+      issue({ key: `PAY-${400 + i}`, summary: `Done ${i}`, status: { name: 'Done', category: 'done' }, updated: daysAgoStamp(i + 1), resolved: daysAgoStamp(i + 1) })
+    );
+
+  it('orders the deck Needs you, Working, Quiet, then Starting and Lost, newest first within a group', async () => {
+    lists[ALPHA.id] = ['PAY-11', 'PAY-12', 'PAY-13', 'PAY-14', 'PAY-15', 'PAY-16'].map((key) => issue({ key, summary: `Ticket ${key}` }));
+    statusAnswer = status({ live: { 'PAY-15': reservation(1, true) } });
+    sessionsAnswer = () => ({
+      links: [
+        linkOn('PAY-11', 'q', 'quiet', 5),
+        linkOn('PAY-12', 'w', 'working', 4),
+        linkOn('PAY-13', 'p', 'plan', 3),
+        linkOn('PAY-14', 'l', 'lost', 6),
+        // A second Needs you, started earlier than PAY-13's: newest first puts PAY-13 first.
+        linkOn('PAY-16', 'r', 'reply', 7)
+      ],
+      reachable: true,
+      rowsAt: null
+    });
+    await renderDeck('Ticket PAY-11');
+    await waitFor(() => expect(deckStates()).toEqual(['PAY-13:plan', 'PAY-16:reply', 'PAY-12:working', 'PAY-11:quiet', 'PAY-15:starting', 'PAY-14:lost']));
+    // The heading's tally: two want a person, one is working.
+    expect(screen.getByText('2 need you')).toBeInTheDocument();
+    expect(screen.getByText('1 working')).toBeInTheDocument();
+  });
+
+  it('draws no deck at all while nothing is live', async () => {
+    await renderDeck('Refund partial captures');
+    expect(document.querySelector('.jira-deck')).toBeNull();
+  });
+
+  it('draws the switch in the band: Board pressed, List enabled and one click away', async () => {
+    await renderDeck('Refund partial captures');
+    const group = screen.getByRole('group', { name: 'View' });
+    expect(within(group).getByRole('button', { name: 'Board' })).toHaveAttribute('aria-pressed', 'true');
+    const list = within(group).getByRole('button', { name: 'List' });
+    expect(list).toBeEnabled();
+    await userEvent.click(list);
+    expect(within(group).getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('region', { name: 'Sessions' })).toBeInTheDocument();
+    // Back to the Board for the cases that follow (the view is a module store that outlives a test).
+    await userEvent.click(within(group).getByRole('button', { name: 'Board' }));
+  });
+
+  it('cuts To Do at 8 rows with `+ 3 more` for 11 tops, the count pill saying 11, and opens the rest on a click', async () => {
+    lists[ALPHA.id] = todos(11);
+    await renderDeck('Todo 0');
+    expect(shelfRows('To Do')).toBe(8);
+    expect(within(column('To Do')).getByTestId('col-count')).toHaveTextContent('11');
+    await userEvent.click(within(column('To Do')).getByRole('button', { name: '+ 3 more' }));
+    expect(shelfRows('To Do')).toBe(11);
+    await userEvent.click(within(column('To Do')).getByRole('button', { name: 'show fewer' }));
+    expect(shelfRows('To Do')).toBe(8);
+  });
+
+  it('collapses Done to its 3 newest of 5', async () => {
+    lists[ALPHA.id] = dones(5);
+    await renderDeck('Done 0');
+    expect(shelfRows('Done')).toBe(3);
+    expect(summariesIn('Done')).toEqual(['Done 0', 'Done 1', 'Done 2']);
+    expect(within(column('Done')).getByRole('button', { name: '+ 2 more' })).toBeInTheDocument();
+  });
+
+  // F1 and the deck answer ONE filter: a hit inside a fold rings the top on its shelf, and a live ticket that does not match leaves the deck with it.
+  it('a search hit inside a fold rings the top in the shelf, and a live card the search does not match leaves the deck', async () => {
+    const epic = issue({ key: 'PAY-120', summary: 'Payments epic', type: { name: 'Epic', level: 1, subtask: false } });
+    const sub = issue({ key: 'PAY-162', summary: 'Ledger rounding fix', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-120', summary: 'Payments epic' } });
+    const busy = issue({ key: 'PAY-180', summary: 'Standalone task' });
+    lists[ALPHA.id] = [epic, sub, busy];
+    sessionsAnswer = () => ({ links: [linkOn('PAY-180', 's180', 'working', 2)], reachable: true, rowsAt: null });
+    await renderDeck('Payments epic');
+    await waitFor(() => expect(deckStates()).toEqual(['PAY-180:working']));
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'ledger');
+    expect(card('Payments epic')).toHaveClass('jira-card-match');
+    expect(within(card('Payments epic')).getByText('1 match: PAY-162')).toBeInTheDocument();
+    expect(deckStates()).toEqual([]);
+  });
+
+  it('a session on a key two boards both hold shows its deck card on each of them', async () => {
+    const shared = issue({ key: 'PAY-20', summary: 'Shared ticket' });
+    lists[ALPHA.id] = [shared];
+    lists[BETA.id] = [shared];
+    sessionsAnswer = () => ({ links: [linkOn('PAY-20', 's20', 'working', 1)], reachable: true, rowsAt: null });
+    await renderDeck('Shared ticket');
+    await waitFor(() => expect(deckStates()).toEqual(['PAY-20:working']));
+    await userEvent.click(screen.getByRole('button', { name: /^Pick a Jira board/ }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Boards' })).getByRole('button', { name: 'Beta board' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Pick a Jira board: Beta board/ })).toBeInTheDocument());
+    await waitFor(() => expect(deckStates()).toEqual(['PAY-20:working']));
+  });
+
+  describe('the shelf row’s extra line', () => {
+    const ended = (id: string, endedHoursAgo: number) => ({ ...linkOn('PAY-131', id, 'ended', 5), endedAt: hoursAgo(endedHoursAgo), endReason: 'finished' });
+
+    it('one ended session reads `run ended <age> ago` with a Reopen link', async () => {
+      sessionsAnswer = () => ({ links: [ended('e1', 2)], reachable: true, rowsAt: null });
+      await renderDeck('Refund partial captures');
+      const line = await within(card('Refund partial captures')).findByTestId('ended-line');
+      expect(line).toHaveTextContent('run ended 2h ago');
+      expect(within(line).getByRole('link')).toBeInTheDocument();
+    });
+
+    it('several ended sessions read `N sessions`, with nothing to reopen', async () => {
+      sessionsAnswer = () => ({ links: [ended('e1', 2), ended('e2', 9)], reachable: true, rowsAt: null });
+      await renderDeck('Refund partial captures');
+      const line = await within(card('Refund partial captures')).findByTestId('ended-line');
+      expect(line).toHaveTextContent('2 sessions');
+      expect(within(line).queryByRole('link')).toBeNull();
+    });
+
+    it('a ticket that was never run draws no extra line', async () => {
+      await renderDeck('Refund partial captures');
+      expect(within(card('Refund partial captures')).queryByTestId('ended-line')).toBeNull();
+    });
   });
 });

@@ -425,6 +425,24 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   }
 
   /**
+   * One issue, read fresh with the sweep's fields and nothing else: what a session detected on a branch needs for its link's snapshot (Jira sessions §5), and
+   * what `/jira link` checks before it links. A single `client.issue` read — no children, no transitions — so a tick that confirms five keys costs five calls.
+   * Refused with no call inside a 429 window (the gate); a failure goes through `routeFailed`, as every fresh read's does, so a 401 or a 429 here moves the site
+   * state and the caller sees the 404 / 429 / 0 and tells them apart. The Done window is OFF (`now: null`): whether a board would still show the issue is not
+   * the question, whether the key is a real ticket is.
+   */
+  async issueSummary(key: string): Promise<JiraResult<JiraIssue>> {
+    const gate = this.gate();
+    if ('refused' in gate) return gate.refused;
+    const { auth } = gate;
+    const res = await this.client.issue(auth, key, this.sweepFields());
+    if (!ok(res)) return this.routeFailed(res);
+    const issue = mapJiraIssue(res.data, { site: auth.site, sprintField: this.boot.sprintField, now: null });
+    if (issue === null) return this.routeFailed(synthetic(0, 'Jira sent an issue this server cannot read'));
+    return { ok: true, value: issue };
+  }
+
+  /**
    * The roots picker: an exact key when `q` (trimmed, upper-cased) is one, else a summary prefix match, `JIRA_SEARCH_LIMIT` at most, the Done window off.
    * Blank is `[]` with no call. The length bound is the route's to enforce (`JIRA_SEARCH_MAX_CHARS`).
    */

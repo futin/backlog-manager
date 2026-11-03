@@ -1906,7 +1906,7 @@ Three differences from the per-item case, each a consequence of the control bein
 
 Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides. The Board's rule just above hides a dispatch
 control whenever the environment makes dispatch impossible, and it is right there because on the Board dispatch is the control's whole job. The Jira card's `Run ▾`
-(`components/jira/JiraRunMenu.tsx`, on every card and again in the issue modal's controls row) has a second job the environment cannot take away: it opens the
+(`components/jira/JiraRunMenu.tsx`, on every card and again in the Detail dialog's agent column) has a second job the environment cannot take away: it opens the
 launch sheet (`JiraLaunchSheet`), and the sheet's `Copy prompt` needs the server's prompt composer and a clipboard, not the dashboard. A person with `BM_AGENTS`
 off, or a dashboard that is down, still gets the one half of Run that works without it — the exact prompt a session would be told, framed and size-checked by
 the server, ready to paste into a terminal of their own. Hiding the chip to match the Board would delete that for the sake of a consistency nobody asked for.
@@ -2184,7 +2184,7 @@ the one settings key a hand-edited localStorage value could turn into script exe
 
 Escape has one owner, and the topmost dialog is the only one that closes. `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
 listener, installed on the first entry and removed with the last; all eight dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet`,
-`OrchestrateSheet`, since Jira phase 2 the Jira issue modal (`jira/JiraIssueModal.tsx`) and the Jira board sheet (`jira/JiraBoardSheet.tsx`), since the
+`OrchestrateSheet`, since Jira phase 2 the Jira Detail dialog (`jira/JiraDetail.tsx`) and the Jira board sheet (`jira/JiraBoardSheet.tsx`), since the
 release chip the What's new drawer (`ReleasesDrawer.tsx`), since Jira phase 5 the Jira launch sheet (`jira/JiraLaunchSheet.tsx`), and since the Dashboards
 card stopped editing in place its add/edit sheet (`settings/DashboardSheet.tsx`) — are on it
 and none binds its own listener. There were four until task-37: `RunDrawer` left the Board with the rest of the run's detail, which
@@ -2197,11 +2197,11 @@ sheets', and each calls `useDialogEscape` once, so a fourth surface opened throu
 The count was three while the shells had three composers, and `test/dialog-escape.test.tsx` mounts those three together to prove the ranking holds across
 them.
 
-Jira phase 2 is that construction paying out, twice. `JiraIssueModal` composes `Modal` — `Modal`'s composers are `ItemModal` and `JiraIssueModal` — and
+Jira phase 2 is that construction paying out, twice. `JiraDetail` composes `Modal` — `Modal`'s composers are `ItemModal` and `JiraDetail` — and
 `JiraBoardSheet` composes `FormSheet` beside the two Board sheets, so both joined the stack without a line of the hook changing, and the count is five. The
 suite still proves the ranking on the Board's three; the two Jira surfaces need no case of their own, because what ranks them is the same shell code those
 three run through, and a sixth composer of either shell would join the same way. A second modal is right where §8.7 of `.claude/DESIGN.md` used to say there
-was one: the issue modal is the same sidecar reading — a facts column and a body — of a ticket instead of an item, and it holds no run state, so the reason
+was one: the Detail dialog is the same sidecar reading — a facts column and a body — of a ticket instead of an item, and the sessions it lists are a reading of the dashboard's rows with no run's Pause or Resume, so the reason
 the run's detail is an always-visible sheet rather than a modal (a modal has no standing place for Pause and Resume) does not reach it.
 
 The What's new drawer made it six through a THIRD shell. `ReleasesDrawer` composed `ui/Drawer.tsx` — a scrim and a right-edge panel, the dashboard's
@@ -2227,7 +2227,7 @@ the shell code the existing cases already cover. The page's row-level `Remove` s
 One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens — and, since #225, the item modal's claim release — drawn inline in
 the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to its two composers and nothing else floating but `Popover`'s
 panels, which hang under their control without a scrim. The Jira board sheet's `Delete board` asks through it too, drawn inside the sheet, as do — since Jira phase 5 — the Skills card's `×` (`JiraSkillsGroup`, in its row) and
-the issue modal's `Stop session` (in place of the chip). It calls
+the Detail dialog's session card `Stop` (in place of the button). It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 
@@ -3876,40 +3876,66 @@ first here, or simply arrives after GitHub merged it, and GitHub answers `405` f
 for, so the merge's refusal path re-reads first, and a re-read that says `MERGED` answers `200 already-merged`. An error there would invite the person to
 retry a merge that already stood. A disarm of a PR with no auto-merge armed is `200 noop` and sends no mutation, for the same reason.
 
-## A Jira session is remembered in server memory only, and Stop is the one hand that clears it early
+<a id="a-jira-session-is-remembered-in-server-memory-only-and-stop-is-the-one-hand-that-clears-it-early"></a>
 
-Phase 5's Run starts a Claude session for a Jira ticket, and the board has to show which tickets have one going and refuse a second. This server keeps that
-fact in memory and nowhere else: `JiraLiveService` (`server/src/jira/live.service.ts` — the spec calls it `JiraService`; the plan ruled otherwise, so `jira/`
-has one service named for what it holds) is a `Map` with no I/O, and a restart forgets it. A session is a fact about a process on this machine, and the dashboard,
-not this server, is the place that knows whether it still runs; a persisted entry would outlive the process that knew, and would need a second mechanism to
-decide which claims to believe. The accepted cost is that after a restart a card shows no strip for a session that is still running, and a second Start on
-that key is then possible; `DispatchRecordsService` makes the same trade for the same reason.
+## A Jira session is a persisted link, and Stop, a quiet dashboard or the 8-hour backstop each end it
 
-**The order protects the one-session-per-ticket rule, and so does what the map refuses to evict.** The key is reserved (`sessionId: null`, `starting`)
-BEFORE the dispatch's first Jira write, by a synchronous check-and-set: of two Starts that both cleared the dashboard gate exactly one passes, because
-nothing can run between the check and the set. Reserving after the writes would let two requests each assign and transition the ticket before one found out it
-had lost. Every failure after the reservation releases it through one `catch`, so no failure class — a Jira error, a refused composition, a spawn that fails —
-leaves a key `starting` until the 8-hour expiry; a retry after any of them is a fresh Start, not a 409. `release` touches a `starting` entry and nothing else,
-so a late failure path can never drop a session that did start, and a Start whose own `reserve` was refused releases nothing, because the entry in the map is
-the OTHER request's. At the cap of 100 the oldest CONFIRMED entry is evicted, and a `starting` one never is: its spawn is in flight and will confirm or
-release it, and evicting it would let a second dispatch pass the gate while the first is still launching. When every slot is starting, `reserve` refuses and
-the caller says the map is busy. The 8-hour expiry is strict and lazy — read at the top of every call, no timer — and is the backstop for a session nobody
-stopped and the reconciler could not judge.
+Phase 5's Run starts a Claude session for a Jira ticket, and the board has to show which tickets have one going and refuse a second. The Jira sessions page asks
+for more than that: which sessions a ticket has had, and which need a person now. So the server keeps each ticket–session link in a file,
+`~/.backlog-manager/jira-links.json`, of which it is the one writer (written whole and atomically, a temp file and a `rename`, the registry's discipline without
+being a field of it). `JiraLiveService` (`server/src/jira/live.service.ts` — the spec calls it `JiraService`; the plan ruled otherwise, so `jira/` has one
+service named for what it holds) holds that state in memory, loads it once, and rewrites the file after every change but a `starting` reservation. What the file
+records is a LINK — the pair of a key and a session id, with the Run action, the repo, a snapshot of the ticket and how it ended — and the dashboard, not this
+server, is still the place that knows whether the process runs. A persisted link would outlive the process that knew, which is why it is never trusted on load:
+after a restart the reconciler resumes judging every live link, and a session that ended while the server was down is judged from the first reconcile on and
+ended once it has been Quiet for two minutes, never on load.
+The `starting` reservation stays in memory only, for `DispatchRecordsService`'s reason — it records a request THIS process made, which no file can answer — and
+a restart frees the key.
 
-**Stop is the one deliberate hand, and the reconciler only agrees with the dashboard.** `POST /api/agents/jira-stop` asks the dashboard to stop the session and
-then forgets the key; it never calls Jira, because the ticket keeps its assignee and its status — what the confirm in the client says. A 200 and the
-dashboard's `no live session` 404 both mean the process is gone, and both clear the entry; any other answer is a 502 and the entry STAYS, because the
-session may still be running and a strip that said otherwise would invite a second Start on a busy repository. (The 404 that carries `remote answers
-disabled` is not "gone" — it says nothing about the session.) A session can also end without a Stop — it finished, it crashed, someone stopped it from the
-dashboard — and then the key would show a strip until the expiry. `JiraLiveReconciler` (`server/src/agents/jira-live.service.ts`) is what notices, and it
-lives in `agents/` because it calls the dashboard and `jira/` imports nothing from there; the dependency runs agents → jira and never back, which is also why the
-map is free of timers. It follows the run watchdog's shape: a `setTimeout` chain armed by `confirm`, pending only while some entry holds a session id,
-`unref`'d, never awaited by a request, and swallowing what it catches because it runs from a timer with nothing above it. One `GET /api/sessions` per tick
-(60 s); an entry stays only while its session is `working` or `question`, because the dashboard keeps an exited session as `idle` for its whole lookback, so
-"present" proves nothing and only "not busy" reads as ended. An entry younger than two minutes is never judged — a just-spawned session has no transcript, so
-the list does not carry it, and absent then means "not yet". A `starting` entry is never judged (its own Start settles it), a list that cannot be read leaves
-the map exactly as it was (an unreadable answer is not an answer), and a verdict clears an entry only if it still holds the session id it was judged for,
-since the list was read across an await in which a Stop and a fresh Start can have replaced it.
+**The file is machine-written history, so an unreadable one is set aside, not refused.** `jira.json` is hand-authored and irreplaceable, so its writers refuse
+with a 409 for as long as it cannot be read. This file's loss costs only past lines in a List, while refusing would stop every Run from linking until someone
+tidied it by hand. A file that does not parse, or whose `version` is not 1, therefore loads as empty with one warning and is renamed `jira-links.json.bad-<ISO>`
+at the first save, so a person can still read what was there; a boot that saves nothing leaves it exactly where it was. One unusable entry costs only itself,
+one level finer, the way the board and skill readers fall back. A save that throws is logged and nothing else: a launch must never fail because a history file
+could not be written, and the memory is the truth for this run of the server. Retention keeps the list from growing for ever — per key every live link and the
+20 newest ended ones, and a key whose newest end is over 90 days old with nothing live goes — and so do the caps on the suppressed and never-link lists.
+
+**The order protects the one-run-per-ticket rule, and so does what the store refuses to end.** The key is reserved (`starting`) BEFORE the dispatch's first Jira
+write, by a synchronous check-and-set: of two Starts that both cleared the dashboard gate exactly one passes, because nothing can run between the check and the
+set. Reserving after the writes would let two requests each assign and transition the ticket before one found out it had lost. The gate is about the Run on the
+key, so it reads `run` links alone: a session the user started on the ticket's branch outside this board is a link worth showing, and must neither block a Run
+nor offer a Stop the board did not start. Every failure after the reservation releases it through one `catch`, so no failure class leaves a key `starting` until
+the 8-hour backstop; `release` touches a `starting` entry and nothing else, so a late failure path can never drop a session that did start, and a Start whose
+own `reserve` was refused releases nothing, because the entry in the store is the OTHER request's. At the cap of 100 the oldest live link is ended as `expired`,
+never deleted — it keeps its line in the history — and a `starting` one is never touched: its spawn is in flight and will confirm or release it, and ending it
+would let a second dispatch pass the gate while the first is still launching. When every slot is starting, `reserve` refuses and the caller says the store is
+busy. The 8-hour backstop is strict and lazy: a live link whose later of `startedAt` and its last re-attach is strictly older than `JIRA_LIVE_TTL_MS` is ended
+`expired` (never deleted, so it keeps its line in the history) at the top of every call, with no timer — it is the backstop for a session nobody stopped and the
+reconciler could not judge, and a stale `starting` reservation is dropped by the same check. A link that has ended stays ended: a late `confirm` for it does not
+revive it, because the Start it belonged to is over; only a re-attach does, from the
+dashboard's own row, below.
+
+**Stop names one session, and the reconciler only agrees with the dashboard.** A ticket can now hold several live sessions — the Run's and, later, one a person
+started on its branch — so `POST /api/agents/jira-stop` takes `{ key, sessionId }`: a bare key no longer says which to stop, and guessing the newest would stop
+something the person was working in. It refuses an id that is not a live link of that key with a 409 that says which of three things it was (a reservation,
+nothing live, or this id), asks the dashboard to stop the session and then ENDS that link as `stopped`; it never calls Jira, because the ticket keeps its
+assignee and its status — what the confirm in the client says. A 200 and the dashboard's `no live session` 404 both mean the process is gone, and both end the
+link; any other answer is a 502 and the link STAYS live, because the session may still be running and a strip that said otherwise would invite a second Start on
+a busy repository. (The 404 that carries `remote answers disabled` is not "gone" — it says nothing about the session.) A session can also end without a Stop —
+it finished, it crashed, someone stopped it from the dashboard. `JiraLiveReconciler` (`server/src/agents/jira-live.service.ts`) is what notices, and it lives in
+`agents/` because it calls the dashboard and `jira/` imports nothing from there; the dependency runs agents → jira and never back, which is also why the store
+is free of timers. It follows the run watchdog's shape: a `setTimeout` chain armed by `confirm` and at boot, pending only while some link is live or Setup maps
+a repo (detection and a re-attach read the rows even with nothing live), `unref`'d, never awaited by a request, and swallowing what it catches because it runs
+from a timer with nothing above it. One `GET /api/sessions?limit=50&lookback=168` per tick — 15 s while a Jira page is open, 60 s otherwise — and its rows are
+kept whole for the page. A link stays live only while its session is `working` or `question`, because the dashboard keeps an exited session as `idle` for its
+whole lookback, so "present" proves nothing and only "not busy" reads as ended. "Not busy" is not yet "ended": a session is Quiet after every finished turn, so
+the link records `quietSince`, the first tick that saw it quiet (cleared by any tick that sees it active), and ends only when that mark is two minutes old as
+well as the link itself — one clock would end a session between two turns of the same conversation. The list is capped, so an absent session is judged `gone`
+only from a list shorter than the cap; a full one proves nothing and the 8-hour backstop decides. An ended session the dashboard shows working again is
+re-attached on its own entry, the backstop's clock restarting, so a resumed session comes back without the history growing. A `starting` entry and a link
+younger than two minutes are never judged — a just-spawned session has no transcript, so the list does not carry it, and absent then means "not yet" — a list
+that cannot be read leaves the store exactly as it was (an unreadable answer is not an answer), and a verdict ends a link only if it still names the `(key,
+sessionId)` it was judged for, since the list was read across an await in which a Stop and a fresh Start can have replaced it.
 
 ## A tracker project has no item files, and that shows up in three places
 

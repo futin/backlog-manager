@@ -1,0 +1,97 @@
+import { useJiraContext } from '../../hooks/JiraContext';
+import { useAction } from '../../hooks/useAction';
+import { useNarrow } from '../../hooks/useNarrow';
+import { openDesktopJira } from '../../lib/jira';
+import { deckCrumb, deckTally, type DeckEntry } from '../../lib/jira-deck';
+import { openButtons, stripTitle } from '../../lib/jira-sessions';
+import { pollAge } from '../../lib/tracker';
+import { STATE_LABEL } from '../../../../shared/jira-sessions';
+import type { JiraIssue } from '../../../../shared/types';
+import { JiraTypeIcon } from '../ui/JiraTypeIcon';
+import { LiveStrip } from '../ui/LiveStrip';
+import { OpenChip } from './JiraSessionCard';
+
+/**
+ * JiraAgentDeck — the live sessions on the picked board, one card each, above the status shelves (Jira sessions spec §7.1; DESIGN.md §8.9.1).
+ *
+ * **It draws what `lib/jira-deck.ts` derived** — the order (Needs you, Working, Quiet, Starting and Lost contact; newest first within), which sessions belong
+ * to this board, and the crumb's words — and holds no copy of any of them. The page hands in the entries ALREADY filtered by the page's search and filters, so
+ * the deck and the shelves answer one filter. With nothing live the section is not drawn at all: an empty "Agents" heading on every quiet board would be a
+ * line of furniture, and the band's switch already says where the sessions are.
+ *
+ * **The card is a session's face, not a ticket's.** A state strip across the top (`ui/LiveStrip`, the band a board card wears for "somebody is on this"), its
+ * label spec §6's words for the state and its mark how long THIS server has seen the session in that state; the head — type glyph, the session's OWN key and
+ * the crumb `run · repo · surface · model`, which leads with `↳ <top>` when the session runs on a ticket folded under another card; the summary, a button that
+ * opens Detail on that ticket; the two open buttons; and the context %. The card is not a `role="button"` the way a shelf row is: it has buttons of its own,
+ * and a card that is itself one would nest them.
+ *
+ * **Buttons are `openButtons`' (§7.5), the deck's narrow reading** (`wide: false`: `Desktop`, where Detail says `Open in Desktop`). They are drawn by Detail's own
+ * `OpenChip`, so C2's Desktop rule (hidden on a phone, disabled with its title while a hand-over could fork a live transcript, the guarded `jira-open-desktop`
+ * POST for a dashboard session at rest) lives in one place. That POST's refusal draws under the buttons in the card's own alert line. A Starting card has none:
+ * every button needs the session's id, and a reservation has no id yet.
+ */
+export function JiraAgentDeck({ entries, now, onOpenIssue }: { entries: readonly DeckEntry[]; now: number; onOpenIssue: (issue: JiraIssue) => void }) {
+  if (entries.length === 0) return null;
+  const tally = deckTally(entries);
+  return (
+    <section className="jira-deck" aria-label="Agents">
+      <div className="jira-deck-head">
+        <h3>Agents</h3>
+        {tally.needs > 0 && <span className="jira-deck-need">{tally.needs} need you</span>}
+        {tally.working > 0 && <span>{tally.working} working</span>}
+      </div>
+      <div className="jira-deck-cards">
+        {entries.map((e) => (
+          <DeckCard key={e.id} entry={e} now={now} onOpenIssue={onOpenIssue} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DeckCard({ entry, now, onOpenIssue }: { entry: DeckEntry; now: number; onOpenIssue: (issue: JiraIssue) => void }) {
+  const { data } = useJiraContext();
+  const phone = useNarrow();
+  const handover = useAction();
+  const { issue, link, state } = entry;
+  const row = link?.row ?? null;
+  const crumb = deckCrumb(entry, data?.skills ?? []);
+  const pct = row?.contextPct;
+  const sessionId = link?.sessionId ?? null;
+  const buttons = link !== null && sessionId !== null ? openButtons(link, row, state, { phone, wide: false }) : null;
+  const go = (id: string): void => handover.run(() => openDesktopJira(id));
+
+  return (
+    <article className="jira-deck-card" aria-label={`Session on ${issue.key}`} data-state={state} data-key={issue.key}>
+      <LiveStrip tone={state} label={STATE_LABEL[state]} mark={pollAge(entry.since, now)} title={stripTitle(state)} />
+      <div className="jira-deck-face">
+        <div className="jira-card-head">
+          <span className="jira-card-type" title={issue.type.name}>
+            <JiraTypeIcon type={issue.type} />
+          </span>
+          <span className="jira-card-key">{issue.key}</span>
+          {crumb !== '' && <span className="jira-card-crumb">{crumb}</span>}
+        </div>
+        <button type="button" className="jira-deck-title" onClick={() => onOpenIssue(issue)}>
+          {issue.summary}
+        </button>
+        {(buttons !== null || pct !== undefined) && (
+          <div className="jira-deck-acts">
+            {buttons !== null && sessionId !== null && (
+              <>
+                <OpenChip button={buttons.primary} sessionId={sessionId} row={row} primary onHandover={go} />
+                {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={row} primary={false} onHandover={go} />}
+              </>
+            )}
+            {pct !== undefined && <span className="jira-deck-ctx">ctx {Math.round(pct)}%</span>}
+          </div>
+        )}
+        {handover.error !== null && (
+          <p className="jira-modal-error" role="alert">
+            {handover.error}
+          </p>
+        )}
+      </div>
+    </article>
+  );
+}

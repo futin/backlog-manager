@@ -7,6 +7,7 @@ import request from 'supertest';
 
 import { AppModule } from '../server/src/app.module';
 import { JiraClient } from '../server/src/jira/jira.client';
+import { JiraLiveService } from '../server/src/jira/live.service';
 import { JiraPollerService } from '../server/src/jira/poller.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import type { JiraStatusPayload } from '../shared/types';
@@ -320,6 +321,15 @@ describe('configured, against a healthy Jira', () => {
     it('does not check that the base exists — it may live only on origin', async () => {
       await defaults(MAPPED, 'only-on-origin', null).expect(200);
     });
+  });
+
+  it('POST /repos tells the live service the mapping changed — once per save, never for a refused one (so the reconciler can arm)', async () => {
+    const spy = jest.spyOn(app.get(JiraLiveService), 'reposChanged');
+    await post('/repos', { project: 'PAY', paths: ['/a/b'] }).expect(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    await post('/repos', { project: 'PAY', paths: ['/a/../b'] }).expect(400);
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
   });
 
   it('POST /repos with an unnormalised path is 400', async () => {

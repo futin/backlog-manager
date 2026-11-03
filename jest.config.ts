@@ -21,6 +21,8 @@ const config: Config = {
   // spawn a real agent session against the developer's own repo. See that
   // file's own header for the full reasoning.
   setupFiles: ['reflect-metadata', '<rootDir>/test/helpers/env.ts'],
+  // A fresh Jira link-store path per test (see that file's header) — `beforeEach` only exists once the framework is installed.
+  setupFilesAfterEnv: ['<rootDir>/test/helpers/jira-links-env.ts'],
   // Timezone pin — unconditional, so `TZ=... pnpm test` does NOT reach the
   // suite. Must be `globalSetup` rather than a `setupFiles` entry: the latter
   // runs inside the test context, where `process.env` is jest's own copy and

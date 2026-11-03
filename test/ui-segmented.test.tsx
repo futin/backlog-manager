@@ -53,6 +53,19 @@ describe('Segmented', () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Compact' })).toBeDisabled();
   });
+
+  // One declared-but-not-usable member (Jira's List view until it lands) is disabled on its own: the others still flip, and the disabled one flips nothing.
+  it('disables one option on its own and leaves the others working', async () => {
+    const onChange = jest.fn();
+    render(<Segmented value="cosy" options={[OPTIONS[0], { ...OPTIONS[1], disabled: true }]} onChange={onChange} />);
+
+    expect(screen.getByRole('button', { name: OPTIONS[1].label })).toBeDisabled();
+    expect(screen.getByRole('button', { name: OPTIONS[0].label })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: OPTIONS[1].label }));
+    expect(onChange).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: OPTIONS[0].label }));
+    expect(onChange).toHaveBeenCalledWith(OPTIONS[0].value);
+  });
   /**
    * The `pill` variant (DESIGN.md §8.6) — a recessed track under a raised
    * option, the shape `Switch` draws. A prop rather than a second class family

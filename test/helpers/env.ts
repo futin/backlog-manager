@@ -121,3 +121,12 @@ process.env.BM_JIRA_TOKEN = '';
  * the blocks above the credentials: a suite that points it at a fixture keeps its own value.
  */
 process.env.BM_JIRA_FILE ||= join(mkdtempSync(join(tmpdir(), 'bm-jira-')), 'jira.json');
+
+/**
+ * `BM_JIRA_LINKS_FILE` — the Jira session link store (`~/.backlog-manager/jira-links.json`, `server/src/jira/links.store.ts`). Unlike `jira.json` this one is
+ * WRITTEN by the server on every confirmed Run, so a suite that builds `JiraLiveService` without an override would persist its fixtures into the developer's
+ * real file and read the developer's real links back. A file under a fresh temp directory that does not exist yet reads as no links. `||=`, like the blocks
+ * above; `jira-links-env.ts` (a `setupFilesAfterEnv` entry) then hands every TEST a fresh path of its own, because one file per process would carry a case's
+ * links into the next case's `new JiraLiveService()`.
+ */
+process.env.BM_JIRA_LINKS_FILE ||= join(mkdtempSync(join(tmpdir(), 'bm-jira-links-')), 'jira-links.json');

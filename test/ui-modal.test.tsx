@@ -94,11 +94,11 @@ describe('the item modal and the Jira issue modal are the only modals', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('is composed by exactly two files — board/ItemModal.tsx and jira/JiraIssueModal.tsx', () => {
+  it('is composed by exactly two files — board/ItemModal.tsx and jira/JiraDetail.tsx', () => {
     const composers = files
       .filter((f) => !f.endsWith(join('ui', 'Modal.tsx')))
       .filter((f) => /from '[^']*ui\/Modal'/.test(readFileSync(f, 'utf8')))
       .map((f) => f.slice(SRC.length + 1));
-    expect(composers.sort()).toEqual([join('components', 'board', 'ItemModal.tsx'), join('components', 'jira', 'JiraIssueModal.tsx')]);
+    expect(composers.sort()).toEqual([join('components', 'board', 'ItemModal.tsx'), join('components', 'jira', 'JiraDetail.tsx')]);
   });
 });

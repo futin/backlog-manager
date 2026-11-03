@@ -290,3 +290,17 @@ export class FakeJira {
     return this.refuse(404, `FakeJira: unrouted gateway ${method} ${path}`);
   }
 }
+
+/**
+ * The `meta` argument `JiraLiveService.confirm` takes since the link store: what a launch records beside the ids. Suites that only need a confirmed Run on a key
+ * pass this; the values are arbitrary and no case asserts them except `jira-live.test.ts`, which builds its own.
+ */
+export const RUN_META = {
+  action: 'execute',
+  name: 'jira PAY-1',
+  branch: null,
+  surface: 'dashboard',
+  model: null,
+  effort: null,
+  snapshot: { summary: 'A ticket', type: 'Task', parentKey: null }
+} as const;

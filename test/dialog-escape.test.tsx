@@ -32,7 +32,7 @@ import { ItemModal } from '../client/src/components/board/ItemModal';
 import { LaunchSheet } from '../client/src/components/board/LaunchSheet';
 import { OrchestrateSheet } from '../client/src/components/board/OrchestrateSheet';
 import { JiraBoardSheet } from '../client/src/components/jira/JiraBoardSheet';
-import { JiraIssueModal } from '../client/src/components/jira/JiraIssueModal';
+import { JiraDetail } from '../client/src/components/jira/JiraDetail';
 import { ReleasesDrawer } from '../client/src/components/ReleasesDrawer';
 import { Confirm } from '../client/src/components/ui/Confirm';
 import { JiraContext } from '../client/src/hooks/JiraContext';
@@ -302,7 +302,7 @@ describe('the six dialogs on the stack', () => {
       render(<OrchestrateSheet project="/abs/alpha" projectName="alpha" source="files" items={[item]} spawnMaxPermission="acceptEdits" onClose={close[2]} refresh={() => {}} />),
       render(
         <JiraContext.Provider value={jira}>
-          <JiraIssueModal issue={JIRA_CARD} childrenOf={null} onOpenIssue={() => {}} onWrote={() => {}} onRun={() => {}} onClose={close[3]} />
+          <JiraDetail issue={JIRA_CARD} childrenOf={null} onOpenIssue={() => {}} onWrote={() => {}} onRun={() => {}} onClose={close[3]} />
         </JiraContext.Provider>
       ),
       render(

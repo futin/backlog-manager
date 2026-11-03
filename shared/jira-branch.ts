@@ -67,6 +67,27 @@ export function branchCarriesKey(branch: string, key: string): boolean {
 }
 
 /**
+ * Every ticket key `branch` carries, among the Jira projects in `projectKeys` (branch detection, Jira sessions §5). The scan is PER PROJECT — `<PROJECT>-<digits>`
+ * bounded on both sides by a non-alphanumeric character or the string's edge, case-insensitively — and not one generic key-shaped pattern, because a generic
+ * pattern has to decide what a key's prefix may contain, and `_` is the case it cannot: `branchCarriesKey` treats it as a separator (`release_PAY-151` carries
+ * PAY-151) while a project key may itself hold one (`MY_PROJ-4`). `branchCarriesKey` stays the confirming check, so the two can never disagree. `XPAY-1510-x`
+ * yields nothing for `PAY`, and `XPAY-1510-then-PAY-151` yields `PAY-151` only. Upper-cased, distinct, ordered by first appearance in the branch across every
+ * project (not by the order of `projectKeys`). Not mirrored in `jira.mjs`, which has no use for it.
+ */
+export function keysInBranch(branch: string, projectKeys: readonly string[]): string[] {
+  const hits: { at: number; key: string }[] = [];
+  for (const project of new Set(projectKeys.map((p) => p.toUpperCase()))) {
+    const escaped = project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const m of branch.matchAll(new RegExp(`(?<![A-Za-z0-9])${escaped}-\\d+(?![A-Za-z0-9])`, 'gi'))) {
+      const key = m[0].toUpperCase();
+      if (branchCarriesKey(branch, key)) hits.push({ at: m.index, key });
+    }
+  }
+  hits.sort((x, y) => x.at - y.at);
+  return [...new Set(hits.map((h) => h.key))];
+}
+
+/**
  * A branch-name-safe slug from a ticket summary, in five steps: lower-case and strip diacritics (NFKD, then drop the combining marks), collapse every run
  * outside `[a-z0-9]` into one `-`, trim `-` from both ends, cut at the last `-` at or before character `SLUG_MAX` (a hard cut at `SLUG_MAX` when there is
  * none), trim `-` again. A summary with nothing in `[a-z0-9]` after step 1 — `日本語`, whitespace — gives `''`.

@@ -22,6 +22,7 @@ import type {
   JiraRepoRefs,
   JiraSkill,
   JiraStatusCategory,
+  JiraSessionsPayload,
   JiraStatusPayload,
   JiraTransition,
   JiraWorktree,
@@ -686,17 +687,32 @@ export function displayPath(path: string, home: string | null): string {
 /**
  * The Run chip's three states (spec §6.1, §7), for one issue against the status. Order is the spec's: a project with no mapped path is `no-repo` (dashed, the
  * title names Setup › Repositories) however the rest reads, so a `live` session on a project whose mapping was removed afterwards draws the dashed chip too —
- * the live STRIP beside it, which reads `status.live` alone, still carries the session and its Stop. `live` is any entry in the live map, `starting` or not,
- * because the key is claimed from `reserve` on and a second Start would be refused (409) either way. Otherwise `ready`.
+ * the live STRIP beside it, which reads `status.live` alone, still carries the session and its Stop. Otherwise `ready`.
+ *
+ * **What `live` reads (Jira sessions, §7.3 / §5's one-run gate; ruling 95).** `live` is the UNION of two sources: a live `run` link on the key in the sessions
+ * payload, OR any entry in `status.live` for it, `starting` or confirmed. Neither source is a fallback for the other, because each is ahead of the other in a
+ * window the chip must not offer a Start in. The status' `live` map holds every live `run` link plus every `starting` reservation (and never a `branch`/`manual`
+ * link — the server's `JiraLiveService.snapshot()`), so a `starting` reservation, which the sessions payload cannot carry, and a Run the server has just
+ * CONFIRMED, which the sessions poll has not seen yet (it runs on its own 15 s clock), both read `live` the moment the status says so; the payload covers the
+ * other direction, a `run` link the status has not been re-read for. Reading only one would re-offer `Start` for up to a poll after a Start landed, and the
+ * server's one-run gate answers that second Start with a 409. What stays `ready` is exactly what neither source holds: a live `branch` or `manual` link
+ * (a session somebody started in a terminal, found by its branch) does NOT disable Run, and neither does an ended link. With no sessions payload (not
+ * loaded yet, or a page mounted without the provider) the status alone answers, so a first paint can never offer a Start the server would refuse.
  *
  * "Mapped" is the status' own `repos`: at least ONE path for the issue's project. An empty list (a hand-edited `jira.json` the server kept) is unmapped, which
  * `unmappedProjects` above does not say — it asks only whether the key is present, because the Repositories card's warning is about a key nobody has
  * touched, and the chip is about whether Start has a place to run.
  */
-export function runChipState(issue: JiraIssue, status: Pick<JiraStatusPayload, 'repos' | 'live'>): 'no-repo' | 'live' | 'ready' {
+export function runChipState(
+  issue: JiraIssue,
+  status: Pick<JiraStatusPayload, 'repos' | 'live'>,
+  sessions: JiraSessionsPayload | null = null
+): 'no-repo' | 'live' | 'ready' {
   const paths: unknown = status.repos[issue.project.key];
   if (!Array.isArray(paths) || paths.length === 0) return 'no-repo';
-  return status.live[issue.key] === undefined ? 'ready' : 'live';
+  if (status.live[issue.key] !== undefined) return 'live';
+  const runLive = sessions !== null && sessions.links.some((l) => l.key === issue.key && l.how === 'run' && l.endedAt === null);
+  return runLive ? 'live' : 'ready';
 }
 
 /** The last segment of an absolute path, trailing slashes ignored: `/Users/ada/pay` → `pay`. The strip names a session's repo this short way (spec §6.2). */
@@ -709,44 +725,6 @@ export function repoBasename(path: string): string {
 export function skillCommand(prompt: string): string | null {
   const first = prompt.trimStart().split(/\s/, 1)[0];
   return first.startsWith('/') && first.length > 1 ? first : null;
-}
-
-/** One live session as a card shows it: the issue it runs on, the session, and whether that issue is FOLDED under the card rather than the card's own. */
-export interface JiraCardSession {
-  key: string;
-  session: JiraLiveSession;
-  folded: boolean;
-}
-
-/**
- * The sessions a card has to say something about: its own first, then every issue folded under it (grouped-board ruling — a folded issue is not a card, so a
- * session on it would be invisible anywhere on the board without this). Read from `status.live` and never from the issue, so the strip and `runChipState`
- * agree on what "live" is. `fold.under` is `sortForBoard` order, which makes the order of the folded strips stable between polls.
- */
-export function cardSessions(top: JiraIssue, fold: Pick<JiraFold, 'under'>, live: Readonly<Record<string, JiraLiveSession>>): JiraCardSession[] {
-  const out: JiraCardSession[] = [];
-  const own = live[top.key];
-  if (own !== undefined) out.push({ key: top.key, session: own, folded: false });
-  for (const under of fold.under.get(top.key) ?? []) {
-    const session = live[under.key];
-    if (session !== undefined) out.push({ key: under.key, session, folded: true });
-  }
-  return out;
-}
-
-/**
- * What a strip prints for one session (spec §6.2): `session · <repo basename>` — led by the issue's key when it is a folded one, since the card is not that
- * issue — and, on the right, `starting` for a reserved key, else the elapsed reading from `startedAt` (`null` when the stamp cannot be aged: half a marker
- * beats `NaNm`, the rule `ItemCard`'s strip follows). The title carries the session's own name and its full path, which the strip has no room for.
- */
-export function sessionStrip(entry: JiraCardSession, now: number): { label: string; mark: string | null; title: string } {
-  const { session } = entry;
-  const word = `session · ${repoBasename(session.repo)}`;
-  return {
-    label: entry.folded ? `${entry.key} · ${word}` : word,
-    mark: session.starting ? 'starting' : elapsedSince(session.startedAt, now),
-    title: `${session.name} · ${session.repo}`
-  };
 }
 
 /**
@@ -1166,7 +1144,32 @@ export function dispatchJira(req: JiraDispatchRequest): Promise<JiraDispatchResu
   return postAgents<JiraDispatchResult>('/api/agents/dispatch-jira', req);
 }
 
-/** `POST /api/agents/jira-stop` — the live strip's Stop (Task 10 draws it). Resolves when the dashboard accepted it; rejects with the server's sentence. */
-export async function stopJira(key: string): Promise<void> {
-  await postAgents<{ ok: true }>('/api/agents/jira-stop', { key });
+/**
+ * `POST /api/agents/jira-stop` — Stop one named session: a ticket can hold several live ones, so the body names which. Resolves when the dashboard accepted it;
+ * rejects with the server's sentence (a 409 for a session id that is not live on the key, say).
+ */
+export async function stopJira(key: string, sessionId: string): Promise<void> {
+  await postAgents<{ ok: true }>('/api/agents/jira-stop', { key, sessionId });
+}
+
+/**
+ * `GET /api/jira/sessions` — every link, live and ended. `open` adds `?open=1`, which is the Jira section saying a page is on screen (what quickens the
+ * server's reconciler); the rail badge's own read leaves it off. Rejects with `failureOf`'s sentence, or `malformed response` for a body without `links`.
+ */
+export async function fetchJiraSessions(open: boolean): Promise<JiraSessionsPayload> {
+  const res = await fetch(open ? '/api/jira/sessions?open=1' : '/api/jira/sessions');
+  if (!res.ok) throw new Error(await failureOf(res));
+  const body: unknown = await res.json();
+  if (typeof body !== 'object' || body === null || !Array.isArray((body as { links?: unknown }).links)) throw new Error('malformed response');
+  return body as JiraSessionsPayload;
+}
+
+/** `POST /api/agents/jira-unlink` — drop one `branch` link (C9). A `run` link is refused with a 409 and the server's sentence. */
+export async function unlinkJira(key: string, sessionId: string): Promise<void> {
+  await postAgents<{ ok: true }>('/api/agents/jira-unlink', { key, sessionId });
+}
+
+/** `POST /api/agents/jira-open-desktop` — the dashboard's own hand-over to the Desktop app, guarded there (C2). Rejects with the server's sentence. */
+export async function openDesktopJira(sessionId: string): Promise<void> {
+  await postAgents<{ ok: true }>('/api/agents/jira-open-desktop', { sessionId });
 }

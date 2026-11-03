@@ -9,6 +9,7 @@
  * union.
  */
 import type { AgentAction } from './agent';
+import type { JiraSessionState } from './jira-sessions';
 
 /** The registry file's shape — written only by skills/backlog/tools/backlog.mjs,
  *  read by the server. */
@@ -888,16 +889,92 @@ export interface JiraTransition {
 }
 
 /**
+ * One row of the dashboard's `/api/sessions` list, as the Jira reconciler keeps it. Only `id` and `status` are always there; every other field is the dashboard's
+ * and may be absent. `desktopOwned` and `processLive` are `true` or absent, never `false` — the dashboard does not send `false` — and `stopState` is absent
+ * unless a stop is possible (`ready`) or underway (`stopping`).
+ */
+export interface DashboardRow {
+  id: string;
+  status: string;
+  surface?: string;
+  desktopOwned?: true;
+  stopState?: 'ready' | 'stopping';
+  processLive?: true;
+  remoteQuestion?: boolean;
+  remotePlan?: boolean;
+  remoteReply?: boolean;
+  permissionWait?: boolean;
+  projectPath?: string;
+  gitBranch?: string;
+  sessionName?: string;
+  model?: string;
+  effort?: string;
+  contextPct?: number;
+}
+
+/**
  * One live Run session on a ticket, as the board draws it (spec §4). `starting` is the window between `reserve` and the dashboard's answer, when the key is
  * claimed but there is no session id yet; `name` is `jiraSessionName(key)`, the title the dispatch gave the session, so the card and the dashboard agree.
  */
 export interface JiraLiveSession {
   name: string;
+  /** The dashboard's id for the session; `null` while `starting`. Stop needs it (the board has no other way to name the session it is stopping). */
+  sessionId: string | null;
   /** ISO instant the key was reserved. */
   startedAt: string;
   /** The absolute repo path the session runs in. */
   repo: string;
   starting: boolean;
+}
+
+/** How a session came to be linked to a ticket (spec §5): started by Run ▾, detected from its branch, or linked by hand with `/jira link`. */
+export type JiraLinkHow = 'run' | 'branch' | 'manual';
+
+/**
+ * Why a link ended (spec §5): the dashboard stopped reporting it busy (`idle`), Stop (`stopped`), the 8-hour backstop (`expired`), or an answered, non-full
+ * dashboard list no longer carried the session (`gone`).
+ */
+export type JiraEndReason = 'idle' | 'stopped' | 'expired' | 'gone';
+
+/**
+ * One session linked to one ticket, live or ended — the unit the link store keeps (`~/.backlog-manager/jira-links.json`, spec §5). The pair `(key, sessionId)`
+ * is its identity, and a session that pauses and resumes re-opens its own entry rather than adding one. `snapshot` is the ticket as it stood when the link was
+ * made, so the List can still draw a ticket that has since left the board; `parentKey` is the parent Jira reports, not the board's fold top. `action` is the
+ * Run action and is `null` for a `branch` or `manual` link, which show the session's `name` instead.
+ */
+export interface JiraLink {
+  key: string;
+  /** `null` is never persisted: a `starting` Run lives in memory only and has no link yet. */
+  sessionId: string | null;
+  how: JiraLinkHow;
+  action: JiraAction | null;
+  name: string;
+  repo: string;
+  branch: string | null;
+  /** This repo's own launch surface, NOT the dashboard row's `local | dashboard | cloud`. */
+  surface: 'desktop' | 'dashboard' | null;
+  model: string | null;
+  effort: string | null;
+  snapshot: { summary: string; type: string; parentKey: string | null };
+  /** ISO instants. */
+  startedAt: string;
+  endedAt: string | null;
+  endReason: JiraEndReason | null;
+  /** The first reconcile tick that saw the session neither `working` nor `question`; cleared when one sees it active again. */
+  quietSince: string | null;
+  /** When a re-attach (C5) last re-opened this pair, or null while it never has. The 8-hour backstop counts from the later of this and `startedAt`. */
+  reattachedAt: string | null;
+}
+
+/**
+ * `GET /api/jira/sessions` — every linked session, live and ended, with the state `sessionState` derives for it (spec §6). `row` is the dashboard's row for a
+ * live link (`null` once ended, or when the dashboard has none), `stateSince` is when THIS server first saw the link in that state (memory, reset on a change),
+ * and `reachable` / `rowsAt` say whether the last tick could read the dashboard and when it last did. Served from memory, never from a call of its own.
+ */
+export interface JiraSessionsPayload {
+  links: (JiraLink & { state: JiraSessionState; row: DashboardRow | null; stateSince: string })[];
+  reachable: boolean;
+  rowsAt: string | null;
 }
 
 /** `GET /api/jira/issue/:key`, read fresh. `session` is the live Run on this key (memory only), or `null`. */

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useJiraPage } from '../../hooks/useJiraPage';
 import type { JiraChildrenIndex } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
 import type { JiraAction, JiraIssue } from '../../../../shared/types';
 import { JiraBoardView } from './JiraBoardView';
-import { JiraIssueModal } from './JiraIssueModal';
+import { JiraDetail } from './JiraDetail';
 import { JiraLaunchSheet } from './JiraLaunchSheet';
 import { JiraSetupView } from './JiraSetupView';
 
@@ -33,7 +34,7 @@ import { JiraSetupView } from './JiraSetupView';
  * Once a status has said `configured: true`, a later failed read keeps it (`useJira` keeps the last answer through a failure), so a page that is up stays
  * up through a blip; what a page says about a stale or failing status is that page's business.
  *
- * **The open issue is held HERE, not in the Board page.** The Board's card click lands in this slot (`onOpenIssue`), and the issue modal is drawn
+ * **The open issue is held HERE, not in the Board page.** The Board's card click lands in this slot (`onOpenIssue`), and the Detail dialog is drawn
  * from it. Held one level above the page so that the slot outlives a re-render of the board under it — a poll that reorders the columns, a board switch —
  * and is read by exactly one modal mount. The modal is drawn only beside the Board page: Setup has no card to open one from, and the slot is cleared whenever `page`
  * changes, so a stale issue never survives a trip to Setup and back (JiraView itself does not unmount on a page switch).
@@ -54,11 +55,12 @@ import { JiraSetupView } from './JiraSetupView';
  * with the modal open behind it), so it mounts later whatever its place in the JSX. It is drawn after the modal anyway, for the reader of this file, but
  * reordering the two lines would change nothing; hosting it in the one component that holds both is what guarantees a single sheet and a single slot.
  * `onStarted` is a landed Start and `onWrote` a Start refused after the server's writes landed: both are `landed` — reload the shell's status (the strip is
- * `live`, and the status poll alone runs on the boards' clock, minutes away) and bump `nudge`, because the ticket may have been assigned and moved either
- * way. Like the open issue, the slot is cleared whenever `page` changes.
+ * `live`, and the status poll alone runs on the boards' clock, minutes away) AND the sessions payload, and bump `nudge`, because the ticket may have been
+ * assigned and moved either way. Like the open issue, the slot is cleared whenever `page` changes.
  */
 export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
   const { data, error, reload } = useJiraContext();
+  const { reload: reloadSessions } = useJiraSessionsContext();
   const [page] = useJiraPage();
   const [openIssue, setOpenIssue] = useState<{ issue: JiraIssue; childrenOf: JiraChildrenIndex | null } | null>(null);
   const openOne = (issue: JiraIssue, childrenOf: JiraChildrenIndex | null): void => setOpenIssue({ issue, childrenOf });
@@ -69,9 +71,12 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   useEffect(() => setLaunch(null), [page]);
   const [nudge, setNudge] = useState(0);
   const run = (issue: JiraIssue, action: JiraAction): void => setLaunch({ issue, action });
-  // A Start that landed, or a Start refused after the server's writes landed (the ticket moved either way): reload the shell's status and nudge the board.
+  // A Start that landed, or a Start refused after the server's writes landed (the ticket moved either way): reload the shell's status, nudge the board, and
+  // re-ask the sessions payload too — Detail's `sessionLive` and the List's `canRun` read it, and left to its own 15 s clock they would offer Start again
+  // on a ticket the server now holds a run on (the one-run 409).
   const landed = (): void => {
     reload();
+    void reloadSessions();
     setNudge((n) => n + 1);
   };
 
@@ -80,10 +85,12 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   return page === 'setup' ? (
     <JiraSetupView onOpenJiraPage={onOpenJiraPage} />
   ) : (
+    // The sessions poll is the shell's (`App` hoists `JiraSessionsProvider` around the rail and this section): the card's `Run ▾`, the Detail dialog and the
+    // rail badge read ONE payload, so none of them disagrees with another for a poll. This section being current is what `open` says there.
     <>
       <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
       {openIssue !== null && (
-        <JiraIssueModal
+        <JiraDetail
           issue={openIssue.issue}
           childrenOf={openIssue.childrenOf}
           onOpenIssue={openOne}

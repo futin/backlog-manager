@@ -9,14 +9,14 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   refuses a starting project with the same `RUN_IN_PROGRESS_CODE`. `runHoldsItem` deliberately does NOT gain the parameter. Why:
   [invariants.md](docs/subsystems/invariants.md#a-starting-entry-blocks-what-a-run-file-blocks-bug-21)
 - **Escape has one owner, and the topmost dialog is the only one that closes.** `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-  listener; eight dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, since Jira phase 2 `JiraIssueModal` and `JiraBoardSheet`, since the
+  listener; eight dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, since Jira phase 2 `JiraDetail` and `JiraBoardSheet`, since the
   release chip `ReleasesDrawer`, since Jira phase 5 `JiraLaunchSheet`, and since the Dashboards page's add/edit sheet `DashboardSheet` — and
   none binds its own (bug-23 — four until task-37 took the run drawer off the Board, whose content is the Runs page's inline detail sheet and never a dialog
   again; three from then until Jira phase 2). Since task-40 the hook is called by the overlay shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`), not by the
-  surfaces themselves: `Modal`'s composers are `ItemModal` and `JiraIssueModal`, `FormSheet`'s are `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet`, `JiraLaunchSheet` and `DashboardSheet`,
+  surfaces themselves: `Modal`'s composers are `ItemModal` and `JiraDetail`, `FormSheet`'s are `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet`, `JiraLaunchSheet` and `DashboardSheet`,
   so the three Jira surfaces and the Dashboards sheet joined by construction (`JiraLaunchSheet` is hosted once, in `JiraView`, and ranks above the issue modal because it MOUNTS later — it always opens while the modal is up — not because of its place in the JSX). `ReleasesDrawer` is the exception: its shell is ui-kit's since #298, so the wrapper calls the hook itself
   and passes `closeOnEscape={false}`, and ui-kit's drawer binds no key of its own. One further entry is not a dialog: `ui/Confirm.tsx` (bug-53), the inline confirmation the run's Stop, the
-  item modal's claim release (#225), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`), the Jira modal's `Stop session` and GitHub › PRs' `Merge` (opened by `PrActions`, drawn by `PrFoot`) open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
+  item modal's claim release (#225), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`), the Jira Detail's session card `Stop` and GitHub › PRs' `Merge` (opened by `PrActions`, drawn by `PrFoot`) open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
   — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with seven composers — the tracker's (`components/TrackerChip.tsx`), the band's
   Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board's picker (`components/jira/JiraBoardView.tsx`), the board sheet's roots
   search (`components/jira/JiraBoardSheet.tsx`) and `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
@@ -109,7 +109,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   (#367) — never while the unvetted rung speaks, since approving a plan does not vet it. Why:
   [invariants.md](docs/subsystems/invariants.md#environment-level-blocks-hide-the-dispatch-control-per-item-ones-disable-it)
 - **Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides.** `JiraRunMenu`
-  (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the issue modal's controls row, and it reads `runChipState` (`lib/jira.ts`)
+  (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the Detail dialog's agent column, and it reads `runChipState` (`lib/jira.ts`)
   alone: `no-repo` draws a dashed chip that opens nothing, a live key a disabled one, anything else a `Popover` — and with agents off it still draws and still
   opens, because the launch sheet's `Copy prompt` needs no dashboard. `JiraLaunchSheet` asks `projectDispatchGate` and draws `Start` only on a `disabled` or
   `enabled` answer, never on `hidden`, and draws none before the agents status has landed; `Copy prompt` waits on the preview and a clipboard and on nothing
@@ -148,7 +148,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   mid-flight folds into one follow-up (`useTrackers` and `useJira` are the deliberate exceptions, #231).** `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure
   of React) is the one home of poll scheduling and `hooks/useCoalescedFetch.ts` is its React shell; `hooks/useRefreshing.ts` (#285) is the layer every board
   poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useTicks`, `useOrchestratorArchive`, `TimeZoneProvider` (#241) and
-  `ProjectsProvider` (no `armed`: none of the three polls) and `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) and `usePullRequests` (60 s, mounted by GitHub › PRs and by GitHub › Settings' Access card, same constant `armed` — the server's PR cache has no timer, so those two mounts are the only things that ever read PRs) — owning the
+  `ProjectsProvider` (no `armed`: none of the three polls) and `useJiraSessions` (15 s, one instance in `JiraSessionsContext`, mounted by the shell around the rail and the section, `enabled` only while Jira is configured) and `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) and `usePullRequests` (60 s, mounted by GitHub › PRs and by GitHub › Settings' Access card, same constant `armed` — the server's PR cache has no timer, so those two mounts are the only things that ever read PRs) — owning the
   mount + window-focus triggers once; no board poller is a `setInterval` (`useNow`'s clock tick is a display, not a request). `trigger()` while idle starts the task; while one is in flight it starts nothing and returns ONE queued follow-up's promise, shared
   by every trigger that arrived meanwhile and run when the flight settles, so its answer was requested after the caller asked. The timer is a `setTimeout`
   re-armed `intervalMs` after the LAST request of a chain settles, at most one pending, cleared the moment `armed` goes false (an in-flight request finishes;

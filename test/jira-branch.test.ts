@@ -6,6 +6,7 @@ import {
   branchCarriesKey,
   branchNameProblem,
   defaultBaseProblem,
+  keysInBranch,
   patternProblem,
   renderBranchPattern,
   shellQuote,
@@ -165,5 +166,34 @@ describe('shellQuote', () => {
     ['/plain', "'/plain'"]
   ])('%j -> %s', (value, quoted) => {
     expect(shellQuote(value)).toBe(quoted);
+  });
+});
+
+// Jira sessions Task 6: detection asks which ticket keys a branch carries, among the projects Setup maps a repo to.
+describe('keysInBranch', () => {
+  it.each([
+    ['PAY-151-currency-rounding', ['PAY'], ['PAY-151']],
+    ['feature/PAY-151', ['PAY'], ['PAY-151']],
+    ['XPAY-1510-x', ['PAY'], []],
+    ['PAY-1-and-PAY-2', ['PAY'], ['PAY-1', 'PAY-2']],
+    ['pay-151-x', ['PAY'], ['PAY-151']],
+    ['OPS-3-x', ['PAY'], []],
+    ['PAY-1-OPS-3-PAY-1', ['PAY', 'OPS'], ['PAY-1', 'OPS-3']],
+    ['release_PAY-151', ['PAY'], ['PAY-151']],
+    ['feature_PAY-151-x', ['PAY'], ['PAY-151']],
+    ['bugfix_PAY-1-and-PAY-2', ['PAY'], ['PAY-1', 'PAY-2']],
+    ['MY_PROJ-4-x', ['MY_PROJ'], ['MY_PROJ-4']],
+    ['OPS-3-PAY-4', ['PAY', 'OPS'], ['OPS-3', 'PAY-4']],
+    ['PAY-15a', ['PAY'], []]
+  ])('%s with %j gives %j', (branch, projects, expected) => {
+    expect(keysInBranch(branch, projects)).toEqual(expected);
+  });
+
+  it('an unbounded key hit does not hide a bounded one later', () => {
+    expect(keysInBranch('XPAY-1-then-PAY-151', ['PAY'])).toEqual(['PAY-151']);
+  });
+
+  it('no projects, no keys', () => {
+    expect(keysInBranch('PAY-1-x', [])).toEqual([]);
   });
 });

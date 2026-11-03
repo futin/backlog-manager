@@ -13,6 +13,7 @@ import { SETTINGS_STORAGE_KEY } from './lib/settings';
 import { readDeepLink, withoutDeepLink } from './lib/deep-link';
 import type { JiraPage } from './lib/jira-page';
 import { JiraProvider, useJiraContext } from './hooks/JiraContext';
+import { JiraSessionsProvider } from './hooks/JiraSessionsContext';
 import { setJiraPage } from './hooks/useJiraPage';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { ProjectsProvider, useProjectsContext } from './hooks/ProjectsContext';
@@ -358,89 +359,98 @@ function AppShell() {
     here would only hide the type error if it ever could.
   */
   return (
-    <div className="shell">
-      <SideRail
-        section={section}
-        onChange={change}
-        chipSlot={narrow ? chip : undefined}
-        working={working}
-        releases={releaseChip}
-        provisional={pending !== null}
-      />
-      {whatsNew.open && whatsNew.data && <ReleasesDrawer data={whatsNew.data} onClose={whatsNew.close} />}
-      {/* The strip over the well (§8.0). `.maincol` is the rail's paper, so the rail and the strip are one white L and the well's 24 px top-left
-          curve is drawn against white — it was grey on grey while `.main` made its own gap with a margin, because `body` is --board and stays so.
-          The strip is always in the tree, empty without a tracker, so its height (`--main-gap`, which `.runs-board` subtracts) never depends on
-          whether one is connected; CSS hides it below 700 px. */}
-      <div className="maincol">
-        <div className="topstrip">{narrow ? null : chip}</div>
-        <main className="main">
-          {/* One measure for every section since task-42. Settings used to be the
-            exception — a narrow `wrap`, on the grounds that a column of
-            label-and-control rows reads better that way — and the Local/Shared
-            split took the exception away: both of its pages are two
-            hand-balanced columns of cards now, the same shape every other
-            section draws, and the narrow wrap folded them to one at every
-            width. The cap itself is released entirely under
-            `contentWidth: 'full'`, which is a stylesheet rule keyed off
-            `<html>` and nothing this expression has to know about. */}
-          <div className="wrap wide">
-            {/* Keyed by view — section, and a source section's page — so a switch clears one page's failure rather than carrying it onto the next (#270,
-                `SectionBoundary`). By section alone, GitHub › Board's crash would follow the reader to GitHub › Archive, which was a section of its own
-                before the source rows and so never shared a boundary with it. */}
-            <SectionBoundary key={view}>
-              <Suspense fallback={<SectionLoading />}>
-                {/* The board's run chip (DESIGN.md §8.3) navigates, and this is
-                  the setter it navigates with — the same `change` the rail's own
-                  Runs entry calls, handed down rather than reimplemented, so the
-                  two cannot come to disagree about what opening Runs does (and
-                  so the chip's click is recorded in `backlog-manager.section`
-                  exactly as the rail's is). */}
-                {/* A provisional landing paints nothing the projects answer could take back: the section's loading shape until it settles. Gated on
-                    `pending` alone, not on `drawn` too: in the render where the first answer lands, `drawn` is set and `pending` still is, and the settle
-                    effect that clears it runs after that commit — gating on both rendered the guessed page for that one commit (and fetched its chunk). The
-                    settle always ends in `change`, which clears `pending`, so this never holds past the answer. */}
-                {pending !== null ? (
-                  <SectionLoading />
-                ) : (
-                  <>
-                    {section === 'files' && filesPage === 'board' && <BoardView source="files" onOpenRuns={() => change('runs')} onWorking={report.filesBoard} />}
-                    {section === 'files' && filesPage === 'archive' && <ArchiveView source="files" onWorking={report.filesArchive} />}
-                    {section === 'github' && githubPage === 'board' && <BoardView source="github" onOpenRuns={() => change('runs')} onWorking={report.githubBoard} />}
-                    {section === 'github' && githubPage === 'prs' && (
-                      <PullRequestsView onWorking={report.githubPrs} onOpenSettings={() => onOpenGithubPage('settings')} />
-                    )}
-                    {section === 'github' && githubPage === 'archive' && <ArchiveView source="github" onWorking={report.githubArchive} />}
-                    {section === 'github' && githubPage === 'settings' && <GithubSettingsView />}
-                  </>
-                )}
-                {section === 'runs' && <RunsView onWorking={report.runs} />}
-                {section === 'jira' && <JiraView onOpenJiraPage={onOpenJiraPage} />}
-                {/* Settings' watchdog card carries a `Live view` link to Runs ›
-                  Watchdog (DESIGN.md §8.6), and this is what it opens with — the
-                  same PAIR the rail's own Watchdog sub-nav entry calls, in the
-                  same order: `setRunsMode` (the module-level store every mounted
-                  reader subscribes to, `hooks/useRunsMode.ts`) and then this
-                  shell's own `change`. Handed down rather than reimplemented in
-                  Settings, for the reason the board's chip is handed `change`:
-                  two expressions of "open Runs › Watchdog" would be two things
-                  free to disagree, and the section key is recorded here. */}
-                {section === 'settings' && (
-                  <SettingsView
-                    onOpenWatchdog={() => {
-                      setRunsMode('watchdog');
-                      change('runs');
-                    }}
-                    onOpenGithubPage={onOpenGithubPage}
-                    onOpenJiraPage={onOpenJiraPage}
-                  />
-                )}
-              </Suspense>
-            </SectionBoundary>
-          </div>
-        </main>
+    /*
+      The shell's one Jira sessions poll (Jira sessions spec §7.4, C4), around the rail AND the section: the rail's Needs-you badge counts with the Jira
+      section closed, and the section's deck, List, Detail and `Run ▾` read the same answer on the same clock. `enabled` is the status's `configured: true`
+      — no poll and no badge on a machine without Jira, and none while the status is unknown — and `open` is "Jira is the section on screen", which is what
+      asks the server's reconciler for its fast rate; with the section closed the request carries no `open=1`. A context element only, so neither flag
+      remounts anything beneath it.
+    */
+    <JiraSessionsProvider open={section === 'jira'} enabled={jiraConfigured === true}>
+      <div className="shell">
+        <SideRail
+          section={section}
+          onChange={change}
+          chipSlot={narrow ? chip : undefined}
+          working={working}
+          releases={releaseChip}
+          provisional={pending !== null}
+        />
+        {whatsNew.open && whatsNew.data && <ReleasesDrawer data={whatsNew.data} onClose={whatsNew.close} />}
+        {/* The strip over the well (§8.0). `.maincol` is the rail's paper, so the rail and the strip are one white L and the well's 24 px top-left
+            curve is drawn against white — it was grey on grey while `.main` made its own gap with a margin, because `body` is --board and stays so.
+            The strip is always in the tree, empty without a tracker, so its height (`--main-gap`, which `.runs-board` subtracts) never depends on
+            whether one is connected; CSS hides it below 700 px. */}
+        <div className="maincol">
+          <div className="topstrip">{narrow ? null : chip}</div>
+          <main className="main">
+            {/* One measure for every section since task-42. Settings used to be the
+              exception — a narrow `wrap`, on the grounds that a column of
+              label-and-control rows reads better that way — and the Local/Shared
+              split took the exception away: both of its pages are two
+              hand-balanced columns of cards now, the same shape every other
+              section draws, and the narrow wrap folded them to one at every
+              width. The cap itself is released entirely under
+              `contentWidth: 'full'`, which is a stylesheet rule keyed off
+              `<html>` and nothing this expression has to know about. */}
+            <div className="wrap wide">
+              {/* Keyed by view — section, and a source section's page — so a switch clears one page's failure rather than carrying it onto the next (#270,
+                  `SectionBoundary`). By section alone, GitHub › Board's crash would follow the reader to GitHub › Archive, which was a section of its own
+                  before the source rows and so never shared a boundary with it. */}
+              <SectionBoundary key={view}>
+                <Suspense fallback={<SectionLoading />}>
+                  {/* The board's run chip (DESIGN.md §8.3) navigates, and this is
+                    the setter it navigates with — the same `change` the rail's own
+                    Runs entry calls, handed down rather than reimplemented, so the
+                    two cannot come to disagree about what opening Runs does (and
+                    so the chip's click is recorded in `backlog-manager.section`
+                    exactly as the rail's is). */}
+                  {/* A provisional landing paints nothing the projects answer could take back: the section's loading shape until it settles. Gated on
+                      `pending` alone, not on `drawn` too: in the render where the first answer lands, `drawn` is set and `pending` still is, and the settle
+                      effect that clears it runs after that commit — gating on both rendered the guessed page for that one commit (and fetched its chunk). The
+                      settle always ends in `change`, which clears `pending`, so this never holds past the answer. */}
+                  {pending !== null ? (
+                    <SectionLoading />
+                  ) : (
+                    <>
+                      {section === 'files' && filesPage === 'board' && <BoardView source="files" onOpenRuns={() => change('runs')} onWorking={report.filesBoard} />}
+                      {section === 'files' && filesPage === 'archive' && <ArchiveView source="files" onWorking={report.filesArchive} />}
+                      {section === 'github' && githubPage === 'board' && <BoardView source="github" onOpenRuns={() => change('runs')} onWorking={report.githubBoard} />}
+                      {section === 'github' && githubPage === 'prs' && (
+                        <PullRequestsView onWorking={report.githubPrs} onOpenSettings={() => onOpenGithubPage('settings')} />
+                      )}
+                      {section === 'github' && githubPage === 'archive' && <ArchiveView source="github" onWorking={report.githubArchive} />}
+                      {section === 'github' && githubPage === 'settings' && <GithubSettingsView />}
+                    </>
+                  )}
+                  {section === 'runs' && <RunsView onWorking={report.runs} />}
+                  {section === 'jira' && <JiraView onOpenJiraPage={onOpenJiraPage} />}
+                  {/* Settings' watchdog card carries a `Live view` link to Runs ›
+                    Watchdog (DESIGN.md §8.6), and this is what it opens with — the
+                    same PAIR the rail's own Watchdog sub-nav entry calls, in the
+                    same order: `setRunsMode` (the module-level store every mounted
+                    reader subscribes to, `hooks/useRunsMode.ts`) and then this
+                    shell's own `change`. Handed down rather than reimplemented in
+                    Settings, for the reason the board's chip is handed `change`:
+                    two expressions of "open Runs › Watchdog" would be two things
+                    free to disagree, and the section key is recorded here. */}
+                  {section === 'settings' && (
+                    <SettingsView
+                      onOpenWatchdog={() => {
+                        setRunsMode('watchdog');
+                        change('runs');
+                      }}
+                      onOpenGithubPage={onOpenGithubPage}
+                      onOpenJiraPage={onOpenJiraPage}
+                    />
+                  )}
+                </Suspense>
+              </SectionBoundary>
+            </div>
+          </main>
+        </div>
       </div>
-    </div>
+    </JiraSessionsProvider>
   );
 }
 

@@ -2,6 +2,7 @@ import { homedir } from 'os';
 import { Controller, Get, HttpException, Param, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 
+import { sessionState } from '../../../shared/jira-sessions';
 import { isJiraKey, parseJiraActionParam } from '../../../shared/types';
 import type {
   JiraBoardIssuesPayload,
@@ -10,6 +11,7 @@ import type {
   JiraJqlCheckResult,
   JiraProjectRef,
   JiraRepoRefs,
+  JiraSessionsPayload,
   JiraStatusPayload,
   JiraWorkspace,
   JiraWorktreesPayload
@@ -25,7 +27,7 @@ import { readRepoRefs, readWorktrees } from './refs.util';
 import { unwrapJira } from './unwrap.util';
 
 /**
- * The nine read routes under `/api/jira` (Jira phase 1, phase 5's `/prompt`, and the repo/branch work's `/refs` and `/worktrees`; spec §5, errors per §8).
+ * The ten read routes under `/api/jira` (Jira phase 1, phase 5's `/prompt`, the repo/branch work's `/refs` and `/worktrees`, and the sessions page's `/sessions`; spec §5, errors per §8).
  * Every one answers from the poller's cache or status, or from ONE fresh read the
  * poller performs for it — never from a call this file makes, so the 429 window, the boot's missing `cloudId` and the 401 bookkeeping have one home
  * (`JiraPollerService.gate` / `routeFailed`) and a route cannot forget them. There is no POST here: the board and repository writes live in
@@ -42,6 +44,13 @@ import { unwrapJira } from './unwrap.util';
  */
 @Controller('api/jira')
 export class JiraController {
+  /**
+   * When this server first saw each `(key, sessionId)` in the state it is in now (spec §6: "a wait's age is measured from when this server first saw it in
+   * that state"). Memory only, never written: a restart restarts the clocks, which only ever under-states an age. Derived at read time rather than by the
+   * reconciler, so it is the first READ that saw the state — a page open every 15 s sees it within a tick, and a closed page has no age to show.
+   */
+  private readonly stateSeen = new Map<string, { state: string; since: number }>();
+
   constructor(
     private readonly poller: JiraPollerService,
     private readonly live: JiraLiveService
@@ -49,12 +58,41 @@ export class JiraController {
 
   /**
    * `GET /api/jira` — memory, the environment and `jira.json`, no outbound call. The controller, not the poller, fills `live` from the live map: the poller
-   * stays unaware of it. An unconfigured server keeps the poller's `{}` — it has no sessions to show, and no run can have started without credentials.
+   * stays unaware of it. `snapshot()` is the live `run` entries alone: a detected or hand-made link is in the store but has no reader here until the List arrives. An unconfigured server keeps the poller's `{}` — it has no sessions to show, and no run can have started without credentials.
    */
   @Get()
   status(): JiraStatusPayload {
     const status = this.poller.status();
     return status.configured ? { ...status, live: this.live.snapshot() } : status;
+  }
+
+  /**
+   * `GET /api/jira/sessions` — every link, live and ended, with its derived state (spec §6). Memory only: the links and the rows are what the reconciler left
+   * in `JiraLiveService`, and nothing here dials the dashboard or Jira, so it is answered whether or not Jira is configured (an unconfigured server has no
+   * links and no read yet, which is `{ links: [], reachable: true, rowsAt: null }` by itself — no 503, the client learns "nothing to show" the same way).
+   * `?open=1` is the Jira section's own hook saying a page is on screen, which is what quickens the reconciler to ~15 s (spec §5, "while a Jira page is
+   * open"); the rail badge's read does not send it, so a configured Jira with the section closed never holds the reconciler at the fast rate.
+   */
+  @Get('sessions')
+  sessions(@Query('open') open?: string): JiraSessionsPayload {
+    const now = Date.now();
+    if (open === '1') this.live.notePageRead(now);
+    const reachable = this.live.reachable();
+    const seen = new Map<string, { state: string; since: number }>();
+    const links = this.live.links().map((link) => {
+      // An ended link has no row to look up; a live one may have none either (the dashboard does not list it) — both are `null`, never `undefined`.
+      const row = link.endedAt === null && link.sessionId !== null ? (this.live.rowFor(link.sessionId) ?? null) : null;
+      const state = sessionState(link, row, reachable);
+      const id = `${link.key}\u0000${link.sessionId}`;
+      const before = this.stateSeen.get(id);
+      const entry = before !== undefined && before.state === state ? before : { state, since: now };
+      seen.set(id, entry);
+      return { ...link, state, row, stateSince: new Date(entry.since).toISOString() };
+    });
+    // Rebuilt from what is linked NOW, so an unlinked or evicted pair does not keep an entry forever.
+    this.stateSeen.clear();
+    for (const [id, entry] of seen) this.stateSeen.set(id, entry);
+    return { links, reachable, rowsAt: this.live.rowsAt() };
   }
 
   /**

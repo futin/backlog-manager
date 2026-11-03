@@ -23,7 +23,7 @@ import { useNarrow } from '../../hooks/useNarrow';
  * standing place for the length of a run, which a surface a reader opens and
  * closes does not offer. So `Modal` is composed by exactly two surfaces, the
  * backlog item (`board/ItemModal.tsx`) and — since Jira phase 2 — the Jira
- * issue (`jira/JiraIssueModal.tsx`, §8.9.2), which is the item modal's twin
+ * issue (`jira/JiraDetail.tsx`, §8.9.2), which is the item modal's twin
  * and has no run to show either; a third composer is a design change, not a
  * reuse.
  *
