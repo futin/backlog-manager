@@ -46,8 +46,9 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * **It is the item modal's twin, not a second dialog design.** It composes `ui/Modal` exactly as `board/ItemModal.tsx` does — so the scrim, the close
  * control, the Escape key (the LIFO stack in `useDialogEscape`, called by the shell and never here) and the 700 px fold are the shell's — and takes the
  * modal's slot on that stack, so the count of dialogs does not change. `Modal`'s composer list is `[ItemModal, JiraDetail]` and a third is a design change.
- * `Modal`'s facts slot (the 290 px column) holds the AGENT: one `JiraSessionCard` per live session, newest first, then the history, then `Run ▾`; its body
- * holds the TICKET: title, key row, facts, the two writes, then the description, children, worktrees and the comments note.
+ * It passes `Modal` a `head`, which is the shell's split shape (`Detail.dc.html`): the head carries the type, key, parent and sprint as crumbs, the link out
+ * and the title; the facts slot holds the AGENT — one `JiraSessionCard` per live session, newest first, then the history, then `Run ▾`; the body holds the
+ * TICKET — a facts pane with the two writes beside the facts they change, then the description, children and worktrees panes and the comments note.
  *
  * **The left column is the sessions page's, not the status'.** The cards and the history read `useJiraSessionsContext()` (`GET /api/jira/sessions`, one poll
  * for the whole Jira section), narrowed to this key by `ticketSessions`. A `starting` Run is the one thing that payload never carries — a reservation has no
@@ -60,7 +61,8 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * sheet alone and the dialog under it on the next press. It sits LAST in the left column — the next session takes over once these end — and `runChipState`
  * disables it only while a `run` link is live (the one-run gate, §5) or a reservation is `starting`; a live `branch` or `manual` link does not. It is never hidden.
  *
- * **The write controls** (Jira phase 3; spec §6.3, §8; DESIGN.md §8.9.2) sit in a row under the facts, on the ticket's side:
+ * **The write controls** (Jira phase 3; spec §6.3, §8; DESIGN.md §8.9.2) sit beside the fact each one changes, as the mock draws them — `Move to…` after the
+ * status pill, `Assign to me` after the assignee:
  *
  * - **`Assign to me`**, a 28 px `Chip` → `POST /api/jira/issue/assign` `{ key }`. Disabled, with the reason as its title, while the shell's status knows
  *   no identity (`data.me` null — which also covers a boot `myself` that has not answered: the server would refuse with 503 `no identity` anyway, and
@@ -224,9 +226,10 @@ export function JiraDetail({
   const now = useNow(true);
   const boardNames = detail === null || data === null ? [] : data.boards.filter((b) => detail.boards.includes(b.id)).map((b) => b.name);
   const paths = data?.repos[src.project.key] ?? [];
-  const typeLine = [src.type.name, src.parent === null ? null : `${src.parent.key} ${src.parent.summary}`].filter((p) => p !== null).join(' · ');
-  const priorityLine = [src.priority, src.sprint].filter((p) => p !== null && p !== '').join(' · ');
-  const people = `${src.assignee === null ? 'unassigned' : src.assignee.name}${src.reporter === null ? '' : ` · ${src.reporter}`}`;
+  // The head's crumbs after the key: the type, the parent it sits in, the sprint — each only when there is one.
+  const crumbs = [src.type.name, src.parent === null ? null : `in ${src.parent.key} ${src.parent.summary}`, src.sprint].filter(
+    (p): p is string => p !== null && p !== ''
+  );
 
   const me = data?.me ?? null;
   const assignBlock = me === null ? 'no identity' : src.assignee?.accountId === me.accountId ? 'already assigned to you' : null;
@@ -293,7 +296,11 @@ export function JiraDetail({
           onStop={(sessionId) => sessionWrite((key) => stopJira(key, sessionId))}
         />
       ))}
-      {liveCount === 0 && <p className="jira-modal-none">no session is running on this ticket</p>}
+      {liveCount === 0 && (
+        <div className="jira-detail-pane">
+          <p className="jira-detail-none">no session is running on this ticket</p>
+        </div>
+      )}
       {ended.length > 0 && (
         <>
           <div className="jira-detail-lbl">History</div>
@@ -304,75 +311,100 @@ export function JiraDetail({
           </ol>
         </>
       )}
-      <div className="jira-modal-controls">
+      <div className="jira-modal-controls jira-detail-run">
         <JiraRunMenu issue={issue} home="modal" onPick={(action) => onRun(issue, action)} />
+        {liveCount > 0 && <span>Next session takes over once this one ends.</span>}
       </div>
     </div>
   );
 
-  return (
-    <Modal label={`${src.key} ${src.summary}`} facts={agent} onClose={onClose}>
-      <h2 className="item-body-title">{src.summary}</h2>
-      <div className="item-facts jira-detail-ticket">
-        <div className="jira-modal-key">
-          <span className="jira-modal-keyname">{src.key}</span>
-          <a href={src.url} target="_blank" rel="noreferrer">
-            open in Jira ↗
-          </a>
-        </div>
-        <dl className="item-facts-list jira-detail-facts">
-          <Fact label="type · parent">{typeLine}</Fact>
-          <Fact label="status">{`${src.status.name} · ${categoryWord(src.status.category)}`}</Fact>
-          {priorityLine !== '' && <Fact label="priority · sprint">{priorityLine}</Fact>}
-          <Fact label="assignee · reporter">{people}</Fact>
-          {src.labels.length > 0 && <Fact label="labels">{src.labels.join(', ')}</Fact>}
-          <Fact label="created · updated">{issueDatesLine(src, now, zone)}</Fact>
-          {boardNames.length > 0 && <Fact label="on boards">{boardNames.join(', ')}</Fact>}
-          <Fact label="repository">
-            {data === null || paths.length === 0 ? (
-              `no repository mapped for ${src.project.key} — Jira › Setup › Repositories`
-            ) : (
-              <span className="item-facts-path">{paths.map((p) => displayPath(p, data.home)).join(', ')}</span>
-            )}
-          </Fact>
-          <Fact label="session">{sessionLine}</Fact>
-        </dl>
-        <div className="jira-detail-controls">
-          <Chip size={28} disabled={busy || assignBlock !== null} title={assignBlock ?? undefined} onClick={() => write('assign', { key: issue.key })}>
-            Assign to me
-          </Chip>
-          <Select
-            label="Move to"
-            title={moveBlock ?? undefined}
-            value=""
-            disabled={busy || !moveReady}
-            options={[{ value: '', label: 'Move to…' }, ...transitionOptions(detail?.transitions ?? [])]}
-            onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
-          />
-        </div>
-        {writeError !== null && (
-          <p className="jira-modal-error" role="alert">
-            {writeError}
-          </p>
-        )}
+  // The head — `Modal`'s split shape (`Detail.dc.html`): the type glyph, key, type, parent and sprint as crumbs, the link out at the right, the title under them.
+  const head = (
+    <div className="jira-detail-head">
+      <div className="jira-detail-crumbs">
+        <JiraTypeIcon type={src.type} />
+        <span className="jira-detail-key">{src.key}</span>
+        {crumbs.map((c) => (
+          <span key={c}>{`· ${c}`}</span>
+        ))}
       </div>
-      <div className="item-body">
-        {failure !== null ? (
-          <div className="drawer-empty">{`could not read the ticket — ${failure}`}</div>
-        ) : detail === null ? (
-          <div className="drawer-empty">loading…</div>
-        ) : (
-          <>
-            {detail.description.trim() === '' ? (
-              <p className="jira-modal-none">no description</p>
-            ) : (
-              // Keyed on the issue, so a Children-row swap opens the next description collapsed rather than inheriting this one's `Show more`.
-              <Description key={detail.key} markdown={detail.description} />
-            )}
-            {detail.children.length > 0 && <ChildrenTree selfKey={detail.key} direct={detail.children} childrenOf={childrenOf} onOpenIssue={onOpenIssue} />}
-          </>
+      {/* A plain link, not a `Chip as="a"`: the chip carries no `target`, and this one must open a new tab with no referrer like every link out. */}
+      <a className="jira-detail-out" href={src.url} target="_blank" rel="noreferrer">
+        Open in Jira ↗
+      </a>
+      <h2 className="jira-detail-title">{src.summary}</h2>
+    </div>
+  );
+
+  return (
+    <Modal label={`${src.key} ${src.summary}`} head={head} facts={agent} onClose={onClose}>
+      <div className="jira-detail-ticket">
+        <div className="jira-detail-lbl">Ticket</div>
+        <div className="jira-detail-pane">
+          <dl className="jira-detail-facts">
+            <Fact label="Status">
+              <Pill tone="neutral">{src.status.name}</Pill>
+              <span className="jira-detail-cat">{` · ${categoryWord(src.status.category)}`}</span>
+              <Select
+                label="Move to"
+                title={moveBlock ?? undefined}
+                value=""
+                disabled={busy || !moveReady}
+                options={[{ value: '', label: 'Move to…' }, ...transitionOptions(detail?.transitions ?? [])]}
+                onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
+              />
+            </Fact>
+            <Fact label="Assignee">
+              <span>{src.assignee === null ? 'unassigned' : src.assignee.name}</span>
+              <Chip size={28} disabled={busy || assignBlock !== null} title={assignBlock ?? undefined} onClick={() => write('assign', { key: issue.key })}>
+                Assign to me
+              </Chip>
+            </Fact>
+            {src.reporter !== null && <Fact label="Reporter">{src.reporter}</Fact>}
+            {src.priority !== null && src.priority !== '' && <Fact label="Priority">{src.priority}</Fact>}
+            {src.sprint !== null && src.sprint !== '' && <Fact label="Sprint">{src.sprint}</Fact>}
+            {src.parent !== null && <Fact label="Parent">{`${src.parent.key} ${src.parent.summary}`}</Fact>}
+            {src.labels.length > 0 && <Fact label="Labels">{src.labels.join(', ')}</Fact>}
+            <Fact label="Created · updated">{issueDatesLine(src, now, zone)}</Fact>
+            {boardNames.length > 0 && <Fact label="On boards">{boardNames.join(', ')}</Fact>}
+            <Fact label="Repository">
+              {data === null || paths.length === 0 ? (
+                `no repository mapped for ${src.project.key} — Jira › Setup › Repositories`
+              ) : (
+                <span className="item-facts-path">{paths.map((p) => displayPath(p, data.home)).join(', ')}</span>
+              )}
+            </Fact>
+            <Fact label="Session">{sessionLine}</Fact>
+          </dl>
+          {writeError !== null && (
+            <p className="jira-modal-error" role="alert">
+              {writeError}
+            </p>
+          )}
+        </div>
+        <div className="jira-detail-lbl">Description</div>
+        <div className="item-body jira-detail-pane">
+          {failure !== null ? (
+            <div className="drawer-empty">{`could not read the ticket — ${failure}`}</div>
+          ) : detail === null ? (
+            <div className="drawer-empty">loading…</div>
+          ) : detail.description.trim() === '' ? (
+            <p className="jira-modal-none">no description</p>
+          ) : (
+            // Keyed on the issue, so a Children-row swap opens the next description collapsed rather than inheriting this one's `Show more`.
+            <Description key={detail.key} markdown={detail.description} />
+          )}
+        </div>
+        {detail !== null && detail.children.length > 0 && (
+          <div className="jira-detail-pane">
+            <ChildrenTree selfKey={detail.key} direct={detail.children} childrenOf={childrenOf} onOpenIssue={onOpenIssue} />
+          </div>
         )}
-        {ticketTrees.length > 0 && <WorktreesList trees={ticketTrees} issueKey={issue.key} live={sessionLive} home={data?.home ?? null} />}
+        {ticketTrees.length > 0 && (
+          <div className="jira-detail-pane">
+            <WorktreesList trees={ticketTrees} issueKey={issue.key} live={sessionLive} home={data?.home ?? null} />
+          </div>
+        )}
         <p className="jira-modal-comments">
           Comments stay in Jira — v1 neither reads nor writes them.{' '}
           <a href={src.url} target="_blank" rel="noreferrer">

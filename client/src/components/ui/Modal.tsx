@@ -43,10 +43,31 @@ import { useNarrow } from '../../hooks/useNarrow';
  * A media query could carry the geometry but not the reading order, and two
  * copies of the breakpoint that had to agree is exactly what that hook exists
  * to prevent.
+ *
+ * **`head` is the split shape's, and only the Jira Detail passes it** (Jira sessions spec §7.3, `Detail.dc.html`; DESIGN.md §8.9.2). Given a head, the
+ * shell draws it across both columns, and the two columns become an even split on the board's ground rather than the 290 px facts column beside a body:
+ * Detail's left column is a session card with a four-up facts grid and a history timeline, which 290 px stacked into one long ribbon. It is a SHAPE of
+ * this one shell, not a second shell — scrim, exit, Escape and the 700 px fold are unchanged, and under 700 px the head, the facts and the body stack in
+ * that order. The item modal passes none and keeps the sidecar exactly.
  */
-export function Modal({ label, facts, children, onClose }: { label: string; facts: ReactNode; children: ReactNode; onClose: () => void }) {
+export function Modal({
+  label,
+  head,
+  facts,
+  children,
+  onClose
+}: {
+  label: string;
+  /** The split shape's full-width head (see the header); absent, the shell is the sidecar. */
+  head?: ReactNode;
+  facts: ReactNode;
+  children: ReactNode;
+  onClose: () => void;
+}) {
   const narrow = useNarrow();
   useDialogEscape(onClose);
+  const split = head !== undefined;
+  const className = ['ui-modal', split ? 'ui-modal-split' : null, narrow ? 'ui-modal-narrow' : null].filter(Boolean).join(' ');
 
   return (
     <>
@@ -54,7 +75,7 @@ export function Modal({ label, facts, children, onClose }: { label: string; fact
           below is the one a keyboard reaches. Both, because neither alone is
           "a real exit" (§6.1) for both kinds of reader. */}
       <div className="ui-modal-scrim" data-testid="modal-scrim" onClick={onClose} />
-      <div className={narrow ? 'ui-modal ui-modal-narrow' : 'ui-modal'} role="dialog" aria-modal="true" aria-label={label}>
+      <div className={className} role="dialog" aria-modal="true" aria-label={label}>
         <button type="button" className="ui-modal-close" aria-label="close" onClick={onClose}>
           ✕
         </button>
@@ -62,6 +83,7 @@ export function Modal({ label, facts, children, onClose }: { label: string; fact
             always the facts and a body that is always the content is what lets
             the 290 px / fold-above geometry live in one stylesheet rule instead
             of in whatever order a composer happened to pass its children in. */}
+        {split && <div className="ui-modal-head">{head}</div>}
         <div className="ui-modal-facts">{facts}</div>
         <div className="ui-modal-body">{children}</div>
       </div>

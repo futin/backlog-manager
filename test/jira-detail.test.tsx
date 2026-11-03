@@ -228,19 +228,24 @@ describe('JiraDetail — the read', () => {
     await screen.findByText(/not/);
 
     expect(screen.getByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeInTheDocument();
-    expect(fact('type · parent')).toHaveTextContent('Story · PAY-120 Refund flows');
-    expect(fact('status')).toHaveTextContent('In Review · in progress');
-    expect(fact('priority · sprint')).toHaveTextContent('High · Sprint 42');
-    expect(fact('assignee · reporter')).toHaveTextContent('Ada Lovelace · Grace Hopper');
-    expect(fact('labels')).toHaveTextContent('payments, refunds');
+    // The type, parent and sprint ride the head's crumbs, as the mock draws them (the flex gap is the space jsdom does not see); the parent and sprint
+    // are facts in the ticket pane too.
+    expect(document.querySelector('.jira-detail-crumbs')).toHaveTextContent('PAY-131· Story· in PAY-120 Refund flows· Sprint 42');
+    expect(fact('Parent')).toHaveTextContent('PAY-120 Refund flows');
+    expect(fact('Status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Priority')).toHaveTextContent('High');
+    expect(fact('Sprint')).toHaveTextContent('Sprint 42');
+    expect(fact('Assignee')).toHaveTextContent('Ada Lovelace');
+    expect(fact('Reporter')).toHaveTextContent('Grace Hopper');
+    expect(fact('Labels')).toHaveTextContent('payments, refunds');
     // created is a short date, updated the board's relative age (`1d`): the fixture is 10 days old and updated 1 day ago.
-    expect(fact('created · updated')).toHaveTextContent(`${formatCreated(CARD.created, Date.now(), ZONE)} · 1d`);
+    expect(fact('Created · updated')).toHaveTextContent(`${formatCreated(CARD.created, Date.now(), ZONE)} · 1d`);
     // Only the board whose id the detail names, by NAME — `Platform` is a board the issue is not on.
-    expect(fact('on boards')).toHaveTextContent('Payments');
-    expect(fact('on boards')).not.toHaveTextContent('Platform');
-    expect(fact('repository')).toHaveTextContent('~/pay');
+    expect(fact('On boards')).toHaveTextContent('Payments');
+    expect(fact('On boards')).not.toHaveTextContent('Platform');
+    expect(fact('Repository')).toHaveTextContent('~/pay');
 
-    const link = screen.getByRole('link', { name: 'open in Jira ↗' });
+    const link = screen.getByRole('link', { name: 'Open in Jira ↗' });
     expect(link).toHaveAttribute('href', CARD.url);
     expect(link).toHaveAttribute('target', '_blank');
     expect(link.getAttribute('rel')).toContain('noreferrer');
@@ -397,13 +402,13 @@ describe('JiraDetail — the repository fact', () => {
   it('writes a path under $HOME with `~`', async () => {
     mount({ status: { repos: { PAY: ['/Users/ada/pay'] }, home: '/Users/ada' } });
     await screen.findByText('not');
-    expect(fact('repository')).toHaveTextContent('~/pay');
+    expect(fact('Repository')).toHaveTextContent('~/pay');
   });
 
   it('says where to map one when the project has none', async () => {
     mount({ status: { repos: {} } });
     await screen.findByText('not');
-    expect(fact('repository')).toHaveTextContent('no repository mapped for PAY — Jira › Setup › Repositories');
+    expect(fact('Repository')).toHaveTextContent('no repository mapped for PAY — Jira › Setup › Repositories');
   });
 });
 
@@ -413,15 +418,15 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     answer = () => new Promise<Response>((resolve) => (release = resolve));
     mount();
 
-    expect(fact('status')).toHaveTextContent('In Review · in progress');
-    expect(fact('labels')).toHaveTextContent('payments, refunds');
+    expect(fact('Status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Labels')).toHaveTextContent('payments, refunds');
     expect(screen.getByText('loading…')).toBeInTheDocument();
     // `on boards` comes from the detail, so it is not guessed at while that is in flight.
-    expect(fact('on boards')).toBeNull();
+    expect(fact('On boards')).toBeNull();
 
     release(json(detail()));
     await screen.findByText('not');
-    expect(fact('on boards')).toHaveTextContent('Payments');
+    expect(fact('On boards')).toHaveTextContent('Payments');
   });
 
   it("keeps the card's facts and says what the server said when the read is a 502", async () => {
@@ -429,8 +434,8 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     mount();
 
     expect(await screen.findByText('could not read the ticket — Jira unreachable: timeout')).toBeInTheDocument();
-    expect(fact('status')).toHaveTextContent('In Review · in progress');
-    expect(fact('assignee · reporter')).toHaveTextContent('Ada Lovelace · Grace Hopper');
+    expect(fact('Status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Assignee')).toHaveTextContent('Ada Lovelace');
     expect(screen.queryByText('loading…')).toBeNull();
   });
 
@@ -438,7 +443,7 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     answer = () => json({});
     mount();
     expect(await screen.findByText('could not read the ticket — malformed response')).toBeInTheDocument();
-    expect(fact('status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Status')).toHaveTextContent('In Review · in progress');
   });
 
   it('does not paint a late answer for the issue the modal has since been reopened on', async () => {
@@ -504,7 +509,7 @@ describe('JiraDetail — the session fact (Jira phase 5)', () => {
   it('reads `<name> · <repo> · <elapsed>` for a confirmed session', async () => {
     mount({ status: { live: SESSION() } });
     await screen.findByText('not');
-    expect(fact('session')).toHaveTextContent('jira PAY-131 · pay · 3h');
+    expect(fact('Session')).toHaveTextContent('jira PAY-131 · pay · 3h');
   });
 
   it('keeps counting while the modal stays open: the elapsed reading follows the clock', async () => {
@@ -512,11 +517,11 @@ describe('JiraDetail — the session fact (Jira phase 5)', () => {
     try {
       mount({ status: { live: { 'PAY-131': { ...SESSION()['PAY-131'], startedAt: new Date(Date.now() - 59 * 60_000).toISOString() } } } });
       await screen.findByText('not');
-      expect(fact('session')).toHaveTextContent('jira PAY-131 · pay · 59m');
+      expect(fact('Session')).toHaveTextContent('jira PAY-131 · pay · 59m');
       act(() => {
         jest.advanceTimersByTime(60_000);
       });
-      expect(fact('session')).toHaveTextContent('jira PAY-131 · pay · 1h');
+      expect(fact('Session')).toHaveTextContent('jira PAY-131 · pay · 1h');
     } finally {
       jest.useRealTimers();
     }
@@ -525,13 +530,13 @@ describe('JiraDetail — the session fact (Jira phase 5)', () => {
   it('reads `starting` while the key is only reserved', async () => {
     mount({ status: { live: SESSION({ starting: true }) } });
     await screen.findByText('not');
-    expect(fact('session')).toHaveTextContent(/^starting$/);
+    expect(fact('Session')).toHaveTextContent(/^starting$/);
   });
 
   it('reads `—` with no session on the key, and ignores another key\'s', async () => {
     mount({ status: { live: { 'PAY-9': SESSION()['PAY-131'] } } });
     await screen.findByText('not');
-    expect(fact('session')).toHaveTextContent(/^—$/);
+    expect(fact('Session')).toHaveTextContent(/^—$/);
   });
 });
 
@@ -734,7 +739,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     expect(card).toHaveAttribute('aria-label', 'Session starting');
     expect(within(card).getByText('Starting…')).toBeInTheDocument();
     expect(within(card).queryByRole('button')).toBeNull();
-    expect(fact('session')).toHaveTextContent(/^starting$/);
+    expect(fact('Session')).toHaveTextContent(/^starting$/);
   });
 
   it('says so when no session is running, and reads from the shell\'s live entry until the sessions payload lands', async () => {
@@ -747,7 +752,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     mount({ status: { live: SESSION() } });
     await screen.findByText('not');
     expect(cards()).toHaveLength(0);
-    expect(fact('session')).toHaveTextContent('jira PAY-131 · pay · 3h');
+    expect(fact('Session')).toHaveTextContent('jira PAY-131 · pay · 3h');
     expect(modalRun()).toBeDisabled();
   });
 
@@ -971,7 +976,7 @@ describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
 
     await act(async () => reread.release(json(detail({ assignee: ADA, description: 'Now **assigned**.' }))));
     expect(await screen.findByText('assigned')).toBeInTheDocument();
-    expect(fact('assignee · reporter')).toHaveTextContent('Ada Lovelace · Grace Hopper');
+    expect(fact('Assignee')).toHaveTextContent('Ada Lovelace');
     expect(assignChip()).toHaveAttribute('title', 'already assigned to you');
   });
 
