@@ -754,6 +754,12 @@ describe('branch detection (Jira sessions §5)', () => {
     expect(linkOf('PAY-152', 's2')).toBeUndefined();
   });
 
+  it('a trailing slash on the row path, and an underscore before the key, still match', async () => {
+    rows(row('s1', 'release_PAY-151', `${main}/`));
+    await reconciler.tick();
+    expect(linkOf('PAY-151', 's1')).toMatchObject({ repo: main });
+  });
+
   it('idle and incomplete rows are never detected', async () => {
     rows(row('s1', 'PAY-151-x', main, 'idle'), row('s2', 'PAY-152-x', main, 'incomplete'));
     await reconciler.tick();

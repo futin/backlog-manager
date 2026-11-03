@@ -67,22 +67,24 @@ export function branchCarriesKey(branch: string, key: string): boolean {
 }
 
 /**
- * Every ticket key `branch` carries, among the Jira projects in `projectKeys` (branch detection, Jira sessions §5): a project's `<PROJECT>-<digits>` token, found
- * by scanning the branch for runs of that shape and keeping the ones `branchCarriesKey` agrees are bounded on both sides — so `XPAY-1510-x` yields nothing for
- * `PAY`, and `PAY-1510-then-PAY-151` yields `PAY-151` only. Upper-cased, distinct, in order of first appearance. Not mirrored in `jira.mjs`, which has no use
- * for it.
+ * Every ticket key `branch` carries, among the Jira projects in `projectKeys` (branch detection, Jira sessions §5). The scan is PER PROJECT — `<PROJECT>-<digits>`
+ * bounded on both sides by a non-alphanumeric character or the string's edge, case-insensitively — and not one generic key-shaped pattern, because a generic
+ * pattern has to decide what a key's prefix may contain, and `_` is the case it cannot: `branchCarriesKey` treats it as a separator (`release_PAY-151` carries
+ * PAY-151) while a project key may itself hold one (`MY_PROJ-4`). `branchCarriesKey` stays the confirming check, so the two can never disagree. `XPAY-1510-x`
+ * yields nothing for `PAY`, and `XPAY-1510-then-PAY-151` yields `PAY-151` only. Upper-cased, distinct, ordered by first appearance in the branch across every
+ * project (not by the order of `projectKeys`). Not mirrored in `jira.mjs`, which has no use for it.
  */
 export function keysInBranch(branch: string, projectKeys: readonly string[]): string[] {
-  const projects = new Set(projectKeys.map((p) => p.toUpperCase()));
-  const found: string[] = [];
-  // A key is `<letters/digits/underscore starting with a letter>-<digits>`; the scan is deliberately wider than any one project and the project filter narrows it.
-  for (const m of branch.matchAll(/[A-Za-z][A-Za-z0-9_]*-\d+/g)) {
-    const key = m[0].toUpperCase();
-    const project = key.slice(0, key.lastIndexOf('-'));
-    if (!projects.has(project) || found.includes(key)) continue;
-    if (branchCarriesKey(branch, key)) found.push(key);
+  const hits: { at: number; key: string }[] = [];
+  for (const project of new Set(projectKeys.map((p) => p.toUpperCase()))) {
+    const escaped = project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const m of branch.matchAll(new RegExp(`(?<![A-Za-z0-9])${escaped}-\\d+(?![A-Za-z0-9])`, 'gi'))) {
+      const key = m[0].toUpperCase();
+      if (branchCarriesKey(branch, key)) hits.push({ at: m.index, key });
+    }
   }
-  return found;
+  hits.sort((x, y) => x.at - y.at);
+  return [...new Set(hits.map((h) => h.key))];
 }
 
 /**

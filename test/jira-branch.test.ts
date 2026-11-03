@@ -178,7 +178,13 @@ describe('keysInBranch', () => {
     ['PAY-1-and-PAY-2', ['PAY'], ['PAY-1', 'PAY-2']],
     ['pay-151-x', ['PAY'], ['PAY-151']],
     ['OPS-3-x', ['PAY'], []],
-    ['PAY-1-OPS-3-PAY-1', ['PAY', 'OPS'], ['PAY-1', 'OPS-3']]
+    ['PAY-1-OPS-3-PAY-1', ['PAY', 'OPS'], ['PAY-1', 'OPS-3']],
+    ['release_PAY-151', ['PAY'], ['PAY-151']],
+    ['feature_PAY-151-x', ['PAY'], ['PAY-151']],
+    ['bugfix_PAY-1-and-PAY-2', ['PAY'], ['PAY-1', 'PAY-2']],
+    ['MY_PROJ-4-x', ['MY_PROJ'], ['MY_PROJ-4']],
+    ['OPS-3-PAY-4', ['PAY', 'OPS'], ['OPS-3', 'PAY-4']],
+    ['PAY-15a', ['PAY'], []]
   ])('%s with %j gives %j', (branch, projects, expected) => {
     expect(keysInBranch(branch, projects)).toEqual(expected);
   });

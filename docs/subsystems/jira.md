@@ -422,7 +422,7 @@ pair it upgrades that entry to `run`), `release` (a `starting` entry only) — a
 reads that serve them, `get`, `snapshot` (the status payload's `live`), `confirmed` and `hasConfirmed`, all of which see `run` links alone. **The reconciler's
 and the page's** — `links`, `liveLinks` and `hasLive` (every `how`), `end(key, sessionId, reason)`, `reattach`, `markQuiet` and `clearQuiet`, and the dashboard
 cache `setRows`, `rowsAt`, `rowFor`, `markUnreachable`, `reachable`, `notePageRead` and `pageOpen`, which is memory only and never in the file. `addLink`,
-`unlink`, `isSuppressed`, `unsuppress`, `markNeverLink` and `isNeverLink` are for branch-detected and hand-made links, which no route makes yet. There is no
+`unlink`, `isSuppressed`, `unsuppress`, `markNeverLink` and `isNeverLink` are for branch-detected and hand-made links: the reconciler's detection pass makes the first, and no route makes the second yet. There is no
 `clear`: a session ends, it is not deleted. Live links are capped at `JIRA_LIVE_CAP` (100, a `starting` one counted): one more ends the oldest live link as
 `expired`, never a `starting` one; a live link older than `JIRA_LIVE_TTL_MS` (8 h, counted from the later of `startedAt` and `reattachedAt`) ends `expired`
 lazily, with no timer. `JiraModule` provides and exports it; `AgentsModule` imports `JiraModule`, so the dispatch, the stop and the reconciler reach it and the
