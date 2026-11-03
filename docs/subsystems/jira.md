@@ -526,12 +526,15 @@ section (eight dialogs). The browser still never talks to Jira or the dashboard:
   applies `Assign to me` and `Move to` BEFORE the spawn, so a Start refused after a write landed ends its sentence `— the assign stands` or `— the Jira writes
   stand`; the sheet reads that (`jiraWritesStand`) as `onWrote` — the same reload and nudge — and puts `Move to` back to `leave as is`, the refusal staying on
   screen. A refusal before any write changes nothing.
-- **The live strip.** `status.live` (the server's live `run` links, folded into the payload) is the one source: `cardSessions` lists a top's own session and
-  every folded
-  issue's, `sessionStrip` words each (`session · <repo basename>` and the elapsed reading or `starting`), and `JiraCard` draws one `ui/LiveStrip` per entry,
-  first in the card. The strip, and the modal's `Stop session` with it, clear on the next status read — the board's timer, a window focus, or the reload after a
-  write — so a session that has ended can linger up to a board interval (at most `5m`, and no timer at all while every board is `off`) although the server's
-  reconciler ends it once the dashboard has stopped reporting it busy for two minutes.
+- **The deck.** The Board page's live sessions are the agent deck above the status shelves (`JiraAgentDeck`, `JiraShelves`; DESIGN.md §8.9.1). The
+  sessions come from the one `useJiraSessionsContext()` provider — never a second poll — and `boardAgents` (`lib/jira-deck.ts`) turns the folded board plus
+  `GET /api/jira/sessions` into entries: every non-ended link whose key is a top or folded under one, plus a `starting` entry for each `status.live[key]`
+  that carries `starting`, because the sessions payload never does. `deckGroup` orders them (needs you, working, quiet, then starting and lost, newest first),
+  `boardShelves` cuts the shelves — a top with an agent on itself or on a folded child leaves them, decided from the unfiltered agents — and `SHELF_LIMIT`
+  (8, 8, 3) caps the rows. `foldMatches` applies to deck and shelves alike. A ticket's newest ended session is the shelf card's `ended` line. `status.live` is
+  still the shell's reservation source and still what the Run chip gates on; it no longer draws a strip on a card, so a `live` entry with no payload link yet
+  (before the first sessions answer) leaves its top on the shelf with no deck card until that answer lands. The deck, like Detail, clears on the next read of
+  the sessions provider.
 - **The modal's session.** A `session` fact (`<name> · <repo> · <elapsed>`, `starting`, or `—`) and `Stop session`, a 28 px chip replaced in place by
   `ui/Confirm`, drawn only while agents are enabled AND the key has a confirmed, non-`starting` entry (`StopSession` is mounted for that case alone, so
   `useAgents()` is read only then). It posts `stopJira(key, sessionId)` (`POST /api/agents/jira-stop`, naming the session the entry holds) through the same

@@ -1,11 +1,14 @@
-import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, sessionStrip, type cardFold, type JiraCardSession } from '../../lib/jira';
+import { useNarrow } from '../../hooks/useNarrow';
+import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, type cardFold } from '../../lib/jira';
+import { endedLine } from '../../lib/jira-deck';
+import { openButtons, type SessionLink } from '../../lib/jira-sessions';
 import type { JiraAction, JiraBoard, JiraIssue, JiraWorktree } from '../../../../shared/types';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
-import { LiveStrip } from '../ui/LiveStrip';
 import { Marker } from '../ui/Marker';
 import { Pill } from '../ui/Pill';
 import { SpreadBar } from '../ui/SpreadBar';
 import { JiraRunMenu } from './JiraRunMenu';
+import { OpenChip } from './JiraSessionCard';
 
 /**
  * JiraCard — one issue on the Jira board (Jira phase 2, spec §6.2; DESIGN.md §8.9.1, which applies §8.3's card to a Jira issue).
@@ -36,10 +39,14 @@ import { JiraRunMenu } from './JiraRunMenu';
  * and neither is drawn; with no filter and no search every top matches itself, so nothing is ever ringed then — no special case. The ring is a page
  * class rather than a `.board-card` variant: it is this board's reading of a filter, not a look the Board's card has.
  *
- * **`Run ▾` and the live strip** (Jira phase 5, spec §6.2, §7; DESIGN.md §8.9.1). The marker row is ALWAYS drawn now — `Run ▾` is its last item, pushed to
- * the right edge (`JiraRunMenu`; it stops the card's click and Enter/Space, as the link out does). A session on this issue, or on any issue folded under
- * it, draws a `LiveStrip` (`board-card-live hatch`, the Board's look) before the face, one per session, the folded ones naming their key — a folded issue
- * is not a card, so without that its session would show nowhere on the board. `sessions` is `cardSessions`' list, computed once by the page.
+ * **`Run ▾`, and no live strip any more** (Jira phase 5, spec §6.2, §7; Jira sessions spec §7.1; DESIGN.md §8.9.1). The marker row is ALWAYS drawn — `Run ▾`
+ * is its last item, pushed to the right edge (`JiraRunMenu`; it stops the card's click and Enter/Space, as the link out does). A top with a live session on
+ * itself or on anything folded under it is not a shelf row at all: its deck card (`JiraAgentDeck`) represents it, so this card never draws the `LiveStrip`
+ * it used to, and `lib/jira-deck.ts` is what takes the row off the shelf.
+ *
+ * **The extra line** (Jira sessions spec §7.1). `ended` is the ticket's own ended sessions, newest first; `endedLine` turns them into `run ended 2h ago` with
+ * a Reopen link for one, or `N sessions` for several, and a ticket that was never run draws nothing. It sits after the marker row so the face's order is
+ * still the card's own, and Reopen stops the card's click and Enter/Space for the reason the link out does.
  *
  * **The worktree chip** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1). `trees` is `ticketWorktrees`' answer for THIS card's own key, computed once by the
  * page from its one `GET /api/jira/worktrees`: the branch name when the ticket has one tree, `N worktrees` when it has several, the paths in the title. A card
@@ -57,7 +64,7 @@ export function JiraCard({
   now,
   fold,
   matches,
-  sessions,
+  ended,
   trees,
   onOpen,
   onRun
@@ -68,7 +75,7 @@ export function JiraCard({
   now: number;
   fold: ReturnType<typeof cardFold>;
   matches: readonly string[];
-  sessions: readonly JiraCardSession[];
+  ended: readonly SessionLink[];
   trees: readonly JiraWorktree[];
   onOpen: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
@@ -76,6 +83,8 @@ export function JiraCard({
   const crumb = crumbText(crumbOf(issue, board, me));
   const match = matchMarker(matches);
   const open = (): void => onOpen(issue);
+  const last = endedLine(ended, now);
+  const phone = useNarrow();
 
   return (
     <div
@@ -90,11 +99,6 @@ export function JiraCard({
         }
       }}
     >
-      {/* The strips sit OUTSIDE the face, as ItemCard's does, so they reach the card's own edges (§8.3). */}
-      {sessions.map((entry) => {
-        const strip = sessionStrip(entry, now);
-        return <LiveStrip key={entry.key} tone="session" label={strip.label} mark={strip.mark} title={strip.title} />;
-      })}
       <div className="board-card-face">
         <div className="jira-card-head">
           {/* The type is the icon's title rather than a word on the row: the key and the crumb need the width, and the type is the reading a person
@@ -153,6 +157,22 @@ export function JiraCard({
           )}
           <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />
         </div>
+        {last !== null && (
+          <div className="jira-card-ended" data-testid="ended-line">
+            <span>{last.text}</span>
+            {last.reopen !== null && last.reopen.sessionId !== null && (
+              // Stops the click and the two keys the card answers to, so Reopen opens the session and never Detail on top of it.
+              <span
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+                }}
+              >
+                <OpenChip button={openButtons(last.reopen, null, 'ended', { phone, wide: false }).primary} sessionId={last.reopen.sessionId} row={null} primary={false} onHandover={() => {}} />
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

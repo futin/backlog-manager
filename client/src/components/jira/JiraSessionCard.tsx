@@ -14,16 +14,18 @@ import {
   desktopHref,
   linkedHow,
   openButtons,
+  runLabel,
   sessionDuration,
   shortSessionId,
+  stripTitle,
   surfaceWord,
   type OpenButton,
   type SessionLink
 } from '../../lib/jira-sessions';
 import { formatZonedClock } from '../../lib/time-zone';
 import { pollAge } from '../../lib/tracker';
-import { QUIET_TITLE, STATE_LABEL, type JiraSessionState } from '../../../../shared/jira-sessions';
-import { JIRA_BUILTIN_LABELS, type JiraLink, type JiraLiveSession } from '../../../../shared/types';
+import { STATE_LABEL } from '../../../../shared/jira-sessions';
+import type { JiraLiveSession } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Confirm } from '../ui/Confirm';
 import { LiveStrip } from '../ui/LiveStrip';
@@ -54,22 +56,6 @@ import { Meter } from '../ui/Meter';
  *   dashboard has agents enabled (`StopSession` reads `useAgents()`), so a Stop the dashboard would refuse is not drawn.
  */
 
-/** The title a state strip carries when its words alone leave a question open (§6, §7.5): what Quiet cannot tell, and where a permission dialog is answered. */
-function stripTitle(state: JiraSessionState): string | undefined {
-  if (state === 'quiet') return QUIET_TITLE;
-  if (state === 'permission') return 'A permission dialog is answered where the session runs — nothing can answer it remotely';
-  if (state === 'lost') return 'The dashboard did not answer — what is shown is the last it said';
-  return undefined;
-}
-
-/** What the Run line of a card reads: the action's own name for a Run ▾ link, the session's name for a detected or hand-made one (`action` is null there). */
-function actionLabel(link: JiraLink, skills: readonly { id: string; name: string }[]): string {
-  const a = link.action;
-  if (a === null) return link.name;
-  if (a === 'execute' || a === 'context') return JIRA_BUILTIN_LABELS[a];
-  return skills.find((k) => k.id === a.skill)?.name ?? a.skill;
-}
-
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
@@ -80,7 +66,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** One Dashboard or Desktop button, drawn from `openButtons`' answer and `desktopButton`'s verdict (see the header). */
-function OpenChip({
+export function OpenChip({
   button,
   sessionId,
   row,
@@ -172,7 +158,7 @@ export function JiraSessionCard({
       <LiveStrip tone={state} label={STATE_LABEL[state]} mark={pollAge(link.stateSince, now)} title={stripTitle(state)} />
       <div className="jira-sess-face">
         <dl className="jira-sess-facts">
-          <Row label="Run">{actionLabel(link, data?.skills ?? [])}</Row>
+          <Row label="Run">{runLabel(link, data?.skills ?? [])}</Row>
           {where !== null && <Row label="Where">{where}</Row>}
           {model !== '' && <Row label="Model">{model}</Row>}
           {pct !== undefined && (

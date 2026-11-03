@@ -69,8 +69,9 @@ import {
 import type { JiraFold } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
+import { SHELF_LIMIT, boardAgents, boardShelves, deckCrumb, deckGroup, deckTally, endedLine } from '../client/src/lib/jira-deck';
 import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
-import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraRepoRefs, JiraSessionsPayload, JiraSkill, JiraStatusPayload } from '../shared/types';
+import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraRepoRefs, JiraSessionsPayload, JiraSkill, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
 
 /**
@@ -1484,5 +1485,105 @@ describe('branch choice derivations', () => {
       expect(continueOffTicket({ mode: 'new', branch: 'develop', base: 'main', openMr: false }, 'TIMIFY-123')).toBe(false);
       expect(continueOffTicket({ mode: 'none' }, 'TIMIFY-123')).toBe(false);
     });
+  });
+});
+
+/*
+  The Board's deck and shelves (Jira sessions, Task 11; spec §7.1, C8) — `lib/jira-deck.ts`, pure. A session is a payload link; a Starting one is a status `live`
+  reservation with no link, because the sessions endpoint never carries one.
+*/
+describe('lib/jira-deck', () => {
+  const NOW = Date.parse('2026-11-03T12:00:00Z');
+  const hoursAgo = (h: number): string => ago(NOW, h * 3_600_000);
+  type Link = JiraSessionsPayload['links'][number];
+  const link = (key: string, id: string | null, state: Link['state'], startedH: number, over: Partial<Link> = {}): Link =>
+    ({
+      key, sessionId: id, how: 'run', action: 'context', name: 'jira run', repo: '/Users/ada/pay', branch: null, surface: 'dashboard', model: 'opus', effort: null,
+      snapshot: { summary: 'x', type: 'Story', parentKey: null }, startedAt: hoursAgo(startedH), endedAt: null, endReason: null, quietSince: null, reattachedAt: null,
+      state, row: null, stateSince: hoursAgo(startedH), ...over
+    }) as Link;
+  const answer = (links: Link[]): JiraSessionsPayload => ({ links, reachable: true, rowsAt: null }) as JiraSessionsPayload;
+  const reservation = (h: number): JiraLiveSession => ({ sessionId: null, name: 'jira PAY-5', startedAt: hoursAgo(h), repo: '/Users/ada/pay', starting: true });
+
+  const top = issue({ key: 'PAY-1', summary: 'Top' });
+  const child = issue({ key: 'PAY-2', summary: 'Child', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-1', summary: 'Top' } });
+  const other = issue({ key: 'PAY-3', summary: 'Other' });
+  const fold = foldBoard([top, child, other]);
+
+  it('deckGroup puts the four wait states in Needs you, and the rest where §7.1 says', () => {
+    expect(['plan', 'permission', 'reply', 'answer'].map((s) => deckGroup(s as Link['state']))).toEqual(['needs', 'needs', 'needs', 'needs']);
+    expect(deckGroup('working')).toBe('working');
+    expect(deckGroup('quiet')).toBe('quiet');
+    expect([deckGroup('starting'), deckGroup('lost')]).toEqual(['other', 'other']);
+  });
+
+  it('boardAgents orders by group, then newest start, and draws a reservation from `live` and never an ended link', () => {
+    const entries = boardAgents(
+      fold,
+      answer([
+        link('PAY-1', 'a', 'quiet', 5),
+        link('PAY-3', 'b', 'working', 4),
+        link('PAY-2', 'c', 'plan', 3),
+        link('PAY-3', 'd', 'ended', 9, { endedAt: hoursAgo(8) }),
+        link('PAY-99', 'e', 'working', 1)
+      ]),
+      { 'PAY-3': reservation(1) }
+    );
+    expect(entries.map((e) => `${e.issue.key}:${e.state}`)).toEqual(['PAY-2:plan', 'PAY-3:working', 'PAY-1:quiet', 'PAY-3:starting']);
+    expect(deckTally(entries)).toEqual({ needs: 1, working: 1 });
+  });
+
+  it('boardAgents ignores a live entry that is not starting, and every payload when none has loaded', () => {
+    expect(boardAgents(fold, null, { 'PAY-1': { ...reservation(1), starting: false, sessionId: 's' } })).toEqual([]);
+  });
+
+  it('a session on a folded child belongs to the top, and its crumb names the top', () => {
+    const [entry] = boardAgents(fold, answer([link('PAY-2', 'c', 'working', 2)]), {});
+    expect(entry.issue.key).toBe('PAY-2');
+    expect(entry.top.key).toBe('PAY-1');
+    expect(deckCrumb(entry, [])).toMatch(/^↳ PAY-1 · /);
+    expect(deckCrumb(entry, [])).toContain('pay');
+    const [own] = boardAgents(fold, answer([link('PAY-1', 'a', 'working', 2)]), {});
+    expect(deckCrumb(own, [])).not.toContain('↳');
+  });
+
+  it('boardShelves takes a top with a live session on itself or a folded child off its shelf, and leaves the others', () => {
+    const agents = boardAgents(fold, answer([link('PAY-2', 'c', 'working', 2)]), {});
+    const shown = foldMatches(fold, () => true);
+    const shelves = boardShelves(fold, shown, agents, null);
+    expect(shelves.map((s) => s.slug)).toEqual(['todo', 'doing', 'done']);
+    expect(shelves[0].cards.map((c) => c.issue.key)).toEqual(['PAY-3']);
+  });
+
+  it('boardShelves applies the filter to the shelves while the deck exclusion stays independent of it', () => {
+    const agents = boardAgents(fold, answer([link('PAY-3', 'x', 'working', 1)]), {});
+    // A filter that keeps nothing: the live top is not resurrected, and the others are gone by the filter.
+    const none = boardShelves(fold, foldMatches(fold, () => false), agents, null);
+    expect(none.every((s) => s.cards.length === 0)).toBe(true);
+    // A filter that keeps only the live top: it stays off the shelves.
+    const onlyLive = boardShelves(fold, foldMatches(fold, (i) => i.key === 'PAY-3'), agents, null);
+    expect(onlyLive.every((s) => s.cards.length === 0)).toBe(true);
+  });
+
+  it('boardShelves hangs each top’s own ended sessions on its row, newest end first', () => {
+    const payload = answer([
+      link('PAY-3', 'o', 'ended', 9, { endedAt: hoursAgo(8) }),
+      link('PAY-3', 'n', 'ended', 5, { endedAt: hoursAgo(2) }),
+      link('PAY-2', 'f', 'ended', 5, { endedAt: hoursAgo(1) })
+    ]);
+    const shelves = boardShelves(fold, foldMatches(fold, () => true), [], payload);
+    const rows = Object.fromEntries(shelves[0].cards.map((c) => [c.issue.key, c.ended.map((l) => l.sessionId)]));
+    expect(rows).toEqual({ 'PAY-3': ['n', 'o'], 'PAY-1': [] });
+  });
+
+  it('SHELF_LIMIT is 8, 8 and 3', () => {
+    expect(SHELF_LIMIT).toEqual({ todo: 8, doing: 8, done: 3 });
+  });
+
+  it('endedLine: nothing for none, a Reopen for one, `N sessions` for several', () => {
+    expect(endedLine([], NOW)).toBeNull();
+    const one = link('PAY-3', 'o', 'ended', 5, { endedAt: hoursAgo(2) });
+    expect(endedLine([one], NOW)).toEqual({ text: 'run ended 2h ago', reopen: one });
+    expect(endedLine([one, one], NOW)).toEqual({ text: '2 sessions', reopen: null });
   });
 });

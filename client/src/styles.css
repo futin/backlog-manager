@@ -1351,6 +1351,29 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-sess-mono { font-size: 11px; color: var(--ink2); overflow-wrap: anywhere }
 .jira-sess-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
 
+/* The agent deck (spec §7.1, DESIGN.md §8.9.1): a heading row with the tally, then a wrapping grid of session cards above the status shelves. A card wears
+   `.jira-sess`'s ground, radius and face padding (restated at deck width, not composed: that class also fixes Detail's 290 px column), with the grid, the
+   heading and the three lines the deck card adds: the summary button (14/500 like a board card's title), the buttons row and the quiet context %. */
+.jira-deck { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px }
+.jira-deck-head { display: flex; align-items: baseline; gap: 12px; font-size: 12px; color: var(--ink3) }
+.jira-deck-head h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink) }
+.jira-deck-need { font-weight: 600; color: var(--amber-text) }
+.jira-deck-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px }
+.jira-deck-card { background: var(--strip); border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden; min-width: 0 }
+.jira-deck-face { display: flex; flex-direction: column; gap: 8px; padding: 10px var(--card-pad-x) 12px }
+.jira-deck-title {
+  width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer;
+  font: inherit; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--ink);
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.jira-deck-title:hover { text-decoration: underline }
+.jira-deck-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
+.jira-deck-ctx { margin-left: auto; font-size: 12px; color: var(--ink3); white-space: nowrap }
+/* A shelf's `+ N more` / `show fewer`: a quiet row at the foot of the column, left-aligned with the cards' own edge. */
+.jira-shelf-more { display: flex; padding-top: 2px }
+/* The shelf row's extra line (spec §7.1): the newest ended session, or `N sessions`. Quiet, a step under the marker row, and Reopen sits right after the words. */
+.jira-card-ended { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--ink3) }
+
 /* The history timeline (spec §7.3): newest first, a hairline down the left with a node per entry. A line's head is `<how> · ended <age> ago`, its Reopen
    sits at the right of the head, and the meta (surface · duration · name) is a quiet line under both. */
 .jira-hist-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column }
