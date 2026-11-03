@@ -205,12 +205,22 @@ describe('refusals — the dashboard is not asked', () => {
     ['a numeric sessionId', { key: 'PAY-1', sessionId: 7 }],
     ['an empty sessionId', { key: 'PAY-1', sessionId: '' }],
     ['a sessionId with a path in it', { key: 'PAY-1', sessionId: '../x' }],
-    ['an over-long sessionId', { key: 'PAY-1', sessionId: 'a'.repeat(129) }]
+    ['an over-long sessionId', { key: 'PAY-1', sessionId: 'a'.repeat(129) }],
+    ['`..` as the sessionId', { key: 'PAY-1', sessionId: '..' }],
+    ['a sessionId with a leading dot', { key: 'PAY-1', sessionId: '.x' }]
   ])('400 `invalid session id` for %s', async (_label, body) => {
     seedLive();
     expect((await post(body).expect(400)).body).toEqual({ error: 'invalid session id' });
     expect(calls).toEqual([]);
     expect(live.get('PAY-1')?.sessionId).toBe('sess-1');
+  });
+
+  /* The leading-alphanumeric rule must not cost a legitimate id: it passes the validator and is refused only for not being live. */
+  it('accepts a short id and an id with inner dots, dashes and underscores', async () => {
+    seedLive('PAY-1', 'a.b_c-1');
+    await post({ key: 'PAY-1', sessionId: 'a.b_c-1' }).expect(200);
+    seedLive('PAY-2', 's1');
+    await post({ key: 'PAY-2', sessionId: 's1' }).expect(200);
   });
 
   /* Not live on THIS key: another key's session, an unknown one, and one that already ended all read the same — nothing to stop, and the dashboard is not asked. */

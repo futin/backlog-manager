@@ -74,7 +74,7 @@ describe('jiraSessionName', () => {
   });
 });
 
-describe('reserve / confirm / release / clear', () => {
+describe('reserve / confirm / release / end', () => {
   it('a reserve reads as a starting entry with no session id', () => {
     expect(live.reserve('PAY-1', REPO)).toBe(true);
     expect(live.snapshot()).toEqual({ 'PAY-1': { name: 'jira PAY-1', sessionId: null, startedAt: new Date(T0).toISOString(), repo: REPO, starting: true } });

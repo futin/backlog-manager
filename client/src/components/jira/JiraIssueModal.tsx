@@ -59,11 +59,11 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  *
  * - **`Run ▾`** (`JiraRunMenu`, the card's own chip) → `onRun(issue, action)`; the launch sheet is hosted by `JiraView`, ABOVE this modal, so Escape closes the
  *   sheet alone and the modal under it on the next press. It reads the shell's status and draws its own disabled / dashed readings; it is never hidden.
- * - **`Stop session`**, a 28 px `Chip` → `ui/Confirm` → `POST /api/agents/jira-stop` `{ key, sessionId }`, drawn ONLY while the dashboard has agents enabled AND the shell's
- *   status holds a CONFIRMED (not `starting`) entry for the key — a starting entry has no process to stop yet, and the server would 409 it. It rides the same
- *   `useAction` as the two writes above, so one guard and one error line serve all three; a landed stop reloads the status and nudges the board, and that
- *   reload is the strip going away (spec §11). `StopSession` is mounted only for a confirmed entry, which is also the only time `useAgents()` reads
- *   `/api/agents/status`: a key with no session never asks.
+ * - **`Stop session`**, a 28 px `Chip` → `ui/Confirm` → `POST /api/agents/jira-stop` `{ key, sessionId }`, drawn ONLY while the dashboard has agents
+ *   enabled AND the shell's status holds a CONFIRMED (not `starting`) entry for the key — a starting entry has no process to stop yet, and the server would
+ *   409 it. It rides the same `useAction` as the two writes above, so one guard and one error line serve all three; a landed stop reloads the status and
+ *   nudges the board, and that reload is the strip going away (spec §11). `StopSession` is mounted only for a confirmed entry, which is also the only time
+ *   `useAgents()` reads `/api/agents/status`: a key with no session never asks.
  *
  * **The Worktrees list** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.2) sits under the body and above the comments note, independent of the detail read: the
  * trees come from `GET /api/jira/worktrees`, which this modal asks for itself — on open, and again when the key changes or a session on it starts or ends
@@ -246,6 +246,8 @@ export function JiraIssueModal({
     });
   };
   const live = data?.live[issue.key] ?? null;
+  // The id Stop names: a confirmed entry's only (a `starting` one has none), held as its own const so the click handler needs no cast.
+  const stoppableSession = live !== null && !live.starting ? live.sessionId : null;
   const sessionLine =
     live === null
       ? '—'
@@ -291,7 +293,7 @@ export function JiraIssueModal({
           onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
         />
         <JiraRunMenu issue={issue} home="modal" onPick={(action) => onRun(issue, action)} />
-        {live !== null && live.sessionId !== null && !live.starting && <StopSession key={issue.key} busy={busy} onStop={() => stop(live.sessionId as string)} />}
+        {stoppableSession !== null && <StopSession key={issue.key} busy={busy} onStop={() => stop(stoppableSession)} />}
       </div>
       {writeError !== null && (
         <p className="jira-modal-error" role="alert">

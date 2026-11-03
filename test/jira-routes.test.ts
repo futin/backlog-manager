@@ -183,6 +183,8 @@ describe('configured, against a healthy Jira', () => {
         live.confirm('PAY-131', 'sess-1', RUN_META);
         expect(((await get('').expect(200)).body as JiraStatusPayload).live['PAY-131'].starting).toBe(false);
       } finally {
+        // Whichever state an early assertion failure left it in: `release` drops a `starting` reservation, `end` a confirmed run (each a no-op on the other).
+        live.release('PAY-131');
         live.end('PAY-131', 'sess-1', 'stopped');
       }
       expect((await get('').expect(200)).body.live).toEqual({});
