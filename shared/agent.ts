@@ -523,15 +523,15 @@ export const IN_REVIEW_REASON = 'a PR is open for this item';
  * Per-item, beside `runClaimBlock` and read by both ladders — the client's `DispatchButton` (after the in-progress block, before the run claim: the label is
  * on the item this board renders, while a run claim is the volatile fact about another worktree) and the server's `plan`/`dispatch` (after `dispatchBlock`,
  * before the run claim, for the same reason). `dispatchGate`/`dispatchBlock` stay project-level and never learn about it. A files item never carries the
- * flag — its PR guard is the execute branch or tree, `EXECUTE_HELD_REASON` below — so this reads the flag alone and does not re-check the source.
+ * flag — its nearest guard is a new tree's execute branch or directory, `EXECUTE_HELD_REASON` below — so this reads the flag alone and does not re-check the source.
  */
 export function inReviewBlock(item: BacklogItem): string | null {
   return item.inReview === true ? IN_REVIEW_REASON : null;
 }
 
 /**
- * The execute-held guard's one sentence (#427): a files item's `--finish pr` execute leaves `execute/<id>` or `.worktrees/execute-<id>` behind, and the item
- * stays in `open/` on the base until the PR merges. NOT `IN_REVIEW_REASON`: this says what is known, a branch or a tree, and nothing here asked whether a PR
+ * The execute-held guard's one sentence (#427): a files item's `--finish pr` execute in a new tree leaves `execute/<id>` or `.worktrees/execute-<id>` behind,
+ * and the item stays in `open/` on the base until the PR merges. An execute that reused a linked worktree leaves neither name and is not caught. NOT `IN_REVIEW_REASON`: this says what is known, a branch or a tree, and nothing here asked whether a PR
  * is open — the branch may be a leftover, which a person deletes. Read by the server's `plan`/`dispatch` ladder (`executeHeldBlock`, because it reads git and
  * `shared/` cannot) and the orchestrator's gate, whose hand-kept copy in `orchestrate.mjs` is pinned to this constant by a jest twin test.
  */

@@ -3690,7 +3690,7 @@ export async function main(argv) {
   // reads as "a PR is open for this item": execute runs it right after a successful push, so pushed work waiting on a reviewer is never executed twice.
   // `off` is the person's way out when a PR closes WITHOUT merging, or targets a non-default base, and leaves the label on an open issue.
   //
-  // Tracker-only: the guard is a label, and a files project has nothing to carry it (its PR guard is a named known limitation). The
+  // Tracker-only: the guard is a label, and a files project has nothing to carry it (its nearest guard is a new tree's execute branch or directory, #427). The
   // usage check runs before `requireStore`, so a malformed call makes no request on any path; after it, the same exit codes every tracker verb has —
   // `5` with the stack down, `1` with the server's own sentence for a refusal.
   if (cmd === 'review') {

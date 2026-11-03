@@ -2245,7 +2245,8 @@ function planReviewGate(flag, verdict) {
 // cannot import it. It says what is known, a branch or a tree, and never that a PR is open: nothing here asked GitHub.
 const EXECUTE_HELD_REASON = 'an execute branch or worktree already holds this item';
 
-// Whether a `--finish pr` execute, by hand or a tick's, holds this files item: `execute/<id>` or `.worktrees/execute-<id>`, each an exact name. TWIN of
+// Whether a `--finish pr` execute in a new tree, by hand or a tick's, holds this files item: `execute/<id>` or `.worktrees/execute-<id>`, each an exact name.
+// One that reused a linked worktree on its own branch makes neither and is not caught: nothing on disk ties that branch to the item. TWIN of
 // `executeTaken` in `skills/backlog-tick/tools/tick.mjs` and of `executeHeldBlock` in `server/src/agents/execute-held.util.ts`; a skill's `tools/` imports
 // neither. Its item stays in `open/` on the base until the PR merges, and a tracker item's `in-review` label has nothing to ride on here, so these two names
 // are the only record on this machine that the work has been done. Files only: `trackerCandidates` never calls this, because a tracker item's guard is its
@@ -6572,7 +6573,7 @@ function cmdAbort() {
     const lease = runDriver(read);
     if (read.status === 'running' && me !== null && lease !== null && lease.sessionId !== me && typeof lease.aborting === 'string' && isFresh(lease.aborting)) {
       throw new OrchestrateError(
-        `run ${read.runId} is already being aborted by session ${lease.sessionId} (since ${lease.aborting}) — another session is ending this read. ` +
+        `run ${read.runId} is already being aborted by session ${lease.sessionId} (since ${lease.aborting}) — another session is ending this run. ` +
           'Stop immediately: write nothing, do not read, `git status` or otherwise inspect any worktree, and end the turn.',
         EXIT_FOREIGN_DRIVER
       );
@@ -6838,7 +6839,9 @@ function cmdAbort() {
 
   // #427: the one write the teardown makes, onto a fresh read, of only what it decided. Everything else on the file survives — a `verification` array a
   // `verify` beside this wrote, a heartbeat. A session id fills an empty field and never replaces one, the rule `resolveItemSessionId` applied to the older
-  // read: the file's value is the newer fact. `mutateRun`'s `assertDriver` is the check `cmdFinish` below would make anyway, one lock sooner.
+  // read: the file's value is the newer fact. `mutateRun`'s `assertDriver` can refuse here, where the old bare write could not: a stale unlocked `heartbeat`, `usage`
+  // or `stage` from a live driver that puts its lease back during the teardown makes this exit `7` with the run still `running` and these entries dropped. That
+  // driver's next `watch` exits `10` and aborts again, re-deriving them; if it died in that window, a person runs `abort`.
   mutateRun(dir, (fresh) => {
     for (const entry of attention) fresh.attention.push(entry);
     for (const item of fresh.queue) {

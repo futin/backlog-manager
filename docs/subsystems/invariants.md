@@ -1813,6 +1813,8 @@ answer:
   and server-side only: `plan` and `dispatch()` refuse with `an execute branch or worktree already holds this item`, and `DispatchButton` stays enabled because the
   answer is a git read its payload never carries. A `--finish pr` execute leaves `execute/<id>` and `.worktrees/execute-<id>` behind while the item stays in `open/`,
   so without this a click, or an orchestrator run through `executeHeldGate`, executes it twice. Execute only, a files item only, per request; a failed read is not held.
+  A session that reused a clean linked worktree on its own branch made neither name, and nothing on disk ties that branch to the item, so its item stays unguarded
+  until the PR merges, and its final message says so.
 - **An outsider filed this item and no groom has pinned its body** — `unvettedBlock` (`shared/agent.ts`, #341): a tracker bug or task whose author is not
   OWNER, MEMBER or COLLABORATOR, mapped to `unvetted: true` until a live claim of ours carries `pin` equal to the body's hash. It reads `UNVETTED_REASON`, and
   the server's `plan` and `dispatch()` refuse with the same sentence, for the same reason the open PR does: the mark is derived from the tracker, which any
@@ -4049,7 +4051,8 @@ text): the board's Run button, the server's `plan`/`dispatch` ladder (an uncoded
 reason so no new verdict reaches the run's stages. A files project has no label to carry, so `review` is tracker-only, and a files item's guard is what a
 `--finish pr` execute leaves behind, its `execute/<id>` branch or `.worktrees/execute-<id>` tree (#427): `an execute branch or worktree already holds this item`
 (`EXECUTE_HELD_REASON`), read by the server's `plan`/`dispatch` (`executeHeldBlock`, per request, execute only) and the orchestrator gate. It says what is known and
-never that a PR is open — nothing here asked GitHub — and a leftover branch blocks until a person deletes it. A tracker item is not asked: a person clears its
+never that a PR is open — nothing here asked GitHub — and a leftover branch blocks until a person deletes it. An execute that reused a linked worktree on its own
+branch leaves neither name, so its item has no guard until the PR merges. A tracker item is not asked: a person clears its
 label after a closed PR without being asked to delete a branch.
 
 **The eleventh write route is `plan-review` (backlog-tick), and it is `review`'s twin.** `POST /api/items/plan-review`, body `{ project, id, planReview }`, adds

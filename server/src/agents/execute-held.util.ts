@@ -8,7 +8,8 @@ import { runGit } from '../git-run.util';
 /**
  * execute-held.util.ts — why this files item cannot be executed again because an execute already holds it, or null (#427).
  *
- * A `--finish pr` execute leaves `execute/<id>` and `.worktrees/execute-<id>` behind, and a files item stays in `open/` on the base until its PR merges. A
+ * A `--finish pr` execute in a new tree leaves `execute/<id>` and `.worktrees/execute-<id>` behind (one that reused a linked worktree on its own branch leaves
+ * neither, and nothing on disk ties that branch to the item, so this does not catch it), and a files item stays in `open/` on the base until its PR merges. A
  * tracker item has its `in-review` label to say so; a files item has only these two names, and without this rung it reads ready to every gate, so a click on
  * Run starts a second execution of work already waiting on a reviewer. A TWIN of `executeTaken` in `skills/backlog-tick/tools/tick.mjs` and `executeHeld` in
  * `skills/backlog-orchestrate/tools/orchestrate.mjs` — a change to the names is a change to all three.

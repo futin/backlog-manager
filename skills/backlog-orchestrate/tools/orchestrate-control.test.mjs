@@ -796,6 +796,7 @@ test('bug-54: a live abort mark refuses a second identified abort with 7, writin
   assert.equal(out.status, 7, out.stderr);
   assert.match(out.stderr, /sess-a/);
   assert.match(out.stderr, /already being aborted/);
+  assert.match(out.stderr, /another session is ending this run/);
   assert.match(out.stderr, /worktree/);
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused abort wrote to the run file');
   assert.equal(fs.existsSync(worktree), true, 'a refused abort removed the worktree');

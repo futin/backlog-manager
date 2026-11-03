@@ -43,7 +43,7 @@ force-pushes, and under an `[orchestrator-run` marker ignores the mode entirely 
 In a tracker project nothing is archived: the claim is held through the review, and after the push
 `backlog.mjs review <id> on` puts the `in-review` label on, so every gate reads the open issue as `a PR is open for this item` until the PR merges — a
 `Closes #<n>` merge shuts the issue, and a `Refs #<n>` one into the default branch lifts the guard by derivation (#411) while the issue stays open. In a files
-project the branch and tree are the guard (#427): `orchestrate.mjs`'s `executeHeldGate`, applied over `planReviewGate`, turns the item `ungroomed` with
+project a new tree's branch and directory are the guard (#427), and a reused tree on its own branch has neither name, so nothing guards its item until the PR merges: `orchestrate.mjs`'s `executeHeldGate`, applied over `planReviewGate`, turns the item `ungroomed` with
 `an execute branch or worktree already holds this item` (a hand-kept copy of `EXECUTE_HELD_REASON`), and the server's `plan`/`dispatch` refuse it with the same
 sentence, while a leftover branch blocks until a person deletes it. The board's execute launch sheet is where the flag normally comes from: its Finish picker (seeded from the `executeDefaultFinish` setting) and Base select
 make the server append the clause, and a typed trigger carries the same flag by hand.
