@@ -72,10 +72,13 @@ Anti-goals — any of these makes the work a failure even if it ships:
   person drives, the CLI or the desktop app, and the row cannot tell which. `cloud` rows have no local transcript and never reach this server.
   - `surface: 'dashboard'` with `desktopOwned`: enabled, as the href `claude://resume?session=<id>` (the app already owns it).
   - `surface: 'dashboard'` otherwise: enabled exactly when the dashboard's own hand-over would accept it — no `stopState`, no `processLive`, none of
-    `remoteQuestion` / `remotePlan` / `remoteReply`, and `status` is `idle` or `incomplete` (the predicate behind `stillRunningNote` in the dashboard's
-    `client/src/lib/resume.ts` and the 409 of its `POST /api/spawn`). A held wait is a running process mid-turn, so it is answered in the Dashboard.
+    `remoteQuestion` / `remotePlan` / `remoteReply`, and `status` is `idle` or `incomplete` (the dashboard's `handOverState` → `'offer'` in
+    `client/src/lib/resume.ts`, and its server's `resumeTarget` behind `POST /api/spawn`). A held wait is a running process mid-turn, so it is answered in the Dashboard.
     *(Builder check: the first draft enabled Desktop on `question`.)* When enabled it goes through that guarded hand-over (`POST /api/spawn` resume) via a
-    route in `agents/`, never a raw `claude://` href, so the guard stays the dashboard's.
+    route in `agents/`, never a raw `claude://` href, so the guard stays the dashboard's. The route is `POST /api/agents/jira-open-desktop { sessionId }`;
+    like `jira-stop` it passes the dashboard's status and sentence through (501 `desktop app unavailable`, 400 `unknown session`, 409 `session is still
+    running` / `already resuming` / `session is open in the desktop app`, 429, 500 `open failed`), an unreachable dashboard is a 502, and the button's
+    error line shows the sentence.
   - `surface: 'local'`: enabled only while `status` is `idle` or `incomplete`, as the href `claude://resume?session=<id>`. While `working` or `question`
     the session may be a terminal mid-turn, and the app opening it would fork a transcript that terminal is writing. *(My call, review 1.)* The builder
     checks by hand what the app does with `claude://resume` on a live CLI session; if it refuses or only focuses, this case may enable — the test in §12
@@ -122,17 +125,21 @@ How a link is made:
   is linked when **both** are true: its `gitBranch` contains a Jira key as a whole token (`PAY-151` in `PAY-151-currency-rounding` or
   `feature/PAY-151`, never inside `XPAY-1510`; the rule is `branchCarriesKey` in `shared/jira-branch.ts`), and its `projectPath` is one of the repos Setup
   maps to that key's Jira project **or a linked git worktree of one**. `projectPath` is the launch cwd, so a ticket-worktree session's is
-  `<repo>/.claude/worktrees/<branch>`, never the mapped path; the row's `repo` is a folder name only. The server resolves a worktree to its main checkout by
+  `<repo>/.worktrees/<branch, / → ->` (`worktreePathFor`, `shared/jira-branch.ts`) or any other linked worktree, never the mapped path; the row's `repo` is a folder name only. The server resolves a worktree to its main checkout by
   reading the `gitdir:` line of `<projectPath>/.git` (a file read, no git spawn), and compares that. Detection runs only on sessions the dashboard reports as
   `working` or `question`. It never back-fills from old, idle transcripts. The dashboard's `gitBranch` is the branch on the **newest** transcript record
   (`server/lib/transcript.ts` scans newest-first), so it follows a session that switches branch. Detection only ever adds: a link made from an earlier
-  branch stays when the session moves on (Unlink removes it, C9), and the new branch's key, if any, adds its own link.
+  branch stays when the session moves on (Unlink removes it, C9), and the new branch's key, if any, adds its own link. A detected key is confirmed with one
+  Jira read before it links, through the poller, and at most 5 such reads go out per tick; a 404 marks the (session, key) pair never-link, and any other
+  failure leaves it for the next tick.
 - **`/jira link <KEY>`** — a new subcommand of the `jira` skill. It posts the key and the session's own `CLAUDE_CODE_SESSION_ID` to
   `POST /api/agents/jira-link`, beside `jira-stop` in `agents/` (`jira-agents.controller.ts`), because checking the session id is a dashboard call and
   `agents/` is the only module that makes one (`.claude/rules/jira.md`: the edge runs agents → jira, never back). It goes through the local server like
   every other `jira` command, never to Jira itself; `jira.mjs`'s header, which names only `/api/jira` routes today, gains this one. The server checks that
-  the key is a real issue (one read, through the existing poller) and refuses a session id the dashboard's list does not carry. `/jira unlink <KEY>` is
-  the inverse (C9), `POST /api/agents/jira-unlink`.
+  the key is a real issue (one read, through the existing poller; a 404, 429 or unreachable Jira refuses with the poller's own sentence) and refuses a
+  session id only when the dashboard's `GET /api/sessions/:id/row` answers 404 — not on absence from the capped list, which proves nothing (above). `/jira unlink <KEY>` is
+  the inverse (C9), `POST /api/agents/jira-unlink`; it refuses a `run` link (409 `<KEY> was started by Run ▾ — stop it from the board instead`), since
+  dropping one would free the one-run gate under a live Run session.
 - **One session, one ticket per link.** A session can be linked to more than one ticket (`/jira link` twice). A branch carrying two keys links to both.
 
 **Several boards.** A Jira board is a saved query over issues, so the store is keyed by issue key and knows nothing about boards. A ticket on three boards
@@ -148,7 +155,9 @@ Rules:
   synchronous one-run-per-ticket gate for **Run ▾ launches**: it refuses while a Run-linked session is live on the key, and ignores `branch` and
   `manual` links, which the user started outside this board. A `starting` entry is never evicted. `release` never drops a confirmed session. An entry that has ended stays ended: a late `confirm` for it does not revive it (only C5's re-attach, from the dashboard's own row, does).
 - **Detach.** The reconciler that today clears an entry when the dashboard stops reporting it `working` or `question` instead **ends** it. It keeps the
-  existing 120 s grace. The entry gets `endedAt` and a reason and becomes history; the ticket is free for the next Run. Stop ends it with `stopped`. The
+  existing 120 s grace, but on a second clock as well: today's grace runs only from `startedAt`; now each entry also records `quietSince`, the first tick
+  that saw it neither `working` nor `question` (cleared whenever a tick sees it active again), and it ends only once both `startedAt` and `quietSince` are
+  more than 120 s old. So a session is Quiet for two minutes after each finished turn, not only in its first two minutes. The entry gets `endedAt` and a reason and becomes history; the ticket is free for the next Run. Stop ends it with `stopped`. The
   8-hour backstop ends it with `expired` rather than deleting it.
 - **A desktop launch with no session id** (an older dashboard) records nothing, as today.
 - On start-up the server reads the file and resumes reconciling every live entry. A session that ended while the server was down is ended at the first
@@ -176,13 +185,15 @@ below is in that row today; checked 2026-11-03. Read the rows top to bottom; the
 | Waiting for a reply      | `remoteReply`                                                     | yes       |
 | Waiting on your answer   | `status: 'question'` with none of the three flags above (`remoteQuestion`, or the transcript's own question) | yes |
 | Working                  | `status: 'working'`                                               | no        |
-| Quiet                    | `status: 'incomplete'`, inside the grace                          | no        |
+| Quiet                    | `status: 'incomplete'`, `quietSince` less than 120 s ago (§5)      | no        |
 | Lost contact             | the dashboard did not answer this tick                            | no        |
 | Ended (history)          | `status: 'idle'` or `'incomplete'` past the grace — detaches (§5)  | —         |
 
 Alongside the state, the page shows the row's `surface`, `desktopOwned`, model, effort and `contextPct`, and how long the session has been in that state.
 A wait's age is measured from when this server first saw it in that state. While any session is live, its state should be no more than ~15 s old on
-screen while a Jira page is open; today's 60 s reconcile is too slow for **Needs you**. The rate is in §5 (Arming and rate).
+screen while a Jira page is open; today's 60 s reconcile is too slow for **Needs you**. The server's rate is in §5 (Arming and rate). The client's
+cadence matters too: `useJira` polls `GET /api/jira` at the soonest board's sync interval with a 15 s floor, and not at all when no board syncs. So the
+live-session read polls on its own 15 s timer while a Jira page is on screen, whatever the boards' sync settings.
 
 `incomplete` means "your turn (recent and done) or stalled" in the dashboard (`server/lib/scan.ts`) and cannot be split from its row; a `local` session
 reads it after every finished turn. It is shown as **Quiet**, with the title `Turn finished or stalled — the dashboard cannot tell which`, and does not
@@ -239,14 +250,15 @@ and the FilterBar funnel's 16 px `--ink` count badge (`.filter-bar-badge` in `st
 
 ### 7.5 Open buttons — labels
 
-One table for every surface that draws them (deck card, Detail's live card, List row). The state is §6's.
+One table for every surface that draws them (deck card, Detail's live card, List row). The state is §6's. Read the rows top to bottom; the first match
+wins. Waiting for permission gets no verb: the dashboard shows `permissionWait` but nothing can answer that dialog remotely (its `shared/types.ts`), so
+it falls to `Open in Dashboard` (or the Desktop row), and the state strip's title says the dialog is answered where the session runs.
 
 | Case                                     | Primary                                 | Secondary   |
 | ---------------------------------------- | --------------------------------------- | ----------- |
-| `dashboard` surface, Waiting on your answer | `Answer in Dashboard`               | `Desktop`   |
-| `dashboard` surface, Waiting for plan approval | `Review plan in Dashboard`       | `Desktop`   |
-| `dashboard` surface, Waiting for permission | `Allow in Dashboard`                | `Desktop`   |
-| `dashboard` surface, Waiting for a reply | `Reply in Dashboard`                   | `Desktop`   |
+| `dashboard` surface, not `desktopOwned`, Waiting on your answer | `Answer in Dashboard` | `Desktop` |
+| `dashboard` surface, not `desktopOwned`, Waiting for plan approval | `Review plan in Dashboard` | `Desktop` |
+| `dashboard` surface, not `desktopOwned`, Waiting for a reply | `Reply in Dashboard` | `Desktop` |
 | Primary is Dashboard, any other live state (a `local` wait included) | `Open in Dashboard`                   | `Desktop`   |
 | Primary is Desktop (C3), any live state  | `Open in Desktop`                       | `Dashboard` |
 | Ended (history line, List's ended row)   | `Reopen` (the primary surface's link)   | none        |
@@ -280,7 +292,8 @@ Issue modal (`JiraIssueModal`), all of which moves to Detail's right side:
 ## 9. Sections, in build order
 
 1. **Link store and state.** Persisted links (§5), the state mapping (§6), and the read the client needs: per ticket, the live session and the history,
-   each with state, ids, surface, model and context. Today's `live` on `GET /api/jira` keeps working for anything still reading it until section 2 lands. No
+   each with state, ids, surface, model and context. Today's `live` on `GET /api/jira` keeps working until section 4 retires its readers (`JiraIssueModal`, `client/src/lib/jira.ts`'s run state), and
+   until then it carries the live `run`-linked entry per key only, so a `branch` or `manual` link never disables Run ▾ where `reserve` would allow it. No
    UI change in this section beyond what today's strip already shows.
 2. **Detection and `/jira link`.** The branch rule in the reconciler, the link and unlink route, and the `jira` skill's two subcommands. A `skills/` change
    reaches sessions only after commit, push and `pnpm run plugin:sync`.
@@ -315,10 +328,11 @@ fresh; how history entries are paged in Detail; component names; whether Board A
 - Detach and re-attach: idle past the grace ends with `idle`; so does `incomplete` past the grace. Idle inside the grace stays live. A resumed ended
   session re-attaches as live even when the ticket already has a live session, and re-uses its own entry (history length unchanged) (C5).
 - State table: one case per row of §6, including first-match order (a row that is `question` with `remotePlan` is plan approval, not answer).
-- Buttons (C2, C3, §7.5): `dashboard` `working` → Desktop disabled. The same session in a held wait (`remoteQuestion`, `remotePlan`, `remoteReply`) →
+- Buttons (C2, C3, §7.5): a `desktopOwned` session in `question` → `Open in Desktop`, not `Answer in Dashboard`. Permission wait → `Open in
+  Dashboard`. `dashboard` `working` → Desktop disabled. The same session in a held wait (`remoteQuestion`, `remotePlan`, `remoteReply`) →
   still disabled. `dashboard` `idle` with `stopState` → disabled; with `processLive` → disabled; with neither and no hold → enabled; `incomplete`, same
   → enabled. `desktopOwned` → Desktop enabled and primary. `local` `working` or `question` → Desktop disabled and Dashboard promoted to primary; `local`
-  `idle` → Desktop enabled and primary. Each Needs you state gives its own primary label. Stop appears only with `stopState`.
+  `idle` → Desktop enabled and primary. Answer, plan and reply each give their own primary label. Stop appears only with `stopState`.
 - Stop: `{ key, sessionId }` on a ticket with two live sessions ends only that one, `stopped`; a session id not live on the key is a 409.
 - End reasons: a session missing from an answered dashboard list of fewer than 50 rows, past the grace, ends `gone`; missing from a full list of 50, it
   stays live; a dashboard that does not answer ends nothing and shows Lost contact. `incomplete` past the grace ends `idle`.
@@ -330,8 +344,11 @@ fresh; how history entries are paged in Detail; component names; whether Board A
 - Detail: every item in §8's modal list is present and still works.
 - Detection: `PAY-151-x` in a mapped repo links. The same branch in an unmapped repo does not. `XPAY-1510` does not match `PAY-151`. A branch with two keys
   links both. An `idle` session is never detected. A detected session on a ticket with a live Run session shows both live, and Run ▾ is still refused.
-  A detected session on a ticket with only a branch link lets Run ▾ start. A session whose `projectPath` is `<mapped repo>/.claude/worktrees/PAY-151-x`
+  A detected session on a ticket with only a branch link lets Run ▾ start. A session whose `projectPath` is `<mapped repo>/.worktrees/PAY-151-x`
   (its `.git` file pointing into the mapped repo) links; a worktree of an unmapped repo does not. A session that moves from `PAY-151-x` to `PAY-160-y`
   keeps its PAY-151 link and gains PAY-160. Detection runs with an empty store as long as Setup maps a repo.
-- `/jira link` / `unlink`: an unknown key is refused; an unknown session id is refused. Unlink removes a branch link and detection never re-adds it.
+- `/jira link` / `unlink`: an unknown key is refused; an unknown session id is refused. Unlink removes a branch link and detection never re-adds it. Unlink of a `run` link is a 409. `/jira link` while the dashboard's list is full but its
+  row route answers 200 links. A detected key Jira answers 404 for is never linked; a 429 retries next tick.
+- Quiet: a session that finishes a turn 10 minutes after it started shows Quiet for 120 s, then ends `idle`; one that works again inside the 120 s stays
+  live and its `quietSince` clears.
 - Several boards: one session on a ticket present on two boards shows on both, once in the List, and once in the badge.
