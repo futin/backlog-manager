@@ -40,9 +40,12 @@ let rows: Record<string, Record<string, unknown>>;
 let list: unknown[];
 let urls: string[];
 let auths: (string | undefined)[];
+let spawns: { method: string | undefined; body: unknown }[];
+/** What the dashboard answers to `POST /api/spawn`: a status and body, or `'down'` for a connection that never completes. */
+let spawnAnswer: { status: number; body: unknown } | 'down';
 const realFetch = global.fetch;
 
-const post = (route: 'jira-link' | 'jira-unlink', body: unknown) =>
+const post = (route: 'jira-link' | 'jira-unlink' | 'jira-open-desktop', body: unknown) =>
   request(app.getHttpServer()).post(`/api/agents/${route}`).set('content-type', 'application/json').send(JSON.stringify(body));
 
 function issueFor(key: string): JiraIssue {
@@ -73,10 +76,18 @@ const failure = (status: number): JiraResult<JiraIssue> => ({ ok: false, respons
 function stubDashboard(): void {
   urls = [];
   auths = [];
+  spawns = [];
+  spawnAnswer = { status: 200, body: { surface: 'desktop' } };
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     urls.push(url);
     auths.push((init?.headers as Record<string, string> | undefined)?.authorization);
+    if (url.endsWith('/api/spawn')) {
+      spawns.push({ method: init?.method, body: JSON.parse(String(init?.body)) });
+      if (spawnAnswer === 'down') return Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }));
+      const answer = spawnAnswer;
+      return Promise.resolve({ ok: answer.status < 400, status: answer.status, json: () => Promise.resolve(answer.body) } as Response);
+    }
     const row = /\/api\/sessions\/([^/?]+)\/row$/.exec(url);
     let answer: { status: number; body: unknown };
     if (row !== null) {
@@ -308,8 +319,63 @@ describe('link after unlink', () => {
   });
 });
 
+describe('jira-open-desktop', () => {
+  it('asks the dashboard to hand the session over: resume + the desktop surface, nothing else, with the bearer token', async () => {
+    const res = await post('jira-open-desktop', { sessionId: 'sess-1' }).expect(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(urls).toEqual(['http://dash.test:4173/api/spawn']);
+    expect(spawns).toEqual([{ method: 'POST', body: { resume: 'sess-1', surface: 'desktop' } }]);
+    expect(auths).toEqual(['Bearer s3cret']);
+  });
+
+  it('passes the dashboard`s refusal through with its status and sentence unchanged', async () => {
+    for (const [status, error] of [
+      [409, 'session is still running'],
+      [409, 'already resuming'],
+      [409, 'session is open in the desktop app'],
+      [501, 'desktop app unavailable'],
+      [400, 'unknown session'],
+      [429, 'too many launches in flight'],
+      [500, 'open failed']
+    ] as const) {
+      spawnAnswer = { status, body: { error } };
+      const res = await post('jira-open-desktop', { sessionId: 'sess-1' }).expect(status);
+      expect(res.body.error).toBe(error);
+    }
+  });
+
+  it('an answer with no sentence is named by its status', async () => {
+    spawnAnswer = { status: 409, body: null };
+    const res = await post('jira-open-desktop', { sessionId: 'sess-1' }).expect(409);
+    expect(res.body.error).toBe('the dashboard answered 409');
+  });
+
+  it('a dashboard that is down is a 502 naming the cause', async () => {
+    spawnAnswer = 'down';
+    const res = await post('jira-open-desktop', { sessionId: 'sess-1' }).expect(502);
+    expect(res.body.error).toContain('ECONNREFUSED');
+  });
+
+  it('a 200 that does not say desktop (a dashboard from before hand-overs) is a 502, not a success', async () => {
+    spawnAnswer = { status: 200, body: { surface: 'dashboard', sessionId: 'sess-1' } };
+    await post('jira-open-desktop', { sessionId: 'sess-1' }).expect(502);
+  });
+
+  it.each([undefined, '', '../x', 'a/b', 42, null])('refuses a bad session id %p with a 400 and no dashboard call', async (sessionId) => {
+    const res = await post('jira-open-desktop', { sessionId }).expect(400);
+    expect(res.body.error).toBe('invalid session id');
+    expect(urls).toEqual([]);
+  });
+
+  it('with agents off is a 409 and no dashboard call', async () => {
+    process.env.BM_AGENTS = 'off';
+    await post('jira-open-desktop', { sessionId: 'sess-1' }).expect(409);
+    expect(spawns).toEqual([]);
+  });
+});
+
 describe('the origin guard', () => {
-  it.each(['jira-link', 'jira-unlink'] as const)('refuses a cross-origin POST to %s without a Jira or dashboard call', async (route) => {
+  it.each(['jira-link', 'jira-unlink', 'jira-open-desktop'] as const)('refuses a cross-origin POST to %s without a Jira or dashboard call', async (route) => {
     const res = await request(app.getHttpServer())
       .post(`/api/agents/${route}`)
       .set('origin', 'http://evil.example')

@@ -20,7 +20,7 @@ export function isSessionId(value: unknown): value is string {
 }
 
 /**
- * The Jira agents routes — `POST /api/agents/dispatch-jira`, `jira-stop`, and the by-hand `jira-link` / `jira-unlink` (spec §5, §7). Its own controller under the same `api/agents` prefix rather than more
+ * The Jira agents routes — `POST /api/agents/dispatch-jira`, `jira-stop`, `jira-open-desktop`, and the by-hand `jira-link` / `jira-unlink` (spec §5, §7). Its own controller under the same `api/agents` prefix rather than more
  * methods on `AgentsController`, which is already the item dispatcher's, the orchestrator's and the watchdog's: the Jira routes share none of those
  * services, and a fourth constructor dependency there would put a Jira import into every one of them.
  *
@@ -112,6 +112,19 @@ export class JiraAgentsController {
     if (!isJiraKey(body.key)) throw new HttpException({ error: 'invalid issue key' }, 400);
     if (!isSessionId(body.sessionId)) throw new HttpException({ error: 'invalid session id' }, 400);
     return this.dispatcher.link(body.key, body.sessionId);
+  }
+
+  /**
+   * `POST /api/agents/jira-open-desktop` `{ sessionId }` — Open in Desktop for a dashboard-surface session (spec C2): the dashboard's guarded hand-over, with its
+   * answer passed through unchanged. Shape only here; no key, since the hand-over is about the session, not a ticket. 200 for the reason `jira-stop` is.
+   */
+  @UseGuards(SameOriginPostGuard)
+  @Post('jira-open-desktop')
+  @HttpCode(200)
+  jiraOpenDesktop(@Body() raw: unknown): Promise<{ ok: true }> {
+    const body = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+    if (!isSessionId(body.sessionId)) throw new HttpException({ error: 'invalid session id' }, 400);
+    return this.dispatcher.openDesktop(body.sessionId);
   }
 
   /** `POST /api/agents/jira-unlink` `{ key, sessionId }` — `/jira unlink` (C9); the inverse of `jira-link`, shape-checked the same way. */

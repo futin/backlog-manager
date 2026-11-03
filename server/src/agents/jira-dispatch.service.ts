@@ -16,7 +16,7 @@ import type { JiraComposeAction } from '../jira/prompt.util';
 import { readRepoRefs } from '../jira/refs.util';
 import { jiraWriteOrThrow, unwrapJira } from '../jira/unwrap.util';
 import { AgentsService } from './agents.service';
-import { readAgentsConfig } from './config.util';
+import { authHeaders, dashboardError, readAgentsConfig } from './config.util';
 import { dashboardSessionRow } from './dashboard-sessions.util';
 import { JiraLiveReconciler } from './jira-live.service';
 import { stopDashboardSession } from './session-stop.util';
@@ -24,6 +24,9 @@ import { stopDashboardSession } from './session-stop.util';
 /** What a failure after a landed write says, appended to its own sentence: the write is not undone (spec §7), and the reader must not retry as if it were. */
 const ASSIGN_STANDS = ' — the assign stands';
 const WRITES_STAND = ' — the Jira writes stand';
+
+/** The hand-over opens a link and answers; `spawn`'s own budget is plenty. */
+const OPEN_DESKTOP_TIMEOUT_MS = 10_000;
 
 /**
  * `POST /api/agents/dispatch-jira` — the launch sheet's Start (Jira phase 5; spec §5, §7, §8). Optional assign, optional transition, then ONE dashboard spawn
@@ -225,6 +228,44 @@ export class JiraDispatchService {
     // `end` is a no-op for a pair that ended while the stop was in flight (the reconciler's own verdict, or a second Stop), so the first end stands — and a
     // fresh Start on the key, a different session, is never the pair this names.
     this.live.end(key, sessionId, 'stopped');
+    return { ok: true };
+  }
+
+  /**
+   * `POST /api/agents/jira-open-desktop` — hand ONE session to the desktop app through the dashboard's own guarded hand-over (spec C2): `POST /api/spawn` with
+   * `{ resume: <id>, surface: 'desktop' }`, the body its `parseSpawnRequest` reads as the hand-over (no prompt, no project — `claude://resume` carries neither).
+   * The guard stays the dashboard's: it refuses a session that is still running, already resuming, or open in the app, and this route re-implements none of it,
+   * so the client's disabled-Desktop rule (`desktopButton`) is a courtesy and this is the check that holds.
+   *
+   * The dashboard's status and `{ error }` go through UNCHANGED — 501 `desktop app unavailable`, 400 `unknown session`, 409 `session is still running` /
+   * `already resuming` / `session is open in the desktop app`, 429, 500 `open failed` — because the button's error line shows that sentence and the person
+   * reads it beside a button labelled Desktop. That is deliberately NOT `desktopSpawnError`'s rewording, which was written for the launch sheet and describes
+   * a launch, not a hand-over. An unreachable dashboard is a 502 naming the cause. Agents off is `stop`'s 409 and makes no request.
+   *
+   * A 200 that does not say `surface: 'desktop'` is a 502: a dashboard from before desktop hand-overs ignores `surface`, and a 200 from it is not a session
+   * that opened in the app, whatever else it started.
+   */
+  async openDesktop(sessionId: string): Promise<{ ok: true }> {
+    const cfg = readAgentsConfig();
+    if (!cfg.enabled) {
+      throw new HttpException({ error: environmentBlock(await this.agents.status()) ?? 'dispatch is off — set BM_AGENTS=on for the API' }, 409);
+    }
+    let res: Response;
+    try {
+      res = await fetch(`${cfg.url}/api/spawn`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cfg) },
+        body: JSON.stringify({ resume: sessionId, surface: 'desktop' }),
+        signal: AbortSignal.timeout(OPEN_DESKTOP_TIMEOUT_MS)
+      });
+    } catch (e) {
+      throw new HttpException({ error: dashboardError(e, 'the dashboard desktop hand-over', OPEN_DESKTOP_TIMEOUT_MS) }, 502);
+    }
+    const body = (await res.json().catch(() => null)) as { surface?: unknown; error?: unknown } | null;
+    if (!res.ok) {
+      throw new HttpException({ error: typeof body?.error === 'string' ? body.error : `the dashboard answered ${res.status}` }, res.status);
+    }
+    if (body?.surface !== 'desktop') throw new HttpException({ error: 'the dashboard did not hand the session to the desktop app' }, 502);
     return { ok: true };
   }
 
