@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
-import { JiraSessionsProvider } from '../../hooks/JiraSessionsContext';
 import { useJiraPage } from '../../hooks/useJiraPage';
 import type { JiraChildrenIndex } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
@@ -81,9 +80,9 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   return page === 'setup' ? (
     <JiraSetupView onOpenJiraPage={onOpenJiraPage} />
   ) : (
-    // The sessions poll is mounted here, around the Board page and the dialog together: the card's `Run ▾` and the Detail dialog read ONE payload, so the
-    // gate on a card and the cards in the dialog never disagree for a poll. `open` is true — this section is on screen — and quickens the server's reconciler.
-    <JiraSessionsProvider open>
+    // The sessions poll is the shell's (`App` hoists `JiraSessionsProvider` around the rail and this section): the card's `Run ▾`, the Detail dialog and the
+    // rail badge read ONE payload, so none of them disagrees with another for a poll. This section being current is what `open` says there.
+    <>
       <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
       {openIssue !== null && (
         <JiraDetail
@@ -106,6 +105,6 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onWrote={landed}
         />
       )}
-    </JiraSessionsProvider>
+    </>
   );
 }

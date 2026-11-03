@@ -311,9 +311,9 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   the row, and the modal stays open. A landed write reloads three things: the shell's status (`useJiraContext().reload()`), the board's list (`onWrote`, the
   nudge above) and the modal's own detail — which keeps showing the last detail of the SAME key meanwhile, so the body does not flash `loading…` and the
   controls do not blink to disabled. A `reread: false` answer is a success like any other: the modal does not read the body.
-  **The agent column (Jira sessions, spec §7.3, §7.5)** is `JiraDetail`'s left side, from `useJiraSessionsContext()` — ONE `useJiraSessions({ open })` instance
-  (`hooks/JiraSessionsContext.tsx`, mounted by `JiraView` around the Board page only; 15 s through `useRefreshing`, a failed read keeps the last answer)
-  that the dialog, `Run ▾` and the card's chip all share. Live cards (`JiraSessionCard`) come newest first: a state strip with its age (`pollAge`, never a
+  **The agent column (Jira sessions, spec §7.3, §7.5)** is `JiraDetail`'s left side, from `useJiraSessionsContext()` — ONE `useJiraSessions({ open, enabled })` instance
+  (`hooks/JiraSessionsContext.tsx`, mounted by `App`'s shell around the rail AND the section — `enabled` is `configured: true`, `open` is "Jira is the current section"; 15 s through
+  `useRefreshing`, a failed read keeps the last answer) that the dialog, `Run ▾`, the card's chip and the rail's Needs-you badge all share. Live cards (`JiraSessionCard`) come newest first: a state strip with its age (`pollAge`, never a
   clock of the component's own), the linked-how tag, the short id; `Unlink` only on a `branch` link and `Stop` only when the row carries a `stopState`, both
   through the dialog's `sessionWrite`, which reloads the sessions, the status and the board. The waiting question's text is never drawn, only its state
   label. Under them the history timeline (`<how> · ended <age> ago`, `Reopen`), then `Run ▾`. A `starting` reservation is drawn from `GET /api/jira`'s

@@ -91,4 +91,35 @@ describe('useJiraSessions', () => {
     });
     expect(fn).toHaveBeenCalledTimes(2);
   });
+
+  it('reads nothing while it is not enabled, and starts reading — once — when it becomes so', async () => {
+    const fn = jest.fn(() => Promise.resolve(okResponse(payload('a'))));
+    global.fetch = fn as unknown as typeof fetch;
+    const { result, rerender } = renderHook(({ enabled }) => useJiraSessions({ open: false, enabled }), { initialProps: { enabled: false } });
+    await flush();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(JIRA_SESSIONS_POLL_MS * 2);
+    });
+    expect(fn).not.toHaveBeenCalled();
+    expect(result.current.data).toBeNull();
+
+    rerender({ enabled: true });
+    await flush();
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledWith('/api/jira/sessions');
+    expect(result.current.data).toEqual(payload('a'));
+  });
+
+  it('re-asks once, at the fast flag, when the section opens, rather than waiting out the period', async () => {
+    const fn = jest.fn(() => Promise.resolve(okResponse(payload('a'))));
+    global.fetch = fn as unknown as typeof fetch;
+    const { rerender } = renderHook(({ open }) => useJiraSessions({ open }), { initialProps: { open: false } });
+    await flush();
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenLastCalledWith('/api/jira/sessions');
+    rerender({ open: true });
+    await flush();
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(fn).toHaveBeenLastCalledWith('/api/jira/sessions?open=1');
+  });
 });

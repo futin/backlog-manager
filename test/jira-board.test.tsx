@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 
 import { JiraBoardView } from '../client/src/components/jira/JiraBoardView';
 import JiraView from '../client/src/components/jira/JiraView';
+import { JiraSessionsProvider } from '../client/src/hooks/JiraSessionsContext';
 import { JiraProvider } from '../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
@@ -505,7 +506,9 @@ it('draws no page switch inside main', async () => {
   render(
     <main>
       <JiraProvider>
-        <JiraView onOpenJiraPage={jest.fn()} />
+        <JiraSessionsProvider open>
+          <JiraView onOpenJiraPage={jest.fn()} />
+        </JiraSessionsProvider>
       </JiraProvider>
     </main>
   );
@@ -739,7 +742,9 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     render(
       <SettingsProvider>
         <JiraProvider>
-          <JiraView onOpenJiraPage={jest.fn()} />
+          <JiraSessionsProvider open>
+            <JiraView onOpenJiraPage={jest.fn()} />
+          </JiraSessionsProvider>
         </JiraProvider>
       </SettingsProvider>
     );
@@ -1011,7 +1016,9 @@ describe('worktree chips on the card', () => {
     render(
       <SettingsProvider>
         <JiraProvider>
-          <JiraView onOpenJiraPage={jest.fn()} />
+          <JiraSessionsProvider open>
+            <JiraView onOpenJiraPage={jest.fn()} />
+          </JiraSessionsProvider>
         </JiraProvider>
       </SettingsProvider>
     );
@@ -1099,7 +1106,9 @@ describe('the agent deck and the status shelves', () => {
     render(
       <SettingsProvider>
         <JiraProvider>
-          <JiraView onOpenJiraPage={jest.fn()} />
+          <JiraSessionsProvider open>
+            <JiraView onOpenJiraPage={jest.fn()} />
+          </JiraSessionsProvider>
         </JiraProvider>
       </SettingsProvider>
     );

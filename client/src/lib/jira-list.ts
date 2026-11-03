@@ -307,3 +307,21 @@ export function forLabel(row: Pick<ListRow, 'link' | 'startedAt' | 'ended'>, now
   const span = row.ended && row.link !== null ? sessionDuration(row.link) : elapsedSince(row.startedAt, now);
   return span === null ? '—' : span === 'now' ? '<1m' : span;
 }
+
+/**
+ * The rail badge's number (C4): sessions that want a person, across EVERY linked ticket — not the picked board's, so a ticket on no board still counts — once
+ * per `${key}:${sessionId}`, the List's row identity, because that is what the badge's click lands on. A reservation (`sessionId` null) is a Run that has no
+ * session yet and cannot be waiting on anyone; an ended link never counts whatever its stored state says, as `applyListFilters`' Needs-you chip excludes it.
+ *
+ * `null` when the payload says the dashboard did not answer: every live link then reads `lost`, which is not "nobody needs you" but "nobody can say", so the
+ * caller keeps the last number it had (`hooks/useJiraNeedsYou`) rather than painting a false zero.
+ */
+export function needsYouCount(payload: JiraSessionsPayload | null): number | null {
+  if (payload === null || !payload.reachable) return null;
+  const seen = new Set<string>();
+  for (const link of payload.links) {
+    if (link.sessionId === null || link.endedAt !== null || !needsYou(link.state)) continue;
+    seen.add(`${link.key}:${link.sessionId}`);
+  }
+  return seen.size;
+}

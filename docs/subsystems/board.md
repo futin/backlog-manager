@@ -80,6 +80,15 @@ The rail's last element is the version chip, `v0.2.0` or `v0.2.0+3`, with a cyan
 What's new drawer behind it; the shell owns the read, the dot and the drawer, and renders the drawer outside the rail. All of it is
 [releases.md](releases.md).
 
+The Jira row carries a Needs-you count badge (Jira sessions spec §7.4, C4): `useJiraNeedsYou` (`client/src/hooks/useJiraNeedsYou.ts`) reads the shell's one
+sessions answer — `JiraSessionsProvider` (`hooks/JiraSessionsContext.tsx`), hoisted out of `JiraView` into `App`'s shell around the rail AND the section, with
+`enabled` = Jira configured (no poll and no badge otherwise) and `open` = Jira is the current section, so with the section closed the request carries no
+`open=1` — and counts `needsYouCount` (`lib/jira-list.ts`): plan, permission, reply and answer across EVERY linked ticket, not the picked board's, once per
+`${key}:${sessionId}`. Zero draws no element. While the dashboard is unreachable (`reachable: false`, every live link reads Lost contact) or a read fails, the
+hook keeps the last count it was sure of. The badge is a `button.rail-badge` beside the row's button, inside `.rail-group` (a button in a button is invalid, and
+the row must still just open Jira); its click sets the Jira page to `board`, the view to `list` and the filters to `{ chip: 'needs-you', allTickets: true }`
+through the three module stores, then `change('jira')`, so the List it lands on shows every session it counted.
+
 Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it — the version chip is its last row. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
 JavaScript knows that breakpoint; everything else reads it from there or from a media query.
 

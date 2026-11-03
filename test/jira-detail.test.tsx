@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 
 import { JiraDetail } from '../client/src/components/jira/JiraDetail';
 import JiraView from '../client/src/components/jira/JiraView';
+import { JiraSessionsProvider } from '../client/src/hooks/JiraSessionsContext';
 import { JiraContext } from '../client/src/hooks/JiraContext';
 import { JiraSessionsContext } from '../client/src/hooks/JiraSessionsContext';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
@@ -1014,7 +1015,9 @@ describe('JiraView — the open-issue slot draws the modal', () => {
 
     render(
       <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: () => {} }}>
-        <JiraView onOpenJiraPage={jest.fn()} />
+        <JiraSessionsProvider open>
+          <JiraView onOpenJiraPage={jest.fn()} />
+        </JiraSessionsProvider>
       </JiraContext.Provider>
     );
 
@@ -1041,7 +1044,9 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     render(
       <SettingsProvider>
         <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: () => {} }}>
-          <JiraView onOpenJiraPage={jest.fn()} />
+          <JiraSessionsProvider open>
+            <JiraView onOpenJiraPage={jest.fn()} />
+          </JiraSessionsProvider>
         </JiraContext.Provider>
       </SettingsProvider>
     );
@@ -1107,7 +1112,9 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     }) as unknown as typeof fetch;
     render(
       <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: () => {} }}>
-        <JiraView onOpenJiraPage={jest.fn()} />
+        <JiraSessionsProvider open>
+          <JiraView onOpenJiraPage={jest.fn()} />
+        </JiraSessionsProvider>
       </JiraContext.Provider>
     );
     return requested;
@@ -1200,7 +1207,9 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     }) as unknown as typeof fetch;
     render(
       <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: () => {} }}>
-        <JiraView onOpenJiraPage={jest.fn()} />
+        <JiraSessionsProvider open>
+          <JiraView onOpenJiraPage={jest.fn()} />
+        </JiraSessionsProvider>
       </JiraContext.Provider>
     );
     await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));

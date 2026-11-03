@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import JiraView from '../client/src/components/jira/JiraView';
+import { JiraSessionsProvider } from '../client/src/hooks/JiraSessionsContext';
 import { JiraProvider } from '../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
@@ -159,7 +160,9 @@ async function renderList(): Promise<void> {
   render(
     <SettingsProvider>
       <JiraProvider>
-        <JiraView onOpenJiraPage={jest.fn()} />
+        <JiraSessionsProvider open>
+          <JiraView onOpenJiraPage={jest.fn()} />
+        </JiraSessionsProvider>
       </JiraProvider>
     </SettingsProvider>
   );
