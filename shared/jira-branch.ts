@@ -67,6 +67,25 @@ export function branchCarriesKey(branch: string, key: string): boolean {
 }
 
 /**
+ * Every ticket key `branch` carries, among the Jira projects in `projectKeys` (branch detection, Jira sessions §5): a project's `<PROJECT>-<digits>` token, found
+ * by scanning the branch for runs of that shape and keeping the ones `branchCarriesKey` agrees are bounded on both sides — so `XPAY-1510-x` yields nothing for
+ * `PAY`, and `PAY-1510-then-PAY-151` yields `PAY-151` only. Upper-cased, distinct, in order of first appearance. Not mirrored in `jira.mjs`, which has no use
+ * for it.
+ */
+export function keysInBranch(branch: string, projectKeys: readonly string[]): string[] {
+  const projects = new Set(projectKeys.map((p) => p.toUpperCase()));
+  const found: string[] = [];
+  // A key is `<letters/digits/underscore starting with a letter>-<digits>`; the scan is deliberately wider than any one project and the project filter narrows it.
+  for (const m of branch.matchAll(/[A-Za-z][A-Za-z0-9_]*-\d+/g)) {
+    const key = m[0].toUpperCase();
+    const project = key.slice(0, key.lastIndexOf('-'));
+    if (!projects.has(project) || found.includes(key)) continue;
+    if (branchCarriesKey(branch, key)) found.push(key);
+  }
+  return found;
+}
+
+/**
  * A branch-name-safe slug from a ticket summary, in five steps: lower-case and strip diacritics (NFKD, then drop the combining marks), collapse every run
  * outside `[a-z0-9]` into one `-`, trim `-` from both ends, cut at the last `-` at or before character `SLUG_MAX` (a hard cut at `SLUG_MAX` when there is
  * none), trim `-` again. A summary with nothing in `[a-z0-9]` after step 1 — `日本語`, whitespace — gives `''`.

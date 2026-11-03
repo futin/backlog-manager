@@ -70,6 +70,7 @@ const same = (a: JiraLinkPair, key: string, sessionId: string): boolean => a.key
 export class JiraLiveService {
   private readonly starting = new Map<string, Starting>();
   private entries: JiraLink[];
+  private readonly reposListeners: (() => void)[] = [];
   private suppressed: JiraLinkPair[];
   private neverLink: JiraLinkPair[];
   private rows = new Map<string, DashboardRow>();
@@ -323,6 +324,27 @@ export class JiraLiveService {
   /** False only after a tick that could not read the dashboard, until the next good one; true before any tick has run — nothing has failed yet. */
   reachable(): boolean {
     return this.up;
+  }
+
+  /**
+   * Setup's repo mapping changed (`POST /api/jira/repos` saved). The reconciler is armed only while something is live or a repo is mapped, and a mapping made
+   * while the server runs would otherwise wait for the next `confirm` or restart to start detection. `agents/` imports `jira/`, never the reverse, so the edge
+   * back is this one callback list rather than an import: the reconciler subscribes, the write route emits, neither names the other. A listener that throws must
+   * not fail the save that already landed, so each is isolated.
+   */
+  onReposChanged(listener: () => void): void {
+    this.reposListeners.push(listener);
+  }
+
+  /** Tells every `onReposChanged` listener the mapping was saved. */
+  reposChanged(): void {
+    for (const listener of this.reposListeners) {
+      try {
+        listener();
+      } catch {
+        // The save has landed; a listener's failure is its own.
+      }
+    }
   }
 
   /** A Jira page was read at `now` (`GET /api/jira/sessions?open=1` is its caller), so the reconciler can tell a page is open. */

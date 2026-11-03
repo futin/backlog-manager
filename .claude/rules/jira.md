@@ -21,7 +21,7 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   throws `JiraUnknownIdError`, which carries the entry kind and is a 404 `unknown board` or `unknown skill`. A handler runs guard (`SameOriginPostGuard`) → validate (400) → configured (503) → write → re-aim, and
   config writes stay open under `access: unauthorized`, because they touch only `jira.json`. A saved board then awaits `boardSaved` (sweeps that board,
   bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer); a deleted one calls `boardDeleted` and `arm()`; repos and skills re-aim
-  nothing, since no sweep reads them. `repoDefaults` (absolute normalised path → `{ base?, namePattern? }`) falls back per VALUE: a base failing
+  no poller work, since no sweep reads them (a repos save only calls `JiraLiveService.reposChanged`, which arms the session reconciler). `repoDefaults` (absolute normalised path → `{ base?, namePattern? }`) falls back per VALUE: a base failing
   `defaultBaseProblem` (Table A, then `is a branch name, without origin/`) or a pattern failing `patternProblem` costs only itself;
   `/repo-defaults` takes `null` for unset (both `null` deletes the entry) and adds
   one check after the 409, a 400 `<path> is not mapped` unless SOME project maps the path. Why:

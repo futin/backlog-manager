@@ -3,10 +3,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { JiraLiveService } from '../server/src/jira/live.service';
+import type { JiraPollerService, JiraResult } from '../server/src/jira/poller.service';
 import { jiraLinksFile } from '../server/src/jira/links.store';
 import { RUN_META } from './helpers/jira';
 import { dashboardSessionRows, dashboardSessions } from '../server/src/agents/dashboard-sessions.util';
 import { readAgentsConfig } from '../server/src/agents/config.util';
+import { mainCheckoutOf } from '../server/src/agents/worktree-main.util';
+import type { JiraIssue } from '../shared/types';
 import {
   JIRA_LIVE_GRACE_MS,
   JIRA_QUIET_MS,
@@ -30,6 +33,9 @@ const KEYS = ['BM_AGENTS', 'BM_AGENTS_URL', 'BM_AGENTS_TOKEN'] as const;
 let saved: Record<string, string | undefined>;
 let live: JiraLiveService;
 let reconciler: JiraLiveReconciler;
+let reads: string[];
+let issueAnswers: Map<string, JiraResult<JiraIssue>>;
+let poller: Pick<JiraPollerService, 'issueSummary'>;
 let urls: string[];
 let sessions: { status: number; body: unknown } | 'reject';
 let savedJiraFile: string | undefined;
@@ -56,7 +62,8 @@ beforeEach(() => {
   process.env.BM_AGENTS_URL = 'http://dash.test:4173';
   process.env.BM_AGENTS_TOKEN = 's3cret';
   live = new JiraLiveService();
-  reconciler = new JiraLiveReconciler(live);
+  freshPoller();
+  reconciler = new JiraLiveReconciler(live, poller as JiraPollerService);
   urls = [];
   sessions = { status: 200, body: { sessions: [] } };
   global.fetch = jest.fn((input: RequestInfo | URL) => {
@@ -106,6 +113,40 @@ const branchLink = (key: string, sessionId: string, ageMs: number) => ({
   snapshot: { summary: 'A ticket', type: 'Task', parentKey: null },
   startedAt: iso(Date.now() - ageMs)
 });
+/** A poller double: `issueSummary` answers from `issueAnswers`, else an ok issue for the key, and records each read in `reads`. */
+function freshPoller(): void {
+  reads = [];
+  issueAnswers = new Map();
+  poller = {
+    issueSummary: jest.fn((key: string) => {
+      reads.push(key);
+      return Promise.resolve(issueAnswers.get(key) ?? { ok: true as const, value: issueFor(key) });
+    })
+  };
+}
+function issueFor(key: string): JiraIssue {
+  return {
+    key,
+    id: '1',
+    url: `https://acme.atlassian.net/browse/${key}`,
+    summary: `Summary of ${key}`,
+    project: { key: key.split('-')[0], name: 'P' },
+    type: { name: 'Bug', level: 0, subtask: false },
+    status: { name: 'In Progress', category: 'indeterminate' },
+    priority: null,
+    assignee: null,
+    reporter: null,
+    parent: { key: 'PAY-1', summary: 'Epic' },
+    subtasks: 0,
+    labels: [],
+    sprint: null,
+    created: iso(T0),
+    updated: iso(T0),
+    resolved: null
+  };
+}
+const failure = (status: number): JiraResult<JiraIssue> => ({ ok: false, response: { status, data: null, message: null, retryAfter: null } });
+
 /** Points `jira.json` at a file mapping `PAY` to one repo, so Setup "maps a repo". */
 function mapRepo(): void {
   const file = join(mkdtempSync(join(tmpdir(), 'bm-jira-live-')), 'jira.json');
@@ -389,7 +430,7 @@ describe('after a restart', () => {
     mkdirSync(dirname(jiraLinksFile()), { recursive: true });
     writeFileSync(jiraLinksFile(), JSON.stringify({ version: 1, links, suppressed: [], neverLink: [] }));
     live = new JiraLiveService();
-    reconciler = new JiraLiveReconciler(live);
+    reconciler = new JiraLiveReconciler(live, poller as JiraPollerService);
   };
 
   it('a persisted live run is not ended on load; the quiet clock starts at the first tick and ends it 120 s after', async () => {
@@ -611,5 +652,223 @@ describe('the timer — armed while a link is live or a repo is mapped', () => {
       await jest.advanceTimersByTimeAsync(JIRA_RECONCILE_MS - JIRA_RECONCILE_FAST_MS);
       expect(urls).toHaveLength(1);
     });
+  });
+});
+
+describe('mainCheckoutOf', () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'bm-main-checkout-'));
+  });
+
+  it('a directory .git is a main checkout: the path itself', () => {
+    mkdirSync(join(root, '.git'));
+    expect(mainCheckoutOf(root)).toBe(root);
+  });
+
+  it('a gitdir: file under <x>/.git/worktrees/<name> resolves to <x>', () => {
+    writeFileSync(join(root, '.git'), 'gitdir: /r/.git/worktrees/w\n');
+    expect(mainCheckoutOf(root)).toBe('/r');
+  });
+
+  it('a relative gitdir resolves against the path', () => {
+    const wt = join(root, 'repo', '.worktrees', 'w');
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, '.git'), 'gitdir: ../../.git/worktrees/w\n');
+    expect(mainCheckoutOf(wt)).toBe(join(root, 'repo'));
+  });
+
+  it('missing, garbage, and a gitdir outside .git/worktrees all say null', () => {
+    expect(mainCheckoutOf(join(root, 'nope'))).toBeNull();
+    expect(mainCheckoutOf(root)).toBeNull();
+    writeFileSync(join(root, '.git'), 'not a pointer');
+    expect(mainCheckoutOf(root)).toBeNull();
+    writeFileSync(join(root, '.git'), 'gitdir: /r/.git/modules/sub\n');
+    expect(mainCheckoutOf(root)).toBeNull();
+  });
+});
+
+describe('branch detection (Jira sessions §5)', () => {
+  let main: string;
+  let other: string;
+  const mapped = (project = 'PAY', repo = main): void => {
+    const file = join(mkdtempSync(join(tmpdir(), 'bm-jira-detect-')), 'jira.json');
+    writeFileSync(file, JSON.stringify({ repos: { [project]: [repo] } }));
+    process.env.BM_JIRA_FILE = file;
+  };
+  /** A linked worktree of `repo` at `<repo>/.worktrees/<name>`, with the `.git` file git writes. */
+  const worktreeOf = (repo: string, name: string): string => {
+    const wt = join(repo, '.worktrees', name);
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, '.git'), `gitdir: ${repo}/.git/worktrees/${name}\n`);
+    return wt;
+  };
+  const row = (id: string, branch: string, projectPath: string, status = 'working', surface = 'dashboard') => ({ id, status, gitBranch: branch, projectPath, surface });
+  const rows = (...r: ReturnType<typeof row>[]) => {
+    sessions = { status: 200, body: { sessions: r } };
+  };
+  const linkOf = (key: string, id: string) => live.links().find((l) => l.key === key && l.sessionId === id);
+
+  beforeEach(() => {
+    main = mkdtempSync(join(tmpdir(), 'bm-detect-main-'));
+    mkdirSync(join(main, '.git'));
+    other = mkdtempSync(join(tmpdir(), 'bm-detect-other-'));
+    mkdirSync(join(other, '.git'));
+    mapped();
+  });
+
+  it('links a working session whose branch carries a key in a mapped repo, with the issue snapshot, on an empty store', async () => {
+    rows(row('s1', 'PAY-151-currency-rounding', main));
+    await reconciler.tick();
+    expect(reads).toEqual(['PAY-151']);
+    expect(linkOf('PAY-151', 's1')).toMatchObject({
+      how: 'branch',
+      action: null,
+      repo: main,
+      branch: 'PAY-151-currency-rounding',
+      surface: 'dashboard',
+      startedAt: iso(T0),
+      endedAt: null,
+      snapshot: { summary: 'Summary of PAY-151', type: 'Bug', parentKey: 'PAY-1' }
+    });
+  });
+
+  it('a question row is detected too; a non-dashboard surface records null', async () => {
+    rows(row('s1', 'feature/PAY-151', main, 'question', 'local'));
+    await reconciler.tick();
+    expect(linkOf('PAY-151', 's1')).toMatchObject({ surface: null });
+  });
+
+  it('a key in an unmapped repo, or of an unmapped project, never links and costs no read', async () => {
+    rows(row('s1', 'PAY-151-x', other), row('s2', 'OPS-3-x', main));
+    await reconciler.tick();
+    expect(reads).toEqual([]);
+    expect(live.links()).toEqual([]);
+  });
+
+  it('a session in <mapped>/.worktrees/PAY-151-x links; one in a worktree of an unmapped repo does not', async () => {
+    rows(row('s1', 'PAY-151-x', worktreeOf(main, 'PAY-151-x')), row('s2', 'PAY-152-x', worktreeOf(other, 'PAY-152-x')));
+    await reconciler.tick();
+    expect(reads).toEqual(['PAY-151']);
+    expect(linkOf('PAY-151', 's1')).toMatchObject({ repo: main });
+    expect(linkOf('PAY-152', 's2')).toBeUndefined();
+  });
+
+  it('idle and incomplete rows are never detected', async () => {
+    rows(row('s1', 'PAY-151-x', main, 'idle'), row('s2', 'PAY-152-x', main, 'incomplete'));
+    await reconciler.tick();
+    expect(reads).toEqual([]);
+  });
+
+  it('a row with no branch or no project path is skipped', async () => {
+    sessions = { status: 200, body: { sessions: [{ id: 's1', status: 'working', projectPath: main }, { id: 's2', status: 'working', gitBranch: 'PAY-1-x' }] } };
+    await reconciler.tick();
+    expect(reads).toEqual([]);
+  });
+
+  it('two keys on one branch link both', async () => {
+    rows(row('s1', 'PAY-1-and-PAY-2', main));
+    await reconciler.tick();
+    expect(linkOf('PAY-1', 's1')).toBeDefined();
+    expect(linkOf('PAY-2', 's1')).toBeDefined();
+  });
+
+  it('a session that moves from PAY-151-x to PAY-160-y keeps PAY-151 and gains PAY-160, and the known pair costs no second read', async () => {
+    rows(row('s1', 'PAY-151-x', main));
+    await reconciler.tick();
+    rows(row('s1', 'PAY-160-y', main));
+    await reconciler.tick();
+    expect(linkOf('PAY-151', 's1')).toMatchObject({ endedAt: null });
+    expect(linkOf('PAY-160', 's1')).toBeDefined();
+    expect(reads).toEqual(['PAY-151', 'PAY-160']);
+    await reconciler.tick();
+    expect(reads).toEqual(['PAY-151', 'PAY-160']);
+  });
+
+  it('a Jira 404 is never linked and not re-read next tick', async () => {
+    issueAnswers.set('PAY-151', failure(404));
+    rows(row('s1', 'PAY-151-x', main));
+    await reconciler.tick();
+    expect(live.links()).toEqual([]);
+    expect(live.isNeverLink('PAY-151', 's1')).toBe(true);
+    await reconciler.tick();
+    expect(reads).toEqual(['PAY-151']);
+  });
+
+  it('a 429 (or any other failure) leaves nothing and is read again next tick, then links', async () => {
+    issueAnswers.set('PAY-151', failure(429));
+    rows(row('s1', 'PAY-151-x', main));
+    await reconciler.tick();
+    expect(live.links()).toEqual([]);
+    expect(live.isNeverLink('PAY-151', 's1')).toBe(false);
+    issueAnswers.delete('PAY-151');
+    await reconciler.tick();
+    expect(reads).toEqual(['PAY-151', 'PAY-151']);
+    expect(linkOf('PAY-151', 's1')).toBeDefined();
+  });
+
+  it('a person-unlinked (suppressed) pair is not read, and an ended pair is left to re-attach', async () => {
+    expect(live.addLink({ ...branchLink('PAY-151', 's1', 1000) })).toBe('added');
+    live.unlink('PAY-151', 's1');
+    rows(row('s1', 'PAY-151-x', main));
+    await reconciler.tick();
+    expect(reads).toEqual([]);
+    expect(live.links()).toEqual([]);
+  });
+
+  it('at most 5 reads per tick; the other 2 wait for the next', async () => {
+    rows(...[1, 2, 3, 4, 5, 6, 7].map((n) => row(`s${n}`, `PAY-${100 + n}-x`, main)));
+    await reconciler.tick();
+    expect(reads).toHaveLength(5);
+    expect(live.links()).toHaveLength(5);
+    await reconciler.tick();
+    expect(reads).toHaveLength(7);
+    expect(reads.slice(5)).toEqual(['PAY-106', 'PAY-107']);
+    expect(live.links()).toHaveLength(7);
+  });
+
+  it('a detected session beside a live Run on the ticket: both live, and reserve is still refused; a branch link alone leaves reserve open', async () => {
+    seed('PAY-151', 'run-1', OLD);
+    rows(row('run-1', 'PAY-151-x', main), row('s2', 'PAY-151-y', main));
+    await reconciler.tick();
+    expect(live.liveLinks().filter((l) => l.key === 'PAY-151').map((l) => l.how).sort()).toEqual(['branch', 'run']);
+    expect(live.reserve('PAY-151', main)).toBe(false);
+    // …and a ticket that holds only a branch link can be Run.
+    rows(row('s3', 'PAY-200-x', main));
+    await reconciler.tick();
+    expect(linkOf('PAY-200', 's3')).toMatchObject({ how: 'branch' });
+    expect(live.reserve('PAY-200', main)).toBe(true);
+  });
+
+  it('with no repo mapped nothing is detected and nothing is asked of Jira', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'bm-jira-detect-')), 'jira.json');
+    writeFileSync(file, '{}');
+    process.env.BM_JIRA_FILE = file;
+    rows(row('s1', 'PAY-151-x', main));
+    await reconciler.tick();
+    expect(reads).toEqual([]);
+  });
+});
+
+describe('arming when Setup maps a repo while the server runs', () => {
+  it('an empty store with no mapped repo is not ticking; a repos save arms the reconciler', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'bm-jira-arm-')), 'jira.json');
+    writeFileSync(file, '{}');
+    process.env.BM_JIRA_FILE = file;
+    reconciler.arm();
+    expect(jest.getTimerCount()).toBe(0);
+    writeFileSync(file, JSON.stringify({ repos: { PAY: [REPO] } }));
+    live.reposChanged();
+    expect(jest.getTimerCount()).toBe(1);
+    await jest.advanceTimersByTimeAsync(JIRA_RECONCILE_MS);
+    expect(urls).toHaveLength(1);
+  });
+
+  it('a save that maps nothing arms nothing', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'bm-jira-arm-')), 'jira.json');
+    writeFileSync(file, '{}');
+    process.env.BM_JIRA_FILE = file;
+    live.reposChanged();
+    expect(jest.getTimerCount()).toBe(0);
   });
 });

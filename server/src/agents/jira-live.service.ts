@@ -1,10 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { resolve } from 'node:path';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
+import { branchCarriesKey, keysInBranch } from '../../../shared/jira-branch';
+import type { DashboardRow } from '../../../shared/types';
 import { readJiraConfig } from '../jira/config.util';
 import { JiraLiveService } from '../jira/live.service';
+import { JiraPollerService } from '../jira/poller.service';
 import { dashboardSessionRows } from './dashboard-sessions.util';
 import { readAgentsConfig } from './config.util';
+import { mainCheckoutOf } from './worktree-main.util';
 
 /** How often the reconciler asks the dashboard when no Jira page is open (spec §3, §6). */
 export const JIRA_RECONCILE_MS = 60_000;
@@ -24,6 +29,9 @@ export const JIRA_LIVE_GRACE_MS = 120_000;
  * "less than 120 s stays", i.e. exactly 120 s ends; this follows §6.
  */
 export const JIRA_QUIET_MS = 120_000;
+
+/** The most Jira reads one tick spends confirming detected keys (spec §5): the rest wait for the next tick, so a first sweep over a long session list cannot burst. */
+export const JIRA_DETECT_READS_PER_TICK = 5;
 
 /** The two statuses that mean a session is still doing something — the test `ItemsAbortService` case B already makes, and for the same reason. */
 const ACTIVE = new Set(['working', 'question']);
@@ -77,7 +85,14 @@ export class JiraLiveReconciler implements OnApplicationBootstrap, OnApplication
    */
   private stopped = false;
 
-  constructor(private readonly live: JiraLiveService) {}
+  constructor(
+    private readonly live: JiraLiveService,
+    private readonly poller: JiraPollerService
+  ) {
+    // Setup mapping a repo while the server runs is the one change `watchable` cannot see by itself: nothing else would start the chain, and detection would wait
+    // for a restart. The listener lives on the jira side (`agents/` imports `jira/`, never back); `arm` is idempotent and self-gating.
+    live.onReposChanged(() => this.arm());
+  }
 
   /** A server that restarts with live links in the file, or with repos mapped, has something to watch from the first second — nothing else would arm it. */
   onApplicationBootstrap(): void {
@@ -167,6 +182,57 @@ export class JiraLiveReconciler implements OnApplicationBootstrap, OnApplication
     for (const link of this.live.links()) {
       const row = link.sessionId === null ? undefined : rows.get(link.sessionId);
       if (link.endedAt !== null && link.sessionId !== null && row !== undefined && ACTIVE.has(row.status)) this.live.reattach(link.key, link.sessionId, now);
+    }
+    await this.detect(answer.rows);
+  }
+
+  /**
+   * Branch detection (Jira sessions §5): a `working` or `question` session whose `gitBranch` carries a key of a project Setup maps, launched in a repo Setup maps to
+   * that project (or in a linked worktree of one — `mainCheckoutOf`, a file read), is linked. It only ever ADDS: nothing here ends, edits or re-attaches a link,
+   * so a session that moved on from `PAY-151-x` keeps its PAY-151 line. A pair already in the store (live or ended), unlinked by a person, or answered 404 before
+   * is skipped without a read; every other pair costs one `issueSummary` — at most JIRA_DETECT_READS_PER_TICK a tick, in the dashboard's row order, so a long list
+   * drains over a few ticks. A 404 marks the pair never-link (the branch merely looks like a ticket); any other failure leaves it to the next tick.
+   */
+  private async detect(rows: DashboardRow[]): Promise<void> {
+    const repos = readJiraConfig().repos;
+    const projects = Object.keys(repos);
+    if (projects.length === 0) return;
+    const mapped = new Map(projects.map((p) => [p, new Set(repos[p].map((r) => resolve(r)))]));
+    const known = new Set(this.live.links().map((l) => `${l.key}\u0000${l.sessionId}`));
+    let budget = JIRA_DETECT_READS_PER_TICK;
+    for (const row of rows) {
+      if (!ACTIVE.has(row.status) || row.gitBranch === undefined || row.gitBranch === '' || row.projectPath === undefined || row.projectPath === '') continue;
+      const keys = keysInBranch(row.gitBranch, projects);
+      if (keys.length === 0) continue;
+      const path = resolve(row.projectPath);
+      const main = mainCheckoutOf(path);
+      for (const key of keys) {
+        const repo = [...(mapped.get(key.slice(0, key.lastIndexOf('-'))) ?? [])].find((r) => r === path || r === main);
+        if (repo === undefined || !branchCarriesKey(row.gitBranch, key)) continue;
+        if (known.has(`${key}\u0000${row.id}`) || this.live.isSuppressed(key, row.id) || this.live.isNeverLink(key, row.id)) continue;
+        if (budget === 0) return;
+        budget -= 1;
+        const res = await this.poller.issueSummary(key);
+        if (!res.ok) {
+          if (res.response.status === 404) this.live.markNeverLink(key, row.id);
+          continue;
+        }
+        const issue = res.value;
+        this.live.addLink({
+          key,
+          sessionId: row.id,
+          how: 'branch',
+          action: null,
+          name: row.sessionName ?? row.gitBranch,
+          repo,
+          branch: row.gitBranch,
+          surface: row.surface === 'dashboard' ? 'dashboard' : null,
+          model: row.model ?? null,
+          effort: row.effort ?? null,
+          snapshot: { summary: issue.summary, type: issue.type.name, parentKey: issue.parent?.key ?? null },
+          startedAt: new Date().toISOString()
+        });
+      }
     }
   }
 }
