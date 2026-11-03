@@ -98,7 +98,7 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   `/skills`, `/skills/delete`, and `/repo-defaults`) and, since phase 3, two writes to Jira itself (`/issue/assign` `{ key }`
   and `/issue/transition` `{ key, transitionId }`), the only writes this server makes to Jira. A link store of Jira sessions (several per ticket, kept in
   `~/.backlog-manager/jira-links.json`) sits here too, driven from
-  `agents/` by `POST /api/agents/dispatch-jira` and `/jira-stop` — part of the
+  `agents/` by `POST /api/agents/dispatch-jira`, `/jira-stop`, `/jira-link` and `/jira-unlink` — part of the
   [Jira integration](superpowers/specs/2026-10-15-jira-integration-design.md); [full doc](subsystems/jira.md).
 - **`registry/`** — read-only view of the registry file.
 - **`hub/`** — three read-only Lookout widgets (open work, projects, this machine's run state) at `/api/hub/widgets`, served through the `lookout-widgets`
@@ -157,7 +157,7 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
 
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
   adapters, and the ten guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this server makes to
-  anybody's items), `agents/` (the dashboard calls — the item `abort` among them — plus the run watchdog, `POST /api/agents/dispatch-jira` and `/jira-stop`,
+  anybody's items), `agents/` (the dashboard calls — the item `abort` among them — plus the run watchdog, `POST /api/agents/dispatch-jira`, `/jira-stop`, `/jira-link` and `/jira-unlink`,
   and the 15 s / 60 s reconciler that keeps the Jira link store honest, and `agents/dashboards/` — `dashboards.json`'s reader/writer, the machine offers, health
   and
   usage reads, and a card's or an Orchestrate run's launch and stop on another machine, whose outbound calls go to remote dashboards and remote boards and are

@@ -134,8 +134,8 @@ describe('the agents POST guard', () => {
     if (verb === 'dispatch-jira') {
       return { key: 'PAY-1', repo: projectPath, action: 'execute', assign: false, transitionId: null, permissionMode: 'plan', remoteControl: false };
     }
-    // jira-stop names a ticket and one of its sessions.
-    if (verb === 'jira-stop') return { key: 'PAY-1', sessionId: 'sess-1' };
+    // jira-stop, jira-link and jira-unlink name a ticket and one of its sessions.
+    if (verb === 'jira-stop' || verb === 'jira-link' || verb === 'jira-unlink') return { key: 'PAY-1', sessionId: 'sess-1' };
     return verb === 'orchestrate' || verb === 'resume' || verb === 'pause' || verb === 'stop' ? { project: projectPath } : verb === 'watchdog/config' ? { enabled: true } : body();
   };
 
@@ -145,7 +145,7 @@ describe('the agents POST guard', () => {
   // eighth (the orchestrator:queued spec, §2), `abort`, the ninth (#225) — the one item write that lives in `agents/`, because it calls the
   // dashboard — `review`, the tenth (the execute pr-mode spec, decision 9) — and `plan-review`, the eleventh (backlog-tick) — and the four `/api/dashboards` settings POSTs
   // (multi-dashboard task 2), which change which machine a launch may be sent to and so are as guarded as the launch itself.
-  // `dispatch-jira` is Jira phase 5's Start, the second session-starting POST; `jira-stop` is its Stop. The three `/api/prs` POSTs (Plan B, task 4) write
+  // `dispatch-jira` is Jira phase 5's Start, the second session-starting POST; `jira-stop` is its Stop, and `jira-link` / `jira-unlink` make and drop a link by hand. The three `/api/prs` POSTs (Plan B, task 4) write
   // to GitHub — merge, auto-merge, update-branch — and are guarded per route beside their unguarded `GET /api/prs`.
   const GUARDED = [
     '/api/agents/plan',
@@ -157,6 +157,8 @@ describe('the agents POST guard', () => {
     '/api/agents/stop',
     '/api/agents/dispatch-jira',
     '/api/agents/jira-stop',
+    '/api/agents/jira-link',
+    '/api/agents/jira-unlink',
     '/api/items/create',
     '/api/items/state',
     '/api/items/claim',

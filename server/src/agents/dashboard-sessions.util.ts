@@ -90,6 +90,27 @@ export async function dashboardSessionStatus(cfg: AgentsConfig, session: string)
 }
 
 /**
+ * One session's row from `GET /api/sessions/:id/row` — `null` for the dashboard's 404 (`no such session`: no transcript exists for the id), a 502 for every
+ * other failure, worded as `readSessions` words them. Unlike the list this reads ANY transcript whatever its age, with no cap and no lookback, so it is the
+ * only honest answer to "does the dashboard know this session": absence from a full list proves nothing (spec §5), and `/jira link` refuses an id on this
+ * 404 alone. The id goes into the path through `encodeURIComponent`, and the body is normalised by the same `toRow` the list uses, so the row a manual link
+ * is made from has the shape the reconciler's rows have.
+ */
+export async function dashboardSessionRow(cfg: AgentsConfig, id: string): Promise<DashboardRow | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.url}/api/sessions/${encodeURIComponent(id)}/row`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS) });
+  } catch (e) {
+    throw new HttpException({ error: dashboardError(e, 'the dashboard session list', SESSIONS_TIMEOUT_MS) }, 502);
+  }
+  if (res.status === 404) return null;
+  if (!res.ok) throw new HttpException({ error: `the dashboard session list answered ${res.status}` }, 502);
+  const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (typeof body !== 'object' || body === null) throw new HttpException({ error: 'the dashboard session row carried no session' }, 502);
+  return toRow(id, body);
+}
+
+/**
  * #227's guard for a STALE claim nobody dispatched: the refusal sentence when this machine can show the holder is still running, else `null`. Never throws.
  *
  * A stale claim is forfeit by protocol — any `start`, on any machine, retires it with no confirm — so this is only an extra guard, and it refuses on a

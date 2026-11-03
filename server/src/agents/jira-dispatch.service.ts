@@ -17,6 +17,7 @@ import { readRepoRefs } from '../jira/refs.util';
 import { jiraWriteOrThrow, unwrapJira } from '../jira/unwrap.util';
 import { AgentsService } from './agents.service';
 import { readAgentsConfig } from './config.util';
+import { dashboardSessionRow } from './dashboard-sessions.util';
 import { JiraLiveReconciler } from './jira-live.service';
 import { stopDashboardSession } from './session-stop.util';
 
@@ -225,6 +226,64 @@ export class JiraDispatchService {
     // fresh Start on the key, a different session, is never the pair this names.
     this.live.end(key, sessionId, 'stopped');
     return { ok: true };
+  }
+
+  /**
+   * `POST /api/agents/jira-link` — `/jira link <KEY>`: link a session to a ticket by hand (spec §5). In the order the spec gives: agents off (409, `stop`'s own
+   * sentence — the row read is a dashboard call), then the key is a real issue (`issueSummary`, one poller read; its status and sentence go through
+   * `unwrapJira`, so a 404, a 429 and an unreachable Jira each read as they do on every other route), then the session is one the dashboard knows — its
+   * `GET /api/sessions/:id/row` answering 404 is the ONLY refusal, never absence from the capped list, which proves nothing. The ticket is checked before the
+   * session so a typo in the key costs no dashboard call.
+   *
+   * An explicit link is the person changing their mind, so it lifts a suppression an earlier unlink left BEFORE `addLink` (which would answer `suppressed`)
+   * — and only here, after both checks passed, so a refused link leaves the suppression standing. The snapshot is the ticket as Jira reports it now; `surface`
+   * is the row's `dashboard` or null, as detection does (the row's `local`/`cloud` are not this repo's launch surfaces). The row carries no `repo` mapping, so
+   * `repo` is its launch folder, `''` when the dashboard sent none.
+   */
+  async link(key: string, sessionId: string): Promise<{ ok: true; linked: 'added' | 'exists' }> {
+    const cfg = readAgentsConfig();
+    if (!cfg.enabled) {
+      throw new HttpException({ error: environmentBlock(await this.agents.status()) ?? 'dispatch is off — set BM_AGENTS=on for the API' }, 409);
+    }
+    const issue = unwrapJira(await this.poller.issueSummary(key));
+    const row = await dashboardSessionRow(cfg, sessionId);
+    if (row === null) throw new HttpException({ error: `the dashboard does not know session ${sessionId.slice(0, 8)}` }, 409);
+    this.live.unsuppress(key, sessionId);
+    const linked = this.live.addLink({
+      key,
+      sessionId,
+      how: 'manual',
+      action: null,
+      name: row.sessionName ?? row.gitBranch ?? `session ${sessionId.slice(0, 8)}`,
+      repo: row.projectPath ?? '',
+      branch: row.gitBranch ?? null,
+      surface: row.surface === 'dashboard' ? 'dashboard' : null,
+      model: row.model ?? null,
+      effort: row.effort ?? null,
+      snapshot: { summary: issue.summary, type: issue.type.name, parentKey: issue.parent?.key ?? null },
+      startedAt: new Date().toISOString()
+    });
+    // `unsuppress` ran first, so the store cannot answer `suppressed`; the type still says it could, and a link that was not made must not read as one that was.
+    if (linked === 'suppressed') throw new HttpException({ error: `${key} could not be linked to session ${sessionId.slice(0, 8)}` }, 409);
+    this.reconciler.arm();
+    return { ok: true, linked };
+  }
+
+  /**
+   * `POST /api/agents/jira-unlink` — `/jira unlink <KEY>` (spec C9): removes a `branch` or `manual` link and remembers the pair so detection never re-adds it.
+   * No dashboard call, so it works with dispatch off. A `run` link refuses (409): dropping it would free the one-run gate under a live Run session, and
+   * only Stop ends one. `missing` is a pair the store does not hold, 404.
+   */
+  unlink(key: string, sessionId: string): { ok: true } {
+    const id8 = sessionId.slice(0, 8);
+    switch (this.live.unlink(key, sessionId)) {
+      case 'run':
+        throw new HttpException({ error: `${key} was started by Run ▾ — stop it from the board instead` }, 409);
+      case 'missing':
+        throw new HttpException({ error: `${key} is not linked to session ${id8}` }, 404);
+      default:
+        return { ok: true };
+    }
   }
 
   /** The second composition, from the re-read detail. Only reached after a write, so its refusal is the caller's to suffix; the sentence is the first's. */

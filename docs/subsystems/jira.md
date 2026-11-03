@@ -465,6 +465,23 @@ of the key — `<KEY> is still starting`, `no live session for <KEY>`, or `<KEY>
 (`stopDashboardSession`) — a 200, or the dashboard's `no live session` 404, ends that link as `stopped` (a no-op if it ended meanwhile); any other answer is a
 502 ending `— Jira is untouched`, with the link left live. Jira is never called.
 
+### `POST /api/agents/jira-link` and `/jira-unlink`
+
+`{ key, sessionId }` each — what `/jira link <KEY>` and `/jira unlink <KEY>` post, in `JiraDispatchService.link` / `unlink` beside `stop` (the row read is a dashboard
+call, and `agents/` is the only module that makes one). Both are `SameOriginPostGuard`ed and shape-checked as `jira-stop` is (400 `invalid issue key` /
+`invalid session id`).
+
+**Link** → `{ ok: true, linked: 'added' | 'exists' }`. 409 when dispatch is off (`stop`'s sentence); then one `issueSummary` read, any failure answered by
+`unwrapJira` (404 `issue not found`, 503 rate limit, 502 unreachable); then `dashboardSessionRow` — the dashboard's `GET /api/sessions/:id/row`, which reads any
+transcript whatever its age — and only its 404 refuses, 409 `the dashboard does not know session <first 8 characters>`; any other failure is a 502. Absence from the
+capped list proves nothing and is never a refusal. The link is `how: 'manual'`, `surface` the row's `dashboard` or `null`, `repo` the row's launch folder, with the
+ticket snapshot from the read. `unsuppress` runs after both checks and before `addLink`, so an explicit link of a pair someone unlinked is `added`, and a refused
+link leaves the suppression standing. A pair already in the store, live or ended, is `exists`.
+
+**Unlink** → `{ ok: true }`. Removes a `branch` or `manual` link and remembers the pair, so the next detection tick does not re-add it (C9). A `run` link is a 409
+`<KEY> was started by Run ▾ — stop it from the board instead`; a pair not in the store is a 404 `<KEY> is not linked to session <id8>`. It calls nothing, so it works
+with dispatch off.
+
 ### The reconciler
 
 `JiraLiveReconciler` (`agents/jira-live.service.ts`) reads the dashboard's session list once per tick (`dashboardSessionRows`: `?limit=50&lookback=168`) and

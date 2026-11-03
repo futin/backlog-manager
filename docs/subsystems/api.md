@@ -296,6 +296,12 @@ the machine is `home`.
   abort) and ends its link as `stopped`; a ticket can hold several, so a bare key is a 400, and an id that is not a live link of the key a 409. Never calls
   Jira. `JiraLiveReconciler` ends links whose session the dashboard has stopped reporting as working for two minutes. →
   [jira.md](jira.md#post-apiagentsjira-stop)
+- `POST /api/agents/jira-link` `{ key, sessionId }` and `POST /api/agents/jira-unlink` `{ key, sessionId }` — the `jira` skill's `/jira link` and `/jira unlink`
+  (`JiraDispatchService.link` / `unlink`). Link: 409 when dispatch is off, the key checked by one poller read (`issueSummary`, its own status and sentence), the
+  session by the dashboard's `GET /api/sessions/:id/row` (`dashboardSessionRow`) — a 404 there is `the dashboard does not know session <id8>`, absence from the
+  capped list is not a refusal — then a `manual` link and `{ ok: true, linked: 'added' | 'exists' }`; an explicit link lifts an earlier unlink's suppression.
+  Unlink removes a `branch`/`manual` link and suppresses the pair so detection never re-adds it; a `run` link is a 409, an unknown pair a 404; it makes no
+  dashboard call. →  [jira.md](jira.md#post-apiagentsjira-link-and-jira-unlink)
 - `GET /api/agents/watchdog`, `POST /api/agents/watchdog/config` — the run watchdog's live state, read out of this process's own memory and the settings file it
   owns, plus the four server-side knobs behind it.
 - `GET /api/agents/merge-check` — a local, read-only look at whether a project's main tree is in a state that can receive a merge.
@@ -349,7 +355,7 @@ the run `stop` stay home-only: they act on a run file, and a remote run has none
 Every new outbound read — the offers' dashboard and board reads, usage, and a remote's status — is held to 5 s. Home keeps its 4 s health and 15 s management
 reads, and every spawn and stop keeps 10 s.
 
-`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop` answers 409 with the same sentence). `status` exists to report that gate, so it answers either
+`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop` and `jira-link` answer 409 with the same sentence; `jira-unlink` calls nothing and is not gated). `status` exists to report that gate, so it answers either
 way, and `pause`, `watchdog`, `watchdog/config` and `merge-check` never call the dashboard at all: two read this process's own state, one writes its own
 settings file, one looks at local git. `pause` being independent of the switch is deliberate rather than incidental — a pause is a fact on this machine's own
 disk about a run that is already going, so gating it would mean a run started while dispatch was on could never be stopped after somebody turned it off.
