@@ -299,7 +299,8 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   slot with the fold's `childrenOf` beside the issue.
 - **The Detail dialog** (`components/jira/JiraDetail.tsx`, the former issue modal) composes `ui/Modal` and `ui/Fact` as `ItemModal` does, and keeps the
   modal's slot on the Escape stack. Its facts column is the ticket's sessions (below); everything the issue modal drew sits on the right. It draws every fact
-  the card carried at once, and reads `GET /api/jira/issue/:key` fresh on open for the description (through `renderMarkdown`, `lib/markdown.ts`, the sanitising `marked` config
+  the card carried at once, and reads `GET /api/jira/issue/:key` fresh on open for the description (through `renderMarkdown`, `lib/markdown.ts`, the sanitising
+  `marked` config
   `ItemModal` also uses), the children and the boards holding it. The held answer is stamped with its key, so a late answer for an issue the modal has left
   is dropped. The children draw as a tree: the detail's direct children with their descendants from the `childrenOf` snapshot the card click carried, each
   key once; a row click swaps the one modal's issue through the same `JiraView` setter, never a second `Modal`.
@@ -313,11 +314,13 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   controls do not blink to disabled. A `reread: false` answer is a success like any other: the modal does not read the body.
   **The agent column (Jira sessions, spec §7.3, §7.5)** is `JiraDetail`'s left side, from `useJiraSessionsContext()` — ONE `useJiraSessions({ open, enabled })` instance
   (`hooks/JiraSessionsContext.tsx`, mounted by `App`'s shell around the rail AND the section — `enabled` is `configured: true`, `open` is "Jira is the current section"; 15 s through
-  `useRefreshing`, a failed read keeps the last answer) that the dialog, `Run ▾`, the card's chip and the rail's Needs-you badge all share. Live cards (`JiraSessionCard`) come newest first: a state strip with its age (`pollAge`, never a
+  `useRefreshing`, a failed read keeps the last answer) that the dialog, `Run ▾`, the card's chip and the rail's Needs-you badge all share. Live cards
+  (`JiraSessionCard`) come newest first: a state strip with its age (`pollAge`, never a
   clock of the component's own), the linked-how tag, the short id; `Unlink` only on a `branch` link and `Stop` only when the row carries a `stopState`, both
   through the dialog's `sessionWrite`, which reloads the sessions, the status and the board. The waiting question's text is never drawn, only its state
   label. Under them the history timeline (`<how> · ended <age> ago`, `Reopen`), then `Run ▾`. A `starting` reservation is drawn from `GET /api/jira`'s
-  `live[key]`, never from the sessions payload. `Run ▾` is disabled only while a live `run` link exists or a reservation does: `runChipState` is the UNION of a live `run` link in
+  `live[key]`, never from the sessions payload. `Run ▾` is disabled only while a live `run` link exists or a reservation does: `runChipState` is the UNION of a
+  live `run` link in
   the sessions payload and any `status.live` entry (every live `run` link plus the `starting` reservations, never a `branch` or `manual` link), so a Start that
   just landed reads `live` from whichever source saw it first (ruling 95); a landed Start also re-reads the sessions payload at once.
 - **Jira › Setup** (`components/jira/JiraSetupView.tsx`) makes the page's ONE `/api/jira/projects` read per mount and hands it to the board sheet and the
@@ -496,7 +499,8 @@ with dispatch off.
 
 `JiraLiveReconciler` (`agents/jira-live.service.ts`) reads the dashboard's session list once per tick (`dashboardSessionRows`: `?limit=50&lookback=168`) and
 keeps the rows in the store (`setRows`). The period is `JIRA_RECONCILE_FAST_MS` (15 s) while a Jira page was read in the last 30 s (`GET /sessions?open=1`) and
-`JIRA_RECONCILE_MS` (60 s) otherwise; a read that opens the page (it was closed) tells `JiraLiveService.onPageOpened`'s listener, which clears a pending slow timer and re-arms at 15 s. For each live link with a session id and older than `JIRA_LIVE_GRACE_MS` (2 min): a `working` or `question` row clears
+`JIRA_RECONCILE_MS` (60 s) otherwise; a read that opens the page (it was closed) tells `JiraLiveService.onPageOpened`'s listener, which clears a pending slow
+timer and re-arms at 15 s. For each live link with a session id and older than `JIRA_LIVE_GRACE_MS` (2 min): a `working` or `question` row clears
 `quietSince`; anything else marks it on the first such tick, and the link ends — `idle`, or `gone` when the list has no row — once the mark is `JIRA_QUIET_MS`
 (2 min) old. A list of 50 rows is full and proves nothing about an absent session, which stays live for the 8-hour backstop. An ended link whose row is
 `working` or `question` again is re-attached on its own entry. One `setTimeout`, armed after `confirm` and at boot and pending only while some link is live or
@@ -606,23 +610,27 @@ rule](invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-on
 
 jest, flat in `test/`, none reaching a real Jira: `jira-env`, `jira-config`, `jira-client`, `jira-adf`, `jira-map-issue`, `jira-block`, `jira-poller` and
 `jira-routes` (supertest through `listenLoopback`); phase 2 adds `jira-config-write` (the writers), `jira-write-routes` (the config POSTs, supertest; three in phase 2, five since 5a), the pure
-`jira-lib` (`lib/jira.ts`), and the jsdom suites `use-jira`, `jira-sections`, `jira-board`, `jira-modal`, `jira-setup` and `jira-chip`, which mock `fetch`. Phase 3 adds `jira-issue-writes` (the two routes, supertest: the guard, validation, the refusals, the 429 window, a 401 on the
-write, the identity gate) and widens `jira-client` (the two calls), `jira-poller` (the splice, in-place-never-add, newest-wins) and `jira-modal` (the controls row, the
+`jira-lib` (`lib/jira.ts`), and the jsdom suites `use-jira`, `jira-sections`, `jira-board`, `jira-detail`, `jira-setup` and `jira-chip`, which mock `fetch`. Phase 3 adds `jira-issue-writes` (the two routes, supertest: the guard, validation, the refusals, the 429 window, a 401 on the
+write, the identity gate) and widens `jira-client` (the two calls), `jira-poller` (the splice, in-place-never-add, newest-wins) and `jira-detail` (the controls row, the
 in-flight guard, the key stamp, the held detail).
 Phase 5a adds `jira-prompt` (the composer and `GET /prompt`), `jira-live` (the map), and — under `agents-` because the route lives there — `agents-dispatch-jira`,
 `agents-jira-stop` and `agents-jira-live` (the reconciler), widens `jira-config-write` and `jira-write-routes` (the skills writers and routes), `jira-routes` (`live`,
 `session`) and `agents-origin-guard` (the two new POSTs). Phase 5b adds the jsdom suite `jira-launch` (the sheet: preview, gates, Start, Copy prompt) and widens
-`jira-lib`, `jira-board` (`Run ▾`, the strip), `jira-modal` (the session fact, Stop), `jira-setup` (the Skills card), `settings-view` and `settings`
+`jira-lib`, `jira-board` (`Run ▾`, the strip), `jira-detail` (the session fact, Stop), `jira-setup` (the Skills card), `settings-view` and `settings`
 (`jiraDefaultAction`), `use-jira` and `dialog-count-docs`.
 The repo/branch work adds `jira-branch` (Tables A–E of `shared/jira-branch.ts`), `jira-branch-choice` (`parseBranchChoice`, `resolveWorkspace`) and `jira-refs`
 (`refs.util.ts` over real temp repos), and widens `jira-config`, `jira-config-write`, `jira-write-routes` (`repoDefaults`, `/repo-defaults`), `jira-routes`
 (`/refs`, `/worktrees`, the prompt's branch parameters), `jira-prompt` (the workspace block, the placeholders, Open MR), `agents-dispatch-jira`, `compose-env`
 (the second mount, `BM_REPO_ROOTS`), `jira-lib`, `jira-launch` (the Branch section), `jira-setup` (the row defaults and the path's worktrees), `jira-board`
-(the chip) and `jira-modal` (the Worktrees list). `skills/jira/tools/jira.test.mjs` (node) covers `worktree` over real temp repos and its own Tables A and B.
+(the chip) and `jira-detail` (the Worktrees list). `skills/jira/tools/jira.test.mjs` (node) covers `worktree` over real temp repos and its own Tables A and B.
 `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a per-request failure hook; `test/helpers/env.ts` blanks
 the three keys so no suite inherits a developer's credentials. `test/compose-env.test.ts` pins the compose passthrough.
 The Jira sessions work adds `jira-sessions-state` (`sessionState` and `needsYou`) and widens `jira-live` (the store, its file, retention, the one-run gate),
-`agents-jira-live` (the quiet clock, re-attach, the pace), `agents-jira-stop` (`{ key, sessionId }`) and `jira-routes` (`GET /sessions`);
+`agents-jira-live` (the quiet clock, re-attach, the pace), `agents-jira-stop` (`{ key, sessionId }`) and `jira-routes` (`GET /sessions`),
+and adds `agents-jira-link` (the link and unlink routes, supertest), the pure `jira-sessions-lib` (`lib/jira-sessions.ts`: the Open buttons, durations, the
+ticket's sessions) and the jsdom suites `jira-list` (the List view), `jira-view-store` (the Board and List switch's module store) and `jira-sessions-hook`
+(`useJiraSessions`), and widens `rail` (the Needs-you badge), `jira-board` (the agent deck and status shelves) and `jira-detail` (the live session cards and
+history; it was `jira-modal` before the dialog was renamed);
 `test/helpers/jira-links-env.ts` gives every test its own `BM_JIRA_LINKS_FILE` in a temp directory, so none touches a developer's real one and no case inherits
 another's links.
 

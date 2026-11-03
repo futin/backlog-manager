@@ -13,8 +13,9 @@ import type { JiraSessionsPayload } from '../../../shared/types';
 export const JIRA_SESSIONS_POLL_MS = 15_000;
 
 /**
- * Every linked Jira session, live and ended, with its derived state (Jira sessions spec §6, §7). Mounted ONCE, by `JiraSessionsProvider` — the Jira
- * section's page — so Detail, the deck and the List read one answer and one clock rather than each running a poll of their own (`JiraContext`'s reasoning).
+ * Every linked Jira session, live and ended, with its derived state (Jira sessions spec §6, §7). Mounted ONCE, by `JiraSessionsProvider` — at the shell,
+ * around the rail and the Jira section — so Detail, the deck, the List and the rail badge read one answer and one clock rather than each running a poll of
+ * their own (`JiraContext`'s reasoning).
  *
  * **`open`** is "a Jira page is on screen": it adds `?open=1`, which is what quickens the server's reconciler to ~15 s. The shell passes whether the Jira
  * section is the current one, so the same instance that feeds the rail badge with the section closed never holds the reconciler at the fast rate.
