@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>List: one row per session</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#2a5fae}a:hover{color:#1d4580}
+.root{--board:#F4F4F3;--strip:#fff;--strip-hi:#F2F2F1;--hairline:#EAEAE8;--hairline2:#DCDCDA;--ink:#131313;--ink2:#636363;--ink3:#8A8A8A;--green:#5FA92C;--green-soft:#CDE8A8;--amber:#F5A15C;--mustard:#8f6214;--red:#C8412E;--note:#2a5fae;
+  font-family:"Hanken Grotesk",Helvetica,Arial,sans-serif;color:var(--ink);font-size:14px;line-height:1.4;font-variant-numeric:tabular-nums;background:var(--strip);-webkit-font-smoothing:antialiased}
+.root *{box-sizing:border-box}
+.root button{font:inherit;color:inherit}
+.shell{display:flex;flex-wrap:wrap;min-height:100%}
+.rail{flex:1 1 200px;max-width:220px;padding:20px 16px;display:flex;flex-direction:column;gap:2px}
+.wm{font-size:18px;font-weight:600;letter-spacing:-.03em;padding:0 12px 18px;display:flex;align-items:center;gap:6px}
+.wm i{display:inline-block;width:8px;height:18px;background:var(--green);border-radius:1px}.wm span{color:var(--green)}
+.nav{display:flex;align-items:center;gap:10px;height:36px;padding:0 12px;border-radius:14px;font-size:14px;font-weight:500;color:var(--ink2);text-decoration:none}
+.nav.on{background:var(--strip-hi);color:var(--ink)}
+.badge{margin-left:auto;background:var(--amber);color:var(--ink);font-size:11px;font-weight:700;min-width:20px;height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px}
+.tree{margin:2px 0 4px 22px;border-left:1px solid var(--hairline2);display:flex;flex-direction:column}
+.tree a{padding:6px 0 6px 16px;font-size:13px;color:var(--ink2);text-decoration:none}.tree a.on{color:var(--ink);font-weight:500}
+.well{flex:999 1 560px;min-width:0;background:var(--board);border-top-left-radius:24px;padding:24px;display:flex;flex-direction:column;gap:16px}
+.band{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px}
+.band .txt{display:flex;flex-direction:column;gap:2px;min-width:0;margin-right:auto}
+.band h1{margin:0;font-size:20px;font-weight:600;letter-spacing:-.02em}
+.sub{font-size:12px;color:var(--ink2)}
+.chip{min-height:32px;padding:0 12px;border:1px solid var(--hairline2);border-radius:11px;background:var(--strip);font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;text-decoration:none;color:var(--ink)}
+.chip.sm{min-height:28px;padding:0 10px;border-radius:9px;font-size:12px}
+.chip.pri{background:var(--ink);color:#fff;border-color:var(--ink)}
+.chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.chip:disabled{opacity:.45;cursor:not-allowed}
+.ic{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.seg{display:inline-flex;padding:3px;border-radius:12px;background:var(--hairline2)}
+.seg a{height:30px;padding:0 14px;border-radius:9px;display:inline-flex;align-items:center;font-size:13px;font-weight:500;color:var(--ink2);text-decoration:none}
+.seg a.on{background:var(--strip);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.search{height:32px;border:1px solid var(--hairline2);border-radius:11px;background:var(--strip);padding:0 12px;font-size:13px;min-width:180px}
+.filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.filters .sep{width:1px;height:20px;background:var(--hairline2);margin:0 4px}
+.n{font-size:11px;color:inherit;opacity:.7}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.d-need{background:var(--amber)}.d-work{background:var(--green)}.d-start{background:var(--ink3)}.d-end{background:transparent;border:1.5px solid var(--ink3)}.d-stall{background:var(--red)}
+.tbl{background:var(--strip);border-radius:12px;overflow-x:auto;min-width:0}
+.row{display:grid;grid-template-columns:190px minmax(220px,1.6fr) 96px minmax(150px,1fr) 96px 64px 80px 76px 64px 220px;gap:0 14px;align-items:center;padding:0 16px;min-height:44px;border-bottom:1px solid var(--hairline);font-size:12.5px;min-width:1240px}
+.row.hd{min-height:34px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink3)}
+.grp{padding:10px 16px 6px;font-size:12px;font-weight:600;color:var(--ink2);display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--hairline);min-width:1240px}
+.row.need{background:linear-gradient(90deg,rgba(245,161,92,.14),transparent 40%)}
+.row.ended{color:var(--ink2)}
+.st{display:flex;align-items:center;gap:8px;font-weight:500}
+.tk{display:flex;align-items:center;gap:8px;min-width:0}
+.tk a{color:var(--ink);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.ended .tk a{color:var(--ink2)}
+.key{font-weight:600;white-space:nowrap}
+.ty{width:12px;height:12px;border-radius:3px;display:inline-block;flex:none}
+.ty.bug{background:var(--red)}.ty.story{background:var(--green)}.ty.task{background:var(--note)}.ty.sub{background:var(--ink3)}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctx{display:flex;align-items:center;gap:6px}
+.bar{width:36px;height:4px;border-radius:2px;background:var(--hairline2);overflow:hidden;flex:none}
+.bar i{display:block;height:100%;background:var(--ink2)}
+.acts{display:flex;gap:6px;justify-content:flex-end}
+.foot{font-size:12px;color:var(--ink2);padding:10px 16px}
+</style>
+</helmet>
+<div class="root">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-desk" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></symbol>
+<symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"></rect><rect x="14" y="3" width="7" height="5" rx="1"></rect><rect x="14" y="12" width="7" height="9" rx="1"></rect><rect x="3" y="16" width="7" height="5" rx="1"></rect></symbol>
+<symbol id="i-hist" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path><path d="M3 3v5h5M12 7v5l3 2"></path></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"></path></symbol>
+</svg>
+<div class="shell">
+  <nav class="rail" aria-label="Sections">
+    <div class="wm"><span>›</span>manager<i></i></div>
+    <a class="nav" href="#">Files</a>
+    <a class="nav" href="#">GitHub</a>
+    <a class="nav on" href="#" aria-current="page">Jira <span class="badge" aria-label="2 sessions need you">2</span></a>
+    <div class="tree"><a class="on" href="#">Board</a><a href="#">Setup</a></div>
+    <a class="nav" href="#">Runs</a>
+    <a class="nav" href="#">Settings</a>
+  </nav>
+  <main class="well">
+    <div class="band">
+      <div class="txt"><h1>Sprint 42 · mine</h1><span class="sub">12 sessions on 9 tickets · last 7 days</span></div>
+      <div class="seg" role="group" aria-label="View"><a href="BoardB.dc.html" aria-pressed="false">Board</a><a class="on" href="List.dc.html" aria-pressed="true">List</a></div>
+      <button class="chip" type="button">Sprint 42 · mine <svg class="ic"><use href="#i-chev"></use></svg></button>
+      <label class="sub"><span style="position:absolute;left:-9999px">Search sessions</span><input class="search" placeholder="search ticket, branch, repo"></label>
+    </div>
+    <div class="filters" role="group" aria-label="Filter sessions">
+      <button class="chip sm on" type="button">All <span class="n">12</span></button>
+      <button class="chip sm" type="button"><i class="dot d-need"></i>Needs you <span class="n">2</span></button>
+      <button class="chip sm" type="button"><i class="dot d-work"></i>Working <span class="n">3</span></button>
+      <button class="chip sm" type="button"><i class="dot d-end"></i>Ended <span class="n">7</span></button>
+      <span class="sep"></span>
+      <button class="chip sm" type="button">Repo: any <svg class="ic"><use href="#i-chev"></use></svg></button>
+      <button class="chip sm" type="button">Run: any <svg class="ic"><use href="#i-chev"></use></svg></button>
+      <button class="chip sm" type="button">Last 7 days <svg class="ic"><use href="#i-chev"></use></svg></button>
+    </div>
+    <div class="tbl" role="table" aria-label="Sessions">
+      <div class="row hd" role="row"><span>State</span><span>Ticket</span><span>Run</span><span>Repo · branch</span><span>Where</span><span>Model</span><span>Context</span><span>Started</span><span>For</span><span style="text-align:right">Open</span></div>
+      <div class="grp"><i class="dot d-work"></i>Live · 5</div>
+      <div class="row need" role="row">
+        <span class="st"><i class="dot d-need"></i>Waiting on answer</span>
+        <span class="tk"><i class="ty bug"></i><span class="key">PAY-151</span><a href="Detail.dc.html">Currency rounding wrong on invoices over 1,000</a></span>
+        <span>execute</span><span class="mono">pay-api · jira/PAY-151</span><span>Dashboard</span><span>opus</span>
+        <span class="ctx"><span class="bar"><i style="width:38%"></i></span>38%</span><span>10:42</span><span>34 m</span>
+        <span class="acts"><button class="chip sm pri" type="button"><svg class="ic"><use href="#i-dash"></use></svg>Dashboard</button><button class="chip sm" type="button"><svg class="ic"><use href="#i-desk"></use></svg>Desktop</button></span>
+      </div>
+      <div class="row need" role="row">
+        <span class="st"><i class="dot d-need"></i>Plan approval</span>
+        <span class="tk"><i class="ty story"></i><span class="key">PAY-140</span><a href="Detail.dc.html">Partial refunds from the order page</a></span>
+        <span>jira-groom</span><span class="mono">pay-web · jira/PAY-140</span><span>Desktop</span><span>opus</span>
+        <span class="ctx"><span class="bar"><i style="width:71%"></i></span>71%</span><span>09:58</span><span>1 h 18</span>
+        <span class="acts"><button class="chip sm pri" type="button"><svg class="ic"><use href="#i-desk"></use></svg>Desktop</button><button class="chip sm" type="button"><svg class="ic"><use href="#i-dash"></use></svg>Dashboard</button></span>
+      </div>
+      <div class="row" role="row">
+        <span class="st"><i class="dot d-work"></i>Working</span>
+        <span class="tk"><i class="ty task"></i><span class="key">PAY-136</span><a href="Detail.dc.html">Validate the partial amount against the captured total</a></span>
+        <span>execute</span><span class="mono">pay-api · jira/PAY-136</span><span>Dashboard</span><span>sonnet</span>
+        <span class="ctx"><span class="bar"><i style="width:22%"></i></span>22%</span><span>11:04</span><span>12 m</span>
+        <span class="acts"><button class="chip sm pri" type="button"><svg class="ic"><use href="#i-dash"></use></svg>Dashboard</button><button class="chip sm" type="button" disabled="{{ yes }}"><svg class="ic"><use href="#i-desk"></use></svg>Desktop</button></span>
+      </div>
+      <div class="row" role="row">
+        <span class="st"><i class="dot d-work"></i>Working</span>
+        <span class="tk"><i class="ty sub"></i><span class="key">PAY-143</span><a href="Detail.dc.html">Refund button disabled state copy</a></span>
+        <span>context</span><span class="mono">pay-web · main</span><span>Desktop</span><span>opus</span>
+        <span class="ctx"><span class="bar"><i style="width:9%"></i></span>9%</span><span>11:13</span><span>3 m</span>
+        <span class="acts"><button class="chip sm pri" type="button"><svg class="ic"><use href="#i-desk"></use></svg>Desktop</button><button class="chip sm" type="button"><svg class="ic"><use href="#i-dash"></use></svg>Dashboard</button></span>
+      </div>
+      <div class="row" role="row">
+        <span class="st"><i class="dot d-start"></i>Starting…</span>
+        <span class="tk"><i class="ty bug"></i><span class="key">PAY-158</span><a href="Detail.dc.html">Webhook retries double-count failed captures</a></span>
+        <span>execute</span><span class="mono">pay-api · jira/PAY-158</span><span>Dashboard</span><span>opus</span>
+        <span>–</span><span>11:16</span><span>now</span><span class="acts"></span>
+      </div>
+      <div class="grp"><i class="dot d-end"></i>Ended · 7</div>
+      <div class="row ended" role="row">
+        <span class="st"><i class="dot d-end"></i>Ended</span>
+        <span class="tk"><i class="ty story"></i><span class="key">PAY-134</span><a href="Detail.dc.html">Partial refund API</a></span>
+        <span>context</span><span class="mono">pay-api · main</span><span>Desktop</span><span>opus</span>
+        <span class="ctx"><span class="bar"><i style="width:54%"></i></span>54%</span><span>09:02</span><span>41 m</span>
+        <span class="acts"><button class="chip sm" type="button"><svg class="ic"><use href="#i-hist"></use></svg>Reopen</button></span>
+      </div>
+      <div class="row ended" role="row">
+        <span class="st"><i class="dot d-end"></i>Ended · plan ready</span>
+        <span class="tk"><i class="ty bug"></i><span class="key">PAY-149</span><a href="Detail.dc.html">Refund email shows the wrong currency symbol</a></span>
+        <span>jira-groom</span><span class="mono">pay-web · jira/PAY-149</span><span>Dashboard</span><span>opus</span>
+        <span class="ctx"><span class="bar"><i style="width:47%"></i></span>47%</span><span>Mon 16:20</span><span>26 m</span>
+        <span class="acts"><button class="chip sm" type="button"><svg class="ic"><use href="#i-hist"></use></svg>Reopen</button><button class="chip sm" type="button">Run <svg class="ic"><use href="#i-chev"></use></svg></button></span>
+      </div>
+      <div class="row ended" role="row">
+        <span class="st"><i class="dot d-stall"></i>Lost contact</span>
+        <span class="tk"><i class="ty task"></i><span class="key">PAY-127</span><a href="Detail.dc.html">Retry policy for card-network timeouts</a></span>
+        <span>execute</span><span class="mono">pay-api · jira/PAY-127</span><span>Dashboard</span><span>sonnet</span>
+        <span class="ctx"><span class="bar"><i style="width:88%"></i></span>88%</span><span>Mon 11:40</span><span>2 h 05</span>
+        <span class="acts"><button class="chip sm" type="button"><svg class="ic"><use href="#i-hist"></use></svg>Reopen</button></span>
+      </div>
+      <div class="foot">+ 4 more ended sessions · PAY-122 ×2, PAY-118, PAY-115</div>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { yes: true };
+  }
+}
+</script>
+</body>
+</html>

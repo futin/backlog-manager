@@ -1,0 +1,465 @@
+<title>Jira Sessions Mocks</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the board's own shell (rail + well), one mock per section stacked top to bottom, each captioned with what it asks you to decide.
+   Single light theme on purpose — mocks are always drawn in the board's daylight palette (tokens copied from shared/theme.css daylight). */
+:root{
+  --board:#F4F4F3;--strip:#fff;--strip-hi:#F2F2F1;--hairline:#EAEAE8;--hairline2:#DCDCDA;
+  --ink:#131313;--ink2:#6E6E6E;--ink3:#A0A0A0;
+  --green:#5FA92C;--green-soft:#CDE8A8;--amber:#F5A15C;--amber2:#F9C79A;--mustard:#b8801f;--red:#E0533F;--red-soft:#F6CFC8;
+  --note:#2a5fae;--note-soft:#E3ECF8;
+  --sans:"Hanken Grotesk",Helvetica,Arial,sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{background:var(--board);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.4;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 64px}
+button{font:inherit;color:inherit}
+svg{flex:none}
+.page{max-width:1440px;margin:0 auto;display:flex;flex-direction:column;gap:40px}
+.intro{max-width:820px;display:flex;flex-direction:column;gap:8px}
+.intro h1{font-size:26px;font-weight:600;letter-spacing:-.02em;margin:0;text-wrap:balance}
+.intro p{margin:0;color:var(--ink2);font-size:15px}
+.mock{display:flex;flex-direction:column;gap:12px}
+.cap{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;max-width:1100px}
+.cap .tag{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);font-weight:600}
+.cap h2{font-size:19px;font-weight:600;margin:0;letter-spacing:-.01em}
+.cap p{flex-basis:100%;margin:0;color:var(--ink2);max-width:900px}
+.ask{background:var(--note-soft);color:var(--note);border-radius:10px;padding:10px 14px;font-size:13px;max-width:900px}
+.ask b{font-weight:600}
+
+/* ── shell ── */
+.frame{background:var(--strip);border-radius:20px;border:1px solid var(--hairline);overflow:hidden;display:flex;min-width:0}
+.rail{flex:0 0 200px;padding:20px 16px;display:flex;flex-direction:column;gap:2px;border-right:1px solid var(--hairline)}
+.rail .wm{font-size:18px;font-weight:600;letter-spacing:-.03em;padding:0 12px 18px;display:flex;align-items:center;gap:6px}
+.rail .wm i{display:inline-block;width:8px;height:18px;background:var(--green);border-radius:1px}
+.rail .wm span{color:var(--green)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 12px;border-radius:14px;font-size:14px;font-weight:500;color:var(--ink2);position:relative}
+.nav.on{background:var(--strip-hi);color:var(--ink)}
+.nav .badge{margin-left:auto;background:var(--amber);color:var(--ink);font-size:11px;font-weight:600;min-width:20px;height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px}
+.tree{margin:2px 0 4px 22px;border-left:1px solid var(--hairline2);display:flex;flex-direction:column}
+.tree a{padding:6px 0 6px 16px;font-size:13px;color:var(--ink2);text-decoration:none}
+.tree a.on{color:var(--ink);font-weight:500}
+.well{flex:1;min-width:0;background:var(--board);padding:20px;display:flex;flex-direction:column;gap:16px}
+@media (max-width:900px){.rail{display:none}}
+
+/* ── band ── */
+.band{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px}
+.band .txt{display:flex;flex-direction:column;gap:2px;min-width:0;margin-right:auto}
+.band h3{margin:0;font-size:20px;font-weight:600;letter-spacing:-.02em}
+.band .sub{font-size:12px;color:var(--ink2)}
+.chip{height:32px;padding:0 12px;border:1px solid var(--hairline2);border-radius:11px;background:var(--strip);font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer}
+.chip.sm{height:26px;padding:0 9px;border-radius:9px;font-size:12px}
+.chip.pri{background:var(--ink);color:var(--strip);border-color:var(--ink)}
+.chip[disabled]{opacity:.42;cursor:not-allowed}
+.chip svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.seg{display:inline-flex;background:var(--strip-hi);border-radius:11px;padding:3px;gap:2px}
+.seg b{font-weight:500;font-size:13px;padding:5px 12px;border-radius:8px;color:var(--ink2);cursor:pointer}
+.seg b.on{background:var(--strip);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.search{height:32px;border:1px solid var(--hairline2);border-radius:11px;background:var(--strip);padding:0 12px;display:inline-flex;align-items:center;font-size:13px;color:var(--ink3);min-width:180px}
+
+/* ── summary ribbon ── */
+.ribbon{display:flex;flex-wrap:wrap;gap:8px}
+.rb{display:inline-flex;align-items:center;gap:8px;background:var(--strip);border-radius:11px;padding:7px 12px;font-size:13px;color:var(--ink2)}
+.rb b{color:var(--ink);font-weight:600;font-size:15px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.d-need{background:var(--amber)}.d-work{background:var(--green)}.d-start{background:var(--ink3)}.d-none{background:var(--hairline2)}.d-stall{background:var(--red)}
+
+/* ── lanes ── */
+.lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}
+@media (max-width:1100px){.lanes{grid-template-columns:minmax(0,1fr)}}
+.lane{display:flex;flex-direction:column;gap:10px;min-width:0}
+.laneh{display:flex;align-items:center;gap:8px;padding:0 4px}
+.laneh .n{font-size:15px;font-weight:600}
+.laneh .hint{font-size:12px;color:var(--ink3)}
+.pill{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;padding:0 7px;border-radius:10px;background:var(--strip-hi);font-size:11px;font-weight:500;color:var(--ink2);white-space:nowrap}
+.laneh .pill{margin-left:auto}
+
+/* ── session card ── */
+.card{background:var(--strip);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.strip{height:26px;padding:0 14px;display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;color:var(--ink)}
+.strip .r{margin-left:auto;font-weight:500}
+.s-need{background:var(--amber);background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.3) 0 1px,transparent 1px 4px)}
+.s-work{background:var(--green-soft)}
+.s-start{background:var(--strip-hi);color:var(--ink2)}
+.s-stall{background:var(--red-soft)}
+.face{padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+.head{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2);min-width:0}
+.head .key{font-weight:600;color:var(--ink)}
+.head .crumb{margin-left:auto;color:var(--ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.ty{width:14px;height:14px;border-radius:3px;display:inline-block}
+.ty.bug{background:var(--red)}.ty.story{background:var(--green)}.ty.task{background:var(--note)}.ty.sub{background:var(--ink3)}
+.t{font-size:14px;font-weight:500;line-height:1.35}
+.sess{border-top:1px solid var(--hairline);padding-top:9px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;font-size:12px}
+.sess dt{color:var(--ink3)}
+.sess dd{margin:0;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mono{font-family:var(--mono);font-size:11.5px}
+.ctx{display:inline-flex;align-items:center;gap:6px}
+.bar{width:64px;height:5px;border-radius:3px;background:var(--strip-hi);overflow:hidden;display:inline-block}
+.bar i{display:block;height:100%;background:var(--ink2)}
+.bar i.hi{background:var(--mustard)}
+.surf{display:inline-flex;align-items:center;gap:4px}
+.surf svg{width:13px;height:13px;stroke:var(--ink2);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.acts{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.acts .sp{margin-left:auto}
+.wait{background:var(--strip-hi);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--ink);display:flex;flex-direction:column;gap:2px}
+.wait small{font-size:11px;color:var(--ink3)}
+.why{font-size:11px;color:var(--ink3)}
+
+/* compact no-agent card */
+.mini{background:var(--strip);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.mini .row{display:flex;align-items:center;gap:8px;min-width:0;font-size:12px;color:var(--ink2)}
+.mini .row .key{font-weight:600;color:var(--ink)}
+.mini .row .st{margin-left:auto}
+.mini .t{font-size:13px}
+.hist{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink2);min-width:0}
+.hist .h{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.hist svg{width:12px;height:12px;stroke:var(--ink3);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.hist a{color:var(--note);text-decoration:none;white-space:nowrap;font-weight:500}
+.more{font-size:12px;color:var(--ink2);padding:4px;text-align:center}
+
+/* ── option B: agent deck + status shelves ── */
+.deck{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.deckh{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink2)}
+.deckh b{color:var(--ink);font-size:15px}
+.shelves{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}
+@media (max-width:1100px){.shelves{grid-template-columns:minmax(0,1fr)}}
+.shelf{background:var(--strip);border-radius:12px;overflow:hidden;min-width:0}
+.shelf .sh{display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:13px;font-weight:600;border-bottom:1px solid var(--hairline)}
+.shelf .sh .pill{margin-left:auto}
+.srow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 10px;padding:9px 14px;border-bottom:1px solid var(--hairline);align-items:center;font-size:12.5px}
+.srow:last-child{border-bottom:0}
+.srow .key{font-weight:600}
+.srow .sum{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.srow .hist{grid-column:2/4}
+
+/* ── list ── */
+.filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.fchip{height:28px;padding:0 11px;border-radius:14px;border:1px solid var(--hairline2);background:var(--strip);font-size:12.5px;display:inline-flex;align-items:center;gap:6px;color:var(--ink2);cursor:pointer}
+.fchip.on{background:var(--ink);color:var(--strip);border-color:var(--ink)}
+.fchip .c{font-weight:600}
+.tablewrap{overflow-x:auto;background:var(--strip);border-radius:12px}
+table{border-collapse:collapse;width:100%;min-width:1080px;font-size:12.5px}
+th{text-align:left;font-weight:500;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);padding:10px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--hairline);vertical-align:middle;white-space:nowrap}
+tr.grp td{background:var(--strip-hi);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);font-weight:600;padding:6px 12px}
+tr.ended td{color:var(--ink2)}
+td .sum{display:block;max-width:300px;overflow:hidden;text-overflow:ellipsis;color:var(--ink2);font-size:12px}
+td .k{font-weight:600;color:var(--ink)}
+.state{display:inline-flex;align-items:center;gap:6px;font-weight:500}
+.state.need{color:var(--mustard)}.state.work{color:var(--green)}.state.stall{color:var(--red)}.state.end{color:var(--ink3)}
+.lnk{display:inline-flex;gap:6px}
+
+/* ── states sheet ── */
+.sheet{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.sheet .card .face{gap:6px}
+.sheet .lbl{font-size:12px;color:var(--ink2)}
+.rules{background:var(--strip);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;font-size:13px;max-width:900px}
+.rules h4{margin:0;font-size:14px}
+.rules ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;color:var(--ink2)}
+.rules b{color:var(--ink);font-weight:600}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-desk" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+  <symbol id="i-hist" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+</svg>
+
+<div class="page">
+  <header class="intro">
+    <h1>Jira page, rebuilt around agent sessions</h1>
+    <p>Example tickets and sessions, drawn in the board's light palette. Four mocks, each captioned with the decision it asks for. Nothing here is built yet.</p>
+  </header>
+
+  <!-- ══════════ A ══════════ -->
+  <section class="mock" id="board-a">
+    <div class="cap"><span class="tag">Mock 1 · Board, option A</span><h2>Three lanes by session state</h2>
+      <p>Needs you · Working · No agent. Every ticket on the picked Jira board lands in exactly one lane. Live cards are full session cards; the No agent lane uses
+        compact cards that keep the ticket's last session as one history line.</p></div>
+    <div class="frame">
+      <nav class="rail">
+        <div class="wm"><span>›</span>manager<i></i></div>
+        <a class="nav">Files</a><a class="nav">GitHub</a>
+        <a class="nav on">Jira <span class="badge" title="2 sessions need you">2</span></a>
+        <div class="tree"><a class="on">Board</a><a>Setup</a></div>
+        <a class="nav">Runs</a><a class="nav">Settings</a>
+      </nav>
+      <div class="well">
+        <div class="band">
+          <div class="txt"><h3>Sprint 42 · mine</h3><span class="sub">acme.atlassian.net · 46 issues · polled 8 s ago</span></div>
+          <span class="seg" role="tablist" aria-label="View"><b class="on">Board</b><b>List</b></span>
+          <button class="chip">Sprint 42 · mine <svg viewBox="0 0 10 10"><use href="#i-chev"/></svg></button>
+          <span class="search">search tickets</span>
+        </div>
+        <div class="ribbon">
+          <span class="rb"><i class="dot d-need"></i><b>2</b> need you</span>
+          <span class="rb"><i class="dot d-work"></i><b>3</b> working</span>
+          <span class="rb"><i class="dot d-none"></i><b>41</b> no agent</span>
+          <span class="rb"><svg width="12" height="12" style="stroke:var(--ink3);fill:none;stroke-width:1.7"><use href="#i-hist"/></svg><b>7</b> sessions ended today</span>
+        </div>
+        <div class="lanes">
+          <!-- Needs you -->
+          <div class="lane">
+            <div class="laneh"><i class="dot d-need"></i><span class="n">Needs you</span><span class="pill">2</span></div>
+            <div class="card">
+              <div class="strip s-need">Waiting on your answer<span class="r">6 m</span></div>
+              <div class="face">
+                <div class="head"><i class="ty bug"></i><span class="key">PAY-151</span><span class="crumb">PAY-120 Refund flows</span></div>
+                <div class="t">Currency rounding wrong on invoices over 1,000</div>
+                <dl class="sess">
+                  <dt>Run</dt><dd>execute</dd>
+                  <dt>Repo</dt><dd class="mono">pay-api · PAY-151-currency-rounding</dd>
+                  <dt>Where</dt><dd><span class="surf"><svg><use href="#i-dash"/></svg>Dashboard</span> · opus · 41 m</dd>
+                  <dt>Context</dt><dd><span class="ctx"><span class="bar"><i style="width:38%"></i></span>38%</span></dd>
+                </dl>
+                <div class="acts">
+                  <button class="chip sm pri"><svg><use href="#i-dash"/></svg>Answer in Dashboard</button>
+                  <button class="chip sm"><svg><use href="#i-desk"/></svg>Desktop</button>
+                  <button class="chip sm sp" aria-label="Stop"><svg><use href="#i-stop"/></svg></button>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="strip s-need">Waiting for plan approval<span class="r">22 m</span></div>
+              <div class="face">
+                <div class="head"><i class="ty story"></i><span class="key">PAY-140</span><span class="crumb">Assigned to me</span></div>
+                <div class="t">Partial refunds from the order page</div>
+                <dl class="sess">
+                  <dt>Run</dt><dd>jira-groom</dd>
+                  <dt>Repo</dt><dd class="mono">pay-web · PAY-140-partial-refunds</dd>
+                  <dt>Where</dt><dd><span class="surf"><svg><use href="#i-desk"/></svg>Desktop app</span> · opus · 1 h 5 m</dd>
+                  <dt>Context</dt><dd><span class="ctx"><span class="bar"><i class="hi" style="width:71%"></i></span>71%</span></dd>
+                </dl>
+                <div class="acts">
+                  <button class="chip sm pri"><svg><use href="#i-desk"/></svg>Open in Desktop</button>
+                  <button class="chip sm"><svg><use href="#i-dash"/></svg>Dashboard</button>
+                  <button class="chip sm sp" aria-label="Stop"><svg><use href="#i-stop"/></svg></button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Working -->
+          <div class="lane">
+            <div class="laneh"><i class="dot d-work"></i><span class="n">Working</span><span class="pill">3</span></div>
+            <div class="card">
+              <div class="strip s-work">Working<span class="r">12 m</span></div>
+              <div class="face">
+                <div class="head"><i class="ty task"></i><span class="key">PAY-136</span><span class="crumb">PAY-134 Partial refund API</span></div>
+                <div class="t">Validate the partial amount against the captured total</div>
+                <dl class="sess">
+                  <dt>Run</dt><dd>execute</dd>
+                  <dt>Repo</dt><dd class="mono">pay-api · PAY-136-validate-partial</dd>
+                  <dt>Where</dt><dd><span class="surf"><svg><use href="#i-dash"/></svg>Dashboard</span> · sonnet · 12 m</dd>
+                  <dt>Context</dt><dd><span class="ctx"><span class="bar"><i style="width:22%"></i></span>22%</span></dd>
+                </dl>
+                <div class="acts">
+                  <button class="chip sm pri"><svg><use href="#i-dash"/></svg>Open in Dashboard</button>
+                  <button class="chip sm" disabled title="Running headless; open it in the desktop app once its turn ends"><svg><use href="#i-desk"/></svg>Desktop</button>
+                  <button class="chip sm sp" aria-label="Stop"><svg><use href="#i-stop"/></svg></button>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="strip s-work">Working<span class="r">3 m</span></div>
+              <div class="face">
+                <div class="head"><i class="ty sub"></i><span class="key">PAY-143</span><span class="crumb">PAY-140 Partial refunds</span></div>
+                <div class="t">Refund button disabled state copy</div>
+                <dl class="sess">
+                  <dt>Run</dt><dd>context</dd>
+                  <dt>Repo</dt><dd class="mono">pay-web</dd>
+                  <dt>Where</dt><dd><span class="surf"><svg><use href="#i-desk"/></svg>Desktop app</span> · opus · 3 m</dd>
+                </dl>
+                <div class="acts">
+                  <button class="chip sm pri"><svg><use href="#i-desk"/></svg>Open in Desktop</button>
+                  <button class="chip sm"><svg><use href="#i-dash"/></svg>Dashboard</button>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="strip s-start">Starting…<span class="r">now</span></div>
+              <div class="face">
+                <div class="head"><i class="ty bug"></i><span class="key">PAY-158</span><span class="crumb">Assigned to me</span></div>
+                <div class="t">Webhook retries double-count failed captures</div>
+                <dl class="sess"><dt>Run</dt><dd>execute</dd><dt>Repo</dt><dd class="mono">pay-api</dd></dl>
+              </div>
+            </div>
+          </div>
+          <!-- No agent -->
+          <div class="lane">
+            <div class="laneh"><i class="dot d-none"></i><span class="n">No agent</span><span class="hint">by Jira status</span><span class="pill">41</span></div>
+            <div class="mini">
+              <div class="row"><i class="ty story"></i><span class="key">PAY-134</span><span class="pill st">In Progress</span></div>
+              <div class="t">Partial refund API</div>
+              <div class="hist"><svg><use href="#i-hist"/></svg><span class="h">context ended 2 h ago · pay-api</span><a href="#">reopen</a></div>
+              <div class="acts"><span class="why">Ada L.</span><button class="chip sm sp">Run <svg viewBox="0 0 10 10"><use href="#i-chev"/></svg></button></div>
+            </div>
+            <div class="mini">
+              <div class="row"><i class="ty bug"></i><span class="key">PAY-149</span><span class="pill st">To Do</span></div>
+              <div class="t">Refund email shows the wrong currency symbol</div>
+              <div class="hist"><svg><use href="#i-hist"/></svg><span class="h">jira-groom ended 1 d ago · plan ready</span><a href="#">reopen</a></div>
+              <div class="acts"><span class="why">unassigned</span><button class="chip sm sp">Run <svg viewBox="0 0 10 10"><use href="#i-chev"/></svg></button></div>
+            </div>
+            <div class="mini">
+              <div class="row"><i class="ty task"></i><span class="key">PAY-131</span><span class="pill st">To Do</span></div>
+              <div class="t">Move invoice PDFs to the new storage bucket</div>
+              <div class="hist"><span class="h" style="color:var(--ink3)">no sessions yet</span></div>
+              <div class="acts"><span class="why">Ada L.</span><button class="chip sm sp">Run <svg viewBox="0 0 10 10"><use href="#i-chev"/></svg></button></div>
+            </div>
+            <div class="more">+ 38 more · To Do 19 · In Progress 6 · Done 13</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="ask"><b>Decide:</b> is one long "No agent" lane OK for a 40+ ticket board? If not, see option B. Also: is the history line ("context ended 2 h ago · reopen") the right amount of history on a card?</div>
+  </section>
+
+  <!-- ══════════ B ══════════ -->
+  <section class="mock" id="board-b">
+    <div class="cap"><span class="tag">Mock 2 · Board, option B</span><h2>Agent deck on top, the rest on shelves</h2>
+      <p>Live sessions sit in a wide deck at the top, with Needs you first. Tickets with no agent drop into three dense shelves by Jira status category, one row per
+        ticket, so a big board stays short.</p></div>
+    <div class="frame">
+      <div class="well">
+        <div class="band">
+          <div class="txt"><h3>Sprint 42 · mine</h3><span class="sub">acme.atlassian.net · 46 issues · polled 8 s ago</span></div>
+          <span class="seg"><b class="on">Board</b><b>List</b></span>
+          <span class="search">search tickets</span>
+        </div>
+        <div class="deckh"><b>Agents</b><span><i class="dot d-need"></i> 2 need you</span><span><i class="dot d-work"></i> 3 working</span></div>
+        <div class="deck">
+          <div class="card">
+            <div class="strip s-need">Waiting on your answer<span class="r">6 m</span></div>
+            <div class="face">
+              <div class="head"><i class="ty bug"></i><span class="key">PAY-151</span><span class="crumb">execute · pay-api · Dashboard</span></div>
+              <div class="t">Currency rounding wrong on invoices over 1,000</div>
+              <div class="acts"><button class="chip sm pri"><svg><use href="#i-dash"/></svg>Answer in Dashboard</button><button class="chip sm"><svg><use href="#i-desk"/></svg>Desktop</button><span class="why sp">ctx 38%</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="strip s-need">Waiting for plan approval<span class="r">22 m</span></div>
+            <div class="face">
+              <div class="head"><i class="ty story"></i><span class="key">PAY-140</span><span class="crumb">jira-groom · pay-web · Desktop</span></div>
+              <div class="t">Partial refunds from the order page</div>
+              <div class="acts"><button class="chip sm pri"><svg><use href="#i-desk"/></svg>Open in Desktop</button><button class="chip sm"><svg><use href="#i-dash"/></svg>Dashboard</button><span class="why sp">ctx 71%</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="strip s-work">Working<span class="r">12 m</span></div>
+            <div class="face">
+              <div class="head"><i class="ty task"></i><span class="key">PAY-136</span><span class="crumb">execute · pay-api · Dashboard</span></div>
+              <div class="t">Validate the partial amount against the captured total</div>
+              <div class="acts"><button class="chip sm pri"><svg><use href="#i-dash"/></svg>Open in Dashboard</button><button class="chip sm" disabled><svg><use href="#i-desk"/></svg>Desktop</button><span class="why sp">ctx 22%</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="strip s-work">Working<span class="r">3 m</span></div>
+            <div class="face">
+              <div class="head"><i class="ty sub"></i><span class="key">PAY-143</span><span class="crumb">context · pay-web · Desktop</span></div>
+              <div class="t">Refund button disabled state copy</div>
+              <div class="acts"><button class="chip sm pri"><svg><use href="#i-desk"/></svg>Open in Desktop</button><button class="chip sm"><svg><use href="#i-dash"/></svg>Dashboard</button></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="strip s-start">Starting…<span class="r">now</span></div>
+            <div class="face">
+              <div class="head"><i class="ty bug"></i><span class="key">PAY-158</span><span class="crumb">execute · pay-api</span></div>
+              <div class="t">Webhook retries double-count failed captures</div>
+            </div>
+          </div>
+        </div>
+        <div class="deckh"><b>No agent</b><span>41 tickets</span></div>
+        <div class="shelves">
+          <div class="shelf"><div class="sh">To Do<span class="pill">19</span></div>
+            <div class="srow"><i class="ty bug"></i><span class="sum"><span class="key">PAY-149</span> Refund email shows the wrong currency symbol</span><button class="chip sm">Run</button><div class="hist"><svg><use href="#i-hist"/></svg><span class="h">jira-groom ended 1 d ago</span><a href="#">reopen</a></div></div>
+            <div class="srow"><i class="ty task"></i><span class="sum"><span class="key">PAY-131</span> Move invoice PDFs to the new storage bucket</span><button class="chip sm">Run</button></div>
+            <div class="srow"><i class="ty story"></i><span class="sum"><span class="key">PAY-160</span> Export refunds as CSV</span><button class="chip sm">Run</button></div>
+            <div class="more">+ 16 more</div>
+          </div>
+          <div class="shelf"><div class="sh">In Progress<span class="pill">6</span></div>
+            <div class="srow"><i class="ty story"></i><span class="sum"><span class="key">PAY-134</span> Partial refund API</span><button class="chip sm">Run</button><div class="hist"><svg><use href="#i-hist"/></svg><span class="h">context ended 2 h ago</span><a href="#">reopen</a></div></div>
+            <div class="srow"><i class="ty task"></i><span class="sum"><span class="key">PAY-127</span> Retry policy for card-network timeouts</span><button class="chip sm">Run</button></div>
+            <div class="more">+ 4 more</div>
+          </div>
+          <div class="shelf"><div class="sh">Done<span class="pill">13</span></div>
+            <div class="srow"><i class="ty bug"></i><span class="sum"><span class="key">PAY-122</span> Duplicate refund on double click</span><span></span><div class="hist"><svg><use href="#i-hist"/></svg><span class="h">execute ended 3 d ago · 2 sessions</span><a href="#">history</a></div></div>
+            <div class="more">+ 12 more</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="ask"><b>Decide:</b> A (three equal lanes) or B (agent deck plus shelves)? B gives live sessions the full width and keeps a 40+ ticket board short; A keeps one visual grammar for everything.</div>
+  </section>
+
+  <!-- ══════════ List ══════════ -->
+  <section class="mock" id="list">
+    <div class="cap"><span class="tag">Mock 3 · List</span><h2>One row per session, live first, then history</h2>
+      <p>Same band and Board | List switch. Rows are sessions, not tickets, so a ticket worked twice shows twice. Filters count what they would show. Every row
+        carries both deep links; ended rows reopen the transcript.</p></div>
+    <div class="frame">
+      <div class="well">
+        <div class="band">
+          <div class="txt"><h3>Sprint 42 · mine</h3><span class="sub">12 sessions · last 7 days</span></div>
+          <span class="seg"><b>Board</b><b class="on">List</b></span>
+          <span class="search">search key, summary, repo</span>
+        </div>
+        <div class="filters">
+          <span class="fchip on">All <span class="c">12</span></span>
+          <span class="fchip"><i class="dot d-need"></i>Needs you <span class="c">2</span></span>
+          <span class="fchip"><i class="dot d-work"></i>Working <span class="c">3</span></span>
+          <span class="fchip">Ended <span class="c">7</span></span>
+          <span class="fchip">Repo: any <svg width="10" height="10" style="stroke:currentColor;fill:none;stroke-width:1.5"><use href="#i-chev"/></svg></span>
+          <span class="fchip">Run: any <svg width="10" height="10" style="stroke:currentColor;fill:none;stroke-width:1.5"><use href="#i-chev"/></svg></span>
+          <span class="fchip">Last 7 days <svg width="10" height="10" style="stroke:currentColor;fill:none;stroke-width:1.5"><use href="#i-chev"/></svg></span>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>State</th><th>Ticket</th><th>Run</th><th>Repo · branch</th><th>Where</th><th>Model</th><th>Context</th><th>Started</th><th>Duration</th><th>Open</th></tr></thead>
+            <tbody>
+              <tr class="grp"><td colspan="10">Live · 5</td></tr>
+              <tr><td><span class="state need"><i class="dot d-need"></i>Answer</span></td><td><span class="k">PAY-151</span><span class="sum">Currency rounding wrong on invoices over 1,000</span></td><td>execute</td><td class="mono">pay-api · PAY-151-currency-rounding</td><td><span class="surf"><svg><use href="#i-dash"/></svg>Dashboard</span></td><td>opus</td><td><span class="ctx"><span class="bar"><i style="width:38%"></i></span>38%</span></td><td>10:12</td><td>41 m</td><td><span class="lnk"><button class="chip sm pri">Dashboard</button><button class="chip sm">Desktop</button></span></td></tr>
+              <tr><td><span class="state need"><i class="dot d-need"></i>Approve plan</span></td><td><span class="k">PAY-140</span><span class="sum">Partial refunds from the order page</span></td><td>jira-groom</td><td class="mono">pay-web · PAY-140-partial-refunds</td><td><span class="surf"><svg><use href="#i-desk"/></svg>Desktop</span></td><td>opus</td><td><span class="ctx"><span class="bar"><i class="hi" style="width:71%"></i></span>71%</span></td><td>09:48</td><td>1 h 5 m</td><td><span class="lnk"><button class="chip sm pri">Desktop</button><button class="chip sm">Dashboard</button></span></td></tr>
+              <tr><td><span class="state work"><i class="dot d-work"></i>Working</span></td><td><span class="k">PAY-136</span><span class="sum">Validate the partial amount against the captured total</span></td><td>execute</td><td class="mono">pay-api · PAY-136-validate-partial</td><td><span class="surf"><svg><use href="#i-dash"/></svg>Dashboard</span></td><td>sonnet</td><td><span class="ctx"><span class="bar"><i style="width:22%"></i></span>22%</span></td><td>10:41</td><td>12 m</td><td><span class="lnk"><button class="chip sm pri">Dashboard</button><button class="chip sm" disabled>Desktop</button></span></td></tr>
+              <tr><td><span class="state work"><i class="dot d-work"></i>Working</span></td><td><span class="k">PAY-143</span><span class="sum">Refund button disabled state copy</span></td><td>context</td><td class="mono">pay-web</td><td><span class="surf"><svg><use href="#i-desk"/></svg>Desktop</span></td><td>opus</td><td><span class="ctx"><span class="bar"><i style="width:9%"></i></span>9%</span></td><td>10:50</td><td>3 m</td><td><span class="lnk"><button class="chip sm pri">Desktop</button><button class="chip sm">Dashboard</button></span></td></tr>
+              <tr><td><span class="state"><i class="dot d-start"></i>Starting</span></td><td><span class="k">PAY-158</span><span class="sum">Webhook retries double-count failed captures</span></td><td>execute</td><td class="mono">pay-api</td><td>—</td><td>—</td><td>—</td><td>10:53</td><td>now</td><td>—</td></tr>
+              <tr class="grp"><td colspan="10">Ended · 7</td></tr>
+              <tr class="ended"><td><span class="state end">Ended</span></td><td><span class="k">PAY-134</span><span class="sum">Partial refund API</span></td><td>context</td><td class="mono">pay-api</td><td><span class="surf"><svg><use href="#i-dash"/></svg>Dashboard</span></td><td>opus</td><td>54%</td><td>08:20</td><td>34 m</td><td><span class="lnk"><button class="chip sm">Dashboard</button><button class="chip sm">Desktop</button></span></td></tr>
+              <tr class="ended"><td><span class="state end">Ended</span></td><td><span class="k">PAY-149</span><span class="sum">Refund email shows the wrong currency symbol</span></td><td>jira-groom</td><td class="mono">pay-web · PAY-149-refund-email</td><td><span class="surf"><svg><use href="#i-desk"/></svg>Desktop</span></td><td>opus</td><td>40%</td><td>Mon 16:02</td><td>22 m</td><td><span class="lnk"><button class="chip sm">Desktop</button><button class="chip sm">Dashboard</button></span></td></tr>
+              <tr class="ended"><td><span class="state stall">Stopped</span></td><td><span class="k">PAY-122</span><span class="sum">Duplicate refund on double click</span></td><td>execute</td><td class="mono">pay-api · PAY-122-dup-refund</td><td><span class="surf"><svg><use href="#i-dash"/></svg>Dashboard</span></td><td>sonnet</td><td>88%</td><td>Fri 11:30</td><td>1 h 40 m</td><td><span class="lnk"><button class="chip sm">Dashboard</button><button class="chip sm">Desktop</button></span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="ask"><b>Decide:</b> sessions as rows (a ticket worked twice shows twice), or tickets as rows with their sessions folded under them? And which columns would you drop?</div>
+  </section>
+
+  <!-- ══════════ States ══════════ -->
+  <section class="mock" id="states">
+    <div class="cap"><span class="tag">Mock 4 · Session states</span><h2>Every strip a card can carry</h2>
+      <p>What the strip says comes from the dashboard's session status (<span class="mono">working · question · idle · incomplete</span>) plus what the session is
+        waiting on (question, permission, plan). Ended means the session detached from the ticket and lives on in its history.</p></div>
+    <div class="sheet">
+      <div class="card"><div class="strip s-start">Starting…<span class="r">now</span></div><div class="face"><span class="lbl">Reserved on Run ▾, no session id yet. No links.</span></div></div>
+      <div class="card"><div class="strip s-work">Working<span class="r">12 m</span></div><div class="face"><span class="lbl">Dashboard status <span class="mono">working</span>. Desktop link greyed while a headless session runs.</span></div></div>
+      <div class="card"><div class="strip s-need">Waiting on your answer<span class="r">6 m</span></div><div class="face"><span class="lbl"><span class="mono">question</span> + a question wait. Lands in Needs you and counts on the rail badge.</span></div></div>
+      <div class="card"><div class="strip s-need">Waiting for permission<span class="r">2 m</span></div><div class="face"><span class="lbl"><span class="mono">question</span> + a permission wait.</span></div></div>
+      <div class="card"><div class="strip s-need">Waiting for plan approval<span class="r">22 m</span></div><div class="face"><span class="lbl"><span class="mono">question</span> + a plan wait.</span></div></div>
+      <div class="card"><div class="strip s-stall">Lost contact<span class="r">40 m</span></div><div class="face"><span class="lbl">Dashboard unreachable or <span class="mono">incomplete</span>. Stays put; never silently dropped.</span></div></div>
+      <div class="card"><div class="face"><div class="hist"><svg><use href="#i-hist"/></svg><span class="h">execute ended 2 h ago · pay-api</span><a href="#">reopen</a></div><span class="lbl">Ended (<span class="mono">idle</span>, stopped, or gone). Detached from the ticket and kept as history.</span></div></div>
+    </div>
+    <div class="rules">
+      <h4>Open rules drawn above</h4>
+      <ul>
+        <li><b>Primary button follows the surface:</b> launched in the desktop app → <i>Open in Desktop</i> first; launched in the dashboard → <i>Dashboard</i> first.</li>
+        <li><b>Desktop is greyed while a dashboard-run session is working.</b> <span class="mono">claude://resume</span> would start a second process on the same transcript.</li>
+        <li><b>Rail badge</b> on the Jira row counts Needs you sessions only, never working ones.</li>
+        <li><b>History is ours:</b> saved on this machine and never written to Jira.</li>
+      </ul>
+    </div>
+  </section>
+</div>

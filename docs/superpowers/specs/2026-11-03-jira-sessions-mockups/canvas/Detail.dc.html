@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Detail: ticket with its sessions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#2a5fae}a:hover{color:#1d4580}
+.root{--board:#F4F4F3;--strip:#fff;--strip-hi:#F2F2F1;--hairline:#EAEAE8;--hairline2:#DCDCDA;--ink:#131313;--ink2:#636363;--ink3:#8A8A8A;--green:#5FA92C;--green-soft:#CDE8A8;--amber:#F5A15C;--mustard:#8f6214;--red:#C8412E;--note:#2a5fae;
+  font-family:"Hanken Grotesk",Helvetica,Arial,sans-serif;color:var(--ink);font-size:14px;line-height:1.45;font-variant-numeric:tabular-nums;background:rgba(19,19,19,.32);-webkit-font-smoothing:antialiased;min-height:100%;padding:40px 48px;display:flex;justify-content:center}
+.root *{box-sizing:border-box}
+.root button{font:inherit;color:inherit}
+.sheet{background:var(--board);border-radius:20px;width:100%;max-width:1320px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.18)}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:18px 24px;background:var(--strip);border-bottom:1px solid var(--hairline)}
+.top .crumbs{font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:6px}
+.top h1{flex-basis:100%;margin:0;font-size:22px;font-weight:600;letter-spacing:-.02em;text-wrap:balance}
+.key{font-weight:600;color:var(--ink)}
+.ty{width:14px;height:14px;border-radius:3px;display:inline-block;flex:none}
+.ty.bug{background:var(--red)}.ty.story{background:var(--green)}.ty.task{background:var(--note)}.ty.sub{background:var(--ink3)}
+.x{margin-left:auto;display:flex;gap:8px}
+.chip{min-height:32px;padding:0 12px;border:1px solid var(--hairline2);border-radius:11px;background:var(--strip);font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;text-decoration:none;color:var(--ink)}
+.chip.sm{min-height:28px;padding:0 10px;border-radius:9px;font-size:12px}
+.chip.pri{background:var(--ink);color:#fff;border-color:var(--ink)}
+.chip.warn{color:var(--red);border-color:var(--red-soft,#F6CFC8)}
+.chip:disabled{opacity:.45;cursor:not-allowed}
+.ic{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.body{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:20px;padding:20px 24px 24px}
+@media (max-width:1000px){.body{grid-template-columns:minmax(0,1fr)}}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);display:flex;align-items:center;gap:8px}
+.lbl .r{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500}
+.card{background:var(--strip);border-radius:12px;overflow:hidden}
+.strip{height:28px;padding:0 16px;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600}
+.strip .r{margin-left:auto;font-weight:500}
+.s-need{background:var(--amber);background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.3) 0 1px,transparent 1px 4px)}
+.face{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.q{background:var(--strip-hi);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--ink)}
+.q b{display:block;font-size:11px;font-weight:600;color:var(--mustard);margin-bottom:3px;letter-spacing:.02em}
+.sess{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 14px;margin:0}
+.sess div{min-width:0}
+.sess dt{font-size:11px;color:var(--ink3)}
+.sess dd{margin:0;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px}
+.ctx{display:flex;align-items:center;gap:6px}
+.bar{width:44px;height:4px;border-radius:2px;background:var(--hairline2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ink2)}
+.acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sp{margin-left:auto}
+.tl{background:var(--strip);border-radius:12px;padding:6px 16px}
+.ev{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:2px 12px;padding:10px 0;border-bottom:1px solid var(--hairline);align-items:start}
+.ev:last-child{border-bottom:0}
+.node{width:10px;height:10px;border-radius:50%;margin-top:5px;justify-self:center}
+.n-live{background:var(--amber)}.n-end{border:1.5px solid var(--ink3);background:var(--strip)}.n-next{border:1.5px dashed var(--ink3);background:transparent}
+.ev .h{font-size:13px;font-weight:500}
+.ev .m{grid-column:2;font-size:12px;color:var(--ink2)}
+.ev a{font-size:12px;font-weight:500;text-decoration:none;white-space:nowrap}
+.next{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink2)}
+.pane{background:var(--strip);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:14px}
+.facts{display:grid;grid-template-columns:110px minmax(0,1fr);gap:10px 12px;font-size:13px;align-items:center;margin:0}
+.facts dt{color:var(--ink3);font-size:12px}
+.facts dd{margin:0;display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0}
+.pill{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:11px;background:var(--strip-hi);font-size:12px;font-weight:500;color:var(--ink2);white-space:nowrap}
+.pill.doing{background:#DCE8F7;color:var(--note)}
+.desc{font-size:13.5px;color:var(--ink);max-width:62ch}
+.desc p{margin:0 0 8px}
+.desc ul{margin:0 0 8px;padding-left:18px}
+.kids{display:flex;flex-direction:column}
+.kid{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--hairline);font-size:12.5px;min-width:0}
+.kid:last-child{border-bottom:0}
+.kid .s{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+.d-work{background:var(--green)}
+</style>
+</helmet>
+<div class="root">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-desk" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></symbol>
+<symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"></rect><rect x="14" y="3" width="7" height="5" rx="1"></rect><rect x="14" y="12" width="7" height="9" rx="1"></rect><rect x="3" y="16" width="7" height="5" rx="1"></rect></symbol>
+<symbol id="i-hist" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path><path d="M3 3v5h5M12 7v5l3 2"></path></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"></rect></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"></path></symbol>
+<symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></symbol>
+</svg>
+<section class="sheet" role="dialog" aria-label="PAY-151 detail">
+  <header class="top">
+    <span class="crumbs"><i class="ty bug"></i><span class="key">PAY-151</span>· Bug · in PAY-120 Refunds v2 · Sprint 42</span>
+    <span class="x"><a class="chip sm" href="#"><svg class="ic"><use href="#i-ext"></use></svg>Open in Jira</a><a class="chip sm" href="Main.dc.html" aria-label="Close"><svg class="ic"><use href="#i-x"></use></svg></a></span>
+    <h1>Currency rounding wrong on invoices over 1,000</h1>
+  </header>
+  <div class="body">
+    <div class="col">
+      <div class="lbl">Agent<span class="r">1 live · 2 ended</span></div>
+      <article class="card">
+        <div class="strip s-need">Waiting on your answer<span class="r">6 m</span></div>
+        <div class="face">
+          <div class="q"><b>Asked 6 m ago</b>Round half-even like the ledger, or half-up like the PDF renderer does today?</div>
+          <dl class="sess">
+            <div><dt>Run</dt><dd>execute</dd></div>
+            <div><dt>Where</dt><dd>Dashboard</dd></div>
+            <div><dt>Model</dt><dd>opus · high</dd></div>
+            <div><dt>Context</dt><dd class="ctx"><span class="bar"><i style="width:38%"></i></span>38%</dd></div>
+            <div><dt>Repo</dt><dd>pay-api</dd></div>
+            <div><dt>Branch</dt><dd class="mono">jira/PAY-151</dd></div>
+            <div><dt>Started</dt><dd>10:42 · 34 m</dd></div>
+            <div><dt>Session</dt><dd class="mono">7f3c…a91e</dd></div>
+          </dl>
+          <div class="acts"><button class="chip pri" type="button"><svg class="ic"><use href="#i-dash"></use></svg>Answer in Dashboard</button><button class="chip" type="button"><svg class="ic"><use href="#i-desk"></use></svg>Open in Desktop</button><button class="chip warn sp" type="button"><svg class="ic"><use href="#i-stop"></use></svg>Stop</button></div>
+        </div>
+      </article>
+      <div class="lbl">History</div>
+      <div class="tl">
+        <div class="ev"><i class="node n-live"></i><span class="h">execute · now</span><span></span><span class="m">Dashboard · started 10:42 · the session above</span></div>
+        <div class="ev"><i class="node n-end"></i><span class="h">context · ended yesterday 17:05</span><a href="#"><svg class="ic" style="vertical-align:-2px"><use href="#i-hist"></use></svg> Reopen</a><span class="m">Desktop · 22 m · read the ledger and PDF paths, no edits</span></div>
+        <div class="ev"><i class="node n-end"></i><span class="h">jira-groom · ended Mon 15:12</span><a href="#"><svg class="ic" style="vertical-align:-2px"><use href="#i-hist"></use></svg> Reopen</a><span class="m">Dashboard · 31 m · plan ready, 4 steps</span></div>
+      </div>
+      <div class="next"><i class="node n-next"></i>Next session takes over once this one ends.<button class="chip sm sp" type="button" disabled="{{ yes }}">Run <svg class="ic"><use href="#i-chev"></use></svg></button></div>
+    </div>
+    <div class="col">
+      <div class="lbl">Ticket</div>
+      <div class="pane">
+        <dl class="facts">
+          <dt>Status</dt><dd><span class="pill doing">In Progress</span><button class="chip sm" type="button">Move to <svg class="ic"><use href="#i-chev"></use></svg></button></dd>
+          <dt>Assignee</dt><dd>Andreja J.<button class="chip sm" type="button" disabled="{{ yes }}">Assign to me</button></dd>
+          <dt>Priority</dt><dd>High</dd>
+          <dt>Parent</dt><dd><i class="ty story"></i><span class="key">PAY-120</span>Refunds v2</dd>
+          <dt>Repo map</dt><dd class="mono">pay-api → ~/work/pay-api</dd>
+          <dt>Updated</dt><dd>14 m ago</dd>
+        </dl>
+      </div>
+      <div class="lbl">Description</div>
+      <div class="pane desc">
+        <p>Invoices above 1,000 show totals one cent off the ledger. Seen on EUR and CHF.</p>
+        <ul><li>Ledger rounds half-even per line.</li><li>PDF renderer sums first, then rounds half-up.</li></ul>
+        <p>Expected: PDF total equals ledger total for every currency.</p>
+      </div>
+      <div class="lbl">Subtasks<span class="r">2</span></div>
+      <div class="pane kids">
+        <div class="kid"><i class="ty sub"></i><span class="key">PAY-152</span><span class="s">Add a rounding test for CHF 5-rappen</span><span class="pill">To Do</span></div>
+        <div class="kid"><i class="ty sub"></i><span class="key">PAY-153</span><span class="s">Share one rounding helper between ledger and PDF</span><i class="dot d-work"></i><span class="pill doing">In Progress</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { yes: true };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "v": 3,
+  "createdOnFiles": { "v": 1, "at": "2026-11-03T12:00:00Z" },
+  "title": "Jira Sessions Redesign",
+  "launch": { "view": "canvas" },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": { "x": 0, "y": 0, "w": 1440, "h": 1060, "title": "Board A · three lanes by session state", "expand": "fill" },
+    "BoardB.dc.html": { "x": 1520, "y": 0, "w": 1440, "h": 1060, "title": "Board B · agent deck + status shelves", "expand": "fill" },
+    "List.dc.html": { "x": 0, "y": 1180, "w": 1440, "h": 760, "title": "List · one row per session", "expand": "fill" },
+    "Detail.dc.html": { "x": 1520, "y": 1180, "w": 1440, "h": 980, "title": "Detail · ticket with its agent sessions", "expand": "fill" },
+    "States.dc.html": { "x": 0, "y": 2280, "w": 1440, "h": 620, "title": "Session states and link rules" }
+  },
+  "order": ["Main.dc.html", "BoardB.dc.html", "List.dc.html", "Detail.dc.html", "States.dc.html"],
+  "notes": {
+    "head": { "x": 0, "y": -300, "text": "Jira page, rebuilt around agent sessions", "kind": "title1", "maxW": 2960 },
+    "q1": { "x": 3040, "y": 0, "text": "Board: A (three equal lanes) or B (agent deck on top, no-agent tickets on short shelves)? B keeps a 40+ ticket board short; A keeps one card grammar.", "w": 320, "fill": "blue" },
+    "q2": { "x": 3040, "y": 1180, "text": "List: a row is a SESSION (a ticket worked twice shows twice). Alternative: a row per ticket with its sessions folded under it.", "w": 320, "fill": "blue" },
+    "q3": { "x": 3040, "y": 1600, "text": "Detail: opens from any card or row. Left = the ticket's agent (live session + history timeline). Right = everything the current Jira modal does today (transitions, assign, children, description).", "w": 320, "fill": "blue" },
+    "q4": { "x": 1520, "y": 2280, "text": "Unverified: the 'permission' / 'plan approval' wording needs the dashboard's session list to say what a session waits on. Its type has question | stop | permission | plan; not yet checked that /api/sessions returns it.", "w": 360, "fill": "orange" }
+  },
+  "designSystems": []
+}
