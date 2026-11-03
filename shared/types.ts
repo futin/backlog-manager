@@ -9,6 +9,7 @@
  * union.
  */
 import type { AgentAction } from './agent';
+import type { JiraSessionState } from './jira-sessions';
 
 /** The registry file's shape — written only by skills/backlog/tools/backlog.mjs,
  *  read by the server. */
@@ -963,6 +964,17 @@ export interface JiraLink {
   quietSince: string | null;
   /** When a re-attach (C5) last re-opened this pair, or null while it never has. The 8-hour backstop counts from the later of this and `startedAt`. */
   reattachedAt: string | null;
+}
+
+/**
+ * `GET /api/jira/sessions` — every linked session, live and ended, with the state `sessionState` derives for it (spec §6). `row` is the dashboard's row for a
+ * live link (`null` once ended, or when the dashboard has none), `stateSince` is when THIS server first saw the link in that state (memory, reset on a change),
+ * and `reachable` / `rowsAt` say whether the last tick could read the dashboard and when it last did. Served from memory, never from a call of its own.
+ */
+export interface JiraSessionsPayload {
+  links: (JiraLink & { state: JiraSessionState; row: DashboardRow | null; stateSince: string })[];
+  reachable: boolean;
+  rowsAt: string | null;
 }
 
 /** `GET /api/jira/issue/:key`, read fresh. `session` is the live Run on this key (memory only), or `null`. */

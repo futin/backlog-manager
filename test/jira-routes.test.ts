@@ -775,3 +775,104 @@ describe('GET /api/jira/refs and /api/jira/worktrees', () => {
     }
   });
 });
+
+describe('unconfigured — GET /api/jira/sessions', () => {
+  beforeAll(async () => {
+    prepare('sessions-unconfigured', false);
+    await build(false);
+  });
+  afterAll(() => app.close());
+
+  it('is 200 with no links, the dashboard presumed reachable and no read yet — memory only, no outbound call', async () => {
+    expect((await get('/sessions').expect(200)).body).toEqual({ links: [], reachable: true, rowsAt: null });
+    expect(fake.calls).toEqual([]);
+  });
+});
+
+describe('configured — GET /api/jira/sessions', () => {
+  const SNAPSHOT = { summary: 'A ticket', type: 'Task', parentKey: null };
+  const pair = (key: string, sessionId: string) => ({
+    key,
+    sessionId,
+    how: 'branch' as const,
+    action: null,
+    name: `session ${sessionId}`,
+    repo: '/work/pay',
+    branch: `${key}-work`,
+    surface: null,
+    model: null,
+    effort: null,
+    snapshot: SNAPSHOT,
+    startedAt: new Date(Date.now() - 60_000).toISOString()
+  });
+  let live: JiraLiveService;
+
+  beforeAll(async () => {
+    prepare('sessions-configured');
+    await build(false);
+    live = app.get(JiraLiveService);
+  });
+  afterAll(() => app.close());
+
+  it('serves each link with its derived state, its row (null once ended) and the dashboard read\'s own time and reachability', async () => {
+    live.addLink(pair('PAY-131', 'live-1'));
+    live.addLink(pair('PAY-132', 'gone-1'));
+    live.end('PAY-132', 'gone-1', 'stopped');
+    live.setRows([{ id: 'live-1', status: 'question', permissionWait: true, model: 'opus' }], Date.parse('2026-11-03T10:00:00Z'));
+
+    const outbound = fake.calls.length; // the boot tick's own calls are not this route's
+    const body = (await get('/sessions').expect(200)).body;
+    expect(body.reachable).toBe(true);
+    expect(body.rowsAt).toBe('2026-11-03T10:00:00.000Z');
+    expect(body.links).toHaveLength(2);
+    const liveOne = body.links.find((l: { sessionId: string }) => l.sessionId === 'live-1');
+    const gone = body.links.find((l: { sessionId: string }) => l.sessionId === 'gone-1');
+    expect(liveOne).toMatchObject({ key: 'PAY-131', state: 'permission', row: { id: 'live-1', permissionWait: true, model: 'opus' } });
+    expect(gone).toMatchObject({ key: 'PAY-132', state: 'ended', row: null, endReason: 'stopped' });
+    expect(liveOne.stateSince).toEqual(expect.any(String));
+    expect(Number.isNaN(Date.parse(liveOne.stateSince))).toBe(false);
+    expect(fake.calls).toHaveLength(outbound);
+  });
+
+  it('a dashboard that did not answer turns a live link Lost contact and leaves an ended one Ended', async () => {
+    live.markUnreachable(Date.now());
+    try {
+      const body = (await get('/sessions').expect(200)).body;
+      expect(body.reachable).toBe(false);
+      const byId = Object.fromEntries(body.links.map((l: { sessionId: string; state: string }) => [l.sessionId, l.state]));
+      expect(byId).toEqual({ 'live-1': 'lost', 'gone-1': 'ended' });
+    } finally {
+      live.setRows([{ id: 'live-1', status: 'question', permissionWait: true }], Date.now());
+    }
+  });
+
+  it('stateSince holds while the state holds and moves when the state changes', async () => {
+    live.setRows([{ id: 'live-1', status: 'working' }], Date.now());
+    const first = (await get('/sessions').expect(200)).body.links.find((l: { sessionId: string }) => l.sessionId === 'live-1');
+    expect(first.state).toBe('working');
+    await new Promise((r) => setTimeout(r, 15));
+    const second = (await get('/sessions').expect(200)).body.links.find((l: { sessionId: string }) => l.sessionId === 'live-1');
+    expect(second.stateSince).toBe(first.stateSince);
+
+    await new Promise((r) => setTimeout(r, 15));
+    live.setRows([{ id: 'live-1', status: 'question' }], Date.now());
+    const third = (await get('/sessions').expect(200)).body.links.find((l: { sessionId: string }) => l.sessionId === 'live-1');
+    expect(third.state).toBe('answer');
+    expect(Date.parse(third.stateSince)).toBeGreaterThan(Date.parse(first.stateSince));
+  });
+
+  it('?open=1 marks a Jira page open and a read without it does not', async () => {
+    const note = jest.spyOn(live, 'notePageRead');
+    try {
+      await get('/sessions').expect(200);
+      expect(note).not.toHaveBeenCalled();
+      await get('/sessions?open=0').expect(200);
+      expect(note).not.toHaveBeenCalled();
+      await get('/sessions?open=1').expect(200);
+      expect(note).toHaveBeenCalledTimes(1);
+      expect(live.pageOpen(Date.now())).toBe(true);
+    } finally {
+      note.mockRestore();
+    }
+  });
+});
