@@ -4,6 +4,7 @@ import { useFetched } from '../../hooks/useFetched';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraBoard } from '../../hooks/useJiraBoard';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
+import { useJiraView } from '../../hooks/useJiraView';
 import { useNow } from '../../hooks/useNow';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import {
@@ -33,6 +34,7 @@ import { Chevron } from '../ui/Chevron';
 import { Chip } from '../ui/Chip';
 import { Popover } from '../ui/Popover';
 import { JiraAgentDeck } from './JiraAgentDeck';
+import { JiraSessionList } from './JiraSessionList';
 import { JiraShelves } from './JiraShelves';
 import { JiraViewSwitch } from './JiraViewSwitch';
 
@@ -87,6 +89,11 @@ const NO_TREES: readonly JiraWorktree[] = [];
  * switch sits before the picker. `Run ▾` is the card's and `onRun` passes straight through; this page hosts NO sheet. `JiraView` does, one for the whole
  * section, because the sheet has to mount above an open modal as well and the modal is not this page's child.
  *
+ * **The List is the same page's other view** (Jira sessions spec §7.2, C7; DESIGN.md §8.9.1): `JiraSessionList` replaces the deck and the shelves, fed the
+ * loaded `issues`, the band's search text and the fold's `childrenOf`, and the search box re-aims at sessions (key, summary, repo, branch). `FilterBar` is
+ * drawn only on the Board — its type, assignee and sprint describe an issue, and the List's own chips, selects and All tickets live in the List. The band's sub
+ * stays the board's (`bandSub`), unchanged in either view, because it says where the data came from and the List's scope can be wider than the board.
+ *
  * **Worktree chips** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1). The page reads `GET /api/jira/worktrees` ONCE on mount and again only when the SET of
  * live keys changes — a Start or a Stop landing — compared as a sorted, joined key list, so a status reload that hands back a
  * new `live` object with the same keys, or a render, asks for nothing. It is not a poller: nothing runs on a clock, and a tree made in a terminal shows up at
@@ -105,7 +112,7 @@ export function JiraBoardView({
   nudge
 }: {
   onOpenJiraPage: (p: JiraPage) => void;
-  onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex) => void;
+  onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   nudge: number;
 }) {
@@ -136,6 +143,7 @@ export function JiraBoardView({
   const applied = useMemo(() => effectiveBoardFilters(filters, options, me), [filters, options, me]);
   const fold = useMemo(() => foldBoard(list.issues), [list.issues]);
   const sessions = useJiraSessionsContext();
+  const [view] = useJiraView();
   // Memoised on the fold, the filters and the sessions answer — never on `now`, so the minute tick re-ages the cards without re-folding or re-filtering up
   // to 500 issues. F1 (grouped-board spec §5): a top is kept when it matches or when an issue folded under it does, with that issue's key to ring it by.
   // The deck and the shelves read the same `kept`, so one filter answers for both; which tops a live session took OFF the shelves is `boardAgents`' call on
@@ -177,56 +185,63 @@ export function JiraBoardView({
         title={board.name}
         sub={<BandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />}
       >
-        <JiraViewSwitch listReady={false} />
+        <JiraViewSwitch />
         <BoardPicker boards={boards} current={board} onPick={setStored} />
         <input
           type="search"
           className="board-band-search"
-          aria-label="Search issues"
-          placeholder="search summaries"
+          aria-label={view === 'list' ? 'Search sessions' : 'Search issues'}
+          placeholder={view === 'list' ? 'search key, summary, repo, branch' : 'search summaries'}
           value={filters.search}
           onChange={(e) => set('search', e.target.value)}
         />
-        {/* One element in one place on every render, for the reason BoardView gives at length: `FilterBar` keeps which panel is open in its own state and a
-            pick does not close it, so a remount on a pick would shut the panel under the reader's pointer. */}
-        <FilterBar count={boardFilterCount(applied)} onClear={() => setFilters((f) => ({ ...NO_JIRA_FILTERS, search: f.search }))}>
-          <Picks title="Type" all="All types" values={options.types} value={applied.type} onPick={(v) => set('type', v ?? undefined)} />
-          <FilterSection title="Assignee">
-            <div className="filter-bar-picks" role="group" aria-label="Assignee">
-              {(['anyone', 'me', 'unassigned'] as JiraAssigneeFilter[])
-                .filter((a) => a !== 'me' || me !== null)
-                .map((a) => (
-                  <Chip key={a} size={28} pressed={applied.assignee === a} onClick={() => set('assignee', a)}>
-                    {a}
-                  </Chip>
-                ))}
-            </div>
-          </FilterSection>
-          <Picks
-            title="Sprint"
-            all="All sprints"
-            values={options.sprints}
-            value={applied.sprint}
-            none={options.noSprint ? 'no sprint' : undefined}
-            onPick={(v) => set('sprint', v)}
-          />
-        </FilterBar>
+        {/* The board's filters (type, assignee, sprint) read issues and the List's rows are sessions, so the List has no track: its own bar sits under
+            the band. Within the Board view it is one element in one place on every render, for the reason BoardView gives at length: `FilterBar` keeps
+            which panel is open in its own state and a pick does not close it, so a remount on a pick would shut the panel under the reader's pointer. */}
+        {view === 'board' && (
+          <FilterBar count={boardFilterCount(applied)} onClear={() => setFilters((f) => ({ ...NO_JIRA_FILTERS, search: f.search }))}>
+            <Picks title="Type" all="All types" values={options.types} value={applied.type} onPick={(v) => set('type', v ?? undefined)} />
+            <FilterSection title="Assignee">
+              <div className="filter-bar-picks" role="group" aria-label="Assignee">
+                {(['anyone', 'me', 'unassigned'] as JiraAssigneeFilter[])
+                  .filter((a) => a !== 'me' || me !== null)
+                  .map((a) => (
+                    <Chip key={a} size={28} pressed={applied.assignee === a} onClick={() => set('assignee', a)}>
+                      {a}
+                    </Chip>
+                  ))}
+              </div>
+            </FilterSection>
+            <Picks
+              title="Sprint"
+              all="All sprints"
+              values={options.sprints}
+              value={applied.sprint}
+              none={options.noSprint ? 'no sprint' : undefined}
+              onPick={(v) => set('sprint', v)}
+            />
+          </FilterBar>
+        )}
       </Band>
 
       {loaded ? (
-        <>
-          <JiraAgentDeck entries={deck} now={now} onOpenIssue={(issue) => onOpenIssue(issue, fold.childrenOf)} />
-          <JiraShelves
-            shelves={shelves}
-            board={board}
-            me={me}
-            now={now}
-            treesOf={treesOf}
-            childrenOf={fold.childrenOf}
-            onOpenIssue={onOpenIssue}
-            onRun={onRun}
-          />
-        </>
+        view === 'list' ? (
+          <JiraSessionList issues={list.issues} search={filters.search} now={now} childrenOf={fold.childrenOf} onOpenIssue={onOpenIssue} onRun={onRun} />
+        ) : (
+          <>
+            <JiraAgentDeck entries={deck} now={now} onOpenIssue={(issue) => onOpenIssue(issue, fold.childrenOf)} />
+            <JiraShelves
+              shelves={shelves}
+              board={board}
+              me={me}
+              now={now}
+              treesOf={treesOf}
+              childrenOf={fold.childrenOf}
+              onOpenIssue={onOpenIssue}
+              onRun={onRun}
+            />
+          </>
+        )
       ) : (
         <div className="board-empty">{list.loading ? 'loading…' : 'board unavailable'}</div>
       )}

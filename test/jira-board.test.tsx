@@ -1143,11 +1143,17 @@ describe('the agent deck and the status shelves', () => {
     expect(document.querySelector('.jira-deck')).toBeNull();
   });
 
-  it('draws the switch in the band: Board pressed, List declared but disabled until the List view lands', async () => {
+  it('draws the switch in the band: Board pressed, List enabled and one click away', async () => {
     await renderDeck('Refund partial captures');
     const group = screen.getByRole('group', { name: 'View' });
     expect(within(group).getByRole('button', { name: 'Board' })).toHaveAttribute('aria-pressed', 'true');
-    expect(within(group).getByRole('button', { name: 'List' })).toBeDisabled();
+    const list = within(group).getByRole('button', { name: 'List' });
+    expect(list).toBeEnabled();
+    await userEvent.click(list);
+    expect(within(group).getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('region', { name: 'Sessions' })).toBeInTheDocument();
+    // Back to the Board for the cases that follow (the view is a module store that outlives a test).
+    await userEvent.click(within(group).getByRole('button', { name: 'Board' }));
   });
 
   it('cuts To Do at 8 rows with `+ 3 more` for 11 tops, the count pill saying 11, and opens the rest on a click', async () => {

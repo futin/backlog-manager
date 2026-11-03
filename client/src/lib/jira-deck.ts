@@ -57,6 +57,14 @@ const ms = (iso: string): number => {
 };
 
 /**
+ * The live sessions' order, for the deck AND the List's Live group (§7.2 says the List "sorts like the deck"): group first, then newest start first, then id so
+ * two equal instants never swap between polls. Exported rather than copied so the two views cannot drift apart on which session comes first.
+ */
+export function deckOrder(a: { group: DeckGroup; startedAt: string; id: string }, b: { group: DeckGroup; startedAt: string; id: string }): number {
+  return GROUP_RANK[a.group] - GROUP_RANK[b.group] || ms(b.startedAt) - ms(a.startedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/**
  * Every live session whose ticket is on the loaded list, ordered for the deck: group first (Needs you, Working, Quiet, Starting/Lost), then newest start
  * first within the group, then by id so two equal instants never swap between polls. An ended link is not live; a reservation whose key is off the list is
  * not this board's.
@@ -98,7 +106,7 @@ export function boardAgents(fold: JiraFold, payload: JiraSessionsPayload | null,
       since: session.startedAt
     });
   }
-  return out.sort((a, b) => GROUP_RANK[a.group] - GROUP_RANK[b.group] || ms(b.startedAt) - ms(a.startedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return out.sort(deckOrder);
 }
 
 /** The header's tally: how many cards want a person and how many are working — the two numbers a glance at the deck is for. */

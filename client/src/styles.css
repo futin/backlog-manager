@@ -1386,6 +1386,44 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-hist-head { font-size: 12px; font-weight: 500; color: var(--ink2) }
 .jira-hist-meta { grid-column: 1 / -1; font-size: 11px; color: var(--ink3); overflow-wrap: anywhere }
 
+/* The List view (spec §7.2, DESIGN.md §8.9.1): a bar (chips with counts, the Repo / Run / window selects, All tickets), then ONE table of sessions in two
+   groups, Live then Ended, ten columns, 44 px rows. A row that needs a person washes in amber from its left edge (a gradient over `--strip`, so it reads on
+   every theme without a new token); an ended row is set in `--ink2`. The table scrolls sideways inside its own wrapper under 1000 px rather than squeezing ten
+   columns into a phone. Nothing is under 11 px (guard 3). */
+.jira-list { display: flex; flex-direction: column; gap: 12px }
+.jira-list-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px }
+.jira-list-chips, .jira-list-picks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
+.jira-list-count { margin-left: 4px; font-size: 12px; color: var(--ink3) }
+.jira-list-scroll { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
+.jira-list-table { width: 100%; min-width: 1000px; border-collapse: collapse; font-size: 13px; color: var(--ink) }
+.jira-list-table thead th {
+  padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
+  color: var(--ink3); border-bottom: 1px solid var(--hairline); white-space: nowrap;
+}
+.jira-list-group th { padding: 10px 12px 6px; text-align: left; font-size: 12px; font-weight: 600; color: var(--ink2); background: var(--steel) }
+.jira-list-row td { height: 44px; padding: 6px 12px; vertical-align: middle; border-top: 1px solid var(--hairline); white-space: nowrap }
+.jira-list-row[data-ended="true"] td { color: var(--ink2) }
+.jira-list-row[data-state="plan"], .jira-list-row[data-state="permission"], .jira-list-row[data-state="reply"], .jira-list-row[data-state="answer"] {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--amber-solid) 14%, var(--strip)), var(--strip) 55%);
+}
+.jira-list-flex { display: flex; align-items: center; gap: 8px; min-width: 0 }
+.jira-list-state { font-weight: 500 }
+.jira-list-mark { font-size: 12px; font-weight: 400; color: var(--ink3) }
+.jira-list-ticket { min-width: 260px; max-width: 420px }
+.jira-list-title {
+  min-width: 0; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.jira-list-title:hover { text-decoration: underline }
+.jira-list-run, .jira-list-repo { max-width: 220px; overflow: hidden; text-overflow: ellipsis }
+.jira-list-repo span { display: block; overflow: hidden; text-overflow: ellipsis }
+.jira-list-branch { font-size: 11px; color: var(--ink3) }
+.jira-list-ctx { color: var(--ink2) }
+.jira-list-ctx-bar { display: inline-block; width: 40px; height: 4px; margin-right: 6px; vertical-align: middle; border-radius: 2px; background: var(--hairline2); overflow: hidden }
+.jira-list-ctx-bar i { display: block; height: 100%; background: var(--ink3) }
+.jira-list-open .jira-list-flex { gap: 6px }
+.jira-list-foot { margin: 0; font-size: 12px; color: var(--ink3) }
+
 /* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
    what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px
    (guard 3). */
