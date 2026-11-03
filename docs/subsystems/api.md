@@ -200,13 +200,14 @@ re-reads the PR. Each POST carries `SameOriginPostGuard`, and the Host allowlist
 
 The third outbound-calling module (Jira integration phase 1): a `fetch` client on Atlassian's API gateway, a poller armed only while the three `BM_JIRA_*`
 keys are set and a board is owed a sweep, the per-board issue caches it fills (the second cache in this server whose age is rendered, as `polledAt`), the
-`jira.json` reader, the ADF converter and the ticket block. Nine read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
+`jira.json` reader, the ADF converter and the ticket block. Ten read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
 fresh (`?format=text` for the ticket block), the roots search, the project list, the JQL check and (phase 5a) `/prompt`, the composed Run prompt as `text/plain` — and
 eight guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
 since the repo/branch work `/repo-defaults`) and
 two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each followed by a re-read of the issue that is spliced into every board cache
-holding it. Since 5a the module also owns `JiraLiveService`, the in-memory map behind the status payload's `live` and an issue's `session`; the two POSTs that
-fill and clear it live in `agents/`, below, because they call the dashboard. The credentials are read per call and reach no payload. → [jira.md](jira.md),
+holding it. Since 5a the module also owns `JiraLiveService`, the ticket–session link store (memory over `~/.backlog-manager/jira-links.json`) behind the status
+payload's `live`, an issue's `session` and `GET /sessions`; the two POSTs that
+fill and end its links live in `agents/`, below, because they call the dashboard. The credentials are read per call and reach no payload. → [jira.md](jira.md),
 the full doc.
 
 The repo/branch work (spec `2026-10-20-jira-repo-branch-design.md`) added the module's one reader of git, `refs.util.ts`, and three routes around it — all of
@@ -219,6 +220,12 @@ them reads of git, never writes ([invariants](invariants.md#the-server-never-wri
   repository`.
 - `GET /api/jira/worktrees` — every working tree of every distinct mapped repo (`git worktree list`, the main tree flagged), as `{ worktrees, unavailable: [{
   repo, reason }] }`; the client matches branches to tickets for the cards' worktree chip and the modal's Worktrees list.
+- `GET /api/jira/sessions` — every ticket–session link, live and ended, as `JiraSessionsPayload` (`{ links, reachable, rowsAt }`): each link is a `JiraLink`
+  plus its derived `state` (`sessionState`, `shared/jira-sessions.ts`), the dashboard's `row` for a live one it lists (`null` for an ended one or one it does
+  not list) and `stateSince`, the first time
+  THIS server saw it in that state. Memory only — the links and the rows the reconciler last read live in `JiraLiveService`; nothing here calls Jira or the
+  dashboard, so an unconfigured server answers it too (empty, `reachable: true`, no 503). `?open=1` records that a Jira page is on screen, which quickens the
+  reconciler to ~15 s; the rail badge's read omits it. → [jira.md](jira.md#the-link-store)
 - `POST /api/jira/repo-defaults` — `{ path, base, namePattern }`, `null` meaning unset and both `null` deleting the path's entry in `jira.json`'s
   `repoDefaults`. Guard → validate (400) → configured (503) → readable (409) → mapped (400 `<path> is not mapped`) → write; no re-aim, since no sweep reads it.
 
@@ -279,13 +286,22 @@ the machine is `home`.
   been awaited by the time one could arrive — and ignoring the flag instead would read an old client's `Cancel stop` as a second stop. On a tracker project
   it also sweeps `orchestrator:queued` off every never-claimed queue item, after the stop is on file and before the spawn; a refused removal is listed in an
   optional `unqueueFailed` (ids as `run.json` spells them) and never fails the stop — the spawned `--abort` repeats the sweep.
-- `POST /api/agents/dispatch-jira` — a Jira ticket's Run (`jira-agents.controller.ts` → `JiraDispatchService.dispatch`): reserve the key in the live map, optionally
+- `POST /api/agents/dispatch-jira` — a Jira ticket's Run (`jira-agents.controller.ts` → `JiraDispatchService.dispatch`): reserve the key in the link store,
+  optionally
   assign and transition in Jira, then spawn a session in the mapped repository. The action is a pick from the body, never derived; the prompt is composed server-side
   by `composeJiraPrompt`. A failure after a Jira write says the write stands. Since the repo/branch work the body also carries the branch choice (`mode`,
   `branch`, `base`, `openMr`, `target`, above), checked before anything is reserved or written. An optional `surface` (`dashboard` | `desktop`) is item
   dispatch's, for any action: forwarded to the spawn as it came, `desktop` a 409 unless home's dashboard says `desktopAvailable`. → [jira.md](jira.md#run-phase-5a)
-- `POST /api/agents/jira-stop` — stops that key's live session through the dashboard (`session-stop.util.ts`, shared with the item abort) and clears its map entry;
-  never calls Jira. `JiraLiveReconciler` clears entries whose session the dashboard no longer lists as working.
+- `POST /api/agents/jira-stop` `{ key, sessionId }` — stops ONE live session of the key through the dashboard (`session-stop.util.ts`, shared with the item
+  abort) and ends its link as `stopped`; a ticket can hold several, so a bare key is a 400, and an id that is not a live link of the key a 409. Never calls
+  Jira. `JiraLiveReconciler` ends links whose session the dashboard has stopped reporting as working for two minutes. →
+  [jira.md](jira.md#post-apiagentsjira-stop)
+- `POST /api/agents/jira-link` `{ key, sessionId }` and `POST /api/agents/jira-unlink` `{ key, sessionId }` — the `jira` skill's `/jira link` and `/jira unlink`
+  (`JiraDispatchService.link` / `unlink`). Link: 409 when dispatch is off, the key checked by one poller read (`issueSummary`, its own status and sentence), the
+  session by the dashboard's `GET /api/sessions/:id/row` (`dashboardSessionRow`) — a 404 there is `the dashboard does not know session <id8>`, absence from the
+  capped list is not a refusal — then a `manual` link and `{ ok: true, linked: 'added' | 'exists' }`; an explicit link lifts an earlier unlink's suppression.
+  Unlink removes a `branch`/`manual` link and suppresses the pair so detection never re-adds it; a `run` link is a 409, an unknown pair a 404; it makes no
+  dashboard call. →  [jira.md](jira.md#post-apiagentsjira-link-and-jira-unlink)
 - `GET /api/agents/watchdog`, `POST /api/agents/watchdog/config` — the run watchdog's live state, read out of this process's own memory and the settings file it
   owns, plus the four server-side knobs behind it.
 - `GET /api/agents/merge-check` — a local, read-only look at whether a project's main tree is in a state that can receive a merge.
@@ -339,7 +355,7 @@ the run `stop` stay home-only: they act on a run file, and a remote run has none
 Every new outbound read — the offers' dashboard and board reads, usage, and a remote's status — is held to 5 s. Home keeps its 4 s health and 15 s management
 reads, and every spawn and stop keeps 10 s.
 
-`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop` answers 409 with the same sentence). `status` exists to report that gate, so it answers either
+`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop` and `jira-link` answer 409 with the same sentence; `jira-unlink` calls nothing and is not gated). `status` exists to report that gate, so it answers either
 way, and `pause`, `watchdog`, `watchdog/config` and `merge-check` never call the dashboard at all: two read this process's own state, one writes its own
 settings file, one looks at local git. `pause` being independent of the switch is deliberate rather than incidental — a pause is a fact on this machine's own
 disk about a run that is already going, so gating it would mean a run started while dispatch was on could never be stopped after somebody turned it off.

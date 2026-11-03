@@ -25,9 +25,12 @@ export function Segmented<T extends string | number>({
 }: {
   value: T;
   /** `readonly`: the component only maps it, so a module-level constant list (GitHub › PRs' `PR_LAYOUT_OPTIONS`) can be handed in as is. */
-  options: readonly { value: T; label: string }[];
+  options: readonly { value: T; label: string; disabled?: boolean }[];
   onChange: (v: T) => void;
-  /** For a setting the server can't act on — the switch would flip and do nothing. */
+  /**
+   * For a setting the server can't act on — the switch would flip and do nothing. One option can be disabled on its own (`options[].disabled`) for a member
+   * that is declared but not yet usable — Jira's List view until it lands — which is why the member stays drawn and does not simply leave the list.
+   */
   disabled?: boolean;
   label?: string;
   /**
@@ -64,7 +67,7 @@ export function Segmented<T extends string | number>({
           type="button"
           className={o.value === value ? 'on' : undefined}
           aria-pressed={o.value === value}
-          disabled={disabled}
+          disabled={disabled === true || o.disabled === true}
           onClick={() => onChange(o.value)}
         >
           {o.label}

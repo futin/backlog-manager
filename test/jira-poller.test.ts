@@ -925,6 +925,50 @@ describe('issueDetail', () => {
   });
 });
 
+describe('issueSummary', () => {
+  beforeEach(async () => {
+    seedTree();
+    await booted();
+    fake.calls.length = 0;
+  });
+
+  it('one issue read with the sweep fields, mapped', async () => {
+    const r = await poller.issueSummary('PAY-131');
+    expect(labels()).toEqual(['issue/PAY-131']);
+    expect(new URL(fake.calls[0].url).searchParams.get('fields')!.split(',')).toEqual([...SWEEP_FIELDS]);
+    expect(r.ok && r.value.key).toBe('PAY-131');
+  });
+
+  it('a 404 is a failure the caller can tell apart, and leaves access alone', async () => {
+    const r = await poller.issueSummary('PAY-999');
+    expect(r).toMatchObject({ ok: false, response: { status: 404 } });
+    expect(poller.status().access).toBe('ok');
+  });
+
+  it('a 429 opens the window and the next read is refused with no call', async () => {
+    fake.failWith = 429;
+    expect(await poller.issueSummary('PAY-131')).toMatchObject({ ok: false, response: { status: 429 } });
+    fake.failWith = null;
+    fake.calls.length = 0;
+    expect(await poller.issueSummary('PAY-131')).toMatchObject({ ok: false, response: { status: 429 } });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('a 401 moves the site state, as any route read does', async () => {
+    fake.unauthorized = true;
+    expect(await poller.issueSummary('PAY-131')).toMatchObject({ ok: false, response: { status: 401 } });
+  });
+
+  it('a Done-window issue still reads ok — detection links on the key, not on whether a board would show it', async () => {
+    fake.issues.set(
+      'PAY-140',
+      makeRawIssue({ key: 'PAY-140', fields: { status: { name: 'Done', statusCategory: { key: 'done' } }, resolutiondate: new Date(T0 - 30 * DAY).toISOString() } })
+    );
+    const r = await poller.issueSummary('PAY-140');
+    expect(r.ok && r.value.key).toBe('PAY-140');
+  });
+});
+
 describe('search', () => {
   beforeEach(async () => {
     seedTree();

@@ -21,12 +21,13 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   throws `JiraUnknownIdError`, which carries the entry kind and is a 404 `unknown board` or `unknown skill`. A handler runs guard (`SameOriginPostGuard`) → validate (400) → configured (503) → write → re-aim, and
   config writes stay open under `access: unauthorized`, because they touch only `jira.json`. A saved board then awaits `boardSaved` (sweeps that board,
   bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer); a deleted one calls `boardDeleted` and `arm()`; repos and skills re-aim
-  nothing, since no sweep reads them. `repoDefaults` (absolute normalised path → `{ base?, namePattern? }`) falls back per VALUE: a base failing
+  no poller work, since no sweep reads them (a repos save only calls `JiraLiveService.reposChanged`, which arms the session reconciler). `repoDefaults` (absolute normalised path → `{ base?, namePattern? }`) falls back per VALUE: a base failing
   `defaultBaseProblem` (Table A, then `is a branch name, without origin/`) or a pattern failing `patternProblem` costs only itself;
   `/repo-defaults` takes `null` for unset (both `null` deletes the entry) and adds
   one check after the 409, a 400 `<path> is not mapped` unless SOME project maps the path. Why:
   [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
-- **The Jira token never leaves the server: the browser and `jira.mjs` both go through `/api/jira`, and the poller is armed only while a board syncs.**
+- **The Jira token never leaves the server: the browser and `jira.mjs` both go through the server's own routes (`/api/jira`, and
+  `/api/agents/jira-link|jira-unlink` for `link` and `unlink`), and the poller is armed only while a board syncs.**
   `jiraEnv()` (`env.util.ts`) reads `BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN` (spelled once, in `JIRA_ENV`) per call, trimmed, never cached; whitespace
   is absent, the site is lower-cased and must pass `isJiraHostname`, and `detail` names the first problem — emptiness first, in site/email/token order, then the
   hostname shape. Every call is `JiraClient.request`'s: the gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3` (`GATEWAY_HOST`, not configurable),
@@ -37,10 +38,11 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `'${BM_JIRA_<NAME>:-}'`, pinned through `JIRA_ENV` by `test/compose-env.test.ts`. `JiraPollerService` is a `setTimeout` chain on `JIRA_POLL_MS`, `unref`'d,
   armed at bootstrap while the site is configured AND some board's interval is not `off`, OR some board is still owed its one cold sweep, OR the boot
   (`cloudId`, `serverInfo`, `me`, the sprint field) is unanswered — except `unsupported`, which is final and disarms. The rule is judged at the end of every
-  sweep against `jira.json` read again there. `skills/jira/tools/jira.mjs` dials `http://127.0.0.1:${BM_API_PORT || 4322}` and nothing else, reads no
-  `BM_JIRA_*` and sends no `authorization` header; the source guard in `jira.test.mjs` (comment lines stripped) holds all three. Its one allowed `BM_JIRA_` name
-  is `BM_JIRA_FETCH_RETRY_MS`, `worktree`'s pause before its one fetch retry (default 1 000 ms) — a test knob, carrying nothing of Jira's — and its second
-  is `BM_JIRA_FETCH_TIMEOUT_MS`, the bound on each `worktree` fetch (default 60 s), a test knob too. Why:
+  sweep against `jira.json` read again there. `skills/jira/tools/jira.mjs` dials `http://127.0.0.1:${BM_API_PORT || 4322}` and nothing else — `jira.mjs
+  link|unlink <KEY>` POST `{ key, sessionId }` to `/api/agents/jira-link|jira-unlink`, the session id read from `CLAUDE_CODE_SESSION_ID` (unset is exit `1`,
+  nothing sent) — reads no `BM_JIRA_*` and sends no `authorization` header; the source guard in `jira.test.mjs` (comment lines stripped) holds all three. Its
+  one allowed `BM_JIRA_` name is `BM_JIRA_FETCH_RETRY_MS`, `worktree`'s pause before its one fetch retry (default 1 000 ms) — a test knob, carrying nothing of
+  Jira's — and its second is `BM_JIRA_FETCH_TIMEOUT_MS`, the bound on each `worktree` fetch (default 60 s), a test knob too. Why:
   [invariants.md](docs/subsystems/invariants.md#the-jira-token-never-leaves-the-server-and-the-poller-is-armed-only-while-a-board-syncs)
 - **Jira's Done column is a window, not a store: a done issue whose resolution — or, lacking one, whose last update — is older than 14 days is dropped at map
   time.** `JIRA_DONE_WINDOW_DAYS` lives in `map-issue.ts` and nowhere else; `mapJiraIssue` applies it to the `done` category alone, from `resolutiondate`, else
@@ -83,24 +85,51 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `skills/jira/tools/jira.mjs` cannot import `shared/`, so it carries Tables A and B by hand, and `jira.test.mjs` pins the same rows as
   `test/jira-branch.test.ts`: a change to one is a change to both, in one commit. The repo path is the one value that can hold anything, so it alone is
   `shellQuote`d. Why: [invariants.md](docs/subsystems/invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-one-hand-kept-copy)
-- **A Jira session is remembered in server memory only; a restart forgets it, and Stop is the one hand that clears it early.** `JiraLiveService`
-  (`server/src/jira/live.service.ts`, NOT `JiraService`) is a `Map<key, { sessionId, repo, startedAt }>` with no file and no I/O, provided by `JiraModule` and
-  read by `GET /api/jira` (`live`, filled by the controller from `snapshot()` — the poller never sees it, and an unconfigured server keeps `{}`) and
-  `GET /api/jira/issue/:key` (`session`). Capped at `JIRA_LIVE_CAP` (100): one more evicts the oldest CONFIRMED entry by `startedAt`, never a `starting` one
-  (its spawn will `confirm` or `release` it), and when every slot is starting `reserve` refuses, which the dispatch answers as 409 `too many Jira sessions are
-  starting`. An entry older than `JIRA_LIVE_TTL_MS` (8 h, strictly) is dropped lazily at the top of every call — no timer — and time is `Date.now()`. The
-  dispatch RESERVES the key (`sessionId: null`, `starting`) before its first Jira write — `reserve` is a synchronous check-and-set, so of two Starts exactly
-  one passes, the other 409s `<KEY> is starting` / `already has a session` — and every failure after the reservation runs through one `catch` that
-  `release`s it; `release` touches only a `starting` entry, so it can never drop a session that did start, and a refused `reserve` releases nothing (it
-  would drop the other request's entry). `confirm` follows the spawn; a key cleared meanwhile is not resurrected. Stop is `POST /api/agents/jira-stop`
-  (`JiraDispatchService.stop`): agents off 409, no entry 409, `starting` 409, then `stopDashboardSession` (`session-stop.util.ts`, shared with the item
-  abort) — a 200 or the dashboard's `no live session` 404 clears the entry, any other answer is a 502 and the entry STAYS, since the session may still run;
-  Jira is never called. The reconciler (`server/src/agents/jira-live.service.ts`, `JiraLiveReconciler`) is the other early clear, and it clears only what
-  the dashboard has stopped reporting as busy: one `GET /api/sessions` per tick (`JIRA_RECONCILE_MS`, 60 s, a `setTimeout` chain armed by `confirm` and only
-  while some entry holds a session id, `unref`'d, never in a request's path, never throwing), an entry stays only while its session is `working` or
-  `question` (the list keeps an exited session as `idle`), a `starting` entry and one younger than `JIRA_LIVE_GRACE_MS` (2 min) are never judged, an unreadable
-  list or agents off leaves the map as it was, and a verdict clears only if the entry still holds the session id it was judged for. The edge runs agents →
-  jira and never back: `jira/` imports nothing from `agents/` except `SameOriginPostGuard`, which is why the dispatch, the stop and the reconciler live in
-  `agents/` while the map does not. Why:
-  [invariants.md](docs/subsystems/invariants.md#a-jira-session-is-remembered-in-server-memory-only-and-stop-is-the-one-hand-that-clears-it-early)
+- **A Jira session is a persisted link, and Stop, a quiet dashboard or the 8-hour backstop each end it.** `JiraLiveService` (`server/src/jira/live.service.ts`,
+  NOT `JiraService`) holds the link store in memory and writes it whole after every change but a `starting` reservation: `server/src/jira/links.store.ts`,
+  `~/.backlog-manager/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it), version 1, the server its one writer, a temp file in the same directory and a
+  `rename`. It holds `links` (`JiraLink`: key, session id, `how` — `run`, `branch` or `manual` — action, repo, branch, surface, model, effort, a ticket
+  snapshot, `startedAt`, `endedAt` with an `endReason` of `idle`, `stopped`, `expired` or `gone`, `quietSince` and `reattachedAt`), plus the `suppressed` and
+  `neverLink` pairs (each capped at 1,000, oldest out); `(key, sessionId)` is a link's identity, and a key may hold several. A file that does not parse, or
+  whose `version` is not 1, loads EMPTY with one warning and is renamed `jira-links.json.bad-<ISO>` at the first save — never overwritten, and left alone by a
+  boot that saves nothing — where `jira.json`'s writers refuse with a 409, because this is machine-written history; one unusable entry costs only itself. A save
+  that throws is logged and costs nothing else: a launch never fails for it. `JiraModule` provides the service; it is read by `GET /api/jira` (`live`, filled by
+  the controller from `snapshot()`, the live `run` links only — the poller never sees it, and an unconfigured server keeps `{}`), `GET /api/jira/issue/:key`
+  (`session`) and `GET /api/jira/sessions`.
+  `GET /api/jira/sessions` is every link, live and ended, as `JiraSessionsPayload` (`{ links, reachable, rowsAt }`): each carries `state` (`sessionState`,
+  `shared/jira-sessions.ts`, derived and never stored), the dashboard's `row` for a live one the dashboard lists (`null` for an ended or an unlisted one) and
+  `stateSince`. It is memory only — it dials neither Jira nor the
+  dashboard, so an unconfigured server answers it too, with no 503 — and `?open=1` (the Jira section's own read, never the rail badge's) tells the reconciler a
+  page is open; a read that OPENS the page (`pageOpen` was false) fires `JiraLiveService.onPageOpened`, and the reconciler drops a pending 60 s timer for a 15 s one.
+  The one-run gate is `run`-only. The dispatch RESERVES the key (`starting`, memory only, never written, dropped by a restart) before its first Jira write, and
+  `reserve` is a synchronous check-and-set refusing while a live `run` link or a reservation holds the key — so of two Starts exactly one passes, the other 409s
+  `<KEY> is starting` / `already has a session`; a live `branch` or `manual` link is the user's own and blocks nothing. Every failure after the reservation runs
+  through one `catch` that `release`s it; `release` touches only a `starting` entry, so it can never drop a session that did start, and a refused `reserve`
+  releases nothing (it would drop the other request's entry). `confirm` follows the spawn and turns the reservation into a `run` link (over a live `branch` or
+  `manual` link for the same pair it upgrades that entry to `run`); a key released meanwhile
+  is not resurrected, and a pair that has ended keeps its end — only the reconciler's re-attach revives one. Live links are capped at `JIRA_LIVE_CAP` (100,
+  `starting` included): one more ENDS the oldest live link by `startedAt` as `expired` — it stays as history — and never a `starting` one, and when every slot
+  is starting `reserve` refuses, which the dispatch answers as 409 `too many Jira sessions are starting`. A live link whose later of `startedAt` and
+  `reattachedAt` is strictly older than `JIRA_LIVE_TTL_MS` (8 h) ends `expired` lazily at the top of every call — no timer, time is `Date.now()` — and a stale
+  `starting` one is dropped. Retention runs on every save: per key every live link and the 20 newest ended ones, and a key whose newest end is over 90 days old
+  with nothing live goes.
+  Stop is `POST /api/agents/jira-stop` `{ key, sessionId }` (`JiraDispatchService.stop`), naming ONE session because a key can hold several: 400 `invalid issue
+  key` or `invalid session id` (`isSessionId`, a shape check only), agents off 409, then 409 when the id is not a live link of the key — `<KEY> is still
+  starting` for a reservation, `no live session for <KEY>` when nothing is live on it, else `<KEY> has no live session <first 8 of the id>` — then
+  `stopDashboardSession` (`session-stop.util.ts`, shared with the item abort): a 200 or the dashboard's `no live session` 404 ENDS the link as `stopped` (a
+  no-op if it ended meanwhile, so the first end stands), any other answer is a 502 and the link STAYS live, since the session may still run; Jira is never
+  called.
+  The reconciler (`server/src/agents/jira-live.service.ts`, `JiraLiveReconciler`) is the other hand, and it ends a link only once the dashboard has stopped
+  reporting it busy for two minutes. One `GET /api/sessions?limit=50&lookback=168` per tick (`dashboardSessionRows`), its rows kept whole in the service
+  (`setRows`, memory only; an unreadable list calls `markUnreachable`, agents off returns before any fetch; neither ends a link); the period is
+  `JIRA_RECONCILE_FAST_MS` (15 s) while a
+  Jira page was read in the last 30 s and `JIRA_RECONCILE_MS` (60 s) otherwise, a `setTimeout` chain armed by `confirm` and at boot, only while some link is
+  live or Setup maps a repo, `unref`'d, never in a request's path, never throwing. For a live link with a session id and older than `JIRA_LIVE_GRACE_MS` (2
+  min): a `working` or `question` row clears `quietSince`; anything else — any other status, or no row in a list shorter than 50 — marks `quietSince` on the
+  first such tick and ends the link (`idle`, or `gone` for no row) once that mark is `JIRA_QUIET_MS` (2 min) old, so a session is Quiet for two minutes after
+  every finished turn, not only its first; a full 50-row list proves nothing about an absent session, which stays live for the backstop. A `starting` entry is
+  never judged, and a verdict applies only to its own `(key, sessionId)`. Then C5: an ENDED link whose row is `working` or `question` again is re-attached — its
+  own entry re-opened, the 8-hour clock restarted — so history does not grow. The edge runs agents → jira and never back: `jira/` imports nothing from `agents/`
+  except `SameOriginPostGuard`, which is why the dispatch, the stop and the reconciler live in `agents/` while the store does not. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-jira-session-is-a-persisted-link-and-stop-a-quiet-dashboard-or-the-8-hour-backstop-each-end-it)
 - **`jira.mjs` writes no file of its own**; its one exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo.

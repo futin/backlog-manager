@@ -8,12 +8,24 @@ import { JiraDispatchService } from './jira-dispatch.service';
 import { SameOriginPostGuard } from './origin.guard';
 
 /**
- * The Jira phase-5 agents routes — `POST /api/agents/dispatch-jira` and `POST /api/agents/jira-stop` (spec §5, §7). Its own controller under the same `api/agents` prefix rather than more
+ * A session id as this route accepts it. The repo has no validator of its own for a dashboard session id (they are minted by the dashboard and compared, never
+ * parsed here), and a UUID-only check would refuse the short ids the suites seed, so this is the shape that makes the id safe to compare, name in a sentence and
+ * put into the dashboard's stop URL: 1–128 characters of `[A-Za-z0-9._-]` whose FIRST is alphanumeric, so `.` and `..` can never become a path segment there
+ * (`encodeURIComponent` leaves dots alone) and no separator gets in. Whether the id is LIVE on the key is the service's 409, not this check's. Exported for the
+ * link and unlink routes, which take the same id.
+ */
+export const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+export function isSessionId(value: unknown): value is string {
+  return typeof value === 'string' && SESSION_ID_RE.test(value);
+}
+
+/**
+ * The Jira agents routes — `POST /api/agents/dispatch-jira`, `jira-stop`, `jira-open-desktop`, and the by-hand `jira-link` / `jira-unlink` (spec §5, §7). Its own controller under the same `api/agents` prefix rather than more
  * methods on `AgentsController`, which is already the item dispatcher's, the orchestrator's and the watchdog's: the Jira routes share none of those
  * services, and a fourth constructor dependency there would put a Jira import into every one of them.
  *
  * `SameOriginPostGuard` like every agents POST — this one starts a session that can write files in a mapped repository and writes to Jira on the way, so a
- * page the developer did not write must not be able to drive it (`origin.guard.ts`). Both routes belong in `test/agents-origin-guard.test.ts`'s list.
+ * page the developer did not write must not be able to drive it (`origin.guard.ts`). Every POST here belongs in `test/agents-origin-guard.test.ts`'s list.
  */
 @Controller('api/agents')
 export class JiraAgentsController {
@@ -73,16 +85,56 @@ export class JiraAgentsController {
   }
 
   /**
-   * `POST /api/agents/jira-stop` — the strip's Stop. The key's shape is the only thing checked here, with the same sentence `dispatch-jira` uses; whether the key
-   * has a session, and whether agents are on, are the service's. 200 for the same reason `dispatch-jira` answers 200: what this reports is something that
-   * happened on the dashboard, not a resource this server created.
+   * `POST /api/agents/jira-stop` `{ key, sessionId }` — Stop, naming ONE session: a ticket can hold several live ones (a Run and a detected branch session), so
+   * a bare `{ key }` no longer says which to stop and is a 400. The two fields' shapes are the only thing checked here, the key with the same sentence
+   * `dispatch-jira` uses; whether the session is live on the key, and whether agents are on, are the service's. 200 for the same reason `dispatch-jira`
+   * answers 200: what this reports is something that happened on the dashboard, not a resource this server created.
    */
   @UseGuards(SameOriginPostGuard)
   @Post('jira-stop')
   @HttpCode(200)
   jiraStop(@Body() raw: unknown): Promise<{ ok: true }> {
-    const key = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>).key : undefined;
-    if (!isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
-    return this.dispatcher.stop(key);
+    const body = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+    if (!isJiraKey(body.key)) throw new HttpException({ error: 'invalid issue key' }, 400);
+    if (!isSessionId(body.sessionId)) throw new HttpException({ error: 'invalid session id' }, 400);
+    return this.dispatcher.stop(body.key, body.sessionId);
+  }
+
+  /**
+   * `POST /api/agents/jira-link` `{ key, sessionId }` — `/jira link`: link a session to a ticket by hand (spec §5). Shape only here, with the sentences
+   * `jira-stop` uses; the key and session checks are the service's. 200, as `jira-stop` — it reports a link this machine made on a session that lives elsewhere.
+   */
+  @UseGuards(SameOriginPostGuard)
+  @Post('jira-link')
+  @HttpCode(200)
+  jiraLink(@Body() raw: unknown): Promise<{ ok: true; linked: 'added' | 'exists' }> {
+    const body = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+    if (!isJiraKey(body.key)) throw new HttpException({ error: 'invalid issue key' }, 400);
+    if (!isSessionId(body.sessionId)) throw new HttpException({ error: 'invalid session id' }, 400);
+    return this.dispatcher.link(body.key, body.sessionId);
+  }
+
+  /**
+   * `POST /api/agents/jira-open-desktop` `{ sessionId }` — Open in Desktop for a dashboard-surface session (spec C2): the dashboard's guarded hand-over, with its
+   * answer passed through unchanged. Shape only here; no key, since the hand-over is about the session, not a ticket. 200 for the reason `jira-stop` is.
+   */
+  @UseGuards(SameOriginPostGuard)
+  @Post('jira-open-desktop')
+  @HttpCode(200)
+  jiraOpenDesktop(@Body() raw: unknown): Promise<{ ok: true }> {
+    const body = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+    if (!isSessionId(body.sessionId)) throw new HttpException({ error: 'invalid session id' }, 400);
+    return this.dispatcher.openDesktop(body.sessionId);
+  }
+
+  /** `POST /api/agents/jira-unlink` `{ key, sessionId }` — `/jira unlink` (C9); the inverse of `jira-link`, shape-checked the same way. */
+  @UseGuards(SameOriginPostGuard)
+  @Post('jira-unlink')
+  @HttpCode(200)
+  jiraUnlink(@Body() raw: unknown): { ok: true } {
+    const body = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+    if (!isJiraKey(body.key)) throw new HttpException({ error: 'invalid issue key' }, 400);
+    if (!isSessionId(body.sessionId)) throw new HttpException({ error: 'invalid session id' }, 400);
+    return this.dispatcher.unlink(body.key, body.sessionId);
   }
 }

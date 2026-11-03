@@ -16,13 +16,17 @@ import type { JiraComposeAction } from '../jira/prompt.util';
 import { readRepoRefs } from '../jira/refs.util';
 import { jiraWriteOrThrow, unwrapJira } from '../jira/unwrap.util';
 import { AgentsService } from './agents.service';
-import { readAgentsConfig } from './config.util';
+import { authHeaders, dashboardError, readAgentsConfig } from './config.util';
+import { dashboardSessionRow } from './dashboard-sessions.util';
 import { JiraLiveReconciler } from './jira-live.service';
 import { stopDashboardSession } from './session-stop.util';
 
 /** What a failure after a landed write says, appended to its own sentence: the write is not undone (spec §7), and the reader must not retry as if it were. */
 const ASSIGN_STANDS = ' — the assign stands';
 const WRITES_STAND = ' — the Jira writes stand';
+
+/** The hand-over opens a link and answers; `spawn`'s own budget is plenty. */
+const OPEN_DESKTOP_TIMEOUT_MS = 10_000;
 
 /**
  * `POST /api/agents/dispatch-jira` — the launch sheet's Start (Jira phase 5; spec §5, §7, §8). Optional assign, optional transition, then ONE dashboard spawn
@@ -173,7 +177,18 @@ export class JiraDispatchService {
       return { surface: 'desktop', assigned, transitioned: transition?.name ?? null, session: null };
     }
 
-    this.live.confirm(req.key, spawned.sessionId);
+    // What the link keeps of this launch (spec §5). `name` is what `launchInProject` was given above; the snapshot is the ticket as the dispatch read it, so the
+    // List can still draw it after it leaves the board (`parent` is Jira's own, not a board fold's). `surface` absent is a dashboard launch, byte for byte as the
+    // spawn body treats it. The workspace's branch is the one a `new`/`continue` choice named, `null` for `none`.
+    this.live.confirm(req.key, spawned.sessionId, {
+      action: req.action,
+      name: jiraSessionName(req.key),
+      branch: workspace?.branch ?? null,
+      surface: req.surface ?? 'dashboard',
+      model: req.model ?? null,
+      effort: req.effort ?? null,
+      snapshot: { summary: detail.summary, type: detail.type.name, parentKey: detail.parent?.key ?? null }
+    });
     // The map now holds a session the dashboard can end without telling us; the reconciler is what notices. Idempotent, and only a `setTimeout` — nothing here awaits it.
     this.reconciler.arm();
     return {
@@ -185,26 +200,131 @@ export class JiraDispatchService {
   }
 
   /**
-   * `POST /api/agents/jira-stop` — the strip's Stop (spec §5). Stops the key's session through the dashboard, then forgets the key. Jira is never called: the
-   * ticket keeps its assignee and its status, which is what the confirm in the client says.
+   * `POST /api/agents/jira-stop` — Stop one named session of a ticket (spec §5; sessions §7.3). Stops it through the dashboard, then ends its link `stopped`,
+   * which keeps it as history rather than deleting it. Jira is never called: the ticket keeps its assignee and its status, which is what the confirm in the
+   * client says.
    *
-   * The order is the spec's: agents off (409, `environmentBlock`'s own sentence — a disabled `status()` makes no request), a key the map does not hold (409), a
-   * `starting` entry (409 — it has no session id to stop, and its own Start will confirm or release it). Then the stop: a 200 and the dashboard's `no live
-   * session` 404 both mean the process is gone, and both clear the entry; any other answer is a 502 from `stopDashboardSession` and the entry STAYS, because the
-   * session may still be running and a strip that says otherwise would invite a second Start on a busy repository.
+   * The order is the spec's: agents off (409, `environmentBlock`'s own sentence — a disabled `status()` makes no request), then a `sessionId` that is not live on
+   * this key: a `starting` entry (409 — it has no session id to stop, and its own Start will confirm or release it), a key with nothing live (409), or an id
+   * that is another ticket's, unknown or already ended (409, naming its first 8 characters). Any live link can be named, `branch`
+   * and `manual` included — the client offers Stop only for a session the dashboard can signal. Then the stop: a 200 and the dashboard's `no live session`
+   * 404 both mean the process is gone, and both end the link; any other answer is a 502 from `stopDashboardSession` and the link STAYS, because the session
+   * may still be running and a page that says otherwise would invite a second Start on a busy repository.
    */
-  async stop(key: string): Promise<{ ok: true }> {
+  async stop(key: string, sessionId: string): Promise<{ ok: true }> {
     const cfg = readAgentsConfig();
     if (!cfg.enabled) {
       throw new HttpException({ error: environmentBlock(await this.agents.status()) ?? 'dispatch is off — set BM_AGENTS=on for the API' }, 409);
     }
-    const entry = this.live.get(key);
-    if (entry === null) throw new HttpException({ error: `no live session for ${key}` }, 409);
-    if (entry.sessionId === null) throw new HttpException({ error: `${key} is still starting` }, 409);
-    await stopDashboardSession(cfg, entry.sessionId, 'Jira is untouched');
-    // The stop is awaited: a Stop and a fresh Start can interleave, and the new entry (a different session) is not the one this request stopped.
-    if (this.live.get(key)?.sessionId === entry.sessionId) this.live.clear(key);
+    const onKey = this.live.liveLinks().filter((l) => l.key === key);
+    if (!onKey.some((l) => l.sessionId === sessionId)) {
+      // Not a live link of this key. A `starting` Run has no id to name, so it is told apart from a plain miss; and a key with nothing live at all is the
+      // spec's older sentence, kept as it was.
+      if (this.live.get(key)?.sessionId === null) throw new HttpException({ error: `${key} is still starting` }, 409);
+      if (onKey.length === 0) throw new HttpException({ error: `no live session for ${key}` }, 409);
+      throw new HttpException({ error: `${key} has no live session ${sessionId.slice(0, 8)}` }, 409);
+    }
+    await stopDashboardSession(cfg, sessionId, 'Jira is untouched');
+    // `end` is a no-op for a pair that ended while the stop was in flight (the reconciler's own verdict, or a second Stop), so the first end stands — and a
+    // fresh Start on the key, a different session, is never the pair this names.
+    this.live.end(key, sessionId, 'stopped');
     return { ok: true };
+  }
+
+  /**
+   * `POST /api/agents/jira-open-desktop` — hand ONE session to the desktop app through the dashboard's own guarded hand-over (spec C2): `POST /api/spawn` with
+   * `{ resume: <id>, surface: 'desktop' }`, the body its `parseSpawnRequest` reads as the hand-over (no prompt, no project — `claude://resume` carries neither).
+   * The guard stays the dashboard's: it refuses a session that is still running, already resuming, or open in the app, and this route re-implements none of it,
+   * so the client's disabled-Desktop rule (`desktopButton`) is a courtesy and this is the check that holds.
+   *
+   * The dashboard's status and `{ error }` go through UNCHANGED — 501 `desktop app unavailable`, 400 `unknown session`, 409 `session is still running` /
+   * `already resuming` / `session is open in the desktop app`, 429, 500 `open failed` — because the button's error line shows that sentence and the person
+   * reads it beside a button labelled Desktop. That is deliberately NOT `desktopSpawnError`'s rewording, which was written for the launch sheet and describes
+   * a launch, not a hand-over. An unreachable dashboard is a 502 naming the cause. Agents off is `stop`'s 409 and makes no request.
+   *
+   * A 200 that does not say `surface: 'desktop'` is a 502: a dashboard from before desktop hand-overs ignores `surface`, and a 200 from it is not a session
+   * that opened in the app, whatever else it started.
+   */
+  async openDesktop(sessionId: string): Promise<{ ok: true }> {
+    const cfg = readAgentsConfig();
+    if (!cfg.enabled) {
+      throw new HttpException({ error: environmentBlock(await this.agents.status()) ?? 'dispatch is off — set BM_AGENTS=on for the API' }, 409);
+    }
+    let res: Response;
+    try {
+      res = await fetch(`${cfg.url}/api/spawn`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cfg) },
+        body: JSON.stringify({ resume: sessionId, surface: 'desktop' }),
+        signal: AbortSignal.timeout(OPEN_DESKTOP_TIMEOUT_MS)
+      });
+    } catch (e) {
+      throw new HttpException({ error: dashboardError(e, 'the dashboard desktop hand-over', OPEN_DESKTOP_TIMEOUT_MS) }, 502);
+    }
+    const body = (await res.json().catch(() => null)) as { surface?: unknown; error?: unknown } | null;
+    if (!res.ok) {
+      throw new HttpException({ error: typeof body?.error === 'string' ? body.error : `the dashboard answered ${res.status}` }, res.status);
+    }
+    if (body?.surface !== 'desktop') throw new HttpException({ error: 'the dashboard did not hand the session to the desktop app' }, 502);
+    return { ok: true };
+  }
+
+  /**
+   * `POST /api/agents/jira-link` — `/jira link <KEY>`: link a session to a ticket by hand (spec §5). In the order the spec gives: agents off (409, `stop`'s own
+   * sentence — the row read is a dashboard call), then the key is a real issue (`issueSummary`, one poller read; its status and sentence go through
+   * `unwrapJira`, so a 404, a 429 and an unreachable Jira each read as they do on every other route), then the session is one the dashboard knows — its
+   * `GET /api/sessions/:id/row` answering 404 is the ONLY refusal, never absence from the capped list, which proves nothing. The ticket is checked before the
+   * session so a typo in the key costs no dashboard call.
+   *
+   * An explicit link is the person changing their mind, so it lifts a suppression an earlier unlink left BEFORE `addLink` (which would answer `suppressed`)
+   * — and only here, after both checks passed, so a refused link leaves the suppression standing. The snapshot is the ticket as Jira reports it now; `surface`
+   * is the row's `dashboard` or null, as detection does (the row's `local`/`cloud` are not this repo's launch surfaces). The row carries no `repo` mapping, so
+   * `repo` is its launch folder, `''` when the dashboard sent none.
+   */
+  async link(key: string, sessionId: string): Promise<{ ok: true; linked: 'added' | 'exists' }> {
+    const cfg = readAgentsConfig();
+    if (!cfg.enabled) {
+      throw new HttpException({ error: environmentBlock(await this.agents.status()) ?? 'dispatch is off — set BM_AGENTS=on for the API' }, 409);
+    }
+    const issue = unwrapJira(await this.poller.issueSummary(key));
+    const row = await dashboardSessionRow(cfg, sessionId);
+    if (row === null) throw new HttpException({ error: `the dashboard does not know session ${sessionId.slice(0, 8)}` }, 409);
+    this.live.unsuppress(key, sessionId);
+    const linked = this.live.addLink({
+      key,
+      sessionId,
+      how: 'manual',
+      action: null,
+      name: row.sessionName ?? row.gitBranch ?? `session ${sessionId.slice(0, 8)}`,
+      repo: row.projectPath ?? '',
+      branch: row.gitBranch ?? null,
+      surface: row.surface === 'dashboard' ? 'dashboard' : null,
+      model: row.model ?? null,
+      effort: row.effort ?? null,
+      snapshot: { summary: issue.summary, type: issue.type.name, parentKey: issue.parent?.key ?? null },
+      startedAt: new Date().toISOString()
+    });
+    // `unsuppress` ran first, so the store cannot answer `suppressed`; the type still says it could, and a link that was not made must not read as one that was.
+    if (linked === 'suppressed') throw new HttpException({ error: `${key} could not be linked to session ${sessionId.slice(0, 8)}` }, 409);
+    this.reconciler.arm();
+    return { ok: true, linked };
+  }
+
+  /**
+   * `POST /api/agents/jira-unlink` — `/jira unlink <KEY>` (spec C9): removes a `branch` or `manual` link and remembers the pair so detection never re-adds it.
+   * No dashboard call, so it works with dispatch off. A `run` link refuses (409): dropping it would free the one-run gate under a live Run session, and
+   * only Stop ends one. `missing` is a pair the store does not hold, 404.
+   */
+  unlink(key: string, sessionId: string): { ok: true } {
+    const id8 = sessionId.slice(0, 8);
+    switch (this.live.unlink(key, sessionId)) {
+      case 'run':
+        throw new HttpException({ error: `${key} was started by Run ▾ — stop it from the board instead` }, 409);
+      case 'missing':
+        throw new HttpException({ error: `${key} is not linked to session ${id8}` }, 404);
+      default:
+        return { ok: true };
+    }
   }
 
   /** The second composition, from the re-read detail. Only reached after a write, so its refusal is the caller's to suffix; the sentence is the first's. */

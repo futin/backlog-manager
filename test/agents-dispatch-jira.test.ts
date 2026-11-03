@@ -15,7 +15,7 @@ import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { DEFAULT_MODEL } from '../shared/agent';
 import type { JiraRefBranch, JiraRepoRefs, JiraStatusPayload } from '../shared/types';
 import { listenLoopback } from './helpers/app';
-import { FakeJira, makeRawIssue } from './helpers/jira';
+import { FakeJira, makeRawIssue, RUN_META } from './helpers/jira';
 import type { FailNext } from './helpers/jira';
 import { makeRegistry } from './helpers/store';
 
@@ -273,7 +273,7 @@ describe('refusals before the reservation — no Jira write, no spawn, nothing r
 
   it('409 <KEY> already has a session for a confirmed key', async () => {
     live.reserve('PAY-1', REPO);
-    live.confirm('PAY-1', 'sess-old');
+    live.confirm('PAY-1', 'sess-old', RUN_META);
     expect((await post(BODY).expect(409)).body).toEqual({ error: 'PAY-1 already has a session' });
     expect(fake.calls.length).toBe(callsAtStart);
     expect(sent.spawns).toEqual([]);

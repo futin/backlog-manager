@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, within } from '@testing-library/react';
+import { act, render, renderHook, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -9,6 +9,12 @@ import { SideRail } from '../client/src/components/SideRail';
 import { type Section } from '../client/src/lib/sections';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { ProjectsContext } from '../client/src/hooks/ProjectsContext';
+import { JiraContext } from '../client/src/hooks/JiraContext';
+import { JiraSessionsContext, JiraSessionsProvider } from '../client/src/hooks/JiraSessionsContext';
+import { resetJiraListFilters, useJiraListFilters } from '../client/src/hooks/useJiraListFilters';
+import { useJiraPage } from '../client/src/hooks/useJiraPage';
+import { setJiraView, useJiraView } from '../client/src/hooks/useJiraView';
+import type { JiraStatusPayload, JiraSessionsPayload } from '../shared/types';
 import type { DrawnSources } from '../client/src/lib/sources';
 import { FILES_PAGE_KEY, GITHUB_PAGE_KEY } from '../client/src/lib/source-page';
 import { RUNS_MODE_KEY, isRunsMode } from '../client/src/lib/runs-mode';
@@ -499,5 +505,186 @@ describe('SideRail · the version chip', () => {
       expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'false');
       expect(chip()).toBeNull();
     });
+  });
+});
+
+/*
+  The Jira row's Needs-you badge (Jira sessions spec §7.4, C4; DESIGN.md §8.0). The rail reads the shell's one sessions answer through
+  `JiraSessionsContext`, so the count cases hand the answer in directly and the wiring case below mounts the real provider over a stubbed `fetch`. Which
+  states count is `needsYou`'s (`test/jira-sessions-shared.test.ts`); what is here is the number the rail draws from a payload, where it draws it, and what a
+  click does.
+*/
+describe('the Jira row’s Needs-you badge', () => {
+  const configured = { data: { configured: true } as unknown as JiraStatusPayload, loading: false, error: false, reload: () => {} };
+  const badge = (): HTMLElement | null => document.querySelector('.rail-badge');
+
+  type Over = { key: string; id: string | null; state: string; endedAt?: string | null };
+  const link = (o: Over) => ({
+    key: o.key,
+    sessionId: o.id,
+    how: 'run',
+    action: 'context',
+    name: `session ${o.id}`,
+    repo: '/home/ada/pay',
+    branch: null,
+    surface: 'dashboard',
+    model: 'opus',
+    effort: null,
+    snapshot: { summary: `Snapshot of ${o.key}`, type: 'Task', parentKey: null },
+    startedAt: '2026-11-01T10:00:00.000Z',
+    endedAt: o.endedAt ?? null,
+    endReason: null,
+    quietSince: null,
+    reattachedAt: null,
+    state: o.state,
+    row: null,
+    stateSince: '2026-11-01T10:00:00.000Z'
+  });
+  const payload = (links: Over[], reachable = true): JiraSessionsPayload =>
+    ({ links: links.map(link), reachable, rowsAt: '2026-11-01T10:00:00.000Z' }) as unknown as JiraSessionsPayload;
+
+  const tree = (data: JiraSessionsPayload | null, onChange: (s: Section) => void = jest.fn()) => (
+    <SettingsProvider>
+      <ProjectsContext.Provider value={{ data: null, drawn: BOTH, reload: () => {} }}>
+        <JiraContext.Provider value={configured}>
+          <JiraSessionsContext.Provider value={{ data, reload: () => Promise.resolve() }}>
+            <SideRail section="runs" onChange={onChange} provisional={false} />
+          </JiraSessionsContext.Provider>
+        </JiraContext.Provider>
+      </ProjectsContext.Provider>
+    </SettingsProvider>
+  );
+
+  beforeEach(() => {
+    localStorage.clear();
+    resetJiraListFilters();
+  });
+
+  it('counts a plan, a permission, a reply and an answer — and not a working session', () => {
+    render(
+      tree(
+        payload([
+          { key: 'PAY-1', id: 's1', state: 'plan' },
+          { key: 'PAY-2', id: 's2', state: 'permission' },
+          { key: 'PAY-3', id: 's3', state: 'reply' },
+          { key: 'PAY-4', id: 's4', state: 'answer' },
+          { key: 'PAY-5', id: 's5', state: 'working' },
+          { key: 'PAY-6', id: 's6', state: 'quiet' }
+        ])
+      )
+    );
+    expect(badge()).toHaveTextContent('4');
+    expect(screen.getByRole('button', { name: '4 sessions need you' })).toBe(badge());
+  });
+
+  it('draws no element at zero, and none before the first answer', () => {
+    const { rerender } = render(tree(null));
+    expect(badge()).toBeNull();
+    rerender(tree(payload([{ key: 'PAY-1', id: 's1', state: 'working' }])));
+    expect(badge()).toBeNull();
+    rerender(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan', endedAt: '2026-11-02T10:00:00.000Z' }])));
+    expect(badge()).toBeNull();
+  });
+
+  it('counts a session on a ticket that is on no picked board — every linked ticket counts, not the board’s', () => {
+    render(tree(payload([{ key: 'OFFBOARD-9', id: 's1', state: 'answer' }])));
+    expect(badge()).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: '1 session needs you' })).toBe(badge());
+  });
+
+  it('counts one session once, however many times the payload lists it and however many tickets it is linked to', () => {
+    render(
+      tree(
+        payload([
+          { key: 'PAY-1', id: 's1', state: 'plan' },
+          { key: 'PAY-1', id: 's1', state: 'plan' },
+          // The same session linked to a second ticket is a second row in the List, but the same person waiting once: the badge counts sessions (spec §5).
+          { key: 'PAY-2', id: 's1', state: 'plan' },
+          // A Starting reservation has no session id and cannot be waiting on anyone.
+          { key: 'PAY-3', id: null, state: 'starting' }
+        ])
+      )
+    );
+    expect(badge()).toHaveTextContent('1');
+  });
+
+  it('counts two different sessions on two tickets as two', () => {
+    render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }, { key: 'PAY-2', id: 's2', state: 'plan' }])));
+    expect(badge()).toHaveTextContent('2');
+  });
+
+  it('keeps the last count while the dashboard is unreachable, and a failed read leaves the payload untouched', () => {
+    const { rerender } = render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }, { key: 'PAY-2', id: 's2', state: 'reply' }])));
+    expect(badge()).toHaveTextContent('2');
+    // Unreachable: every live link reads Lost contact — nobody can say who is waiting, so the number does not drop to nothing.
+    rerender(tree(payload([{ key: 'PAY-1', id: 's1', state: 'lost' }, { key: 'PAY-2', id: 's2', state: 'lost' }], false)));
+    expect(badge()).toHaveTextContent('2');
+    // The next reachable answer is believed again.
+    rerender(tree(payload([{ key: 'PAY-1', id: 's1', state: 'working' }])));
+    expect(badge()).toBeNull();
+  });
+
+  it('is its own button beside the row’s, hung on the Jira row — the row still just opens Jira', async () => {
+    const onChange = jest.fn();
+    render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }]), onChange));
+    const row = screen.getByRole('button', { name: 'Jira' });
+    expect(row).toHaveClass('rail-link');
+    expect(row).not.toContainElement(badge());
+    expect(badge()?.parentElement).toHaveClass('rail-group');
+    expect(badge()?.parentElement).toContainElement(row);
+    await userEvent.click(row);
+    expect(onChange).toHaveBeenCalledWith('jira');
+    expect(JSON.parse(localStorage.getItem('backlog-manager.jira-view') ?? 'null')).not.toBe('list');
+  });
+
+  it('lands on the Board page’s List with Needs you and All tickets set', async () => {
+    const onChange = jest.fn();
+    setJiraView('board');
+    const filters = renderHook(() => useJiraListFilters());
+    const view = renderHook(() => useJiraView());
+    const page = renderHook(() => useJiraPage());
+    act(() => page.result.current[1]('setup'));
+    render(tree(payload([{ key: 'OFFBOARD-9', id: 's1', state: 'answer' }]), onChange));
+
+    await userEvent.click(screen.getByRole('button', { name: '1 session needs you' }));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith('jira');
+    expect(page.result.current[0]).toBe('board');
+    expect(view.result.current[0]).toBe('list');
+    expect(filters.result.current[0]).toMatchObject({ chip: 'needs-you', allTickets: true });
+  });
+
+  it('is fed by the shell’s one poll: a read with no `open=1` while the section is closed, none at all while Jira is unconfigured', async () => {
+    const realFetch = global.fetch;
+    const fn = jest.fn(() =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload([{ key: 'PAY-1', id: 's1', state: 'permission' }])) } as Response)
+    );
+    global.fetch = fn as unknown as typeof fetch;
+    try {
+      const wired = (enabled: boolean) => (
+        <SettingsProvider>
+          <ProjectsContext.Provider value={{ data: null, drawn: BOTH, reload: () => {} }}>
+            <JiraContext.Provider value={configured}>
+              <JiraSessionsProvider open={false} enabled={enabled}>
+                <SideRail section="runs" onChange={jest.fn()} provisional={false} />
+              </JiraSessionsProvider>
+            </JiraContext.Provider>
+          </ProjectsContext.Provider>
+        </SettingsProvider>
+      );
+      const { rerender } = render(wired(false));
+      await act(async () => {});
+      expect(fn).not.toHaveBeenCalled();
+      expect(badge()).toBeNull();
+
+      rerender(wired(true));
+      await act(async () => {});
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(fn).toHaveBeenCalledWith('/api/jira/sessions');
+      expect(badge()).toHaveTextContent('1');
+    } finally {
+      global.fetch = realFetch;
+    }
   });
 });

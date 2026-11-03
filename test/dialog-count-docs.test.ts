@@ -7,7 +7,7 @@ import { join } from 'node:path';
  * headline left `CLAUDE.md` on 2026-11-02 (the rule is fenced to `client/src/**`); the headline is pinned in `board.md` so the bullet the count lives in
  * stays findable by name.
  *
- * Jira phase 2 moved the count from three to five — `JiraIssueModal` composes `ui/Modal` and `JiraBoardSheet` composes `ui/FormSheet`, so both joined the
+ * Jira phase 2 moved the count from three to five — `JiraDetail` composes `ui/Modal` and `JiraBoardSheet` composes `ui/FormSheet`, so both joined the
  * stack through the shells, by construction, with no line of `useDialogEscape` changed — which is exactly the edit this suite exists to catch half-made.
  * The What's new drawer moved it to six: `ReleasesDrawer` composed `ui/Drawer`, a third shell, and since #298 calls the hook itself over ui-kit's drawer.
  * Jira phase 5 moved it to seven — the same edit a third time: `JiraLaunchSheet` composes `ui/FormSheet`, `FormSheet`'s fourth composer, and joined the stack
@@ -43,7 +43,7 @@ function mechanismBullet(): string {
 }
 
 describe('the Escape rule reads eight dialogs, not three, four, five, six or seven', () => {
-  const EIGHT = ['ItemModal', 'LaunchSheet', 'OrchestrateSheet', 'JiraIssueModal', 'JiraBoardSheet', 'ReleasesDrawer', 'JiraLaunchSheet', 'DashboardSheet'];
+  const EIGHT = ['ItemModal', 'LaunchSheet', 'OrchestrateSheet', 'JiraDetail', 'JiraBoardSheet', 'ReleasesDrawer', 'JiraLaunchSheet', 'DashboardSheet'];
 
   it('invariants.md names eight and says WHY the run drawer left, rather than dropping it', () => {
     const entry = escapeEntry();
@@ -64,7 +64,7 @@ describe('the Escape rule reads eight dialogs, not three, four, five, six or sev
     expect(bullet).not.toMatch(/(three|four|five|six|seven) dialogs/);
     expect(bullet).toContain('LaunchSheet');
     expect(bullet).toContain('OrchestrateSheet');
-    expect(bullet).toContain('JiraIssueModal');
+    expect(bullet).toContain('JiraDetail');
     expect(bullet).toContain('JiraBoardSheet');
     expect(bullet).toContain('ReleasesDrawer');
     expect(bullet).toContain('JiraLaunchSheet');

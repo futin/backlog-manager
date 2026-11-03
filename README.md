@@ -485,9 +485,9 @@ Releases are nightly rollups: `.github/workflows/release.yml` runs at 04:17 UTC 
 - [**The board**](docs/subsystems/board.md) — the React SPA: five lazy sections behind a side rail, with most of what you see derived in the browser from whole
   corpora.
 - [**The skills**](docs/subsystems/skills.md) — the eight published skills, their five CLIs, and the reviewer agent the orchestrator dispatches before a merge.
-- [**Jira**](docs/subsystems/jira.md) — the Jira Cloud integration: a client, a board poller and its caches, nine read routes under `/api/jira`, six guarded
+- [**Jira**](docs/subsystems/jira.md) — the Jira Cloud integration: a client, a board poller and its caches, ten read routes under `/api/jira`, six guarded
   config writes to `jira.json`, the two writes to Jira itself (`/issue/assign` and `/issue/transition`), the Run half in `agents/` (`POST
-  /api/agents/dispatch-jira` and `/jira-stop`) with an in-memory map of live Jira sessions, and the `jira` skill (`jira.mjs`) that reaches those routes from any
+  /api/agents/dispatch-jira` and `/jira-stop`) with a persisted store of the sessions linked to each ticket, and the `jira` skill (`jira.mjs`) that reaches those routes from any
   session and, on a Run, makes the ticket's git worktree in a mapped repo.
 - [**Releases**](docs/subsystems/releases.md) — the rail's version chip and its What's new drawer, read from this checkout's release tags.
 - [**Invariant rationale**](docs/subsystems/invariants.md) — the rules the other five are held to, and the failure each one encodes.

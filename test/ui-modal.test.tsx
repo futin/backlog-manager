@@ -24,6 +24,25 @@ describe('Modal', () => {
     // stylesheet, not the composer, decides the 290 px column and the fold.
     expect(dialog.querySelector('.ui-modal-facts')).toContainElement(screen.getByText('the facts'));
     expect(dialog.querySelector('.ui-modal-body')).toContainElement(screen.getByText('the body'));
+    // No `head`, no split: the item modal keeps the sidecar shape and draws no head band.
+    expect(dialog).not.toHaveClass('ui-modal-split');
+    expect(dialog.querySelector('.ui-modal-head')).toBeNull();
+  });
+
+  it('takes the split shape when a composer passes `head`, with the head band ahead of both columns', () => {
+    render(
+      <Modal label="PAY-131" head={<span>the head</span>} facts={<span>the agent</span>} onClose={() => {}}>
+        <span>the ticket</span>
+      </Modal>
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'PAY-131' });
+    expect(dialog).toHaveClass('ui-modal', 'ui-modal-split');
+    const head = dialog.querySelector('.ui-modal-head');
+    expect(head).toContainElement(screen.getByText('the head'));
+    // Ahead in document order, so a reader meets the title before either column.
+    expect(head!.compareDocumentPosition(dialog.querySelector('.ui-modal-facts')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dialog.querySelector('.ui-modal-body')).toContainElement(screen.getByText('the ticket'));
   });
 
   it('closes on the scrim, on its close control, and on Escape', async () => {
@@ -94,11 +113,11 @@ describe('the item modal and the Jira issue modal are the only modals', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('is composed by exactly two files — board/ItemModal.tsx and jira/JiraIssueModal.tsx', () => {
+  it('is composed by exactly two files — board/ItemModal.tsx and jira/JiraDetail.tsx', () => {
     const composers = files
       .filter((f) => !f.endsWith(join('ui', 'Modal.tsx')))
       .filter((f) => /from '[^']*ui\/Modal'/.test(readFileSync(f, 'utf8')))
       .map((f) => f.slice(SRC.length + 1));
-    expect(composers.sort()).toEqual([join('components', 'board', 'ItemModal.tsx'), join('components', 'jira', 'JiraIssueModal.tsx')]);
+    expect(composers.sort()).toEqual([join('components', 'board', 'ItemModal.tsx'), join('components', 'jira', 'JiraDetail.tsx')]);
   });
 });

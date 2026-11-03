@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 // jira.mjs — read a Jira ticket and move it, through this machine's backlog-manager API.
 //
-// What this tool is: a thin client of `/api/jira` on 127.0.0.1 — and, for one command, of git. Every other command is one to three requests to routes the
-// server already serves — `GET /api/jira`, `GET /api/jira/issue/:key` (JSON, or `?format=text` for the ticket block), `POST /api/jira/issue/assign` and
-// `POST /api/jira/issue/transition` — and every refusal it prints is the server's own sentence (a refused transition prefixed with its key and followed by
-// what is offered now), except a route a stale stack does not have, which `failure` names along with the fix.
+// What this tool is: a thin client of `/api/jira` and `/api/agents` on 127.0.0.1 — and, for one command, of git. Every other command is one to three requests
+// to routes the server already serves — `GET /api/jira`, `GET /api/jira/issue/:key` (JSON, or `?format=text` for the ticket block), `POST
+// /api/jira/issue/assign` and `POST /api/jira/issue/transition`, plus `POST /api/agents/jira-link` and `/api/agents/jira-unlink` for `link` and `unlink` —
+// and every refusal it prints is the server's own sentence (a refused transition prefixed with its key and followed by what is offered now), except a route a
+// stale stack does not have, which `failure` names along with the fix.
+//
+// `link` and `unlink` are the one pair that write no Jira state at all: they tell the dashboard's side of this server that THIS session works on a ticket, so
+// the board shows it, and the session says who it is with `CLAUDE_CODE_SESSION_ID` (the environment Claude Code gives every session) — the server cannot
+// know, since it is not the caller's parent process. Their routes live under `/api/agents` because the link store is that module's, with the dashboard call
+// it makes to confirm the session exists; nothing in them reaches Jira's token or API beyond the one read that proves the key is real.
 //
 // What it is not: a Jira client. It never calls Atlassian, reads no `BM_JIRA_*` variable and sends no `authorization` header (spec §10). The server is
 // Jira's ONE caller on this machine, which keeps three things single: one rate-limit budget, one 429 window, one identity. And a token that never reaches a
@@ -34,6 +40,8 @@ commands:
   jira.mjs transitions <KEY>             list the transitions the issue offers: <id>\\t<label>\\t<category>, one per line
   jira.mjs transition <KEY> <id|name>    apply one transition, matched by id, then transition name, then target status
   jira.mjs assign <KEY>                  assign the issue to the signed-in user
+  jira.mjs link <KEY>                    link this session to the ticket (shown on the board; never written to Jira)
+  jira.mjs unlink <KEY>                  unlink this session from the ticket (shown on the board; never written to Jira)
   jira.mjs status                        is Jira connected, and can the next call work (exit 0 only when access is ok and someone is signed in)
   jira.mjs worktree <KEY> --repo <path> --mode new|continue --branch <name> [--base <name>]
                                          cut or enter the ticket's git worktree in a mapped repo; prints one JSON line (git only, no API)
@@ -294,6 +302,39 @@ async function assign(args) {
   const res = await apiRequest('POST', '/api/jira/issue/assign', { key })
   if (!ok(res)) throw failure(res)
   console.log(`${key} assigned to you`)
+  return 0
+}
+
+// The session this tool runs in, as Claude Code names it. Absent or blank is the caller's to fix — outside a session there is nothing to link — so it is a
+// usage error (`1`, nothing sent), not a request the server would have to refuse with a sentence about an id nobody typed.
+function sessionIdOrFail(cmd) {
+  const id = (process.env.CLAUDE_CODE_SESSION_ID ?? '').trim()
+  if (id === '') throw new JiraCliError(`jira.mjs ${cmd} needs CLAUDE_CODE_SESSION_ID — run it inside a Claude Code session`, 1)
+  return id
+}
+
+// `link`: POST `{ key, sessionId }`. The server's refusals (agents off, an unknown key, a session the dashboard does not know) are printed as its sentences
+// and exit through `exitForStatus` like every other command's. A success has no sentence of the server's to print — its body is `{ ok, linked }` — so the
+// line is this tool's, and says whether the pair was already there, since a second `link` is harmless and the caller should not read it as a new one.
+async function link(args) {
+  expectArgs('link', args, 1)
+  const key = keyOrFail(args[0])
+  const sessionId = sessionIdOrFail('link')
+  const res = await apiRequest('POST', '/api/agents/jira-link', { key, sessionId })
+  if (!ok(res)) throw failure(res)
+  console.log(res.body && res.body.linked === 'exists' ? `${key} was already linked to this session` : `${key} linked to this session`)
+  return 0
+}
+
+// `unlink`: the inverse. A `run` link refuses with the server's 409 sentence (only Stop ends a Run's session), and a pair that is not linked is its 404 — both
+// exit `2`, which is what a 4xx means here: the caller asked for something the server will not do.
+async function unlink(args) {
+  expectArgs('unlink', args, 1)
+  const key = keyOrFail(args[0])
+  const sessionId = sessionIdOrFail('unlink')
+  const res = await apiRequest('POST', '/api/agents/jira-unlink', { key, sessionId })
+  if (!ok(res)) throw failure(res)
+  console.log(`${key} unlinked from this session`)
   return 0
 }
 
@@ -709,7 +750,7 @@ function worktree(args) {
   }
 }
 
-const COMMANDS = { show, transitions, transition, assign, status, worktree }
+const COMMANDS = { show, transitions, transition, assign, link, unlink, status, worktree }
 
 // `main` is async because every API command awaits a `fetch` (`worktree` is synchronous, and awaiting its number is harmless); see the entry guard's note
 // for why that is safe.

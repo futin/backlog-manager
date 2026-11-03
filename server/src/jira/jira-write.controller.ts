@@ -22,6 +22,7 @@ import {
   writeSkill
 } from './config.util';
 import { jiraEnv } from './env.util';
+import { JiraLiveService } from './live.service';
 import { JiraPollerService } from './poller.service';
 import { jiraWriteOrThrow } from './unwrap.util';
 
@@ -58,12 +59,15 @@ import { jiraWriteOrThrow } from './unwrap.util';
  *
  * After a config write, the poller is re-aimed. A saved board awaits `boardSaved`, which sweeps THAT board and resolves when the sweep is done or after its
  * own `JIRA_SAVE_SWEEP_WAIT_MS` cap — it already races itself and never rejects, so this route adds no second timer. A deleted board drops its cache at once
- * (`boardDeleted`) and the poller is `arm()`ed so it re-judges whether anything is left to poll. A repos or repo-defaults write re-aims nothing: no sweep reads
- * either.
+ * (`boardDeleted`) and the poller is `arm()`ed so it re-judges whether anything is left to poll. A repos or repo-defaults write re-aims the poller at nothing: no sweep reads
+ * either. A repos write does tell `JiraLiveService` (`reposChanged`), so the session reconciler in `agents/` arms and branch detection starts without a restart.
  */
 @Controller('api/jira')
 export class JiraWriteController {
-  constructor(private readonly poller: JiraPollerService) {}
+  constructor(
+    private readonly poller: JiraPollerService,
+    private readonly live: JiraLiveService
+  ) {}
 
   /** `POST /api/jira/boards` — create (no `id`) or update (`id`) a board; answers the board as stored, with the ids the server minted. */
   @Post('boards')
@@ -101,6 +105,9 @@ export class JiraWriteController {
     if (!parsed.ok) throw new HttpException({ error: parsed.error }, 400);
     this.requireConfigured();
     this.writing(() => writeRepos(parsed.value.project, parsed.value.paths));
+    // The one re-aim a repos write has: detection (agents/) runs only while a repo is mapped, so a mapping made now must arm it. Through the live service's
+    // listener hook, because jira/ never imports agents/.
+    this.live.reposChanged();
     return parsed.value;
   }
 

@@ -1,7 +1,8 @@
 // jira.mjs's suite: the pure helpers by import, and the CLI end to end as a child process against a fake API that runs in this process.
 //
-// The fake stands in for the backlog-manager server, never for Jira: jira.mjs's one network peer is `/api/jira` on 127.0.0.1 (spec §10), so what the suite
-// can pin is what that peer is sent and how its answers become stdout, stderr and an exit code.
+// The fake stands in for the backlog-manager server, never for Jira: jira.mjs's one network peer is the backlog-manager API on 127.0.0.1 — `/api/jira`, plus
+// `/api/agents/jira-link` and `/jira-unlink` for `link` and `unlink` (spec §10) — so what the suite can pin is what that peer is sent and how its answers
+// become stdout, stderr and an exit code.
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -71,8 +72,15 @@ function fakeApi(routes) {
  * connection — the child would wait on an accept that cannot happen until it has exited, and the case would read like a stack that is down.
  */
 function runCli(port, ...args) {
+  return runCliEnv(port, {}, ...args)
+}
+
+/** `runCli` with extra environment. A value of `undefined` REMOVES the variable, so a case can run as if outside a Claude Code session. */
+function runCliEnv(port, env, ...args) {
   return new Promise((resolve) => {
-    const child = spawn('node', [SCRIPT, ...args], { env: { ...process.env, BM_API_PORT: String(port) } })
+    const childEnv = { ...process.env, BM_API_PORT: String(port), ...env }
+    for (const [name, value] of Object.entries(childEnv)) if (value === undefined) delete childEnv[name]
+    const child = spawn('node', [SCRIPT, ...args], { env: childEnv })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (c) => (stdout += c))
@@ -94,6 +102,8 @@ async function withApi(routes, fn) {
 }
 
 const cli = (routes, ...args) => withApi(routes, (port) => runCli(port, ...args))
+// `cli` with the session environment pinned: `session` is `CLAUDE_CODE_SESSION_ID`, `undefined` meaning "not set" even when this suite itself runs in one.
+const cliAs = (session, routes, ...args) => withApi(routes, (port) => runCliEnv(port, { CLAUDE_CODE_SESSION_ID: session }, ...args))
 
 const STATUS_OK = {
   configured: true,
@@ -154,7 +164,7 @@ test('formatStatus: not configured is stderr only and exit 3, with the dash only
 })
 
 test('USAGE has one line per command, and API_DOWN_CODE is 5', () => {
-  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'status', 'worktree']) {
+  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'link', 'unlink', 'status', 'worktree']) {
     assert.match(USAGE, new RegExp(`^\\s*jira\\.mjs ${cmd}\\b`, 'm'), `USAGE has no line for ${cmd}`)
   }
   assert.equal(API_DOWN_CODE, 5)
@@ -465,6 +475,98 @@ test('assign with two keys is usage and sends nothing', async () => {
   const { out, requests } = await cli(assignRoute({ body: { ok: true, reread: true } }), 'assign', 'PAY-1', 'PAY-2')
   assert.equal(out.status, 1)
   assert.equal(requests.length, 0)
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// link and unlink — the session tells the board it works on a ticket. Routes under /api/agents, the session id from CLAUDE_CODE_SESSION_ID.
+
+const SESSION = 'sess-1234-abcd'
+const linkRoute = (answer) => ({ '/api/agents/jira-link': (_b, { method }) => (method === 'POST' ? answer : undefined) })
+const unlinkRoute = (answer) => ({ '/api/agents/jira-unlink': (_b, { method }) => (method === 'POST' ? answer : undefined) })
+
+test('link posts the normalised key and this session id, and says whether the pair was new', async () => {
+  for (const [linked, line] of [
+    ['added', 'PAY-1 linked to this session\n'],
+    ['exists', 'PAY-1 was already linked to this session\n'],
+  ]) {
+    const { out, requests } = await cliAs(SESSION, linkRoute({ body: { ok: true, linked } }), 'link', 'pay-1')
+    assert.equal(out.status, 0, out.stderr)
+    assert.equal(out.stdout, line)
+    assert.equal(requests.length, 1)
+    const [r] = requests
+    assert.deepEqual([r.method, r.path], ['POST', '/api/agents/jira-link'])
+    assert.equal(r.headers['content-type'], 'application/json')
+    assert.equal(r.headers.origin, undefined)
+    assert.deepEqual(r.body, { key: 'PAY-1', sessionId: SESSION })
+  }
+})
+
+test('link and unlink outside a Claude Code session are usage: exit 1, the sentence, and nothing sent', async () => {
+  for (const cmd of ['link', 'unlink']) {
+    for (const unset of [undefined, '', '  ']) {
+      const { out, requests } = await cliAs(unset, { ...linkRoute({ body: { ok: true } }), ...unlinkRoute({ body: { ok: true } }) }, cmd, 'PAY-1')
+      assert.equal(out.status, 1, `${cmd} ${JSON.stringify(unset)}`)
+      assert.equal(out.stderr.trim(), `jira.mjs ${cmd} needs CLAUDE_CODE_SESSION_ID — run it inside a Claude Code session`)
+      assert.equal(requests.length, 0)
+    }
+  }
+})
+
+test("link maps the server's refusals: a 4xx is 2, a 5xx is 3, each sentence verbatim", async () => {
+  const cases = [
+    [{ status: 409, body: { error: 'the dashboard does not know session sess-123' } }, 2, 'the dashboard does not know session sess-123'],
+    [{ status: 400, body: { error: 'invalid session id' } }, 2, 'invalid session id'],
+    [{ status: 502, body: { error: 'Jira unreachable' } }, 3, 'Jira unreachable'],
+  ]
+  for (const [answer, code, sentence] of cases) {
+    const { out } = await cliAs(SESSION, linkRoute(answer), 'link', 'PAY-1')
+    assert.equal(out.status, code, String(answer.status))
+    assert.equal(out.stderr.trim(), sentence)
+    assert.equal(out.stdout, '')
+  }
+})
+
+test('link and unlink with a wrong argument count or a bad key are usage and send nothing', async () => {
+  const bad = [['link'], ['link', 'PAY-1', 'PAY-2'], ['unlink'], ['unlink', 'PAY-1', 'PAY-2'], ['link', 'PAY'], ['unlink', 'PAY-1/../x'], ['link', '--force']]
+  for (const args of bad) {
+    const { out, requests } = await cliAs(SESSION, { ...linkRoute({ body: { ok: true } }), ...unlinkRoute({ body: { ok: true } }) }, ...args)
+    assert.equal(out.status, 1, args.join(' '))
+    assert.equal(requests.length, 0, args.join(' '))
+  }
+})
+
+test('unlink posts the key and this session id, and says so', async () => {
+  const { out, requests } = await cliAs(SESSION, unlinkRoute({ body: { ok: true } }), 'unlink', 'pay-1')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.stdout, 'PAY-1 unlinked from this session\n')
+  assert.equal(requests.length, 1)
+  const [r] = requests
+  assert.deepEqual([r.method, r.path], ['POST', '/api/agents/jira-unlink'])
+  assert.deepEqual(r.body, { key: 'PAY-1', sessionId: SESSION })
+})
+
+const RUN_LINK_REFUSAL = 'PAY-1 was started by Run ▾ — stop it from the board instead'
+
+test("unlink maps the server's refusals: a Run's link and an unknown pair are 2, with their sentences", async () => {
+  const cases = [
+    [{ status: 409, body: { error: RUN_LINK_REFUSAL } }, RUN_LINK_REFUSAL],
+    [{ status: 404, body: { error: 'PAY-1 is not linked to session sess-123' } }, 'PAY-1 is not linked to session sess-123'],
+  ]
+  for (const [answer, sentence] of cases) {
+    const { out } = await cliAs(SESSION, unlinkRoute(answer), 'unlink', 'PAY-1')
+    assert.equal(out.status, 2, String(answer.status))
+    assert.equal(out.stderr.trim(), sentence)
+  }
+})
+
+test('link with the stack down is exit 5, the same sentence as every other command', async () => {
+  const { server } = fakeApi({})
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  await new Promise((resolve) => server.close(resolve))
+  const out = await runCliEnv(port, { CLAUDE_CODE_SESSION_ID: SESSION }, 'link', 'PAY-1')
+  assert.equal(out.status, API_DOWN_CODE)
+  assert.match(out.stderr, /the backlog-manager API is not running/)
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1062,7 +1164,7 @@ test('jira/SKILL.md is the jira skill, triggered by /jira', () => {
 
 test('jira/SKILL.md documents every command, through the braced plugin root', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8')
-  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'status', 'worktree']) {
+  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'link', 'unlink', 'status', 'worktree']) {
     assert.match(text, new RegExp(`jira\\.mjs ${cmd}\\b`), `SKILL.md never shows jira.mjs ${cmd}`)
   }
   const nodeLines = text.split('\n').filter((line) => /\bnode\s+"/.test(line))
