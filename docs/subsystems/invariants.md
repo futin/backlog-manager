@@ -3887,7 +3887,8 @@ being a field of it). `JiraLiveService` (`server/src/jira/live.service.ts` — t
 service named for what it holds) holds that state in memory, loads it once, and rewrites the file after every change but a `starting` reservation. What the file
 records is a LINK — the pair of a key and a session id, with the Run action, the repo, a snapshot of the ticket and how it ended — and the dashboard, not this
 server, is still the place that knows whether the process runs. A persisted link would outlive the process that knew, which is why it is never trusted on load:
-after a restart the reconciler resumes judging every live link, and a session that ended while the server was down is ended at the first reconcile, not on load.
+after a restart the reconciler resumes judging every live link, and a session that ended while the server was down is judged from the first reconcile on and
+ended once it has been Quiet for two minutes, never on load.
 The `starting` reservation stays in memory only, for `DispatchRecordsService`'s reason — it records a request THIS process made, which no file can answer — and
 a restart frees the key.
 
@@ -3908,7 +3909,10 @@ the 8-hour backstop; `release` touches a `starting` entry and nothing else, so a
 own `reserve` was refused releases nothing, because the entry in the store is the OTHER request's. At the cap of 100 the oldest live link is ended as `expired`,
 never deleted — it keeps its line in the history — and a `starting` one is never touched: its spawn is in flight and will confirm or release it, and ending it
 would let a second dispatch pass the gate while the first is still launching. When every slot is starting, `reserve` refuses and the caller says the store is
-busy. A link that has ended stays ended: a late `confirm` for it does not revive it, because the Start it belonged to is over; only a re-attach does, from the
+busy. The 8-hour backstop is strict and lazy: a live link whose later of `startedAt` and its last re-attach is strictly older than `JIRA_LIVE_TTL_MS` is ended
+`expired` (never deleted, so it keeps its line in the history) at the top of every call, with no timer — it is the backstop for a session nobody stopped and the
+reconciler could not judge, and a stale `starting` reservation is dropped by the same check. A link that has ended stays ended: a late `confirm` for it does not
+revive it, because the Start it belonged to is over; only a re-attach does, from the
 dashboard's own row, below.
 
 **Stop names one session, and the reconciler only agrees with the dashboard.** A ticket can now hold several live sessions — the Run's and, later, one a person

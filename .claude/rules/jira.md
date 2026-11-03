@@ -95,14 +95,16 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   the controller from `snapshot()`, the live `run` links only — the poller never sees it, and an unconfigured server keeps `{}`), `GET /api/jira/issue/:key`
   (`session`) and `GET /api/jira/sessions`.
   `GET /api/jira/sessions` is every link, live and ended, as `JiraSessionsPayload` (`{ links, reachable, rowsAt }`): each carries `state` (`sessionState`,
-  `shared/jira-sessions.ts`, derived and never stored), the dashboard's `row` for a live one and `stateSince`. It is memory only — it dials neither Jira nor the
+  `shared/jira-sessions.ts`, derived and never stored), the dashboard's `row` for a live one the dashboard lists (`null` for an ended or an unlisted one) and
+  `stateSince`. It is memory only — it dials neither Jira nor the
   dashboard, so an unconfigured server answers it too, with no 503 — and `?open=1` (the Jira section's own read, never the rail badge's) tells the reconciler a
   page is open.
   The one-run gate is `run`-only. The dispatch RESERVES the key (`starting`, memory only, never written, dropped by a restart) before its first Jira write, and
   `reserve` is a synchronous check-and-set refusing while a live `run` link or a reservation holds the key — so of two Starts exactly one passes, the other 409s
   `<KEY> is starting` / `already has a session`; a live `branch` or `manual` link is the user's own and blocks nothing. Every failure after the reservation runs
   through one `catch` that `release`s it; `release` touches only a `starting` entry, so it can never drop a session that did start, and a refused `reserve`
-  releases nothing (it would drop the other request's entry). `confirm` follows the spawn and turns the reservation into a `run` link; a key released meanwhile
+  releases nothing (it would drop the other request's entry). `confirm` follows the spawn and turns the reservation into a `run` link (over a live `branch` or
+  `manual` link for the same pair it upgrades that entry to `run`); a key released meanwhile
   is not resurrected, and a pair that has ended keeps its end — only the reconciler's re-attach revives one. Live links are capped at `JIRA_LIVE_CAP` (100,
   `starting` included): one more ENDS the oldest live link by `startedAt` as `expired` — it stays as history — and never a `starting` one, and when every slot
   is starting `reserve` refuses, which the dispatch answers as 409 `too many Jira sessions are starting`. A live link whose later of `startedAt` and
@@ -117,7 +119,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   called.
   The reconciler (`server/src/agents/jira-live.service.ts`, `JiraLiveReconciler`) is the other hand, and it ends a link only once the dashboard has stopped
   reporting it busy for two minutes. One `GET /api/sessions?limit=50&lookback=168` per tick (`dashboardSessionRows`), its rows kept whole in the service
-  (`setRows`, memory only; an unreadable list or agents off calls `markUnreachable` and ends nothing); the period is `JIRA_RECONCILE_FAST_MS` (15 s) while a
+  (`setRows`, memory only; an unreadable list calls `markUnreachable`, agents off returns before any fetch; neither ends a link); the period is
+  `JIRA_RECONCILE_FAST_MS` (15 s) while a
   Jira page was read in the last 30 s and `JIRA_RECONCILE_MS` (60 s) otherwise, a `setTimeout` chain armed by `confirm` and at boot, only while some link is
   live or Setup maps a repo, `unref`'d, never in a request's path, never throwing. For a live link with a session id and older than `JIRA_LIVE_GRACE_MS` (2
   min): a `working` or `question` row clears `quietSince`; anything else — any other status, or no row in a list shorter than 50 — marks `quietSince` on the

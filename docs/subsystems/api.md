@@ -205,7 +205,8 @@ fresh (`?format=text` for the ticket block), the roots search, the project list,
 eight guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
 since the repo/branch work `/repo-defaults`) and
 two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each followed by a re-read of the issue that is spliced into every board cache
-holding it. Since 5a the module also owns `JiraLiveService`, the ticket–session link store (memory over `~/.backlog-manager/jira-links.json`) behind the status payload's `live`, an issue's `session` and `GET /sessions`; the two POSTs that
+holding it. Since 5a the module also owns `JiraLiveService`, the ticket–session link store (memory over `~/.backlog-manager/jira-links.json`) behind the status
+payload's `live`, an issue's `session` and `GET /sessions`; the two POSTs that
 fill and end its links live in `agents/`, below, because they call the dashboard. The credentials are read per call and reach no payload. → [jira.md](jira.md),
 the full doc.
 
@@ -220,7 +221,8 @@ them reads of git, never writes ([invariants](invariants.md#the-server-never-wri
 - `GET /api/jira/worktrees` — every working tree of every distinct mapped repo (`git worktree list`, the main tree flagged), as `{ worktrees, unavailable: [{
   repo, reason }] }`; the client matches branches to tickets for the cards' worktree chip and the modal's Worktrees list.
 - `GET /api/jira/sessions` — every ticket–session link, live and ended, as `JiraSessionsPayload` (`{ links, reachable, rowsAt }`): each link is a `JiraLink`
-  plus its derived `state` (`sessionState`, `shared/jira-sessions.ts`), the dashboard's `row` for a live one (`null` otherwise) and `stateSince`, the first time
+  plus its derived `state` (`sessionState`, `shared/jira-sessions.ts`), the dashboard's `row` for a live one it lists (`null` for an ended one or one it does
+  not list) and `stateSince`, the first time
   THIS server saw it in that state. Memory only — the links and the rows the reconciler last read live in `JiraLiveService`; nothing here calls Jira or the
   dashboard, so an unconfigured server answers it too (empty, `reachable: true`, no 503). `?open=1` records that a Jira page is on screen, which quickens the
   reconciler to ~15 s; the rail badge's read omits it. → [jira.md](jira.md#the-link-store)
@@ -284,7 +286,8 @@ the machine is `home`.
   been awaited by the time one could arrive — and ignoring the flag instead would read an old client's `Cancel stop` as a second stop. On a tracker project
   it also sweeps `orchestrator:queued` off every never-claimed queue item, after the stop is on file and before the spawn; a refused removal is listed in an
   optional `unqueueFailed` (ids as `run.json` spells them) and never fails the stop — the spawned `--abort` repeats the sweep.
-- `POST /api/agents/dispatch-jira` — a Jira ticket's Run (`jira-agents.controller.ts` → `JiraDispatchService.dispatch`): reserve the key in the link store, optionally
+- `POST /api/agents/dispatch-jira` — a Jira ticket's Run (`jira-agents.controller.ts` → `JiraDispatchService.dispatch`): reserve the key in the link store,
+  optionally
   assign and transition in Jira, then spawn a session in the mapped repository. The action is a pick from the body, never derived; the prompt is composed server-side
   by `composeJiraPrompt`. A failure after a Jira write says the write stands. Since the repo/branch work the body also carries the branch choice (`mode`,
   `branch`, `base`, `openMr`, `target`, above), checked before anything is reserved or written. An optional `surface` (`dashboard` | `desktop`) is item
