@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { RUN_META } from './helpers/jira';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -53,7 +54,7 @@ const post = (body: unknown) =>
 /** A key with a session the dashboard can be asked to stop. */
 function seedLive(key = 'PAY-1', sessionId = 'sess-1'): void {
   expect(live.reserve(key, REPO)).toBe(true);
-  live.confirm(key, sessionId);
+  live.confirm(key, sessionId, RUN_META);
 }
 
 beforeAll(() => {

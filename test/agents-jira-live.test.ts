@@ -1,4 +1,5 @@
 import { JiraLiveService } from '../server/src/jira/live.service';
+import { RUN_META } from './helpers/jira';
 import { JIRA_LIVE_GRACE_MS, JIRA_RECONCILE_MS, JiraLiveReconciler } from '../server/src/agents/jira-live.service';
 
 /**
@@ -58,7 +59,7 @@ function seed(key: string, sessionId: string, ageMs: number): void {
   const now = Date.now();
   jest.setSystemTime(now - ageMs);
   expect(live.reserve(key, REPO)).toBe(true);
-  live.confirm(key, sessionId);
+  live.confirm(key, sessionId, RUN_META);
   jest.setSystemTime(now);
 }
 
@@ -172,7 +173,7 @@ describe('tick — what it leaves alone', () => {
     (global.fetch as jest.Mock).mockImplementationOnce(() => {
       live.clear('PAY-1');
       expect(live.reserve('PAY-1', REPO)).toBe(true);
-      live.confirm('PAY-1', 'sess-2');
+      live.confirm('PAY-1', 'sess-2', RUN_META);
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ sessions: [] }) } as Response);
     });
     await reconciler.tick();

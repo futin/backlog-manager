@@ -49,7 +49,7 @@ export class JiraController {
 
   /**
    * `GET /api/jira` — memory, the environment and `jira.json`, no outbound call. The controller, not the poller, fills `live` from the live map: the poller
-   * stays unaware of it. An unconfigured server keeps the poller's `{}` — it has no sessions to show, and no run can have started without credentials.
+   * stays unaware of it. `snapshot()` is the live `run` entries alone: a detected or hand-made link is in the store but has no reader here until the List arrives. An unconfigured server keeps the poller's `{}` — it has no sessions to show, and no run can have started without credentials.
    */
   @Get()
   status(): JiraStatusPayload {

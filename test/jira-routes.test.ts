@@ -15,7 +15,7 @@ import * as refsUtil from '../server/src/jira/refs.util';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import type { JiraIssueDetail, JiraRepoRefs, JiraStatusPayload, JiraWorktree } from '../shared/types';
 import { listenLoopback } from './helpers/app';
-import { FakeJira, makeRawIssue } from './helpers/jira';
+import { FakeJira, makeRawIssue, RUN_META } from './helpers/jira';
 import { makeRegistry } from './helpers/store';
 
 /**
@@ -179,8 +179,8 @@ describe('configured, against a healthy Jira', () => {
       live.reserve('PAY-131', '/work/pay');
       try {
         const starting = (await get('').expect(200)).body as JiraStatusPayload;
-        expect(starting.live).toEqual({ 'PAY-131': { name: 'jira PAY-131', startedAt: expect.any(String), repo: '/work/pay', starting: true } });
-        live.confirm('PAY-131', 'sess-1');
+        expect(starting.live).toEqual({ 'PAY-131': { sessionId: null, name: 'jira PAY-131', startedAt: expect.any(String), repo: '/work/pay', starting: true } });
+        live.confirm('PAY-131', 'sess-1', RUN_META);
         expect(((await get('').expect(200)).body as JiraStatusPayload).live['PAY-131'].starting).toBe(false);
       } finally {
         live.clear('PAY-131');
@@ -243,7 +243,7 @@ describe('configured, against a healthy Jira', () => {
       live.reserve('PAY-131', '/work/pay');
       try {
         const body = (await get('/issue/PAY-131').expect(200)).body as JiraIssueDetail;
-        expect(body.session).toEqual({ name: 'jira PAY-131', startedAt: expect.any(String), repo: '/work/pay', starting: true });
+        expect(body.session).toEqual({ sessionId: null, name: 'jira PAY-131', startedAt: expect.any(String), repo: '/work/pay', starting: true });
         expect(((await get('/issue/PAY-500').expect(200)).body as JiraIssueDetail).session).toBeNull();
       } finally {
         live.clear('PAY-131');

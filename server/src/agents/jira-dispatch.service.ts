@@ -173,7 +173,18 @@ export class JiraDispatchService {
       return { surface: 'desktop', assigned, transitioned: transition?.name ?? null, session: null };
     }
 
-    this.live.confirm(req.key, spawned.sessionId);
+    // What the link keeps of this launch (spec §5). `name` is what `launchInProject` was given above; the snapshot is the ticket as the dispatch read it, so the
+    // List can still draw it after it leaves the board (`parent` is Jira's own, not a board fold's). `surface` absent is a dashboard launch, byte for byte as the
+    // spawn body treats it. The workspace's branch is the one a `new`/`continue` choice named, `null` for `none`.
+    this.live.confirm(req.key, spawned.sessionId, {
+      action: req.action,
+      name: jiraSessionName(req.key),
+      branch: workspace?.branch ?? null,
+      surface: req.surface ?? 'dashboard',
+      model: req.model ?? null,
+      effort: req.effort ?? null,
+      snapshot: { summary: detail.summary, type: detail.type.name, parentKey: detail.parent?.key ?? null }
+    });
     // The map now holds a session the dashboard can end without telling us; the reconciler is what notices. Idempotent, and only a `setTimeout` — nothing here awaits it.
     this.reconciler.arm();
     return {

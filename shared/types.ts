@@ -893,11 +893,50 @@ export interface JiraTransition {
  */
 export interface JiraLiveSession {
   name: string;
+  /** The dashboard's id for the session; `null` while `starting`. Stop needs it (the board has no other way to name the session it is stopping). */
+  sessionId: string | null;
   /** ISO instant the key was reserved. */
   startedAt: string;
   /** The absolute repo path the session runs in. */
   repo: string;
   starting: boolean;
+}
+
+/** How a session came to be linked to a ticket (spec §5): started by Run ▾, detected from its branch, or linked by hand with `/jira link`. */
+export type JiraLinkHow = 'run' | 'branch' | 'manual';
+
+/**
+ * Why a link ended (spec §5): the dashboard stopped reporting it busy (`idle`), Stop (`stopped`), the 8-hour backstop (`expired`), or an answered, non-full
+ * dashboard list no longer carried the session (`gone`).
+ */
+export type JiraEndReason = 'idle' | 'stopped' | 'expired' | 'gone';
+
+/**
+ * One session linked to one ticket, live or ended — the unit the link store keeps (`~/.backlog-manager/jira-links.json`, spec §5). The pair `(key, sessionId)`
+ * is its identity, and a session that pauses and resumes re-opens its own entry rather than adding one. `snapshot` is the ticket as it stood when the link was
+ * made, so the List can still draw a ticket that has since left the board; `parentKey` is the parent Jira reports, not the board's fold top. `action` is the
+ * Run action and is `null` for a `branch` or `manual` link, which show the session's `name` instead.
+ */
+export interface JiraLink {
+  key: string;
+  /** `null` is never persisted: a `starting` Run lives in memory only and has no link yet. */
+  sessionId: string | null;
+  how: JiraLinkHow;
+  action: JiraAction | null;
+  name: string;
+  repo: string;
+  branch: string | null;
+  /** This repo's own launch surface, NOT the dashboard row's `local | dashboard | cloud`. */
+  surface: 'desktop' | 'dashboard' | null;
+  model: string | null;
+  effort: string | null;
+  snapshot: { summary: string; type: string; parentKey: string | null };
+  /** ISO instants. */
+  startedAt: string;
+  endedAt: string | null;
+  endReason: JiraEndReason | null;
+  /** The first reconcile tick that saw the session neither `working` nor `question`; cleared when one sees it active again. */
+  quietSince: string | null;
 }
 
 /** `GET /api/jira/issue/:key`, read fresh. `session` is the live Run on this key (memory only), or `null`. */

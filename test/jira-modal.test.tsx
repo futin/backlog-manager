@@ -447,7 +447,7 @@ describe('JiraIssueModal — while loading, and when the read fails', () => {
 /** A session started three hours ago, so the elapsed reading is `3h` for the whole of a case. */
 const threeHoursAgo = (): string => new Date(Date.now() - 3 * 3_600_000).toISOString();
 const SESSION = (over: Partial<{ starting: boolean }> = {}) => ({
-  'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false, ...over }
+  'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false, ...over }
 });
 const modalRun = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Run PAY-131' });
 const stopChip = (): HTMLElement | null => within(screen.getByRole('dialog')).queryByRole('button', { name: 'Stop session' });

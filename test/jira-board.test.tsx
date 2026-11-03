@@ -745,7 +745,7 @@ describe('Run ▾ and the live strip', () => {
   });
 
   it('a live key draws a disabled chip titled with the key, and a strip naming the repo basename and the elapsed reading', async () => {
-    await renderRun({ live: { 'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } });
+    await renderRun({ live: { 'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } });
     const chip = runChip('Refund partial captures');
     expect(chip).toBeDisabled();
     expect(chip).toHaveAttribute('title', 'a session is running on PAY-131');
@@ -758,7 +758,7 @@ describe('Run ▾ and the live strip', () => {
   });
 
   it('a starting entry reads `starting` in the strip, and the chip is disabled just the same', async () => {
-    await renderRun({ live: { 'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: true } } });
+    await renderRun({ live: { 'PAY-131': { sessionId: null, name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: true } } });
     const [strip] = strips('Refund partial captures');
     expect(strip).toHaveTextContent('starting');
     expect(strip).not.toHaveTextContent('3h');
@@ -771,7 +771,7 @@ describe('Run ▾ and the live strip', () => {
     const top = issue({ key: 'PAY-160', summary: 'Top story', type: { name: 'Story', level: 0, subtask: false } });
     const under = issue({ key: 'PAY-162', summary: 'Folded sub-task', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-160', summary: 'Top story' } });
     lists[ALPHA.id] = [top, under];
-    await renderRun({ live: { 'PAY-162': { name: 'jira PAY-162', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } }, 'Top story');
+    await renderRun({ live: { 'PAY-162': { sessionId: 's1', name: 'jira PAY-162', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } }, 'Top story');
     const [strip] = strips('Top story');
     expect(strip).toHaveTextContent('PAY-162');
     expect(strip).toHaveTextContent('session · pay');
@@ -906,7 +906,7 @@ describe('Run ▾ and the live strip', () => {
   // The modal's Stop is the other half: the modal reloads the status itself, and `JiraView`'s `onWrote` is what re-reads the board list. Both are pinned here
   // through the real page, since `jira-modal`'s cases hand the modal mock callbacks.
   it('Stop from the modal reads GET /api/jira once more and the board list once more, and the strip is gone', async () => {
-    const live = { 'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } };
+    const live = { 'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } };
     await renderRun({ live });
     const refund = (lists[ALPHA.id] ?? []).find((i) => i.key === 'PAY-131') as JiraIssue;
     const answered = global.fetch;
@@ -966,7 +966,7 @@ describe('worktree chips on the card', () => {
   });
   const worktreeReads = (): number => requested.filter((u) => u === '/api/jira/worktrees').length;
   const chipOf = (summary: string): HTMLElement | null => card(summary).querySelector<HTMLElement>('.jira-card-tree');
-  const live = (key: string) => ({ [key]: { name: `jira ${key}`, startedAt: new Date().toISOString(), repo: '/home/ada/pay', starting: false } });
+  const live = (key: string) => ({ [key]: { sessionId: 's1', name: `jira ${key}`, startedAt: new Date().toISOString(), repo: '/home/ada/pay', starting: false } });
 
   async function renderBoard(over: Partial<JiraStatusPayload> = {}): Promise<void> {
     setJiraPage('board');

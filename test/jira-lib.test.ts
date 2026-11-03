@@ -960,7 +960,7 @@ describe('resolveJiraAction and jiraSettingOf', () => {
 
 describe('runChipState', () => {
   const mapped = { PAY: ['/home/ada/pay'] };
-  const session = { name: 'jira PAY-1', startedAt: '2026-10-19T10:00:00.000Z', repo: '/home/ada/pay', starting: false };
+  const session = { sessionId: 's1', name: 'jira PAY-1', startedAt: '2026-10-19T10:00:00.000Z', repo: '/home/ada/pay', starting: false };
 
   it('is no-repo while the issue’s project has no mapped path, an empty list included', () => {
     expect(runChipState(issue(), payload({ repos: {} }))).toBe('no-repo');

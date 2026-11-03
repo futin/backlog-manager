@@ -454,7 +454,7 @@ describe('useJiraBoard', () => {
   `GET /api/jira`, no timer waited for. The probe is those two callers' shape (`JiraLaunchSheet`'s `onStarted`, the modal's Stop `onSuccess`) over the real
   wire helpers and the real provider; the components' own wiring is asserted in their suites.
 */
-const LIVE: JiraLiveSession = { name: 'jira PAY-131', startedAt: '2026-10-16T09:00:00Z', repo: '/Users/ada/pay', starting: false };
+const LIVE: JiraLiveSession = { sessionId: 's1', name: 'jira PAY-131', startedAt: '2026-10-16T09:00:00Z', repo: '/Users/ada/pay', starting: false };
 
 function WriteProbe() {
   const { data, reload } = useJiraContext();
