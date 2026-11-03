@@ -19,7 +19,7 @@ skill root — never duplicated under `.claude/skills/`, which would load the sa
 | `backlog-orchestrate` | drains a project's groomed queue unattended, one item per git worktree, each reviewed and verified before it merges                                                                                                                         |
 | `backlog-retro`       | sweeps every orchestrator run on the machine into a report of what the pipeline cost, where the time went and how much was rework, proposes backlog items from what it finds, and records the sweep for the next one to be measured against |
 | `backlog-tick`        | one unattended unit of work per scheduled tick, started by a dashboard job: only when the project is idle, it executes a ready bug or task to a PR, or grooms an ungroomed bug or a refactor into a plan marked `plan-review` |
-| `jira`                | reads one Jira ticket and moves it — prints it, lists and applies its transitions, assigns it to me, checks the connection — all through `/api/jira`; on a Jira Run, makes the ticket's git worktree in a mapped repo (git only)           |
+| `jira`                | reads one Jira ticket and moves it — prints it, lists and applies its transitions, assigns it to me, checks the connection — all through `/api/jira`; links or unlinks the calling session through `/api/agents/jira-link`/`jira-unlink`; on a Jira Run, makes the ticket's git worktree in a mapped repo (git only)           |
 
 `backlog-orchestrate` is the largest of the seven and the only one that merges. Told to drain a queue, it works every ready bug and task one at a time —
 each in its own worktree and its own headless `backlog-execute` session — then commits that item, has it reviewed and verified, and merges it into the run's
@@ -77,7 +77,8 @@ that tree and branch as a groom already taken. `skills/backlog-groom/references/
   exiled into a child that is reaped before the parent's call returns. Its exit codes are private (`0`/`3`/`5`) and `apiCall` maps them onto the tool's own
   `8` (the stack is down) and `9` (a refusal this command cannot absorb).
 - `skills/jira/tools/jira.mjs` — the `jira` skill's CLI (Jira phase 4): `show`, `transitions`, `transition`, `assign` and `status`, each one to three requests to
-  `/api/jira` on `127.0.0.1`. API-only except `worktree`, which runs git in the mapped repo (below); the API commands have no files mode and write no file,
+  `/api/jira` on `127.0.0.1`, plus `link` and `unlink`, one request each to `/api/agents/jira-link`/`jira-unlink` carrying `CLAUDE_CODE_SESSION_ID` (Jira
+  sessions). API-only except `worktree`, which runs git in the mapped repo (below); the API commands have no files mode and write no file,
   and none of it carries a Jira credential, the server being Jira's one caller.
   Exit `0` success, `1` usage (a key that is not one included — nothing is sent), `2` a 4xx, `3` a 5xx, `5` the stack is down.
   Since the repo/branch work it has one more command, `worktree <KEY> --repo <path> --mode new|continue --branch <name> [--base <name>]`, and it is the
