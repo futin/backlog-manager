@@ -46,7 +46,7 @@ binding and the body is yours. If the plan and the spec disagree, the spec wins 
 
 1. **Restart mid-run.** Server restarts while a Run session is live and while another is `starting`: the confirmed one is live again after load and is
    reconciled; the starting one is gone (never persisted) and its key is free; one whose session went idle while the server was down survives the load
-   and ends at the first reconcile after the quiet clock, not on load (spec §5, §12). Tests in Task 2 (`after a restart`).
+   and is judged at the first reconcile, not on load (spec §5, §12). Tests in Task 2 (`after a restart`, both fixtures).
 2. **Corrupt or old store file.** Truncated JSON or `version: 2`: the server boots, the page shows no links, the bad file is set aside, not silently
    overwritten. One malformed entry (missing `how`, unknown `how`, no `key`) costs only itself: it is dropped on load and the rest load — the per-entry
    fallback `server/src/jira/config.util.ts` uses. Tests in Task 1.
@@ -173,7 +173,10 @@ Behaviour per tick (agents enabled; otherwise unchanged no-op):
   - `dashboardSessions output unchanged`: same fixture through the old reader → identical `id → status` map.
   - `asks with the caps`: the fetched URL carries `limit=50` and `lookback=168`.
   - `after a restart`: store file holding a live `run` on `PAY-1`/`s1` (started 1 h ago) and nothing for `PAY-2`; new service + reconciler, row `s1`
-    `idle` → after load `s1` is live (not ended on load); first tick sets `quietSince`; tick 120 s later ends it `idle`. `reserve('PAY-2', r)` true.
+    `idle` → after load `s1` is live (not ended on load); first tick sets `quietSince`; tick 120 s later ends it `idle` (the quiet clock was never
+    started before the restart). Second fixture, spec §12's "ends at the first reconcile, not on load": `PAY-3`/`s2` persisted with
+    `quietSince` 10 min old, row `s2` `idle` → live after load, ended `idle` at the first tick. A starting `PAY-2` reserved before the restart →
+    `get('PAY-2')` null after it.
 - [ ] **Step 2:** Run `test/agents-jira-live.test.ts` → FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run `test/agents-jira-live.test.ts`, `test/jira-live.test.ts`, plus `grep -l dashboardSessions test/` hits; `pnpm run typecheck` → PASS.
@@ -290,16 +293,16 @@ other failure → nothing, retry next tick. Detection never runs on `idle`/`inco
 
 ### Task 8: `jira.mjs link` / `unlink` and the skill
 
-**Files:** `skills/jira/tools/jira.mjs` (USAGE, header comment naming the new routes and the new exit code 2 in its exit-code prose, two commands),
+**Files:** `skills/jira/tools/jira.mjs` (USAGE, header comment naming the new routes, two commands; exit codes unchanged — `:21-22`),
 `.claude/rules/jira.md:29,40` and `jira.test.mjs:3` (their "one network peer is `/api/jira`" wording now also names `/api/agents/jira-link|unlink`), `skills/jira/tools/jira.test.mjs`,
 `skills/jira/SKILL.md` (two subcommands; description mentions linking)
 
-Behaviour: `jira.mjs link <KEY>` / `unlink <KEY>` read `CLAUDE_CODE_SESSION_ID`; absent → exit 2, `jira.mjs link needs CLAUDE_CODE_SESSION_ID — run it
-inside a Claude Code session`. Otherwise POST as above and print the server's sentence; non-2xx → its sentence, exit 1; refused connection → today's exit
+Behaviour: `jira.mjs link <KEY>` / `unlink <KEY>` read `CLAUDE_CODE_SESSION_ID`; absent → exit 1 (usage: nothing sent), `jira.mjs link needs CLAUDE_CODE_SESSION_ID — run it
+inside a Claude Code session`. Otherwise POST as above and print the server's sentence; non-2xx → its sentence, exit `exitForStatus(status)` (`jira.mjs:110`: 4xx → 2, else 3); refused connection → today's exit
 5 path. USAGE lines: `jira.mjs link <KEY>                    link this session to the ticket (shown on the board; never written to Jira)` and the
 `unlink` twin.
-- [ ] Tests in `jira.test.mjs` (stub server, as the file does): link success prints and exits 0; missing env → exit 2 and the sentence; 409 →
-  sentence, exit 1; unlink success. Run `pnpm run test:skills`. Commit `feat(jira): /jira link and unlink`. Note in the commit body: reaches sessions
+- [ ] Tests in `jira.test.mjs` (stub server, as the file does): link success prints and exits 0; missing env → exit 1 and the sentence, no request made; 409 →
+  sentence, exit 2; 502 → exit 3; unlink success. Run `pnpm run test:skills`. Commit `feat(jira): /jira link and unlink`. Note in the commit body: reaches sessions
   only after push + `pnpm run plugin:sync` (held).
 
 ---
@@ -347,12 +350,12 @@ inside a Claude Code session`. Otherwise POST as above and print the server's se
 - Test: rename `test/jira-modal.test.tsx` → `test/jira-detail.test.tsx` and keep every existing case; add the new ones
 
 Behaviour: §7.3 as written — left: live cards newest first (state strip with age from `stateSince`, crumb, linked-how tag, short id, Unlink only on a
-`branch` link, Stop only with `stopState`), then the history timeline newest first (`<run|name> · ended <when>`, surface, duration, Reopen), then Run ▾
+`branch` link, Stop only with `stopState`), then the history timeline newest first (`<how> · ended <age> ago`, surface, duration, Reopen), then Run ▾
 disabled only while a live `run` link exists. Right: everything §8's modal list names. Takes `JiraIssueModal`'s slot on the Escape stack (board.md: the
 dialog count stays eight). The waiting question's text is not shown.
 - [ ] **Step 1: Tests** — every §8 modal item present and working (the existing suite, moved); two live sessions → two cards newest first; Unlink only on
   the branch card and it POSTs `jira-unlink`; Stop only with `stopState` and its body carries `sessionId`; Run ▾ enabled with only a branch link,
-  disabled with a live run link; history line for an ended `run` link 2 h ago reads `run · ended <pollAge> ago` and one for a `branch` link `branch · ended <pollAge> ago` — assert against `pollAge(endedAt, now)` (`client/src/lib/tracker.ts:37`), e.g. `2 h` (the first word is the
+  disabled with a live run link; history line for an ended `run` link 2 h ago reads `run · ended <pollAge> ago` and one for a `branch` link `branch · ended <pollAge> ago` — assert against `pollAge(endedAt, now)` (`client/src/lib/tracker.ts:37`), e.g. `2h` (the first word is the
   link's `how`, never its action, so `{ skill }` needs no label; ages via `pollAge`); Escape closes; the board.md dialog-count guard still green.
 - [ ] **Steps 2–4** (`jira-detail`, `jira-board`, `jira-lib`, `ui-modal`, `dialog-escape`, `dialog-count-docs`, `claude-rules`, typecheck; then
   `grep -rl JiraIssueModal client test .claude docs/subsystems` must print nothing), **Step 5:** commit
