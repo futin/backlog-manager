@@ -71,6 +71,9 @@ export class JiraLiveService {
   private readonly starting = new Map<string, Starting>();
   private entries: JiraLink[];
   private readonly reposListeners: (() => void)[] = [];
+
+  /** `onPageOpened`'s listeners: told when a Jira page read moves `pageOpen` from false to true, never on a read while it is already open. */
+  private readonly pageOpenedListeners: Array<() => void> = [];
   private suppressed: JiraLinkPair[];
   private neverLink: JiraLinkPair[];
   private rows = new Map<string, DashboardRow>();
@@ -347,9 +350,32 @@ export class JiraLiveService {
     }
   }
 
-  /** A Jira page was read at `now` (`GET /api/jira/sessions?open=1` is its caller), so the reconciler can tell a page is open. */
+  /**
+   * Subscribes to a page read that OPENS a page: `pageOpen` was false and this read makes it true. The reconciler picks its period (15 s open, 60 s closed)
+   * when it schedules a link, so a 60 s timer scheduled while the page was closed would otherwise keep the page waiting a full minute after a reader opens
+   * Jira, against the spec's "15 s while a page is open". `onReposChanged`'s shape and its reason: `agents/` imports `jira/`, never back, so the edge the
+   * other way is a callback list the reconciler subscribes to.
+   */
+  onPageOpened(listener: () => void): void {
+    this.pageOpenedListeners.push(listener);
+  }
+
+  /**
+   * A Jira page was read at `now` (`GET /api/jira/sessions?open=1` is its caller), so the reconciler can tell a page is open. A read that finds the page
+   * closed tells every `onPageOpened` listener AFTER the stamp is set, so a listener that asks `pageOpen` sees the new answer; a read while open tells nobody,
+   * so a poll every 15 s never re-arms the reconciler it is already pacing.
+   */
   notePageRead(now: number): void {
+    const opened = !this.pageOpen(now);
     this.pageReadAt = now;
+    if (!opened) return;
+    for (const listener of this.pageOpenedListeners) {
+      try {
+        listener();
+      } catch {
+        // The read has landed; a listener's failure is its own.
+      }
+    }
   }
 
   /** A page read within the last 30 s. */

@@ -431,7 +431,7 @@ The methods, by what reads them. **The Run's** — `reserve` (the synchronous on
 pair it upgrades that entry to `run`), `release` (a `starting` entry only) — and the
 reads that serve them, `get`, `snapshot` (the status payload's `live`), `confirmed` and `hasConfirmed`, all of which see `run` links alone. **The reconciler's
 and the page's** — `links`, `liveLinks` and `hasLive` (every `how`), `end(key, sessionId, reason)`, `reattach`, `markQuiet` and `clearQuiet`, and the dashboard
-cache `setRows`, `rowsAt`, `rowFor`, `markUnreachable`, `reachable`, `notePageRead` and `pageOpen`, which is memory only and never in the file. `addLink`,
+cache `setRows`, `rowsAt`, `rowFor`, `markUnreachable`, `reachable`, `notePageRead`, `pageOpen` and `onPageOpened`, which is memory only and never in the file. `addLink`,
 `unlink`, `isSuppressed`, `unsuppress`, `markNeverLink` and `isNeverLink` are for branch-detected and hand-made links: the reconciler's detection pass makes the first, and no route makes the second yet. There is no
 `clear`: a session ends, it is not deleted. Live links are capped at `JIRA_LIVE_CAP` (100, a `starting` one counted): one more ends the oldest live link as
 `expired`, never a `starting` one; a live link older than `JIRA_LIVE_TTL_MS` (8 h, counted from the later of `startedAt` and `reattachedAt`) ends `expired`
@@ -496,7 +496,7 @@ with dispatch off.
 
 `JiraLiveReconciler` (`agents/jira-live.service.ts`) reads the dashboard's session list once per tick (`dashboardSessionRows`: `?limit=50&lookback=168`) and
 keeps the rows in the store (`setRows`). The period is `JIRA_RECONCILE_FAST_MS` (15 s) while a Jira page was read in the last 30 s (`GET /sessions?open=1`) and
-`JIRA_RECONCILE_MS` (60 s) otherwise. For each live link with a session id and older than `JIRA_LIVE_GRACE_MS` (2 min): a `working` or `question` row clears
+`JIRA_RECONCILE_MS` (60 s) otherwise; a read that opens the page (it was closed) tells `JiraLiveService.onPageOpened`'s listener, which clears a pending slow timer and re-arms at 15 s. For each live link with a session id and older than `JIRA_LIVE_GRACE_MS` (2 min): a `working` or `question` row clears
 `quietSince`; anything else marks it on the first such tick, and the link ends — `idle`, or `gone` when the list has no row — once the mark is `JIRA_QUIET_MS`
 (2 min) old. A list of 50 rows is full and proves nothing about an absent session, which stays live for the 8-hour backstop. An ended link whose row is
 `working` or `question` again is re-attached on its own entry. One `setTimeout`, armed after `confirm` and at boot and pending only while some link is live or

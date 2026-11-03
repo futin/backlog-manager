@@ -61,7 +61,8 @@ const ACTIVE = new Set(['working', 'question']);
  * only while there is something to watch — a live link, or a Setup that maps a repo (detection and re-attach read these rows even with nothing live) — so an
  * idle server pays nothing and "no timer" is a checkable state. The next link is scheduled AFTER the tick's awaits finish, so two ticks cannot overlap by
  * construction, and the timer is `unref()`'d so a pending tick never keeps a dying process alive. The period is chosen when the link is scheduled: 15 s while
- * a Jira page was read in the last 30 s, else 60 s. `arm()` is called after `JiraLiveService.confirm`, and at boot, and is idempotent and self-gating — it
+ * a Jira page was read in the last 30 s, else 60 s — and a read that OPENS the page (it was closed) replaces a pending slow timer at once, through
+ * `onPageOpened`, so the first read after minutes away does not wait out a minute. `arm()` is called after `JiraLiveService.confirm`, and at boot, and is idempotent and self-gating — it
  * starts a chain only when there is something to watch, so every caller may call it without knowing either. A tick that leaves nothing to watch does not
  * schedule the next one: that is the disarm.
  *
@@ -92,6 +93,9 @@ export class JiraLiveReconciler implements OnApplicationBootstrap, OnApplication
     // Setup mapping a repo while the server runs is the one change `watchable` cannot see by itself: nothing else would start the chain, and detection would wait
     // for a restart. The listener lives on the jira side (`agents/` imports `jira/`, never back); `arm` is idempotent and self-gating.
     live.onReposChanged(() => this.arm());
+    // The period is picked when a link is SCHEDULED, so a 60 s timer pending while the page was closed would hold a freshly opened page to 60 s. A read that
+    // opens the page drops that timer and re-arms, which picks 15 s; a read while the page is already open never reaches this (`notePageRead`'s transition).
+    live.onPageOpened(() => this.rearmForOpenPage());
   }
 
   /** A server that restarts with live links in the file, or with repos mapped, has something to watch from the first second — nothing else would arm it. */
@@ -122,6 +126,18 @@ export class JiraLiveReconciler implements OnApplicationBootstrap, OnApplication
     }, period);
     // A pending reconcile is not a reason for a server to refuse to exit.
     this.timer.unref();
+  }
+
+  /**
+   * The page just opened: replace a pending slow timer with a fast one. Only a PENDING timer is touched — while a tick is in flight (`timer` is null) the tick's
+   * own successor reads `pageOpen` when it schedules and picks 15 s by itself, and a stopped or unarmed reconciler has no timer to replace, so `arm()`'s own
+   * gates (`stopped`, `inFlight`, `watchable`) decide whether anything starts. Public for tests.
+   */
+  rearmForOpenPage(): void {
+    if (this.timer === null) return;
+    clearTimeout(this.timer);
+    this.timer = null;
+    this.arm();
   }
 
   /** One reconciliation. Public for tests; returns the in-flight promise when a tick is already running, as `WatchdogService.tick` does. Never rejects. */

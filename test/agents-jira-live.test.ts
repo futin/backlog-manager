@@ -641,6 +641,45 @@ describe('the timer — armed while a link is live or a repo is mapped', () => {
       expect(urls).toHaveLength(4);
     });
 
+    it('a read that opens the page replaces the pending 60 s timer with a 15 s one, and a read while it is already open re-arms nothing', async () => {
+      seed('PAY-1', 'sess-1', 0);
+      list({ id: 'sess-1', status: 'working' });
+      // The page is closed (no read yet), so the link is scheduled at the slow period.
+      reconciler.arm();
+      expect(jest.getTimerCount()).toBe(1);
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect(urls).toHaveLength(0);
+
+      // The read opens the page: the slow timer is dropped and a fast one takes its place, counted from now (T0 + 10 s).
+      const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+      live.notePageRead(Date.now());
+      expect(jest.getTimerCount()).toBe(1);
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(JIRA_RECONCILE_FAST_MS - 1);
+      expect(urls).toHaveLength(0);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(urls).toHaveLength(1);
+
+      // The chain is re-armed fast (the read is 15 s old). A second read while the page is open schedules nothing and clears nothing: the poll's own reads
+      // every 15 s must not keep pushing the reconciler's next tick out.
+      setTimeoutSpy.mockClear();
+      const clearSpy = jest.spyOn(global, 'clearTimeout');
+      live.notePageRead(Date.now());
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+      expect(clearSpy).not.toHaveBeenCalled();
+      expect(jest.getTimerCount()).toBe(1);
+      await jest.advanceTimersByTimeAsync(JIRA_RECONCILE_FAST_MS);
+      expect(urls).toHaveLength(2);
+      setTimeoutSpy.mockRestore();
+      clearSpy.mockRestore();
+    });
+
+    it('a read that opens the page leaves a disarmed reconciler disarmed', () => {
+      expect(jest.getTimerCount()).toBe(0);
+      live.notePageRead(Date.now());
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
     it('31 s without a read arms at 60 s', async () => {
       seed('PAY-1', 'sess-1', 0);
       live.notePageRead(Date.now());
