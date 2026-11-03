@@ -888,6 +888,30 @@ export interface JiraTransition {
 }
 
 /**
+ * One row of the dashboard's `/api/sessions` list, as the Jira reconciler keeps it. Only `id` and `status` are always there; every other field is the dashboard's
+ * and may be absent. `desktopOwned` and `processLive` are `true` or absent, never `false` — the dashboard does not send `false` — and `stopState` is absent
+ * unless a stop is possible (`ready`) or underway (`stopping`).
+ */
+export interface DashboardRow {
+  id: string;
+  status: string;
+  surface?: string;
+  desktopOwned?: true;
+  stopState?: 'ready' | 'stopping';
+  processLive?: true;
+  remoteQuestion?: boolean;
+  remotePlan?: boolean;
+  remoteReply?: boolean;
+  permissionWait?: boolean;
+  projectPath?: string;
+  gitBranch?: string;
+  sessionName?: string;
+  model?: string;
+  effort?: string;
+  contextPct?: number;
+}
+
+/**
  * One live Run session on a ticket, as the board draws it (spec §4). `starting` is the window between `reserve` and the dashboard's answer, when the key is
  * claimed but there is no session id yet; `name` is `jiraSessionName(key)`, the title the dispatch gave the session, so the card and the dashboard agree.
  */
@@ -937,6 +961,8 @@ export interface JiraLink {
   endReason: JiraEndReason | null;
   /** The first reconcile tick that saw the session neither `working` nor `question`; cleared when one sees it active again. */
   quietSince: string | null;
+  /** When a re-attach (C5) last re-opened this pair, or null while it never has. The 8-hour backstop counts from the later of this and `startedAt`. */
+  reattachedAt: string | null;
 }
 
 /** `GET /api/jira/issue/:key`, read fresh. `session` is the live Run on this key (memory only), or `null`. */

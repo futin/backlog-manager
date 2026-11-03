@@ -89,7 +89,8 @@ function readLink(raw: unknown, file: string, index: number): JiraLink | null {
     endedAt: ended ? (raw.endedAt as string) : null,
     // An ended entry whose reason is unreadable still ended; `gone` is the one reason that claims nothing about what the session was doing.
     endReason: ended ? (REASONS.includes(raw.endReason as JiraEndReason) ? (raw.endReason as JiraEndReason) : 'gone') : null,
-    quietSince: parses(raw.quietSince) ? raw.quietSince : null
+    quietSince: parses(raw.quietSince) ? raw.quietSince : null,
+    reattachedAt: parses(raw.reattachedAt) ? raw.reattachedAt : null
   };
 }
 

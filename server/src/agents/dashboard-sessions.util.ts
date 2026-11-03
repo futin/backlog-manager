@@ -2,11 +2,12 @@ import { HttpException } from '@nestjs/common';
 
 import { authHeaders, dashboardError, readAgentsConfig, type AgentsConfig } from './config.util';
 import { CLAIM_STALE_MS } from '../../../shared/types';
+import type { DashboardRow } from '../../../shared/types';
 
 /*
  * dashboard-sessions.util.ts — the dashboard's `/api/sessions` read, and the two claim refusals built on it: `staleClaimProbe` (#227) and `itemClaimBlock`,
  * which ends in it. Read by `AgentsService.dispatch` (the item-claim refusal), `ItemsAbortService` (#225's case B and the stale probe) and
- * `JiraLiveService`'s reconciler (every session at once).
+ * `JiraLiveReconciler` (every session at once, as rows).
  *
  * Moved out of `agents.service.ts` in #388: three modules imported these from the service file, which made it the grab-bag every neighbour reached into
  * for a helper (#351). They are plain functions over an `AgentsConfig` — no provider state — so they are a util, and `agents.service.ts` exports its class
@@ -16,27 +17,67 @@ import { CLAIM_STALE_MS } from '../../../shared/types';
 /** The dashboard's session list is a scan of `~/.claude/projects/`, the same order of work as the management index, and gets that call's budget. */
 const SESSIONS_TIMEOUT_MS = 15_000;
 
+/** The caps `dashboardSessionRows` asks with: the dashboard's own maxima, so the board sees as many sessions as one call can carry. */
+const ROW_LIMIT = 50;
+const ROW_LOOKBACK_HOURS = 168;
+
 /**
- * The dashboard's session list as `id → status` — `'unknown'` for an entry with no status string — or a 502 when it cannot be read. One fetch and one parse
- * for every reader: #225's case B and #227's stale probe ask for one session's status (`dashboardSessionStatus`), and Jira's live-map reconciler asks for all
- * of them at once, so none of them can disagree with another about what the list said.
+ * The one fetch-and-parse of `/api/sessions` that every reader goes through. `query` is appended verbatim (`''` or `?limit=…`), `raw` is the list as the
+ * dashboard sent it and `rows` is that list normalised: the first entry for an id wins (as `Array.find` did before this was a map), an entry with no string id is
+ * skipped, `status` is `'unknown'` without a status string, and `desktopOwned` / `processLive` appear only when the dashboard sent `true` — it never sends
+ * `false`, so absent and false are one thing and the row says it once.
  */
-export async function dashboardSessions(cfg: AgentsConfig): Promise<Map<string, string>> {
+async function readSessions(cfg: AgentsConfig, query: string): Promise<{ rows: DashboardRow[]; count: number }> {
   let res: Response;
   try {
-    res = await fetch(`${cfg.url}/api/sessions`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS) });
+    res = await fetch(`${cfg.url}/api/sessions${query}`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS) });
   } catch (e) {
     throw new HttpException({ error: dashboardError(e, 'the dashboard session list', SESSIONS_TIMEOUT_MS) }, 502);
   }
   if (!res.ok) throw new HttpException({ error: `the dashboard session list answered ${res.status}` }, 502);
   const body = (await res.json().catch(() => null)) as { sessions?: unknown } | null;
   if (!Array.isArray(body?.sessions)) throw new HttpException({ error: 'the dashboard session list carried no sessions' }, 502);
-  const out = new Map<string, string>();
-  for (const s of body.sessions as { id?: unknown; status?: unknown }[]) {
-    // The first entry for an id wins, as `Array.find` did before this was a map.
-    if (typeof s?.id === 'string' && !out.has(s.id)) out.set(s.id, typeof s.status === 'string' ? s.status : 'unknown');
+  const seen = new Set<string>();
+  const rows: DashboardRow[] = [];
+  for (const s of body.sessions as Record<string, unknown>[]) {
+    if (typeof s?.id !== 'string' || seen.has(s.id)) continue;
+    seen.add(s.id);
+    rows.push(toRow(s.id, s));
   }
-  return out;
+  return { rows, count: body.sessions.length };
+}
+
+function toRow(id: string, s: Record<string, unknown>): DashboardRow {
+  const row: DashboardRow = { id, status: typeof s.status === 'string' ? s.status : 'unknown' };
+  if (typeof s.surface === 'string') row.surface = s.surface;
+  if (s.desktopOwned === true) row.desktopOwned = true;
+  if (s.stopState === 'ready' || s.stopState === 'stopping') row.stopState = s.stopState;
+  if (s.processLive === true) row.processLive = true;
+  for (const k of ['remoteQuestion', 'remotePlan', 'remoteReply', 'permissionWait'] as const) if (typeof s[k] === 'boolean') row[k] = s[k] as boolean;
+  for (const k of ['projectPath', 'gitBranch', 'sessionName', 'model', 'effort'] as const) if (typeof s[k] === 'string') row[k] = s[k] as string;
+  if (typeof s.contextPct === 'number') row.contextPct = s.contextPct;
+  return row;
+}
+
+/**
+ * The dashboard's sessions as rows, for the Jira reconciler: one call with the dashboard's caps (`limit=50`, `lookback=168` hours). `full` is true when the
+ * answer is as long as the cap — a list that long may have left sessions out, so a session ABSENT from it proves nothing (spec §5). The count is the raw list's,
+ * not the deduplicated rows', because the cap is the dashboard's and it counts what it sent. A 502 when the list cannot be read.
+ */
+export async function dashboardSessionRows(cfg: AgentsConfig): Promise<{ rows: DashboardRow[]; full: boolean }> {
+  const { rows, count } = await readSessions(cfg, `?limit=${ROW_LIMIT}&lookback=${ROW_LOOKBACK_HOURS}`);
+  return { rows, full: count >= ROW_LIMIT };
+}
+
+/**
+ * The dashboard's session list as `id → status` — `'unknown'` for an entry with no status string — or a 502 when it cannot be read. One parse for every reader:
+ * #225's case B and #227's stale probe ask for one session's status (`dashboardSessionStatus`), and none of them can disagree with another, or with the
+ * reconciler's rows, about what the list said. It keeps the bare URL — the dashboard's own default caps — because these readers want any session a claim could
+ * name, not the reconciler's capped window, and `test/tracker-abort.test.ts` matches that URL.
+ */
+export async function dashboardSessions(cfg: AgentsConfig): Promise<Map<string, string>> {
+  const { rows } = await readSessions(cfg, '');
+  return new Map(rows.map((r) => [r.id, r.status]));
 }
 
 /**

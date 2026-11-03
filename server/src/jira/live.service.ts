@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { jiraSessionName } from '../../../shared/types';
-import type { JiraEndReason, JiraLink, JiraLiveSession } from '../../../shared/types';
+import type { DashboardRow, JiraEndReason, JiraLink, JiraLiveSession } from '../../../shared/types';
 import { loadLinks, saveLinks } from './links.store';
 import type { JiraLinkPair } from './links.store';
 
@@ -30,6 +30,9 @@ interface Starting {
   startedAt: number;
 }
 
+/** A Jira page whose last read is this recent counts as open: the reconciler then ticks every 15 s instead of every 60 s (spec §6). Inclusive at the edge. */
+export const JIRA_PAGE_OPEN_MS = 30_000;
+
 const same = (a: JiraLinkPair, key: string, sessionId: string): boolean => a.key === key && a.sessionId === sessionId;
 
 /**
@@ -46,6 +49,9 @@ const same = (a: JiraLinkPair, key: string, sessionId: string): boolean => a.key
  * starting check, the run chip) are about the Run on the key, and a detected branch link showing through them would block a Run or offer a Stop that is not
  * the board's to give. `release` undoes a reserve whose spawn failed and refuses to touch a confirmed entry — a late failure path must never drop a session
  * that did start.
+ *
+ * The dashboard rows the reconciler last read live here too, in memory only (`setRows`, `rowFor`, `reachable`), with the time a Jira page was last read
+ * (`notePageRead`, `pageOpen`), which sets the reconciler's pace. None of it is persisted: it is a cache of the dashboard's state, never a link.
  *
  * An entry that ENDS stays as history (`end`, with a reason), and stays ended: a late `confirm` for a pair that has ended does not revive it. Only `reattach`
  * does, from the dashboard's own row (spec C5), and it re-opens the pair's own entry rather than adding one. `unlink` removes a `branch`/`manual` link and
@@ -66,6 +72,10 @@ export class JiraLiveService {
   private entries: JiraLink[];
   private suppressed: JiraLinkPair[];
   private neverLink: JiraLinkPair[];
+  private rows = new Map<string, DashboardRow>();
+  private rowsAtMs: number | null = null;
+  private up = true;
+  private pageReadAt: number | null = null;
 
   constructor() {
     const state = loadLinks();
@@ -92,7 +102,24 @@ export class JiraLiveService {
     const reserved = this.starting.get(key);
     if (reserved === undefined) return;
     this.starting.delete(key);
-    if (this.find(key, sessionId) !== undefined) return;
+    const existing = this.find(key, sessionId);
+    if (existing !== undefined) {
+      // The board's own Run met the same session already linked by detection or by hand: it becomes the Run (one entry, the Run's meta merged in, its
+      // reservation consumed above), so the one-run gate sees it. Anything else — an ended pair — keeps its end.
+      if (existing.endedAt === null && existing.how !== 'run') {
+        existing.how = 'run';
+        existing.action = meta.action;
+        existing.name = meta.name;
+        existing.repo = reserved.repo;
+        existing.branch = meta.branch;
+        existing.surface = meta.surface;
+        existing.model = meta.model;
+        existing.effort = meta.effort;
+        existing.snapshot = { ...meta.snapshot };
+        this.persist();
+      }
+      return;
+    }
     this.entries.push({
       key,
       sessionId,
@@ -108,7 +135,8 @@ export class JiraLiveService {
       startedAt: new Date(reserved.startedAt).toISOString(),
       endedAt: null,
       endReason: null,
-      quietSince: null
+      quietSince: null,
+      reattachedAt: null
     });
     this.persist();
   }
@@ -194,13 +222,14 @@ export class JiraLiveService {
   }
 
   /** C5: the pair's own entry is live again — `endedAt`, the reason and `quietSince` cleared, nothing added. False when the store has no such pair. */
-  reattach(key: string, sessionId: string): boolean {
+  reattach(key: string, sessionId: string, now: number = Date.now()): boolean {
     this.expire();
     const link = this.find(key, sessionId);
     if (link === undefined) return false;
     link.endedAt = null;
     link.endReason = null;
     link.quietSince = null;
+    link.reattachedAt = new Date(now).toISOString();
     this.persist();
     return true;
   }
@@ -210,13 +239,13 @@ export class JiraLiveService {
    * store, live or ended — a pair that ended comes back through `reattach`, never through here. A `run` link is made only by `reserve` + `confirm`, which is
    * the one-run gate; adding one here would walk round it.
    */
-  addLink(link: Omit<JiraLink, 'endedAt' | 'endReason' | 'quietSince'>): 'added' | 'exists' | 'suppressed' {
+  addLink(link: Omit<JiraLink, 'endedAt' | 'endReason' | 'quietSince' | 'reattachedAt'>): 'added' | 'exists' | 'suppressed' {
     if (link.how === 'run' || link.sessionId === null) throw new Error('addLink takes a branch or manual link with a session id');
     this.expire();
     if (this.isSuppressed(link.key, link.sessionId)) return 'suppressed';
     if (this.find(link.key, link.sessionId) !== undefined) return 'exists';
     if (this.liveCount() >= JIRA_LIVE_CAP) this.evictOldestConfirmed();
-    this.entries.push({ ...copy({ ...link, endedAt: null, endReason: null, quietSince: null }) });
+    this.entries.push({ ...copy({ ...link, endedAt: null, endReason: null, quietSince: null, reattachedAt: null }) });
     this.persist();
     return 'added';
   }
@@ -274,6 +303,47 @@ export class JiraLiveService {
     this.persist();
   }
 
+  /**
+   * The rows of the reconciler's latest good read of the dashboard, and when it was made. Memory only — they are a cache of someone else's state, rebuilt by the
+   * next tick, and a restart starts with none. `markUnreachable` is the other outcome of a tick: the dashboard did not answer, so the rows kept are old and the
+   * board says so, but nothing about any link changes.
+   */
+  setRows(rows: DashboardRow[], at: number): void {
+    this.rows = new Map(rows.map((r) => [r.id, r]));
+    this.rowsAtMs = at;
+    this.up = true;
+  }
+
+  /** ISO time of the latest good read, or null before there has been one. */
+  rowsAt(): string | null {
+    return this.rowsAtMs === null ? null : new Date(this.rowsAtMs).toISOString();
+  }
+
+  /** The dashboard's row for `sessionId` from the latest good read, or undefined (absent from it, or no read yet). */
+  rowFor(sessionId: string): DashboardRow | undefined {
+    return this.rows.get(sessionId);
+  }
+
+  /** The latest tick could not read the dashboard. The previous rows stay, so a page can still show them, flagged stale. */
+  markUnreachable(_at: number): void {
+    this.up = false;
+  }
+
+  /** False only after a tick that could not read the dashboard, until the next good one; true before any tick has run — nothing has failed yet. */
+  reachable(): boolean {
+    return this.up;
+  }
+
+  /** A Jira page was read at `now` (the route that serves it is to call this — not wired yet, a later task), so the reconciler can tell a page is open. */
+  notePageRead(now: number): void {
+    this.pageReadAt = now;
+  }
+
+  /** A page read within the last 30 s. */
+  pageOpen(now: number): boolean {
+    return this.pageReadAt !== null && now - this.pageReadAt <= JIRA_PAGE_OPEN_MS;
+  }
+
   private find(key: string, sessionId: string): JiraLink | undefined {
     return this.entries.find((l) => l.key === key && l.sessionId === sessionId);
   }
@@ -307,7 +377,9 @@ export class JiraLiveService {
     for (const [key, s] of this.starting) if (s.startedAt < cutoff) this.starting.delete(key);
     let changed = false;
     for (const l of this.entries) {
-      if (l.endedAt === null && Date.parse(l.startedAt) < cutoff) {
+      // The clock restarts at a re-attach: an entry the dashboard shows working again has just proved it is not the stale thing the backstop is for.
+      const since = Math.max(Date.parse(l.startedAt), l.reattachedAt === null ? 0 : Date.parse(l.reattachedAt));
+      if (l.endedAt === null && since < cutoff) {
         this.endLink(l, 'expired', now);
         changed = true;
       }

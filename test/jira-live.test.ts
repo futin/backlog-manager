@@ -44,7 +44,7 @@ beforeEach(() => {
 afterEach(() => jest.useRealTimers());
 
 /** A `branch`/`manual` link as `addLink` takes it, started at `startedAt` (ms). */
-function link(key: string, sessionId: string, over: Partial<Omit<JiraLink, 'endedAt' | 'endReason' | 'quietSince'>> = {}, startedAt = Date.now()) {
+function link(key: string, sessionId: string, over: Partial<Omit<JiraLink, 'endedAt' | 'endReason' | 'quietSince' | 'reattachedAt'>> = {}, startedAt = Date.now()) {
   return {
     key,
     sessionId,
@@ -262,6 +262,54 @@ describe('the persisted link store', () => {
     expect(live.liveLinks()).toHaveLength(1);
     expect(live.reattach('PAY-1', 'nope')).toBe(false);
     expect(live.reserve('PAY-1', REPO)).toBe(false); // a re-attached run counts for the one-run gate again
+  });
+
+  /* The 8-hour backstop counts from the later of `startedAt` and the last re-attach: a session resumed after 9 hours is a new stretch of activity, and expiring
+     it on the very next sweep would end the pair the reconciler just re-attached. */
+  it('a re-attached entry older than 8 h is not expired by the next sweep; its TTL counts from the re-attach', () => {
+    jest.setSystemTime(T0 - 9 * 3600_000);
+    live.reserve('PAY-1', REPO);
+    live.confirm('PAY-1', 's1', META);
+    jest.setSystemTime(T0 - 9 * 3600_000 + 60_000);
+    expect(live.end('PAY-1', 's1', 'idle')).toBe(true);
+    jest.setSystemTime(T0);
+    expect(live.reattach('PAY-1', 's1')).toBe(true);
+    expect(live.links()[0].reattachedAt).toBe(new Date(T0).toISOString());
+    expect(live.liveLinks()).toHaveLength(1); // a sweep ran inside that call: nothing expired
+    jest.setSystemTime(T0 + JIRA_LIVE_TTL_MS);
+    expect(live.liveLinks()).toHaveLength(1); // exactly 8 h after the re-attach is still live
+    jest.setSystemTime(T0 + JIRA_LIVE_TTL_MS + 1);
+    expect(live.liveLinks()).toEqual([]);
+    expect(live.links()[0]).toMatchObject({ endReason: 'expired' });
+  });
+
+  it('an entry never re-attached still expires from its startedAt, and reattachedAt is null', () => {
+    live.reserve('PAY-1', REPO);
+    live.confirm('PAY-1', 's1', META);
+    expect(live.links()[0].reattachedAt).toBeNull();
+  });
+
+  it('reattachedAt survives a reload', () => {
+    live.reserve('PAY-1', REPO);
+    live.confirm('PAY-1', 's1', META);
+    live.end('PAY-1', 's1', 'idle');
+    live.reattach('PAY-1', 's1');
+    expect(new JiraLiveService().links()[0].reattachedAt).toBe(new Date(T0).toISOString());
+  });
+
+  /* A session the user started with a branch carrying the key can be Run-linked afterwards (Run ▾ on a ticket whose live link is a detected one). The pair is
+     one entry — a second would double the history line — and it must count for the one-run gate, which only `run` entries do. */
+  it('confirm on a pair that already holds a live branch link upgrades that entry to a run, and the gate holds', () => {
+    expect(live.reserve('PAY-1', REPO)).toBe(true);
+    expect(live.addLink(link('PAY-1', 's1'))).toBe('added');
+    live.confirm('PAY-1', 's1', META);
+    const links = live.links();
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ key: 'PAY-1', sessionId: 's1', how: 'run', action: 'execute', name: 'jira PAY-1', endedAt: null });
+    expect(live.get('PAY-1')?.sessionId).toBe('s1');
+    expect(live.snapshot()['PAY-1']).toMatchObject({ sessionId: 's1', starting: false });
+    expect(live.reserve('PAY-1', REPO)).toBe(false);
+    expect(new JiraLiveService().links()[0].how).toBe('run'); // the upgrade is persisted
   });
 
   it('a late confirm for a pair that has ended does not revive it', () => {
