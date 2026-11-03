@@ -8,7 +8,8 @@ import { Dot } from '../ui/Dot';
  * A tick grooms only while fewer plans carry the `plan-review` mark than its `--max-plans` cap, so a backlog of unread plans stops grooming silently: the
  * tick answers `idle` and nothing on the board said why. This is that reading, on the surface where the plans are read. Scoped to the picked project it
  * reads `count/cap` once a tick has recorded its caps for that project (`lastDecide`), and the bare count before one has; across all projects it reads the
- * summed count and names every project whose tick is blocked. The arithmetic is `lib/plan-review.ts`'s; this file only draws it.
+ * summed count and names every project whose tick is blocked. The dot and the title follow that same scope, so one control never says two things (#422): the
+ * title is one `<name>: N/cap` line per project in scope. The arithmetic is `lib/plan-review.ts`'s; this file only draws it.
  *
  * A control since #387: a click flips the Board's `Awaiting review` filter — on when off, off when on — which narrows the board to exactly the items this
  * chip counts (`awaitsPlanReview`), and leaves the project scope as it is. So it is RunChip's button, with RunChip's affordance and `›` mark, and is
@@ -41,7 +42,7 @@ export function PlanReviewChip({
       type="button"
       className="board-plan-chip"
       data-testid="plan-review-chip"
-      title={planReviewTitle(tallies)}
+      title={planReviewTitle(scoped)}
       aria-pressed={pressed}
       onClick={onToggle}
     >

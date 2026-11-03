@@ -40,6 +40,24 @@ describe('PlanReviewChip', () => {
     expect(chip.querySelector('.ui-dot')).not.toBeNull();
   });
 
+  // #422: the label and the dot were scoped to the picked project and the title was not, so one control said two different things. The title now names only
+  // the project in scope; the all-projects title is the `titles every project` case above, unchanged.
+  it('titles only the picked project, under its cap', () => {
+    render(<PlanReviewChip tallies={[blocked, under]} projectValue="/abs/beta" pressed={false} onToggle={() => {}} />);
+    expect(screen.getByTestId('plan-review-chip')).toHaveAttribute('title', 'beta: 1/3');
+  });
+
+  it('titles only the picked project, at its cap', () => {
+    render(<PlanReviewChip tallies={[blocked, under]} projectValue="/abs/alpha" pressed={false} onToggle={() => {}} />);
+    expect(screen.getByTestId('plan-review-chip')).toHaveAttribute('title', 'alpha: 2/2');
+  });
+
+  it('titles a picked project with no cap known by its bare count', () => {
+    const uncapped = { projectPath: '/abs/gamma', name: 'gamma', count: 1, cap: null, blocked: false };
+    render(<PlanReviewChip tallies={[blocked, under, uncapped]} projectValue="/abs/gamma" pressed={false} onToggle={() => {}} />);
+    expect(screen.getByTestId('plan-review-chip')).toHaveAttribute('title', 'gamma: 1');
+  });
+
   it('is a button named by its reading, aria-pressed as told', () => {
     const { rerender } = render(<PlanReviewChip tallies={[blocked, under]} projectValue={null} pressed={false} onToggle={() => {}} />);
     const button = screen.getByRole('button', { name: '3 plans awaiting review · tick blocked in alpha' });
