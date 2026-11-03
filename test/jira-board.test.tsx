@@ -13,7 +13,7 @@ import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { JIRA_BOARD_KEY, bandSub } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
 import { daysAgoStamp } from './helpers/dates';
-import { JIRA_BUILTIN_LABELS, type AgentsStatus, type JiraBoardStatus, type JiraIssue, type JiraStatusPayload } from '../shared/types';
+import { JIRA_BUILTIN_LABELS, type AgentsStatus, type DashboardRow, type JiraBoardStatus, type JiraIssue, type JiraLiveSession, type JiraStatusPayload } from '../shared/types';
 
 /*
   Jira › Board (Jira phase 2; spec §6.2; DESIGN.md §8.9.1) — the real page over a mocked `fetch`, in the style of `tracker-board.test.tsx`: the band
@@ -150,6 +150,17 @@ let lists: Record<string, JiraIssue[]>;
 let requested: string[];
 /* `GET /api/jira/worktrees` — what the board reads once on mount and again when the set of live keys changes. */
 let worktreesAnswer: () => Promise<Response>;
+/* `GET /api/jira/sessions` — the section's one sessions poll (Jira sessions, Task 10); nothing linked unless a case says so. */
+let sessionsAnswer: () => unknown;
+/**
+ * The link the server keeps for a live Run — `JiraLiveService.snapshot()` is built from exactly these plus the `starting` reservations, so a status `live` entry
+ * with a session id always has one, and the default sessions answer below is derived from the status to keep the two fixtures from contradicting each other.
+ */
+const runLink = (key: string, l: JiraLiveSession, row: DashboardRow | null = null) => ({
+  key, sessionId: l.sessionId, how: 'run', action: 'context', name: l.name, repo: l.repo, branch: null, surface: 'dashboard', model: null, effort: null,
+  snapshot: { summary: 'x', type: 'Story', parentKey: null }, startedAt: l.startedAt, endedAt: null, endReason: null, quietSince: null, reattachedAt: null,
+  state: 'working', row, stateSince: l.startedAt
+});
 
 const ok = (body: unknown) =>
   Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve(typeof body === 'string' ? body : '') } as Response);
@@ -170,10 +181,16 @@ beforeEach(() => {
   lists = { [ALPHA.id]: ALPHA_ISSUES, [BETA.id]: BETA_ISSUES };
   requested = [];
   worktreesAnswer = () => ok({ worktrees: [], unavailable: [] });
+  sessionsAnswer = () => ({
+    links: Object.entries(statusAnswer.live).filter(([, l]) => !l.starting && l.sessionId !== null).map(([k, l]) => runLink(k, l)),
+    reachable: true,
+    rowsAt: null
+  });
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     requested.push(url);
     if (url === '/api/jira') return ok(statusAnswer);
+    if (url.startsWith('/api/jira/sessions')) return ok(sessionsAnswer());
     const m = /^\/api\/jira\/boards\/([^/]+)\/issues$/.exec(url);
     if (m !== null) {
       const id = decodeURIComponent(m[1]);
@@ -907,6 +924,8 @@ describe('Run ▾ and the live strip', () => {
   // through the real page, since `jira-modal`'s cases hand the modal mock callbacks.
   it('Stop from the modal reads GET /api/jira once more and the board list once more, and the strip is gone', async () => {
     const live = { 'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } };
+    // Stop is the Detail dialog's card's, and the card is the sessions payload's: the Run link the status' `live` implies, with a dashboard row that can end it.
+    sessionsAnswer = () => ({ links: [runLink('PAY-131', live['PAY-131'], { id: 's1', status: 'busy', stopState: 'ready' })], reachable: true, rowsAt: null });
     await renderRun({ live });
     const refund = (lists[ALPHA.id] ?? []).find((i) => i.key === 'PAY-131') as JiraIssue;
     const answered = global.fetch;
@@ -916,6 +935,7 @@ describe('Run ▾ and the live strip', () => {
       if (url === '/api/agents/jira-stop') {
         requested.push(`POST ${url}`);
         statusAnswer = status({ repos: MAPPED, skills: [SKILL] });
+        sessionsAnswer = () => ({ links: [], reachable: true, rowsAt: null });
         return ok({ ok: true });
       }
       return (answered as jest.Mock)(input, init);

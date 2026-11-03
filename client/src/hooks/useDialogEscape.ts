@@ -21,7 +21,7 @@ import { useEffect, useRef } from 'react';
  * this module changed for that — which is the point of a stack whose entries
  * are removed by identity.
  *
- * Five since Jira phase 2: the Jira issue modal (`components/jira/JiraIssueModal.tsx`) composes `ui/Modal` and the Jira board sheet
+ * Five since Jira phase 2: the Jira issue modal (`components/jira/JiraDetail.tsx`) composes `ui/Modal` and the Jira board sheet
  * (`components/jira/JiraBoardSheet.tsx`) composes `ui/FormSheet`, so both joined the stack through the two shells, by construction — the item modal,
  * `LaunchSheet`, `OrchestrateSheet` and those two. Nothing here changed for that either, which is what moving the call into the shells (task-40) bought.
  *

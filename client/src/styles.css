@@ -1330,6 +1330,39 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-modal-comments { margin-top: 20px }
 .jira-modal-comments a { color: var(--cyan) }
 
+/* The Detail dialog (Jira sessions spec §7.3, §8; DESIGN.md §8.9.2) — `Modal`'s facts slot holds the AGENT column, its body the ticket. Nothing here restyles
+   a `.ui-*` class (guard 7): the shell's slot is reached through the column's own wrapper, and the cards' look is `.jira-sess*` below. */
+.jira-detail-agent { display: flex; flex-direction: column; gap: 12px; min-width: 0 }
+.jira-detail-lbl { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 500; color: var(--ink3) }
+.jira-detail-lbl span { font-weight: 400 }
+/* The ticket's side: the key row, the facts, then the two writes under them, wrapping rather than overflowing the body when a transition's name is long. */
+.jira-detail-ticket { margin-bottom: 18px }
+.jira-detail-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+
+/* One live session's card: the deck card's face, widened to the 290 px column. The strip is the board card's own band (`ui/LiveStrip`), clipped to the card's
+   radius; the face under it carries the card's inline padding token, so the strip's text and the facts' text share one left edge. */
+.jira-sess { background: var(--strip); border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden; min-width: 0 }
+.jira-sess-face { display: flex; flex-direction: column; gap: 10px; padding: 10px var(--card-pad-x) 12px }
+.jira-sess-facts { display: flex; flex-direction: column; gap: 4px; margin: 0 }
+.jira-sess-facts > div { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 8px; align-items: baseline }
+.jira-sess-facts dt { font-size: 11px; font-weight: 500; color: var(--ink3) }
+.jira-sess-facts dd { margin: 0; font-size: 12px; color: var(--ink); min-width: 0; overflow-wrap: anywhere }
+/* One face everywhere (§8.1): the id and the branch are set apart by size and ink, not by a monospace. */
+.jira-sess-mono { font-size: 11px; color: var(--ink2); overflow-wrap: anywhere }
+.jira-sess-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
+
+/* The history timeline (spec §7.3): newest first, a hairline down the left with a node per entry. A line's head is `<how> · ended <age> ago`, its Reopen
+   sits at the right of the head, and the meta (surface · duration · name) is a quiet line under both. */
+.jira-hist-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column }
+.jira-hist {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; align-items: center;
+  padding: 0 0 12px 16px; border-left: 1px solid var(--hairline); margin-left: 4px;
+}
+.jira-hist:last-child { padding-bottom: 0 }
+.jira-hist-node { position: absolute; left: -4px; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--ink3) }
+.jira-hist-head { font-size: 12px; font-weight: 500; color: var(--ink2) }
+.jira-hist-meta { grid-column: 1 / -1; font-size: 11px; color: var(--ink3); overflow-wrap: anywhere }
+
 /* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
    what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px
    (guard 3). */

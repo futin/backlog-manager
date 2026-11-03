@@ -1906,7 +1906,7 @@ Three differences from the per-item case, each a consequence of the control bein
 
 Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides. The Board's rule just above hides a dispatch
 control whenever the environment makes dispatch impossible, and it is right there because on the Board dispatch is the control's whole job. The Jira card's `Run ▾`
-(`components/jira/JiraRunMenu.tsx`, on every card and again in the issue modal's controls row) has a second job the environment cannot take away: it opens the
+(`components/jira/JiraRunMenu.tsx`, on every card and again in the Detail dialog's agent column) has a second job the environment cannot take away: it opens the
 launch sheet (`JiraLaunchSheet`), and the sheet's `Copy prompt` needs the server's prompt composer and a clipboard, not the dashboard. A person with `BM_AGENTS`
 off, or a dashboard that is down, still gets the one half of Run that works without it — the exact prompt a session would be told, framed and size-checked by
 the server, ready to paste into a terminal of their own. Hiding the chip to match the Board would delete that for the sake of a consistency nobody asked for.
@@ -2184,7 +2184,7 @@ the one settings key a hand-edited localStorage value could turn into script exe
 
 Escape has one owner, and the topmost dialog is the only one that closes. `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
 listener, installed on the first entry and removed with the last; all eight dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet`,
-`OrchestrateSheet`, since Jira phase 2 the Jira issue modal (`jira/JiraIssueModal.tsx`) and the Jira board sheet (`jira/JiraBoardSheet.tsx`), since the
+`OrchestrateSheet`, since Jira phase 2 the Jira Detail dialog (`jira/JiraDetail.tsx`) and the Jira board sheet (`jira/JiraBoardSheet.tsx`), since the
 release chip the What's new drawer (`ReleasesDrawer.tsx`), since Jira phase 5 the Jira launch sheet (`jira/JiraLaunchSheet.tsx`), and since the Dashboards
 card stopped editing in place its add/edit sheet (`settings/DashboardSheet.tsx`) — are on it
 and none binds its own listener. There were four until task-37: `RunDrawer` left the Board with the rest of the run's detail, which
@@ -2197,11 +2197,11 @@ sheets', and each calls `useDialogEscape` once, so a fourth surface opened throu
 The count was three while the shells had three composers, and `test/dialog-escape.test.tsx` mounts those three together to prove the ranking holds across
 them.
 
-Jira phase 2 is that construction paying out, twice. `JiraIssueModal` composes `Modal` — `Modal`'s composers are `ItemModal` and `JiraIssueModal` — and
+Jira phase 2 is that construction paying out, twice. `JiraDetail` composes `Modal` — `Modal`'s composers are `ItemModal` and `JiraDetail` — and
 `JiraBoardSheet` composes `FormSheet` beside the two Board sheets, so both joined the stack without a line of the hook changing, and the count is five. The
 suite still proves the ranking on the Board's three; the two Jira surfaces need no case of their own, because what ranks them is the same shell code those
 three run through, and a sixth composer of either shell would join the same way. A second modal is right where §8.7 of `.claude/DESIGN.md` used to say there
-was one: the issue modal is the same sidecar reading — a facts column and a body — of a ticket instead of an item, and it holds no run state, so the reason
+was one: the Detail dialog is the same sidecar reading — a facts column and a body — of a ticket instead of an item, and the sessions it lists are a reading of the dashboard's rows with no run's Pause or Resume, so the reason
 the run's detail is an always-visible sheet rather than a modal (a modal has no standing place for Pause and Resume) does not reach it.
 
 The What's new drawer made it six through a THIRD shell. `ReleasesDrawer` composed `ui/Drawer.tsx` — a scrim and a right-edge panel, the dashboard's
@@ -2227,7 +2227,7 @@ the shell code the existing cases already cover. The page's row-level `Remove` s
 One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens — and, since #225, the item modal's claim release — drawn inline in
 the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to its two composers and nothing else floating but `Popover`'s
 panels, which hang under their control without a scrim. The Jira board sheet's `Delete board` asks through it too, drawn inside the sheet, as do — since Jira phase 5 — the Skills card's `×` (`JiraSkillsGroup`, in its row) and
-the issue modal's `Stop session` (in place of the chip). It calls
+the Detail dialog's session card `Stop` (in place of the button). It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 

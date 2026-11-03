@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useAction } from '../../hooks/useAction';
-import { useAgents } from '../../hooks/useAgents';
 import { useFetched } from '../../hooks/useFetched';
 import { useNow } from '../../hooks/useNow';
 import {
@@ -19,13 +19,14 @@ import {
   stopJira,
   ticketWorktrees,
   transitionOptions,
+  unlinkJira,
   type JiraChildrenIndex
 } from '../../lib/jira';
+import { ticketSessions } from '../../lib/jira-sessions';
 import { elapsedSince } from '../../lib/item-age';
 import { renderMarkdown } from '../../lib/markdown';
 import type { JiraAction, JiraIssue, JiraIssueDetail, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
-import { Confirm } from '../ui/Confirm';
 import { Fact } from '../ui/Fact';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
@@ -33,20 +34,33 @@ import { Pill } from '../ui/Pill';
 import { Select } from '../ui/Select';
 import { SpreadBar } from '../ui/SpreadBar';
 import { JiraRunMenu } from './JiraRunMenu';
+import { JiraHistoryLine, JiraSessionCard, JiraStartingCard } from './JiraSessionCard';
 import { WorktreeRow } from './JiraWorktreeRow';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
- * JiraIssueModal — one Jira issue's detail, the board's two writes to Jira itself (Jira phase 3) and its session controls (Jira phase 5) — spec §6.3, §7;
- * DESIGN.md §8.9.2, which applies §8.7's sidecar to a Jira issue.
+ * JiraDetail — one Jira issue's Detail dialog: the ticket's agent sessions on the left, the ticket itself on the right (Jira sessions spec §7.3, §8), with the
+ * board's two writes to Jira itself (Jira phase 3) and its session controls (Jira phase 5) — spec §6.3, §7; DESIGN.md §8.9.2, which applies §8.7's sidecar to
+ * a Jira issue. It replaced the Jira issue modal, and everything that modal showed and did is still here, regrouped.
  *
- * **It is the item modal's twin, not a second modal design.** It composes `ui/Modal` exactly as `board/ItemModal.tsx` does — so the scrim, the close
- * control, the Escape key (the LIFO stack in `useDialogEscape`, called by the shell and never here) and the 700 px fold are the shell's — and draws the same
- * facts column through `ui/Fact` and the same body through `.item-body`. `Modal`'s composer list is `[ItemModal, JiraIssueModal]` and a third is a design
- * change.
+ * **It is the item modal's twin, not a second dialog design.** It composes `ui/Modal` exactly as `board/ItemModal.tsx` does — so the scrim, the close
+ * control, the Escape key (the LIFO stack in `useDialogEscape`, called by the shell and never here) and the 700 px fold are the shell's — and takes the
+ * modal's slot on that stack, so the count of dialogs does not change. `Modal`'s composer list is `[ItemModal, JiraDetail]` and a third is a design change.
+ * `Modal`'s facts slot (the 290 px column) holds the AGENT: one `JiraSessionCard` per live session, newest first, then the history, then `Run ▾`; its body
+ * holds the TICKET: title, key row, facts, the two writes, then the description, children, worktrees and the comments note.
  *
- * **The controls row** (Jira phase 3; spec §6.3, §8; DESIGN.md §8.9.2) sits under the facts list, inside the facts column, and holds four controls — the two
- * writes to Jira below, then phase 5's `Run ▾` and `Stop session`:
+ * **The left column is the sessions page's, not the status'.** The cards and the history read `useJiraSessionsContext()` (`GET /api/jira/sessions`, one poll
+ * for the whole Jira section), narrowed to this key by `ticketSessions`. A `starting` Run is the one thing that payload never carries — a reservation has no
+ * link until the dashboard answers — so its "Starting…" card is drawn from the shell's `live[key]`, which is where `reserve` puts it. Unlink (only a `branch`
+ * link) and Stop (only a row with `stopState`) are offered by the card; the POSTs are this dialog's, through the one write guard below, and a landed one
+ * reloads the status AND the sessions payload so the card goes without waiting for the timer. Stop names the session (`{ key, sessionId }`): a ticket can
+ * hold several, and the server ends only the one it is told.
+ *
+ * **`Run ▾`** (`JiraRunMenu`, the card's own chip) → `onRun(issue, action)`; the launch sheet is hosted by `JiraView`, ABOVE this dialog, so Escape closes the
+ * sheet alone and the dialog under it on the next press. It sits LAST in the left column — the next session takes over once these end — and `runChipState`
+ * disables it only while a `run` link is live (the one-run gate, §5) or a reservation is `starting`; a live `branch` or `manual` link does not. It is never hidden.
+ *
+ * **The write controls** (Jira phase 3; spec §6.3, §8; DESIGN.md §8.9.2) sit in a row under the facts, on the ticket's side:
  *
  * - **`Assign to me`**, a 28 px `Chip` → `POST /api/jira/issue/assign` `{ key }`. Disabled, with the reason as its title, while the shell's status knows
  *   no identity (`data.me` null — which also covers a boot `myself` that has not answered: the server would refuse with 503 `no identity` anyway, and
@@ -57,47 +71,41 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  *   very next render. Disabled until the detail lands (the transitions are the detail's, and the card carries none), with `transitions unavailable` as the
  *   title once that read failed, and `no transitions offered` when Jira offers none.
  *
- * - **`Run ▾`** (`JiraRunMenu`, the card's own chip) → `onRun(issue, action)`; the launch sheet is hosted by `JiraView`, ABOVE this modal, so Escape closes the
- *   sheet alone and the modal under it on the next press. It reads the shell's status and draws its own disabled / dashed readings; it is never hidden.
- * - **`Stop session`**, a 28 px `Chip` → `ui/Confirm` → `POST /api/agents/jira-stop` `{ key, sessionId }`, drawn ONLY while the dashboard has agents
- *   enabled AND the shell's status holds a CONFIRMED (not `starting`) entry for the key — a starting entry has no process to stop yet, and the server would
- *   409 it. It rides the same `useAction` as the two writes above, so one guard and one error line serve all three; a landed stop reloads the status and
- *   nudges the board, and that reload is the strip going away (spec §11). `StopSession` is mounted only for a confirmed entry, which is also the only time
- *   `useAgents()` reads `/api/agents/status`: a key with no session never asks.
- *
  * **The Worktrees list** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.2) sits under the body and above the comments note, independent of the detail read: the
- * trees come from `GET /api/jira/worktrees`, which this modal asks for itself — on open, and again when the key changes or a session on it starts or ends
+ * trees come from `GET /api/jira/worktrees`, which this dialog asks for itself — on open, and again when the key changes or a session on it starts or ends
  * (the moments a tree is made or becomes safe to remove) — and `ticketWorktrees` narrows to this key's. The main tree never gets a row. A failed read, or
  * no tree, draws no heading at all; the previous answer for the same key stays drawn while a re-read is out, so the list does not blink on a Stop. Each row's
- * `Remove` COPIES `removeCommand` — the board never writes git — and is disabled, titled `a session is running on <KEY>`, while the shell knows of one. That
- * check is the best the board can do: a session it did not start (Copy prompt, a terminal) is invisible to it, which the enabled title says in so many words.
+ * `Remove` COPIES `removeCommand` — the board never writes git — and is disabled, titled `a session is running on <KEY>`, while any session is live on the
+ * key, a detected `branch` one included (it is running IN a worktree). That check is the best the board can do: a session it has no link for (Copy prompt, a
+ * terminal on a branch the detector cannot read) is invisible to it, which the enabled title says in so many words.
  *
- * **The `session` fact** reads the shell's `live[key]` (`<name> · <repo basename> · <elapsed>`, `starting`, or `—`) rather than the detail's `session`, which
- * stays typed `null`: the status is already polled, one poll old at worst, and the detail read would add a second source for one fact. The elapsed reading
- * ticks with `useNow` — the card strip's own clock — so it keeps counting while the modal stays open.
+ * **The `session` fact** reads the newest live session — `<name> · <repo basename> · <elapsed>`, `starting`, or `—` — from the sessions payload, and from the
+ * shell's `live[key]` while that payload has not landed, rather than from the detail's `session`, which stays typed `null`: both are already polled, and the
+ * detail read would add a third source for one fact. The elapsed reading ticks with `useNow` — the card strip's own clock — so it keeps counting while the
+ * dialog stays open.
  *
- * **One write at a time, stamped with its key.** Both controls fire through ONE `useAction`, so its ref guard (bug-19's layer 1, the reason DESIGN.md
- * §8.4.1 gives `RunControls`) holds across both: a double click on Assign, or a Move picked while Assign is out, sends nothing — two clicks inside one tick
- * both read a `disabled` that has not been painted yet, and only a ref sees the first. Both controls are disabled while a write is out, the rendering half
- * of that guard; and they stay disabled across a Children-row swap until it settles, because one modal sends one write (plan ruling R6 leaves the
- * serialisation to this modal). Each write carries the key it was sent for, and its settle compares that against the key the modal shows NOW (`keyRef`):
- * a refusal for an issue the reader has swapped away from is dropped (`onError` → `true`, "handled"), never drawn under another issue's title, and a
+ * **One write at a time, stamped with its key.** Every write — Assign, Move, Stop, Unlink — fires through ONE `useAction`, so its ref guard (bug-19's layer 1,
+ * the reason DESIGN.md §8.4.1 gives `RunControls`) holds across all of them: a double click on Assign, or a Move picked while Assign is out, sends nothing —
+ * two clicks inside one tick both read a `disabled` that has not been painted yet, and only a ref sees the first. The controls are disabled while a write is
+ * out, the rendering half of that guard; and they stay disabled across a Children-row swap until it settles, because one dialog sends one write (plan ruling
+ * R6 leaves the serialisation to this dialog). Each write carries the key it was sent for, and its settle compares that against the key the dialog shows NOW
+ * (`keyRef`): a refusal for an issue the reader has swapped away from is dropped (`onError` → `true`, "handled"), never drawn under another issue's title, and a
  * landed write's detail re-read is skipped for the same reason. The status reload and the board nudge are NOT skipped: the write happened, and both of
- * those describe the board, not the modal's issue.
+ * those describe the board, not the dialog's issue.
  *
  * **A failure says why, in place.** The server's sentence (`{ error }`), else `HTTP <status>`, else the network's own message — `failureOf`'s rule, the
- * same one the read uses — in a `role="alert"` line under the row. The modal stays open: a refusal (`Jira refused: …`, `transition not offered`) is
- * something to read and maybe retry, not a reason to lose the place. The line clears when the next write leaves (`useAction` clears it) and when the key
- * changes (cleared during render, so the new issue's first frame never carries the old one's refusal).
+ * same one the read uses — in a `role="alert"` line under the ticket's write row. The dialog stays open: a refusal (`Jira refused: …`, `transition not
+ * offered`, an unlink of a Run link) is something to read and maybe retry, not a reason to lose the place. The line clears when the next write leaves
+ * (`useAction` clears it) and when the key changes (cleared during render, so the new issue's first frame never carries the old one's refusal).
  *
  * **A landed write re-reads three things** (spec §6.1; rulings R7, R8): the shell's status (`useJiraContext().reload()`), the board's list (`onWrote`,
- * which bumps `JiraView`'s nudge), and this modal's own detail. A 200 with `reread: false` is a success like any other: it says the SERVER's re-read
+ * which bumps `JiraView`'s nudge), and this dialog's own detail. A 200 with `reread: false` is a success like any other: it says the SERVER's re-read
  * failed after the write stood, the next sweep catches its cache up, and an error here would invite a retry of a write that already happened (R1). The
  * detail re-read is a `rev` counter in `useFetched`'s deps — which answers `PENDING` on any dep change — so the last detail that landed for this SAME key
  * is held here and drawn while the re-read is out (R8): no `loading…` flash, and no controls blinking to disabled-for-no-detail and back.
  *
  * **Two sources, one column.** The card hands over the `JiraIssue` it was drawn from, and every fact the card already carries is drawn from it at once —
- * the modal opens with a full column rather than a spinner. The detail (`GET /api/jira/issue/:key`, read fresh on open) then supplies the three things a
+ * the dialog opens with a full column rather than a spinner. The detail (`GET /api/jira/issue/:key`, read fresh on open) then supplies the three things a
  * card cannot: the description, the children, and the boards that hold the issue; it also replaces the card's copy, which may be one poll old. A failed read
  * leaves the card's facts exactly as they were and says so where the body would be, with the server's own sentence (`could not read the ticket — Jira
  * unreachable: timeout`), because a column that blanked on a Jira blip would take the readable half down with the unreadable one.
@@ -106,28 +114,29 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * given in a new tab with no referrer, and the description goes in through `renderMarkdown` — the sanitising renderer that never emits raw HTML as markup and refuses a
  * `javascript:` href (see its header), which matters more here than on a backlog item, because this text was typed by anyone with access to the Jira site.
  *
- * **State belongs to a key.** The held answer is stamped with the issue key it was read for, and only that key's answer is read: reopening the modal on
- * another issue while a read is in flight never paints the first issue's description under the second one's title, and a late answer for a key the modal
+ * **State belongs to a key.** The held answer is stamped with the issue key it was read for, and only that key's answer is read: reopening the dialog on
+ * another issue while a read is in flight never paints the first issue's description under the second one's title, and a late answer for a key the dialog
  * has left is dropped. Facts that come from the detail (`on boards`) are simply absent while the held answer is for another key — and also once it has landed, if none of the
  * boards it names is one the shell's status knows (a board deleted a moment ago): the spec lists the fact unconditionally, but a label with nothing under it is
  * the empty fact `Fact`'s own header says never to draw.
  *
  * Repositories are read from the shell's one status (`useJiraContext`): the mapped paths for the issue's PROJECT key through `displayPath` (the same `~`
- * reading the Setup card gives), or the hint that says where to map one. The `created · updated` line (`issueDatesLine`) and the session fact read the one `useNow` clock, a minute's tick.
+ * reading the Setup card gives), or the hint that says where to map one. The `created · updated` line (`issueDatesLine`), the session fact and every age on
+ * the cards read the one `useNow` clock, a minute's tick.
  *
- * **Children are a tree, and a row swaps THIS modal's issue** (DESIGN.md §8.9.2; grouped-board spec §6). The detail's `children` are the direct children,
+ * **Children are a tree, and a row swaps THIS dialog's issue** (DESIGN.md §8.9.2; grouped-board spec §6). The detail's `children` are the direct children,
  * fresh; under each hang its descendants from `childrenOf`, the board's fold index as it stood when the card was clicked (`modalTree`). That snapshot is not
- * refreshed by later board polls: the tree costs no Jira call beyond the one read this modal already makes, and a row a poll moved is at worst one poll old
- * while the direct children never are. `null` (no board behind the modal) draws the direct children only. The head row counts the DIRECT children in its
+ * refreshed by later board polls: the tree costs no Jira call beyond the one read this dialog already makes, and a row a poll moved is at worst one poll old
+ * while the direct children never are. `null` (no board behind the dialog) draws the direct children only. The head row counts the DIRECT children in its
  * pill and says `N in all` only when the tree draws more rows than that; the spread bar counts the rows as drawn. No filter marking inside the tree — the
  * filter ring is the card's (spec §8 non-goal). A row click hands the row's issue and the SAME snapshot to `onOpenIssue`, which is the very setter the board
- * calls, so `JiraView` swaps the one modal's issue and the keyed read below fetches the new detail. Never a second `Modal`: Escape has one owner, and a
- * stack of issue modals would make it close one layer of a walk the reader thinks of as one dialog.
+ * calls, so `JiraView` swaps the one dialog's issue and the keyed read below fetches the new detail. Never a second `Modal`: Escape has one owner, and a
+ * stack of issue dialogs would make it close one layer of a walk the reader thinks of as one dialog.
  */
 
 type Held = { detail: JiraIssueDetail } | { failure: string };
 
-/** What a status category reads as in a fact — `JIRA_COLUMNS`' own labels, lower-cased, so the column and the modal never name one category two ways. */
+/** What a status category reads as in a fact — `JIRA_COLUMNS`' own labels, lower-cased, so the column and the dialog never name one category two ways. */
 function categoryWord(category: JiraIssue['status']['category']): string {
   return (JIRA_COLUMNS.find((c) => c.category === category)?.label ?? 'To Do').toLowerCase();
 }
@@ -142,7 +151,7 @@ async function postWrite(path: 'assign' | 'transition', body: Record<string, str
   if (!res.ok) throw new Error(await failureOf(res));
 }
 
-export function JiraIssueModal({
+export function JiraDetail({
   issue,
   childrenOf,
   onOpenIssue,
@@ -154,14 +163,15 @@ export function JiraIssueModal({
   childrenOf: JiraChildrenIndex | null;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
   onWrote: () => void;
-  /** `Run ▾`'s pick — the page opens the launch sheet over this modal. */
+  /** `Run ▾`'s pick — the page opens the launch sheet over this dialog. */
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   onClose: () => void;
 }) {
   const { zone } = useTimeZone();
   const { data, reload } = useJiraContext();
+  const { data: sessions, reload: reloadSessions } = useJiraSessionsContext();
   const { busy, error: writeError, run, clearError } = useAction();
-  // The key the modal shows NOW, read by a write's settle (see the header) — a ref, because the settle closure was made on the render that sent it.
+  // The key the dialog shows NOW, read by a write's settle (see the header) — a ref, because the settle closure was made on the render that sent it.
   const keyRef = useRef(issue.key);
   keyRef.current = issue.key;
   // Bumped by a landed write for the key still shown: it only TRIGGERS the re-read; the held detail below is what keeps the body up meanwhile (R8).
@@ -189,8 +199,13 @@ export function JiraIssueModal({
         .catch((e: unknown): Held => ({ failure: e instanceof Error ? e.message : String(e) })),
     [issue.key, rev]
   );
+
+  // This ticket's sessions, and the shell's reservation for it — `starting` is the one state only the status knows (see the header).
+  const { live: liveLinks, ended } = ticketSessions(issue.key, sessions);
+  const reserved = data?.live[issue.key] ?? null;
+  const starting = reserved !== null && reserved.starting ? reserved : null;
   // The Worktrees list's read: keyed on the issue and on WHETHER a session is live on it (not on the session object, which a status poll replaces).
-  const sessionLive = data?.live[issue.key] !== undefined;
+  const sessionLive = starting !== null || liveLinks.length > 0 || (sessions === null && reserved !== null);
   const trees = useFetched(() => fetchJiraWorktrees(), [issue.key, sessionLive]);
   const keptTrees = useRef<{ key: string; payload: JiraWorktreesPayload } | null>(null);
   if (trees.status === 'ok' && trees.value !== null) keptTrees.current = { key: issue.key, payload: trees.value };
@@ -204,7 +219,8 @@ export function JiraIssueModal({
   // The detail's copy is the fresher one; the card's is what the column draws until it lands (or for good, when the read fails).
   const src: JiraIssue = detail ?? issue;
 
-  // `useNow`, like the card strip's: the session fact's elapsed reading (and `created · updated`) ticks while the modal sits open between status polls.
+  // `useNow`, like the card strip's: every age on the cards, the session fact's elapsed reading and `created · updated` tick while the dialog sits open
+  // between polls.
   const now = useNow(true);
   const boardNames = detail === null || data === null ? [] : data.boards.filter((b) => detail.boards.includes(b.id)).map((b) => b.name);
   const paths = data?.repos[src.project.key] ?? [];
@@ -217,7 +233,7 @@ export function JiraIssueModal({
   const moveBlock = failure !== null ? 'transitions unavailable' : detail !== null && detail.transitions.length === 0 ? 'no transitions offered' : null;
   const moveReady = detail !== null && detail.transitions.length > 0;
 
-  /** The one write path both controls take (see the header): one guard, one error line, one key stamp. */
+  /** The one write path the two Jira controls take (see the header): one guard, one error line, one key stamp. */
   const write = (path: 'assign' | 'transition', body: Record<string, string>): void => {
     const asked = issue.key;
     run(() => postWrite(path, body), {
@@ -226,86 +242,120 @@ export function JiraIssueModal({
         onWrote();
         if (keyRef.current === asked) setRev((r) => r + 1);
       },
-      // `true` is "handled — draw nothing": the refusal is for an issue this modal no longer shows.
+      // `true` is "handled — draw nothing": the refusal is for an issue this dialog no longer shows.
       onError: () => keyRef.current !== asked
     });
   };
 
   /**
-   * Stop, through the one write guard and error line (see the header); a landed stop reloads the status — the strip's way out — and nudges the board. It names
-   * the session the status shows for the key (`live[key].sessionId`): a ticket can hold several, and the server ends only the one it is told.
+   * A session write — Stop or Unlink — through the one write guard and error line (see the header). A landed one reloads the status and the sessions
+   * payload — the card's way out — and nudges the board. They name the session the card shows: a ticket can hold several, and the server ends only the one
+   * it is told.
    */
-  const stop = (sessionId: string): void => {
+  const sessionWrite = (send: (key: string) => Promise<void>): void => {
     const asked = issue.key;
-    run(() => stopJira(asked, sessionId), {
+    run(() => send(asked), {
       onSuccess: () => {
         reload();
+        void reloadSessions();
         onWrote();
       },
       onError: () => keyRef.current !== asked
     });
   };
-  const live = data?.live[issue.key] ?? null;
-  // The id Stop names: a confirmed entry's only (a `starting` one has none), held as its own const so the click handler needs no cast.
-  const stoppableSession = live !== null && !live.starting ? live.sessionId : null;
-  const sessionLine =
-    live === null
-      ? '—'
-      : live.starting
-        ? 'starting'
-        : [live.name, repoBasename(live.repo), elapsedSince(live.startedAt, now)].filter((p) => p !== null).join(' · ');
 
-  const facts = (
-    <div className="item-facts">
-      <div className="jira-modal-key">
-        <span className="jira-modal-keyname">{src.key}</span>
-        <a href={src.url} target="_blank" rel="noreferrer">
-          open in Jira ↗
-        </a>
+  const newest = liveLinks[0] ?? null;
+  const sessionLine =
+    starting !== null
+      ? 'starting'
+      : newest !== null
+        ? [newest.name, repoBasename(newest.repo), elapsedSince(newest.startedAt, now)].filter((p) => p !== null).join(' · ')
+        : sessions === null && reserved !== null
+          ? [reserved.name, repoBasename(reserved.repo), elapsedSince(reserved.startedAt, now)].filter((p) => p !== null).join(' · ')
+          : '—';
+  const liveCount = liveLinks.length + (starting !== null ? 1 : 0);
+
+  // The agent column — `Modal`'s facts slot. Cards newest first; the reservation, being newest of all, leads.
+  const agent = (
+    <div className="jira-detail-agent">
+      <div className="jira-detail-lbl">
+        Agent
+        <span>{`${liveCount} live · ${ended.length} ended`}</span>
       </div>
-      <dl className="item-facts-list">
-        <Fact label="type · parent">{typeLine}</Fact>
-        <Fact label="status">{`${src.status.name} · ${categoryWord(src.status.category)}`}</Fact>
-        {priorityLine !== '' && <Fact label="priority · sprint">{priorityLine}</Fact>}
-        <Fact label="assignee · reporter">{people}</Fact>
-        {src.labels.length > 0 && <Fact label="labels">{src.labels.join(', ')}</Fact>}
-        <Fact label="created · updated">{issueDatesLine(src, now, zone)}</Fact>
-        {boardNames.length > 0 && <Fact label="on boards">{boardNames.join(', ')}</Fact>}
-        <Fact label="repository">
-          {data === null || paths.length === 0 ? (
-            `no repository mapped for ${src.project.key} — Jira › Setup › Repositories`
-          ) : (
-            <span className="item-facts-path">{paths.map((p) => displayPath(p, data.home)).join(', ')}</span>
-          )}
-        </Fact>
-        <Fact label="session">{sessionLine}</Fact>
-      </dl>
-      <div className="jira-modal-controls">
-        <Chip size={28} disabled={busy || assignBlock !== null} title={assignBlock ?? undefined} onClick={() => write('assign', { key: issue.key })}>
-          Assign to me
-        </Chip>
-        <Select
-          label="Move to"
-          title={moveBlock ?? undefined}
-          value=""
-          disabled={busy || !moveReady}
-          options={[{ value: '', label: 'Move to…' }, ...transitionOptions(detail?.transitions ?? [])]}
-          onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
+      {starting !== null && <JiraStartingCard session={starting} now={now} />}
+      {liveLinks.map((link) => (
+        <JiraSessionCard
+          key={link.sessionId ?? link.startedAt}
+          link={link}
+          now={now}
+          busy={busy}
+          onUnlink={(sessionId) => sessionWrite((key) => unlinkJira(key, sessionId))}
+          onStop={(sessionId) => sessionWrite((key) => stopJira(key, sessionId))}
         />
-        <JiraRunMenu issue={issue} home="modal" onPick={(action) => onRun(issue, action)} />
-        {stoppableSession !== null && <StopSession key={issue.key} busy={busy} onStop={() => stop(stoppableSession)} />}
-      </div>
-      {writeError !== null && (
-        <p className="jira-modal-error" role="alert">
-          {writeError}
-        </p>
+      ))}
+      {liveCount === 0 && <p className="jira-modal-none">no session is running on this ticket</p>}
+      {ended.length > 0 && (
+        <>
+          <div className="jira-detail-lbl">History</div>
+          <ol className="jira-hist-list">
+            {ended.map((link) => (
+              <JiraHistoryLine key={`${link.sessionId ?? ''}\u0000${link.startedAt}`} link={link} now={now} />
+            ))}
+          </ol>
+        </>
       )}
+      <div className="jira-modal-controls">
+        <JiraRunMenu issue={issue} home="modal" onPick={(action) => onRun(issue, action)} />
+      </div>
     </div>
   );
 
   return (
-    <Modal label={`${src.key} ${src.summary}`} facts={facts} onClose={onClose}>
+    <Modal label={`${src.key} ${src.summary}`} facts={agent} onClose={onClose}>
       <h2 className="item-body-title">{src.summary}</h2>
+      <div className="item-facts jira-detail-ticket">
+        <div className="jira-modal-key">
+          <span className="jira-modal-keyname">{src.key}</span>
+          <a href={src.url} target="_blank" rel="noreferrer">
+            open in Jira ↗
+          </a>
+        </div>
+        <dl className="item-facts-list jira-detail-facts">
+          <Fact label="type · parent">{typeLine}</Fact>
+          <Fact label="status">{`${src.status.name} · ${categoryWord(src.status.category)}`}</Fact>
+          {priorityLine !== '' && <Fact label="priority · sprint">{priorityLine}</Fact>}
+          <Fact label="assignee · reporter">{people}</Fact>
+          {src.labels.length > 0 && <Fact label="labels">{src.labels.join(', ')}</Fact>}
+          <Fact label="created · updated">{issueDatesLine(src, now, zone)}</Fact>
+          {boardNames.length > 0 && <Fact label="on boards">{boardNames.join(', ')}</Fact>}
+          <Fact label="repository">
+            {data === null || paths.length === 0 ? (
+              `no repository mapped for ${src.project.key} — Jira › Setup › Repositories`
+            ) : (
+              <span className="item-facts-path">{paths.map((p) => displayPath(p, data.home)).join(', ')}</span>
+            )}
+          </Fact>
+          <Fact label="session">{sessionLine}</Fact>
+        </dl>
+        <div className="jira-detail-controls">
+          <Chip size={28} disabled={busy || assignBlock !== null} title={assignBlock ?? undefined} onClick={() => write('assign', { key: issue.key })}>
+            Assign to me
+          </Chip>
+          <Select
+            label="Move to"
+            title={moveBlock ?? undefined}
+            value=""
+            disabled={busy || !moveReady}
+            options={[{ value: '', label: 'Move to…' }, ...transitionOptions(detail?.transitions ?? [])]}
+            onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
+          />
+        </div>
+        {writeError !== null && (
+          <p className="jira-modal-error" role="alert">
+            {writeError}
+          </p>
+        )}
+      </div>
       <div className="item-body">
         {failure !== null ? (
           <div className="drawer-empty">{`could not read the ticket — ${failure}`}</div>
@@ -322,7 +372,7 @@ export function JiraIssueModal({
             {detail.children.length > 0 && <ChildrenTree selfKey={detail.key} direct={detail.children} childrenOf={childrenOf} onOpenIssue={onOpenIssue} />}
           </>
         )}
-        {ticketTrees.length > 0 && <WorktreesList trees={ticketTrees} issueKey={issue.key} live={live !== null} home={data?.home ?? null} />}
+        {ticketTrees.length > 0 && <WorktreesList trees={ticketTrees} issueKey={issue.key} live={sessionLive} home={data?.home ?? null} />}
         <p className="jira-modal-comments">
           Comments stay in Jira — v1 neither reads nor writes them.{' '}
           <a href={src.url} target="_blank" rel="noreferrer">
@@ -352,39 +402,6 @@ function WorktreesList({ trees, issueKey, live, home }: { trees: readonly JiraWo
         ))}
       </ul>
     </section>
-  );
-}
-
-/**
- * `Stop session` and its confirmation (Jira phase 5, spec §7; DESIGN.md §8.9.2). Mounted by the modal only for a confirmed live entry, so `useAgents()` — the
- * dashboard's `enabled` flag, the same gate the card's dispatch control reads — asks `/api/agents/status` only then. Nothing is drawn with agents off or
- * before the answer lands: a Stop the dashboard would refuse is a promise it cannot keep. The question REPLACES the chip in place (`ui/Confirm`, the claim
- * release's precedent), and the safe answer holds the focus. The POST itself is the modal's, so its refusal draws in the modal's one alert line.
- */
-function StopSession({ busy, onStop }: { busy: boolean; onStop: () => void }) {
-  const { status } = useAgents();
-  const [asking, setAsking] = useState(false);
-  if (status === null || !status.enabled) return null;
-  if (!asking)
-    return (
-      <Chip size={28} disabled={busy} title="end the session running on this issue" onClick={() => setAsking(true)}>
-        Stop session
-      </Chip>
-    );
-  return (
-    <Confirm
-      label="confirm stop"
-      testId="jira-stop-confirm"
-      acceptLabel="Stop session"
-      dismissLabel="Keep running"
-      onDismiss={() => setAsking(false)}
-      onAccept={() => {
-        setAsking(false);
-        onStop();
-      }}
-    >
-      Stop this session? It ends mid-work; its edits stay where it left them.
-    </Confirm>
   );
 }
 

@@ -70,7 +70,7 @@ import type { JiraFold } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
 import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
-import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraRepoRefs, JiraSkill, JiraStatusPayload } from '../shared/types';
+import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraRepoRefs, JiraSessionsPayload, JiraSkill, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
 
 /**
@@ -976,6 +976,37 @@ describe('runChipState', () => {
   it('is ready for a mapped project with no session on that key, whatever another key holds', () => {
     expect(runChipState(issue(), payload({ repos: mapped }))).toBe('ready');
     expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-2': session } }))).toBe('ready');
+  });
+
+  // Jira sessions Task 10: once the sessions payload has landed the gate is a live `run` LINK (spec §5's one-run rule) or a reservation — the one live entry
+  // that has no link yet. `status.live` is the same links plus those reservations, so the two never contradict; a branch or manual link never holds it.
+  describe('with the sessions payload', () => {
+    const link = (over: Partial<JiraSessionsPayload['links'][number]> = {}): JiraSessionsPayload['links'][number] =>
+      ({
+        key: 'PAY-1', sessionId: 's1', how: 'run', action: 'context', name: 'jira PAY-1', repo: '/home/ada/pay', branch: null, surface: 'dashboard', model: null,
+        effort: null, snapshot: { summary: 'x', type: 'Story', parentKey: null }, startedAt: '2026-10-19T10:00:00.000Z', endedAt: null, endReason: null,
+        quietSince: null, reattachedAt: null, state: 'working', row: null, stateSince: '2026-10-19T10:00:00.000Z', ...over
+      }) as JiraSessionsPayload['links'][number];
+    const sessions = (...links: JiraSessionsPayload['links']): JiraSessionsPayload => ({ links, reachable: true, rowsAt: null });
+
+    it('is live for a live run link on the key, and for nothing else the payload holds', () => {
+      expect(runChipState(issue(), payload({ repos: mapped }), sessions(link()))).toBe('live');
+      expect(runChipState(issue(), payload({ repos: mapped }), sessions(link({ how: 'branch' })))).toBe('ready');
+      expect(runChipState(issue(), payload({ repos: mapped }), sessions(link({ how: 'manual' })))).toBe('ready');
+      expect(runChipState(issue(), payload({ repos: mapped }), sessions(link({ endedAt: '2026-10-19T11:00:00.000Z', state: 'ended' })))).toBe('ready');
+      expect(runChipState(issue(), payload({ repos: mapped }), sessions(link({ key: 'PAY-2' })))).toBe('ready');
+      expect(runChipState(issue(), payload({ repos: mapped }), sessions())).toBe('ready');
+    });
+
+    it('is live for a starting reservation, which the sessions payload cannot carry, and ready for a stale non-starting entry the links no longer back', () => {
+      expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': { ...session, starting: true } } }), sessions())).toBe('live');
+      expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': session } }), sessions())).toBe('ready');
+    });
+
+    it('still answers no-repo first, and reads the old live entry while the payload is null', () => {
+      expect(runChipState(issue(), payload({ repos: {} }), sessions(link()))).toBe('no-repo');
+      expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': session } }), null)).toBe('live');
+    });
   });
 });
 

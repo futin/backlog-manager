@@ -102,12 +102,12 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | card foot, column header, run chip, Runs rows, modal facts                     |
 | `RunOn`                | `.ui-run-on`      | `offers: ProjectOffers`, `value`, `onChange` (draws nothing below two machines)                  | `LaunchSheet`, `ModesStep` (Orchestrate step 3)                                 |
 | `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped\|match\|machine`, `children`, `title?`    | `ItemCard`'s marker row (Board and Archive draw the same card), `JiraCard`'s `match` marker |
-| `SpreadBar`            | `.ui-spread`      | `done`, `doing`, `todo`, `caption?` — a 4 px track of up to three segments, nothing drawn when all three are zero | `JiraCard`'s fold block, `JiraIssueModal`'s Children head |
-| `JiraTypeIcon`         | `.ui-type-icon`   | `type` (a `JiraIssue['type']`) — the glyph by what the type is: sub-task, epic or above, bug, story, else task | `JiraCard`, `JiraIssueModal`'s Children rows |
+| `SpreadBar`            | `.ui-spread`      | `done`, `doing`, `todo`, `caption?` — a 4 px track of up to three segments, nothing drawn when all three are zero | `JiraCard`'s fold block, `JiraDetail`'s Children head |
+| `JiraTypeIcon`         | `.ui-type-icon`   | `type` (a `JiraIssue['type']`) — the glyph by what the type is: sub-task, epic or above, bug, story, else task | `JiraCard`, `JiraDetail`'s Children rows |
 | `ProgressRow`          | `.ui-progress`    | `name?`, `value`, `max`, `caption?`, `valueText?`, `hatch?`, `height?: 10\|6`, `fill?: progress\|ink\|warn` | the Watchdog page's sweep meter and per-row heartbeat meter                      |
 | `Meter`                | `.ui-meter`       | `label`, `value`, `fraction` (clamped; `null` draws empty), `tone?: green\|amber\|red`, `width?` (px, default 56, or `'fill'`) | `TrackerChip` — the chip's POLL and API meters, the popover's rows and API block; `JiraChip`'s POLL and CALLS; `RunOn`'s 5 h and week bars; the Dashboards list rows' and detail's usage meters |
 | `Ledger`, `DayKicker`  | `.ui-ledger`      | `Ledger{columns?, children, label?}` owns the `overflow-x` box; `DayKicker{children}`            | Runs History's day groups, the Watchdog activity feed                           |
-| `Modal`                | `.ui-modal`       | `label`, `facts`, `children`, `onClose`                                                          | `ItemModal`, `JiraIssueModal` — the app's two modals                            |
+| `Modal`                | `.ui-modal`       | `label`, `facts`, `children`, `onClose`                                                          | `ItemModal`, `JiraDetail` — the app's two modals                            |
 | `FormSheet`            | `.ui-form-sheet`  | `label`, `title`, `steps?`, `footer`, `children`, `onClose`                                      | `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet`, `JiraLaunchSheet`, `DashboardSheet` |
 | `Popover`              | `.ui-popover`     | `label`, `width` (px), `anchor`, `onClose`, `children`                                           | `FilterBar` (Filters, Sort), `TrackerChip`, `JiraChip`, the Jira board's picker, `JiraBoardSheet`'s roots search, `JiraRunMenu`'s `Run ▾` panel |
 | `Segmented`            | `.ui-seg`         | `value`, `options`, `onChange`, `disabled?`, `label?`, `pill?`                                   | Settings (density, text size, staleness), the Runs range control (stroked, not `pill`), `JiraBoardSheet`'s sync interval, `JiraBranchSection`'s branch mode |
@@ -115,7 +115,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `NumberField`          | `.ui-number`      | `value`, `min`, `max`, `unit?`, `onCommit`, `label?`, `disabled?`                                | `SuggestCard`'s threshold (Settings › Dashboards) — see below                   |
 | `Switch`               | `.ui-switch`      | `checked`, `onChange`, `label?`, `disabled?`, `onLabel?`, `offLabel?`, `title?`                  | `WatchdogGroup`'s Enabled row, `LaunchSheet`'s toggle, `JiraLaunchSheet`'s toggles, `JiraBranchSection`'s `Open MR when done` |
 | `Chevron`              | `.chev`           | `dir?: down\|up\|right` (default `down`), `className?` — one 10×10 stroked path, the other two directions rotations of it | `TrackerChip`'s and `JiraChip`'s carets and the Jira board picker's (`up` while the popover is open), `DispatchButton`'s mark (`right`), `JiraRunMenu`'s `Run ▾` caret |
-| `Fact`                 | `.item-fact*`     | `label`, `children` — one label over its value; the call site decides whether it is drawn at all | `ItemModal`, `JiraIssueModal` (the facts column)                                 |
+| `Fact`                 | `.item-fact*`     | `label`, `children` — one label over its value; the call site decides whether it is drawn at all | `ItemModal`, `JiraDetail` (the facts column)                                 |
 | `SettingsRow`, `SettingsGroup` | `.set-row`, `.set-group` | `SettingsRow{name, hint?, children?}`; `SettingsGroup{title, scope, right?, children}` | every Settings card, the Jira Setup cards, `JiraBoardSheet`'s Name & sync rows |
 | `LiveStrip`            | `.board-card-live` | `tone`, `label`, `mark` (`null` draws no right-hand reading), `title?` — `stale` is the one tone the stylesheet reads, and it drops `.hatch` | `ItemCard`, `JiraCard` (a live session) |
 
@@ -130,14 +130,14 @@ Dashboards page's Suggest card threshold (1–100 %, #340) turned out to be, and
 unreadable `dashboards.json` but cannot save one.
 
 The last three rows are the exception to the table's opening rule, and on purpose. `Fact` (hoisted out of `ItemModal`) and `SettingsRow`/`SettingsGroup`
-(promoted from `settings/`) moved into `ui/` in Jira phase 2 because a second surface now draws each — the Jira issue modal's facts column, the Jira Setup
+(promoted from `settings/`) moved into `ui/` in Jira phase 2 because a second surface now draws each — the Jira Detail dialog's facts column, the Jira Setup
 page's cards — and a component only one directory can import is the drift the one-home rule exists to stop. Their CLASSES did not move: `.item-fact*` and
 `.set-*` were never `.ui-*` families, they sit outside the ui primitives block, and guard 7 does not pin them, because the hoist moved the components and
 left their CSS byte-for-byte where both surfaces already read it. `LiveStrip` followed for the same reason in Jira phase 5: it was `ItemCard`'s inline markup
 until the Jira card needed the same band for a live session, and the component owns the markup while `.board-card-live` stays the stylesheet's, declared once.
 Everything else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`,
 `RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`, `StageBars`, `WatchdogMonitor` (runs); `JiraView`, `JiraBoardView`, `JiraCard`,
-`JiraIssueModal`, `JiraSetupView`, `JiraBoardSheet`, `JiraReposGroup`, `JiraConnectionGroup`, `JiraSkillsGroup`, `JiraWorktreeRow`, `JiraRunMenu`,
+`JiraDetail`, `JiraSetupView`, `JiraBoardSheet`, `JiraReposGroup`, `JiraConnectionGroup`, `JiraSkillsGroup`, `JiraWorktreeRow`, `JiraRunMenu`,
 `JiraLaunchSheet`, `JiraBranchSection` (jira). `JiraChip` sits at the top level of `components/` beside
 `TrackerChip`, because the shell draws it. `FilterBar` sits at the top level of `components/`, like `lib/view-keys.ts`, because more than one lazy chunk
 reads it (Board, Archive and the Jira board); `RunControls` sits there too, though only the Runs chunk reads it (`RunDetail`, `WatchdogMonitor`), and
@@ -634,18 +634,18 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   and window focus, never a poll — the value changes on a person's pick), and `useTimeZone()`: `{ zone, stored, browser, save, saveError }`, `zone` being
   `stored ?? browser`. A component mounted without the provider reads the browser's zone, which is what the jsdom suites rely on.
 - `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns`,
-  `useWatchdog`, `useTicks`, `useOrchestratorArchive` and `useMachines` (all through `useRefreshing`, below), and of `useJiraBoard` directly:
+  `useWatchdog`, `useTicks`, `useOrchestratorArchive`, `useJiraSessions` and `useMachines` (all through `useRefreshing`, below), and of `useJiraBoard` directly:
   one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
   rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
 - `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those pollers go through, `useMachines`
   among them, and `TimeZoneProvider`'s read (#241) and `ProjectsProvider`'s, which like `useOrchestratorArchive` pass no `armed` and never poll.
 - `hooks/useFetched.ts` (#285) — the keyed one-shot read: `idle | pending | ok | failed`, a key change reads `pending` on the render that carries it, and a
   superseded or post-unmount answer sets nothing. `useProjectSources`, the item modal's body, `LaunchSheet`'s plan and branch list, `useOrchestrateDraft`'s
-  merge-check, uncommitted flag and branch list, `RunDetail`'s archived run, `JiraIssueModal`'s detail and worktrees, `JiraLaunchSheet`'s prompt preview and
+  merge-check, uncommitted flag and branch list, `RunDetail`'s archived run, `JiraDetail`'s detail and worktrees, `JiraLaunchSheet`'s prompt preview and
   detail, `JiraBranchSection`'s and `JiraReposGroup`'s branch refs, and the Jira board's and Repositories card's worktree lists all read through it.
 - `hooks/useAgents.ts` — status poll on mount and window focus, plus the one re-ask a click against a project-visibility block provokes.
 - `hooks/useAction.ts` — the one home of a click-fired mutation's in-flight guard, `busy`, `error` and message mapping (#286, bug-19's layer 1): `RunControls`,
-  `LaunchSheet`, `useOrchestrateDraft`, `ClaimRelease` and, since Jira phases 3 and 5, `JiraIssueModal`'s writes and `JiraLaunchSheet`'s Start keep only their own
+  `LaunchSheet`, `useOrchestrateDraft`, `ClaimRelease` and, since Jira phases 3 and 5, `JiraDetail`'s writes and `JiraLaunchSheet`'s Start keep only their own
   success and refusal branches.
 - `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, any `remote` run is `running`, or any
   `starting` or `remoteStarting` entry is present, plus a grace window after a Resume click.

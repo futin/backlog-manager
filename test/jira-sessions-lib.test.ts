@@ -1,6 +1,6 @@
 import type { JiraSessionState } from '../shared/jira-sessions';
-import type { DashboardRow, JiraLink } from '../shared/types';
-import { desktopButton, desktopHref, openButtons, primaryIsDesktop } from '../client/src/lib/jira-sessions';
+import type { DashboardRow, JiraLink, JiraSessionsPayload } from '../shared/types';
+import { desktopButton, desktopHref, linkedHow, openButtons, primaryIsDesktop, sessionDuration, shortSessionId, surfaceWord, ticketSessions } from '../client/src/lib/jira-sessions';
 
 /**
  * The open buttons' pure rules (Jira sessions spec C2, C3, §7.5): when Desktop may be pressed, which surface leads, and what each button says. One case per
@@ -210,5 +210,53 @@ describe('openButtons (§7.5)', () => {
     it('on a phone Desktop is hidden, so Reopen targets Dashboard', () => {
       expect(buttons(null, 'ended', { phone: true }, ended('desktop'))).toEqual({ primary: { label: 'Reopen', target: 'dashboard' }, secondary: null });
     });
+  });
+});
+
+describe('Detail’s pure readings (Jira sessions spec §7.3)', () => {
+  const entry = (over: Partial<JiraLink> = {}): JiraSessionsPayload['links'][number] => ({ ...link(over), state: 'working', row: null, stateSince: new Date().toISOString() });
+  const at = (m: number): string => new Date(Date.UTC(2026, 9, 1, 12, 0) + m * 60_000).toISOString();
+
+  it('ticketSessions keeps one key’s links, live newest-started first and ended newest-ended first, and tolerates no payload', () => {
+    const payload: JiraSessionsPayload = {
+      links: [
+        entry({ sessionId: 'a', startedAt: at(0) }),
+        entry({ sessionId: 'b', startedAt: at(30) }),
+        entry({ sessionId: 'c', key: 'PAY-2', startedAt: at(60) }),
+        entry({ sessionId: 'd', startedAt: at(0), endedAt: at(10) }),
+        entry({ sessionId: 'e', startedAt: at(0), endedAt: at(20) })
+      ],
+      reachable: true,
+      rowsAt: null
+    };
+    const { live, ended } = ticketSessions('PAY-131', payload);
+    expect(live.map((l) => l.sessionId)).toEqual(['b', 'a']);
+    expect(ended.map((l) => l.sessionId)).toEqual(['e', 'd']);
+    expect(ticketSessions('PAY-131', null)).toEqual({ live: [], ended: [] });
+  });
+
+  it('shortSessionId keeps the first and last four of a long id and a short one whole', () => {
+    expect(shortSessionId('0123456789abcdef')).toBe('0123…cdef');
+    expect(shortSessionId('abc')).toBe('abc');
+    expect(shortSessionId('123456789')).toBe('123456789');
+  });
+
+  it('sessionDuration is the span start → end, `<1m` under a minute, and null while live', () => {
+    expect(sessionDuration({ startedAt: at(0), endedAt: at(135) })).toBe('2h');
+    expect(sessionDuration({ startedAt: at(0), endedAt: at(0) })).toBe('<1m');
+    expect(sessionDuration({ startedAt: at(0), endedAt: null })).toBeNull();
+  });
+
+  it('linkedHow and surfaceWord say how and where, the row’s word beating the link’s own surface', () => {
+    expect(linkedHow('run')).toBe('started by Run');
+    expect(linkedHow('branch')).toBe('found by its branch');
+    expect(linkedHow('manual')).toBe('linked by hand');
+    const row = (over: Partial<DashboardRow>): DashboardRow => ({ id: 's', status: 'busy', ...over });
+    expect(surfaceWord(link({ surface: 'dashboard' }), row({ desktopOwned: true }))).toBe('Desktop');
+    expect(surfaceWord(link({ surface: 'dashboard' }), row({ surface: 'local' }))).toBe('Terminal or app');
+    expect(surfaceWord(link({ surface: 'desktop' }), row({ surface: 'dashboard' }))).toBe('Dashboard');
+    expect(surfaceWord(link({ surface: 'dashboard' }), row({ surface: 'cloud' }))).toBe('Cloud');
+    expect(surfaceWord(link({ surface: 'desktop' }), null)).toBe('Desktop');
+    expect(surfaceWord(link({ surface: null }), null)).toBeNull();
   });
 });

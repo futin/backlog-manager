@@ -1,5 +1,6 @@
 import type { JiraSessionState } from '../../../shared/jira-sessions';
-import type { DashboardRow, JiraLink } from '../../../shared/types';
+import type { DashboardRow, JiraLink, JiraSessionsPayload } from '../../../shared/types';
+import { elapsedSince } from './item-age';
 
 /**
  * jira-sessions.ts — which "open" buttons a linked Jira session shows, and whether the Desktop one may be pressed (Jira sessions spec C2, C3, §7.5).
@@ -131,4 +132,55 @@ export function openButtons(link: JiraLink, row: DashboardRow | null, state: Jir
     primary: { label: dashboardLabel(row, state), target: 'dashboard' },
     secondary: opts.phone ? null : { label: opts.wide ? 'Open in Desktop' : 'Desktop', target: 'desktop' }
   };
+}
+
+/** One link as `GET /api/jira/sessions` carries it: the link, its derived state, the dashboard's row for it, and when this server first saw it in that state. */
+export type SessionLink = JiraSessionsPayload['links'][number];
+
+/**
+ * A ticket's sessions for Detail (spec §7.3), split into the two lists it draws and each ordered newest first: the live ones by `startedAt`, the ended ones by
+ * `endedAt` (a history reads from the most recent end backwards). A re-attached session (C5) keeps its original `startedAt`, so it stays where it began rather
+ * than jumping to the top on every resume. Ties keep the payload's order, which is the store's, so two equal instants do not swap between polls.
+ */
+export function ticketSessions(key: string, payload: JiraSessionsPayload | null): { live: SessionLink[]; ended: SessionLink[] } {
+  const mine = (payload?.links ?? []).filter((l) => l.key === key);
+  const at = (iso: string | null): number => {
+    const ms = iso === null ? NaN : Date.parse(iso);
+    return Number.isNaN(ms) ? 0 : ms;
+  };
+  const newest = (field: 'startedAt' | 'endedAt') => (a: SessionLink, b: SessionLink) => at(b[field]) - at(a[field]);
+  return {
+    live: mine.filter((l) => l.endedAt === null).sort(newest('startedAt')),
+    ended: mine.filter((l) => l.endedAt !== null).sort(newest('endedAt'))
+  };
+}
+
+/** `7f3c…a91e` — the first and last four of a session id, which is what a person matches against the dashboard's own list. A short id is returned whole. */
+export function shortSessionId(id: string): string {
+  return id.length <= 9 ? id : `${id.slice(0, 4)}…${id.slice(-4)}`;
+}
+
+/** How long a session ran, `startedAt` → `endedAt`: `elapsedSince`'s ladder, with its `now` (under a minute) spelled `<1m` because a duration is not "now". */
+export function sessionDuration(link: Pick<JiraLink, 'startedAt' | 'endedAt'>): string | null {
+  if (link.endedAt === null) return null;
+  const end = Date.parse(link.endedAt);
+  if (Number.isNaN(end)) return null;
+  const span = elapsedSince(link.startedAt, end);
+  return span === 'now' ? '<1m' : span;
+}
+
+/** The "linked how" tag on a card (spec §7.3): Run ▾ made it, a branch name matched it, or somebody linked it by hand. */
+export function linkedHow(how: JiraLink['how']): string {
+  return how === 'run' ? 'started by Run' : how === 'branch' ? 'found by its branch' : 'linked by hand';
+}
+
+/** Where a link was started or runs, for the card's `Where` line and a history line's surface; `null` when nothing says. */
+export function surfaceWord(link: JiraLink, row: DashboardRow | null): string | null {
+  if (row !== null) {
+    if (row.desktopOwned === true) return 'Desktop';
+    if (row.surface === 'local') return 'Terminal or app';
+    if (row.surface === 'dashboard') return 'Dashboard';
+    if (row.surface === 'cloud') return 'Cloud';
+  }
+  return link.surface === 'desktop' ? 'Desktop' : link.surface === 'dashboard' ? 'Dashboard' : null;
 }

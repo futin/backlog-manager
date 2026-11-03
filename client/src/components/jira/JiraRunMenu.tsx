@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useSettings } from '../../hooks/useSettings';
 import { jiraSettingOf, resolveJiraAction, runChipState, skillCommand } from '../../lib/jira';
 import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
@@ -23,10 +24,11 @@ interface MenuRow {
  * picked mock is `RunMenu.html`, where the spec differs the spec wins). One component for both homes — the card's marker row and the modal's controls row —
  * because two copies would be two places to decide what "no repository" or "a session is running" looks like.
  *
- * **It decides nothing itself.** `runChipState` (`lib/jira.ts`) is the one answer, read from the shell's status through `useJiraContext()`:
+ * **It decides nothing itself.** `runChipState` (`lib/jira.ts`) is the one answer, read from the shell's status through `useJiraContext()` and the sessions
+ * payload through `useJiraSessionsContext()` (the one-run gate is a live `run` link, not any live session — that function's header says what each source adds):
  * - `no-repo` — a DASHED chip (the wrapper's `data-state`, so the stylesheet needs no class of this family on a `Chip`, which takes none) titled
  *   `no repository mapped for <PROJECT> — Jira › Setup › Repositories`. It opens nothing: there is nowhere to run, and the title says where to fix that.
- * - `live` — disabled, titled `a session is running on <KEY>`. The strip beside it carries the session and the modal's Stop.
+ * - `live` — disabled, titled `a session is running on <KEY>`. The strip beside it carries the session and Detail's Stop.
  * - `ready` — a `Popover` with the two built-ins, a rule, this machine's skills by name, a rule, and the note `opens the launch sheet`. A pick calls
  *   `onPick(action)` and closes the panel; the sheet itself belongs to the page (`JiraView`), because it has to mount ABOVE an open modal.
  *
@@ -61,6 +63,7 @@ const MODAL_PANEL_WIDTH = 234;
 
 export function JiraRunMenu({ issue, onPick, home = 'card' }: { issue: JiraIssue; onPick: (action: JiraAction) => void; home?: 'card' | 'modal' }) {
   const { data } = useJiraContext();
+  const { data: sessions } = useJiraSessionsContext();
   const { settings } = useSettings();
   const [open, setOpen] = useState(false);
   const chip = useRef<HTMLButtonElement>(null);
@@ -71,7 +74,7 @@ export function JiraRunMenu({ issue, onPick, home = 'card' }: { issue: JiraIssue
   }, [open, home]);
   if (data === null) return null;
 
-  const state = runChipState(issue, data);
+  const state = runChipState(issue, data, sessions);
   const title =
     state === 'no-repo'
       ? `no repository mapped for ${issue.project.key} — Jira › Setup › Repositories`

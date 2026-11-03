@@ -6,7 +6,7 @@ registry entry, and nothing in `items/` knows it exists. This doc describes **ph
 client, the config reader, the poller and its caches, the issue mapping, the ADF converter, the ticket block and the read routes (six, then seven with phase
 5a's `/prompt`, nine with the repo/branch work's `/refs` and `/worktrees`, ten with the sessions page's `/sessions`). Phase 2 adds `jira.json`'s writers behind
 three guarded write routes (five since
-5a's skills, six with `/repo-defaults`) and the whole client section: a rail entry with two pages (Board and Setup), the issue modal, the shell chip and
+5a's skills, six with `/repo-defaults`) and the whole client section: a rail entry with two pages (Board and Setup), the Detail dialog, the shell chip and
 a read-only Jira row on Settings › Shared (the Trackers card's then, the Sources card's since the source-sections change). Phase 3 adds the first two writes to
 Jira itself — assign the issue to me and transition it — behind two more guarded routes, each followed
 by a re-read of the issue that is spliced into the board caches, and the modal's two controls that call them. Phase 4 adds the `jira` skill and its CLI,
@@ -282,7 +282,7 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   deliberate exception to the `useCoalescedFetch` rule
   ([invariants.md](invariants.md#a-client-poller-built-on-usecoalescedfetch-never-has-two-of-its-own-requests-in-flight)). `useJiraBoard(id, interval, nudge)`
   (`hooks/useJiraBoard.ts`) IS on `useCoalescedFetch`: it polls `boards/:id/issues` every `BOARD_TRACKER_POLL_MS` while the board syncs, once and then only on
-  `reload` for an `off` one, and only an answer for the current id may write. A CHANGE of `nudge` — a counter `JiraView` owns and bumps when the issue modal
+  `reload` for an `off` one, and only an answer for the current id may write. A CHANGE of `nudge` — a counter `JiraView` owns and bumps when the Detail dialog
   reports a landed write — asks at once through the same coalesced request, whatever the interval, `off` included (spec §6.1).
 - **`lib/jira.ts`** is the one home of every derivation the five surfaces print — the columns (`JIRA_COLUMNS`, `columnOf`, `sortForBoard`), the card's crumb
   (`crumbOf`/`crumbText`), initials, age (`cardAgeStamp`), the fold (`foldBoard` — the one walk of the parent chain, into `tops`, `under` and the
@@ -297,8 +297,9 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. The board draws the fold's tops only, each column sorted by
   `sortTops` and counting cards, and a filter that matches only a folded issue still shows its top, ringed. A card click lands in `JiraView`'s open-issue
   slot with the fold's `childrenOf` beside the issue.
-- **The issue modal** (`components/jira/JiraIssueModal.tsx`) composes `ui/Modal` and `ui/Fact` as `ItemModal` does, draws every fact the card carried at
-  once, and reads `GET /api/jira/issue/:key` fresh on open for the description (through `renderMarkdown`, `lib/markdown.ts`, the sanitising `marked` config
+- **The Detail dialog** (`components/jira/JiraDetail.tsx`, the former issue modal) composes `ui/Modal` and `ui/Fact` as `ItemModal` does, and keeps the
+  modal's slot on the Escape stack. Its facts column is the ticket's sessions (below); everything the issue modal drew sits on the right. It draws every fact
+  the card carried at once, and reads `GET /api/jira/issue/:key` fresh on open for the description (through `renderMarkdown`, `lib/markdown.ts`, the sanitising `marked` config
   `ItemModal` also uses), the children and the boards holding it. The held answer is stamped with its key, so a late answer for an issue the modal has left
   is dropped. The children draw as a tree: the detail's direct children with their descendants from the `childrenOf` snapshot the card click carried, each
   key once; a row click swaps the one modal's issue through the same `JiraView` setter, never a second `Modal`.
@@ -310,6 +311,15 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   the row, and the modal stays open. A landed write reloads three things: the shell's status (`useJiraContext().reload()`), the board's list (`onWrote`, the
   nudge above) and the modal's own detail — which keeps showing the last detail of the SAME key meanwhile, so the body does not flash `loading…` and the
   controls do not blink to disabled. A `reread: false` answer is a success like any other: the modal does not read the body.
+  **The agent column (Jira sessions, spec §7.3, §7.5)** is `JiraDetail`'s left side, from `useJiraSessionsContext()` — ONE `useJiraSessions({ open })` instance
+  (`hooks/JiraSessionsContext.tsx`, mounted by `JiraView` around the Board page only; 15 s through `useRefreshing`, a failed read keeps the last answer)
+  that the dialog, `Run ▾` and the card's chip all share. Live cards (`JiraSessionCard`) come newest first: a state strip with its age (`pollAge`, never a
+  clock of the component's own), the linked-how tag, the short id; `Unlink` only on a `branch` link and `Stop` only when the row carries a `stopState`, both
+  through the dialog's `sessionWrite`, which reloads the sessions, the status and the board. The waiting question's text is never drawn, only its state
+  label. Under them the history timeline (`<how> · ended <age> ago`, `Reopen`), then `Run ▾`. A `starting` reservation is drawn from `GET /api/jira`'s
+  `live[key]`, never from the sessions payload. `Run ▾` is disabled only while a live `run` link exists or a reservation does: `runChipState` reads the sessions
+  payload when it has landed and `status.live` (every live `run` link plus the `starting` reservations, never a `branch` or `manual` link) before it, so the two
+  sources cannot contradict each other.
 - **Jira › Setup** (`components/jira/JiraSetupView.tsx`) makes the page's ONE `/api/jira/projects` read per mount and hands it to the board sheet and the
   Repositories card. The Boards card's `Open board` writes the pick straight to `localStorage` (the page unmounts in the commit that navigates, so a
   `usePersistedState` effect would never run) and calls `onOpenJiraPage('board')`. `JiraBoardSheet` composes `ui/FormSheet`, seeds its fields once at
@@ -498,7 +508,7 @@ The look is DESIGN.md §8.9.1 (`Run ▾` and the strip), §8.9.2 (the modal's ro
 [invariants.md](invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake) (`Run ▾` is never hidden for the dashboard's sake) and the Escape
 section (eight dialogs). The browser still never talks to Jira or the dashboard: every request below is to this server.
 
-- **`Run ▾`** (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the issue modal's controls row. It decides nothing:
+- **`Run ▾`** (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the Detail dialog's agent column. It decides nothing:
   `runChipState(issue, status)` (`lib/jira.ts`) answers `no-repo` (a dashed chip that opens nothing, its title naming `Jira › Setup › Repositories`), `live`
   (disabled, titled `a session is running on <KEY>`) or `ready` (a `Popover` of the two built-ins, the skills with `skillCommand`'s slash command as a hint,
   and the note `opens the launch sheet`), the row `Jira default action` resolves to listed first with the hint `default`. It is drawn with agents off. On a card
@@ -579,7 +589,7 @@ rule](invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-on
 - **The card's worktree chip.** `JiraBoardView` reads `GET /api/jira/worktrees` once on mount and again only when the SET of live keys changes — not a poller —
   and `ticketWorktrees(key, payload)` picks the trees on a branch that carries the key, never a repo's own tree. One tree draws its branch name, more draw `N
   worktrees`; a failed read draws nothing. A Start's own tree is cut later, by the session, so its chip appears on the next change of live keys or a remount.
-- **The modal's Worktrees list.** `JiraIssueModal` asks the same route itself — on open, and when the key or its session changes — and lists the trees under a
+- **The modal's Worktrees list.** `JiraDetail` asks the same route itself — on open, and when the key or its session changes — and lists the trees under a
   heading with a count pill. Each row's `Remove` copies `removeCommand` — `git -C <repo> worktree remove <path>`, both quoted — and runs nothing: the board
   cannot see a session it did not start (Copy prompt, a terminal), so its title says to make sure none is using the tree. It is disabled while the key has a
   live session, titled `a session is running on <KEY>`.
