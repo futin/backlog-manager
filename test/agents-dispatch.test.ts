@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -9,7 +9,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
-import { item, makeProject, makeRegistry, writeRunFile } from './helpers/store';
+import { gitRepoWithBranches, item, makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import homeSpawnFixture from './fixtures/dispatch-home-spawn.json';
 import { DispatchRecordsService } from '../server/src/items/dispatch-records.service';
@@ -354,6 +354,24 @@ describe('POST /api/agents/dispatch', () => {
     );
     const res = await post({ ...good, itemPath: bugPath('bug-3-plan-awaits.md') }).expect(409);
     expect(res.body).toEqual({ error: 'this plan awaits review' });
+    expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  /* #427: the re-check that actually stops a second execution of a files item — `plan` above only draws the refusal. Uncoded, like its neighbours. */
+  it('409s a files item an execute/<id> branch holds, with no code, and spawns nothing', async () => {
+    const sent = stubDashboard();
+    gitRepoWithBranches(projectPath, ['execute/bug-2']);
+    const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
+    expect(res.body).toEqual({ error: 'an execute branch or worktree already holds this item' });
+    expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  it('409s a files item only a .worktrees/execute-<id> directory holds, and spawns nothing', async () => {
+    const sent = stubDashboard();
+    gitRepoWithBranches(projectPath, []);
+    mkdirSync(join(projectPath, '.worktrees', 'execute-bug-2'), { recursive: true });
+    const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
+    expect(res.body).toEqual({ error: 'an execute branch or worktree already holds this item' });
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
   });
 

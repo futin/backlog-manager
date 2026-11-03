@@ -302,8 +302,10 @@ The worktree stays where it is: the PR may need follow-up fixes there. The final
   open issue, removed with `backlog.mjs review <n> off`; with `Refs #<n>`, that the guard stops blocking by itself once the latest closed referencing PR merged into the
   default branch and none is open (the board derives it; the label stays), and that the issue must still be closed by hand when the work is complete. If the
   label write failed: that the guard is missing, and the command to add it;
-- **files:** "merge this PR before draining the backlog" — until it merges the item is still in `open/` on `<base>`, and an orchestrator run would execute it
-  again. That is a known limitation: a files project has no label to carry a guard. Not printed when the auto-merge wait saw the PR merge;
+- **files:** "merge this PR" — until it merges the item is still in `open/` on `<base>`. **In a new tree** (§2), this branch and worktree are what keep it from
+  running again: an orchestrator run and the board's launch sheet both refuse it with `an execute branch or worktree already holds this item`, and if the PR
+  closes without merging, deleting the branch and the worktree frees the item. **In a reused tree** neither name exists, so nothing guards the item: say that an
+  orchestrator run or a click on Run would execute it again until the PR merges. Not printed when the auto-merge wait saw the PR merge;
 - **with `--auto-merge`:** the one `auto-merge:` outcome line and every fix commit (`<short sha> <subject>`, or `fix commits: none`), as
   `references/auto-merge.md` §4 lists them. A merged PR with `Closes #<n>` closed the issue and took `in-review` with it, so the tracker line above becomes
   "merged and closed"; with `Refs #<n>` the hand steps above still apply.

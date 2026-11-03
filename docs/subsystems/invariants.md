@@ -49,7 +49,14 @@ One writer is not one writer PROCESS: `verify` runs detached beside the driver's
 heartbeat that read before verify's write and wrote after it put the item's old `verification` array back (#349). Both now go through `mutateRun`, which
 holds `<dir>/run.json.lock` (created `wx`, stamped with the pid) across the re-read and the write; a lock whose pid is dead or whose stamp is older than 30 s
 is broken, and a waiter past `BM_RUN_LOCK_TIMEOUT_MS` (default 5000) exits `1` naming the lock with nothing written. `writeRunAtomic` alone is atomic per
-write, never serialised across writes — a third writer that can run concurrently with these goes through `mutateRun` too. The reader never takes the lock.
+write, never serialised across writes — a further writer that can run concurrently with these goes through `mutateRun` too. The reader never takes the lock.
+
+`abort` and `finish` are that case (#427). `abort` runs beside a live driver's `watch` by design (bug-54) and a hand-run one beside a `verify`, and it used to
+read once, spend its whole teardown in subprocesses, and write that read back — so whatever landed in between, a `verification` array or a heartbeat, was lost.
+`mutateRun` forbids a subprocess under the lock, so abort does not hold one across the teardown: its opening read, both bug-54 refusals and `takeOverRun` are one
+`withRunLock` section, the teardown runs outside it and only COLLECTS (attention entries, each item's session id and signalled pid), and one `mutateRun` at the end
+applies those to a fresh read. A session id fills an empty field and never replaces one, because the file's value is the newer fact. `finish` is a plain
+`mutateRun`, with its branch removal and tracker publishes outside it. A lock past its deadline is exit `1` before abort signals or removes anything.
 
 The same one reader now also covers `runs/`, the archive directory `cmdInit` writes to when a new run supersedes a finished one (`archiveStem`,
 `orchestrate.mjs`) — before this feature nothing ever read it back, so a project's whole run history sat on disk with no surface showing it beyond the drawer's
@@ -1793,7 +1800,7 @@ answer:
   mapped to `inReview: true`. Execute in `pr` mode releases its claim once the branch is pushed, and the issue stays open until the PR merges, so without
   this rung the item reads ready and a click starts a second execution of work already waiting on a reviewer. Unlike `progressBlock` it lives in `shared/` and
   the server reads it too — `plan` and `dispatch()` refuse with the same sentence, `a PR is open for this item` — because the label is on the tracker, where
-  any machine's spawn can see it. A files item never carries the flag; its PR guard is a named known limitation. **The guard ends when the work lands, label or
+  any machine's spawn can see it. A files item never carries the flag; its guard is the next entry's. **The guard ends when the work lands, label or
   no label** (#411): a partial fix ships as `Refs #<n>`, which closes nothing, so after #362 merged #266 kept its label and read "a PR is open" with none
   open, until a person noticed. The mapper now drops `inReview` while `TrackerPollerService.reviewLifted` holds — a PR whose body references the issue after a
   keyword (`pullRefs`: GitHub's closing words plus `ref`/`refs`; a bare `#n` mention never counts) merged into the repo's default branch, no referencing PR
@@ -1802,6 +1809,12 @@ answer:
   issue and `review <n> off` stays the person's tidy-up. The issues read already carries every PR with `merged_at`; only the BASE needs `GET /pulls/<n>`, made
   once per merged PR that could lift a still-labelled issue and cached for the process, a failure leaving the guard on. A latest merge into a feature branch, a
   latest PR closed unmerged and a base not yet learned all keep it — the first two because the work has not reached the default branch.
+- **An execute branch or tree already holds this files item** — `executeHeldBlock` (`server/src/agents/execute-held.util.ts`, #427), right after the in-review rung
+  and server-side only: `plan` and `dispatch()` refuse with `an execute branch or worktree already holds this item`, and `DispatchButton` stays enabled because the
+  answer is a git read its payload never carries. A `--finish pr` execute leaves `execute/<id>` and `.worktrees/execute-<id>` behind while the item stays in `open/`,
+  so without this a click, or an orchestrator run through `executeHeldGate`, executes it twice. Execute only, a files item only, per request; a failed read is not held.
+  A session that reused a clean linked worktree on its own branch made neither name, and nothing on disk ties that branch to the item, so its item stays unguarded
+  until the PR merges, and its final message says so.
 - **An outsider filed this item and no groom has pinned its body** — `unvettedBlock` (`shared/agent.ts`, #341): a tracker bug or task whose author is not
   OWNER, MEMBER or COLLABORATOR, mapped to `unvetted: true` until a live claim of ours carries `pin` equal to the body's hash. It reads `UNVETTED_REASON`, and
   the server's `plan` and `dispatch()` refuse with the same sentence, for the same reason the open PR does: the mark is derived from the tracker, which any
@@ -4035,8 +4048,12 @@ right after a successful push, PR or not; a person runs `review <id> off` when t
 lifts the flag by derivation without touching the label (#411, the "A PR for this item is open" rung). Every per-item gate reads the mapped `inReview` flag
 through one sentence, `a PR is open for this item` (`IN_REVIEW_REASON`, `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and execute's skill
 text): the board's Run button, the server's `plan`/`dispatch` ladder (an uncoded 409) and the orchestrator gate, which turns the item `ungroomed` with that
-reason so no new verdict reaches the run's stages. A files project has no label to carry, so `review` is tracker-only and a files item's PR guard is a named
-known limitation, not a gap this route papers over.
+reason so no new verdict reaches the run's stages. A files project has no label to carry, so `review` is tracker-only, and a files item's guard is what a
+`--finish pr` execute leaves behind, its `execute/<id>` branch or `.worktrees/execute-<id>` tree (#427): `an execute branch or worktree already holds this item`
+(`EXECUTE_HELD_REASON`), read by the server's `plan`/`dispatch` (`executeHeldBlock`, per request, execute only) and the orchestrator gate. It says what is known and
+never that a PR is open — nothing here asked GitHub — and a leftover branch blocks until a person deletes it. An execute that reused a linked worktree on its own
+branch leaves neither name, so its item has no guard until the PR merges. A tracker item is not asked: a person clears its
+label after a closed PR without being asked to delete a branch.
 
 **The eleventh write route is `plan-review` (backlog-tick), and it is `review`'s twin.** `POST /api/items/plan-review`, body `{ project, id, planReview }`, adds
 or removes the `plan-review` label — the eleventh tracker label — with the class guard, the `writerFor` gate, the per-URN chain, a literal boolean or a 400, and

@@ -96,6 +96,10 @@ orchestrator gate turns it `ungroomed` with the same sentence. The label is LIFT
 merged into the default branch — the case a `Refs #<n>` PR leaves behind, since it closes nothing. The latest decides, never any: groom's plan PR is an older
 `Refs #<n>` merge into main.
 
+A files item has no label, so its rung is a git read (#427): `plan`/`dispatch` refuse an item whose derived action is `execute` while `refs/heads/execute/<id>` or
+`.worktrees/execute-<id>` exists, right after `inReviewBlock`, with `an execute branch or worktree already holds this item` (`executeHeldBlock`, an uncoded 409 from
+`dispatch`). Through `runGit`, per request and memoised nowhere, and a failed read is not held. The orchestrator gate turns such an item `ungroomed` with the same sentence.
+
 `plan-review` is the label a tick's unattended groom leaves on the plan it writes, and it is read as exclusion exactly as `in-review` is: `planReviewBlock`
 (`shared/agent.ts`) makes `plan`/`dispatch` refuse a mapped `planReview` item with `this plan awaits review`, always AFTER `inReviewBlock`, and the orchestrator
 gate turns it `ungroomed` with the same sentence. `backlog.mjs plan-review <id> on|off` is the one caller of the route, and `off` is how a person approves.

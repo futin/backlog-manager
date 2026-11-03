@@ -10,6 +10,7 @@ import {
   dispatchBlock,
   dispatchGate,
   finishClause,
+  EXECUTE_HELD_REASON,
   IN_REVIEW_REASON,
   inReviewBlock,
   PLAN_REVIEW_REASON,
@@ -1212,6 +1213,17 @@ describe('planReviewBlock', () => {
   it('is the same sentence backlog-execute refuses with', () => {
     const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
     expect(skill).toContain(PLAN_REVIEW_REASON);
+  });
+});
+
+describe('EXECUTE_HELD_REASON', () => {
+  it('says what is known, which is a branch or a tree, never that a PR is open', () => {
+    expect(EXECUTE_HELD_REASON).toBe('an execute branch or worktree already holds this item');
+  });
+
+  it('is the same sentence the orchestrator gate carries by hand', () => {
+    const tool = readFileSync(join(__dirname, '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
+    expect(tool).toContain(`const EXECUTE_HELD_REASON = '${EXECUTE_HELD_REASON}';`);
   });
 });
 
