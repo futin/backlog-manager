@@ -31,7 +31,8 @@ binding and the body is yours. If the plan and the spec disagree, the spec wins 
   lines — refusing would stop every Run from linking. Say so in the store's header comment.
 - Nothing is ever written to Jira by this work.
 - Before editing a file by any route that does not `Read` it, read its `.claude/rules/` file (CLAUDE.md "Rule files" table): `jira.md` for
-  `server/src/jira/**` and `server/src/agents/jira-*.ts`; `board.md` for `client/src/**`; `skills.md` for `skills/**`; `tests.md` for `test/**`.
+  `server/src/jira/**` and `server/src/agents/jira-*.ts`; `dispatch-watchdog.md` for `server/src/agents/**`; `items.md` for `shared/types.ts`; `board.md`
+  for `client/src/**` and `shared/agent.ts`; `skills.md` for `skills/**`; `tests.md` for `test/**` and `.claude/rules/**`.
 - Comments explain *why*, at the density of the surrounding file. New prose wraps at 160 columns.
 - Copy strings are the spec's, verbatim: state names (§6), the Quiet title, C2's two disabled titles, §7.5's labels, the unlink 409 sentence.
 - Dashboard row surface is `'local' | 'dashboard' | 'cloud'`; this repo's own launch surface is `'desktop' | 'dashboard'`. Never conflate the two types.
@@ -44,14 +45,16 @@ binding and the body is yours. If the plan and the spec disagree, the spec wins 
 ## Review Focus
 
 1. **Restart mid-run.** Server restarts while a Run session is live and while another is `starting`: the confirmed one is live again after load and is
-   reconciled; the starting one is gone (never persisted) and its key is free. Test in Task 2.
-2. **Corrupt or old store file.** Truncated JSON, `version: 2`, or an entry missing `how`: the server boots, the page shows no links, the bad file is set
-   aside, not silently overwritten. Test in Task 1.
+   reconciled; the starting one is gone (never persisted) and its key is free; one whose session went idle while the server was down survives the load
+   and ends at the first reconcile after the quiet clock, not on load (spec §5, §12). Tests in Task 2 (`after a restart`).
+2. **Corrupt or old store file.** Truncated JSON or `version: 2`: the server boots, the page shows no links, the bad file is set aside, not silently
+   overwritten. One malformed entry (missing `how`, unknown `how`, no `key`) costs only itself: it is dropped on load and the rest load — the per-entry
+   fallback `server/src/jira/config.util.ts` uses. Tests in Task 1.
 3. **Dashboard down for a long stretch.** No tick answers for 10 minutes: nothing ends, every live session shows Lost contact, and the badge keeps its
    last count rather than dropping to zero. Tests in Task 3 (server) and Task 13 (badge).
 4. **Two tabs, one switch.** Board | List chosen in one tab, the badge clicked in another: both readers of the view store agree (module store, like
-   `useJiraPage`). Test in Task 10.
-5. **Phone over the tailnet.** `claude://` cannot open there: the Desktop button must not throw or navigate the SPA away. Decide in Task 7 (hide when
+   `useJiraPage`). Test in Task 11.
+5. **Phone over the tailnet.** `claude://` cannot open there: the Desktop button must not throw or navigate the SPA away. Decide in Task 9 (hide when
    `navigator.userAgent` is a phone — the spec leaves it to the builder) and test the hidden case.
 
 ---
@@ -73,12 +76,16 @@ binding and the body is yours. If the plan and the spec disagree, the spec wins 
     null }; startedAt: string; endedAt: string | null; endReason: JiraEndReason | null; quietSince: string | null }`.
   - `JiraLiveSession` gains `sessionId: string | null` (Stop needs it; Task 4).
 - Produces in `server/src/jira/live.service.ts` (`JiraLiveService`), keeping today's `reserve(key, repo)`, `confirm(key, sessionId)`, `release(key)`,
-  `get(key)`, `snapshot()`, `confirmed()`, `hasConfirmed()` with today's semantics, plus:
+  `get(key)`, `snapshot()`, `confirmed()`, `hasConfirmed()` with today's semantics, now read over the key's **`run`** entries only: `get(key)` is the
+  key's live `run` entry (starting included) or null — a live `branch`/`manual` link never shows through it (its readers are the dispatch's gate, Stop's
+  starting check and the run-chip, `jira-dispatch.service.ts:183,201,231`); `release(key)` drops only a starting `run` entry. Plus:
   - `confirm(key, sessionId, meta: Pick<JiraLink, 'action' | 'name' | 'branch' | 'surface' | 'model' | 'effort' | 'snapshot'>)` — the meta argument is new.
   - `end(key: string, sessionId: string, reason: JiraEndReason, now?: number): boolean` — false if that pair is not live.
   - `reattach(key: string, sessionId: string): boolean` — clears `endedAt`/`endReason`/`quietSince` on the pair's own entry.
   - `addLink(link: Omit<JiraLink, 'endedAt' | 'endReason' | 'quietSince'>): 'added' | 'exists' | 'suppressed'` — for `branch`/`manual`.
   - `unlink(key: string, sessionId: string): 'removed' | 'missing' | 'run'` — removes and records the pair in a suppressed list; `'run'` refuses.
+  - `isSuppressed(key, sessionId): boolean`, `unsuppress(key, sessionId)` (Task 7's explicit link), `markNeverLink(key, sessionId)`,
+    `isNeverLink(key, sessionId): boolean` (Task 6's Jira-404 pairs). Both lists persist with the entries.
   - `markQuiet(key, sessionId, at: string)` / `clearQuiet(key, sessionId)`.
   - `links(): JiraLink[]` (live and ended), `liveLinks(): JiraLink[]`, `hasLive(): boolean`.
   - `snapshot()` now returns only live **`run`** entries (spec §9.1 / review 2: `live[key]` is run-only until Task 10 retires its readers).
@@ -109,6 +116,10 @@ Behaviour:
   - `snapshot is run-only`: one live `run` on `PAY-4`, one live `branch` on `PAY-5` → `snapshot()` has `PAY-4` (with its `sessionId`) and not `PAY-5`.
   - `corrupt file`: write `{"version":1,"links":[` → service boots with no links; the file is renamed to `jira-links.json.bad-*` only at the first save.
   - `wrong version`: `{"version":2,"links":[]}` → same as corrupt.
+  - `a malformed entry costs only itself`: file with three entries, the middle one missing `how` → the other two load; the file is not set aside.
+  - `get is run-only`: `addLink` a live `branch` on `PAY-6` → `get('PAY-6')` null; `release('PAY-6')` leaves the branch link live.
+  - `never-link and suppression survive reload`: `markNeverLink('PAY-8','s3')`, `unlink` a branch `PAY-9`/`s4`, new instance → `isNeverLink` and
+    `isSuppressed` true for those pairs and false for `PAY-8`/`s4`; `unsuppress('PAY-9','s4')` then `addLink` → `'added'`.
   - `atomic write`: after a save, no `jira-links.json.tmp*` remains in the dir.
 - [ ] **Step 2:** `pnpm run test:jest -- test/jira-live.test.ts` → the new cases FAIL.
 - [ ] **Step 3:** Implement `links.store.ts` and the reworked `JiraLiveService`. Update `server/src/jira/jira.controller.ts` (`GET /api/jira` `live`,
@@ -122,10 +133,13 @@ Behaviour:
 **Files:**
 - Modify: `server/src/agents/dashboard-sessions.util.ts` (add a rows read beside `dashboardSessions`), `server/src/agents/jira-live.service.ts`
   (`JiraLiveReconciler`)
-- Test: `test/agents-jira-live.test.ts` (extend)
+- Test: `test/agents-jira-live.test.ts` — **rewritten in part**: the cases at :71, :78, :85 (immediate drop), :125 (one-clock grace) and :205 (disarm when
+  nothing is confirmed) assert behaviour this task replaces; rewrite each to the new rule and say so, case by case, in the commit body. Every other case
+  keeps its assertion.
 
 **Interfaces:**
-- Produces `interface DashboardRow` in `dashboard-sessions.util.ts` — exactly the fields the spec's §5 "The dashboard read carries rows" lists, each
+- Produces `interface DashboardRow` in **`shared/types.ts`** (not in `agents/`: `JiraLiveService` in `jira/` takes it, and `jira/` imports nothing from
+  `agents/`, `.claude/rules/jira.md:103`) — exactly the fields the spec's §5 "The dashboard read carries rows" lists, each
   optional/absent-safe as the dashboard encodes it (`stopState`, `processLive`, `desktopOwned` absent, never `false`).
 - Produces `dashboardSessionRows(cfg: AgentsConfig): Promise<{ rows: DashboardRow[]; full: boolean }>` — `GET /api/sessions?limit=50&lookback=168`;
   `full` is `rows.length >= 50`. `dashboardSessions` is re-expressed over it with **unchanged** output for its three readers.
@@ -147,15 +161,19 @@ Behaviour per tick (agents enabled; otherwise unchanged no-op):
 
 - [ ] **Step 1: Write failing tests** (fake timers, stub fetch, as the suite does today):
   - `incomplete for 120 s after a turn ends with idle`: entry started 10 min ago; tick at t0 row `incomplete` → live, `quietSince = t0`; tick at
-    t0 + 119 s → live; t0 + 120 s → ended `idle`.
+    t0 + 119 s → live; t0 + 120 s → ended `idle` (the boundary follows §6's "less than 120 s" and today's `agents-jira-live.test.ts:125`; §5's "more
+    than 120 s" is the spec disagreeing with itself — note it in the commit body). Same case with an `idle` row instead of `incomplete` → same result.
   - `working inside the quiet window clears it`: t0 `incomplete`, t0 + 60 s `working` → `quietSince` null; t0 + 180 s `incomplete` → live (new clock).
   - `absent from a short list ends gone`; `absent from a full list of 50 stays live`.
   - `unreachable dashboard ends nothing`: fetch rejects for 10 consecutive ticks → every entry live, `reachable()` false; next good tick → true.
-  - `re-attach`: ended `idle` entry, row `working` → live again, same entry.
+  - `re-attach`: ended `idle` entry `s1` on `PAY-1`, a second live entry `s2` on `PAY-1`, row `s1` `working` → `s1` live again on its own entry, `s2`
+    untouched, `links().length` unchanged.
   - `arms on boot with an empty store when a repo is mapped`; `does not arm with no repos and no live`.
   - `15 s while a page is open`: `notePageRead(now)` → next tick scheduled at 15 s; 31 s without a read → 60 s.
   - `dashboardSessions output unchanged`: same fixture through the old reader → identical `id → status` map.
   - `asks with the caps`: the fetched URL carries `limit=50` and `lookback=168`.
+  - `after a restart`: store file holding a live `run` on `PAY-1`/`s1` (started 1 h ago) and nothing for `PAY-2`; new service + reconciler, row `s1`
+    `idle` → after load `s1` is live (not ended on load); first tick sets `quietSince`; tick 120 s later ends it `idle`. `reserve('PAY-2', r)` true.
 - [ ] **Step 2:** Run `test/agents-jira-live.test.ts` → FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run `test/agents-jira-live.test.ts`, `test/jira-live.test.ts`, plus `grep -l dashboardSessions test/` hits; `pnpm run typecheck` → PASS.
@@ -170,19 +188,23 @@ Behaviour per tick (agents enabled; otherwise unchanged no-op):
 
 **Interfaces:**
 - Produces `type JiraSessionState = 'starting' | 'plan' | 'permission' | 'reply' | 'answer' | 'working' | 'quiet' | 'lost' | 'ended'` and
-  `sessionState(link: JiraLink, row: DashboardRowView | null, reachable: boolean): JiraSessionState` in `shared/jira-sessions.ts`, first-match per §6.
+  `sessionState(link: JiraLink, row: DashboardRow | null, reachable: boolean): JiraSessionState` in `shared/jira-sessions.ts`, first-match per §6,
+  total: a live link that no row of §6 matches (an `idle` or `incomplete` row inside the grace, `quietSince` not yet set, an unknown status, or no row
+  while the dashboard answers) is `quiet`.
   `needsYou(state): boolean` — true for `plan | permission | reply | answer` only. `STATE_LABEL: Record<JiraSessionState, string>` with §6's exact names
   (`Starting…`, `Waiting for plan approval`, `Waiting for permission`, `Waiting for a reply`, `Waiting on your answer`, `Working`, `Quiet`,
   `Lost contact`, `Ended`). `QUIET_TITLE = 'Turn finished or stalled — the dashboard cannot tell which'`.
-- Produces `DashboardRowView` in `shared/types.ts` (the subset of `DashboardRow` the client needs — move the type there and import it server-side).
-- Produces `GET /api/jira/sessions` → `JiraSessionsPayload { links: (JiraLink & { state: JiraSessionState; row: DashboardRowView | null;
-  stateSince: string })[]; reachable: boolean; rowsAt: string | null }`. Memory only, no outbound call; calls `notePageRead`. `stateSince` is when the
+- Produces `GET /api/jira/sessions` → `JiraSessionsPayload { links: (JiraLink & { state: JiraSessionState; row: DashboardRow | null;
+  stateSince: string })[]; reachable: boolean; rowsAt: string | null }`. Memory only, no outbound call. Calls `notePageRead` only when the query
+  carries `open=1`, which only the Jira section's hook sends — the rail badge's read (Task 13) does not, so a configured Jira does not keep the reconciler
+  at 15 s forever (spec §5 "while a Jira page is open"). `stateSince` is when the
   server first saw that state for that pair (memory; reset on a state change).
 
 - [ ] **Step 1: Write failing tests** — `sessionState`: one case per §6 row; `question` + `remotePlan` → `plan`; `question` + `permissionWait` +
   `remoteReply` → `permission` (row order); `question` alone → `answer`; `incomplete` with `quietSince` set → `quiet`; unreachable with a last state of
-  `working` → `lost`; `sessionId: null` → `starting`; ended entry → `ended`. `needsYou`: true for the four waits, false for the rest. Route: unconfigured
-  → `{ links: [], reachable: true, rowsAt: null }`; configured → one live and one ended link with their states; the call marks the page open.
+  `working` → `lost`; `sessionId: null` → `starting`; ended entry → `ended`; live link with an `idle` row and `quietSince` null → `quiet`; live link,
+  no row, dashboard reachable → `quiet`. `needsYou`: true for the four waits, false for the rest. Route: unconfigured
+  → `{ links: [], reachable: true, rowsAt: null }`; configured → one live and one ended link with their states; `?open=1` marks the page open and a read without it does not.
 - [ ] **Step 2:** Run → FAIL. **Step 3:** Implement. **Step 4:** Run both suites + typecheck → PASS.
 - [ ] **Step 5:** Commit `feat(jira): derive session state and serve GET /api/jira/sessions`.
 
@@ -193,7 +215,7 @@ Behaviour per tick (agents enabled; otherwise unchanged no-op):
   `client/src/components/jira/JiraIssueModal.tsx` (its Stop caller sends `sessionId` from `live[key].sessionId`)
 - Test: `test/agents-jira-stop.test.ts` (extend), `test/jira-modal.test.tsx` (the Stop case's request body)
 
-Behaviour: `POST /api/agents/jira-stop { key, sessionId }`. Missing or malformed `sessionId` → 400 with the key-shape sentence's style. A `sessionId` not
+Behaviour: `POST /api/agents/jira-stop { key, sessionId }`. Missing or malformed `sessionId` → 400 `invalid session id`. A `sessionId` not
 live on that key → 409 `<KEY> has no live session <first 8 chars of id>`. Success ends the entry `stopped` (not delete). Today's other answers keep their
 status and sentence.
 
@@ -205,7 +227,8 @@ status and sentence.
 ### Task 5 (docs for section 1)
 
 **Files:** `.claude/rules/jira.md` (the live-map bullet → the store), `docs/subsystems/invariants.md` (rename the "remembered in server memory only"
-entry; keep an HTML anchor with the old slug so `jira.md`'s and other links still land), `docs/subsystems/api.md` (`GET /api/jira/sessions`, Stop body).
+entry. `.claude/rules/jira.md:105` takes the **new** heading's slug — `test/claude-rules.test.ts` resolves rule-file anchors against `##`/`###`
+headings only, so an HTML anchor cannot satisfy it; an `<a id>` with the old slug serves `docs/subsystems/jira.md`'s link only), `docs/subsystems/api.md` (`GET /api/jira/sessions`, Stop body).
 `test/claude-rules.test.ts` must stay green (headline byte-equality, 80-word cap, one anchor per bullet).
 - [ ] Edit, run `test/claude-rules.test.ts`, commit `docs: jira link store replaces the memory-only live map`.
 
@@ -249,7 +272,7 @@ other failure → nothing, retry next tick. Detection never runs on `idle`/`inco
 
 **Files:**
 - Modify: `server/src/agents/jira-agents.controller.ts`, `server/src/agents/dashboard-sessions.util.ts` (add the one-row read)
-- Test: `test/agents-jira-link.test.ts` (create)
+- Test: `test/agents-jira-link.test.ts` (create; supertest via `listenLoopback` once, `.claude/rules/tests.md`)
 
 **Interfaces:**
 - `dashboardSessionRow(cfg, id): Promise<DashboardRow | null>` — `GET /api/sessions/:id/row`; 404 → null; other failures → 502 `HttpException` as
@@ -267,7 +290,8 @@ other failure → nothing, retry next tick. Detection never runs on `idle`/`inco
 
 ### Task 8: `jira.mjs link` / `unlink` and the skill
 
-**Files:** `skills/jira/tools/jira.mjs` (USAGE, header comment naming the new routes, two commands), `skills/jira/tools/jira.test.mjs`,
+**Files:** `skills/jira/tools/jira.mjs` (USAGE, header comment naming the new routes and the new exit code 2 in its exit-code prose, two commands),
+`.claude/rules/jira.md:29,40` and `jira.test.mjs:3` (their "one network peer is `/api/jira`" wording now also names `/api/agents/jira-link|unlink`), `skills/jira/tools/jira.test.mjs`,
 `skills/jira/SKILL.md` (two subcommands; description mentions linking)
 
 Behaviour: `jira.mjs link <KEY>` / `unlink <KEY>` read `CLAUDE_CODE_SESSION_ID`; absent → exit 2, `jira.mjs link needs CLAUDE_CODE_SESSION_ID — run it
@@ -286,32 +310,39 @@ inside a Claude Code session`. Otherwise POST as above and print the server's se
 
 **Files:**
 - Create: `client/src/lib/jira-sessions.ts` (pure)
-- Modify: `server/src/agents/jira-agents.controller.ts` (+ `POST /api/agents/jira-open-desktop`), reuse `desktop.util.ts` for nothing — this route
+- Modify: `server/src/agents/jira-agents.controller.ts` (+ `POST /api/agents/jira-open-desktop`), do not reuse `desktop.util.ts` — this route
   passes the dashboard's sentence through **unchanged** (unlike the launch sheet's rewording)
 - Test: `test/jira-sessions-lib.test.ts` (create), `test/agents-jira-link.test.ts` (extend with the open route)
 
 **Interfaces:**
-- `desktopButton(row: DashboardRowView, phone: boolean): { show: boolean; enabled: boolean; via: 'href' | 'handover' | null; title: string | null }` —
+- `desktopButton(row: DashboardRow, phone: boolean): { show: boolean; enabled: boolean; via: 'href' | 'handover' | null; title: string | null }` —
   C2 exactly. Titles: `Still running — open it in the Dashboard` (dashboard), `Still running in a terminal or the app` (local). `phone` → `show: false`.
 - `primaryIsDesktop(row): boolean` — C3 incl. promotion.
-- `openButtons(link, row, state, phone): { primary: { label: string; target: 'desktop' | 'dashboard' }; secondary: { label: string; target } | null }`
-  — §7.5 first-match table; `wide: boolean` param spells the secondary out for Detail.
+- `openButtons(link: JiraLink, row: DashboardRow | null, state: JiraSessionState, opts: { phone: boolean; wide: boolean }): { primary: { label: string;
+  target: 'desktop' | 'dashboard' }; secondary: { label: string; target: 'desktop' | 'dashboard' } | null }` — §7.5 first-match table; `wide` spells
+  the secondary out for Detail. An ended link (row usually null) gets `Reopen` alone, targeting `link.surface === 'dashboard'` ? Dashboard : Desktop
+  (Desktop hidden on a phone → Dashboard).
 - `desktopHref(id) = 'claude://resume?session=' + encodeURIComponent(id)`; Dashboard is `sessionUrl(linkBase, id)` (`client/src/lib/agents.ts:466`).
 - `POST /api/agents/jira-open-desktop { sessionId }` → dashboard `POST /api/spawn` resume with that id and the desktop surface (read the dashboard's
   `resumeTarget` for the body it expects); status and `{ error }` passed through; unreachable → 502.
 
 - [ ] **Step 1: Tests** — every Buttons case in spec §12 (dashboard working/held/idle+stopState/idle+processLive/idle clean/incomplete clean,
   `desktopOwned`, local working/question/idle, `desktopOwned` in `question` → `Open in Desktop`, permission → `Open in Dashboard`, answer/plan/reply
-  labels, ended → `Reopen` only, phone → Desktop hidden). Route: 409 `session is still running` passes through verbatim; 501 likewise; dashboard down → 502.
+  labels, ended → `Reopen` only, ended with `row: null` and `surface: 'dashboard'` → Reopen targets Dashboard, `surface: 'desktop'` → Desktop, phone →
+  Desktop hidden). Route: 409 `session is still running` passes through verbatim; 501 likewise; dashboard down → 502.
 - [ ] **Steps 2–4**, **Step 5:** commit `feat(jira): open-in buttons follow the dashboard's hand-over rules`.
 
 ### Task 10: Detail dialog
 
 **Files:**
 - Create: `client/src/components/jira/JiraDetail.tsx`, `client/src/components/jira/JiraSessionCard.tsx` (one live card; reused by the deck in Task 11),
-  `client/src/hooks/useJiraSessions.ts` (polls `GET /api/jira/sessions` every 15 s while mounted; `JiraContext`-style single instance)
+  `client/src/hooks/useJiraSessions.ts` (polls `GET /api/jira/sessions` every 15 s while mounted; `JiraContext`-style single instance;
+  `useJiraSessions({ open: boolean })` — the Jira section passes `open: true`, which adds `?open=1`)
 - Modify: `client/src/components/jira/JiraView.tsx` (open `JiraDetail` where it opened `JiraIssueModal`); move `JiraIssueModal`'s right-side content
-  into `JiraDetail` and delete `JiraIssueModal.tsx`; `client/src/lib/jira.ts` run state (`:699`) and `JiraRunMenu` read the **run gate** (live `run`
+  into `JiraDetail` and delete `JiraIssueModal.tsx`; rename it everywhere a guard pins it: `.claude/rules/board.md:12,16,19`, the Escape entry in
+  `docs/subsystems/invariants.md`, the comment in `client/src/hooks/useDialogEscape.ts`, `client/src/components/ui/Modal.tsx`'s composer note,
+  `docs/subsystems/board.md`, `docs/subsystems/jira.md`, `.claude/DESIGN.md`, `test/ui-modal.test.tsx:97-102` (composers → `ItemModal` + `JiraDetail`),
+  `test/dialog-escape.test.tsx:35,305` (import and render), `test/dialog-count-docs.test.ts:46` (`EIGHT` list); the count stays eight; `client/src/lib/jira.ts` run state (`:699`) and `JiraRunMenu` read the **run gate** (live `run`
   link in the sessions payload) instead of `live[key]`
 - Test: rename `test/jira-modal.test.tsx` → `test/jira-detail.test.tsx` and keep every existing case; add the new ones
 
@@ -321,8 +352,10 @@ disabled only while a live `run` link exists. Right: everything §8's modal list
 dialog count stays eight). The waiting question's text is not shown.
 - [ ] **Step 1: Tests** — every §8 modal item present and working (the existing suite, moved); two live sessions → two cards newest first; Unlink only on
   the branch card and it POSTs `jira-unlink`; Stop only with `stopState` and its body carries `sessionId`; Run ▾ enabled with only a branch link,
-  disabled with a live run link; history line text for an ended `execute` 2 h ago; Escape closes; the board.md dialog-count guard still green.
-- [ ] **Steps 2–4** (`jira-detail`, `jira-board`, `jira-lib`, `grep -l JiraIssueModal test/` hits, typecheck), **Step 5:** commit
+  disabled with a live run link; history line for an ended `run` link 2 h ago reads `run · ended <pollAge> ago` and one for a `branch` link `branch · ended <pollAge> ago` — assert against `pollAge(endedAt, now)` (`client/src/lib/tracker.ts:37`), e.g. `2 h` (the first word is the
+  link's `how`, never its action, so `{ skill }` needs no label; ages via `pollAge`); Escape closes; the board.md dialog-count guard still green.
+- [ ] **Steps 2–4** (`jira-detail`, `jira-board`, `jira-lib`, `ui-modal`, `dialog-escape`, `dialog-count-docs`, `claude-rules`, typecheck; then
+  `grep -rl JiraIssueModal client test .claude docs/subsystems` must print nothing), **Step 5:** commit
   `feat(jira): Detail dialog with the ticket's sessions`.
 
 ---
@@ -343,7 +376,8 @@ child leaves the shelves; shelves To Do / In Progress show 8 + `+ N more`, Done 
 shelves alike; the minute tick re-ages without re-folding.
 - [ ] **Step 1: Tests** — deck order with one of each state; a live session on a folded child removes its top from the shelves and the deck card names the
   top in its crumb; 11 To Do tops → 8 rows + `+ 3 more`; 5 Done → 3 rows; search hit inside a fold rings the top in the shelf; view store: two mounted
-  readers agree after one writes, survives remount, a junk stored value reads `'board'` (Review Focus 4); every §8 board item still present.
+  readers agree after one writes, survives remount, a junk stored value reads `'board'` (Review Focus 4); every §8 board item still present; one session
+  on `PAY-20`, which two boards both hold → its deck card shows on board A and on board B.
 - [ ] **Steps 2–4**, **Step 5:** commit `feat(jira): Board view as agent deck and status shelves`.
 
 ## Section 5 — List (spec §7.2, C7)
@@ -356,9 +390,9 @@ allTickets; badge click writes it in Task 13). Modify `JiraBoardView.tsx` (List 
 Behaviour: §7.2 — Live then Ended; Live by state priority then `startedAt` newest first; Ended by `endedAt` newest first; window filters ended rows on
 `endedAt` only (default 7 d); All tickets widens from the picked board's keys (and their folds) to every link, using the snapshot for tickets off the board;
 Reopen on ended rows; Run ▾ on an ended row only when the ticket has no live `run` link.
-- [ ] **Step 1: Tests** — grouping and both sorts; each chip's count and filter; live row started 10 d ago visible under 7 d, ended 10 d ago hidden;
+- [ ] **Step 1: Tests** — grouping and both sorts; each chip's count and filter; live row started 10 d ago visible under 7 d, ended 10 d ago hidden (dates via `daysAgoDate`, `test/helpers/dates.ts`, never literals);
   All tickets shows a session on a key not on the board with its snapshot summary; Run ▾ present on an ended row whose ticket has only a live branch link;
-  search by branch.
+  search by branch; one session on a ticket two boards hold → one row with All tickets on.
 - [ ] **Steps 2–4**, **Step 5:** commit `feat(jira): List view, one row per session`.
 
 ## Section 6 — Rail badge (spec §7.4, C4)
@@ -371,12 +405,14 @@ rail's classes.
 
 Behaviour: count of `needsYou` across **all** live links (not the picked board); zero → no element; while the sessions read is unreachable the last count
 stays (Review Focus 3); click → `setJiraPage('board')`, view `'list'`, filters `{ chip: 'needs-you', allTickets: true }`. The rail reads the sessions
-hook only while Jira is configured (no poll otherwise).
+hook only while Jira is configured (no poll otherwise), with `open: false`.
 - [ ] **Step 1: Tests** — plan + permission + reply + answer + working → `4`; zero → absent; a session on a key off the picked board counts; one session on a
-  ticket on two boards counts once; click lands on List with Needs you and All tickets; unreachable payload keeps the previous count.
+  ticket on two boards counts once; click lands on List with Needs you and All tickets; unreachable payload keeps the previous count; the rail's request carries no `open=1`.
 - [ ] **Steps 2–4**, **Step 5:** commit `feat(jira): Needs-you badge on the Jira rail entry`.
 
 ### Task 14: Manual check of `claude://resume` on a live local session (parked #1)
+
+C2's `local` rule ships as written in Task 9 whatever this finds; the result only feeds a follow-up proposal.
 
 Not code. Start `claude` in a terminal on a scratch repo, keep it mid-turn, open `claude://resume?session=<id>` from the board's Detail (temporarily
 enabled via devtools). Record what the app does in the final report. If it only focuses or refuses, propose relaxing C2's `local` rule; change nothing
@@ -388,4 +424,10 @@ without the user.
 
 §5 store/rules/retention → 1; detach/grace/arming/rate/rows → 2; detection → 6; `/jira link` → 7, 8. §6 → 3. §7.1 → 11. §7.2 → 12. §7.3 → 10 (+4 Stop).
 §7.4 → 13. §7.5 + C2/C3 → 9. C1 → 11. C4 → 13. C5 → 2. C6 → 1. C7 → 12. C8 → 11. C9 → 1, 7, 10. §8 → 10, 11. §10 docs → 5, 11, 13; CSP → no change
-expected (spec §10), Task 9 confirms by test that the Desktop href renders under the served CSP's `test/csp.test.ts` unchanged. §12 → each task's Step 1.
+expected (spec §10). §12 → each task's Step 1.
+
+## Decisions this plan takes where the spec leaves the builder a choice (§11)
+
+- Store file `~/.backlog-manager/jira-links.json`, schema version 1. Client read: a new `GET /api/jira/sessions`. ~15 s: `?open=1` reads mark a page open
+  for 30 s. History in Detail: not paged (C6 caps it at 20). `live` stays on `GET /api/jira` (run-only) after Task 10 — removing a field is not in scope.
+  Board A's mock files are kept.
