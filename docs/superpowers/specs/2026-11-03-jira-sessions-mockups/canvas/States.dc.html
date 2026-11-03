@@ -42,7 +42,7 @@ h2{margin:0 0 14px;font-size:16px;font-weight:600}
     <h2>Session states</h2>
     <div class="grid">
       <article class="card"><div class="strip s-start">Starting…<span class="r">now</span></div><div class="face">Run clicked, session id not confirmed yet.<span class="src">live map: starting</span></div></article>
-      <article class="card"><div class="strip s-work">Working<span class="r">12 m</span></div><div class="face">Agent is busy. Desktop greyed while a Dashboard-run session works.<div class="acts"><button class="chip pri" type="button">Open in Dashboard</button><button class="chip" type="button" disabled="{{ yes }}">Desktop</button></div><span class="src">dashboard: working</span></div></article>
+      <article class="card"><div class="strip s-work">Working<span class="r">12 m</span></div><div class="face">Agent is busy. Desktop greyed while a Dashboard-run session is still running.<div class="acts"><button class="chip pri" type="button">Open in Dashboard</button><button class="chip" type="button" disabled="{{ yes }}">Desktop</button></div><span class="src">dashboard: working</span></div></article>
       <article class="card"><div class="strip s-need">Waiting on your answer<span class="r">6 m</span></div><div class="face">Agent asked a question. Counts toward the rail badge.<span class="src">dashboard: question · wait=question</span></div></article>
       <article class="card"><div class="strip s-need">Waiting for permission<span class="r">2 m</span></div><div class="face">A tool call needs approval. Counts toward the badge.<span class="src">dashboard: question · wait=permission ?</span></div></article>
       <article class="card"><div class="strip s-need">Waiting for plan approval<span class="r">22 m</span></div><div class="face">Plan written, waiting on you. Counts toward the badge.<span class="src">dashboard: question · wait=plan ?</span></div></article>
@@ -54,11 +54,11 @@ h2{margin:0 0 14px;font-size:16px;font-weight:600}
     <h2>Link rules</h2>
     <div class="rules">
       <ol>
-        <li>Only sessions started from <b>Run ▾ on this board</b> link to a ticket. No branch guessing.</li>
+        <li>A session links to a ticket three ways: <b>Run ▾ on this board</b>, a branch named for the key, or <b>/jira link</b> inside the session.</li>
         <li>The link is saved on this machine, survives a server restart, and is <b>never written to Jira</b>.</li>
-        <li>A ticket has <b>at most one live</b> session; every ended one stays as history.</li>
+        <li>A ticket can have <b>several live</b> sessions; every ended one stays as history.</li>
         <li>A finished session <b>detaches</b>; the next Run (plan, then execute) takes over.</li>
-        <li><b>Open in Dashboard</b> is always offered. <b>Open in Desktop</b> is greyed while a Dashboard-run session is working.</li>
+        <li><b>Open in Dashboard</b> is always offered. <b>Open in Desktop</b> is greyed while a Dashboard-run session is still running, waits included.</li>
         <li>The primary button follows the surface the session was started on.</li>
         <li>The Jira rail badge counts <b>only</b> sessions that need you.</li>
         <li>The board shows the whole picked Jira board, tickets with no agent included.</li>
