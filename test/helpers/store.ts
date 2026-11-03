@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,6 +45,17 @@ export function makeRegistry(projects: { name: string; path: string }[]): string
     })
   );
   return file;
+}
+
+/**
+ * Turns a `makeProject` directory into a real repository holding `branches`, for a case about what the server's git reads answer. Built here rather than in
+ * every suite because a branch needs a commit to point at, and a commit needs an identity this machine's global config may not have.
+ */
+export function gitRepoWithBranches(root: string, branches: string[]): void {
+  const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', ...args], { stdio: 'ignore' });
+  git('init', '-q', '-b', 'main');
+  git('commit', '-q', '--allow-empty', '-m', 'seed');
+  for (const branch of branches) git('branch', branch);
 }
 
 export function item(id: string, title: string, body: string, extra = ''): string {

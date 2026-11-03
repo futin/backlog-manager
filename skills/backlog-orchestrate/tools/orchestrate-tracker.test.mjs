@@ -25,6 +25,7 @@ import {
   closedPort,
   commitEverything,
   gateRoutes,
+  git,
   orchFixture,
   plan,
   planGitFixture,
@@ -1115,4 +1116,76 @@ test('Q-7: finish with the API down warns once for the whole sweep and exits as 
   const down = out.stderr.split('\n').filter((line) => /API down/.test(line));
   assert.deepEqual(down, ['orchestrator:queued: API down — label not removed on 3 item(s)']);
   assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'done');
+});
+
+// --- #427: a files item an execute branch or tree holds is gated ------------
+// `backlog-tick` and a `--finish pr` execute leave `execute/<id>` and `.worktrees/execute-<id>` behind while the PR is open, and the item stays in `open/` on
+// the base until it merges. A tracker item is guarded by its `in-review` label; a files item has no label to carry, so these two names are the guard.
+const EXECUTE_HELD_REASON = 'an execute branch or worktree already holds this item';
+
+test('plan: an execute/<id> branch gates a files item, with the reason first, until the branch is deleted', (t) => {
+  const { home, project } = planGitFixture(t);
+  assert.equal(git(project, 'branch', 'execute/task-1').status, 0);
+
+  const queue = JSON.parse(plan(project, home, '--json').stdout);
+  const gated = queue.find((q) => q.id === 'task-1');
+  assert.equal(gated.gate, 'ungroomed');
+  assert.equal(gated.reasons[0], EXECUTE_HELD_REASON);
+  assert.deepEqual(gated.questions, []);
+  assert.equal(queue.find((q) => q.id === 'bug-7').gate, 'ready', 'a sibling with no branch stays ready');
+
+  assert.equal(git(project, 'branch', '-D', 'execute/task-1').status, 0);
+  assert.equal(JSON.parse(plan(project, home, '--json').stdout).find((q) => q.id === 'task-1').gate, 'ready');
+});
+
+test('plan: a .worktrees/execute-<id> directory with no branch gates the item the same way', (t) => {
+  const { home, project } = planGitFixture(t);
+  fs.mkdirSync(path.join(project, '.worktrees', 'execute-task-1'), { recursive: true });
+
+  const gated = JSON.parse(plan(project, home, '--json').stdout).find((q) => q.id === 'task-1');
+  assert.equal(gated.gate, 'ungroomed');
+  assert.equal(gated.reasons[0], EXECUTE_HELD_REASON);
+});
+
+test('plan --ids naming a held item lists and gates it rather than dropping it, and no unknown-id error fires', (t) => {
+  const { home, project } = planGitFixture(t);
+  assert.equal(git(project, 'branch', 'execute/task-1').status, 0);
+
+  const out = plan(project, home, '--ids', 'task-1', '--json');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((q) => [q.id, q.gate, q.reasons[0]]),
+    [['task-1', 'ungroomed', EXECUTE_HELD_REASON]]
+  );
+});
+
+test('plan: execute/task-10 leaves task-1 ready, because the name match is exact', (t) => {
+  const { home, project } = planGitFixture(t);
+  assert.equal(git(project, 'branch', 'execute/task-10').status, 0);
+  fs.mkdirSync(path.join(project, '.worktrees', 'execute-task-10'), { recursive: true });
+
+  assert.equal(JSON.parse(plan(project, home, '--json').stdout).find((q) => q.id === 'task-1').gate, 'ready');
+});
+
+test('plan: a held item that also carries plan-review reads held, then plan-review', (t) => {
+  const { home, project } = planGitFixture(t);
+  markPlanReview(path.join(project, ...PLAN_REVIEW_TASK_1));
+  commitEverything(project, 'mark task-1 plan-review');
+  assert.equal(git(project, 'branch', 'execute/task-1').status, 0);
+
+  const gated = JSON.parse(plan(project, home, '--json').stdout).find((q) => q.id === 'task-1');
+  assert.deepEqual(gated.reasons.slice(0, 2), [EXECUTE_HELD_REASON, PLAN_REVIEW_REASON]);
+});
+
+test('plan: an execute/<n> branch does not gate a tracker issue, whose guard is its in-review label', async (t) => {
+  const { home, project } = trackerFixture(t);
+  commitEverything(project, 'seed');
+  assert.equal(git(project, 'branch', 'execute/12').status, 0);
+  fs.mkdirSync(path.join(project, '.worktrees', 'execute-12'), { recursive: true });
+
+  const { out } = await withApi(gateRoutes([apiItem(project, 12)], { 12: GROOMED_TASK_BODY }), (port) => runApi(project, home, port, 'plan', '--project', project, '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(out.stdout).find((r) => r.id === '12').gate, 'ready');
 });

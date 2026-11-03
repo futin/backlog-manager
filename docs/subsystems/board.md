@@ -566,6 +566,12 @@ has pushed a `pr`-mode branch — the moment its claim is released and the still
 closes the issue, or by `backlog.mjs review <id> off`. A `Refs #<n>` PR closes nothing, so the flag is also lifted without a write once the latest closed
 referencing PR merged into the default branch and none is open (#411, `TrackerPollerService.reviewLifted`) — the label stays, the card reads ready. A files item never carries it.
 
+**A files item an execute branch or tree holds is refused by the launch sheet, and its control stays enabled** (#427). A `--finish pr` execute leaves `execute/<id>`
+and `.worktrees/execute-<id>` behind while the item stays in `open/`. `plan` and `dispatch` refuse it with `an execute branch or worktree already holds this item`
+(`executeHeldBlock`, `server/src/agents/execute-held.util.ts`), right after the in-review rung; `DispatchButton` does not read this one, because the answer is a
+git read the board's payload never carries, so the click opens the sheet and the sheet says why. Execute only — a groom of such an item still opens — and a tracker
+item is not asked. Deleting the branch and tree frees the item on the next plan: nothing is memoised.
+
 **A plan that awaits review keeps the control too, disabled with `this plan awaits review`** (backlog-tick, #330). `planReviewBlock` (`shared/agent.ts`) is the
 next rung, after `inReviewBlock` and before the run claim, so an item carrying both says the PR. It reads `BacklogItem.planReview`, which — unlike `inReview` —
 both sources carry: a tracker issue while its `plan-review` label is on, a files item while its frontmatter has a `plan-review:` line. The tick's groom adds the

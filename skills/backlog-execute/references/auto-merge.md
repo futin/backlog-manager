@@ -155,7 +155,7 @@ leaves the PR open, auto-merge armed if it was armed, and the tree kept. Each pa
   - **execute:** nothing on the issue. With `Closes #<n>` GitHub closes it and `in-review` goes with it; with `Refs #<n>` the issue stays open with
     `in-review` on — no longer blocking once the merge was into the default branch — and the final message lists pr-mode §9's hand steps as it does without
     auto-merge. A files item reached `done/` on `<base>` with the
-    merge, so §9's "merge this PR before draining the backlog" line is not printed.
+    merge, so §9's "merge this PR" line is not printed.
 - **Closed.** Stop and report. Auto-merge ended with the PR. Groom on a tracker project leaves `plan-review` on, and the final message says so with the
   `plan-review <issue> off` command.
 - **Bound hit**, **Stopped** — stop and report: auto-merge left armed, every check still pending or red by name, `mergeable` and `mergeStateStatus` as last

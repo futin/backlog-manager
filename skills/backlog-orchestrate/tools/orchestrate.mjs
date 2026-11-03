@@ -828,11 +828,13 @@ export function readRun(dir) {
 // read-modify-write, and two processes that each read, mutate and write
 // leave whichever wrote last (#349). The driver protocol sequences almost
 // every writer — one command at a time, from one session — so a plain
-// `readRun` → mutate → `writeRunAtomic` is safe for them. The one pairing
-// that runs CONCURRENTLY by design is `verify` with `watch` heartbeating the
-// same run file beside it (SKILL.md §8), and both go through `mutateRun`
-// below. A future writer that can run alongside another must use
-// `mutateRun` too, never a bare read and write.
+// `readRun` → mutate → `writeRunAtomic` is safe for them. Two pairings run
+// CONCURRENTLY by design: `verify` with `watch` heartbeating the same run file
+// beside it (SKILL.md §8), and `abort` beside a live driver's `watch` or a
+// hand-run `verify` (bug-54, and `finish` is the write abort ends with) — and
+// all four go through `mutateRun` below, abort's opening through `withRunLock`
+// (#427). A future writer that can run alongside another must use `mutateRun`
+// too, never a bare read and write.
 function writeRunAtomic(dir, run) {
   fs.mkdirSync(dir, { recursive: true });
   const file = runFilePath(dir);
@@ -1883,7 +1885,7 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
       return {
         title,
         hoisted: runnerFix,
-        ...planReviewGate(planReview, gateItem(entry.section, body, projectRoot)),
+        ...executeHeldGate(executeHeld(projectRoot, entry.id), planReviewGate(planReview, gateItem(entry.section, body, projectRoot))),
         ...planFacts(entry, body, frontmatter)
       };
     }
@@ -1908,7 +1910,7 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
     return {
       title,
       hoisted: runnerFix,
-      ...planReviewGate(planReview, gateItem(entry.section, body, projectRoot)),
+      ...executeHeldGate(executeHeld(projectRoot, entry.id), planReviewGate(planReview, gateItem(entry.section, body, projectRoot))),
       ...planFacts(entry, body, frontmatter)
     };
   };
@@ -2237,6 +2239,28 @@ const PLAN_REVIEW_REASON = 'this plan awaits review';
 function planReviewGate(flag, verdict) {
   if (flag !== true) return verdict;
   return { ...verdict, gate: 'ungroomed', reasons: [PLAN_REVIEW_REASON, ...verdict.reasons], questions: [] };
+}
+
+// The execute-held guard's sentence (#427) — a HAND-KEPT copy of `EXECUTE_HELD_REASON` in `shared/agent.ts`, for the same reason as the two above: this file
+// cannot import it. It says what is known, a branch or a tree, and never that a PR is open: nothing here asked GitHub.
+const EXECUTE_HELD_REASON = 'an execute branch or worktree already holds this item';
+
+// Whether a `--finish pr` execute, by hand or a tick's, holds this files item: `execute/<id>` or `.worktrees/execute-<id>`, each an exact name. TWIN of
+// `executeTaken` in `skills/backlog-tick/tools/tick.mjs` and of `executeHeldBlock` in `server/src/agents/execute-held.util.ts`; a skill's `tools/` imports
+// neither. Its item stays in `open/` on the base until the PR merges, and a tracker item's `in-review` label has nothing to ride on here, so these two names
+// are the only record on this machine that the work has been done. Files only: `trackerCandidates` never calls this, because a tracker item's guard is its
+// label, which a person clears after a closed PR without being asked to delete a branch.
+function executeHeld(projectRoot, id) {
+  return branchExists(projectRoot, `execute/${id}`) || fs.existsSync(path.join(projectRoot, '.worktrees', `execute-${id}`));
+}
+
+// Shaped like `planReviewGate` — `ungroomed`, the reason first, `questions` emptied, membership untouched — so no new verdict reaches `RunStage`, and `--ids`
+// naming a held item says why rather than running nothing. The caller applies it over `planReviewGate`, so the reasons read held, then plan-review, which is
+// `inReviewGate`'s order for the same reason: work already done is the stronger fact. A leftover branch blocks until a person deletes it, and the reason is
+// where they learn that.
+function executeHeldGate(held, verdict) {
+  if (!held) return verdict;
+  return { ...verdict, gate: 'ungroomed', reasons: [EXECUTE_HELD_REASON, ...verdict.reasons], questions: [] };
 }
 
 // The unvetted guard's sentence (#341) — a third HAND-KEPT copy, of `UNVETTED_REASON` in `shared/agent.ts`, for the same reason as the two above: this file
@@ -5028,12 +5052,10 @@ function cmdFinish(argv) {
 
   const projectRoot = resolveProjectRoot();
   const dir = projectDir(orchHome(), projectRoot);
-  const run = readRun(dir);
-  assertDriver(run);
-
-  run.status = status;
-  run.updatedAt = nowISO();
-  writeRunAtomic(dir, run);
+  const run = mutateRun(dir, (read) => {
+    read.status = status;
+    read.updatedAt = nowISO();
+  });
   // PR mode, spec §4: a run that ends with nothing merged has no PR to open, so its empty run branch goes. After the status write because
   // the run file is the record and this is housekeeping; never on `paused`, which means to come back to that branch. A degraded run (its
   // effective mode moved to `branch`) is still a `pr` run here — its branched items were cut from the run branch while it equalled the
@@ -6506,65 +6528,70 @@ function cmdReconcile(argv) {
 function cmdAbort() {
   const projectRoot = resolveProjectRoot();
   const dir = projectDir(orchHome(), projectRoot);
-  const run = readRun(dir);
+  const run = withRunLock(dir, () => {
+    const read = readRun(dir);
 
-  /* bug-54: one board Stop reaches a live run TWICE — the server spawns an
-     `--abort` session unconditionally (the only thing that ends a run whose
-     driver is dead), and the live driver's `watch` returns `10` and runs its
-     own. Each is right on its own, and nothing reconciled them: observed on
-     2026-09-22, the spawned session ran `git status` on a worktree the
-     driver's abort was halfway through removing, read "51 deletions" as the
-     child's work, and made its call on that. The server cannot gate its spawn
-     without stranding a run whose driver dies after the stop (the client
-     draws no second Stop once one is on file), so the TOOL excludes itself,
-     in two halves, both before this command writes anything:
+    /* bug-54: one board Stop reaches a live run TWICE — the server spawns an
+       `--abort` session unconditionally (the only thing that ends a run whose
+       driver is dead), and the live driver's `watch` returns `10` and runs its
+       own. Each is right on its own, and nothing reconciled them: observed on
+       2026-09-22, the spawned session ran `git status` on a worktree the
+       driver's abort was halfway through removing, read "51 deletions" as the
+       child's work, and made its call on that. The server cannot gate its spawn
+       without stranding a run whose driver dies after the stop (the client
+       draws no second Stop once one is on file), so the TOOL excludes itself,
+       in two halves, both before this command writes anything:
 
-       - a run already `aborted` is finished with. A late second abort used
-         to re-run the teardown and `finish`; now it says so in one line and
-         touches nothing — no write, no signal, no git.
-       - a `running` run whose lease is a FRESH abort's, taken by another
-         identified session, is being ended right now. Exit `7`, whose meaning
-         is already "this call was right, another session holds this run". The
-         `force` a stop gives the takeover below overrides a DRIVER's lease,
-         never an abort's — a stop is on file for both aborts, so it cannot be
-         what separates them.
+         - a run already `aborted` is finished with. A late second abort used
+           to re-run the teardown and `finish`; now it says so in one line and
+           touches nothing — no write, no signal, no git.
+         - a `running` run whose lease is a FRESH abort's, taken by another
+           identified session, is being ended right now. Exit `7`, whose meaning
+           is already "this call was right, another session holds this run". The
+           `force` a stop gives the takeover below overrides a DRIVER's lease,
+           never an abort's — a stop is on file for both aborts, so it cannot be
+           what separates them.
 
-     Three exemptions, each deliberate. The SAME session proceeds, so an abort
-     that lost its process mid-teardown can finish its own work. A hand-run
-     terminal (`me === null`) proceeds, because a person at the keyboard is the
-     authority SKILL.md says a stuck run is never refused to, and nothing
-     automated has a null identity. A mark past `RUN_STALE_MS` is an abort that
-     died, and no longer refuses — the window every other lease uses, rather
-     than a second one. There is no lock under any of this: two aborts whose
-     reads land in the same few milliseconds could both see no mark. They
-     arrive ~25s apart in practice, and a doubled abort is still safe. */
-  if (run.status === 'aborted') {
-    const lease = runDriver(run);
-    const by = lease === null ? 'by an unidentified session' : `by session ${lease.sessionId}, since ${lease.at}`;
-    console.log(`abort: run ${run.runId} is already aborted (${by}) — nothing to do`);
-    return 0;
-  }
-  const me = sessionIdentity();
-  const lease = runDriver(run);
-  if (run.status === 'running' && me !== null && lease !== null && lease.sessionId !== me && typeof lease.aborting === 'string' && isFresh(lease.aborting)) {
-    throw new OrchestrateError(
-      `run ${run.runId} is already being aborted by session ${lease.sessionId} (since ${lease.aborting}) — another session is ending this run. ` +
-        'Stop immediately: write nothing, do not read, `git status` or otherwise inspect any worktree, and end the turn.',
-      EXIT_FOREIGN_DRIVER
-    );
-  }
+       Three exemptions, each deliberate. The SAME session proceeds, so an abort
+       that lost its process mid-teardown can finish its own work. A hand-run
+       terminal (`me === null`) proceeds, because a person at the keyboard is the
+       authority SKILL.md says a stuck run is never refused to, and nothing
+       automated has a null identity. A mark past `RUN_STALE_MS` is an abort that
+       died, and no longer refuses — the window every other lease uses, rather
+       than a second one. All of this is one `withRunLock` section with the
+       takeover below (#427), so two aborts whose reads land in the same few
+       milliseconds cannot both see no mark: the second waits, and reads the
+       first's. Not `mutateRun`: abort takes the lease rather than asserting it. */
+    if (read.status === 'aborted') {
+      const lease = runDriver(read);
+      const by = lease === null ? 'by an unidentified session' : `by session ${lease.sessionId}, since ${lease.at}`;
+      console.log(`abort: run ${read.runId} is already aborted (${by}) — nothing to do`);
+      return null;
+    }
+    const me = sessionIdentity();
+    const lease = runDriver(read);
+    if (read.status === 'running' && me !== null && lease !== null && lease.sessionId !== me && typeof lease.aborting === 'string' && isFresh(lease.aborting)) {
+      throw new OrchestrateError(
+        `run ${read.runId} is already being aborted by session ${lease.sessionId} (since ${lease.aborting}) — another session is ending this read. ` +
+          'Stop immediately: write nothing, do not read, `git status` or otherwise inspect any worktree, and end the turn.',
+        EXIT_FOREIGN_DRIVER
+      );
+    }
 
-  // A takeover, not an assertion — see `takeOverRun` for why abort of all
-  // commands may not be refused on a dead session's lease. It also has to be a
-  // real write rather than an in-memory pass: `cmdFinish` below re-reads the
-  // file and runs `assertDriver` on what it finds, so a takeover that never
-  // landed on disk would refuse this run's own ending.
-  // bug-39: the one caller that may take the lease from a driver the run file
-  // still believes in. Read here rather than inside `takeOverRun` so the
-  // control file has exactly one reader per command and the parameter states,
-  // at the call site, which commands are allowed the escape hatch.
-  // bug-54: `true` — the lease this takes is an abort's, and says so.
-  takeOverRun(dir, run, stopRequestEffective(readPauseRequest(run.project), run), true);
+    // A takeover, not an assertion — see `takeOverRun` for why abort of all
+    // commands may not be refused on a dead session's lease. It also has to be a
+    // real write rather than an in-memory pass: `cmdFinish` below re-reads the
+    // file and runs `assertDriver` on what it finds, so a takeover that never
+    // landed on disk would refuse this run's own ending.
+    // bug-39: the one caller that may take the lease from a driver the run file
+    // still believes in. Read here rather than inside `takeOverRun` so the
+    // control file has exactly one reader per command and the parameter states,
+    // at the call site, which commands are allowed the escape hatch.
+    // bug-54: `true` — the lease this takes is an abort's, and says so.
+    takeOverRun(dir, read, stopRequestEffective(readPauseRequest(read.project), read), true);
+    return read;
+  });
+  if (run === null) return 0;
 
   const removedIds = [];
   const preservedIds = [];
@@ -6572,16 +6599,23 @@ function cmdAbort() {
   const keptItemIds = [];
   const signalledIds = [];
 
+  // #427: what the teardown below decides, collected rather than written. The teardown is all subprocesses, so it runs outside the lock (`mutateRun` forbids
+  // one under it), and for its whole length a `watch` or a `verify` beside this command can write the file. `run` above is that one read: nothing in this
+  // function may write it back.
+  const attention = [];
+  const pids = new Map();
+  const sessionIds = new Map();
+
   // bug-52: recover every item's session id before anything else in this command reads the item — the claim releases below among them. Over the whole
   // queue rather than the non-terminal items the signal loop walks: an id is a record of which session did the work, not an address to act on, so a finished
   // item with an empty field has as much to recover as the stopped one, and `resolveItemSessionId` never replaces an id already recorded. Picked up by the
-  // single `writeRunAtomic` at the end of this command.
+  // single `mutateRun` at the end of this command.
   //
   // `finish --status paused` deliberately does NOT do this, and `cmdFinish` stays free of the harvest (it is no longer a pure
   // status write: since PR mode it also deletes a `pr` run's empty branch, and that is the only git it runs). A park is decided from `watch`'s own exits, so the
   // parked item's tick has normally already read the id; abort is the exit that ends a run on the path where `watch` never ran at all — the stop inside the
   // dispatch block. One harvest at the one exit that needs it, rather than a second copy on an exit that usually would not.
-  for (const item of run.queue) item.sessionId = resolveItemSessionId(dir, item);
+  for (const item of run.queue) sessionIds.set(item.id, resolveItemSessionId(dir, item));
 
   /* bug-39: end the CHILDREN before the teardown touches their worktrees.
      Until this, `abort` ended the run FILE and nothing else — a driver killed
@@ -6635,8 +6669,8 @@ function cmdAbort() {
       // purpose: a number that FAILED them is what `--pid`'s own validation
       // calls worse than no pid at all, and recording it would put a wrong
       // address in the field deliberately. Picked up by the single
-      // `writeRunAtomic` at the end of this command.
-      item.pid = pid;
+      // `mutateRun` at the end of this command.
+      pids.set(item.id, pid);
     } catch (e) {
       console.error(`abort: could not signal pid ${pid} for ${item.id} (${e.message}) — continuing`);
     }
@@ -6661,7 +6695,7 @@ function cmdAbort() {
     if (marker && tracker) {
       // No `backlog.mjs stop` in this entry, unlike the file case below: there is no marker to clear, and the claim is released by `cmdFinish` with every
       // other one this run holds — so the only thing left for a person is the work itself.
-      run.attention.push({
+      attention.push({
         id: item.id,
         kind: 'parked',
         detail:
@@ -6682,7 +6716,7 @@ function cmdAbort() {
       // happened; it has to stand alone (a human may never see this
       // process's own stdout), so it carries the absolute path and the
       // exact command, not just the item id.
-      run.attention.push({
+      attention.push({
         id: item.id,
         kind: 'parked',
         detail:
@@ -6699,7 +6733,7 @@ function cmdAbort() {
     if (KEPT_BY_ABORT_STAGES.has(item.stage)) {
       // #264 — the THIRD exemption in this function's header comment. A parked or failed item already ran `stop --keep-started`, so it has no marker
       // and would otherwise fall through to the forced teardown below, deleting the only copy of committed work that never reached the base.
-      run.attention.push({
+      attention.push({
         id: item.id,
         kind: 'parked',
         detail:
@@ -6734,7 +6768,7 @@ function cmdAbort() {
         // just this function's own console summary below, for the same
         // "a human may never see this process's own stdout" reason the
         // marker exemption above already gives.
-        run.attention.push({
+        attention.push({
           id: item.id,
           kind: 'parked',
           detail:
@@ -6802,8 +6836,17 @@ function cmdAbort() {
   // after `takeOverRun`, and releases before it stamps `finished` and before
   // its `orchestrator:queued` sweep over the items this run never claimed.
 
-  run.updatedAt = nowISO();
-  writeRunAtomic(dir, run);
+  // #427: the one write the teardown makes, onto a fresh read, of only what it decided. Everything else on the file survives — a `verification` array a
+  // `verify` beside this wrote, a heartbeat. A session id fills an empty field and never replaces one, the rule `resolveItemSessionId` applied to the older
+  // read: the file's value is the newer fact. `mutateRun`'s `assertDriver` is the check `cmdFinish` below would make anyway, one lock sooner.
+  mutateRun(dir, (fresh) => {
+    for (const entry of attention) fresh.attention.push(entry);
+    for (const item of fresh.queue) {
+      if (pids.has(item.id)) item.pid = pids.get(item.id);
+      if (typeof item.sessionId !== 'string' || item.sessionId === '') item.sessionId = sessionIds.get(item.id) ?? null;
+    }
+    fresh.updatedAt = nowISO();
+  });
 
   // A one-line human-readable summary, printed BEFORE cmdFinish's own
   // `{"status":"aborted"}` JSON line, so a human watching this run does not

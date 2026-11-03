@@ -8,6 +8,7 @@ import { proveBaseBranch } from '../items/base-branch.util';
 import { authHeaders, dashboardError, readAgentsConfig, type AgentsConfig } from './config.util';
 import { itemClaimBlock } from './dashboard-sessions.util';
 import { desktopSpawnError } from './desktop.util';
+import { executeHeldBlock } from './execute-held.util';
 import { machineChoiceBlock, remoteDefaultModel, remoteGateBlock } from './machine-choice.util';
 import { DashboardStatusService } from './dashboard-status.service';
 import { DashboardsService, type Machine } from './dashboards/dashboards.service';
@@ -341,6 +342,7 @@ export class AgentsService {
     // rather than reaching for `.runs` inline is the whole of the server-side
     // change bug-21 needed: no new wiring, no new injection, no second read.
     const { runs, starting } = this.orchestrator.runs();
+    const executeHeld = await executeHeldBlock(item, action);
     return {
       action,
       prompt: composePrompt(item, action),
@@ -374,9 +376,12 @@ export class AgentsService {
       // the same sentence. In-review first, so an item holding both says the PR reason.
       // The unvetted rung (#341) sits between those two, the client's order again: an outsider's issue no trusted groom has pinned, which approving the
       // plan would not clear — so its reason reads before plan-review's.
+      // The execute-held rung (#427) sits right after in-review, because it is that rung's files half: this work has been done on a branch already. Its read
+      // is the `await` above this return, per request and never mapped onto the item.
       blocked:
         dispatchBlock(item, status) ??
         inReviewBlock(item) ??
+        executeHeld ??
         unvettedBlock(item) ??
         planReviewBlock(item) ??
         runClaimBlock(item, runs, starting) ??
@@ -540,6 +545,11 @@ export class AgentsService {
     // close the PR, or `backlog.mjs review <id> off`), with no upstream to blame.
     const inReview = inReviewBlock(item);
     if (inReview !== null) throw new HttpException({ error: inReview }, 409);
+
+    // The execute-held block (#427), the files half of in-review and re-checked for the same reason: an execute started by hand or by a tick may have cut its
+    // branch since the sheet's plan was read. Same uncoded 409 — a person resolves it by merging the PR or deleting the branch and worktree.
+    const executeHeld = await executeHeldBlock(item, action);
+    if (executeHeld !== null) throw new HttpException({ error: executeHeld }, 409);
 
     // The unvetted block (#341), re-checked for the same reason: an outsider may have edited the body since the sheet's plan was read, which un-pins it.
     // Same uncoded 409 — a person resolves it by grooming the item, whose `body` write pins it. Between in-review and plan-review, the ladder's order.

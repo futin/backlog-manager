@@ -174,7 +174,8 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   session's own `takeOverRun` write — and the second `--abort` that a live driver's own `watch`
   exit `10` produces is refused by the TOOL, not the route (bug-54): `abort` writes `driver.aborting` (equal to `at`) on the lease it takes, and another
   identified session's abort exits `7` on a mark fresher than `RUN_STALE_MS`, before any write, signal or git; on an already-`aborted` run it is a one-line
-  no-op `0`. The stop's `force` never overrides an abort's lease; the same session, `me === null` and a stale mark are exempt. `stopRequested` rides the runs payload beside
+  no-op `0`. That read, both refusals and the takeover are one `withRunLock` section; the teardown runs outside the lock, collects and never writes, and one
+  `mutateRun` applies what it collected to a fresh read (#427), so a concurrent `verify` or `watch` write survives. The stop's `force` never overrides an abort's lease; the same session, `me === null` and a stale mark are exempt. `stopRequested` rides the runs payload beside
   `pauseRequested`, derived from the SAME control-file read, and **both the sweeper and `RunControls` read that one field** — it is deliberately NOT a third
   input to `watchdogStoodDown`, whose being TRUE is what makes the board OFFER a Resume, so the coupling's biconditional narrows to an implication in the safe
   direction. In the tool: `stage` refuses EVERY transition with exit `10` (wider than the pause gate in both dimensions — a stop may abandon a worktree, which
@@ -206,3 +207,6 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   [invariants.md](docs/subsystems/invariants.md#orchestratorqueued-is-a-plan-never-a-claim)
 - **The server's `orchestrator/` module is a read-only view of the run-state directory**, save the two files it writes there (`pause-control.util.ts`,
   `watchdog-config.util.ts`) and the third, which `POST /api/trackers/sync` (`tracker-sync.controller.ts`) writes.
+- **A files item an execute branch or tree holds is gated `ungroomed`, never dropped.** `executeHeld` matches `execute/<id>` and `.worktrees/execute-<id>` exactly, and
+  `executeHeldGate` sits over `planReviewGate` in both content branches of `buildGatedQueue`, so its reason reads first. `trackerCandidates` never calls it. The
+  sentence is a hand copy of `EXECUTE_HELD_REASON`, pinned by `test/agents-shared.test.ts`; `executeTaken` and `executeHeldBlock` are its twins (#427).

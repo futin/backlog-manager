@@ -557,6 +557,8 @@ function isSkippedTree(root, tree) {
   return FILE_ITEM_ID.test(name);
 }
 
+// Two twins ask the same question of a files item before running it a second time: `executeHeld` in `orchestrate.mjs` and `executeHeldBlock` in
+// `server/src/agents/execute-held.util.ts` (#427). This one covers a tracker id too, hence the `#`-stripping, and they do not. A change to the names is a change to all three.
 const executeTaken = (root, id) => branchExists(root, `execute/${executeId(id)}`) || fs.existsSync(path.join(root, '.worktrees', `execute-${executeId(id)}`));
 
 // A pr-mode groom's own branch and tree (`groom/<id>`, `.worktrees/groom-<id>`): the plan lives on that branch, not on disk in the main checkout, so without

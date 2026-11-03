@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -8,7 +8,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
-import { item, makeProject, makeRegistry, writeRunFile } from './helpers/store';
+import { gitRepoWithBranches, item, makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun, RunStage } from '../shared/types';
 import { COMMIT_RULE } from '../shared/agent';
@@ -239,5 +239,50 @@ describe('POST /api/agents/plan', () => {
     writeRun('bug-2', 'merged');
     const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
     expect(res.body.blocked).toBeUndefined();
+  });
+
+  /* #427: `backlog-tick` and a `--finish pr` execute leave `execute/<id>` and `.worktrees/execute-<id>` behind while the PR is open, and a files item has no
+     label to say so. Real repositories, because what is under test is the git read itself. */
+  describe('a files item an execute branch or tree already holds', () => {
+    const HELD = 'an execute branch or worktree already holds this item';
+
+    it('is blocked by refs/heads/execute/<id>', async () => {
+      stubDashboard();
+      gitRepoWithBranches(projectPath, ['execute/bug-2']);
+      const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
+      expect(res.body.action).toBe('execute');
+      expect(res.body.blocked).toBe(HELD);
+    });
+
+    it('is blocked by .worktrees/execute-<id> alone', async () => {
+      stubDashboard();
+      gitRepoWithBranches(projectPath, []);
+      mkdirSync(join(projectPath, '.worktrees', 'execute-bug-2'), { recursive: true });
+      const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
+      expect(res.body.blocked).toBe(HELD);
+    });
+
+    it('matches the id exactly: execute/bug-22 does not hold bug-2', async () => {
+      stubDashboard();
+      gitRepoWithBranches(projectPath, ['execute/bug-22']);
+      mkdirSync(join(projectPath, '.worktrees', 'execute-bug-22'), { recursive: true });
+      const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
+      expect(res.body.blocked).toBeUndefined();
+    });
+
+    it('does not block a groom: a second groom is not a second execution', async () => {
+      stubDashboard();
+      gitRepoWithBranches(projectPath, ['execute/bug-1']);
+      const res = await post({ itemPath: itemPath('bugs/open', 'bug-1-a-fresh-bug.md') }).expect(201);
+      expect(res.body.action).toBe('groom');
+      expect(res.body.blocked).toBeUndefined();
+    });
+
+    it('does not block, and does not throw, on a project directory that is not a repository', async () => {
+      stubDashboard();
+      const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
+      expect(res.body.action).toBe('execute');
+      expect(res.body.blocked).toBeUndefined();
+    });
   });
 });

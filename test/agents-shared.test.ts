@@ -10,6 +10,7 @@ import {
   dispatchBlock,
   dispatchGate,
   finishClause,
+  EXECUTE_HELD_REASON,
   IN_REVIEW_REASON,
   inReviewBlock,
   PLAN_REVIEW_REASON,
@@ -1219,6 +1220,17 @@ describe('planReviewBlock', () => {
  * The unvetted guard (#341): a tracker bug or task filed from outside the repository whose body no trusted groom has pinned. One sentence again, shared by
  * the board's button, the server's two ladders, the orchestrator's hand-kept copy and execute's refusal — and one rung, between in-review and plan-review.
  */
+describe('EXECUTE_HELD_REASON', () => {
+  it('says what is known, which is a branch or a tree, never that a PR is open', () => {
+    expect(EXECUTE_HELD_REASON).toBe('an execute branch or worktree already holds this item');
+  });
+
+  it('is the same sentence the orchestrator gate carries by hand', () => {
+    const tool = readFileSync(join(__dirname, '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
+    expect(tool).toContain(`const EXECUTE_HELD_REASON = '${EXECUTE_HELD_REASON}';`);
+  });
+});
+
 describe('unvettedBlock', () => {
   it('names the vetting a groom gives for an item carrying the flag', () => {
     expect(unvettedBlock(fakeItem({ unvetted: true }))).toBe('filed from outside the repo — groom it to vet the plan');

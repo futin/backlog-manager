@@ -12,7 +12,7 @@ import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { FakeGithub, FAKE_REPO } from './helpers/github';
 import { listenLoopback } from './helpers/app';
-import { item, makeProject, makeRegistry } from './helpers/store';
+import { gitRepoWithBranches, item, makeProject, makeRegistry } from './helpers/store';
 import type { ClaimRecord } from '../shared/types';
 
 /**
@@ -237,6 +237,20 @@ describe('dispatch', () => {
       .expect(409);
     expect(res.body.error).toMatch(/orchestrator run/i);
     expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  });
+});
+
+/**
+ * #427: the execute-held rung reads branches and trees for a FILES item alone. A tracker issue's guard is its `in-review` label, and a person clears that
+ * after a closed PR without being asked to delete a branch, so a leftover branch must not block the re-run. Both spellings of the name, so this goes red
+ * whichever one a rung that forgot the source would read.
+ */
+describe('a tracker item with a leftover execute branch', () => {
+  it('is not blocked in the plan', async () => {
+    gitRepoWithBranches(trackerPath, ['execute/31', 'execute/#31']);
+    const res = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
+    expect(res.body.action).toBe('execute');
+    expect(res.body.blocked).toBeUndefined();
   });
 });
 

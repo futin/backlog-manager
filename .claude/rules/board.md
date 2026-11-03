@@ -99,7 +99,9 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   `CLAIM_STALE_MS` lets the click through unless a run or the board's own session holds it, #227), an open PR (`inReviewBlock`, `shared/agent.ts` — a
   tracker issue labelled `in-review`; the server's `plan`/`dispatch` read the same helper), an outsider's issue no groom of ours has pinned
   (`unvettedBlock`, `shared/agent.ts` — `BacklogItem.unvetted`, #341; after in-review and before plan-review, here and in both server ladders), an
-  orchestrator claim (`runClaimBlock`).
+  orchestrator claim (`runClaimBlock`). A sixth refusal is the server's alone and `DispatchButton` must not learn it: `executeHeldBlock`
+  (`server/src/agents/execute-held.util.ts`, #427) reads git, per request, for a files item whose action is `execute`, so the button stays enabled and the launch
+  sheet and `dispatch` say `an execute branch or worktree already holds this item`.
   Exactly one lets the click through, and only when it speaks alone: the visibility block re-asks the status through `useReverify`
   (`client/src/hooks/useReverify.ts`), whose one caller is `GatedChip` (`components/ui/GatedChip.tsx`, rule in `lib/gate-view.ts`), which `DispatchButton` and
   the toolbar Orchestrate control both compose (bug-13, bug-16, #272); the other blocks keep swallowing it. The plan-review rung (`planReviewBlock`, after

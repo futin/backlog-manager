@@ -1382,3 +1382,143 @@ test("aborting a later item harvests its id and leaves an earlier item's recorde
   assert.equal(byId('task-5').sessionId, 'early-session', "the earlier item's id did not survive");
   assert.equal(byId('task-6').sessionId, 'late-session', "the stopped item's id was left in its log");
 });
+
+// --- #427: abort takes the run lock for every write, and never across a subprocess ---
+// `abort` runs beside a live driver's `watch` by design (bug-54), and a hand-run one beside a `verify`, so every read-modify-write it makes is the concurrent
+// kind `writeRunAtomic`'s header reserves for `mutateRun`. The teardown is all subprocesses, which `mutateRun` forbids under the lock, so abort locks each
+// write and applies only what the teardown decided onto a fresh read at the end.
+
+function lockFileOf(home, project) {
+  return `${runFile(home, project)}.lock`;
+}
+
+function runEnv(project, home, extra, ...args) {
+  return spawnSync('node', [SCRIPT, ...args], {
+    encoding: 'utf8',
+    cwd: project,
+    env: { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control`, CLAUDE_CODE_SESSION_ID: 'sess-427', ...extra }
+  });
+}
+
+// A `running` run with one dispatched item whose worktree and branch really exist (`task-26`, whose teardown runs `git worktree remove`) and two more items
+// the teardown only reads: `task-27`, parked, so abort writes an attention entry about it, and `task-28`, queued with no session id.
+function raceFixture(t) {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-26', 'Some task');
+  seedReadyTask(project, 'task-27', 'Another task');
+  seedReadyTask(project, 'task-28', 'A third task');
+  commitEverything(project, 'seed');
+  assert.equal(runAs('sess-427', project, home, 'init', '--project', project).status, 0);
+  const worktree = path.join(project, '.worktrees', 'task-26');
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktree, '-b', 'backlog/task-26', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  const staged = runAs('sess-427', project, home, 'stage', 'task-26', 'dispatched', '--worktree', worktree, '--branch', 'backlog/task-26');
+  assert.equal(staged.status, 0, staged.stderr);
+  const file = runFile(home, project);
+  const body = JSON.parse(fs.readFileSync(file, 'utf8'));
+  body.queue.find((q) => q.id === 'task-27').stage = 'parked';
+  fs.writeFileSync(file, JSON.stringify(body, null, 2));
+  return { home, project, worktree, file };
+}
+
+// A `git` on PATH that plays the concurrent writer: on the teardown's `worktree remove` it writes `edit` onto run.json the way a `watch` or `verify` beside the
+// abort would, notes whether the run lock is held at that moment, then runs the real git. Only that verb, so everything else this command runs is untouched.
+function concurrentWriterGit(t, home, file, edit) {
+  const bin = path.join(home, 'shim-bin');
+  fs.mkdirSync(bin, { recursive: true });
+  const real = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim();
+  const seen = path.join(home, 'lock-seen');
+  const writer = path.join(bin, 'writer.cjs');
+  fs.writeFileSync(
+    writer,
+    `const fs = require('node:fs');\n` +
+      `const file = ${JSON.stringify(file)};\n` +
+      `fs.writeFileSync(${JSON.stringify(seen)}, String(fs.existsSync(file + '.lock')));\n` +
+      `const run = JSON.parse(fs.readFileSync(file, 'utf8'));\n` +
+      `(${edit.toString()})(run);\n` +
+      `fs.writeFileSync(file, JSON.stringify(run, null, 2));\n`
+  );
+  const shim = path.join(bin, 'git');
+  fs.writeFileSync(shim, `#!/bin/sh\ncase "$*" in *"worktree remove"*) node ${JSON.stringify(writer)} ;; esac\nexec ${JSON.stringify(real)} "$@"\n`);
+  fs.chmodSync(shim, 0o755);
+  return { PATH: `${bin}${path.delimiter}${process.env.PATH}`, seen };
+}
+
+test("#427: a write that lands during abort's teardown survives it, abort's own attention entry lands too, and no lock is held across the subprocess", (t) => {
+  const { home, project, file } = raceFixture(t);
+  const { PATH, seen } = concurrentWriterGit(t, home, file, (run) => {
+    run.queue.find((q) => q.id === 'task-27').verification = [{ command: 'pnpm test', status: 0 }];
+  });
+
+  const out = runEnv(project, home, { PATH }, 'abort');
+
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(after.queue.find((q) => q.id === 'task-27').verification, [{ command: 'pnpm test', status: 0 }], 'the concurrent write was lost');
+  assert.ok(
+    after.attention.some((a) => a.id === 'task-27' && /KEPT by abort/.test(a.detail)),
+    "abort's own attention entry was lost"
+  );
+  assert.equal(after.status, 'aborted');
+  assert.equal(fs.readFileSync(seen, 'utf8'), 'false', 'the run lock was held across the teardown subprocess');
+});
+
+test('#427: a run lock a live holder keeps past the deadline refuses abort with 1 before any write, signal or git', async (t) => {
+  const { home, project, worktree, file } = raceFixture(t);
+  const child = spawnFakeClaude(t, home);
+  const staged = runAs('sess-427', project, home, 'stage', 'task-26', 'dispatched', '--worktree', worktree, '--branch', 'backlog/task-26', '--pid', String(child.pid));
+  assert.equal(staged.status, 0, staged.stderr);
+  const before = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(lockFileOf(home, project), `${process.pid}\n${new Date().toISOString()}\n`);
+
+  const out = runEnv(project, home, { BM_RUN_LOCK_TIMEOUT_MS: '100' }, 'abort');
+
+  assert.equal(out.status, 1, out.stderr);
+  assert.match(out.stderr, /run\.json\.lock/);
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+  assert.ok(fs.existsSync(worktree), 'the teardown ran');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(child.exitCode, null, 'the session was signalled');
+  assert.equal(child.signalCode, null, 'the session was signalled');
+});
+
+test('#427: a run lock a dead pid left behind is broken, and abort ends the run', (t) => {
+  const { home, project, file } = raceFixture(t);
+  const dead = spawnSync('node', ['-e', '0']).pid;
+  fs.writeFileSync(lockFileOf(home, project), `${dead}\n${new Date().toISOString()}\n`);
+
+  const out = runEnv(project, home, {}, 'abort');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).status, 'aborted');
+  assert.equal(fs.existsSync(lockFileOf(home, project)), false, 'the broken lock was left behind');
+});
+
+test('#427: finish goes through the run lock too — a live holder past the deadline is exit 1, status unchanged', (t) => {
+  const { home, project, file } = raceFixture(t);
+  const before = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(lockFileOf(home, project), `${process.pid}\n${new Date().toISOString()}\n`);
+
+  const out = runEnv(project, home, { BM_RUN_LOCK_TIMEOUT_MS: '100' }, 'finish', '--status', 'done');
+
+  assert.equal(out.status, 1, out.stderr);
+  assert.match(out.stderr, /run\.json\.lock/);
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+});
+
+test("#427: a session id set on disk during the teardown keeps its value, and an empty one is still filled from the item's log", (t) => {
+  const { home, project, file } = raceFixture(t);
+  // task-26: the log says one thing and the concurrent writer records another while the teardown runs. The file's value is the newer fact.
+  seedDispatchLog(home, project, 'task-26', initLog('from-the-log'));
+  seedDispatchLog(home, project, 'task-28', initLog('task-28-from-the-log'));
+  const { PATH } = concurrentWriterGit(t, home, file, (run) => {
+    run.queue.find((q) => q.id === 'task-26').sessionId = 'set-during-teardown';
+  });
+
+  const out = runEnv(project, home, { PATH }, 'abort');
+
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.queue.find((q) => q.id === 'task-26').sessionId, 'set-during-teardown');
+  assert.equal(after.queue.find((q) => q.id === 'task-28').sessionId, 'task-28-from-the-log');
+  assert.equal(after.queue.find((q) => q.id === 'task-27').sessionId, null, 'no log and no recorded id reads as no answer');
+});
