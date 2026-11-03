@@ -1032,13 +1032,13 @@ describe('the launch sheet wire', () => {
     await expect(dispatchJira(req)).rejects.toThrow('PAY-1 already has a live Run session');
   });
 
-  it('stopJira posts the key and rejects with the server sentence', async () => {
+  it('stopJira posts the key and the session it names, and rejects with the server sentence', async () => {
     const f = answer(200, { ok: true });
-    await expect(stopJira('PAY-1')).resolves.toBeUndefined();
+    await expect(stopJira('PAY-1', 's1')).resolves.toBeUndefined();
     expect(f.mock.calls[0][0]).toBe('/api/agents/jira-stop');
-    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ key: 'PAY-1' });
-    answer(404, { error: 'no session for PAY-1' });
-    await expect(stopJira('PAY-1')).rejects.toThrow('no session for PAY-1');
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ key: 'PAY-1', sessionId: 's1' });
+    answer(409, { error: 'PAY-1 has no live session s9' });
+    await expect(stopJira('PAY-1', 's9')).rejects.toThrow('PAY-1 has no live session s9');
   });
 
   it('modelEffortFlags leaves the key out for the default option', () => {

@@ -1166,7 +1166,10 @@ export function dispatchJira(req: JiraDispatchRequest): Promise<JiraDispatchResu
   return postAgents<JiraDispatchResult>('/api/agents/dispatch-jira', req);
 }
 
-/** `POST /api/agents/jira-stop` — the live strip's Stop (Task 10 draws it). Resolves when the dashboard accepted it; rejects with the server's sentence. */
-export async function stopJira(key: string): Promise<void> {
-  await postAgents<{ ok: true }>('/api/agents/jira-stop', { key });
+/**
+ * `POST /api/agents/jira-stop` — Stop one named session: a ticket can hold several live ones, so the body names which. Resolves when the dashboard accepted it;
+ * rejects with the server's sentence (a 409 for a session id that is not live on the key, say).
+ */
+export async function stopJira(key: string, sessionId: string): Promise<void> {
+  await postAgents<{ ok: true }>('/api/agents/jira-stop', { key, sessionId });
 }

@@ -477,7 +477,7 @@ function WriteProbe() {
       >
         start
       </button>
-      <button onClick={() => void stopJira('PAY-131').then(reload)}>stop</button>
+      <button onClick={() => void stopJira('PAY-131', LIVE.sessionId as string).then(reload)}>stop</button>
     </div>
   );
 }
@@ -531,7 +531,7 @@ describe('reload-after-write', () => {
       fireEvent.click(screen.getByText('stop'));
     });
     await flush();
-    expect(fetchMock).toHaveBeenCalledWith('/api/agents/jira-stop', expect.objectContaining({ method: 'POST', body: '{"key":"PAY-131"}' }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/agents/jira-stop', expect.objectContaining({ method: 'POST', body: '{"key":"PAY-131","sessionId":"s1"}' }));
     expect(jiraCalls()).toBe(2);
     expect(screen.getByTestId('strip')).toHaveTextContent('none');
   });

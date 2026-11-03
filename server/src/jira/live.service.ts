@@ -146,15 +146,6 @@ export class JiraLiveService {
     this.starting.delete(key);
   }
 
-  /**
-   * The unconditional removal the callers that predate the store still use (Stop, the reconciler finding the session gone): a `starting` reservation is
-   * dropped, a live `run` entry ENDS as `stopped`. Their replacements are `end` with the right reason — spec Tasks 3 and 4 — and this goes with them.
-   */
-  clear(key: string): void {
-    this.starting.delete(key);
-    for (const l of this.liveRun(key)) this.end(key, l.sessionId as string, 'stopped');
-  }
-
   /** The key's live `run` entry, `starting` included; a live `branch`/`manual` link never shows through. */
   get(key: string): { sessionId: string | null; repo: string; startedAt: string } | null {
     this.expire();
@@ -334,7 +325,7 @@ export class JiraLiveService {
     return this.up;
   }
 
-  /** A Jira page was read at `now` (the route that serves it is to call this — not wired yet, a later task), so the reconciler can tell a page is open. */
+  /** A Jira page was read at `now` (`GET /api/jira/sessions?open=1` is its caller), so the reconciler can tell a page is open. */
   notePageRead(now: number): void {
     this.pageReadAt = now;
   }

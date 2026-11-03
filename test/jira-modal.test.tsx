@@ -557,7 +557,7 @@ describe('JiraIssueModal — Stop session (Jira phase 5)', () => {
     expect(posts()).toHaveLength(0);
   });
 
-  it('posts `{ key }` to /api/agents/jira-stop on accept, then reloads the status and nudges the board', async () => {
+  it('posts `{ key, sessionId }` to /api/agents/jira-stop on accept, then reloads the status and nudges the board', async () => {
     mount({ status: { live: SESSION() } });
     await screen.findByText('not');
     await waitFor(() => expect(stopChip()).not.toBeNull());
@@ -569,7 +569,7 @@ describe('JiraIssueModal — Stop session (Jira phase 5)', () => {
     const [{ url, init }] = posts();
     expect(url).toBe('/api/agents/jira-stop');
     expect((init?.headers as Record<string, string>)['content-type']).toBe('application/json');
-    expect(init?.body).toBe('{"key":"PAY-131"}');
+    expect(init?.body).toBe('{"key":"PAY-131","sessionId":"s1"}');
     expect(reload).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('alert')).toBeNull();
   });

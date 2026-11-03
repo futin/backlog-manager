@@ -196,25 +196,34 @@ export class JiraDispatchService {
   }
 
   /**
-   * `POST /api/agents/jira-stop` — the strip's Stop (spec §5). Stops the key's session through the dashboard, then forgets the key. Jira is never called: the
-   * ticket keeps its assignee and its status, which is what the confirm in the client says.
+   * `POST /api/agents/jira-stop` — Stop one named session of a ticket (spec §5; sessions §7.3). Stops it through the dashboard, then ends its link `stopped`,
+   * which keeps it as history rather than deleting it. Jira is never called: the ticket keeps its assignee and its status, which is what the confirm in the
+   * client says.
    *
-   * The order is the spec's: agents off (409, `environmentBlock`'s own sentence — a disabled `status()` makes no request), a key the map does not hold (409), a
-   * `starting` entry (409 — it has no session id to stop, and its own Start will confirm or release it). Then the stop: a 200 and the dashboard's `no live
-   * session` 404 both mean the process is gone, and both clear the entry; any other answer is a 502 from `stopDashboardSession` and the entry STAYS, because the
-   * session may still be running and a strip that says otherwise would invite a second Start on a busy repository.
+   * The order is the spec's: agents off (409, `environmentBlock`'s own sentence — a disabled `status()` makes no request), then a `sessionId` that is not live on
+   * this key: a `starting` entry (409 — it has no session id to stop, and its own Start will confirm or release it), a key with nothing live (409), or an id
+   * that is another ticket's, unknown or already ended (409, naming its first 8 characters). Any live link can be named, `branch`
+   * and `manual` included — the client offers Stop only for a session the dashboard can signal. Then the stop: a 200 and the dashboard's `no live session`
+   * 404 both mean the process is gone, and both end the link; any other answer is a 502 from `stopDashboardSession` and the link STAYS, because the session
+   * may still be running and a page that says otherwise would invite a second Start on a busy repository.
    */
-  async stop(key: string): Promise<{ ok: true }> {
+  async stop(key: string, sessionId: string): Promise<{ ok: true }> {
     const cfg = readAgentsConfig();
     if (!cfg.enabled) {
       throw new HttpException({ error: environmentBlock(await this.agents.status()) ?? 'dispatch is off — set BM_AGENTS=on for the API' }, 409);
     }
-    const entry = this.live.get(key);
-    if (entry === null) throw new HttpException({ error: `no live session for ${key}` }, 409);
-    if (entry.sessionId === null) throw new HttpException({ error: `${key} is still starting` }, 409);
-    await stopDashboardSession(cfg, entry.sessionId, 'Jira is untouched');
-    // The stop is awaited: a Stop and a fresh Start can interleave, and the new entry (a different session) is not the one this request stopped.
-    if (this.live.get(key)?.sessionId === entry.sessionId) this.live.clear(key);
+    const onKey = this.live.liveLinks().filter((l) => l.key === key);
+    if (!onKey.some((l) => l.sessionId === sessionId)) {
+      // Not a live link of this key. A `starting` Run has no id to name, so it is told apart from a plain miss; and a key with nothing live at all is the
+      // spec's older sentence, kept as it was.
+      if (this.live.get(key)?.sessionId === null) throw new HttpException({ error: `${key} is still starting` }, 409);
+      if (onKey.length === 0) throw new HttpException({ error: `no live session for ${key}` }, 409);
+      throw new HttpException({ error: `${key} has no live session ${sessionId.slice(0, 8)}` }, 409);
+    }
+    await stopDashboardSession(cfg, sessionId, 'Jira is untouched');
+    // `end` is a no-op for a pair that ended while the stop was in flight (the reconciler's own verdict, or a second Stop), so the first end stands — and a
+    // fresh Start on the key, a different session, is never the pair this names.
+    this.live.end(key, sessionId, 'stopped');
     return { ok: true };
   }
 

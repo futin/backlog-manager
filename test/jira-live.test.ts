@@ -115,12 +115,12 @@ describe('reserve / confirm / release / clear', () => {
     expect(live.get('PAY-1')?.sessionId).toBe('sess-1');
   });
 
-  it('clear removes an entry in either state', () => {
+  it('release drops a starting entry and end a confirmed one, each leaving the key free', () => {
     live.reserve('PAY-1', REPO);
     live.reserve('PAY-2', REPO);
     live.confirm('PAY-2', 'sess-2', META);
-    live.clear('PAY-1');
-    live.clear('PAY-2');
+    live.release('PAY-1');
+    expect(live.end('PAY-2', 'sess-2', 'stopped')).toBe(true);
     expect(live.snapshot()).toEqual({});
     expect(live.reserve('PAY-1', REPO)).toBe(true);
   });

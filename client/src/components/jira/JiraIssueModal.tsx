@@ -59,7 +59,7 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  *
  * - **`Run ▾`** (`JiraRunMenu`, the card's own chip) → `onRun(issue, action)`; the launch sheet is hosted by `JiraView`, ABOVE this modal, so Escape closes the
  *   sheet alone and the modal under it on the next press. It reads the shell's status and draws its own disabled / dashed readings; it is never hidden.
- * - **`Stop session`**, a 28 px `Chip` → `ui/Confirm` → `POST /api/agents/jira-stop` `{ key }`, drawn ONLY while the dashboard has agents enabled AND the shell's
+ * - **`Stop session`**, a 28 px `Chip` → `ui/Confirm` → `POST /api/agents/jira-stop` `{ key, sessionId }`, drawn ONLY while the dashboard has agents enabled AND the shell's
  *   status holds a CONFIRMED (not `starting`) entry for the key — a starting entry has no process to stop yet, and the server would 409 it. It rides the same
  *   `useAction` as the two writes above, so one guard and one error line serve all three; a landed stop reloads the status and nudges the board, and that
  *   reload is the strip going away (spec §11). `StopSession` is mounted only for a confirmed entry, which is also the only time `useAgents()` reads
@@ -231,10 +231,13 @@ export function JiraIssueModal({
     });
   };
 
-  /** Stop, through the one write guard and error line (see the header); a landed stop reloads the status — the strip's way out — and nudges the board. */
-  const stop = (): void => {
+  /**
+   * Stop, through the one write guard and error line (see the header); a landed stop reloads the status — the strip's way out — and nudges the board. It names
+   * the session the status shows for the key (`live[key].sessionId`): a ticket can hold several, and the server ends only the one it is told.
+   */
+  const stop = (sessionId: string): void => {
     const asked = issue.key;
-    run(() => stopJira(asked), {
+    run(() => stopJira(asked, sessionId), {
       onSuccess: () => {
         reload();
         onWrote();
@@ -288,7 +291,7 @@ export function JiraIssueModal({
           onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
         />
         <JiraRunMenu issue={issue} home="modal" onPick={(action) => onRun(issue, action)} />
-        {live !== null && !live.starting && <StopSession key={issue.key} busy={busy} onStop={stop} />}
+        {live !== null && live.sessionId !== null && !live.starting && <StopSession key={issue.key} busy={busy} onStop={() => stop(live.sessionId as string)} />}
       </div>
       {writeError !== null && (
         <p className="jira-modal-error" role="alert">

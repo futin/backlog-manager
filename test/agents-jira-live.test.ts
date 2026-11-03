@@ -363,7 +363,7 @@ describe('tick — what it leaves alone', () => {
     seed('PAY-1', 'sess-1', OLD);
     live.markQuiet('PAY-1', 'sess-1', iso(T0 - JIRA_QUIET_MS)); // sess-1 is due to end the moment the list says it is not active
     (global.fetch as jest.Mock).mockImplementationOnce(() => {
-      live.clear('PAY-1');
+      live.end('PAY-1', 'sess-1', 'stopped');
       expect(live.reserve('PAY-1', REPO)).toBe(true);
       live.confirm('PAY-1', 'sess-2', RUN_META);
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ sessions: [] }) } as Response);

@@ -183,7 +183,7 @@ describe('configured, against a healthy Jira', () => {
         live.confirm('PAY-131', 'sess-1', RUN_META);
         expect(((await get('').expect(200)).body as JiraStatusPayload).live['PAY-131'].starting).toBe(false);
       } finally {
-        live.clear('PAY-131');
+        live.end('PAY-131', 'sess-1', 'stopped');
       }
       expect((await get('').expect(200)).body.live).toEqual({});
     });
@@ -246,7 +246,7 @@ describe('configured, against a healthy Jira', () => {
         expect(body.session).toEqual({ sessionId: null, name: 'jira PAY-131', startedAt: expect.any(String), repo: '/work/pay', starting: true });
         expect(((await get('/issue/PAY-500').expect(200)).body as JiraIssueDetail).session).toBeNull();
       } finally {
-        live.clear('PAY-131');
+        live.release('PAY-131');
       }
       expect(((await get('/issue/PAY-131').expect(200)).body as JiraIssueDetail).session).toBeNull();
     });
@@ -258,7 +258,7 @@ describe('configured, against a healthy Jira', () => {
       try {
         expect((await get('/issue/PAY-131?format=text').expect(200)).text).toBe(before);
       } finally {
-        live.clear('PAY-131');
+        live.release('PAY-131');
       }
     });
 

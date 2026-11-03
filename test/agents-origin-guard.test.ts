@@ -134,8 +134,8 @@ describe('the agents POST guard', () => {
     if (verb === 'dispatch-jira') {
       return { key: 'PAY-1', repo: projectPath, action: 'execute', assign: false, transitionId: null, permissionMode: 'plan', remoteControl: false };
     }
-    // jira-stop names a ticket only.
-    if (verb === 'jira-stop') return { key: 'PAY-1' };
+    // jira-stop names a ticket and one of its sessions.
+    if (verb === 'jira-stop') return { key: 'PAY-1', sessionId: 'sess-1' };
     return verb === 'orchestrate' || verb === 'resume' || verb === 'pause' || verb === 'stop' ? { project: projectPath } : verb === 'watchdog/config' ? { enabled: true } : body();
   };
 
