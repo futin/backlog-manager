@@ -163,6 +163,10 @@ happened.
 - Comments explain _why_, at length, and the existing density is deliberate — match it rather than stripping it.
 - **A PR title must pass `ci / pr-title`** (it becomes the squash commit — `main` merges squash-only): `feat|fix|perf` (`!` allowed) or
   `docs|chore|test|refactor|ci|build`, optional lowercase `(scope)`, `: `, a description. `feat`/`fix`/`perf` cut a release (`.github/workflows/release.yml`).
+- **A PR body is `.github/pull_request_template.md` — read it before `gh pr create` and pass the filled copy with `--body-file`.** `--body` bypasses the
+  template, and Claude Code's own `## Summary` / `## Test plan` default is not this repo's shape. A `feat`/`fix`/`perf` body without `## What's new` fails
+  `ci / pr-title` (its lines become the release notes, [ci.md](docs/workflows/ci.md#releases)). Why: #448 was the 4th or 5th PR opened with the default
+  body, because only the title was a written rule here.
 - **Tests are flat in `test/` under jest and beside the tool they cover under node; the node globs do not descend, so a suite one level deeper never runs**
   Why: [invariants.md](docs/subsystems/invariants.md#where-a-test-file-sits-decides-which-runner-executes-it)
 
