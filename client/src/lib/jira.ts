@@ -689,13 +689,15 @@ export function displayPath(path: string, home: string | null): string {
  * title names Setup › Repositories) however the rest reads, so a `live` session on a project whose mapping was removed afterwards draws the dashed chip too —
  * the live STRIP beside it, which reads `status.live` alone, still carries the session and its Stop. Otherwise `ready`.
  *
- * **What `live` reads (Jira sessions, §7.3 / §5's one-run gate).** The gate is "a `run`-linked session is live on this key", and it is read from the sessions
- * payload when there is one: a live `branch` or `manual` link (a session somebody started in a terminal, found by its branch) does NOT disable Run. The
- * status' `live` map is a SUPERSET of that gate — every live `run` link plus every `starting` reservation, and never a `branch`/`manual` link (the server's
- * `JiraLiveService.snapshot()`) — so the two sources cannot contradict on a `run` link; they differ in exactly one place, and it is why `status.live` is not
- * dropped: a `starting` reservation has no link yet (`GET /api/jira/sessions` never carries one), yet the server's `reserve` gate would 409 a second Start, so
- * a `starting` entry still reads `live`. With no sessions payload (not loaded yet, or a page mounted without the provider) the answer is the old one — any
- * entry in `status.live` — so a first paint can never offer a Start the server would refuse.
+ * **What `live` reads (Jira sessions, §7.3 / §5's one-run gate; ruling 95).** `live` is the UNION of two sources: a live `run` link on the key in the sessions
+ * payload, OR any entry in `status.live` for it, `starting` or confirmed. Neither source is a fallback for the other, because each is ahead of the other in a
+ * window the chip must not offer a Start in. The status' `live` map holds every live `run` link plus every `starting` reservation (and never a `branch`/`manual`
+ * link — the server's `JiraLiveService.snapshot()`), so a `starting` reservation, which the sessions payload cannot carry, and a Run the server has just
+ * CONFIRMED, which the sessions poll has not seen yet (it runs on its own 15 s clock), both read `live` the moment the status says so; the payload covers the
+ * other direction, a `run` link the status has not been re-read for. Reading only one would re-offer `Start` for up to a poll after a Start landed, and the
+ * server's one-run gate answers that second Start with a 409. What stays `ready` is exactly what neither source holds: a live `branch` or `manual` link
+ * (a session somebody started in a terminal, found by its branch) does NOT disable Run, and neither does an ended link. With no sessions payload (not
+ * loaded yet, or a page mounted without the provider) the status alone answers, so a first paint can never offer a Start the server would refuse.
  *
  * "Mapped" is the status' own `repos`: at least ONE path for the issue's project. An empty list (a hand-edited `jira.json` the server kept) is unmapped, which
  * `unmappedProjects` above does not say — it asks only whether the key is present, because the Repositories card's warning is about a key nobody has
@@ -708,10 +710,9 @@ export function runChipState(
 ): 'no-repo' | 'live' | 'ready' {
   const paths: unknown = status.repos[issue.project.key];
   if (!Array.isArray(paths) || paths.length === 0) return 'no-repo';
-  const entry = status.live[issue.key];
-  if (sessions === null) return entry === undefined ? 'ready' : 'live';
-  const runLive = sessions.links.some((l) => l.key === issue.key && l.how === 'run' && l.endedAt === null);
-  return runLive || entry?.starting === true ? 'live' : 'ready';
+  if (status.live[issue.key] !== undefined) return 'live';
+  const runLive = sessions !== null && sessions.links.some((l) => l.key === issue.key && l.how === 'run' && l.endedAt === null);
+  return runLive ? 'live' : 'ready';
 }
 
 /** The last segment of an absolute path, trailing slashes ignored: `/Users/ada/pay` → `pay`. The strip names a session's repo this short way (spec §6.2). */

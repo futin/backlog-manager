@@ -999,9 +999,16 @@ describe('runChipState', () => {
       expect(runChipState(issue(), payload({ repos: mapped }), sessions())).toBe('ready');
     });
 
-    it('is live for a starting reservation, which the sessions payload cannot carry, and ready for a stale non-starting entry the links no longer back', () => {
+    it('is live for a starting reservation, which the sessions payload cannot carry', () => {
       expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': { ...session, starting: true } } }), sessions())).toBe('live');
-      expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': session } }), sessions())).toBe('ready');
+    });
+
+    it('is live for a confirmed non-starting status entry the landed sessions payload has no link for yet (ruling 95: the union, not payload-then-fallback)', () => {
+      // A Start landed and the server confirmed it; the sessions poll has not seen the run link. Reading `ready` here re-offered Start for up to a poll.
+      expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': session } }), sessions())).toBe('live');
+      expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': session } }), sessions(link({ key: 'PAY-2' })))).toBe('live');
+      // Neither source holds the key: a branch-only link and an empty status entry map stay `ready`.
+      expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-2': session } }), sessions(link({ how: 'branch' })))).toBe('ready');
     });
 
     it('still answers no-repo first, and reads the old live entry while the payload is null', () => {

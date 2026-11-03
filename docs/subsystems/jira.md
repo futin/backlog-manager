@@ -317,9 +317,9 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   clock of the component's own), the linked-how tag, the short id; `Unlink` only on a `branch` link and `Stop` only when the row carries a `stopState`, both
   through the dialog's `sessionWrite`, which reloads the sessions, the status and the board. The waiting question's text is never drawn, only its state
   label. Under them the history timeline (`<how> · ended <age> ago`, `Reopen`), then `Run ▾`. A `starting` reservation is drawn from `GET /api/jira`'s
-  `live[key]`, never from the sessions payload. `Run ▾` is disabled only while a live `run` link exists or a reservation does: `runChipState` reads the sessions
-  payload when it has landed and `status.live` (every live `run` link plus the `starting` reservations, never a `branch` or `manual` link) before it, so the two
-  sources cannot contradict each other.
+  `live[key]`, never from the sessions payload. `Run ▾` is disabled only while a live `run` link exists or a reservation does: `runChipState` is the UNION of a live `run` link in
+  the sessions payload and any `status.live` entry (every live `run` link plus the `starting` reservations, never a `branch` or `manual` link), so a Start that
+  just landed reads `live` from whichever source saw it first (ruling 95); a landed Start also re-reads the sessions payload at once.
 - **Jira › Setup** (`components/jira/JiraSetupView.tsx`) makes the page's ONE `/api/jira/projects` read per mount and hands it to the board sheet and the
   Repositories card. The Boards card's `Open board` writes the pick straight to `localStorage` (the page unmounts in the commit that navigates, so a
   `usePersistedState` effect would never run) and calls `onOpenJiraPage('board')`. `JiraBoardSheet` composes `ui/FormSheet`, seeds its fields once at
@@ -522,7 +522,7 @@ section (eight dialogs). The browser still never talks to Jira or the dashboard:
   control) sits under the action, for any action, seeded once from `launchSurfaceDefault`, and Start sends its pick as `surface`; under Desktop only remote
   control is disabled (and sent Off) — permissions, model and effort still drive the headless first turn. Start stays HOME-ONLY under multi-dashboard: the sheet draws no machine picker and `dispatch-jira` takes no
   `machine`, because the mapped repository is a path in this machine's `jira.json` and means nothing on another. A landed Start calls `onStarted`, which reloads
-  the shell's status (the strip) and nudges the board. The server
+  the shell's status (the strip) and the sessions payload and nudges the board. The server
   applies `Assign to me` and `Move to` BEFORE the spawn, so a Start refused after a write landed ends its sentence `— the assign stands` or `— the Jira writes
   stand`; the sheet reads that (`jiraWritesStand`) as `onWrote` — the same reload and nudge — and puts `Move to` back to `leave as is`, the refusal staying on
   screen. A refusal before any write changes nothing.

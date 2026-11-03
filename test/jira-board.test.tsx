@@ -914,7 +914,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
 
   // Spec §11: a resolved dispatch-jira reloads the status without waiting for the poll. `use-jira`'s probe re-implements `.then(reload)`, so only THIS case, through
   // the real `JiraView` -> `JiraLaunchSheet`'s `onStarted`, fails when that wiring loses its reload or its board nudge.
-  it('Start from a card\'s Run menu reads GET /api/jira once more and the board list once more, with no timer wait', async () => {
+  it('Start from a card\'s Run menu reads GET /api/jira, the sessions payload and the board list once more each, with no timer wait', async () => {
     await renderRun();
     const dispatched = global.fetch;
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -930,17 +930,22 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
     const start = await within(sheet).findByRole('button', { name: 'Start' });
     await waitFor(() => expect(start).toBeEnabled());
+    // The sessions payload is the second thing a landed Start must re-read (Detail's Start gate and the List's `canRun` read it, not the status).
+    const sessionsReads = (): number => requested.filter((u) => u.startsWith('/api/jira/sessions')).length;
     const statusBefore = statusReads();
     const boardBefore = boardRequests().length;
+    const sessionsBefore = sessionsReads();
 
     await userEvent.click(start);
     await waitFor(() => expect(requested).toContain('POST /api/agents/dispatch-jira'));
     await waitFor(() => expect(statusReads()).toBe(statusBefore + 1));
     await waitFor(() => expect(boardRequests().length).toBe(boardBefore + 1));
+    await waitFor(() => expect(sessionsReads()).toBe(sessionsBefore + 1));
     // Settled: nothing else follows (a second read would be the timer or a doubled trigger).
     await new Promise((r) => setTimeout(r, 50));
     expect(statusReads()).toBe(statusBefore + 1);
     expect(boardRequests().length).toBe(boardBefore + 1);
+    expect(sessionsReads()).toBe(sessionsBefore + 1);
   });
 
   // The modal's Stop is the other half: the modal reloads the status itself, and `JiraView`'s `onWrote` is what re-reads the board list. Both are pinned here
