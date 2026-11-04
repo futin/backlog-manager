@@ -885,6 +885,28 @@ describe('branch detection (Jira sessions §5)', () => {
     expect(live.reserve('PAY-200', main)).toBe(true);
   });
 
+  /* A Run of PAY-200 launched in a checkout still on another ticket's branch (`PAY-151-x`, left by an earlier session) is PAY-200's session, not
+     PAY-151's: the person named its ticket, and the branch only says what the checkout held. 2026-11-04, TIMIFY-28021 run on a TIMIFY-26150 branch. */
+  it('a session holding a run link is never branch-detected: no read, no second link', async () => {
+    seed('PAY-200', 's1', OLD);
+    rows(row('s1', 'PAY-151-x', main));
+    await reconciler.tick();
+    expect(reads).toEqual([]);
+    expect(linkOf('PAY-151', 's1')).toBeUndefined();
+  });
+
+  it('a manual link stops detection for its session too, and an ended one still does; another session on the branch is detected', async () => {
+    expect(live.addLink({ ...branchLink('PAY-200', 's1', 1000), how: 'manual' })).toBe('added');
+    seed('PAY-300', 's2', OLD);
+    live.end('PAY-300', 's2', 'idle', Date.now());
+    rows(row('s1', 'PAY-151-x', main), row('s2', 'PAY-151-x', main), row('s3', 'PAY-151-x', main));
+    await reconciler.tick();
+    expect(reads).toEqual(['PAY-151']);
+    expect(linkOf('PAY-151', 's1')).toBeUndefined();
+    expect(linkOf('PAY-151', 's2')).toBeUndefined();
+    expect(linkOf('PAY-151', 's3')).toMatchObject({ how: 'branch' });
+  });
+
   it('with no repo mapped nothing is detected and nothing is asked of Jira', async () => {
     const file = join(mkdtempSync(join(tmpdir(), 'bm-jira-detect-')), 'jira.json');
     writeFileSync(file, '{}');

@@ -753,11 +753,14 @@ export function jiraSettingOf(action: JiraAction): string {
 }
 
 /**
- * The permission mode the launch sheet's `Permissions` select opens on for an action (spec §7): `plan` for `context`, which opens a session to read and wait,
- * and `acceptEdits` for `execute` and for a skill, which are there to change things. NOT capped by the dashboard's ceiling — that is the sheet's job
- * (`clampMode` over `modesUpTo`), because the ceiling is a fact about the host and this is a pure function of the action.
+ * The permission mode the launch sheet's `Permissions` select opens on for an action (spec §7). `setting` is `Settings.jiraDefaultPermission`: a mode wins
+ * for every action, `context` included; `''` (per action) gives `plan` for `context`, which opens a session to read and wait, and `acceptEdits` for `execute`
+ * and for a skill, which are there to change things. NOT capped by the dashboard's ceiling — that is the sheet's job (`clampMode` over `modesUpTo`), because
+ * the ceiling is a fact about the host and this is a pure function of the action and the setting. `setting` is required, so no caller can forget it and
+ * quietly drop the reader's default.
  */
-export function defaultModeFor(action: JiraAction): PermissionMode {
+export function defaultModeFor(action: JiraAction, setting: '' | PermissionMode): PermissionMode {
+  if (setting !== '') return setting;
   return action === 'context' ? 'plan' : 'acceptEdits';
 }
 

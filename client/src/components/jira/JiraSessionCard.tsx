@@ -70,12 +70,15 @@ export function OpenChip({
   button,
   sessionId,
   row,
+  launch,
   primary,
   onHandover
 }: {
   button: OpenButton;
   sessionId: string;
   row: SessionLink['row'];
+  /** The link's own launch surface: `desktopButton` reads it to know Run ▾ started a `local` row in the app (`appOwned`). */
+  launch: SessionLink['surface'];
   primary: boolean;
   onHandover: (sessionId: string) => void;
 }) {
@@ -97,7 +100,7 @@ export function OpenChip({
       </Chip>
     );
   }
-  const d = desktopButton(row, phone);
+  const d = desktopButton(row, launch, phone);
   if (!d.show) return null;
   if (!d.enabled) {
     return (
@@ -181,11 +184,12 @@ export function JiraSessionCard({
             button={buttons.primary}
             sessionId={sessionId}
             row={row}
+            launch={link.surface}
             primary
             onHandover={(id) => handover.run(() => openDesktopJira(id))}
           />
           {buttons.secondary !== null && (
-            <OpenChip button={buttons.secondary} sessionId={sessionId} row={row} primary={false} onHandover={(id) => handover.run(() => openDesktopJira(id))} />
+            <OpenChip button={buttons.secondary} sessionId={sessionId} row={row} launch={link.surface} primary={false} onHandover={(id) => handover.run(() => openDesktopJira(id))} />
           )}
           {/* The session's own writes, pushed to the row's end as the mock draws Stop — apart from the two that only open it somewhere. */}
           {(link.how === 'branch' || stoppable) && (
@@ -241,7 +245,7 @@ export function JiraHistoryLine({ link, now }: { link: SessionLink; now: number 
     <li className="jira-hist">
       <i className="jira-hist-node" aria-hidden="true" />
       <span className="jira-hist-head">{age === null ? `${link.how} · ended` : `${link.how} · ended ${age} ago`}</span>
-      {link.sessionId !== null && <OpenChip button={buttons.primary} sessionId={link.sessionId} row={null} primary={false} onHandover={() => {}} />}
+      {link.sessionId !== null && <OpenChip button={buttons.primary} sessionId={link.sessionId} row={null} launch={link.surface} primary={false} onHandover={() => {}} />}
       <span className="jira-hist-meta">{meta}</span>
     </li>
   );

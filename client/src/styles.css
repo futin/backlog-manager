@@ -1486,6 +1486,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-list-ctx-bar i { display: block; height: 100%; background: var(--ink3) }
 .jira-list-open .jira-list-flex { gap: 6px }
 .jira-list-foot { margin: 0; font-size: 12px; color: var(--ink3) }
+/* The link store cannot save (`saveError`): `--amber-ink`, the amber that carries the hue on its own — nothing amber stands beside this line (§ marks and
+   text). Amber and not red: the rows are still right, they are only not kept. The error's own words follow in the muted ink, so the sentence reads first. */
+.jira-list-warn { margin: 0; font-size: 13px; line-height: 1.45; color: var(--amber-ink) }
+.jira-list-warn-detail { color: var(--ink2); overflow-wrap: anywhere }
 
 /* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
    what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px

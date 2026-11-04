@@ -388,7 +388,8 @@ model and effort every launch sheet seeds from, the dashboard link base, and the
 from. `Dispatch` also carries `Execute finish` (`executeDefaultFinish`, the execute sheet's Finish seed), `Groom finish` (`groomDefaultFinish`, a home groom's),
 `Auto-merge PRs` (`prAutoMergeDefault`) and `Fix if it fails` (`prFixDefault`, disabled while the row above it is off, its stored value left alone) and, only
 while Jira is configured, `Jira default action` — the action a Jira card's `Run ▾` lists first, read through `resolveJiraAction` so a deleted skill's id reads
-as `Work it end to end` while the stored value is left alone. That card is what the old `Claude Agents` card's per-device half became: that card mixed backends,
+as `Work it end to end` while the stored value is left alone, and `Jira default permission` (`jiraDefaultPermission`, the Jira launch sheet's Permissions
+seed — `Per action` or one mode for every action, capped by the host's ceiling at launch, not here). That card is what the old `Claude Agents` card's per-device half became: that card mixed backends,
 and a page that promises a scope cannot carry one that does. `Sources · this machine` (`SourcesGroup`) is the Shared report and is read-only by design, not by
 phase: one row per source — Files (its project count, any unsupported or missing project, and the connect commands), GitHub (`as <login> · N of M left · resets
 HH:MM`, `token set` or the no-token sentence, its project count, and one `repo · state` line per repo, sync off included) and Jira (`configured · <site> · N

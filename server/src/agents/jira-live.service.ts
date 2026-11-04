@@ -208,16 +208,24 @@ export class JiraLiveReconciler implements OnApplicationBootstrap, OnApplication
    * so a session that moved on from `PAY-151-x` keeps its PAY-151 line. A pair already in the store (live or ended), unlinked by a person, or answered 404 before
    * is skipped without a read; every other pair costs one `issueSummary` — at most JIRA_DETECT_READS_PER_TICK a tick, in the dashboard's row order, so a long list
    * drains over a few ticks. A 404 marks the pair never-link (the branch merely looks like a ticket); any other failure leaves it to the next tick.
+   *
+   * A session that holds a `run` or `manual` link — live or ended, on any key — is never detected at all. A person named that session's ticket, and the branch
+   * is only what the checkout held when it started: a Run launched without a worktree inherits whatever branch the last session left checked out, so detection
+   * read it as a second ticket. The branch is evidence of a ticket only when nobody said which one it was. 2026-11-04: a TIMIFY-28021 Run in a microservice
+   * checkout left on `feature/timify-26150-new-contacts` showed on the Jira page as two sessions, the second titled with TIMIFY-26150's summary.
    */
   private async detect(rows: DashboardRow[]): Promise<void> {
     const repos = readJiraConfig().repos;
     const projects = Object.keys(repos);
     if (projects.length === 0) return;
     const mapped = new Map(projects.map((p) => [p, new Set(repos[p].map((r) => resolve(r)))]));
-    const known = new Set(this.live.links().map((l) => `${l.key}\u0000${l.sessionId}`));
+    const links = this.live.links();
+    const known = new Set(links.map((l) => `${l.key}\u0000${l.sessionId}`));
+    const named = new Set(links.filter((l) => l.how !== 'branch' && l.sessionId !== null).map((l) => l.sessionId));
     let budget = JIRA_DETECT_READS_PER_TICK;
     for (const row of rows) {
       if (!ACTIVE.has(row.status) || row.gitBranch === undefined || row.gitBranch === '' || row.projectPath === undefined || row.projectPath === '') continue;
+      if (named.has(row.id)) continue;
       const keys = keysInBranch(row.gitBranch, projects);
       if (keys.length === 0) continue;
       const path = resolve(row.projectPath);

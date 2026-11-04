@@ -172,6 +172,7 @@ export function JiraCard({
                   button={openButtons(last.reopen, null, 'ended', { phone, wide: false }).primary}
                   sessionId={last.reopen.sessionId}
                   row={null}
+                  launch={last.reopen.surface}
                   primary={false}
                   onHandover={() => {}}
                 />

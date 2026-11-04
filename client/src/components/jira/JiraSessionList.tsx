@@ -91,6 +91,7 @@ export function JiraSessionList({
   const { filters } = view;
 
   const total = view.live.length + view.ended.length;
+  const saveError = payload?.saveError ?? null;
   return (
     <section className="jira-list" aria-label="Sessions">
       <div className="jira-list-bar">
@@ -125,6 +126,14 @@ export function JiraSessionList({
           </Chip>
         </div>
       </div>
+
+      {/* The link store's last save failed: every row here is memory only, and a restart drops them and every unlink with them. A save that throws costs
+          nothing else by contract, so this line is the one place that says so (2026-11-04: a store in the compose stack's read-only mount, never saved). */}
+      {saveError !== null && (
+        <p className="jira-list-warn" role="status" aria-label="Link store">
+          Jira links are not being saved — a server restart will drop them. <span className="jira-list-warn-detail">{saveError.message}</span>
+        </p>
+      )}
 
       {total === 0 ? (
         <div className="board-empty">No sessions{filters.chip === 'all' && search.trim() === '' ? '' : ' match'}</div>
@@ -312,8 +321,8 @@ function ListRowView({
         <div className="jira-list-flex">
           {buttons !== null && sessionId !== null && (
             <>
-              <OpenChip button={buttons.primary} sessionId={sessionId} row={sessionRow} primary={!row.ended} onHandover={onHandover} />
-              {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={sessionRow} primary={false} onHandover={onHandover} />}
+              <OpenChip button={buttons.primary} sessionId={sessionId} row={sessionRow} launch={link?.surface ?? null} primary={!row.ended} onHandover={onHandover} />
+              {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={sessionRow} launch={link?.surface ?? null} primary={false} onHandover={onHandover} />}
             </>
           )}
           {canRun && <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />}

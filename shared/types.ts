@@ -937,7 +937,7 @@ export type JiraLinkHow = 'run' | 'branch' | 'manual';
 export type JiraEndReason = 'idle' | 'stopped' | 'expired' | 'gone';
 
 /**
- * One session linked to one ticket, live or ended — the unit the link store keeps (`~/.backlog-manager/jira-links.json`, spec §5). The pair `(key, sessionId)`
+ * One session linked to one ticket, live or ended — the unit the link store keeps (`~/.backlog-manager/settings/jira-links.json`, spec §5). The pair `(key, sessionId)`
  * is its identity, and a session that pauses and resumes re-opens its own entry rather than adding one. `snapshot` is the ticket as it stood when the link was
  * made, so the List can still draw a ticket that has since left the board; `parentKey` is the parent Jira reports, not the board's fold top. `action` is the
  * Run action and is `null` for a `branch` or `manual` link, which show the session's `name` instead.
@@ -970,11 +970,23 @@ export interface JiraLink {
  * `GET /api/jira/sessions` — every linked session, live and ended, with the state `sessionState` derives for it (spec §6). `row` is the dashboard's row for a
  * live link (`null` once ended, or when the dashboard has none), `stateSince` is when THIS server first saw the link in that state (memory, reset on a change),
  * and `reachable` / `rowsAt` say whether the last tick could read the dashboard and when it last did. Served from memory, never from a call of its own.
+ *
+ * `saveError` is the link store's latest failed save — the error's message and when — or `null` once a save succeeds (and before any has failed). A save that
+ * throws is logged and costs nothing else by contract, so without this the store can run memory-only for its whole life and a restart drops every link and
+ * unlink with nobody told: 2026-11-04, a path in the compose stack's read-only mount. Optional in the type only so older fixtures stay valid; the route always
+ * sends it, and the client reads an absent one as `null`.
  */
 export interface JiraSessionsPayload {
   links: (JiraLink & { state: JiraSessionState; row: DashboardRow | null; stateSince: string })[];
   reachable: boolean;
   rowsAt: string | null;
+  saveError?: JiraSaveError | null;
+}
+
+/** A failed save of the Jira link store: the error's message (`EROFS: read-only file system, …`) and the ISO time of the latest failure. */
+export interface JiraSaveError {
+  message: string;
+  at: string;
 }
 
 /** `GET /api/jira/issue/:key`, read fresh. `session` is the live Run on this key (memory only), or `null`. */

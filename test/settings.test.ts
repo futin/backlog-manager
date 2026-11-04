@@ -23,7 +23,8 @@ describe('clampSettings', () => {
       prFixDefault: true,
       settingsScope: 'shared',
       contentWidth: 'full',
-      jiraDefaultAction: 's_0123abcd'
+      jiraDefaultAction: 's_0123abcd',
+      jiraDefaultPermission: 'auto'
     });
     expect(s).toEqual({
       theme: 'daylight',
@@ -42,7 +43,8 @@ describe('clampSettings', () => {
       prFixDefault: true,
       settingsScope: 'shared',
       contentWidth: 'full',
-      jiraDefaultAction: 's_0123abcd'
+      jiraDefaultAction: 's_0123abcd',
+      jiraDefaultPermission: 'auto'
     });
   });
 
@@ -57,9 +59,21 @@ describe('clampSettings', () => {
       staleDays: 'soon',
       orchestrateDefaultMergeMode: 'rebase',
       orchestrateDefaultQuestionMode: 'auto',
-      executeDefaultFinish: 'merge'
+      executeDefaultFinish: 'merge',
+      jiraDefaultPermission: 'yolo'
     });
     expect(s).toEqual(DEFAULT_SETTINGS);
+  });
+
+  // `''` is "per action" — the sheet's own ladder (context → plan, the rest → acceptEdits) — and any other value must be one of the four modes; the ceiling
+  // is not this clamp's business, the sheet clamps at render because the ceiling is the host's and can change under a stored pick.
+  it('keeps jiraDefaultPermission per action by default and accepts each of the four modes', () => {
+    expect(DEFAULT_SETTINGS.jiraDefaultPermission).toBe('');
+    for (const mode of ['plan', 'acceptEdits', 'auto', 'bypassPermissions']) {
+      expect(clampSettings({ jiraDefaultPermission: mode }).jiraDefaultPermission).toBe(mode);
+    }
+    expect(clampSettings({ jiraDefaultPermission: 'default' }).jiraDefaultPermission).toBe('');
+    expect(clampSettings({ jiraDefaultPermission: 3 }).jiraDefaultPermission).toBe('');
   });
 
   // Spec §2: the clamp is pure and cannot know which skill ids exist (that is `resolveJiraAction`'s job in lib/jira.ts), so it keeps any non-empty string of

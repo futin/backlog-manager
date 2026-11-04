@@ -3882,7 +3882,7 @@ retry a merge that already stood. A disarm of a PR with no auto-merge armed is `
 
 Phase 5's Run starts a Claude session for a Jira ticket, and the board has to show which tickets have one going and refuse a second. The Jira sessions page asks
 for more than that: which sessions a ticket has had, and which need a person now. So the server keeps each ticket–session link in a file,
-`~/.backlog-manager/jira-links.json`, of which it is the one writer (written whole and atomically through `writeJsonAtomic`, the registry's discipline without
+`~/.backlog-manager/settings/jira-links.json`, of which it is the one writer (written whole and atomically through `writeJsonAtomic`, the registry's discipline without
 being a field of it). `JiraLiveService` (`server/src/jira/live.service.ts` — the spec calls it `JiraService`; the plan ruled otherwise, so `jira/` has one
 service named for what it holds) holds that state in memory, loads it once, and rewrites the file after every change but a `starting` reservation. What the file
 records is a LINK — the pair of a key and a session id, with the Run action, the repo, a snapshot of the ticket and how it ended — and the dashboard, not this

@@ -41,7 +41,8 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
   A root that does not exist on the host is created by Docker's bind mount, as an empty directory (root-owned on Linux), so set `BM_JIRA_REPO_ROOT` to a
   directory that already exists on a machine without `~/Documents/timify-projects`.
 - **Per browser**: `backlog-manager.jira-board` (the board pick, `usePersistedState`) and `backlog-manager.jira-page` (`board | setup`, a module store) since
-  phase 2; `jiraDefaultAction` (a `Settings` key, capped at 64 characters) since phase 5b. The Board page's filters and summary search are per mount and never persisted.
+  phase 2; `jiraDefaultAction` (a `Settings` key, capped at 64 characters) since phase 5b, and `jiraDefaultPermission` (`''` per action, or one of the four
+  modes) beside it. The Board page's filters and summary search are per mount and never persisted.
 
 ## The module, file by file
 
@@ -61,7 +62,7 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 | `refs.util.ts`       | the repo/branch work's one reader of git: `readRepoRefs` (`JiraRepoRefs`), `readWorktrees`, `checkRepo` (the unavailable reasons) — every call a read through `runGit` |
 | `branch-choice.util.ts` | `parseBranchChoice` (the branch choice's shape, 400s) and `resolveWorkspace` (the choice against the refs, 409s), shared by `/prompt` and `dispatch-jira` |
 | `live.service.ts`    | `JiraLiveService` — the ticket–session link store, in memory over a file (phase 5a's map, persisted since the Jira sessions work, → [the link store](#the-link-store)); not `JiraService`, the spec's name for it |
-| `links.store.ts`     | the link store's file I/O — `loadLinks`, `saveLinks`, `jiraLinksFile` (`~/.backlog-manager/jira-links.json`, `BM_JIRA_LINKS_FILE`); no rule about what is kept |
+| `links.store.ts`     | the link store's file I/O — `loadLinks`, `saveLinks`, `jiraLinksFile` (`~/.backlog-manager/settings/jira-links.json`, `BM_JIRA_LINKS_FILE`); no rule about what is kept |
 | `jira.controller.ts` | the ten read routes (six, phase 5's `GET /prompt`, the repo/branch work's `GET /refs` and `GET /worktrees`, and the sessions page's `GET /sessions`) |
 | `jira-write.controller.ts` | the eight write routes — six config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
 | `jira.module.ts`     | `JiraModule` — the two controllers, the poller, the client (a factory value, the one place a suite swaps in a fake `fetch`) and since phase 5a `JiraLiveService`, all three exported for `AgentsModule` to import, never the reverse |
@@ -100,7 +101,7 @@ unconfigured, then ask the poller — so a malformed request never reads as an e
 | `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&target` | `text/plain`: `composeJiraPrompt`'s answer. Refusals in order: 400 `invalid issue key`, 400 `action must be execute, context or skill:<id>`, 400 `repo is required`, the branch choice's 400s (`parseBranchChoice`, [below](#branch-and-worktree-the-repobranch-work)), 503, 409 (`jira.json` unreadable), 400 `unknown skill <id>`, the issue read (§8), 400 `<repo> is not mapped to <PROJECT>` (`repos[detail.project.key]`, repo normalised like a stored path), the refs' 409s (`resolveWorkspace`), 400 `prompt too long` |
 | `GET /api/jira/refs?repo&key`     | `JiraRepoRefs` for one mapped repo, as of its last fetch. 400 `repo is required`, 400 `invalid issue key` (`key` is optional), 503, 409, 400 `<repo> is not mapped`; an unreadable repo is a 200 with `available: false` and its reason |
 | `GET /api/jira/worktrees`         | `{ worktrees, unavailable }` — every working tree of every distinct mapped path, and each repo that could not be read with its reason; never an error for one repo |
-| `GET /api/jira/sessions?open=1`   | `JiraSessionsPayload` — every link, live and ended, with its derived `state`, the dashboard's `row` (`null` for an ended link or a live one the dashboard does not list) and `stateSince`, plus `reachable` and `rowsAt`; memory only, and answered while unconfigured (no 503). `?open=1` marks a Jira page open, which quickens the reconciler |
+| `GET /api/jira/sessions?open=1`   | `JiraSessionsPayload` — every link, live and ended, with its derived `state`, the dashboard's `row` (`null` for an ended link or a live one the dashboard does not list) and `stateSince`, plus `reachable`, `rowsAt` and `saveError` (the link store's latest failed save, `null` once one lands; the List draws it as an amber line above the rows); memory only, and answered while unconfigured (no 503). `?open=1` marks a Jira page open, which quickens the reconciler |
 
 Every route but the first and `/sessions` answers 503 `Jira is not configured` while unconfigured. `GET /api/jira` fills `live` from the link store in the
 controller (the poller
@@ -419,7 +420,7 @@ Jira has moved to another project, where the key keeps its old prefix and the de
 
 ### The link store
 
-`JiraLiveService` (`live.service.ts`) holds the persisted link store in memory: `~/.backlog-manager/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it, as
+`JiraLiveService` (`live.service.ts`) holds the persisted link store in memory: `~/.backlog-manager/settings/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it, as
 `BM_JIRA_FILE` does `jira.json`), read once at construction by `loadLinks` and rewritten whole by `saveLinks` after every change but a `starting` reservation —
 a temp file in the same directory, then `rename`, the server its one writer. The file is `{ version: 1, links, suppressed, neverLink }`. A `JiraLink`
 (`shared/types.ts`) is the key, the session id, `how` (`run`, `branch` or `manual`), the action, the session's name, the repo, the branch, the surface, the
@@ -521,7 +522,8 @@ section (eight dialogs). The browser still never talks to Jira or the dashboard:
   call `onRun(issue, action)`, and the slot is cleared on a page switch like the open issue. It reads the server's prompt (`fetchJiraPrompt`, keyed on action and
   repository through `useFetched`), the ticket's transitions and assignee (`GET /issue/:key`, on open) and the agents status (`useAgents`, on open — never the
   Board's copy). `Start` is drawn only for a `disabled` or `enabled` `projectDispatchGate` answer and sends `dispatchJira` (`POST /api/agents/dispatch-jira`);
-  `Copy prompt` needs the preview and a clipboard. The permission mode is derived — the pick, else `defaultModeFor(action)`, clamped to the host's ceiling —
+  `Copy prompt` needs the preview and a clipboard. The permission mode is derived — the pick, else `defaultModeFor(action, settings.jiraDefaultPermission)` (a set mode
+  for every action, else `plan` for `context` and `acceptEdits` for the rest), clamped to the host's ceiling —
   and model and effort seed from Settings. While the agents status says `desktopAvailable`, an `Open in` Dashboard | Desktop pill (the board LaunchSheet's
   control) sits under the action, for any action, seeded once from `launchSurfaceDefault`, and Start sends its pick as `surface`; under Desktop only remote
   control is disabled (and sent Off) — permissions, model and effort still drive the headless first turn. Start stays HOME-ONLY under multi-dashboard: the sheet draws no machine picker and `dispatch-jira` takes no
@@ -548,7 +550,8 @@ section (eight dialogs). The browser still never talks to Jira or the dashboard:
   add row and a `×` that asks through `ui/Confirm`; every write is one of the six config routes and reloads the shell's status. Settings › Local › Dispatch
   gains `Jira default action`, drawn only while Jira is configured. It is read by `Run ▾`, not by the sheet — every way into the sheet passes the clicked
   row — which lists the resolved default first, marked `default`; `resolveJiraAction(setting, skills)` reads a deleted skill's id as `execute` in the select
-  and in the menu alike, without rewriting the stored value.
+  and in the menu alike, without rewriting the stored value. `Jira default permission` sits under it on the same condition and is read by the sheet, not the
+  menu: `Per action` or a mode that seeds Permissions for every action, `context` included, clamped to the ceiling at render and never by the select.
 
 ## The probe facts the code encodes
 
