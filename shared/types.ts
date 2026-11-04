@@ -937,7 +937,7 @@ export type JiraLinkHow = 'run' | 'branch' | 'manual';
 export type JiraEndReason = 'idle' | 'stopped' | 'expired' | 'gone';
 
 /**
- * One session linked to one ticket, live or ended — the unit the link store keeps (`~/.backlog-manager/jira-links.json`, spec §5). The pair `(key, sessionId)`
+ * One session linked to one ticket, live or ended — the unit the link store keeps (`~/.backlog-manager/settings/jira-links.json`, spec §5). The pair `(key, sessionId)`
  * is its identity, and a session that pauses and resumes re-opens its own entry rather than adding one. `snapshot` is the ticket as it stood when the link was
  * made, so the List can still draw a ticket that has since left the board; `parentKey` is the parent Jira reports, not the board's fold top. `action` is the
  * Run action and is `null` for a `branch` or `manual` link, which show the session's `name` instead.

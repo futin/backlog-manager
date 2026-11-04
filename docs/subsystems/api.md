@@ -205,7 +205,7 @@ fresh (`?format=text` for the ticket block), the roots search, the project list,
 eight guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
 since the repo/branch work `/repo-defaults`) and
 two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each followed by a re-read of the issue that is spliced into every board cache
-holding it. Since 5a the module also owns `JiraLiveService`, the ticket–session link store (memory over `~/.backlog-manager/jira-links.json`) behind the status
+holding it. Since 5a the module also owns `JiraLiveService`, the ticket–session link store (memory over `~/.backlog-manager/settings/jira-links.json`) behind the status
 payload's `live`, an issue's `session` and `GET /sessions`; the two POSTs that
 fill and end its links live in `agents/`, below, because they call the dashboard. The credentials are read per call and reach no payload. → [jira.md](jira.md),
 the full doc.

@@ -37,7 +37,7 @@ const same = (a: JiraLinkPair, key: string, sessionId: string): boolean => a.key
 
 /**
  * Which Jira tickets have a session linked to them — live and ended (Jira sessions, spec §5; it grew out of phase 5's memory-only live map). The state is the
- * link store's file (`links.store.ts`, `~/.backlog-manager/jira-links.json`) held in memory: it is loaded once at construction and every change but a
+ * link store's file (`links.store.ts`, `~/.backlog-manager/settings/jira-links.json`) held in memory: it is loaded once at construction and every change but a
  * `starting` reservation writes the whole file again. A write that fails is logged and costs nothing else — the memory is the truth for this run of the server,
  * and a launch must never fail because a history file could not be saved. Keeping it free of `agents/` and of the poller means `jira/` gains no new
  * dependency: `AgentsModule` already imports `JiraModule`, so the dispatch reserves, confirms or releases through this provider, the reconciler reads

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 import { JIRA_LIVE_CAP, JIRA_LIVE_TTL_MS, JiraLiveService } from '../server/src/jira/live.service';
 import { jiraLinksFile } from '../server/src/jira/links.store';
@@ -489,5 +489,19 @@ describe('a store file that cannot be trusted', () => {
     const svc = new JiraLiveService();
     svc.addLink(link('PAY-1', 'b1'));
     expect(existsSync(process.env.BM_JIRA_LINKS_FILE)).toBe(true);
+  });
+});
+
+/* The compose stack mounts ~/.backlog-manager read-only and only its `settings/` subtree read-write, so a links file anywhere else under it can never be
+   saved there: every save logged EROFS and every restart dropped every link and every unlink (2026-11-04). The default path must sit in the writable mount. */
+describe('jiraLinksFile default', () => {
+  it('is settings/jira-links.json, beside jira.json, when BM_JIRA_LINKS_FILE is unset', () => {
+    expect(jiraLinksFile({})).toBe(join(homedir(), '.backlog-manager', 'settings', 'jira-links.json'));
+  });
+
+  it("sits in the subtree docker-compose.yml mounts read-write", () => {
+    const compose = readFileSync(join(__dirname, '..', 'docker-compose.yml'), 'utf8');
+    expect(dirname(jiraLinksFile({}))).toBe(join(homedir(), '.backlog-manager', 'settings'));
+    expect(compose).toMatch(/^\s*- \$\{HOME\}\/\.backlog-manager\/settings:\$\{HOME\}\/\.backlog-manager\/settings\s*$/m);
   });
 });

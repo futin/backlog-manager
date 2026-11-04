@@ -61,7 +61,7 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 | `refs.util.ts`       | the repo/branch work's one reader of git: `readRepoRefs` (`JiraRepoRefs`), `readWorktrees`, `checkRepo` (the unavailable reasons) — every call a read through `runGit` |
 | `branch-choice.util.ts` | `parseBranchChoice` (the branch choice's shape, 400s) and `resolveWorkspace` (the choice against the refs, 409s), shared by `/prompt` and `dispatch-jira` |
 | `live.service.ts`    | `JiraLiveService` — the ticket–session link store, in memory over a file (phase 5a's map, persisted since the Jira sessions work, → [the link store](#the-link-store)); not `JiraService`, the spec's name for it |
-| `links.store.ts`     | the link store's file I/O — `loadLinks`, `saveLinks`, `jiraLinksFile` (`~/.backlog-manager/jira-links.json`, `BM_JIRA_LINKS_FILE`); no rule about what is kept |
+| `links.store.ts`     | the link store's file I/O — `loadLinks`, `saveLinks`, `jiraLinksFile` (`~/.backlog-manager/settings/jira-links.json`, `BM_JIRA_LINKS_FILE`); no rule about what is kept |
 | `jira.controller.ts` | the ten read routes (six, phase 5's `GET /prompt`, the repo/branch work's `GET /refs` and `GET /worktrees`, and the sessions page's `GET /sessions`) |
 | `jira-write.controller.ts` | the eight write routes — six config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
 | `jira.module.ts`     | `JiraModule` — the two controllers, the poller, the client (a factory value, the one place a suite swaps in a fake `fetch`) and since phase 5a `JiraLiveService`, all three exported for `AgentsModule` to import, never the reverse |
@@ -419,7 +419,7 @@ Jira has moved to another project, where the key keeps its old prefix and the de
 
 ### The link store
 
-`JiraLiveService` (`live.service.ts`) holds the persisted link store in memory: `~/.backlog-manager/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it, as
+`JiraLiveService` (`live.service.ts`) holds the persisted link store in memory: `~/.backlog-manager/settings/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it, as
 `BM_JIRA_FILE` does `jira.json`), read once at construction by `loadLinks` and rewritten whole by `saveLinks` after every change but a `starting` reservation —
 a temp file in the same directory, then `rename`, the server its one writer. The file is `{ version: 1, links, suppressed, neverLink }`. A `JiraLink`
 (`shared/types.ts`) is the key, the session id, `how` (`run`, `branch` or `manual`), the action, the session's name, the repo, the branch, the surface, the
