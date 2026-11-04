@@ -32,8 +32,15 @@ export const THEME_SCRIPT_SHA256 = 'sha256-Twr6lVSQUJ92bCaX7PSyc9hqyBvevHee9Qkkb
  * recommends. Dev binds loopback only (see main.ts), so the served build is
  * where a CSP earns its keep.
  *
- * style-src keeps 'unsafe-inline' because the pre-paint script sets
- * --font-scale as an inline style and React writes inline styles too;
+ * style-src is 'self' alone, because the directive governs less than it looks
+ * like it does: a <style> element, a style="…" attribute in parsed markup, and
+ * setAttribute('style', …). It does not govern a CSSOM write, and every inline
+ * style in this app is one — the pre-paint script's and useSettings'
+ * style.setProperty('--font-scale', …), and React's style prop, which assigns
+ * element.style. Checked in the built app, every sheet and the font-scale change,
+ * not only in jsdom, which enforces no CSP (#454). The failure is quiet, one
+ * console line and an unstyled element, so test/csp.test.ts holds the source to it.
+ *
  * connect-src 'self' keeps a compromised page from exfiltrating what it read
  * off /api/items/body.
  */
@@ -41,7 +48,7 @@ export const CSP_POLICY = [
   "default-src 'self'",
   `script-src 'self' '${THEME_SCRIPT_SHA256}'`,
   "img-src 'self' data:",
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",

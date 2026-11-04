@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdtempSync, readFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Module } from '@nestjs/common';
@@ -12,6 +12,7 @@ import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { CSP_POLICY, applySecurityMiddleware } from '../server/src/security';
 import { clientDistModules } from '../server/src/static';
+import { renderMarkdown } from '../client/src/lib/markdown';
 import viteConfig from '../vite.config';
 import { listenLoopback } from './helpers/app';
 import { makeRegistry } from './helpers/store';
@@ -98,7 +99,9 @@ describe('Content-Security-Policy header', () => {
     );
     expect(directives.get('default-src')).toBe("'self'");
     expect(directives.get('img-src')).toBe("'self' data:");
-    expect(directives.get('style-src')).toBe("'self' 'unsafe-inline'");
+    // Exactly 'self', not merely "has no 'unsafe-inline'": a hash or a nonce added
+    // here is a loosening too, and the walk in #454 found nothing that needs one.
+    expect(directives.get('style-src')).toBe("'self'");
     expect(directives.get('connect-src')).toBe("'self'");
     expect(directives.get('object-src')).toBe("'none'");
     expect(directives.get('base-uri')).toBe("'self'");
@@ -135,5 +138,76 @@ describe('the client build fits the CSP', () => {
     const decide = limit as Exclude<InlineLimit, number>;
     expect(decide('/x/icon.svg', Buffer.alloc(100))).toBeUndefined();
     expect(decide('/x/logo.png', Buffer.alloc(100))).toBeUndefined();
+  });
+});
+
+/**
+ * style-src 'self' refuses a <style> element, a style="…" attribute in parsed
+ * markup and setAttribute('style', …), and leaves a CSSOM write alone. Everything
+ * here holds the source to the side that is allowed, because nothing else will:
+ * jsdom enforces no CSP and dev serves none, so a refused style shows only as a
+ * console line in the built app and an element that lost its look. These read
+ * source and bundled code, and do not replace the browser walk #454 did; they
+ * keep what that walk found true from quietly stopping being true.
+ */
+describe('the client writes inline styles only where style-src allows', () => {
+  const ROOT = join(__dirname, '..');
+
+  const filesUnder = (dir: string, keep: (name: string) => boolean): string[] =>
+    readdirSync(dir, { recursive: true, encoding: 'utf8' })
+      .filter(keep)
+      .map((name) => join(dir, name));
+
+  /**
+   * What the directive would refuse. A `style="` is only a hit inside a string
+   * being built into markup, and that cannot be told from a regex in general, so
+   * this is the literal: JSX writes `style={…}`, which never matches it.
+   */
+  const REFUSED: Array<[string, RegExp]> = [
+    ['a <style> element from createElement', /createElement\(\s*['"`]style['"`]/],
+    ["setAttribute('style', …)", /setAttribute\(\s*['"`]style['"`]/],
+    ['a style="…" attribute in markup', /\bstyle=\\?["']/],
+  ];
+
+  const hits = (files: string[], patterns: Array<[string, RegExp]>): string[] =>
+    files.flatMap((file) =>
+      patterns.filter(([, pattern]) => pattern.test(readFileSync(file, 'utf8'))).map(([what]) => `${file}: ${what}`),
+    );
+
+  it('the app source builds no style element or style attribute', () => {
+    const sources = filesUnder(join(ROOT, 'client', 'src'), (name) => /\.tsx?$/.test(name));
+    // The walk itself, or an empty list would pass this for the wrong reason.
+    expect(sources.length).toBeGreaterThan(50);
+    expect(hits(sources, REFUSED)).toEqual([]);
+    // A .tsx file has no reason to carry the tag. A .ts one can name it in a
+    // comment, as lib/markdown.ts does, so only the components are read for it.
+    const components = sources.filter((file) => file.endsWith('.tsx'));
+    expect(hits(components, [['a <style> element in JSX', /<style[\s>]/]])).toEqual([]);
+  });
+
+  it('ui-kit, which draws the Releases drawer inside this policy, builds none either', () => {
+    const kit = filesUnder(join(ROOT, 'node_modules', 'ui-kit', 'dist', 'esm'), (name) => name.endsWith('.js'));
+    expect(kit.length).toBeGreaterThan(0);
+    expect(hits(kit, REFUSED)).toEqual([]);
+  });
+
+  it('the font scale reaches the document through CSSOM, on both of its writers', () => {
+    // The two writes the old comment took for inline styles the policy had to
+    // allow. A hand-rolled setAttribute('style', …) at either site would be
+    // refused, and the text size would stop following the setting in the build.
+    const write = /\.style\.setProperty\('--font-scale'/;
+    expect(readFileSync(INDEX_HTML, 'utf8')).toMatch(write);
+    expect(readFileSync(join(ROOT, 'client', 'src', 'hooks', 'useSettings.tsx'), 'utf8')).toMatch(write);
+  });
+
+  it('markdown the app renders carries no style attribute: alignment is align=, raw HTML is escaped', () => {
+    // dangerouslySetInnerHTML is parsed markup, so a style= in this string is a
+    // refused one. A table's column alignment is the case that could have emitted it.
+    const html = renderMarkdown('| a | b |\n| :-- | --: |\n| 1 | 2 |\n\n<div style="color:red">x</div>\n');
+    expect(html).toContain('align="left"');
+    // The escaped text still spells style=&quot;, which is text and harmless, so
+    // this looks for the attribute's opening quote and not for the word.
+    expect(html).toContain('&lt;div style=');
+    expect(html).not.toMatch(/\bstyle=["']/);
   });
 });

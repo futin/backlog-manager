@@ -1591,6 +1591,14 @@ existing `scripts/*.test.mjs` glob.
 only, so the build is where the policy earns its keep. `script-src` carries the sha256 of the pre-paint theme script instead of `'unsafe-inline'` — edit that
 script and `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows.
 
+`style-src` is `'self'` alone (#454). It carried `'unsafe-inline'` for a reason that was never true: the comment named the pre-paint script's `--font-scale` and
+React's inline styles, and both are CSSOM writes, `style.setProperty` and an assignment to `element.style`, which the directive does not govern. It governs a
+`<style>` element, a `style="…"` attribute in parsed markup, and `setAttribute('style', …)`, and the app and ui-kit use none of them; markdown reaches the page
+as parsed markup, and `marked` writes a table's alignment as `align=` and the renderer escapes raw HTML. That was checked in the built app under the served
+header — every sheet, the item modal, Jira Detail, the Releases drawer and a font-scale change, with a console watcher, and an injected `<style>` as the control
+to prove the policy was live. jsdom enforces no CSP and dev serves none, so a refused style shows only as one console line in the build and an element that lost
+its look; that is why `test/csp.test.ts` also reads the source for the refused shapes.
+
 ## Dispatch derives the action; it never accepts one
 
 `shared/agent.ts` is the single derivation (`deriveAction`), imported by the board to label a button and by the server to validate a request — one
