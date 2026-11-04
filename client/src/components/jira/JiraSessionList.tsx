@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, type MouseEvent, type ReactNode } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
@@ -50,7 +50,10 @@ const CHIP_LABEL: Record<ListChip, string> = { all: 'All', 'needs-you': 'Needs y
  *
  * **The row.** State · Ticket · Run · Repo and branch · Where · Model · Context · Started · For · Open. The ticket cell is the type glyph, the key and the
  * summary as a button that opens Detail (§8.9.2) — with the fold's `childrenOf` for a ticket on the board, and none for one drawn from its link's snapshot,
- * which has no fold to hand the Children tree. A row that needs a person wears the amber wash the deck's strip does; an ended row is set in the quiet ink.
+ * which has no fold to hand the Children tree. **The whole row opens Detail too** (`rowOpens`): a summary-only target read as plain text until hovered, so
+ * nobody found it. The summary button stays the keyboard's way in — a `tr` takes no focus — and a click on any control inside the row (`Open`, `Reopen`,
+ * `Run ▾` and its panel, which is drawn inside the cell, not in a portal) is that control's alone, as is a click that ends a text selection.
+ * A row that needs a person wears the amber wash the deck's strip does; an ended row is set in the quiet ink.
  * **Open** is the deck's: `openButtons(..., { wide: false })` through Detail's own `OpenChip`, so C2's Desktop rule lives in one place and its refusal draws
  * in the alert line under the table. An ended row's is `Reopen` — and `Run ▾`, but ONLY while the ticket has no live `run` link and no Starting reservation
  * (`runChipState`, the one-run gate): a second Start on a ticket that is already being run is exactly what the server would refuse. A Starting row has no
@@ -88,6 +91,7 @@ export function JiraSessionList({
   const { filters } = view;
 
   const total = view.live.length + view.ended.length;
+  const saveError = payload?.saveError ?? null;
   return (
     <section className="jira-list" aria-label="Sessions">
       <div className="jira-list-bar">
@@ -122,6 +126,14 @@ export function JiraSessionList({
           </Chip>
         </div>
       </div>
+
+      {/* The link store's last save failed: every row here is memory only, and a restart drops them and every unlink with them. A save that throws costs
+          nothing else by contract, so this line is the one place that says so (2026-11-04: a store in the compose stack's read-only mount, never saved). */}
+      {saveError !== null && (
+        <p className="jira-list-warn" role="status" aria-label="Link store">
+          Jira links are not being saved — a server restart will drop them. <span className="jira-list-warn-detail">{saveError.message}</span>
+        </p>
+      )}
 
       {total === 0 ? (
         <div className="board-empty">No sessions{filters.chip === 'all' && search.trim() === '' ? '' : ' match'}</div>
@@ -205,6 +217,20 @@ function ListGroup({ title, count, children }: { title: string; count: number; c
   );
 }
 
+/** Every element inside a row that owns its own click: the Open chips are links, `Run ▾` a button, and its `Popover` panel a `role="dialog"` in the cell. */
+const ROW_OWN_CONTROLS = 'a, button, input, select, textarea, label, [role="dialog"]';
+
+/**
+ * Whether a click on a List row is the row's — opening Detail — rather than a control's. A target inside one of `ROW_OWN_CONTROLS` is that control's (the
+ * summary button included: it opens Detail through its own `onClick`, so the row must not open it a second time); a target outside the row is a React
+ * synthetic event bubbling from somewhere the DOM does not nest; and a click that leaves a text selection behind was someone copying a branch name.
+ */
+function rowOpens(row: Element, target: EventTarget | null, selection: string): boolean {
+  if (!(target instanceof Element) || !row.contains(target)) return false;
+  if (target.closest(ROW_OWN_CONTROLS) !== null) return false;
+  return selection === '';
+}
+
 function ListRowView({
   row,
   now,
@@ -238,9 +264,20 @@ function ListRowView({
   const buttons = link !== null && sessionId !== null ? openButtons(link, sessionRow, state, { phone, wide: false }) : null;
   // The one-run gate, read where the deck's and Detail's are: a live `run` link or a Starting reservation hides `Run ▾`, a live branch link does not.
   const canRun = row.ended && data !== null && runChipState(issue, data, payload) !== 'live';
+  const open = (): void => onOpenIssue(issue, row.onBoard ? childrenOf : null);
+  const onRowClick = (e: MouseEvent<HTMLTableRowElement>): void => {
+    if (rowOpens(e.currentTarget, e.target, window.getSelection()?.toString() ?? '')) open();
+  };
 
   return (
-    <tr className="jira-list-row" data-state={state} data-key={row.key} data-ended={row.ended ? 'true' : undefined} aria-label={`Session on ${row.key}`}>
+    <tr
+      className="jira-list-row"
+      data-state={state}
+      data-key={row.key}
+      data-ended={row.ended ? 'true' : undefined}
+      aria-label={`Session on ${row.key}`}
+      onClick={onRowClick}
+    >
       <td className="jira-list-state" title={stripTitle(state)}>
         <div className="jira-list-flex">
           {tone !== null && <Dot tone={tone} breathe={tone === 'live'} />}
@@ -254,7 +291,7 @@ function ListRowView({
             <JiraTypeIcon type={issue.type} />
           </span>
           <span className="jira-card-key">{row.key}</span>
-          <button type="button" className="jira-list-title" onClick={() => onOpenIssue(issue, row.onBoard ? childrenOf : null)}>
+          <button type="button" className="jira-list-title" onClick={open}>
             {issue.summary}
           </button>
         </div>
@@ -284,8 +321,8 @@ function ListRowView({
         <div className="jira-list-flex">
           {buttons !== null && sessionId !== null && (
             <>
-              <OpenChip button={buttons.primary} sessionId={sessionId} row={sessionRow} primary={!row.ended} onHandover={onHandover} />
-              {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={sessionRow} primary={false} onHandover={onHandover} />}
+              <OpenChip button={buttons.primary} sessionId={sessionId} row={sessionRow} launch={link?.surface ?? null} primary={!row.ended} onHandover={onHandover} />
+              {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={sessionRow} launch={link?.surface ?? null} primary={false} onHandover={onHandover} />}
             </>
           )}
           {canRun && <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />}

@@ -131,7 +131,8 @@ How a link is made:
   (`server/lib/transcript.ts` scans newest-first), so it follows a session that switches branch. Detection only ever adds: a link made from an earlier
   branch stays when the session moves on (Unlink removes it, C9), and the new branch's key, if any, adds its own link. A detected key is confirmed with one
   Jira read before it links, through the poller, and at most 5 such reads go out per tick; a 404 marks the (session, key) pair never-link, and any other
-  failure leaves it for the next tick.
+  failure leaves it for the next tick. A session that already holds a `run` or `manual` link (live or ended, any key) is skipped whole: a person named
+  its ticket, and a Run launched without a worktree inherits whatever branch the checkout was left on (added 2026-11-04).
 - **`/jira link <KEY>`** — a new subcommand of the `jira` skill. It posts the key and the session's own `CLAUDE_CODE_SESSION_ID` to
   `POST /api/agents/jira-link`, beside `jira-stop` in `agents/` (`jira-agents.controller.ts`), because checking the session id is a dashboard call and
   `agents/` is the only module that makes one (`.claude/rules/jira.md`: the edge runs agents → jira, never back). It goes through the local server like

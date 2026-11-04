@@ -352,6 +352,22 @@ describe('JiraLaunchSheet — permissions', () => {
     await waitFor(() => expect(modeSelect().value).toBe('plan'));
     expect([...modeSelect().options].map((o) => o.value)).toEqual(['plan']);
   });
+
+  it('seeds every action, context included, from a fixed Jira default permission', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultPermission: 'auto' }));
+    server.agents = agents({ spawnMaxPermission: 'bypassPermissions' });
+    await ready({ initialAction: 'context' });
+    await waitFor(() => expect(modeSelect().value).toBe('auto'));
+    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), 'execute');
+    expect(modeSelect().value).toBe('auto');
+  });
+
+  it('clamps a fixed default to the ceiling rather than dropping it', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultPermission: 'bypassPermissions' }));
+    server.agents = agents({ spawnMaxPermission: 'auto' });
+    await ready();
+    await waitFor(() => expect(modeSelect().value).toBe('auto'));
+  });
 });
 
 describe('JiraLaunchSheet — assign and move', () => {

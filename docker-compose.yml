@@ -169,7 +169,8 @@ services:
       # orchestrator-control/ (pause-control.util.ts), tracker-sync.json
       # (tracker/sync-config.util.ts), jira.json (jira/config.util.ts),
       # tick.json (tick/tick-breaker.util.ts), dashboards.json
-      # (agents/dashboards/dashboards-file.util.ts) and timezone.json
+      # (agents/dashboards/dashboards-file.util.ts), jira-links.json
+      # (jira/links.store.ts) and timezone.json
       # (settings/timezone-config.util.ts). The whole directory has to stay
       # read-write, not any one file in it. A nested mount of a whole directory,
       # deliberately not of the file: a bind mount of a path that does not

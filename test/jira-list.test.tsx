@@ -132,6 +132,8 @@ function link(o: LinkOver) {
 let statusAnswer: JiraStatusPayload;
 let lists: Record<string, JiraIssue[]>;
 let links: ReturnType<typeof link>[];
+/** The sessions answer's `saveError`; `null` unless a case sets it. */
+let saveError: { message: string; at: string } | null = null;
 
 const ok = (body: unknown) =>
   Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve(typeof body === 'string' ? body : '') } as Response);
@@ -142,10 +144,11 @@ beforeEach(() => {
   statusAnswer = status();
   lists = { [ALPHA.id]: Object.values(ISSUES), [BETA.id]: [ISSUES['PAY-131']] };
   links = [];
+  saveError = null;
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     if (url === '/api/jira') return ok(statusAnswer);
-    if (url.startsWith('/api/jira/sessions')) return ok({ links, reachable: true, rowsAt: null });
+    if (url.startsWith('/api/jira/sessions')) return ok({ links, reachable: true, rowsAt: null, saveError });
     const m = /^\/api\/jira\/boards\/([^/]+)\/issues$/.exec(url);
     if (m !== null) return ok({ issues: lists[decodeURIComponent(m[1])] ?? [], polledAt: ALPHA.polledAt });
     if (url === '/api/jira/worktrees') return ok({ worktrees: [], unavailable: [] });
@@ -293,6 +296,35 @@ describe('the List view', () => {
     expect(within(group('Live')).queryByRole('button', { name: /^Run PAY/ })).toBeNull();
   });
 
+  it('a click anywhere on a row opens Detail; its own Run ▾, that menu\'s panel and a text selection do not', async () => {
+    links = [
+      link({ key: 'PAY-131', id: 'b1', state: 'working', startedAt: hoursAgo(2), how: 'branch', branch: 'feat/refund-partial' }),
+      link({ key: 'PAY-131', id: 'e1', state: 'ended', startedAt: daysAgo(2), endedAt: daysAgo(1) })
+    ];
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBe(2));
+    const modal = (): Element | null => document.querySelector('[role="dialog"][aria-modal="true"]');
+    const ended = (): HTMLElement => within(group('Ended')).getByRole('row', { name: 'Session on PAY-131' });
+
+    // Run ▾ is the button's, and so is a click on the panel it opens inside the cell: neither opens Detail.
+    await userEvent.click(within(ended()).getByRole('button', { name: 'Run PAY-131' }));
+    const panel = ended().querySelector('[role="dialog"]');
+    expect(panel).not.toBeNull();
+    await userEvent.click(panel as HTMLElement);
+    expect(modal()).toBeNull();
+    await userEvent.keyboard('{Escape}');
+
+    // A click that ends a text selection is someone copying, not opening.
+    const selection = jest.spyOn(window, 'getSelection').mockReturnValue({ toString: () => 'feat/refund-partial' } as unknown as Selection);
+    await userEvent.click(within(group('Live')).getByText('feat/refund-partial'));
+    expect(modal()).toBeNull();
+    selection.mockRestore();
+
+    // A plain cell — the branch, nowhere near the summary — opens Detail for that row's ticket.
+    await userEvent.click(within(group('Live')).getByText('feat/refund-partial'));
+    expect(await screen.findByRole('dialog', { name: /^PAY-131 / })).toHaveAttribute('aria-modal', 'true');
+  });
+
   it('draws a Starting row from the status reservation, with no buttons', async () => {
     statusAnswer = status({ live: { 'PAY-151': { name: 'jira run', sessionId: null, startedAt: hoursAgo(0.01), repo: '/home/ada/pay', starting: true } } });
     await renderList();
@@ -352,5 +384,22 @@ describe('the List view', () => {
     const keyWarnings = warn.mock.calls.filter((c) => String(c[0]).includes('same key') || String(c[0]).includes('unique "key"'));
     warn.mockRestore();
     expect(keyWarnings).toEqual([]);
+  });
+
+  /* The link store's save failing was a log line only, so the stack ran it memory-only for its whole life and every restart dropped every link (2026-11-04).
+     The List says so while it lasts, and says nothing once a save lands. */
+  it('warns above the rows while the link store cannot save, naming the error', async () => {
+    standardLinks();
+    saveError = { message: 'EROFS: read-only file system, open \'/x/.atomic-write.tmp\'', at: hoursAgo(0) };
+    await renderList();
+    const note = await screen.findByRole('status', { name: 'Link store' });
+    expect(note.textContent).toBe("Jira links are not being saved — a server restart will drop them. EROFS: read-only file system, open '/x/.atomic-write.tmp'");
+  });
+
+  it('draws no warning when the answer has no saveError', async () => {
+    standardLinks();
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBeGreaterThan(0));
+    expect(screen.queryByRole('status', { name: 'Link store' })).toBeNull();
   });
 });

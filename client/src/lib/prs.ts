@@ -26,6 +26,36 @@ export interface UpdateMark {
   sha: string;
 }
 
+/**
+ * A pull request's identity on the page, `<repo>#<number>`: what outcomes, update marks, the in-flight set and the open Confirm are held under, and what every
+ * layout keys a row by. Two repos can each have a `#7`, so the number alone never names a PR. A plain string because all of those are `Record`s and `Set`s of
+ * one; this pair is the only code that knows its shape.
+ */
+export function prKey(repo: string, number: number): string {
+  return `${repo}#${number}`;
+}
+
+/**
+ * `prKey` read back, or `null` for anything it could not have built: no `#`, an empty repo, or a number part that is not a positive integer in decimal digits.
+ * Split at the LAST `#`, because the number never holds one. A caller compares `repo` exactly, so `a/x` cannot claim `a/xy#1` the way a bare prefix test would.
+ */
+export function parsePrKey(key: string): { repo: string; number: number } | null {
+  const at = key.lastIndexOf('#');
+  if (at <= 0) return null;
+  const digits = key.slice(at + 1);
+  if (!/^[1-9][0-9]*$/.test(digits)) return null;
+  return { repo: key.slice(0, at), number: Number(digits) };
+}
+
+/** The repo and PR a `<repo>#<number>` key names in a read, or `undefined` when that read does not list it, or the key is not one. */
+export function findPr(repos: readonly PrRepoView[], key: string): { repo: PrRepoView; pr: PullRequestRow } | undefined {
+  const parsed = parsePrKey(key);
+  if (parsed === null) return undefined;
+  const repo = repos.find((r) => r.repo === parsed.repo);
+  const pr = repo?.prs.find((p) => p.number === parsed.number);
+  return repo === undefined || pr === undefined ? undefined : { repo, pr };
+}
+
 /** A chip a row draws: the label is the whole claim, the tone is `Pill`'s vocabulary. */
 export interface PrChip {
   label: string;
@@ -162,6 +192,44 @@ export function defaultMethod(methods: readonly MergeMethod[]): MergeMethod | nu
  * (`PR_UPDATING_MS`) because the server makes the repo's cache entry due again at the same moment — the page's one re-read must reach GitHub, not the TTL.
  */
 export const UPDATING_MS = PR_UPDATING_MS;
+
+/** What a PR whose head moved under its update mark says: the update landed, whichever read saw it first. */
+const BRANCH_UPDATED: PrOutcome = { text: 'branch updated', kind: 'ok' };
+
+/**
+ * What one read means for one update mark — the one statement of "the head moved, so the branch was updated". The page owns the effects (the timers, the React
+ * state, the rule that the mark stays until the timer's read is in); this owns the decision, so a test can ask it without rendering the page.
+ *
+ * `read` is the payload's repos, `null` for a failed read. `final` says who is asking, because GitHub answers update-branch with 202 and merges later, and the
+ * two readers owe different things. The poll's reads (`false`) may only end a mark early: a head that has not moved yet says nothing, nor does a read that
+ * failed. The timer's one re-read after `UPDATING_MS` (`true`) must end it whatever it sees, or a slow update would leave the row waiting forever — so the same
+ * head, or a failed read, drops the mark and takes the `updating…` line with it. Either way a head that moved says `branch updated`, and a read that no longer
+ * lists the PR drops the mark alone: it has no row left to say anything on.
+ */
+export function updateTransition(
+  read: readonly PrRepoView[] | null,
+  key: string,
+  sha: string,
+  final: boolean
+): { dropMark: boolean; outcome: 'updated' | 'clear-updating' | null } {
+  const unmoved = final ? ({ dropMark: true, outcome: 'clear-updating' } as const) : ({ dropMark: false, outcome: null } as const);
+  if (read === null) return unmoved;
+  const found = findPr(read, key);
+  if (found === undefined) return { dropMark: true, outcome: null };
+  return found.pr.headSha !== sha ? { dropMark: true, outcome: 'updated' } : unmoved;
+}
+
+/**
+ * The outcome record after `updateTransition`'s answer. The SAME object when nothing changes, so a `setOutcomes` updater keeps React's bail-out. `clear-updating`
+ * removes the key only while it still says `updating…`: a finished or refused outcome that arrived while the update waited answers a later write, and stays.
+ */
+export function applyUpdateOutcome(outcomes: Record<string, PrOutcome>, key: string, outcome: 'updated' | 'clear-updating' | null): Record<string, PrOutcome> {
+  if (outcome === 'updated') return outcomes[key] === BRANCH_UPDATED ? outcomes : { ...outcomes, [key]: BRANCH_UPDATED };
+  if (outcome === null || outcomes[key]?.kind !== 'updating') return outcomes;
+  const next = { ...outcomes };
+  delete next[key];
+  return next;
+}
 
 function newest(prs: readonly PullRequestRow[]): number {
   return prs.reduce((max, pr) => Math.max(max, Date.parse(pr.updatedAt) || 0), 0);

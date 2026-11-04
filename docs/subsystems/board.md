@@ -388,7 +388,8 @@ model and effort every launch sheet seeds from, the dashboard link base, and the
 from. `Dispatch` also carries `Execute finish` (`executeDefaultFinish`, the execute sheet's Finish seed), `Groom finish` (`groomDefaultFinish`, a home groom's),
 `Auto-merge PRs` (`prAutoMergeDefault`) and `Fix if it fails` (`prFixDefault`, disabled while the row above it is off, its stored value left alone) and, only
 while Jira is configured, `Jira default action` — the action a Jira card's `Run ▾` lists first, read through `resolveJiraAction` so a deleted skill's id reads
-as `Work it end to end` while the stored value is left alone. That card is what the old `Claude Agents` card's per-device half became: that card mixed backends,
+as `Work it end to end` while the stored value is left alone, and `Jira default permission` (`jiraDefaultPermission`, the Jira launch sheet's Permissions
+seed — `Per action` or one mode for every action, capped by the host's ceiling at launch, not here). That card is what the old `Claude Agents` card's per-device half became: that card mixed backends,
 and a page that promises a scope cannot carry one that does. `Sources · this machine` (`SourcesGroup`) is the Shared report and is read-only by design, not by
 phase: one row per source — Files (its project count, any unsupported or missing project, and the connect commands), GitHub (`as <login> · N of M left · resets
 HH:MM`, `token set` or the no-token sentence, its project count, and one `repo · state` line per repo, sync off included) and Jira (`configured · <site> · N
@@ -514,7 +515,7 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   of them filled by `primaryKey` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
   the method `Select` inside it, then `PrOutcomeLine`. A blocked key is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
   off` on each for a sync-off repo) as its `title` and its `aria-describedby`; a key is `disabled` outright only while its PR's write runs, because the page
-  owns an in-flight set keyed `<repo>#<number>`. The page holds ONE `confirming` key, so a second `Merge` moves the Confirm, and a write leaving, a layout
+  owns an in-flight set keyed `<repo>#<number>` (`prKey` / `parsePrKey`, `lib/prs.ts`). The page holds ONE `confirming` key, so a second `Merge` moves the Confirm, and a write leaving, a layout
   switch, a re-read that drops the PR or blocks the merge, a filter hiding the row or a collapse closes it, nothing sent. `PrRepoNotes` says the merged
   outcomes, the `sync off` sentence and `showing n of total` once above Inbox and Matrix, then the `Can't read` lines below; Cards says the first three in each
   card. A token-less server reads `no token — set BM_GITHUB_TOKEN in .env and restart`. A row's chips are `prChips`, and while a live or paused run, a remote

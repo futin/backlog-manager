@@ -15,25 +15,14 @@ import { usePullRequests } from '../../hooks/usePullRequests';
 import { useReportWorking } from '../../hooks/useReportWorking';
 import { emptyRepoNote, newestPolledAt, parseLayout, PR_LAYOUT_KEY, PR_LAYOUT_OPTIONS, splitReach, type PrLayout } from '../../lib/pr-layouts';
 import type { PrRunContext } from '../../lib/pr-run';
-import { groupRepos, mergeBlock, outcomeLine, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
-import type { PrRepoView, PrWriteResult, PullRequestRow } from '../../../../shared/types';
+import { applyUpdateOutcome, findPr, groupRepos, mergeBlock, outcomeLine, updateTransition, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
+import type { PrWriteResult } from '../../../../shared/types';
 
 /** The page's own words for the token-less server — an instruction, because the only fix is on the host. */
 const NO_TOKEN = 'no token — set BM_GITHUB_TOKEN in .env and restart';
 
 /** How often the run-in-progress warning's clock moves. A live claim goes stale in minutes, so a quarter-minute is ample, and the run poll re-renders anyway. */
 const WARNING_CLOCK_MS = 15_000;
-
-/** What a PR whose head moved under its update mark says: the update landed, whichever read saw it first. */
-const BRANCH_UPDATED: PrOutcome = { text: 'branch updated', kind: 'ok' };
-
-/** The repo and PR a `<repo>#<number>` key names in a read, or `undefined` when that read does not list it. */
-function findPr(repos: readonly PrRepoView[], key: string): { repo: PrRepoView; pr: PullRequestRow } | undefined {
-  const at = key.lastIndexOf('#');
-  const repo = repos.find((r) => r.repo === key.slice(0, at));
-  const pr = repo?.prs.find((p) => p.number === Number(key.slice(at + 1)));
-  return repo === undefined || pr === undefined ? undefined : { repo, pr };
-}
 
 /**
  * GitHub › PRs (.claude/DESIGN.md §8.11; source-sections spec, Goal 2 and "Left to the builder"): the open pull requests of every registered GitHub repo,
@@ -72,8 +61,9 @@ function findPr(repos: readonly PrRepoView[], key: string): { repo: PrRepoView; 
  * says `updating…` for as long as the mark is PRESENT — no clock of its own, so a render can never free `Update` before a read has judged the update. Any read
  * that shows the head moved drops the mark and says `branch updated`; one that no longer lists the PR drops the mark alone. After `UPDATING_MS` the mark's
  * timer re-reads once and judges THAT answer: a new head is `branch updated`, the same head (or a failed read) drops the mark and the `updating…` line, so a
- * slow update does not leave the row waiting forever. The timer's verdict lands only while the page is mounted. Marks, outcomes and timers are this page's,
- * not a layout's, so switching layout mid-update keeps the mark.
+ * slow update does not leave the row waiting forever. What each read means is `updateTransition`'s (`lib/prs.ts`), the rule's one home; this page only acts on
+ * the answer. The timer's verdict lands only while the page is mounted. Marks, outcomes and timers are this page's, not a layout's, so switching layout
+ * mid-update keeps the mark.
  *
  * **The Confirm.** One merge Confirm per page (`confirming`, a key), opened by a row's `Merge` and closed by Cancel, by any write of that PR leaving, by a
  * layout switch, and by a read in which its PR is gone or `mergeBlock` refuses it — so a Confirm never outlives the facts it was opened on, and a PR whose
@@ -126,19 +116,9 @@ export default function PullRequestsView({ onWorking, onOpenSettings }: { onWork
           // The mark stays until this read is in: dropping it first would free `Update` on a head the update may be moving that very moment.
           void refresh().then((payload) => {
             if (!mountedRef.current) return;
-            const found = payload === null ? undefined : findPr(payload.repos, key);
-            dropMark(key);
-            if (payload !== null && found === undefined) return;
-            if (found !== undefined && found.pr.headSha !== sha) {
-              setOutcomes((prev) => ({ ...prev, [key]: BRANCH_UPDATED }));
-              return;
-            }
-            setOutcomes((prev) => {
-              if (prev[key]?.kind !== 'updating') return prev;
-              const next = { ...prev };
-              delete next[key];
-              return next;
-            });
+            const verdict = updateTransition(payload === null ? null : payload.repos, key, sha, true);
+            if (verdict.dropMark) dropMark(key);
+            setOutcomes((prev) => applyUpdateOutcome(prev, key, verdict.outcome));
           });
         }, UPDATING_MS)
       );
@@ -159,17 +139,13 @@ export default function PullRequestsView({ onWorking, onOpenSettings }: { onWork
     };
   }, []);
 
-  // A read that shows the head moved ends the mark early, timer and all, and says the update landed; one that no longer lists the PR ends the mark alone; one
-  // still on the marked head keeps it.
+  // Every read judges every mark (`updateTransition`), and this one may end a mark early, timer and all; one still on the marked head keeps it.
   useEffect(() => {
     if (data === null) return;
     for (const [key, mark] of Object.entries(marks)) {
-      const found = findPr(data.repos, key);
-      if (found === undefined) dropMark(key);
-      else if (found.pr.headSha !== mark.sha) {
-        dropMark(key);
-        setOutcomes((prev) => ({ ...prev, [key]: BRANCH_UPDATED }));
-      }
+      const verdict = updateTransition(data.repos, key, mark.sha, false);
+      if (verdict.dropMark) dropMark(key);
+      setOutcomes((prev) => applyUpdateOutcome(prev, key, verdict.outcome));
     }
   }, [data, marks, dropMark]);
 

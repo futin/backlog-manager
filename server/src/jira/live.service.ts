@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { jiraSessionName } from '../../../shared/types';
-import type { DashboardRow, JiraEndReason, JiraLink, JiraLiveSession } from '../../../shared/types';
+import type { DashboardRow, JiraEndReason, JiraLink, JiraLiveSession, JiraSaveError } from '../../../shared/types';
 import { loadLinks, saveLinks } from './links.store';
 import type { JiraLinkPair } from './links.store';
 
@@ -37,7 +37,7 @@ const same = (a: JiraLinkPair, key: string, sessionId: string): boolean => a.key
 
 /**
  * Which Jira tickets have a session linked to them — live and ended (Jira sessions, spec §5; it grew out of phase 5's memory-only live map). The state is the
- * link store's file (`links.store.ts`, `~/.backlog-manager/jira-links.json`) held in memory: it is loaded once at construction and every change but a
+ * link store's file (`links.store.ts`, `~/.backlog-manager/settings/jira-links.json`) held in memory: it is loaded once at construction and every change but a
  * `starting` reservation writes the whole file again. A write that fails is logged and costs nothing else — the memory is the truth for this run of the server,
  * and a launch must never fail because a history file could not be saved. Keeping it free of `agents/` and of the poller means `jira/` gains no new
  * dependency: `AgentsModule` already imports `JiraModule`, so the dispatch reserves, confirms or releases through this provider, the reconciler reads
@@ -79,6 +79,8 @@ export class JiraLiveService {
   private rows = new Map<string, DashboardRow>();
   private rowsAtMs: number | null = null;
   private up = true;
+  /** The latest save's failure, cleared by the next good save; see `saveError()`. */
+  private lastSaveError: JiraSaveError | null = null;
   private pageReadAt: number | null = null;
 
   constructor() {
@@ -330,6 +332,14 @@ export class JiraLiveService {
   }
 
   /**
+   * The latest save's failure, or null once one succeeds (and before any has failed). Memory only — it describes the file, so it cannot be written to it.
+   * `GET /api/jira/sessions` carries it so the List can say the store is not being kept; see `JiraSessionsPayload.saveError`.
+   */
+  saveError(): JiraSaveError | null {
+    return this.lastSaveError === null ? null : { ...this.lastSaveError };
+  }
+
+  /**
    * Setup's repo mapping changed (`POST /api/jira/repos` saved). The reconciler is armed only while something is live or a repo is mapped, and a mapping made
    * while the server runs would otherwise wait for the next `confirm` or restart to start detection. `agents/` imports `jira/`, never the reverse, so the edge
    * back is this one callback list rather than an import: the reconciler subscribes, the write route emits, neither names the other. A listener that throws must
@@ -458,8 +468,12 @@ export class JiraLiveService {
     this.retain();
     try {
       saveLinks({ links: this.entries, suppressed: this.suppressed, neverLink: this.neverLink });
+      this.lastSaveError = null;
     } catch (err) {
-      console.warn(`jira links not saved: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      // Logged once per distinct message, not per save: a store that cannot be written fails on every change, and the List already says so on screen.
+      if (this.lastSaveError?.message !== message) console.warn(`jira links not saved: ${message}`);
+      this.lastSaveError = { message, at: new Date().toISOString() };
     }
   }
 }

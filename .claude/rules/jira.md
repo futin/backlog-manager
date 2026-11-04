@@ -87,13 +87,14 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `shellQuote`d. Why: [invariants.md](docs/subsystems/invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-one-hand-kept-copy)
 - **A Jira session is a persisted link, and Stop, a quiet dashboard or the 8-hour backstop each end it.** `JiraLiveService` (`server/src/jira/live.service.ts`,
   NOT `JiraService`) holds the link store in memory and writes it whole after every change but a `starting` reservation: `server/src/jira/links.store.ts`,
-  `~/.backlog-manager/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it), version 1, the server its one writer, through
+  `~/.backlog-manager/settings/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it), version 1, the server its one writer, through
   `writeJsonAtomic`. It holds `links` (`JiraLink`: key, session id, `how` — `run`, `branch` or `manual` — action, repo, branch, surface, model, effort, a ticket
   snapshot, `startedAt`, `endedAt` with an `endReason` of `idle`, `stopped`, `expired` or `gone`, `quietSince` and `reattachedAt`), plus the `suppressed` and
   `neverLink` pairs (each capped at 1,000, oldest out); `(key, sessionId)` is a link's identity, and a key may hold several. A file that does not parse, or
   whose `version` is not 1, loads EMPTY with one warning and is renamed `jira-links.json.bad-<ISO>` at the first save — never overwritten, and left alone by a
   boot that saves nothing — where `jira.json`'s writers refuse with a 409, because this is machine-written history; one unusable entry costs only itself. A save
-  that throws is logged and costs nothing else: a launch never fails for it. `JiraModule` provides the service; it is read by `GET /api/jira` (`live`, filled by
+  that throws is logged (once per distinct message) and costs nothing else: a launch never fails for it — but `saveError()` holds it, `{ message, at }`,
+  until a save lands, and `GET /api/jira/sessions` carries it so the List warns that links are memory only. `JiraModule` provides the service; it is read by `GET /api/jira` (`live`, filled by
   the controller from `snapshot()`, the live `run` links only — the poller never sees it, and an unconfigured server keeps `{}`), `GET /api/jira/issue/:key`
   (`session`) and `GET /api/jira/sessions`.
   `GET /api/jira/sessions` is every link, live and ended, as `JiraSessionsPayload` (`{ links, reachable, rowsAt }`): each carries `state` (`sessionState`,

@@ -796,8 +796,18 @@ describe('SettingsView', () => {
         'Auto-merge PRs',
         'Fix if it fails',
         'Jira default action',
+        'Jira default permission',
         'Dashboard link'
       ]);
+    });
+
+    it('offers Per action and the four modes, starts on Per action, and persists a pick', async () => {
+      renderWithJira(jiraData());
+      const select = screen.getByLabelText('Jira default permission') as HTMLSelectElement;
+      expect([...select.options].map((o) => o.value)).toEqual(['', 'plan', 'acceptEdits', 'auto', 'bypassPermissions']);
+      expect(select.value).toBe('');
+      await userEvent.selectOptions(select, 'auto');
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').jiraDefaultPermission).toBe('auto');
     });
 
     it('persists a pick as the setting string', async () => {
