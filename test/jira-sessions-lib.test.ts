@@ -47,84 +47,117 @@ describe('desktopHref', () => {
 
 describe('desktopButton (C2)', () => {
   it('dashboard working: disabled, with the Dashboard title', () => {
-    expect(desktopButton(dash({ status: 'working' }), false)).toEqual({ show: true, enabled: false, via: null, title: DASH_TITLE });
+    expect(desktopButton(dash({ status: 'working' }), null, false)).toEqual({ show: true, enabled: false, via: null, title: DASH_TITLE });
   });
 
   it.each(['remoteQuestion', 'remotePlan', 'remoteReply'] as const)('dashboard idle but holding a %s: still disabled — a held wait is a process mid-turn', (flag) => {
-    expect(desktopButton(dash({ [flag]: true }), false)).toMatchObject({ enabled: false, title: DASH_TITLE });
+    expect(desktopButton(dash({ [flag]: true }), null, false)).toMatchObject({ enabled: false, title: DASH_TITLE });
   });
 
   it('dashboard question (no held flag yet) is disabled: the status is not a resting one', () => {
-    expect(desktopButton(dash({ status: 'question' }), false)).toMatchObject({ enabled: false, title: DASH_TITLE });
+    expect(desktopButton(dash({ status: 'question' }), null, false)).toMatchObject({ enabled: false, title: DASH_TITLE });
   });
 
   it('dashboard idle with a stopState: disabled', () => {
-    expect(desktopButton(dash({ stopState: 'ready' }), false)).toMatchObject({ enabled: false, title: DASH_TITLE });
-    expect(desktopButton(dash({ stopState: 'stopping' }), false)).toMatchObject({ enabled: false, title: DASH_TITLE });
+    expect(desktopButton(dash({ stopState: 'ready' }), null, false)).toMatchObject({ enabled: false, title: DASH_TITLE });
+    expect(desktopButton(dash({ stopState: 'stopping' }), null, false)).toMatchObject({ enabled: false, title: DASH_TITLE });
   });
 
   it('dashboard idle with processLive: disabled', () => {
-    expect(desktopButton(dash({ processLive: true }), false)).toMatchObject({ enabled: false, title: DASH_TITLE });
+    expect(desktopButton(dash({ processLive: true }), null, false)).toMatchObject({ enabled: false, title: DASH_TITLE });
   });
 
   it('dashboard idle, clean: enabled through the guarded hand-over', () => {
-    expect(desktopButton(dash(), false)).toEqual({ show: true, enabled: true, via: 'handover', title: null });
+    expect(desktopButton(dash(), null, false)).toEqual({ show: true, enabled: true, via: 'handover', title: null });
   });
 
   it('dashboard incomplete, clean: enabled through the guarded hand-over', () => {
-    expect(desktopButton(dash({ status: 'incomplete' }), false)).toEqual({ show: true, enabled: true, via: 'handover', title: null });
+    expect(desktopButton(dash({ status: 'incomplete' }), null, false)).toEqual({ show: true, enabled: true, via: 'handover', title: null });
   });
 
   it('dashboard incomplete with a stopState or processLive: disabled', () => {
-    expect(desktopButton(dash({ status: 'incomplete', stopState: 'ready' }), false).enabled).toBe(false);
-    expect(desktopButton(dash({ status: 'incomplete', processLive: true }), false).enabled).toBe(false);
+    expect(desktopButton(dash({ status: 'incomplete', stopState: 'ready' }), null, false).enabled).toBe(false);
+    expect(desktopButton(dash({ status: 'incomplete', processLive: true }), null, false).enabled).toBe(false);
   });
 
   it('desktopOwned: enabled as the plain href whatever the status — the app already owns it', () => {
     for (const status of ['working', 'question', 'idle']) {
-      expect(desktopButton(dash({ desktopOwned: true, status }), false)).toEqual({ show: true, enabled: true, via: 'href', title: null });
+      expect(desktopButton(dash({ desktopOwned: true, status }), null, false)).toEqual({ show: true, enabled: true, via: 'href', title: null });
     }
   });
 
   it('a row with an unknown status or no surface is judged as a dashboard session, and an unknown status is not resting', () => {
-    expect(desktopButton({ id: 's', status: 'unknown' }, false)).toMatchObject({ enabled: false, title: DASH_TITLE });
-    expect(desktopButton({ id: 's', status: 'idle' }, false)).toMatchObject({ enabled: true, via: 'handover' });
+    expect(desktopButton({ id: 's', status: 'unknown' }, null, false)).toMatchObject({ enabled: false, title: DASH_TITLE });
+    expect(desktopButton({ id: 's', status: 'idle' }, null, false)).toMatchObject({ enabled: true, via: 'handover' });
   });
 
   it.each(['working', 'question'])('local %s: disabled, with the terminal-or-app title', (status) => {
-    expect(desktopButton(local({ status }), false)).toEqual({ show: true, enabled: false, via: null, title: LOCAL_TITLE });
+    expect(desktopButton(local({ status }), null, false)).toEqual({ show: true, enabled: false, via: null, title: LOCAL_TITLE });
   });
 
   it('local idle and incomplete: enabled as the plain href', () => {
-    expect(desktopButton(local(), false)).toEqual({ show: true, enabled: true, via: 'href', title: null });
-    expect(desktopButton(local({ status: 'incomplete' }), false)).toEqual({ show: true, enabled: true, via: 'href', title: null });
+    expect(desktopButton(local(), null, false)).toEqual({ show: true, enabled: true, via: 'href', title: null });
+    expect(desktopButton(local({ status: 'incomplete' }), null, false)).toEqual({ show: true, enabled: true, via: 'href', title: null });
   });
 
   it('a local row is judged by its status alone: stopState and processLive do not matter to it', () => {
-    expect(desktopButton(local({ processLive: true }), false).enabled).toBe(true);
+    expect(desktopButton(local({ processLive: true }), null, false).enabled).toBe(true);
   });
 
   it('a phone hides the button whatever the row says', () => {
-    expect(desktopButton(dash(), true)).toEqual({ show: false, enabled: false, via: null, title: null });
-    expect(desktopButton(local({ status: 'working' }), true)).toEqual({ show: false, enabled: false, via: null, title: null });
-    expect(desktopButton(dash({ desktopOwned: true }), true).show).toBe(false);
+    expect(desktopButton(dash(), null, true)).toEqual({ show: false, enabled: false, via: null, title: null });
+    expect(desktopButton(local({ status: 'working' }), null, true)).toEqual({ show: false, enabled: false, via: null, title: null });
+    expect(desktopButton(dash({ desktopOwned: true }), null, true).show).toBe(false);
+  });
+});
+
+describe('appOwned: a local row Run ▾ launched in Desktop', () => {
+  it.each(['working', 'question', 'idle', 'incomplete'])('local %s launched in Desktop: enabled as the href, like desktopOwned', (status) => {
+    expect(desktopButton(local({ status }), 'desktop', false)).toEqual({ show: true, enabled: true, via: 'href', title: null });
+    expect(primaryIsDesktop(local({ status }), 'desktop')).toBe(true);
+  });
+
+  it('a local row launched from the dashboard or never launched here keeps the stricter terminal-or-app reading', () => {
+    expect(desktopButton(local({ status: 'working' }), 'dashboard', false)).toMatchObject({ enabled: false, title: LOCAL_TITLE });
+    expect(desktopButton(local({ status: 'working' }), null, false)).toMatchObject({ enabled: false, title: LOCAL_TITLE });
+  });
+
+  it('the row outranks the launch: a dashboard row is judged by the dashboard rules whatever Run ▾ launched', () => {
+    expect(desktopButton(dash({ status: 'working' }), 'desktop', false)).toMatchObject({ enabled: false, title: DASH_TITLE });
+    expect(primaryIsDesktop(dash(), 'desktop')).toBe(false);
+  });
+
+  it('a phone still hides it', () => {
+    expect(desktopButton(local({ status: 'working' }), 'desktop', true).show).toBe(false);
+  });
+
+  it('a permission wait in an app-launched session leads with Open in Desktop, Dashboard second', () => {
+    expect(buttons(local({ status: 'question', permissionWait: true }), 'permission', { wide: true }, link({ surface: 'desktop' }))).toEqual({
+      primary: { label: 'Open in Desktop', target: 'desktop' },
+      secondary: { label: 'Open in Dashboard', target: 'dashboard' }
+    });
+  });
+
+  it('its Where reads Desktop', () => {
+    expect(surfaceWord(link({ surface: 'desktop' }), local({ status: 'working' }))).toBe('Desktop');
+    expect(surfaceWord(link({ surface: null }), local({ status: 'working' }))).toBe('Terminal or app');
   });
 });
 
 describe('primaryIsDesktop (C3)', () => {
   it('desktopOwned leads with Desktop', () => {
-    expect(primaryIsDesktop(dash({ desktopOwned: true, status: 'working' }))).toBe(true);
+    expect(primaryIsDesktop(dash({ desktopOwned: true, status: 'working' }), null)).toBe(true);
   });
 
   it('local idle leads with Desktop; local working or question promotes Dashboard', () => {
-    expect(primaryIsDesktop(local())).toBe(true);
-    expect(primaryIsDesktop(local({ status: 'working' }))).toBe(false);
-    expect(primaryIsDesktop(local({ status: 'question' }))).toBe(false);
+    expect(primaryIsDesktop(local(), null)).toBe(true);
+    expect(primaryIsDesktop(local({ status: 'working' }), null)).toBe(false);
+    expect(primaryIsDesktop(local({ status: 'question' }), null)).toBe(false);
   });
 
   it('a plain dashboard session leads with Dashboard even when its Desktop is enabled', () => {
-    expect(desktopButton(dash(), false).enabled).toBe(true);
-    expect(primaryIsDesktop(dash())).toBe(false);
+    expect(desktopButton(dash(), null, false).enabled).toBe(true);
+    expect(primaryIsDesktop(dash(), null)).toBe(false);
   });
 });
 

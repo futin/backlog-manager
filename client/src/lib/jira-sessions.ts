@@ -32,6 +32,20 @@ export interface DesktopButton {
   title: string | null;
 }
 
+/**
+ * Whether the desktop app holds this session, so `claude://resume` only brings its own window forward and cannot start a second process on the transcript.
+ *
+ * Two sources say so. The dashboard's `desktopOwned`, for a session it handed over. And this repo's own launch: a `local` row whose link says Run ▾ started it
+ * in Desktop (`launch === 'desktop'`). The dashboard reports that session as plain `local`, the same word it uses for a terminal, so without the link the
+ * board read an app session mid-turn as a possible terminal and disabled the very button that leads back to it. Only Run ▾ stamps `desktop`; a detected or
+ * hand-made link carries `null` and keeps the stricter `local` reading. A `dashboard` or `cloud` row outranks the launch: the row says where it runs now.
+ *
+ * The one gap is a person resuming that app session in a terminal by hand; the dashboard cannot report that, and `desktopOwned` has the same gap.
+ */
+export function appOwned(row: DashboardRow, launch: JiraLink['surface']): boolean {
+  return row.desktopOwned === true || (row.surface === 'local' && launch === 'desktop');
+}
+
 /** The two statuses a session rests in once its turn is over; the dashboard's own hand-over (`handOverState` → `offer`) accepts exactly these. */
 const RESTING = new Set(['idle', 'incomplete']);
 
@@ -45,17 +59,18 @@ const RESTING = new Set(['idle', 'incomplete']);
  *   otherwise it is enabled exactly when the dashboard's own hand-over would accept it — no `stopState`, no `processLive`, none of the three held waits, and a
  *   resting status — and goes through the guarded route, never a raw link, so the guard stays the dashboard's. A held wait is a running process mid-turn.
  *
- * `desktopOwned` is read only on the dashboard branch, as the spec words it: a `local` row is judged by its status alone.
+ * An app-owned session (`appOwned`: `desktopOwned`, or a `local` row Run ▾ launched in Desktop) is enabled as the href at any status, and is checked first; any
+ * other `local` row is judged by its status alone.
  */
-export function desktopButton(row: DashboardRow, phone: boolean): DesktopButton {
+export function desktopButton(row: DashboardRow, launch: JiraLink['surface'], phone: boolean): DesktopButton {
   if (phone) return { show: false, enabled: false, via: null, title: null };
+  if (appOwned(row, launch)) return { show: true, enabled: true, via: 'href', title: null };
   const resting = RESTING.has(row.status);
   if (row.surface === 'local') {
     return resting
       ? { show: true, enabled: true, via: 'href', title: null }
       : { show: true, enabled: false, via: null, title: DESKTOP_BUSY_LOCAL_TITLE };
   }
-  if (row.desktopOwned === true) return { show: true, enabled: true, via: 'href', title: null };
   const held = row.remoteQuestion === true || row.remotePlan === true || row.remoteReply === true;
   const offered = resting && row.stopState === undefined && row.processLive !== true && !held;
   return offered
@@ -64,12 +79,13 @@ export function desktopButton(row: DashboardRow, phone: boolean): DesktopButton 
 }
 
 /**
- * C3 — the primary button follows the session's surface: Desktop for a `local` or `desktopOwned` session, Dashboard otherwise, and Dashboard is promoted when
- * C2 disables the Desktop the surface picked. Phone-blind on purpose (a phone hides Desktop; `openButtons` applies that), so the answer is about the row.
+ * C3 — the primary button follows the session's surface: Desktop for a `local` or app-owned (`appOwned`) session, Dashboard otherwise, and Dashboard is
+ * promoted when C2 disables the Desktop the surface picked — which an app-owned session never is. Phone-blind on purpose (a phone hides Desktop;
+ * `openButtons` applies that), so the answer is about the row and the link's launch.
  */
-export function primaryIsDesktop(row: DashboardRow): boolean {
-  const surfacePicksDesktop = row.surface === 'local' || row.desktopOwned === true;
-  return surfacePicksDesktop && desktopButton(row, false).enabled;
+export function primaryIsDesktop(row: DashboardRow, launch: JiraLink['surface']): boolean {
+  const surfacePicksDesktop = row.surface === 'local' || appOwned(row, launch);
+  return surfacePicksDesktop && desktopButton(row, launch, false).enabled;
 }
 
 export type OpenTarget = 'desktop' | 'dashboard';
@@ -122,7 +138,7 @@ export function openButtons(link: JiraLink, row: DashboardRow | null, state: Jir
     return { primary: { label: 'Reopen', target: endedTarget(link, opts.phone) }, secondary: null };
   }
   if (row === null) return { primary: { label: 'Open in Dashboard', target: 'dashboard' }, secondary: null };
-  if (!opts.phone && primaryIsDesktop(row)) {
+  if (!opts.phone && primaryIsDesktop(row, link.surface)) {
     return {
       primary: { label: 'Open in Desktop', target: 'desktop' },
       secondary: { label: opts.wide ? 'Open in Dashboard' : 'Dashboard', target: 'dashboard' }
@@ -177,7 +193,7 @@ export function linkedHow(how: JiraLink['how']): string {
 /** Where a link was started or runs, for the card's `Where` line and a history line's surface; `null` when nothing says. */
 export function surfaceWord(link: JiraLink, row: DashboardRow | null): string | null {
   if (row !== null) {
-    if (row.desktopOwned === true) return 'Desktop';
+    if (appOwned(row, link.surface)) return 'Desktop';
     if (row.surface === 'local') return 'Terminal or app';
     if (row.surface === 'dashboard') return 'Dashboard';
     if (row.surface === 'cloud') return 'Cloud';

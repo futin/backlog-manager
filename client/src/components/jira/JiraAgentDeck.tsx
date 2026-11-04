@@ -79,8 +79,8 @@ function DeckCard({ entry, now, onOpenIssue }: { entry: DeckEntry; now: number; 
           <div className="jira-deck-acts">
             {buttons !== null && sessionId !== null && (
               <>
-                <OpenChip button={buttons.primary} sessionId={sessionId} row={row} primary onHandover={go} />
-                {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={row} primary={false} onHandover={go} />}
+                <OpenChip button={buttons.primary} sessionId={sessionId} row={row} launch={link?.surface ?? null} primary onHandover={go} />
+                {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={row} launch={link?.surface ?? null} primary={false} onHandover={go} />}
               </>
             )}
             {pct !== undefined && <span className="jira-deck-ctx">ctx {Math.round(pct)}%</span>}

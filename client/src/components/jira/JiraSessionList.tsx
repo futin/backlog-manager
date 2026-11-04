@@ -321,8 +321,8 @@ function ListRowView({
         <div className="jira-list-flex">
           {buttons !== null && sessionId !== null && (
             <>
-              <OpenChip button={buttons.primary} sessionId={sessionId} row={sessionRow} primary={!row.ended} onHandover={onHandover} />
-              {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={sessionRow} primary={false} onHandover={onHandover} />}
+              <OpenChip button={buttons.primary} sessionId={sessionId} row={sessionRow} launch={link?.surface ?? null} primary={!row.ended} onHandover={onHandover} />
+              {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={sessionRow} launch={link?.surface ?? null} primary={false} onHandover={onHandover} />}
             </>
           )}
           {canRun && <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />}
