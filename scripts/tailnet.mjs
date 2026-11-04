@@ -37,7 +37,7 @@
 // POSTs survive the terminating proxy either way — origin.guard.ts compares
 // host and port and deliberately not the scheme, for exactly this setup.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { connect } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -261,8 +261,17 @@ export async function main(argv) {
   return COMMANDS[command](port, cli, dryRun);
 }
 
+// Twin of `isMain` in `skills/backlog/tools/backlog.mjs`, which carries the reasoning; `scripts/run-as-main.test.mjs` pins every copy.
+function isMain(url) {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(url));
+  } catch {
+    return false;
+  }
+}
+
 // Guarded so the test file can import the helpers without reconfiguring
 // anything as a side effect — same guard sync-plugin.mjs uses.
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+if (isMain(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2));
 }

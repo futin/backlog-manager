@@ -781,10 +781,19 @@ export async function main(argv) {
   }
 }
 
+// Twin of `isMain` in `skills/backlog/tools/backlog.mjs`, which carries the reasoning; `scripts/run-as-main.test.mjs` pins every copy.
+function isMain(url) {
+  try {
+    return Boolean(process.argv[1]) && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(url))
+  } catch {
+    return false
+  }
+}
+
 // `process.exitCode = await main(...)`, never `process.exit(...)`: `process.exit()` drops whatever of a large stdout write is still queued for a pipe (a
 // whole ticket, for `show`). Awaiting `main` is safe because every `fetch` is awaited to completion and sends `connection: close`, so nothing holds the event
 // loop open once it returns — and `worktree` holds nothing either: its git children are `spawnSync`, and its one pause is an `Atomics.wait`, not a timer.
 // `retro.mjs` carries the long-form copy of this note.
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2))
 }

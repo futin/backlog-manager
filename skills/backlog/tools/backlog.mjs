@@ -3796,6 +3796,21 @@ export async function main(argv) {
   return 1
 }
 
+// Whether this module is the script node was started on. Both sides go through `realpathSync` because node builds `import.meta.url` from the realpath of the
+// main module while `process.argv[1]` keeps the spelling it was given, so through any path that crosses a symlink an unresolved comparison is false, main() is
+// skipped and the process exits 0 having done nothing (#453, the symlink half of #346). Resolving `url` too keeps it true under `--preserve-symlinks-main`, where
+// `import.meta.url` keeps the link. The catch is required, not defensive: `node -e "import(…)" some-arg` has an argv[1] that is no file, and an ENOENT thrown from
+// here would crash every process that merely imports this module. A copy per script rather than a shared import: a skill tool imports nothing from another
+// skill's `tools/`, and `scripts/test-tmpdir.test.mjs` runs a lone copy of its launcher. `import.meta.main` would do, but it needs node 24.2 and `engines` allows
+// `>=22.13`. Pinned by `scripts/run-as-main.test.mjs`.
+function isMain(url) {
+  try {
+    return Boolean(process.argv[1]) && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(url))
+  } catch {
+    return false
+  }
+}
+
 // `process.exitCode`, NOT `process.exit()` — the same rule all three skill
 // CLIs follow, and retro.mjs's entry guard carries the full record of the
 // incident behind it (see retro.mjs, just above its own guard): writing to a
@@ -3813,6 +3828,6 @@ export async function main(argv) {
 // What the rule actually requires is that nothing be left holding the event loop open when `main` returns, and API mode keeps that: every `fetch` is awaited
 // to completion before the value comes back, and each one sends `connection: close`, so no pooled socket outlives the call. Assert it rather than trust it —
 // `backlog.test.mjs`'s API-mode children are expected to EXIT, not to hang.
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2))
 }

@@ -51,4 +51,13 @@ function main(files) {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2))
+// Twin of `isMain` in `skills/backlog/tools/backlog.mjs`, which carries the reasoning; `scripts/run-as-main.test.mjs` pins every copy.
+function isMain(url) {
+  try {
+    return Boolean(process.argv[1]) && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(url))
+  } catch {
+    return false
+  }
+}
+
+if (isMain(import.meta.url)) process.exitCode = main(process.argv.slice(2))

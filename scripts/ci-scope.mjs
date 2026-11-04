@@ -16,7 +16,7 @@
 // Local `pnpm test` and an orchestrated item's verification are untouched — they still run everything. `--dry-run` prints the plan without running it, and
 // `--files <paths…>` replaces the PR diff, so a scope can be checked by hand: `node scripts/ci-scope.mjs --dry-run --files docs/overview.md`.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -198,4 +198,13 @@ function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) process.exitCode = main(process.argv.slice(2));
+// Twin of `isMain` in `skills/backlog/tools/backlog.mjs`, which carries the reasoning; `scripts/run-as-main.test.mjs` pins every copy.
+function isMain(url) {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMain(import.meta.url)) process.exitCode = main(process.argv.slice(2));

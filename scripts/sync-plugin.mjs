@@ -17,7 +17,7 @@
 // less rather than installing stale code and reporting success.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -339,9 +339,18 @@ function main() {
   console.log('restart Claude Code for the new skills to load');
 }
 
+// Twin of `isMain` in `skills/backlog/tools/backlog.mjs`, which carries the reasoning; `scripts/run-as-main.test.mjs` pins every copy.
+function isMain(url) {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(url));
+  } catch {
+    return false;
+  }
+}
+
 // Guarded so the test file can import the helpers without reinstalling
 // anything as a side effect.
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+if (isMain(import.meta.url)) {
   try {
     main();
   } catch (error) {
