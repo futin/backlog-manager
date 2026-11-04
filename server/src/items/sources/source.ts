@@ -12,6 +12,7 @@ import type {
   ItemQueueRequest,
   ItemReleaseRequest,
   ItemPlanReviewRequest,
+  ItemPlanReviewResult,
   ItemReviewRequest,
   ItemStateRequest,
   ProjectSummary,
@@ -250,7 +251,7 @@ export interface ItemWriter {
    * Add or remove `plan-review` (the eleventh write route; backlog-tick). `review`'s twin, for the same reasons: it reads nothing first, a closed issue is
    * not refused, and a removal that 404s is success — the caller's contract is "the label is not there".
    */
-  planReview(project: RegistryProject, marker: SourceMarker, req: ItemPlanReviewRequest): Promise<WriteOutcome<{ id: string; planReview: boolean }>>;
+  planReview(project: RegistryProject, marker: SourceMarker, req: ItemPlanReviewRequest): Promise<WriteOutcome<ItemPlanReviewResult>>;
 
   /**
    * The claim that holds one item — the lowest live id, the holder `claim`

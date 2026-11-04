@@ -492,6 +492,20 @@ describe('the board sheet — edit, save, delete', () => {
     expect(urls('/api/jira/search')).toEqual([]);
   });
 
+  it('a 200 with no issues array leaves the roots reading their keys, and says nothing', async () => {
+    boardIssuesAnswer = () => answer({ issues: 'x' });
+    await renderSetup();
+    const dialog = await openEdit('Alpha board');
+    await waitFor(() => expect(urls(`/api/jira/boards/${ALPHA.id}/issues`)).toHaveLength(1));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const known = within(dialog).getByRole('button', { name: 'Remove PAY-120' }).closest('.jira-sheet-root') as HTMLElement;
+    expect(known.textContent).toBe('PAY-120×');
+    expect(within(dialog).queryByRole('alert')).toBeNull();
+  });
+
   it('a root the cached list does not hold reads its key alone, and a picked root reads the summary the search showed', async () => {
     searchAnswer = (q) => answer(q === 'PAY-9' ? [issue('PAY-9', 'Chargebacks')] : []);
     await renderSetup();

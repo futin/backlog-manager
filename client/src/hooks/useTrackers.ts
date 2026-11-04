@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { errorOf } from '../lib/http';
 import { hasSyncingTracker, isTrackersPayload, syncCycleMs, TRACKER_CYCLE_MS } from '../lib/tracker';
 import type { SyncInterval, TrackersPayload } from '../../../shared/types';
 import { useWindowFocus } from './useWindowFocus';
@@ -156,6 +157,7 @@ export function useTrackers(): TrackersState {
     };
   }, [reload, clear]);
 
+  // Not `useRefreshing`: that is `useCoalescedFetch`, which exists to prevent the overlapping reads this hook allows under its newest-read-wins counter (#231).
   useWindowFocus(reload);
 
   /*
@@ -186,8 +188,8 @@ export function useTrackers(): TrackersState {
         reload();
         return;
       }
-      const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
-      refuse(typeof body?.error === 'string' ? body.error : `refused (${res.status})`);
+      const body: unknown = await res.json().catch(() => null);
+      refuse(errorOf(body, `refused (${res.status})`));
     },
     [reload, state.data]
   );

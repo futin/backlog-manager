@@ -23,6 +23,7 @@ import type {
   ItemHeartbeatRequest,
   ItemQueueRequest,
   ItemPlanReviewRequest,
+  ItemPlanReviewResult,
   ItemReviewRequest,
   ItemReleaseRequest,
   ItemStateRequest,
@@ -1076,7 +1077,7 @@ export class GithubSource implements ItemSource, ItemWriter {
     project: RegistryProject,
     marker: SourceMarker,
     req: ItemPlanReviewRequest
-  ): Promise<WriteOutcome<{ id: string; planReview: boolean }>> {
+  ): Promise<WriteOutcome<ItemPlanReviewResult>> {
     const ready = this.ready(marker);
     if (!ready.ok) return ready;
     const { repo, token } = ready.value;

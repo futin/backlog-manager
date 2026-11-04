@@ -74,7 +74,9 @@ Setup's `Open board` and the empty board's `Open Setup` land on a page too, thro
 `change`) built once in `App` and handed down, as the Settings watchdog card's `Live view` is `onOpenWatchdog`. The source rows' pages take the same road:
 `useFilesPage` and `useGithubPage` (`client/src/hooks/useSourcePage.ts`) are module stores over `lib/source-page.ts`'s `FILES_PAGES`/`GITHUB_PAGES`, keys and
 guards, written by the tree, by the shell's legacy-landing initializer and — GitHub's — by the Sources card's `GitHub › Settings ↗`, which is
-`onOpenGithubPage`, the tree's pair built once in `App` the same way.
+`onOpenGithubPage`, the tree's pair built once in `App` the same way. Every one of these stores, and the Jira Board page's `useJiraView`, is a `persistedStore`
+(`client/src/hooks/persistedStore.ts`), the one home of the subscribe, read and write they share; each hook file keeps only its key, its guard, its fallback and
+who its mounted readers are.
 
 The rail's last element is the version chip, `v0.2.0` or `v0.2.0+3`, with a cyan dot while a release has landed since this browser last opened the
 What's new drawer behind it; the shell owns the read, the dot and the drawer, and renders the drawer outside the rail. All of it is
@@ -695,7 +697,7 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   which sends each index error to the source it names — a `gh:` issue URN to GitHub, a registered project's path to that project's source, anything else to
   Files.
 - `lib/source-page.ts` and `hooks/useSourcePage.ts` — `FILES_PAGES`/`GITHUB_PAGES` with their keys and guards, `FALLBACK_SECTION` and `resolveLegacySection`;
-  and `useFilesPage`/`useGithubPage` with their setters, module stores on `useJiraPage`'s shape.
+  and `useFilesPage`/`useGithubPage` with their setters, `persistedStore`s (`hooks/persistedStore.ts`) like `useJiraPage`.
 - `components/github/` — `GithubSettingsView` (GitHub › Settings), `GithubSyncGroup`, its `Sync` card, and `GithubAccessGroup`, its `Access` card;
   `PullRequestsView` (GitHub › PRs) and the three layouts it switches between — `PrInbox`, `PrMatrix`, `PrCards` — over the shared `PrActions` (merge,
   auto-merge, update, open), `PrFoot` (the merge Confirm, then `PrOutcomeLine`) and `PrRepoNotes`; `components/settings/SourcesGroup.tsx` is the Shared report.

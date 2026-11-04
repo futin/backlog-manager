@@ -8,6 +8,7 @@ import type {
   JiraAction,
   JiraBoard,
   JiraBoardFailure,
+  JiraBoardIssuesPayload,
   JiraBoardStatus,
   JiraBranchChoice,
   JiraDispatchRequest,
@@ -27,7 +28,8 @@ import type {
   JiraTransition,
   JiraWorktree,
   JiraWorktreesPayload,
-  PermissionMode
+  PermissionMode,
+  Unchecked
 } from '../../../shared/types';
 
 /**
@@ -785,6 +787,24 @@ export function isJiraStatusPayload(value: unknown): value is JiraStatusPayload 
     isRecord(p.live) &&
     isRecord(p.calls)
   );
+}
+
+/**
+ * The one reader of `GET /api/jira/boards/:id/issues`, for the Board page's poll (`useJiraBoard`) and the edit sheet's roots (`JiraBoardSheet`). A body with no
+ * `issues` array is no answer at all, `null`, and each caller keeps its own meaning for that. A bad ROW is filtered rather than refusing the payload, because one
+ * bad row must not blank a board: `key` and `summary` are the two fields both readers use without a null-safe expression. `polledAt` reads `null` unless it is a
+ * string, the same "not swept yet" the server sends before the first sweep lands.
+ */
+export function parseJiraBoardIssues(value: unknown): JiraBoardIssuesPayload | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { issues, polledAt } = value as Unchecked<JiraBoardIssuesPayload>;
+  if (!Array.isArray(issues)) return null;
+  const isRow = (row: unknown): row is JiraIssue => {
+    if (typeof row !== 'object' || row === null) return false;
+    const { key, summary } = row as Unchecked<JiraIssue>;
+    return typeof key === 'string' && typeof summary === 'string';
+  };
+  return { issues: issues.filter(isRow), polledAt: typeof polledAt === 'string' ? polledAt : null };
 }
 
 // ── The wire (Jira phase 5 — the launch sheet and the modal read one issue the same way) ────────────────────────────────────────────────────────────

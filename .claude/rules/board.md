@@ -61,8 +61,8 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   (`lib/sources.ts`) of the projects answer, or, unwritten, to the provisional `FALLBACK_SECTION` while that answer is unknown, for the settle to correct;
   unknown holds,
   drawn in `JiraView`'s `loading…` or `Jira unavailable` shape. The page is `JIRA_PAGES` (`board | setup`), `JIRA_PAGE_KEY` and `isJiraPage` in
-  `lib/jira-page.ts`, held by `hooks/useJiraPage.ts` — `useRunsMode`'s module store, because the rail's `RailTree` and the in-page links are two mounted
-  writers. The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
+  `lib/jira-page.ts`, held by `hooks/useJiraPage.ts` — a `persistedStore` (`hooks/persistedStore.ts`, the one home of the client's persisted module
+  store), because the rail's `RailTree` and the in-page links are two mounted writers. The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
   `change('jira')` and handed down through `JiraView`; the Sources card's `Jira › Setup ↗` link is the same pair, threaded `App` → `SettingsView` → `SharedPage`
   → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a switch of its own. Settings' `Opens on` offers `Jira` only while
   configured (`landingOptions`), keeping a stored `jira` pin's option; a `landing: 'jira'` takes the same fall. Why:
@@ -80,7 +80,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   legacyLanding]` with `update({ landing: settleSection('github', drawn) })` — never through `pending`, which a deep link or a click clears — while
   `update` carries the raw value through any patch not naming `landing`, and a source section whose row is gone falls to
   `firstDrawn`; a provisional landing renders `SectionLoading` until it settles. The pages are `FILES_PAGES` (`board | archive`) and `GITHUB_PAGES` (`board |
-  prs | archive | settings`), each with its key and guard, held by `useFilesPage`/`useGithubPage` (`hooks/useSourcePage.ts`), module stores like `useJiraPage`'s; the
+  prs | archive | settings`), each with its key and guard, held by `useFilesPage`/`useGithubPage` (`hooks/useSourcePage.ts`), two more `persistedStore`s; the
   Sources card's `GitHub › Settings ↗` link is `onOpenGithubPage` (`setGithubPage(p)` then `change('github')`, built once in `App`), drawn only while
   `useProjectsContext().drawn?.github` — the rail's answer, never the tracker counts. Board and Archive take a required `source` and cut the index with
   `narrowToSource`, which routes each index error by `errorSource`: a `gh:` issue URN to GitHub, a registered project's path (longest, on a `/` or `:`

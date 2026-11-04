@@ -8,7 +8,7 @@ import { CLAIM_FINISHED_STATUSES, MERGE_MODES, QUESTION_MODES } from '../../../s
 import type { CreatedItem } from './sources/source';
 import { answer } from './write-answer.util';
 import { optional, required, text, writable } from './write-gate.util';
-import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, ClaimRun, ItemBodyResult, Section } from '../../../shared/types';
+import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, ClaimRun, ItemBodyResult, ItemPlanReviewResult, Section } from '../../../shared/types';
 
 /**
  * items-write.controller.ts — ten of a tracker project's eleven item write routes: task-46's seven (spec §6.2), the eighth, `queue` (the orchestrator:queued
@@ -298,7 +298,7 @@ export class ItemsWriteController {
    * lift, and coercing `'true'` the other way would leave an unreviewed plan looking approved.
    */
   @Post('plan-review')
-  async planReview(@Body() body: Record<string, unknown> | undefined): Promise<{ id: string; planReview: boolean }> {
+  async planReview(@Body() body: Record<string, unknown> | undefined): Promise<ItemPlanReviewResult> {
     const raw = body ?? {};
     const project = required(raw.project, 'project');
     const id = required(raw.id, 'id');

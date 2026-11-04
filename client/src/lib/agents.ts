@@ -7,6 +7,7 @@ import type {
   ExecuteFinish,
   ItemAbortResult,
   ItemDispatchResult,
+  ItemPlanReviewResult,
   LaunchSurface,
   MergeCheckResult,
   OrchestratorArchivePayload,
@@ -399,8 +400,8 @@ export async function abortClaim(project: string, id: string): Promise<ItemAbort
  * a refusal — a files project, a sync-off repo — into an `ApiError` carrying the server's own sentence. A files item never reaches this: the board writes no
  * item file, so its approval is a copied prompt (`planApprovePrompt`, `lib/plan-review.ts`).
  */
-export async function approvePlan(project: string, id: string): Promise<{ id: string; planReview: boolean }> {
-  return unwrap<{ id: string; planReview: boolean }>(
+export async function approvePlan(project: string, id: string): Promise<ItemPlanReviewResult> {
+  return unwrap<ItemPlanReviewResult>(
     await fetch('/api/items/plan-review', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

@@ -3367,7 +3367,7 @@ The two links that DO land on a page — `Open board` on a Setup row, and `Open 
 they are not a second implementation of one. `App` builds `onOpenJiraPage` once, the same pair the tree calls in the same order (`setJiraPage`, then the
 shell's `change`), and hands it down, exactly as Settings' `Live view` link is `onOpenWatchdog`. A link built that way means what the tree entry means by
 construction; a link built inside the page out of its own `localStorage` write and its own section call would mean it only until one of the two changed. The
-page value lives in a module store (`hooks/useJiraPage.ts`, `useRunsMode`'s shape) rather than a `usePersistedState` per caller for the same reason Runs' does:
+page value lives in a module store (`hooks/useJiraPage.ts`, on `hooks/persistedStore.ts`) rather than a `usePersistedState` per caller for the same reason Runs' does:
 the tree and the page are two mounted writers, and a per-caller copy would leave one of them looking at the page the other has just left.
 
 The chip's popover stays a reading with no link at all, for the rule's other face: a `Setup ›` link there would be an in-page switch on a surface that is not
