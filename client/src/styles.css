@@ -1462,6 +1462,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis
 }
 .jira-list-row[data-ended="true"] td { color: var(--ink2) }
+/* The whole row opens Detail (JiraSessionList's `rowOpens`), so it wears the pointer and a hover fill. The fill is laid on the CELLS and half transparent, so
+   a needs-you row's amber wash — the row's own background — still reads through it under the pointer. */
+.jira-list-row { cursor: pointer }
+.jira-list-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }
 .jira-list-row[data-state="plan"], .jira-list-row[data-state="permission"], .jira-list-row[data-state="reply"], .jira-list-row[data-state="answer"] {
   background: linear-gradient(90deg, color-mix(in srgb, var(--amber-solid) 14%, var(--strip)), var(--strip) 55%);
 }
