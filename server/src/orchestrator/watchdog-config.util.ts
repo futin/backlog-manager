@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
+import { writeJsonAtomic } from '../atomic-write.util';
 import { DEFAULT_WATCHDOG_CONFIG, WATCHDOG_LIMITS, type WatchdogConfig } from '../../../shared/types';
 
 /**
@@ -223,13 +224,8 @@ export function readWatchdogConfig(file: string = watchdogFile()): WatchdogConfi
  * `DEFAULT_WATCHDOG_CONFIG`'s — the merge, not-replace behaviour test case
  * 13 pins.
  *
- * Written the same atomic way `orchestrate.mjs`'s own `writeRunAtomic` and
- * `backlog.mjs`'s `moveItem` are: the full new content lands in a temp file
- * in the SAME directory (so the rename that follows is on one filesystem
- * and therefore atomic at the OS level), then `renameSync` swaps it into
- * place in one step — a reader can only ever see the old complete file or
- * the new complete one, and there is never a temp file left over to clean
- * up, because the rename IS the cleanup.
+ * Written through `writeJsonAtomic`: a reader can only ever see the old
+ * complete file or the new complete one.
  */
 export function writeWatchdogConfig(patch: unknown, file: string = watchdogFile()): WatchdogConfig {
   const current = readWatchdogConfig(file);
@@ -241,10 +237,6 @@ export function writeWatchdogConfig(patch: unknown, file: string = watchdogFile(
   if ('maxAttempts' in p) merged.maxAttempts = p.maxAttempts;
   const next = clampWatchdogConfig(merged);
 
-  const dir = dirname(file);
-  mkdirSync(dir, { recursive: true });
-  const tmp = join(dir, `.watchdog.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
-  writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
-  renameSync(tmp, file);
+  writeJsonAtomic(file, next);
   return next;
 }

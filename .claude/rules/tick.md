@@ -6,7 +6,7 @@ paths: ["server/src/tick/**", "skills/backlog-tick/tools/tick.mjs", "skills/back
 
 - **`~/.backlog-manager/settings/tick.json` has exactly one writer, the server, and a file that cannot be read is never replaced.** The file is `$BM_TICK_FILE`,
   else `~/.backlog-manager/settings/tick.json`, shaped `{ haltAfter, maxPlans, maxPrs, resetAt: { <abs main-checkout path>: <ISO> } }`, and `writeTickFile` in
-  `server/src/tick/tick-breaker.util.ts` is the only thing that writes it: a temp file in the SAME directory, then `rename`, merged over the current file with
+  `server/src/tick/tick-breaker.util.ts` is the only thing that writes it, through `writeJsonAtomic`, merged over the current file with
   `resetAt` merged key by key, so a Reset of one project never forgets another's, and every number the write was not sent carried over from the file. `tick.mjs` (`readTickSettings`) reads it for `decide` and `status`; the server
   reads it only to answer GET and to merge its own write. Reading has three outcomes — `ok`, `missing` (ENOENT: `haltAfter` 3, `maxPlans` 3, `maxPrs` 2, no resets) and `unreadable` — and
   UNREADABLE is an I/O error that is not ENOENT, text that is not JSON, or JSON that is not a plain object (stricter than `jira.json`, which reads a non-object

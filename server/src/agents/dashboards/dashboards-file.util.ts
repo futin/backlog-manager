@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
+import { writeJsonAtomic } from '../../atomic-write.util';
 import { EFFORTS, MODELS, defaultBoardUrl } from '../../../../shared/agent';
 import type { DashboardEntry, DashboardsFile, HomeEntry, SuggestStrategy } from '../../../../shared/types';
 
@@ -237,22 +238,11 @@ export function readDashboardsFile(file: string = dashboardsFile()): DashboardsF
 }
 
 /**
- * The one write path. Refuses (`DashboardsFileUnreadable`, file untouched) when the current file is unreadable, then writes `next` as given: tmp + rename in the
- * SAME directory, so the rename is atomic on one filesystem, a concurrent reader sees the old complete file or the new one and never half of one, and the rename
- * IS the cleanup — no temp file is left behind. A failure before the rename leaves the old file as it was.
+ * The one write path. Refuses (`DashboardsFileUnreadable`, file untouched) when the current file is unreadable, then writes `next` as given through
+ * `writeJsonAtomic`.
  */
 export function writeDashboardsFile(next: DashboardsFile | Record<string, unknown>, file: string = dashboardsFile()): void {
   const current = readDashboardsFile(file);
   if (current.source === 'unreadable') throw new DashboardsFileUnreadable(file, current.reason);
-  const dir = dirname(file);
-  mkdirSync(dir, { recursive: true });
-  const tmp = join(dir, `.dashboards.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
-  try {
-    writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
-    renameSync(tmp, file);
-  } catch (e) {
-    // A write or rename that fails must not strand its temp file: "no temp file is left behind" holds on the failure path too.
-    rmSync(tmp, { force: true });
-    throw e;
-  }
+  writeJsonAtomic(file, next);
 }

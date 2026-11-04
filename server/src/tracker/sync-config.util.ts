@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
+import { writeJsonAtomic } from '../atomic-write.util';
 import { DEFAULT_SYNC_INTERVAL, isSyncInterval, type SyncInterval } from '../../../shared/types';
 
 /**
@@ -9,7 +10,7 @@ import { DEFAULT_SYNC_INTERVAL, isSyncInterval, type SyncInterval } from '../../
  *
  * The third file this server writes, after `watchdog.json` and the pause-control files, and it follows `watchdog-config.util.ts` on every point that
  * header argues at length: it lives under `settings/` because that is the one read-write directory carved out of the read-only `~/.backlog-manager` mount,
- * it is read fresh on every call and cached nowhere, every failure reads as the default and never throws, and the one write is temp file plus rename. One
+ * it is read fresh on every call and cached nowhere, every failure reads as the default and never throws, and the one write goes through `writeJsonAtomic`. One
  * departure (#270): the WRITE refuses a file that exists but does not parse, rather than replacing it — see `writeSyncInterval`.
  *
  * What differs is the shape. The watchdog's file is one fixed object whose every field has a range to clamp into; this one is a MAP keyed by `owner/name`,
@@ -114,10 +115,5 @@ export function writeSyncInterval(repo: string, interval: SyncInterval, file: st
     }
     if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) current = raw as Record<string, unknown>;
   }
-  const next = { ...current, [repo]: interval };
-  const dir = dirname(file);
-  mkdirSync(dir, { recursive: true });
-  const tmp = join(dir, `.tracker-sync.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
-  writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
-  renameSync(tmp, file);
+  writeJsonAtomic(file, { ...current, [repo]: interval });
 }
