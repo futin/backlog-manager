@@ -786,7 +786,7 @@ describe('unconfigured — GET /api/jira/sessions', () => {
   afterAll(() => app.close());
 
   it('is 200 with no links, the dashboard presumed reachable and no read yet — memory only, no outbound call', async () => {
-    expect((await get('/sessions').expect(200)).body).toEqual({ links: [], reachable: true, rowsAt: null });
+    expect((await get('/sessions').expect(200)).body).toEqual({ links: [], reachable: true, rowsAt: null, saveError: null });
     expect(fake.calls).toEqual([]);
   });
 });

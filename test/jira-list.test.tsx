@@ -132,6 +132,8 @@ function link(o: LinkOver) {
 let statusAnswer: JiraStatusPayload;
 let lists: Record<string, JiraIssue[]>;
 let links: ReturnType<typeof link>[];
+/** The sessions answer's `saveError`; `null` unless a case sets it. */
+let saveError: { message: string; at: string } | null = null;
 
 const ok = (body: unknown) =>
   Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve(typeof body === 'string' ? body : '') } as Response);
@@ -142,10 +144,11 @@ beforeEach(() => {
   statusAnswer = status();
   lists = { [ALPHA.id]: Object.values(ISSUES), [BETA.id]: [ISSUES['PAY-131']] };
   links = [];
+  saveError = null;
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     if (url === '/api/jira') return ok(statusAnswer);
-    if (url.startsWith('/api/jira/sessions')) return ok({ links, reachable: true, rowsAt: null });
+    if (url.startsWith('/api/jira/sessions')) return ok({ links, reachable: true, rowsAt: null, saveError });
     const m = /^\/api\/jira\/boards\/([^/]+)\/issues$/.exec(url);
     if (m !== null) return ok({ issues: lists[decodeURIComponent(m[1])] ?? [], polledAt: ALPHA.polledAt });
     if (url === '/api/jira/worktrees') return ok({ worktrees: [], unavailable: [] });
@@ -381,5 +384,22 @@ describe('the List view', () => {
     const keyWarnings = warn.mock.calls.filter((c) => String(c[0]).includes('same key') || String(c[0]).includes('unique "key"'));
     warn.mockRestore();
     expect(keyWarnings).toEqual([]);
+  });
+
+  /* The link store's save failing was a log line only, so the stack ran it memory-only for its whole life and every restart dropped every link (2026-11-04).
+     The List says so while it lasts, and says nothing once a save lands. */
+  it('warns above the rows while the link store cannot save, naming the error', async () => {
+    standardLinks();
+    saveError = { message: 'EROFS: read-only file system, open \'/x/.atomic-write.tmp\'', at: hoursAgo(0) };
+    await renderList();
+    const note = await screen.findByRole('status', { name: 'Link store' });
+    expect(note.textContent).toBe("Jira links are not being saved — a server restart will drop them. EROFS: read-only file system, open '/x/.atomic-write.tmp'");
+  });
+
+  it('draws no warning when the answer has no saveError', async () => {
+    standardLinks();
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBeGreaterThan(0));
+    expect(screen.queryByRole('status', { name: 'Link store' })).toBeNull();
   });
 });

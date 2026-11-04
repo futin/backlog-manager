@@ -490,6 +490,33 @@ describe('a store file that cannot be trusted', () => {
     svc.addLink(link('PAY-1', 'b1'));
     expect(existsSync(process.env.BM_JIRA_LINKS_FILE)).toBe(true);
   });
+
+  /* A save that throws is logged and costs nothing else — which let the store run memory-only in the compose stack for its whole life (EROFS, 2026-11-04).
+     The failure is now held for the List to show, and cleared by the next save that lands. */
+  it('a failed save is held as saveError, warned once per message, and the next good save clears it', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const good = process.env.BM_JIRA_LINKS_FILE;
+    const blocker = join(dir, 'not-a-dir');
+    writeFileSync(blocker, '');
+    const svc = new JiraLiveService();
+    expect(svc.saveError()).toBeNull();
+
+    process.env.BM_JIRA_LINKS_FILE = join(blocker, 'jira-links.json');
+    svc.addLink(link('PAY-1', 'b1'));
+    const first = svc.saveError();
+    expect(first).toEqual({ message: expect.any(String), at: new Date(T0).toISOString() });
+    expect(svc.links().map((l) => l.key)).toEqual(['PAY-1']); // memory still holds it
+    jest.setSystemTime(T0 + 60_000);
+    svc.addLink(link('PAY-2', 'b2'));
+    expect(svc.saveError()).toEqual({ message: first?.message, at: new Date(T0 + 60_000).toISOString() });
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    process.env.BM_JIRA_LINKS_FILE = good;
+    svc.addLink(link('PAY-3', 'b3'));
+    expect(svc.saveError()).toBeNull();
+    expect(existsSync(good as string)).toBe(true);
+    warn.mockRestore();
+  });
 });
 
 /* The compose stack mounts ~/.backlog-manager read-only and only its `settings/` subtree read-write, so a links file anywhere else under it can never be
