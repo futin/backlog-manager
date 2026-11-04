@@ -52,12 +52,8 @@ test('the launcher runs the files under its root, passes the exit code through, 
 // held a space or a non-ASCII character the launcher never called main(), spawned no `node --test`, and exited 0: `test:skills` and the node half of
 // `pnpm test` reported PASS having run nothing. The launcher has no relative imports, so a copy of it runs standalone from such a directory. The passing
 // probe must exit 0 AND name its test, so this case cannot pass merely because the launcher crashed; the failing probe must exit non-zero.
-//
-// `realpathSync` because node resolves the main module through symlinks before it builds `import.meta.url`, while argv[1] keeps the spelling it was given:
-// on macOS `os.tmpdir()` sits under `/var`, a symlink to `/private/var`, so an unresolved copy would miss the guard for that reason instead of this one —
-// and every other run-as-main guard in the repo makes the same unresolved comparison.
 test('the launcher runs its files from a directory whose path holds a space and a non-ASCII character', () => {
-  const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'launch-')))
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'launch-'))
   const dir = path.join(work, 'dir with space é')
   fs.mkdirSync(dir)
   const copy = path.join(dir, 'test-tmpdir.mjs')

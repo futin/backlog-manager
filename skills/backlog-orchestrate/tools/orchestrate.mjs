@@ -7259,6 +7259,15 @@ export function main(argv) {
   }
 }
 
+// Twin of `isMain` in `skills/backlog/tools/backlog.mjs`, which carries the reasoning; `scripts/run-as-main.test.mjs` pins every copy.
+function isMain(url) {
+  try {
+    return Boolean(process.argv[1]) && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(url));
+  } catch {
+    return false;
+  }
+}
+
 // `process.exitCode`, NOT `process.exit()` — the same rule all three skill
 // CLIs follow; retro.mjs's own entry guard carries the full record of the
 // incident (a `--json` payload silently cut at exactly 65,536 bytes, because
@@ -7275,6 +7284,6 @@ export function main(argv) {
 // returning leaves no live handle. A future edit that introduces one must
 // close it rather than restore `process.exit()`, which would bring the
 // truncation back with it.
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2));
 }

@@ -390,6 +390,15 @@ export function main(argv) {
   }
 }
 
+// Twin of `isMain` in `skills/backlog/tools/backlog.mjs`, which carries the reasoning; `scripts/run-as-main.test.mjs` pins every copy.
+function isMain(url) {
+  try {
+    return Boolean(process.argv[1]) && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(url));
+  } catch {
+    return false;
+  }
+}
+
 // Guarded the same way orchestrate.mjs guards its own entry point, so the
 // test suite can import `main` and `RetroError` without the module running
 // a sweep as a side effect of being loaded.
@@ -405,7 +414,7 @@ export function main(argv) {
 // exit on its own. Nothing here holds the event loop open — every read is
 // synchronous `fs` and there is no server, no timer and no child process —
 // so "exit naturally" is not a hang waiting to happen.
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2));
 }
 
