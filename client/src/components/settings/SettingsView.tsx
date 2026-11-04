@@ -20,7 +20,7 @@ import { useSettings } from '../../hooks/useSettings';
 import { EXECUTE_FINISH_OPTIONS } from '../../lib/agents';
 import { jiraSettingOf, resolveJiraAction } from '../../lib/jira';
 import { mergeModeOptionLabels } from '../../lib/merge-mode';
-import { FONT_SCALES, STALE_WINDOWS, THEMES, stopsWith, type ContentWidth, type Landing, type SettingsScope, type ThemeId } from '../../lib/settings';
+import { FONT_SCALES, JIRA_DEFAULT_PERMISSIONS, STALE_WINDOWS, THEMES, stopsWith, type ContentWidth, type JiraDefaultPermission, type Landing, type SettingsScope, type ThemeId } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import { JIRA_BUILTIN_LABELS, MERGE_MODES } from '../../../../shared/types';
 import type { QuestionMode } from '../../../../shared/types';
@@ -554,6 +554,23 @@ function DispatchGroup() {
               ...jiraSkills.map((k) => ({ value: k.id, label: k.name }))
             ]}
             onChange={(jiraDefaultAction) => update({ jiraDefaultAction })}
+          />
+        </SettingsRow>
+      )}
+
+      {/* Beside the action it seeds alongside, and drawn on the same condition: both are Jira launch-sheet defaults, and neither means anything while Jira
+          is not configured. Not clamped to the ceiling here — this page is per device and the ceiling is the host's; the sheet clamps at render, so the
+          hint says so rather than this select hiding modes a raised ceiling would give back. */}
+      {jiraSkills !== null && (
+        <SettingsRow
+          name="Jira default permission"
+          hint="What a Jira launch's Permissions starts on. Per action is plan for Open with the ticket loaded, acceptEdits for the rest; a mode applies to every action. Capped by the host's ceiling at launch."
+        >
+          <Select<JiraDefaultPermission>
+            label="Jira default permission"
+            value={settings.jiraDefaultPermission}
+            options={JIRA_DEFAULT_PERMISSIONS.map((m) => ({ value: m, label: m === '' ? 'Per action' : m }))}
+            onChange={(jiraDefaultPermission) => update({ jiraDefaultPermission })}
           />
         </SettingsRow>
       )}

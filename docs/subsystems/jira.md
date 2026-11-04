@@ -41,7 +41,8 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
   A root that does not exist on the host is created by Docker's bind mount, as an empty directory (root-owned on Linux), so set `BM_JIRA_REPO_ROOT` to a
   directory that already exists on a machine without `~/Documents/timify-projects`.
 - **Per browser**: `backlog-manager.jira-board` (the board pick, `usePersistedState`) and `backlog-manager.jira-page` (`board | setup`, a module store) since
-  phase 2; `jiraDefaultAction` (a `Settings` key, capped at 64 characters) since phase 5b. The Board page's filters and summary search are per mount and never persisted.
+  phase 2; `jiraDefaultAction` (a `Settings` key, capped at 64 characters) since phase 5b, and `jiraDefaultPermission` (`''` per action, or one of the four
+  modes) beside it. The Board page's filters and summary search are per mount and never persisted.
 
 ## The module, file by file
 
@@ -521,7 +522,8 @@ section (eight dialogs). The browser still never talks to Jira or the dashboard:
   call `onRun(issue, action)`, and the slot is cleared on a page switch like the open issue. It reads the server's prompt (`fetchJiraPrompt`, keyed on action and
   repository through `useFetched`), the ticket's transitions and assignee (`GET /issue/:key`, on open) and the agents status (`useAgents`, on open — never the
   Board's copy). `Start` is drawn only for a `disabled` or `enabled` `projectDispatchGate` answer and sends `dispatchJira` (`POST /api/agents/dispatch-jira`);
-  `Copy prompt` needs the preview and a clipboard. The permission mode is derived — the pick, else `defaultModeFor(action)`, clamped to the host's ceiling —
+  `Copy prompt` needs the preview and a clipboard. The permission mode is derived — the pick, else `defaultModeFor(action, settings.jiraDefaultPermission)` (a set mode
+  for every action, else `plan` for `context` and `acceptEdits` for the rest), clamped to the host's ceiling —
   and model and effort seed from Settings. While the agents status says `desktopAvailable`, an `Open in` Dashboard | Desktop pill (the board LaunchSheet's
   control) sits under the action, for any action, seeded once from `launchSurfaceDefault`, and Start sends its pick as `surface`; under Desktop only remote
   control is disabled (and sent Off) — permissions, model and effort still drive the headless first turn. Start stays HOME-ONLY under multi-dashboard: the sheet draws no machine picker and `dispatch-jira` takes no
@@ -548,7 +550,8 @@ section (eight dialogs). The browser still never talks to Jira or the dashboard:
   add row and a `×` that asks through `ui/Confirm`; every write is one of the six config routes and reloads the shell's status. Settings › Local › Dispatch
   gains `Jira default action`, drawn only while Jira is configured. It is read by `Run ▾`, not by the sheet — every way into the sheet passes the clicked
   row — which lists the resolved default first, marked `default`; `resolveJiraAction(setting, skills)` reads a deleted skill's id as `execute` in the select
-  and in the menu alike, without rewriting the stored value.
+  and in the menu alike, without rewriting the stored value. `Jira default permission` sits under it on the same condition and is read by the sheet, not the
+  menu: `Per action` or a mode that seeds Permissions for every action, `context` included, clamped to the ceiling at render and never by the select.
 
 ## The probe facts the code encodes
 

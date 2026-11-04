@@ -59,9 +59,10 @@ export const PREVIEW_SETTLE_MS = 350;
  * Start at all — Copy prompt is the whole point of the sheet then — and `disabled` draws it with the gate's reason as its title. No Start is drawn before
  * the status lands, rather than a dead one that is enabled a moment later. Copy prompt never waits on the gate: it needs the preview and a clipboard.
  *
- * **Permissions are derived, not stored.** The mode the select shows is the reader's pick if there is one, else `defaultModeFor(action)`, clamped to the
- * ceiling at render (`clampMode`). Changing the action drops the pick, so `context` re-seeds `plan` and `execute` `acceptEdits` — and a ceiling that has
- * not landed yet is the floor (`modesUpTo(null)`), never the top. Model and effort seed from Settings and nowhere else (LaunchSheet's rule: a sticky `max`
+ * **Permissions are derived, never the last launch.** The mode the select shows is the reader's pick if there is one, else `defaultModeFor(action,
+ * settings.jiraDefaultPermission)` — the per-device Settings default when one is set, for every action, else the per-action ladder — clamped to the
+ * ceiling at render (`clampMode`). Changing the action drops the pick, so the default re-seeds (per action: `context` `plan`, `execute` `acceptEdits`) —
+ * and a ceiling that has not landed yet is the floor (`modesUpTo(null)`), never the top. Model and effort seed from Settings and nowhere else (LaunchSheet's rule: a sticky `max`
  * from last week is the failure a per-launch control exists to prevent).
  *
  * **Two writes ride along, both opt-in and both off.** `Assign to me` (disabled with a reason when the ticket is already the reader's, or `me` is not
@@ -151,7 +152,7 @@ export function JiraLaunchSheet({
 
   const ceiling = agents?.spawnMaxPermission ?? null;
   const modes = modesUpTo(ceiling);
-  const mode = clampMode(pickedMode ?? defaultModeFor(action), ceiling);
+  const mode = clampMode(pickedMode ?? defaultModeFor(action, settings.jiraDefaultPermission), ceiling);
 
   // The detail's assignee is the fresher copy; the card's is what stands until it lands (or for good, if that read fails).
   const assignee = detail.value?.assignee ?? issue.assignee;
