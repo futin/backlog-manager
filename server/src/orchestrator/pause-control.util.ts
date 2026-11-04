@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
+import { writeJsonAtomic } from '../atomic-write.util';
 import type { OrchestratorRun } from '../../../shared/types';
 
 /**
@@ -206,11 +207,8 @@ function controlRequestTimely(request: PauseRequest, run: Pick<OrchestratorRun, 
  * what landed on disk so the caller can re-derive the verdict from the same
  * bytes rather than echo its own request back.
  *
- * Written atomically the same way `writeWatchdogConfig`, `writeRunAtomic`
- * and `moveItem` are — full content into a temp file in the SAME directory
- * (so the rename is on one filesystem and therefore atomic at the OS level),
- * then `renameSync` in one step. That matters more here than for the
- * watchdog config: the reader is a DIFFERENT process, polling this path at
+ * Written through `writeJsonAtomic`, and being atomic matters more here than
+ * for the watchdog config: the reader is a DIFFERENT process, polling this path at
  * every dispatch gate, and a half-written file it happened to catch would
  * read as no request at all — a pause silently dropped.
  *
@@ -231,12 +229,7 @@ export function writePauseRequest(
   // spelled out says what a person asked for to anyone who opens it, which is
   // the only reason this file is on disk at all.
   const request: PauseRequest = { runId, requestedAt: now.toISOString(), kind };
-  const file = controlFile(project, root);
-  const dir = dirname(file);
-  mkdirSync(dir, { recursive: true });
-  const tmp = join(dir, `.control.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
-  writeFileSync(tmp, JSON.stringify(request, null, 2) + '\n');
-  renameSync(tmp, file);
+  writeJsonAtomic(controlFile(project, root), request);
   return request;
 }
 

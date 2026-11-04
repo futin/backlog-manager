@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
+import { writeJsonAtomic } from '../atomic-write.util';
 import { isJiraKey, parseJiraAction } from '../../../shared/types';
 import type { JiraEndReason, JiraLink, JiraLinkHow } from '../../../shared/types';
 
@@ -140,21 +141,11 @@ export function loadLinks(): JiraLinksState {
 }
 
 /**
- * Writes the whole state: a bad file already on disk is first renamed to `jira-links.json.bad-<ISO>`, then a temp file in the same directory is written and
- * renamed over the target, and the temp is removed if the write fails. Throws on an I/O failure — the caller decides that a link that could not be saved must
- * not fail a launch.
+ * Writes the whole state: a bad file already on disk is first renamed to `jira-links.json.bad-<ISO>`, then the state goes through `writeJsonAtomic`. Throws on
+ * an I/O failure — the caller decides that a link that could not be saved must not fail a launch.
  */
 export function saveLinks(state: JiraLinksState): void {
   const file = jiraLinksFile();
-  const dir = dirname(file);
-  mkdirSync(dir, { recursive: true });
   if (existsSync(file) && readFile(file).kind === 'bad') renameSync(file, `${file}.bad-${new Date().toISOString()}`);
-  const tmp = `${file}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
-  try {
-    writeFileSync(tmp, JSON.stringify({ version: JIRA_LINKS_VERSION, links: state.links, suppressed: state.suppressed, neverLink: state.neverLink }, null, 2) + '\n');
-    renameSync(tmp, file);
-  } catch (err) {
-    rmSync(tmp, { force: true });
-    throw err;
-  }
+  writeJsonAtomic(file, { version: JIRA_LINKS_VERSION, links: state.links, suppressed: state.suppressed, neverLink: state.neverLink });
 }

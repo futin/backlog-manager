@@ -175,7 +175,8 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   outbound-calling module), `tick/` (`tick.json`'s reader/writer and the three `/api/ticks` routes — read-only on `~/.backlog-manager/tick/`, not an
   outbound-calling module either), `settings/` (`settings/timezone.json`'s reader/writer and `GET`/`POST /api/settings/timezone`, the board's one shared
   time zone), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
-  route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
+  route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git), `atomic-write.util.ts`
+  (`writeJsonAtomic`, the one way this server replaces a JSON file it owns).
   → [docs/subsystems/api.md](subsystems/api.md)
 - `client/src/` — React SPA: five lazy sections behind a side rail (Files, GitHub, Jira, Runs, Settings — Files and GitHub each drawn only while a registered
   project has that source, with Board and Archive under each; GitHub's tree is Board, PRs, Archive, Settings — PRs being the open pull requests of the

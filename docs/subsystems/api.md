@@ -143,7 +143,7 @@ leaves this process in no payload, log line or URL.
 
 **Each repo on its own interval** (#17, [spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.md)). `sync-config.util.ts` owns
 `~/.backlog-manager/settings/tracker-sync.json` (`BM_TRACKER_SYNC_FILE` overrides it): a map `owner/name → '15s' | '1m' | '5m' | 'off'` (`SYNC_INTERVALS`,
-`shared/types.ts`), read fresh per call, every missing or invalid entry reading `15s`, written temp-file-plus-rename by `writeSyncInterval` alone. The tick stays
+`shared/types.ts`), read fresh per call, every missing or invalid entry reading `15s`, written by `writeSyncInterval` alone, through `writeJsonAtomic`. The tick stays
 `TRACKER_POLL_MS`; `sweep` syncs only the repos that are DUE — a `15s` repo every tick with no clock check, a slower one once its interval has elapsed since
 its last sync (success or failure), an `off` one never, except the one cold-boot sync a never-filled cache is owed. `shouldPoll` narrows to "a token, and some
 connected repo that is not `off` or still owes that cold sync". `TrackerPollerService.syncOffBlock(projectPath)` is the ONE server home of the refusal
@@ -445,7 +445,7 @@ file, and answers the new `TicksPayload`. `POST /api/ticks/reset` `{
 project }` is a `400` for anything but an absolute-path string, a `404` when the tick home has no directory for it, and otherwise stamps `resetAt[project] =
 max(now, the newest parseable at in its recent)` into `settings/tick.json` and answers the new payload; it is allowed in every state and touches no lock. Both
 are a `409` naming the file when `tick.json` exists and cannot be read — `TickFileUnreadable`, thrown before any write, so the file is left byte-identical. The
-write itself (`writeTickFile`) is a temp file in the same directory plus a `rename`, with `resetAt` merged key by key. The invariants are
+write itself (`writeTickFile`) goes through `writeJsonAtomic`, with `resetAt` merged key by key. The invariants are
 [`tick.json`'s](invariants.md#tickjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced) and [the
 halt's](invariants.md#a-tick-halt-is-derived-from-the-records-and-the-reset-time-never-stored-and-only-a-persons-reset-clears-it).
 
@@ -457,7 +457,7 @@ every call and caches nothing; every way the file can fail to name a zone — mi
 the parse and shape failures with a warning. The default is `null` and NOT this host's zone: the API runs in a container whose zone is `UTC` unless `TZ` is
 set, so defaulting to it would move every reading by hours for a person who never opened Settings.
 
-`POST /api/settings/timezone` `{ timeZone }` is behind `SameOriginPostGuard` and is the file's one writer (`writeTimeZone`, temp file plus `rename`). A zone the
+`POST /api/settings/timezone` `{ timeZone }` is behind `SameOriginPostGuard` and is the file's one writer (`writeTimeZone`, through `writeJsonAtomic`). A zone the
 platform accepts is canonicalised through `Intl.DateTimeFormat`'s `resolvedOptions()` — `etc/utc` is written and answered as `UTC` — `null` unsets it, and
 anything else (an unknown id, a non-string, a missing key, a non-object body) is a `400`, file untouched. Unlike `tick.json` and `jira.json`, a file that
 cannot be read is replaced by the next write: it holds one value and the write replaces that value whole, so there is nothing in it a write could lose. The

@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
+import { writeJsonAtomic } from '../atomic-write.util';
 import { defaultBaseProblem, patternProblem } from '../../../shared/jira-branch';
 import {
   DEFAULT_JIRA_INTERVAL,
@@ -23,7 +24,7 @@ import {
  * This is the fourth file the server writes, after `watchdog.json`, the pause-control files and `tracker-sync.json`, and the writers sit on
  * `writeSyncInterval`'s contract: read the RAW parsed file, change exactly ONE entry (a board by id, one project's repo list by key), keep everything else —
  * malformed entries and unknown top-level keys included, because the file is hand-edited and a writer that re-serialised only what it understood would
- * delete the rest — and write `JSON.stringify(next, null, 2) + '\n'` to a temp file beside it and `rename` it over, so a reader never sees half a file.
+ * delete the rest — and write the result through `writeJsonAtomic`, so a reader never sees half a file.
  * A file that exists and cannot be read or parsed is REPORTED by the reader (`unreadable`, which becomes `configUnreadable` on the status payload) and
  * REFUSED by every writer (`JiraConfigUnreadableError`, a 409 at the route), never replaced: rewriting it from `{}` would turn one stray comma, or a file
  * truncated by a full disk, into a file holding only the entry being written — every board, saved query and repo path gone, with nothing on disk left to
@@ -487,24 +488,6 @@ function readRawForWrite(file: string): Record<string, unknown> {
   return isRecord(raw) ? raw : {};
 }
 
-/** Temp file in the same directory (same filesystem, so `rename` is atomic), then rename over the target; the temp file does not outlive a failed write. */
-function writeRawAtomic(file: string, next: Record<string, unknown>): void {
-  const dir = dirname(file);
-  mkdirSync(dir, { recursive: true });
-  const tmp = join(dir, `.jira.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
-  try {
-    writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
-    renameSync(tmp, file);
-  } catch (e) {
-    try {
-      unlinkSync(tmp);
-    } catch {
-      // nothing to clean up: the failure was before the temp file existed
-    }
-    throw e;
-  }
-}
-
 /** Every id the file already holds — boards, their queries and skills, malformed entries' ids included — so a minted id can never collide with one. */
 function idsIn(current: Record<string, unknown>): Set<string> {
   const ids = new Set<string>();
@@ -556,7 +539,7 @@ export function writeBoard(input: JiraBoardWrite, file: string = jiraConfigFile(
   };
   if (index >= 0) boards[index] = { ...(boards[index] as Record<string, unknown>), ...board };
   else boards.push(board);
-  writeRawAtomic(file, { ...current, boards });
+  writeJsonAtomic(file, { ...current, boards });
   return board;
 }
 
@@ -569,7 +552,7 @@ export function deleteBoard(id: string, file: string = jiraConfigFile()): void {
   const boards = Array.isArray(current.boards) ? current.boards : [];
   const rest = boards.filter((entry) => !(isRecord(entry) && entry.id === id));
   if (rest.length === boards.length) throw new JiraUnknownIdError(id);
-  writeRawAtomic(file, { ...current, boards: rest });
+  writeJsonAtomic(file, { ...current, boards: rest });
 }
 
 /**
@@ -587,7 +570,7 @@ export function writeRepoDefaults(path: string, value: JiraRepoDefaults, file: s
     if (value.namePattern !== undefined) entry.namePattern = value.namePattern;
     repoDefaults[path] = entry;
   }
-  writeRawAtomic(file, { ...current, repoDefaults });
+  writeJsonAtomic(file, { ...current, repoDefaults });
 }
 
 /**
@@ -599,7 +582,7 @@ export function writeRepos(project: string, paths: string[], file: string = jira
   const repos: Record<string, unknown> = isRecord(current.repos) ? { ...current.repos } : {};
   if (paths.length === 0) delete repos[project];
   else repos[project] = paths;
-  writeRawAtomic(file, { ...current, repos });
+  writeJsonAtomic(file, { ...current, repos });
 }
 
 /**
@@ -620,7 +603,7 @@ export function writeSkill(input: JiraSkillWrite, file: string = jiraConfigFile(
   const skill: JiraSkill = { id: input.id !== undefined ? input.id : mintUnique('s', idsIn(current)), name: input.name.trim(), prompt: input.prompt.trim() };
   if (index >= 0) skills[index] = { ...(skills[index] as Record<string, unknown>), ...skill };
   else skills.push(skill);
-  writeRawAtomic(file, { ...current, skills });
+  writeJsonAtomic(file, { ...current, skills });
   return skill;
 }
 
@@ -633,5 +616,5 @@ export function deleteSkill(id: string, file: string = jiraConfigFile()): void {
   const skills = Array.isArray(current.skills) ? current.skills : [];
   const rest = skills.filter((entry) => !(isRecord(entry) && entry.id === id));
   if (rest.length === skills.length) throw new JiraUnknownIdError(id, 'skill');
-  writeRawAtomic(file, { ...current, skills: rest });
+  writeJsonAtomic(file, { ...current, skills: rest });
 }

@@ -106,7 +106,7 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
 - **`~/.backlog-manager/settings/dashboards.json` has exactly one writer, the server, and a file that cannot be read is never replaced.** The file is
   `$BM_DASHBOARDS_FILE` (read per call), else `~/.backlog-manager/settings/dashboards.json`, shaped `{ home?, dashboards: [{ name, url, bmUrl, host, account?,
   models?, efforts? }], order?, strategy?, threshold? }`; `writeDashboardsFile` in `server/src/agents/dashboards/dashboards-file.util.ts` is the only thing that
-  writes it (a temp file in the SAME directory, then `rename`, the temp removed on a failed write) behind `POST /api/dashboards/entries`, `/entries/delete`,
+  writes it (through `writeJsonAtomic`, the temp removed on a failed write) behind `POST /api/dashboards/entries`, `/entries/delete`,
   `/home` and `/settings`, each a read-modify-write of its own field family and each behind `SameOriginPostGuard`. A machine id is `home` or a remote's `name`
   (`^[A-Za-z][A-Za-z0-9]{0,23}$`, unique case-insensitively, never `home`, at most `MAX_REMOTES` = 8). Reading has three outcomes: `file`, `default` (ENOENT —
   home only, no remote, no picker anywhere, and `GET /api/dashboards/offers` fetches no usage) and `unreadable` (an I/O error that is not ENOENT, text that is

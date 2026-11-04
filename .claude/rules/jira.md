@@ -16,7 +16,7 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   else. Each is `writeSyncInterval`'s contract: read the RAW file (ENOENT starts from `{}`; a parsed non-object is replaced), merge ONE entry — a board by id,
   one project's list by key, one path's defaults by path, a skill by id (`s_` ids, a name of
   at most 60 characters, a prompt of at most 2 000) — keeping every other entry, malformed ones and unknown top-level keys included, then
-  write a temp file in the same directory and `rename` it over. A file that exists and cannot be read or parsed throws `JiraConfigUnreadableError`, which the
+  write through `writeJsonAtomic`. A file that exists and cannot be read or parsed throws `JiraConfigUnreadableError`, which the
   route answers as a 409 carrying its message (`… nothing was written`) with the file byte-identical; an update or delete naming an id the file does not hold
   throws `JiraUnknownIdError`, which carries the entry kind and is a 404 `unknown board` or `unknown skill`. A handler runs guard (`SameOriginPostGuard`) → validate (400) → configured (503) → write → re-aim, and
   config writes stay open under `access: unauthorized`, because they touch only `jira.json`. A saved board then awaits `boardSaved` (sweeps that board,
@@ -87,8 +87,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `shellQuote`d. Why: [invariants.md](docs/subsystems/invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-one-hand-kept-copy)
 - **A Jira session is a persisted link, and Stop, a quiet dashboard or the 8-hour backstop each end it.** `JiraLiveService` (`server/src/jira/live.service.ts`,
   NOT `JiraService`) holds the link store in memory and writes it whole after every change but a `starting` reservation: `server/src/jira/links.store.ts`,
-  `~/.backlog-manager/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it), version 1, the server its one writer, a temp file in the same directory and a
-  `rename`. It holds `links` (`JiraLink`: key, session id, `how` — `run`, `branch` or `manual` — action, repo, branch, surface, model, effort, a ticket
+  `~/.backlog-manager/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it), version 1, the server its one writer, through
+  `writeJsonAtomic`. It holds `links` (`JiraLink`: key, session id, `how` — `run`, `branch` or `manual` — action, repo, branch, surface, model, effort, a ticket
   snapshot, `startedAt`, `endedAt` with an `endReason` of `idle`, `stopped`, `expired` or `gone`, `quietSince` and `reattachedAt`), plus the `suppressed` and
   `neverLink` pairs (each capped at 1,000, oldest out); `(key, sessionId)` is a link's identity, and a key may hold several. A file that does not parse, or
   whose `version` is not 1, loads EMPTY with one warning and is renamed `jira-links.json.bad-<ISO>` at the first save — never overwritten, and left alone by a

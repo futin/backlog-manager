@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
+import { writeJsonAtomic } from '../atomic-write.util';
 import { TICK_CAP_LIMITS, TICK_HALT_LIMITS, type TickRecentEntry } from '../../../shared/types';
 
 /**
@@ -160,9 +161,8 @@ export class TickFileUnreadable extends Error {
  * and `maxPrs` replaces the current one only when the patch carries it (clamped) and is carried through from the current file when it does not, and `resetAt`
  * merges KEY-WISE over the current map — resetting one project must not forget another's Reset, nor setting one number forget the other two.
  *
- * Written tmp + rename, the same atomic way `writeWatchdogConfig` and `writeSyncInterval` are: the temp file is in the SAME directory, so the rename is one
- * filesystem and atomic at the OS level, a `tick.mjs` reading concurrently sees the old complete file or the new complete one and never half of one, and the
- * rename IS the cleanup — no temp file is left behind. A write that fails before the rename leaves the old file as it was.
+ * Written through `writeJsonAtomic`: a `tick.mjs` reading concurrently sees the old complete file or the new complete one and never half of one, and a write
+ * that fails leaves the old file as it was with no temp file beside it.
  */
 export function writeTickFile(
   patch: { haltAfter?: number; maxPlans?: number; maxPrs?: number; resetAt?: Record<string, string> },
@@ -176,9 +176,5 @@ export function writeTickFile(
     maxPrs: patch.maxPrs !== undefined ? clampSetting(patch.maxPrs, TICK_CAP_LIMITS.maxPrs) : current.maxPrs,
     resetAt: { ...current.resetAt, ...(patch.resetAt ?? {}) }
   };
-  const dir = dirname(file);
-  mkdirSync(dir, { recursive: true });
-  const tmp = join(dir, `.tick.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
-  writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
-  renameSync(tmp, file);
+  writeJsonAtomic(file, next);
 }

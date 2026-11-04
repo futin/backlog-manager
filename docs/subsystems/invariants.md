@@ -333,8 +333,8 @@ looked. That last one is the point of the rule, and it is a stop rather than a f
 would un-halt a project whose written N was 1 or 2, and dropping the resets would re-halt one a person had just cleared. Stopping is the `state.json` posture —
 nothing runs, and nothing is lost. The Ticks page's own figures are unaffected, because they read `state.json`.
 
-**The write is atomic, key-wise, and the server's only one into this system's state.** Temp file in the same directory plus `rename` — a `tick.mjs` reading
-concurrently sees the old complete file or the new complete one, and the rename is the cleanup, so no temp file survives a write — merged over the current file,
+**The write is atomic, key-wise, and the server's only one into this system's state.** Through `writeJsonAtomic` (`server/src/atomic-write.util.ts`) — a `tick.mjs` reading
+concurrently sees the old complete file or the new complete one, and no temp file survives a write, a failed one included — merged over the current file,
 `resetAt` key by key, so Resetting one project never forgets another's. Two concurrent POSTs are a read-merge-write with no serialisation and the later one
 wins; that is accepted, `jira.json`'s precedent: one person, one board. A hand-edited `resetAt` in the future masks every record until the clock passes it,
 which is a hand edit's own consequence. The server writes `resetAt` only as `max(now, the newest parseable at in that project's recent)`, because a container
@@ -2108,7 +2108,7 @@ an offer is built field by field from the machine so a machine's config, which h
 rule applied to a third secret; the file is plain text a person edits and may paste into a bug report, and the variable is what a process manager already
 keeps out of one.
 
-**The write is atomic and the file's own.** A temp file in the same directory, then `rename`, the `tick-breaker.util.ts` shape — a reader concurrently sees the
+**The write is atomic and the file's own.** Through `writeJsonAtomic` — a reader concurrently sees the
 old complete file or the new complete one — with the temp file removed when the write fails. Each POST is a read-modify-write of one field family (an entry, the
 home block, the strategy), so editing one machine never forgets another; two concurrent POSTs are the later one wins, the precedent `jira.json` set: one person,
 one board. The file never holds anything a machine owns: a remote's `host` is the value that machine's claims carry (its `BM_MACHINE_NAME`), recorded here only
@@ -2574,7 +2574,7 @@ half of the sentence, not to the single-writer half.
 The third file is `settings/tracker-sync.json` (#17, `server/src/tracker/sync-config.util.ts`), each connected repo's sync interval on this machine. It joins
 `settings/` for `watchdog.json`'s reason — it is how eagerly THIS server asks GitHub, which no skill has anything to say about and which would differ between
 two machines on one repo, so it cannot live in the committed marker — and it follows that file's posture point for point: read fresh, never cached, every
-failure reading as the default (`15s`), one writer (`writeSyncInterval`, reached only from `POST /api/trackers/sync`), temp file plus rename. One departure
+failure reading as the default (`15s`), one writer (`writeSyncInterval`, reached only from `POST /api/trackers/sync`), written through `writeJsonAtomic`. One departure
 (#270): the WRITER refuses a file that exists but does not parse — a 409, the file untouched — because it rewrites the whole map, and rewriting from `{}`
 would silently reset every other repo to `15s`; reading it as the default is harmless, replacing it is not. It is a map, not
 a fixed object, so validation is per entry: a bad value costs its own repo its setting, never a neighbour's. No skill reads it; `backlog.mjs` learns of it only
@@ -2582,8 +2582,8 @@ through the 409 the server answers while a repo is `off`.
 
 `settings/timezone.json` (#241, `server/src/settings/timezone-config.util.ts`) holds the one zone every device draws the board in. It joins `settings/` for
 `watchdog.json`'s reason — a value a person sets from Settings, which a server-side write must reach — and follows its posture: read fresh, never cached, every
-failure reading as the default (`null`, each browser's own zone), one writer (`writeTimeZone`, reached only from `POST /api/settings/timezone`), temp file plus
-rename. It departs from `tick.json`, `jira.json` and `dashboards.json` on one point: a file that does not parse is REPLACED by the next write rather than
+failure reading as the default (`null`, each browser's own zone), one writer (`writeTimeZone`, reached only from `POST /api/settings/timezone`), written through
+`writeJsonAtomic`. It departs from `tick.json`, `jira.json` and `dashboards.json` on one point: a file that does not parse is REPLACED by the next write rather than
 refused, because it holds one value and the write replaces that value whole — there is nothing a write could lose, and the person picking a zone is the repair.
 No skill reads it.
 
@@ -3676,8 +3676,8 @@ writer already replaces and so what the six writers agree with.
 would accept, because a writer that round-tripped through the reader would silently drop every entry the reader warned about — the same erasure #270 found,
 by a quieter road. They merge exactly one entry (a board by id, one project's list by key, one path's defaults by path, a skill by id) and leave the rest
 untouched, hand-written junk and unknown
-top-level keys included, so a person's annotation or a newer version's key survives a save made by an older one. The write is a temp file in the same
-directory and a `rename`, so a crash leaves the old file or the new one and never half of either. The refusal is the writer's rather than a check the route
+top-level keys included, so a person's annotation or a newer version's key survives a save made by an older one. The write goes through
+`writeJsonAtomic`, so a crash leaves the old file or the new one and never half of either. The refusal is the writer's rather than a check the route
 makes first because the route's read and the writer's read would be two reads: a file that broke between them would be replaced after the check passed. So
 `JiraConfigUnreadableError` comes out of the one read the write is built on, and the route's only job is to map it to a 409 with the message — which tells
 the person to fix or delete the file by hand and that nothing was written, the one sentence the board sheet shows under its footer with every edit intact.
@@ -3694,7 +3694,7 @@ once, naming the file and the entry, so a vanished entry leaves a trace in the s
 **`repoDefaults` joined under the same contract** (Jira repo/branch, spec §5.1, §6). It maps a mapped path — absolute, normalised — to the base a New worktree
 is cut from and the pattern its branch is named by, and it is keyed by PATH rather than by project because one checkout can be mapped to two Jira projects and
 has one convention. Its writer is the sixth, `writeRepoDefaults`, behind `POST /api/jira/repo-defaults`: the same raw read, the same one-entry merge, the same
-temp file and `rename`, the same 409 for an unreadable file; both values unset deletes the path's entry. The route adds one check the other five do not need —
+`writeJsonAtomic`, the same 409 for an unreadable file; both values unset deletes the path's entry. The route adds one check the other five do not need —
 the path must be mapped by SOME project, a 400 otherwise — so the file does not collect defaults for paths nothing can reach, and it sits after the 409
 because an unreadable file cannot say what is mapped. Its reader's fallback goes one level finer again, to the VALUE: a base that fails `branchNameProblem` or
 a pattern that fails `patternProblem` — the same checks the route applies — costs only itself, so a hand-edited bad pattern leaves that path's good base
@@ -3882,7 +3882,7 @@ retry a merge that already stood. A disarm of a PR with no auto-merge armed is `
 
 Phase 5's Run starts a Claude session for a Jira ticket, and the board has to show which tickets have one going and refuse a second. The Jira sessions page asks
 for more than that: which sessions a ticket has had, and which need a person now. So the server keeps each ticket–session link in a file,
-`~/.backlog-manager/jira-links.json`, of which it is the one writer (written whole and atomically, a temp file and a `rename`, the registry's discipline without
+`~/.backlog-manager/jira-links.json`, of which it is the one writer (written whole and atomically through `writeJsonAtomic`, the registry's discipline without
 being a field of it). `JiraLiveService` (`server/src/jira/live.service.ts` — the spec calls it `JiraService`; the plan ruled otherwise, so `jira/` has one
 service named for what it holds) holds that state in memory, loads it once, and rewrites the file after every change but a `starting` reservation. What the file
 records is a LINK — the pair of a key and a session id, with the Run action, the repo, a snapshot of the ticket and how it ended — and the dashboard, not this

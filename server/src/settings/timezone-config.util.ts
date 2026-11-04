@@ -1,6 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+
+import { writeJsonAtomic } from '../atomic-write.util';
 
 /**
  * timezone-config.util.ts — ~/.backlog-manager/settings/timezone.json (#241).
@@ -8,7 +10,7 @@ import { dirname, join } from 'node:path';
  * The one zone every clock, day group, week window and created date on the board is drawn in, so a phone, a laptop and a tailnet browser looking at the same
  * run read the same times. It follows `sync-config.util.ts` and `watchdog-config.util.ts` on every point those headers argue: it lives under `settings/`
  * because that is the one read-write directory carved out of the read-only `~/.backlog-manager` mount, it is read fresh on every call and cached nowhere,
- * every failure reads as the default and never throws, and the one write is temp file plus rename.
+ * every failure reads as the default and never throws, and the one write goes through `writeJsonAtomic`.
  *
  * The default is `null` — "unset", each browser keeps its own zone — and NOT this host's zone: the API runs in a container whose zone is `UTC` unless somebody
  * set `TZ`, so defaulting to it would move every reading by hours for the person who never opened Settings.
@@ -68,14 +70,10 @@ export function readTimeZone(file: string = timeZoneFile()): string | null {
 }
 
 /**
- * Write `{ timeZone }` atomically — temp file in the same directory, then rename — creating the directory when it is missing, and return what was written.
+ * Write `{ timeZone }` through `writeJsonAtomic` and return what was written.
  * Called by `POST /api/settings/timezone` and nothing else; the route has already canonicalised `zone`.
  */
 export function writeTimeZone(zone: string | null, file: string = timeZoneFile()): string | null {
-  const dir = dirname(file);
-  mkdirSync(dir, { recursive: true });
-  const tmp = join(dir, `.timezone.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
-  writeFileSync(tmp, JSON.stringify({ timeZone: zone }, null, 2) + '\n');
-  renameSync(tmp, file);
+  writeJsonAtomic(file, { timeZone: zone });
   return zone;
 }
