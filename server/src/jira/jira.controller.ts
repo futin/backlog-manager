@@ -69,7 +69,7 @@ export class JiraController {
   /**
    * `GET /api/jira/sessions` — every link, live and ended, with its derived state (spec §6). Memory only: the links and the rows are what the reconciler left
    * in `JiraLiveService`, and nothing here dials the dashboard or Jira, so it is answered whether or not Jira is configured (an unconfigured server has no
-   * links and no read yet, which is `{ links: [], reachable: true, rowsAt: null }` by itself — no 503, the client learns "nothing to show" the same way).
+   * links and no read yet, which is `{ links: [], reachable: true, rowsAt: null, saveError: null }` by itself — no 503, the client learns "nothing to show" the same way).
    * `?open=1` is the Jira section's own hook saying a page is on screen, which is what quickens the reconciler to ~15 s (spec §5, "while a Jira page is
    * open"); the rail badge's read does not send it, so a configured Jira with the section closed never holds the reconciler at the fast rate.
    */
@@ -92,7 +92,7 @@ export class JiraController {
     // Rebuilt from what is linked NOW, so an unlinked or evicted pair does not keep an entry forever.
     this.stateSeen.clear();
     for (const [id, entry] of seen) this.stateSeen.set(id, entry);
-    return { links, reachable, rowsAt: this.live.rowsAt() };
+    return { links, reachable, rowsAt: this.live.rowsAt(), saveError: this.live.saveError() };
   }
 
   /**
