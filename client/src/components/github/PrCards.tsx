@@ -7,7 +7,7 @@ import { useNow } from '../../hooks/useNow';
 import type { PrLayoutProps } from './pr-layout-props';
 import { ageText, cardRepos, departedOutcomes, transientFailures } from '../../lib/pr-layouts';
 import { prRunWarning } from '../../lib/pr-run';
-import { prChips } from '../../lib/prs';
+import { parsePrKey, prChips, prKey } from '../../lib/prs';
 import { pollAge } from '../../lib/tracker';
 import type { PrRepoView, PrWriteResult, PullRequestRow } from '../../../../shared/types';
 
@@ -28,7 +28,7 @@ export function PolledAge({ polledAt }: { polledAt: string | null }) {
  * is the row's side, so a blocked key's reason and the busy rule live there once. The Confirm is page state (`PrLayoutProps.confirming`), one per page.
  */
 function CardRow({ repo, pr, props }: { repo: PrRepoView; pr: PullRequestRow; props: PrLayoutProps }) {
-  const key = `${repo.repo}#${pr.number}`;
+  const key = prKey(repo.repo, pr.number);
   // The mark's presence, not its clock: `Update` frees, and `updating…` leaves the row, only when the page's timer has judged the re-read.
   const updating = props.marks[key] !== undefined;
   const outcome = props.outcomes[key];
@@ -124,7 +124,7 @@ function RepoSheet(props: PrLayoutProps & { repo: PrRepoView }) {
         )}
         {departed.map(({ key, outcome }) => (
           <p key={key} className={outcome.kind === 'error' ? 'prs-outcome prs-outcome-error' : 'prs-outcome'}>
-            {`#${key.slice(repo.repo.length + 1)} ${outcome.text}`}
+            {`#${parsePrKey(key)?.number} ${outcome.text}`}
           </p>
         ))}
       </div>

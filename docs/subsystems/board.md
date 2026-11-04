@@ -514,7 +514,7 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   of them filled by `primaryKey` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
   the method `Select` inside it, then `PrOutcomeLine`. A blocked key is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
   off` on each for a sync-off repo) as its `title` and its `aria-describedby`; a key is `disabled` outright only while its PR's write runs, because the page
-  owns an in-flight set keyed `<repo>#<number>`. The page holds ONE `confirming` key, so a second `Merge` moves the Confirm, and a write leaving, a layout
+  owns an in-flight set keyed `<repo>#<number>` (`prKey` / `parsePrKey`, `lib/prs.ts`). The page holds ONE `confirming` key, so a second `Merge` moves the Confirm, and a write leaving, a layout
   switch, a re-read that drops the PR or blocks the merge, a filter hiding the row or a collapse closes it, nothing sent. `PrRepoNotes` says the merged
   outcomes, the `sync off` sentence and `showing n of total` once above Inbox and Matrix, then the `Can't read` lines below; Cards says the first three in each
   card. A token-less server reads `no token — set BM_GITHUB_TOKEN in .env and restart`. A row's chips are `prChips`, and while a live or paused run, a remote

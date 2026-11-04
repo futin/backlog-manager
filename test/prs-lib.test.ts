@@ -1,16 +1,25 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import {
+  applyUpdateOutcome,
   defaultMethod,
+  findPr,
   groupRepos,
   autoMergeBlock,
   mergeBlock,
   outcomeLine,
+  parsePrKey,
   prChips,
+  prKey,
   PR_KEYS,
   REPO_REASONS,
   updateBlock,
+  updateTransition,
   UPDATING_MS,
   whyLine
 } from '../client/src/lib/prs';
+import type { PrOutcome } from '../client/src/lib/prs';
 import type { PrRepoView, PrWriteResult, PullRequestRow } from '../shared/types';
 
 /**
@@ -320,5 +329,161 @@ describe('outcomeLine', () => {
     expect(line('auto-merge-disabled')).toBe('auto-merge off');
     expect(line('noop')).toBe('no auto-merge was armed');
     expect(line('update-requested')).toBe('updating…');
+  });
+});
+
+describe('prKey and parsePrKey', () => {
+  it('builds <repo>#<number>', () => {
+    expect(prKey('a/x', 12)).toBe('a/x#12');
+  });
+
+  it('parses a key back into its repo and number', () => {
+    expect(parsePrKey('a/x#12')).toEqual({ repo: 'a/x', number: 12 });
+    expect(parsePrKey(prKey('a/x', 12))).toEqual({ repo: 'a/x', number: 12 });
+  });
+
+  it('splits at the LAST #, so a # inside the repo part stays there', () => {
+    expect(parsePrKey('a#b/x#3')).toEqual({ repo: 'a#b/x', number: 3 });
+  });
+
+  it.each(['a/x', 'a/x#', '#12', 'a/x#abc', 'a/x#1.5', 'a/x#-1', 'a/x#0', ''])('%j is not a key', (key) => {
+    expect(parsePrKey(key)).toBeNull();
+  });
+});
+
+describe('findPr', () => {
+  const one = pr({ number: 1, headSha: 'b'.repeat(40) });
+  const two = pr({ number: 2, headSha: 'c'.repeat(40) });
+  const ax = repo({ repo: 'a/x', prs: [one] });
+  const axy = repo({ repo: 'a/xy', prs: [two] });
+
+  it('returns the repo and the PR a key names', () => {
+    expect(findPr([ax, axy], 'a/x#1')).toEqual({ repo: ax, pr: one });
+  });
+
+  it('a number listed only under another repo is no match', () => {
+    expect(findPr([ax, axy], 'a/x#2')).toBeUndefined();
+  });
+
+  it('a repo that is only a prefix of the key’s, and a repo not in the read, are no match', () => {
+    expect(findPr([ax, axy], 'a/xy#1')).toBeUndefined();
+    expect(findPr([ax, axy], 'b/z#1')).toBeUndefined();
+  });
+
+  it('a malformed key is no match and does not throw', () => {
+    expect(findPr([ax, axy], 'a/x')).toBeUndefined();
+  });
+});
+
+describe('updateTransition', () => {
+  const KEY = 'a/x#1';
+  const SHA = 'old';
+  const withHead = (headSha: string) => [repo({ repo: 'a/x', prs: [pr({ number: 1, headSha })] })];
+  const prGone = [repo({ repo: 'a/x', prs: [pr({ number: 2, headSha: SHA })] })];
+  const repoGone = [repo({ repo: 'b/z', prs: [pr({ number: 1, headSha: SHA })] })];
+
+  describe('final: false, the poll', () => {
+    it('a moved head drops the mark and says the update landed', () => {
+      expect(updateTransition(withHead('new'), KEY, SHA, false)).toEqual({ dropMark: true, outcome: 'updated' });
+    });
+
+    it('the marked head keeps the mark and says nothing', () => {
+      expect(updateTransition(withHead(SHA), KEY, SHA, false)).toEqual({ dropMark: false, outcome: null });
+    });
+
+    it('a PR the read no longer lists drops the mark alone', () => {
+      expect(updateTransition(prGone, KEY, SHA, false)).toEqual({ dropMark: true, outcome: null });
+    });
+
+    it('a repo the read does not list drops the mark alone', () => {
+      expect(updateTransition(repoGone, KEY, SHA, false)).toEqual({ dropMark: true, outcome: null });
+    });
+
+    it('a failed read keeps the mark and says nothing', () => {
+      expect(updateTransition(null, KEY, SHA, false)).toEqual({ dropMark: false, outcome: null });
+    });
+  });
+
+  describe('final: true, the timer', () => {
+    it('a moved head drops the mark and says the update landed', () => {
+      expect(updateTransition(withHead('new'), KEY, SHA, true)).toEqual({ dropMark: true, outcome: 'updated' });
+    });
+
+    it('the marked head drops the mark and clears the updating line', () => {
+      expect(updateTransition(withHead(SHA), KEY, SHA, true)).toEqual({ dropMark: true, outcome: 'clear-updating' });
+    });
+
+    it('a PR the read no longer lists drops the mark alone', () => {
+      expect(updateTransition(prGone, KEY, SHA, true)).toEqual({ dropMark: true, outcome: null });
+    });
+
+    it('a failed read drops the mark and clears the updating line', () => {
+      expect(updateTransition(null, KEY, SHA, true)).toEqual({ dropMark: true, outcome: 'clear-updating' });
+    });
+  });
+});
+
+describe('applyUpdateOutcome', () => {
+  const KEY = 'a/x#1';
+  const OTHER: PrOutcome = { text: 'merged', kind: 'ok' };
+
+  it('updated says branch updated under the key and leaves other keys alone', () => {
+    const outcomes = { [KEY]: { text: 'updating…', kind: 'updating' as const }, 'a/x#2': OTHER };
+    expect(applyUpdateOutcome(outcomes, KEY, 'updated')).toEqual({ [KEY]: { text: 'branch updated', kind: 'ok' }, 'a/x#2': OTHER });
+  });
+
+  it('updated on a key that already says it returns the same object', () => {
+    const outcomes = applyUpdateOutcome({}, KEY, 'updated');
+    expect(applyUpdateOutcome(outcomes, KEY, 'updated')).toBe(outcomes);
+  });
+
+  it('clear-updating removes a key of kind updating, and only that key', () => {
+    const outcomes = { [KEY]: { text: 'updating…', kind: 'updating' as const }, 'a/x#2': OTHER };
+    expect(applyUpdateOutcome(outcomes, KEY, 'clear-updating')).toEqual({ 'a/x#2': OTHER });
+    // A copy: the state React still holds is never edited in place.
+    expect(outcomes[KEY]).toEqual({ text: 'updating…', kind: 'updating' });
+  });
+
+  it('clear-updating leaves a finished or refused outcome that arrived meanwhile: the same object', () => {
+    const finished = { [KEY]: { text: 'auto-merge armed', kind: 'ok' as const } };
+    const refused = { [KEY]: { text: 'head moved', kind: 'error' as const } };
+    expect(applyUpdateOutcome(finished, KEY, 'clear-updating')).toBe(finished);
+    expect(applyUpdateOutcome(refused, KEY, 'clear-updating')).toBe(refused);
+  });
+
+  it('clear-updating on an absent key returns the same object', () => {
+    const outcomes = { 'a/x#2': OTHER };
+    expect(applyUpdateOutcome(outcomes, KEY, 'clear-updating')).toBe(outcomes);
+  });
+
+  it('null returns the same object', () => {
+    const outcomes = { [KEY]: { text: 'updating…', kind: 'updating' as const } };
+    expect(applyUpdateOutcome(outcomes, KEY, null)).toBe(outcomes);
+  });
+});
+
+/**
+ * Source guards: what they forbid would still render correctly, so behaviour cannot catch it coming back. `#${pr.number}` alone stays legal, it is display text.
+ */
+describe('one home for the key and for the head-moved rule', () => {
+  const SRC = join(__dirname, '..', 'client', 'src');
+  const GITHUB = join(SRC, 'components', 'github');
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
+  const sources = [...walk(GITHUB).filter((f) => /\.tsx?$/.test(f)), join(SRC, 'lib', 'pr-layouts.ts')];
+
+  it('reads the files it means to', () => {
+    expect(sources).toContain(join(GITHUB, 'PrCards.tsx'));
+    expect(sources).toContain(join(GITHUB, 'PullRequestsView.tsx'));
+  });
+
+  it.each(sources)('%s neither builds nor parses a key by hand', (file) => {
+    const text = readFileSync(file, 'utf8');
+    expect(text).not.toContain('.repo}#$');
+    expect(text).not.toContain("lastIndexOf('#')");
+  });
+
+  it('PullRequestsView does not test the head itself', () => {
+    expect(readFileSync(join(GITHUB, 'PullRequestsView.tsx'), 'utf8')).not.toContain('headSha !==');
   });
 });
