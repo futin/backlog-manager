@@ -139,7 +139,8 @@ happened.
 - **Editing `skills/` changes nothing until it is committed, pushed, and `pnpm run plugin:sync` runs.**
   Why: [invariants.md](docs/subsystems/invariants.md#editing-skills-changes-nothing-until-commit--push--pluginsync)
 - **The served build carries a CSP (`server/src/security.ts`); dev does not.** `script-src` pins the pre-paint theme script's sha256 — edit that script and
-  `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows.
+  `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows. `style-src` is `'self'` alone: write inline styles through CSSOM, never a `<style>` element
+  or a `style=` attribute in markup.
 - **pnpm only**, pinned by `packageManager`, enforced via corepack in the image.
 - **Backlog items move `open/` → `done/`; `out-of-scope/` is flat.**
 - **Dispatch derives the action; it never accepts one.** Why: [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
