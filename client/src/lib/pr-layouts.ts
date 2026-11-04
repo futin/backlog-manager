@@ -1,5 +1,5 @@
 import { elapsedSince } from './item-age';
-import { prChips, mergeBlock, updateBlock, type PrOutcome } from './prs';
+import { parsePrKey, prChips, prKey, mergeBlock, updateBlock, type PrOutcome } from './prs';
 import type { DotTone } from '../components/ui/Dot';
 import type { PrRepoView, PullRequestRow } from '../../../shared/types';
 
@@ -148,7 +148,7 @@ export interface RankedPr {
  */
 export function rankPrs(repos: readonly PrRepoView[]): RankedPr[] {
   const ranked: RankedPr[] = repos.flatMap((repo) =>
-    repo.prs.map((pr) => ({ key: `${repo.repo}#${pr.number}`, repo, pr, level: prLevel(pr), severity: prSeverity(pr) }))
+    repo.prs.map((pr) => ({ key: prKey(repo.repo, pr.number), repo, pr, level: prLevel(pr), severity: prSeverity(pr) }))
   );
   return ranked.sort(
     (a, b) =>
@@ -208,21 +208,21 @@ export const DEPARTED_KEEP = 3;
 /**
  * The finished outcomes of PRs a write of this page took off the list (merged), still owed a line: the key's repo is shown, the PR is no longer listed, and the
  * outcome is not `updating…` (an updating PR with no row left has nothing to be updating). Lifted from `RepoSheet` so a page-level layout can say them too.
- * Matched on `<repo>#`, never a bare prefix, so `a/x` does not claim `a/xy#1`.
+ * Matched on the key's parsed repo (`parsePrKey`), never a bare prefix, so `a/x` does not claim `a/xy#1`.
  *
  * Only the newest `DEPARTED_KEEP` per repo are returned, in the order they were recorded. "Newest" is the record's own key order: `PullRequestsView` deletes a
  * key when its next write leaves and re-adds it when that write settles, so insertion order is completion order — no timestamp is stored to sort by.
  */
 export function departedOutcomes(outcomes: Record<string, PrOutcome>, shown: readonly PrRepoView[]): { key: string; outcome: PrOutcome }[] {
-  const listed = new Set(shown.flatMap((repo) => repo.prs.map((pr) => `${repo.repo}#${pr.number}`)));
-  const departed = Object.entries(outcomes).filter(
-    ([key, outcome]) => outcome.kind !== 'updating' && !listed.has(key) && shown.some((repo) => key.startsWith(`${repo.repo}#`))
-  );
+  const listed = new Set(shown.flatMap((repo) => repo.prs.map((pr) => prKey(repo.repo, pr.number))));
+  const departed = Object.entries(outcomes).flatMap(([key, outcome]) => {
+    const repo = parsePrKey(key)?.repo;
+    return outcome.kind !== 'updating' && !listed.has(key) && shown.some((r) => r.repo === repo) && repo !== undefined ? [{ key, outcome, repo }] : [];
+  });
   const left = new Map<string, number>();
   const kept: { key: string; outcome: PrOutcome }[] = [];
   for (let i = departed.length - 1; i >= 0; i -= 1) {
-    const [key, outcome] = departed[i];
-    const repo = key.slice(0, key.lastIndexOf('#'));
+    const { key, outcome, repo } = departed[i];
     const n = left.get(repo) ?? 0;
     if (n >= DEPARTED_KEEP) continue;
     left.set(repo, n + 1);
@@ -233,7 +233,7 @@ export function departedOutcomes(outcomes: Record<string, PrOutcome>, shown: rea
 
 /**
  * The repos Cards draws a sheet for, in the order given (`groupRepos`'): a repo that lists at least one PR, or that has no PR left but still owes a departed
- * outcome line (`departedOutcomes(outcomes, [repo])`, which is asked per repo so the `<repo>#` match and the `DEPARTED_KEEP` cut stay its own). A repo whose
+ * outcome line (`departedOutcomes(outcomes, [repo])`, which is asked per repo so the repo match and the `DEPARTED_KEEP` cut stay its own). A repo whose
  * last PR has just merged keeps its card for as long as that outcome lives, so `#12 merged` stays where the row was instead of the whole sheet vanishing under
  * the person who clicked Merge; an empty repo with nothing to say is not drawn, and `emptyRepoNote` counts it instead.
  *

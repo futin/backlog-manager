@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 
 import { Chip } from '../ui/Chip';
 import { primaryKey } from '../../lib/pr-layouts';
-import { PR_KEYS, autoMergeBlock, defaultMethod, mergeBlock, updateBlock, whyLine, type PrKey, type PrOutcome } from '../../lib/prs';
+import { PR_KEYS, autoMergeBlock, defaultMethod, mergeBlock, prKey, updateBlock, whyLine, type PrKey, type PrOutcome } from '../../lib/prs';
 import { setAutoMerge, updateBranch } from '../../lib/prs-api';
 import type { PrAutoMergeRequest, PrRepoView, PrWriteResult, PullRequestRow } from '../../../../shared/types';
 
@@ -103,7 +103,7 @@ export function PrActions({
   const reasons = whyLine(pr, repo, updating, outcome?.kind).filter((reason) => !(omitUpdatingReason && reason === 'updating…'));
 
   return (
-    <div className="prs-keys-side" data-testid={`pr-keys-${repo.repo}#${pr.number}`}>
+    <div className="prs-keys-side" data-testid={`pr-keys-${prKey(repo.repo, pr.number)}`}>
       <div className="prs-keys">
         {PR_KEYS.map((key) => {
           if (key === 'open') {
