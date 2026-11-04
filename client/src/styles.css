@@ -1434,14 +1434,21 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-list-scroll { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
 /* `table-layout: fixed` with every column but Ticket given its width in the head: under `auto`, each column sized to its widest cell — a long run label, a
    full summary, two open buttons side by side — and at 1440 px the table came to 1544 px in a 1150 px well, with Started, For and Open behind a sideways
-   scroll. Fixed, Ticket takes what is left and ellipsises; State and Open wrap onto a second line instead of widening their column. */
+   scroll. Fixed, State and Open wrap onto a second line instead of widening their column.
+   The columns whose content is bounded — State, Run, Context (a 32 px bar and a percentage), Started, For, Open — are px. Ticket, Repo · branch, Where and
+   Model are percentages summing to exactly 100%, so px + % always overflows the table: Chromium then keeps every px column and splits what is left among
+   the four in ratio 32 : 28 : 21 : 19. When Ticket was the one auto column it took all of that leftover, and in full content width on a wide screen the
+   summary held ~740 of 1710 px while Repo, Where and Model ellipsised at 128/92/72. At the 1150 px well of a 1440 screen the ratio lands on 147/128/96/87,
+   no narrower than the old px widths. Do not write these as `calc()` or `max()` mixing px and %: a fixed-layout table reads those as `auto`, and auto
+   columns split the leftover evenly, not by ratio (measured, Chromium). */
 .jira-list-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
 .jira-list-table thead th:nth-child(1) { width: 160px }
+.jira-list-table thead th:nth-child(2) { width: 32% }
 .jira-list-table thead th:nth-child(3) { width: 120px }
-.jira-list-table thead th:nth-child(4) { width: 128px }
-.jira-list-table thead th:nth-child(5) { width: 92px }
-.jira-list-table thead th:nth-child(6) { width: 72px }
-.jira-list-table thead th:nth-child(7) { width: 84px }
+.jira-list-table thead th:nth-child(4) { width: 28% }
+.jira-list-table thead th:nth-child(5) { width: 21% }
+.jira-list-table thead th:nth-child(6) { width: 19% }
+.jira-list-table thead th:nth-child(7) { width: 96px }
 .jira-list-table thead th:nth-child(8) { width: 76px }
 .jira-list-table thead th:nth-child(9) { width: 64px }
 .jira-list-table thead th:nth-child(10) { width: 176px }
