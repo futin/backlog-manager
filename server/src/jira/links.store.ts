@@ -42,9 +42,15 @@ export interface JiraLinksState {
   neverLink: JiraLinkPair[];
 }
 
-/** The file, or `BM_JIRA_LINKS_FILE` when set — `jiraConfigFile()`'s shape, `env` a parameter for the same reason. */
+/**
+ * The file, or `BM_JIRA_LINKS_FILE` when set — `jiraConfigFile()`'s shape, `env` a parameter for the same reason. It lives in `settings/`, beside `jira.json`,
+ * because that is the one subtree of `~/.backlog-manager` the compose stack mounts read-write: the rest is `:ro`. It first sat at the top of the directory,
+ * where every save in the stack failed with EROFS (logged, so nothing else broke) and the store was memory only — a restart dropped every link, every
+ * unlink's suppression and every never-link pair, and detection re-added what a person had removed. 2026-11-04. A host-run server could write the old path, so
+ * a file left there is not read: it holds history only, and the next Run or detection tick rebuilds what is live.
+ */
 export function jiraLinksFile(env: NodeJS.ProcessEnv = process.env): string {
-  return env.BM_JIRA_LINKS_FILE || join(homedir(), '.backlog-manager', 'jira-links.json');
+  return env.BM_JIRA_LINKS_FILE || join(homedir(), '.backlog-manager', 'settings', 'jira-links.json');
 }
 
 const HOWS: readonly JiraLinkHow[] = ['run', 'branch', 'manual'];
