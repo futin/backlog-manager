@@ -293,6 +293,35 @@ describe('the List view', () => {
     expect(within(group('Live')).queryByRole('button', { name: /^Run PAY/ })).toBeNull();
   });
 
+  it('a click anywhere on a row opens Detail; its own Run ▾, that menu\'s panel and a text selection do not', async () => {
+    links = [
+      link({ key: 'PAY-131', id: 'b1', state: 'working', startedAt: hoursAgo(2), how: 'branch', branch: 'feat/refund-partial' }),
+      link({ key: 'PAY-131', id: 'e1', state: 'ended', startedAt: daysAgo(2), endedAt: daysAgo(1) })
+    ];
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBe(2));
+    const modal = (): Element | null => document.querySelector('[role="dialog"][aria-modal="true"]');
+    const ended = (): HTMLElement => within(group('Ended')).getByRole('row', { name: 'Session on PAY-131' });
+
+    // Run ▾ is the button's, and so is a click on the panel it opens inside the cell: neither opens Detail.
+    await userEvent.click(within(ended()).getByRole('button', { name: 'Run PAY-131' }));
+    const panel = ended().querySelector('[role="dialog"]');
+    expect(panel).not.toBeNull();
+    await userEvent.click(panel as HTMLElement);
+    expect(modal()).toBeNull();
+    await userEvent.keyboard('{Escape}');
+
+    // A click that ends a text selection is someone copying, not opening.
+    const selection = jest.spyOn(window, 'getSelection').mockReturnValue({ toString: () => 'feat/refund-partial' } as unknown as Selection);
+    await userEvent.click(within(group('Live')).getByText('feat/refund-partial'));
+    expect(modal()).toBeNull();
+    selection.mockRestore();
+
+    // A plain cell — the branch, nowhere near the summary — opens Detail for that row's ticket.
+    await userEvent.click(within(group('Live')).getByText('feat/refund-partial'));
+    expect(await screen.findByRole('dialog', { name: /^PAY-131 / })).toHaveAttribute('aria-modal', 'true');
+  });
+
   it('draws a Starting row from the status reservation, with no buttons', async () => {
     statusAnswer = status({ live: { 'PAY-151': { name: 'jira run', sessionId: null, startedAt: hoursAgo(0.01), repo: '/home/ada/pay', starting: true } } });
     await renderList();
