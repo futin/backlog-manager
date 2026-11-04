@@ -12,8 +12,8 @@
  * field's default.
  */
 
-import { EFFORTS, MODELS } from '../../../shared/agent';
-import { EXECUTE_FINISHES, MERGE_MODES, QUESTION_MODES, type ExecuteFinish, type MergeMode, type QuestionMode } from '../../../shared/types';
+import { EFFORTS, MODELS, PERMISSION_LADDER } from '../../../shared/agent';
+import { EXECUTE_FINISHES, MERGE_MODES, QUESTION_MODES, type ExecuteFinish, type MergeMode, type PermissionMode, type QuestionMode } from '../../../shared/types';
 import { SECTIONS, type Section } from './sections';
 
 export const THEMES = [
@@ -187,7 +187,21 @@ export interface Settings {
    * `jira.json` can) is still the default.
    */
   jiraDefaultAction: string;
+  /**
+   * What the Jira launch sheet's Permissions select starts on: `''` is "per action" — `defaultModeFor`'s own ladder, `context` in `plan` and everything else
+   * in `acceptEdits` — and a mode is that mode for EVERY action, `context` included (asked for that way: a reader who launches in `auto` wants it on a
+   * read-only look too). Seeds the sheet only; a pick in the sheet still wins for that launch, and is never written back here.
+   *
+   * Per device like `jiraDefaultAction`, and stored unclamped by the ceiling: the ceiling is the host's (`SPAWN_MAX_PERMISSION`) and can move under a stored
+   * pick, so the sheet clamps at render (`clampMode`) and a raised ceiling gives the stored mode back. The board's own `LaunchSheet` does not read this —
+   * its mode still comes from the plan's `defaultMode`.
+   */
+  jiraDefaultPermission: JiraDefaultPermission;
 }
+
+/** `''` is per action; see `Settings.jiraDefaultPermission`. */
+export type JiraDefaultPermission = '' | PermissionMode;
+export const JIRA_DEFAULT_PERMISSIONS: readonly JiraDefaultPermission[] = ['', ...PERMISSION_LADDER];
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'daylight',
@@ -206,7 +220,8 @@ export const DEFAULT_SETTINGS: Settings = {
   staleDays: 30,
   settingsScope: 'local',
   contentWidth: 'fixed',
-  jiraDefaultAction: 'execute'
+  jiraDefaultAction: 'execute',
+  jiraDefaultPermission: ''
 };
 
 /**
@@ -397,6 +412,7 @@ export function clampSettings(raw: unknown): Settings {
     staleDays: clampDays(s.staleDays, DEFAULT_SETTINGS.staleDays, LIMITS.staleDays.min, LIMITS.staleDays.max),
     settingsScope: pickOne(s.settingsScope, SETTINGS_SCOPES, DEFAULT_SETTINGS.settingsScope),
     contentWidth: pickOne(s.contentWidth, CONTENT_WIDTHS, DEFAULT_SETTINGS.contentWidth),
-    jiraDefaultAction: clampBoundedString(s.jiraDefaultAction, DEFAULT_SETTINGS.jiraDefaultAction, LIMITS.jiraDefaultAction.max)
+    jiraDefaultAction: clampBoundedString(s.jiraDefaultAction, DEFAULT_SETTINGS.jiraDefaultAction, LIMITS.jiraDefaultAction.max),
+    jiraDefaultPermission: pickOne(s.jiraDefaultPermission, JIRA_DEFAULT_PERMISSIONS, DEFAULT_SETTINGS.jiraDefaultPermission)
   };
 }

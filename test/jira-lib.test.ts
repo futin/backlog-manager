@@ -1019,10 +1019,17 @@ describe('runChipState', () => {
 });
 
 describe('defaultModeFor', () => {
-  it('is plan for context and acceptEdits for execute and for a skill', () => {
-    expect(defaultModeFor('context')).toBe('plan');
-    expect(defaultModeFor('execute')).toBe('acceptEdits');
-    expect(defaultModeFor({ skill: 's_0123abcd' })).toBe('acceptEdits');
+  it('per action (the setting is empty): plan for context and acceptEdits for execute and for a skill', () => {
+    expect(defaultModeFor('context', '')).toBe('plan');
+    expect(defaultModeFor('execute', '')).toBe('acceptEdits');
+    expect(defaultModeFor({ skill: 's_0123abcd' }, '')).toBe('acceptEdits');
+  });
+
+  it('a fixed setting wins for every action, context included', () => {
+    expect(defaultModeFor('context', 'auto')).toBe('auto');
+    expect(defaultModeFor('execute', 'auto')).toBe('auto');
+    expect(defaultModeFor({ skill: 's_0123abcd' }, 'bypassPermissions')).toBe('bypassPermissions');
+    expect(defaultModeFor('execute', 'plan')).toBe('plan');
   });
 });
 
