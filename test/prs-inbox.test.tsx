@@ -117,19 +117,18 @@ const trio = () => repo('a/x', [clean, behind, failing]);
 describe('PrInbox — tiles, order and filter', () => {
   it('counts one PR in each level and lists failing, then behind, then the quiet line', () => {
     render(<PrInbox {...props([trio()])} />);
-    expect(screen.getByTestId('pr-tile-needs-you')).toHaveTextContent('1 Needs you');
-    expect(screen.getByTestId('pr-tile-worth-a-look')).toHaveTextContent('1 Worth a look');
-    expect(screen.getByTestId('pr-tile-quiet')).toHaveTextContent('1 Quiet');
+    const triage = screen.getByRole('group', { name: 'Triage' });
+    expect(within(triage).getAllByRole('button').map((b) => b.textContent)).toEqual(['Needs you 1', 'Worth a look 1', 'Quiet 1']);
     const order = ['pr-row-a/x#1', 'pr-row-a/x#2', 'pr-row-a/x#3'].map((id) => screen.getByTestId(id));
     expect(order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(order[1].compareDocumentPosition(order[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(order[0]).getByText('Checks are failing.')).toBeInTheDocument();
+    expect(within(order[0].querySelector('.prs-chips') as HTMLElement).getByText('checks failing')).toBeInTheDocument();
   });
 
   it('filters on a tile and clears on a second click', async () => {
     const user = userEvent.setup();
     render(<PrInbox {...props([trio()])} />);
-    const tile = screen.getByRole('button', { name: /Needs you/ });
+    const tile = screen.getByRole('button', { name: /^Needs you \d/ });
     expect(tile).toHaveAttribute('aria-pressed', 'false');
     await user.click(tile);
     expect(tile).toHaveAttribute('aria-pressed', 'true');
@@ -145,11 +144,11 @@ describe('PrInbox — tiles, order and filter', () => {
   it('says No pull request at this level. when a re-read leaves the selected level empty', async () => {
     const user = userEvent.setup();
     const { rerender } = render(<PrInbox {...props([trio()])} />);
-    await user.click(screen.getByRole('button', { name: /Needs you/ }));
+    await user.click(screen.getByRole('button', { name: /^Needs you \d/ }));
     rerender(<PrInbox {...props([repo('a/x', [clean, behind, pr({ number: 1, title: 'failing one' })])])} />);
     expect(screen.getByText('No pull request at this level.')).toBeInTheDocument();
-    expect(screen.getByTestId('pr-tile-needs-you')).toHaveTextContent('0 Needs you');
-    expect(screen.getByTestId('pr-tile-needs-you')).toHaveAttribute('aria-pressed', 'true');
+    const tile = screen.getByRole('button', { name: 'Needs you 0' });
+    expect(tile).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('says no open pull requests when no shown repo has a PR, and not the filter sentence', () => {
@@ -161,7 +160,7 @@ describe('PrInbox — tiles, order and filter', () => {
   it('does not claim no open pull requests while a shown repo could not be read, and draws no tiles over nothing', () => {
     render(<PrInbox {...props([repo('a/x', []), repo('a/y', [], { access: 'rate-limited', detail: 'slow down' })])} />);
     expect(screen.queryByText('no open pull requests')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('pr-tile-needs-you')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Triage' })).not.toBeInTheDocument();
     expect(screen.getByTestId('pr-cantread-a/y')).toHaveTextContent("Can't read · a/y — slow down");
   });
 });
@@ -176,11 +175,29 @@ describe('PrInbox — items', () => {
     expect(screen.getByTestId('pr-row-a/x#4')).toHaveTextContent('ghost');
   });
 
-  it('draws the problems after the verdict as steps', () => {
-    render(<PrInbox {...props([repo('a/x', [pr({ number: 6, checks: 'failure', review: 'approved' })])])} />);
+  it('draws the checks tile in the checks tone, the neutral one when there are none', () => {
+    const rows = [
+      pr({ number: 11, checks: 'failure' }),
+      pr({ number: 12, checks: 'pending' }),
+      pr({ number: 13, checks: 'success' }),
+      pr({ number: 14, checks: 'none' })
+    ];
+    render(<PrInbox {...props([repo('a/x', rows)])} />);
+    const tone = (n: number) => screen.getByTestId(`pr-row-a/x#${n}`).querySelector('.ui-glyph-tile');
+    expect(tone(11)).toHaveAttribute('data-tone', 'red');
+    expect(tone(12)).toHaveAttribute('data-tone', 'amber');
+    expect(tone(13)).toHaveAttribute('data-tone', 'green');
+    expect(tone(14)).toHaveAttribute('data-tone', 'neutral');
+    expect(tone(11)).toHaveAttribute('data-size', '32');
+  });
+
+  it('draws the facts as pills and no verdict, steps or quiet-facts line', () => {
+    render(<PrInbox {...props([repo('a/x', [pr({ number: 6, checks: 'failure', review: 'approved', mergeState: 'behind' })])])} />);
     const item = screen.getByTestId('pr-row-a/x#6');
-    expect(within(item).getByText('Checks are failing.')).toBeInTheDocument();
-    expect(within(item).getByText('Approved.')).toHaveClass('prs-inbox-step-calm');
+    const pills = within(item.querySelector('.prs-chips') as HTMLElement);
+    for (const label of ['checks failing', 'behind base', 'approved']) expect(pills.getByText(label)).toBeInTheDocument();
+    expect(item.querySelector('.prs-inbox-verdict, .prs-inbox-steps, .prs-inbox-facts')).toBeNull();
+    expect(within(item).queryByText('Checks are failing.')).not.toBeInTheDocument();
   });
 
   it('draws two repos each with #7, keyed apart', () => {
@@ -349,11 +366,11 @@ describe('PrInbox — one row vocabulary', () => {
     render(<Harness {...hp([trio()])} />);
     await user.click(mergeKey(screen.getByTestId('pr-row-a/x#3')));
     expect(screen.getByTestId('confirming-key')).toHaveTextContent('a/x#3');
-    await user.click(screen.getByRole('button', { name: /Needs you/ }));
+    await user.click(screen.getByRole('button', { name: /^Needs you \d/ }));
     expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
     expect(screen.getByTestId('confirming-key')).toHaveTextContent(/^$/);
     // Cleared, not hidden: lifting the filter does not bring it back.
-    await user.click(screen.getByRole('button', { name: /Needs you/ }));
+    await user.click(screen.getByRole('button', { name: /^Needs you \d/ }));
     await act(async () => {});
     expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
   });
@@ -379,7 +396,7 @@ describe('PrInbox — one row vocabulary', () => {
     const row = screen.getByTestId('pr-row-a/x#9');
     expect(row.querySelector('.prs-meta')).toHaveTextContent(warning as string);
     expect(row).toHaveTextContent('approved');
-    expect(screen.getByTestId('pr-tile-quiet')).toHaveTextContent('1 Quiet');
+    expect(screen.getByRole('button', { name: 'Quiet 1' })).toBeInTheDocument();
   });
 });
 
@@ -407,7 +424,7 @@ describe('PrInbox — notes above and below the list', () => {
     expect(row.compareDocumentPosition(cantRead) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(row.compareDocumentPosition(truncated) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole('heading', { name: "Can't read" })).not.toBeInTheDocument();
-    expect(screen.getByTestId('pr-tile-needs-you')).toHaveTextContent('1 Needs you');
+    expect(screen.getByRole('button', { name: 'Needs you 1' })).toBeInTheDocument();
   });
 
   it("says a sync-off repo's sentence once above the list and sync off on each of its rows' why-lines", () => {

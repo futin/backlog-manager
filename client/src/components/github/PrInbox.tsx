@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { Dot } from '../ui/Dot';
+import { GlyphTile } from '../ui/GlyphTile';
 import { Pill } from '../ui/Pill';
+import { Segmented } from '../ui/Segmented';
 import { PrActions } from './PrActions';
 import { PrFoot } from './PrFoot';
 import { PrRepoNotes } from './PrRepoNotes';
@@ -9,12 +10,11 @@ import type { PrLayoutProps } from './pr-layout-props';
 import {
   ageText,
   LEVELS,
-  LEVEL_DOT,
   LEVEL_LABEL,
+  checksGlyph,
+  checksTone,
   levelCounts,
-  prProblems,
-  prVerdict,
-  quietFacts,
+  prPills,
   rankPrs,
   transientFailures,
   type PrLevel,
@@ -29,9 +29,10 @@ import type { PrWriteResult } from '../../../../shared/types';
  * `Quiet` heading. It decides nothing: the level, the rank, the verdict and the steps are `lib/pr-layouts.ts`'s, the run warning is `lib/pr-run.ts`'s, and
  * every write is `PrActions`' and `PrFoot`'s, so the three layouts cannot triage one PR three ways.
  *
- * **Tiles are toggles.** A `<button aria-pressed>` per level — dot, count, label. Clicking one filters, clicking it again clears. The filter is held here as a
+ * **The triage is one `Segmented`** (label `Triage`): a button per level with its count, no `all` option. Clicking one filters, clicking the pressed one again
+ * clears — `Segmented` only reports the value, so the toggle is this file's. The filter is held here as a
  * LEVEL, not as a list of keys, so a PR that a re-read moves out of the selected level simply leaves the list and the empty filter says
- * `No pull request at this level.` — a tile that still selected a PR the data no longer puts there would be lying. A tile for an empty level stays drawn, so
+ * `No pull request at this level.` — a tile that still selected a PR the data no longer puts there would be lying. An option for an empty level stays drawn, so
  * the person who selected it can see why the list is empty and click it off. A filter that hides the row whose Confirm is open closes that Confirm: a row out
  * of the list is out of the list, whatever took it, and a Confirm nothing draws would still hold the Escape stack.
  *
@@ -39,12 +40,11 @@ import type { PrWriteResult } from '../../../../shared/types';
  * its position changed would lose its place under the person's eye. The open Confirm is the page's (`PrLayoutProps.confirming`), so it follows the key, not
  * the position.
  *
- * **One row, loud or quiet.** Dot, `#n` link, title, repo; the fact line — the verdict and its steps for a loud row (the calm ones muted: `Approved.` is worth
- * reading beside a problem, not acting on), `quietFacts` for a quiet one, nothing when there is nothing; the meta line `author · head → base · age` with the
- * run warning as one warn pill after it; then the foot (the Confirm, then the outcome line). The four keys and their why-line are the row's right-hand side,
- * top-aligned with the title, and wrap under the text when the title would get less than 320 px — and always below the narrow breakpoint. The run warning is
- * said once, as that pill, so a loud row asks `prProblems` for its steps without it. A quiet row used to fold its keys behind an `Actions` toggle; the
- * fixed four keys are the point of this layout, so it carries them like every other row and its `#n` is a link and nothing more.
+ * **One row, loud or quiet.** A 32 px `GlyphTile` in the checks tone (`checksTone` / `checksGlyph`; conflicts, behind and changes-requested are pills, never the
+ * tile), the `#n` link, title and repo; the pill row (`prPills` — the facts a verdict line and a quiet line used to say in prose); the meta line
+ * `author · head → base · age` with the run warning as one warn pill after it; then the foot (the Confirm, then the outcome line). The four keys and their
+ * why-line are the row's right-hand side, top-aligned with the title, and wrap under the text when the title would get less than 320 px — and always below the
+ * narrow breakpoint. The run warning is said once, as that pill. A quiet row carries the same keys as every other row and its `#n` is a link and nothing more.
  *
  * **Can't read.** A shown repo whose last read was `rate-limited` or `error` keeps its rows — still ranked, still actionable, a failed refresh is no reason to
  * stop offering a merge. Its `Can't read` line, like every note that is not a PR (outcomes of merged ones, the sync-off sentence, `showing n of total`), is
@@ -77,30 +77,27 @@ function InboxRow({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
   const outcome = props.outcomes[key];
   const warning = prRunWarning(pr, repo.repo, props.ctx, props.now);
   const write = (call: () => Promise<PrWriteResult>) => props.write(key, pr.headSha, call);
-  const { verdict, steps } = r.level === 'quiet' ? { verdict: null, steps: [] } : prVerdict(prProblems(pr, null));
-  const facts = r.level === 'quiet' ? quietFacts(pr) : '';
+  const pills = prPills(pr);
   return (
-    <li className="prs-row" data-testid={`pr-row-${key}`}>
+    <li className="prs-row prs-inbox-row" data-testid={`pr-row-${key}`}>
+      <GlyphTile glyph={checksGlyph(pr.checks)} tone={checksTone(pr.checks)} size={32} />
       <div className="prs-row-main">
         <div className="prs-row-title">
-          <Dot size={10} tone={LEVEL_DOT[r.level]} />
           <a className="prs-num" href={pr.url} target="_blank" rel="noreferrer noopener">
             #{pr.number}
           </a>
           <span className="prs-title">{pr.title}</span>
           <span className="prs-inbox-repo">{repo.repo}</span>
         </div>
-        {verdict !== null && <p className="prs-inbox-verdict">{verdict}</p>}
-        {steps.length > 0 && (
-          <ul className="prs-inbox-steps">
-            {steps.map((step) => (
-              <li key={step.text} className={step.calm ? 'prs-inbox-step prs-inbox-step-calm' : 'prs-inbox-step'}>
-                {step.text}
-              </li>
+        {pills.length > 0 && (
+          <div className="prs-chips">
+            {pills.map((chip) => (
+              <Pill key={chip.label} tone={chip.tone}>
+                {chip.label}
+              </Pill>
             ))}
-          </ul>
+          </div>
         )}
-        {facts !== '' && <p className="prs-inbox-facts">{facts}</p>}
         <RowMeta r={r} now={props.now} warning={warning} />
         <PrFoot
           repo={repo}
@@ -152,20 +149,13 @@ export function PrInbox(props: PrLayoutProps) {
         failures.length === 0 && <p className="prs-status">no open pull requests</p>
       ) : (
         <>
-          <div className="prs-inbox-tiles">
-            {LEVELS.map((level) => (
-              <button
-                key={level}
-                type="button"
-                className="prs-tile"
-                aria-pressed={filter === level}
-                data-testid={`pr-tile-${level}`}
-                onClick={() => setFilter((current) => (current === level ? null : level))}
-              >
-                <Dot size={10} tone={LEVEL_DOT[level]} />
-                <b className="prs-tile-n">{counts[level]}</b> <span>{LEVEL_LABEL[level]}</span>
-              </button>
-            ))}
+          <div className="prs-inbox-triage">
+            <Segmented<PrLevel | 'all'>
+              label="Triage"
+              value={filter ?? 'all'}
+              options={LEVELS.map((level) => ({ value: level, label: LEVEL_LABEL[level], count: counts[level] }))}
+              onChange={(v) => setFilter((current) => (v === 'all' || current === v ? null : v))}
+            />
           </div>
           {visible.length === 0 && <p className="prs-status">No pull request at this level.</p>}
           {loud.length > 0 && (

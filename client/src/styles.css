@@ -3353,27 +3353,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-outcome-error { color: var(--red) }
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
 
-/* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The tiles are plain bordered buttons — a selected one takes the ink border, never a fill, so a level's dot stays
-   the only colour on it. Its rows are the shared `.prs-row` above, boxless with a hairline between them.
-   Muted steps use --ink3, the calm ones a step down from the problems, which stay --ink2. Own `.prs-inbox*`, `.prs-tile*` and `.prs-notes*` classes only — a
+/* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The triage is a `Segmented` and each row leads with a `GlyphTile` in its checks tone. Its rows are the shared `.prs-row` above, boxless with a hairline between them.
+   Own `.prs-inbox*` and `.prs-notes*` classes only — a
    `.ui-*` primitive is never restyled from here (guard 7). */
 .prs-inbox { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
-.prs-inbox-tiles { display: flex; flex-wrap: wrap; gap: 8px }
-.prs-tile {
-  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 14px; border-radius: 12px; cursor: pointer;
-  border: 1px solid var(--hairline); background: var(--strip); color: var(--ink2); font-size: 14px
-}
-.prs-tile:hover { color: var(--ink) }
-.prs-tile[aria-pressed="true"] { border-color: var(--ink); color: var(--ink) }
-.prs-tile-n { color: var(--ink); font-weight: 600 }
+.prs-inbox-triage { display: flex; min-width: 0 }
 .prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0 }
 .prs-inbox-heading { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
 .prs-inbox-repo { flex: none; font-size: 13px; font-weight: 400; color: var(--ink3) }
-.prs-inbox-verdict { font-size: 14px; color: var(--ink); line-height: 1.45 }
-.prs-inbox-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px }
-.prs-inbox-step { font-size: 13px; color: var(--ink2); line-height: 1.45 }
-.prs-inbox-step-calm { color: var(--ink3) }
-.prs-inbox-facts { font-size: 13px; color: var(--ink3) }
 /* One text-link look for the page's inline controls — the toolbar's `GitHub › Settings`. `.set-link` is §8.6's 36 px bordered row control and reads as a
    button inside a sentence, so this page keeps its own (a PRs class, not a restyle of `.set-link`). */
 .prs-textlink {
