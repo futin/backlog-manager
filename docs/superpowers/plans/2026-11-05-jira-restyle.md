@@ -20,6 +20,8 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 
 ## Global Constraints
 
+- Line cites predate #472 (b3c73fa5, merged under this plan): `client/src/lib/jira.ts` cites past :574 sit 12 lines lower (`runChipState` :738,
+  `skillCommand` :757, `resolveJiraAction` :767, `transitionOptions` :861) and `test/jira-board.test.tsx` cites past :298 sit 28 lower. Find by content.
 - Uppercase: `text-transform: uppercase` stays in exactly one rule, `.rail-kicker`. Menu headers are sentence case, 11/600 `--ink3`, `letter-spacing: .04em`.
 - Type floor: every px font-size ≥ 11 px (mock 10.5 / 11.5 px → 11 px).
 - Tint form: `color-mix(in srgb, var(--<mark>) N%, var(--strip)|var(--steel))`, marks `--green-solid --amber-solid --red --magenta --cyan --mustard`; a word on
