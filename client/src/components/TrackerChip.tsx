@@ -41,7 +41,13 @@ export function TrackerChip({ section, onOpenSettings }: { section: Section; onO
   // The popover's anchor: a press on the pill is not "outside" it — the pill's own click toggles — so `Popover` is told which element that is.
   const button = useRef<HTMLButtonElement>(null);
   // The sweep state lives here and not in the popover, which unmounts on close: a sweep out when it closes must still read as out when it opens again.
-  const sweep = useSweep('github', reload, zone, data);
+  const sweep = useSweep(
+    'github',
+    reload,
+    zone,
+    // What a 409 stands on: a token and a registered GitHub project. Not the payload, which is a new object every poll.
+    data === null ? 'none' : `${data.platforms.some((p) => p.kind === 'github' && p.hasToken)}:${hasTracker(data.projects)}`
+  );
 
   // The pill outlives every section; the popover has no reason to.
   useEffect(() => setOpen(false), [section]);
@@ -180,8 +186,8 @@ function TrackerPopover({
                 type="button"
                 className="tracker-sync"
                 aria-label={`Sync ${name}`}
-                title={off ? 'sync is off' : (sweep.blocked ?? `Sync ${name} now`)}
-                disabled={off || busy || sweep.blocked !== null}
+                title={off ? 'sync is off' : row.repo === null ? 'repo not resolved' : (sweep.blocked ?? `Sync ${name} now`)}
+                disabled={off || row.repo === null || busy || sweep.blocked !== null}
                 onClick={() => sweep.run(name)}
               >
                 <Glyph name="refresh" />

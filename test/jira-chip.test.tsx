@@ -238,6 +238,23 @@ describe('the popover', () => {
     expect(syncNow()).toHaveAttribute('title', 'Jira is not being polled');
   });
 
+  it('a 409 survives a status poll that changes nothing, and clears when `armed` flips', async () => {
+    const { update } = renderChip(status());
+    await user.click(chip());
+    await user.click(syncNow());
+    await act(async () => answer({ ok: false, status: 409, body: { message: 'Jira is not being polled' } }));
+    update(status());
+    expect(syncNow()).toBeDisabled();
+    update(status({ armed: false }));
+    expect(syncNow()).toBeEnabled();
+  });
+
+  it('Last sweep names the fastest board interval, not a fixed 15 s', async () => {
+    renderChip(status({ boards: [board({ interval: '1m' }), board({ id: 'b_00000002', name: 'Growth', interval: '5m' })] }));
+    await user.click(chip());
+    expect(screen.getByText(/^5 s ago · every 1m$/)).toBeInTheDocument();
+  });
+
   describe('a board’s sync icon', () => {
     it('POSTs the board’s id to boards/sweep, reads syncing… and is disabled until the answer, then re-reads the status once', async () => {
       renderChip(status({ boards: [board({ id: 'b_00000001', name: 'Platform' }), board({ id: 'b_00000002', name: 'Growth' })] }));

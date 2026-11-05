@@ -208,6 +208,23 @@ describe('the popover head', () => {
     expect(within(rows[2]!).getByText('not polled yet · sync off')).toBeInTheDocument();
   });
 
+  it('a GitHub row whose repo did not resolve has its sync disabled, so no project name is posted', async () => {
+    renderChip(payload([row({ name: 'unresolved', path: '/abs/u', repo: null })]));
+    await user.click(chip());
+    expect(screen.getByRole('button', { name: 'Sync unresolved' })).toBeDisabled();
+  });
+
+  it('a 409 survives a poll that changes nothing', async () => {
+    const { update } = renderChip(payload());
+    await user.click(chip());
+    const syncNow = () => screen.getByRole('button', { name: 'Sync now' });
+    await user.click(syncNow());
+    await act(async () => answer({ ok: false, status: 409, body: { message: 'GitHub is not being polled' } }));
+    update(payload());
+    expect(syncNow()).toBeDisabled();
+    expect(syncNow()).toHaveAttribute('title', 'GitHub is not being polled');
+  });
+
   it('the setup link navigates to GitHub › Settings and closes the popover', async () => {
     renderChip(payload());
     await user.click(chip());

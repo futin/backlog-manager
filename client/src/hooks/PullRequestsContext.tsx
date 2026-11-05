@@ -37,6 +37,10 @@ export function PullRequestsProvider({ children }: { children: ReactNode }) {
   const { data: trackers } = useTrackersContext();
   const enabled = trackers !== null && hasTracker(trackers.projects);
   const [read, setRead] = useState<Read | null>(null);
+  // A disable → enable flip must not expose the previous read (old data, a `refresh` bound to an unmounted hook) before the new reader reports.
+  useEffect(() => {
+    if (!enabled) setRead(null);
+  }, [enabled]);
   const value = useMemo<PullRequestsContextValue>(() => (enabled && read !== null ? { ...read, enabled } : { ...DISABLED, enabled }), [enabled, read]);
   return (
     <PullRequestsContext.Provider value={value}>

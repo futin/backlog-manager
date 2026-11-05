@@ -39,7 +39,7 @@ import type { JiraBoardStatus, JiraStatusPayload } from '../../../shared/types';
  * Board page's cards. A refusal is kept per board and drawn red in that row until its next sync.
  */
 export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSetup?: (page: JiraPage) => void }) {
-  const { data } = useJiraContext();
+  const { data, reload } = useJiraContext();
   const visible = data !== null && data.configured;
   // A one-second tick is what a seconds readout needs, and it runs only while Jira is configured.
   const now = useNow(visible, 1_000);
@@ -47,9 +47,8 @@ export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSet
   // The popover's anchor: a press on the pill is not "outside" it — the pill's own click toggles — so `Popover` is told which element that is.
   const button = useRef<HTMLButtonElement>(null);
 
-  const { reload } = useJiraContext();
   const { zone } = useTimeZone();
-  const site = useSweep('jira', reload, zone, data);
+  const site = useSweep('jira', reload, zone, String(data?.armed));
   const [sweeping, setSweeping] = useState<ReadonlySet<string>>(() => new Set());
   const [refused, setRefused] = useState<ReadonlyMap<string, string>>(() => new Map());
   const out = useRef(new Set<string>());
@@ -187,7 +186,7 @@ function JiraPopover({
         notice={site.notice}
         onSync={() => site.run()}
         figures={[
-          { label: 'Last sweep', value: `${last === null ? 'not yet' : `${last} ago`} · ${!data.armed ? 'idle' : every === 'off' ? 'sync off' : 'every 15 s'}` },
+          { label: 'Last sweep', value: `${last === null ? 'not yet' : `${last} ago`} · ${!data.armed ? 'idle' : every === 'off' ? 'sync off' : `every ${every}`}` },
           { label: 'Calls', value: `${data.calls.sweep} · ${last429 === null ? 'no 429 since start' : `last 429 ${last429} ago`}` }
         ]}
       />

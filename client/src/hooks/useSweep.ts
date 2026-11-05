@@ -9,14 +9,15 @@ import { postSweep, refusalText, type SweepService } from '../lib/sweep';
  * own rule — it joins a sweep already running — so every sync button is disabled while any is out.
  *
  * A 200 re-reads the shell's status (`reload`); a 409 means nothing is being polled, so the buttons stay disabled with the server's sentence as their title
- * until the shell's status next changes (`status` is its payload; a new one clears `blocked`, since the poller may be armed again); anything else is a
- * notice, kept until the next ask.
+ * until the fact the 409 stands on next changes (`armedKey` is that fact as a string — Jira's `armed`, GitHub's token + registered tracker — NOT the status payload,
+ * which is a fresh object every poll and would re-enable the buttons after one interval with nothing changed; a new key clears `blocked`, since the poller may be
+ * armed again); anything else is a notice, kept until the next ask.
  */
-export function useSweep(service: SweepService, reload: () => void, zone: string, status: unknown) {
+export function useSweep(service: SweepService, reload: () => void, zone: string, armedKey: string) {
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
-  useEffect(() => setBlocked(null), [status]);
+  useEffect(() => setBlocked(null), [armedKey]);
   const out = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
