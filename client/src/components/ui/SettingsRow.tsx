@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
+
+import { Pill } from './Pill';
 
 import { Sheet, SheetHead } from './Sheet';
 
@@ -37,12 +39,41 @@ import { Sheet, SheetHead } from './Sheet';
   reserve the right-hand slot's width for nothing, pulling the hint in against
   a margin no control occupies.
 */
-export function SettingsRow({ name, hint, children }: { name: string; hint?: ReactNode; children?: ReactNode }) {
+export function SettingsRow({
+  name,
+  hint,
+  more,
+  stacked,
+  children
+}: {
+  name: string;
+  /** The one-line description. Text longer than a line goes in `more` instead. */
+  hint?: ReactNode;
+  /** The long text, behind an `ⓘ more` button (spec §4.10). Closed by default; the button keeps its name and flips `aria-expanded`. */
+  more?: ReactNode;
+  /** The control under the label rather than beside it — a row whose control is a full-width track of cards. */
+  stacked?: boolean;
+  children?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const moreId = useId();
   return (
-    <div className="set-row">
+    <div className={stacked ? 'set-row set-row-stacked' : 'set-row'}>
       <div className="set-label">
-        <span className="set-name">{name}</span>
+        <span className="set-name-line">
+          <span className="set-name">{name}</span>
+          {more && (
+            <button type="button" className="set-more" aria-expanded={open} aria-controls={moreId} onClick={() => setOpen((o) => !o)}>
+              ⓘ more
+            </button>
+          )}
+        </span>
         {hint && <span className="set-hint">{hint}</span>}
+        {more && open && (
+          <span className="set-hint set-more-text" id={moreId}>
+            {more}
+          </span>
+        )}
       </div>
       {children && <div className="set-control">{children}</div>}
     </div>
@@ -73,10 +104,35 @@ export function SettingsRow({ name, hint, children }: { name: string; hint?: Rea
   in the card's head, beside the title, because it makes a row rather than belonging to one. Optional, and no Settings card passes it, so every card that
   drew before draws the same.
 */
-export function SettingsGroup({ title, scope, right, children }: { title: string; scope: string; right?: ReactNode; children: ReactNode }) {
+export function SettingsGroup({
+  title,
+  scope,
+  pill,
+  right,
+  children
+}: {
+  title: string;
+  /** The sub-line. Optional since Task 8: a card that states its scope with `pill` has nothing more to say under the title. */
+  scope?: string;
+  /** Where the card saves, as a neutral `Pill` beside the title (spec §4.10): `this browser` is localStorage, `this machine` is the API host. */
+  pill?: 'this browser' | 'this machine';
+  right?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <Sheet as="section" className="set-group">
-      <SheetHead title={title} sub={scope} right={right} />
+      <SheetHead
+        title={title}
+        sub={scope}
+        right={
+          pill || right ? (
+            <>
+              {pill && <Pill tone="neutral">{pill}</Pill>}
+              {right}
+            </>
+          ) : undefined
+        }
+      />
       {children}
     </Sheet>
   );

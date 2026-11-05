@@ -902,7 +902,8 @@ button.rail-count { cursor: pointer }
    second one here would put 32 px between the title and the first card. */
 .set { display: flex; flex-direction: column }
 
-/* Two hand-balanced columns (§8.6). An explicit two-track grid rather than
+/* `.set-cols` is Jira › Setup's two-column grid now (`JiraSetupView`); Settings itself is one `.set-col` since Task 8 (spec §4.10) and no longer reads it.
+   Two hand-balanced columns (§8.6). An explicit two-track grid rather than
    `auto-fit` or a masonry pass: which side a card sits on is a placement this
    page makes once, in `SettingsView`'s markup, so that a reader who learnt
    where `Dashboards` is does not find it on the other side of the page after
@@ -1007,35 +1008,47 @@ button.rail-count { cursor: pointer }
 }
 .set-link:hover { background: var(--strip-hi) }
 
-/* The theme picker (§8.6): the `Switch` primitive's track-and-option ground,
-   restated as this page's own layout because a five-option swatch picker is not
-   in §12.2's table and so has no primitive to compose. A recessed `--steel`
-   track holds raised `--strip` options, and the RAISED one is the selected one
-   — §8's standing rule that a raised control marks a state, never a button.
-   Wraps rather than scrolls: at 1100 px and under, the card is the full width
-   of the page and five options still fit two rows without a sideways scroll a
-   touch device would have to discover. */
-.set-themes {
-  display: flex; flex-wrap: wrap; gap: 3px;
-  padding: 3px; border-radius: 12px;
-  background: var(--steel); border: 1px solid var(--hairline);
-}
+/* The theme picker (spec §4.10): five picture cards, each a mini board. The preview element carries its theme's own `data-theme`, so `--board`, `--strip` and
+   `--cyan` below resolve from THAT theme's `[data-theme]` block in shared/theme.css rather than from the live page — which is the whole point of drawing
+   it as CSS instead of mirroring five palettes in a table (the mirror drifted once, #350). `--cyan` is the accent in every theme (`--accent` is
+   `var(--cyan)`). The picked card is told by an ink outline, not a colour: the amber theme has no second hue to spend on a state. */
+.set-themes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px }
 .set-theme {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 10px 5px 5px; border-radius: 10px;
-  background: none; border: 0; cursor: pointer;
-  transition: background .15s, box-shadow .15s;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 5px; border-radius: 10px; cursor: pointer;
+  background: var(--strip); border: 1px solid var(--hairline2);
+  transition: border-color .15s, box-shadow .15s;
 }
-.set-theme:hover .set-theme-name { color: var(--ink) }
-.set-theme.on { background: var(--strip); box-shadow: 0 1px 2px var(--shadow) }
-/* 24 px at an 8 px radius — this design's own figure (§8.6), where this was a
-   34 px strip at a 2 px corner. Three bands: board, strip, accent, with the
-   accent kept narrow so the two grounds are what the eye compares. */
-.set-swatch { display: flex; width: 24px; height: 24px; flex: none; border-radius: 8px; overflow: hidden }
-.set-swatch i { flex: 1 }
-.set-swatch i:last-child { flex: 0 0 6px }
-.set-theme-name { font-size: 13px; font-weight: 500; color: var(--ink3); text-align: left; white-space: nowrap; transition: color .15s }
-.set-theme.on .set-theme-name { color: var(--ink) }
+.set-theme:hover { border-color: var(--ink3) }
+.set-theme.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink) }
+.set-theme-board { display: flex; gap: 3px; height: 44px; padding: 5px; border-radius: 6px; background: var(--board) }
+.set-theme-board i { flex: 1; border-radius: 3px; background: var(--strip) }
+.set-theme-board i:last-child { background: var(--cyan); max-height: 10px }
+.set-theme-name { font-size: 13px; font-weight: 500; color: var(--ink2); text-align: center; transition: color .15s }
+.set-theme.on .set-theme-name { color: var(--ink); font-weight: 600 }
+@media (max-width: 700px) { .set-themes { grid-template-columns: repeat(3, minmax(0, 1fr)) } }
+
+/* The merge-mode icon cards: three buttons, a glyph tile, a title and one line. Same ink-outline selection as the theme cards. */
+.set-row-stacked > .set-control { display: block; width: 100% }
+.set-merge-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px }
+.set-merge-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left;
+  padding: 10px; border-radius: 12px; cursor: pointer; font-family: inherit;
+  background: var(--strip); border: 1px solid var(--hairline2);
+  transition: border-color .15s, box-shadow .15s;
+}
+.set-merge-card:hover { border-color: var(--ink3) }
+.set-merge-card.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink) }
+.set-merge-card-top { display: flex; align-items: center; justify-content: space-between; width: 100%; color: var(--green) }
+.set-merge-card-title { font-size: 13px; font-weight: 600; color: var(--ink) }
+.set-merge-card-line { font-size: 12px; color: var(--ink2); line-height: 1.4 }
+@media (max-width: 700px) { .set-merge-cards { grid-template-columns: 1fr } }
+
+/* `ⓘ more` beside a row's name: a quiet text button, never a chip — it reveals a paragraph, it does not act. */
+.set-name-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap }
+.set-more { background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 500; color: var(--ink3) }
+.set-more:hover, .set-more[aria-expanded="true"] { color: var(--ink) }
+.set-more-text { max-width: 70ch }
 
 /* Under the phone break a row's control drops below its label and takes the
    full width — a 36 px select beside a 15/500 name and a 13 px hint has nothing

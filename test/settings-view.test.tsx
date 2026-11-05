@@ -10,7 +10,7 @@ import '@testing-library/jest-dom';
 
 import { readStyles, ruleBlock } from './helpers/css-rule';
 
-import SettingsView, { SWATCHES } from '../client/src/components/settings/SettingsView';
+import SettingsView from '../client/src/components/settings/SettingsView';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { JiraContext } from '../client/src/hooks/JiraContext';
@@ -59,6 +59,17 @@ function groupScopes(): string[] {
   return [...document.querySelectorAll('.set-group .ui-sheet-sub')].map((el) => el.textContent ?? '');
 }
 
+/** Opens a row's `ⓘ more` text, by the row's visible name — the long hints live behind it since spec §4.10. */
+async function openMore(name: string): Promise<void> {
+  const row = screen.getByText(name, { selector: '.set-name' }).closest('.set-row') as HTMLElement;
+  await userEvent.click(within(row).getByRole('button', { name: 'ⓘ more' }));
+}
+
+/** Each card's scope pill (`SettingsGroup`'s `pill`), in render order. */
+function groupPills(): string[] {
+  return [...document.querySelectorAll('.set-group .ui-sheet-head-right .ui-pill')].map((el) => el.textContent ?? '');
+}
+
 /** The rows inside one named card, by their visible name — how this suite tells
  *  "moved into the new group" apart from "rendered twice". */
 function rowNamesIn(title: string): string[] {
@@ -87,9 +98,8 @@ describe('SettingsView', () => {
    * and `SettingsView`'s props are unchanged by the split. A case that wants
    * the other page therefore has to say so BEFORE the first render — the
    * provider reads localStorage once on mount — which is why this takes a
-   * parameter rather than offering a switch to click afterwards. There is no
-   * in-page switch to click; the rail is the only thing that moves between
-   * these three pages, at every width.
+   * parameter. The band's switch (spec §3) writes the same field, and the cases
+   * that exercise it click it directly.
    */
   function renderView(scope: SettingsScope = 'local') {
     if (scope !== 'local') localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ settingsScope: scope }));
@@ -171,24 +181,24 @@ describe('SettingsView', () => {
     expect(within(stale).getByRole('button', { name: '45d' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  /* #350 — the swatches mirror shared/theme.css by hand (the swatch paints a palette that is not applied, so it cannot read live properties), and the
-     mirror drifted: amber and nightshift painted another token as their accent. `--accent` is `var(--cyan)` in every theme, so the third band is `--cyan`. */
-  it('paints each theme swatch from that theme’s own board, strip and accent', () => {
-    const css = readFileSync(join(__dirname, '../shared/theme.css'), 'utf8');
-    const block = (selector: string): string => {
-      const at = css.indexOf(`${selector}{`);
-      if (at < 0) throw new Error(`no ${selector} block in theme.css`);
-      return css.slice(at, css.indexOf('}', at));
-    };
-    const token = (body: string, name: string): string => {
-      const m = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,8})`).exec(body);
-      if (m === null) throw new Error(`no --${name} in block`);
-      return m[1].toLowerCase();
-    };
-    for (const id of ['midnight', 'graphite', 'amber', 'nightshift', 'daylight'] as const) {
-      const body = block(id === 'midnight' ? ':root,[data-theme="midnight"]' : `[data-theme="${id}"]`);
-      expect([id, SWATCHES[id].map((c) => c.toLowerCase())]).toEqual([id, [token(body, 'board'), token(body, 'strip'), token(body, 'cyan')]]);
-    }
+  /* #350 (reworked in plan 4 Task 8) — the swatches used to mirror shared/theme.css by hand and drifted. Each preview now carries its theme's own `data-theme`
+     and the stylesheet paints it from `--board`, `--strip` and `--cyan`, so there is no hex to drift: this pins both halves of that. */
+  it('draws each theme preview from that theme’s own tokens, with no colour in the markup', () => {
+    renderView();
+    const boards = [...document.querySelectorAll('.set-theme-board')] as HTMLElement[];
+    expect(boards.map((b) => b.dataset.theme)).toEqual(['daylight', 'midnight', 'graphite', 'amber', 'nightshift']);
+    for (const b of boards) expect(b.outerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}|style=/);
+    const css = readStyles();
+    expect(ruleBlock(css, '.set-theme-board') as string).toMatch(/background: *var\(--board\)/);
+    expect(ruleBlock(css, '.set-theme-board i') as string).toMatch(/background: *var\(--strip\)/);
+    expect(ruleBlock(css, '.set-theme-board i:last-child') as string).toMatch(/background: *var\(--cyan\)/);
+  });
+
+  it('sets the theme from a picture card', async () => {
+    renderView();
+    await userEvent.click(screen.getByRole('button', { name: 'Graphite' }));
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').theme).toBe('graphite');
+    expect(screen.getByRole('button', { name: 'Graphite' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('changes density and text size', async () => {
@@ -329,30 +339,36 @@ describe('SettingsView', () => {
       exists to refuse.
     */
     /*
-      Queried inside the band's own right slot rather than by text alone, and
-      that is not query hygiene — on Shared the `Claude Agents` card's scope
-      subtitle says `this machine` too, so a bare text query matches two nodes
-      and would pass on a build where the pill had vanished and the card's
-      subtitle was all that was left.
+      Spec §3's override of the old "the rail is the only switch" rule: the band carries a `Local | Shared | Dashboards` switch, and its sub-line says where
+      the page saves. The old band pill moved onto each card (`groupPills`).
     */
-    const scopePill = (): HTMLElement => document.querySelector('.ui-band-right .ui-pill') as HTMLElement;
+    const subLine = (): string => document.querySelector('.ui-band-sub')?.textContent ?? '';
 
-    it('states the scope in the band, in words rather than in a tone', () => {
+    it('says where Local saves in the band sub-line', () => {
       renderView();
-      expect(scopePill()).toHaveTextContent('this browser');
-      expect(scopePill()).toHaveClass('ui-pill-neutral');
+      expect(subLine()).toBe('saves in this browser only');
     });
 
-    it('states the Shared scope as this machine', () => {
+    it('says Shared and Dashboards save on this machine', async () => {
       renderView('shared');
-      expect(scopePill()).toHaveTextContent('this machine');
-      expect(scopePill()).toHaveClass('ui-pill-neutral');
+      expect(subLine()).toBe('saved on this machine');
+      cleanup();
+      answerDashboards();
+      renderView('dashboards');
+      expect(subLine()).toBe('saved on this machine');
     });
 
-    it('states the Dashboards scope as this machine too, in the same neutral pill', () => {
-      renderView('dashboards');
-      expect(scopePill()).toHaveTextContent('this machine');
-      expect(scopePill()).toHaveClass('ui-pill-neutral');
+    it('switches page from the band and the sub-line follows', async () => {
+      renderView();
+      const sw = screen.getByRole('group', { name: 'Settings page' });
+      expect(within(sw).getByRole('button', { name: 'Local' })).toHaveAttribute('aria-pressed', 'true');
+      await userEvent.click(within(sw).getByRole('button', { name: 'Shared' }));
+      expect(groupTitles()).toContain('Sources');
+      expect(subLine()).toBe('saved on this machine');
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').settingsScope).toBe('shared');
+      await userEvent.click(within(sw).getByRole('button', { name: 'Local' }));
+      expect(groupTitles()).toContain('Display');
+      expect(subLine()).toBe('saves in this browser only');
     });
 
     // The title is the page's own name and does not change with the scope; the subtitle is the sentence that says what is on the page, so it must differ.
@@ -366,38 +382,37 @@ describe('SettingsView', () => {
         cleanup();
         localStorage.clear();
       }
-      expect(new Set(subs).size).toBe(3);
-      expect(subs[2]).toBe(
-        'The machines a launch can run on, in prefer order, and how the launch sheet picks one. Saved on the API host — change it here and it changes for everyone.'
-      );
+      // Local says browser, the other two say machine: two distinct sentences, and the title never moves.
+      expect(subs).toEqual(['saves in this browser only', 'saved on this machine', 'saved on this machine']);
     });
 
     /*
-      No in-page switch, at any width — the rail's tree is the only thing that
-      moves between the three pages, the same rule Runs' three pages follow since
-      task-38. The dashboard this pattern was ported from DOES show a pill
-      switch in the band below 700 px; this board does not, because the rail's
-      trees stand open at that width and a second control here would be a
-      second wording free to disagree with the tree's.
-
-      Pinned rather than left to the code, because "add a switch on the phone"
-      is exactly the improvement a later reader would make without knowing it
-      was already decided against.
+      Inverted by spec §3: this case used to assert the page offers NO control that changes the page (the rail's tree was the only switch). The band now has
+      one, on every page, and it is the same control on all three.
     */
-    it('offers no control of its own that changes the page', async () => {
+    it('offers the page switch on every page', async () => {
       renderView();
-      expect(screen.queryByRole('button', { name: 'Local' })).toBeNull();
-      expect(screen.queryByRole('button', { name: 'Shared' })).toBeNull();
+      for (const scope of ['local', 'shared', 'dashboards'] as const) {
+        if (scope !== 'local') {
+          cleanup();
+          if (scope === 'dashboards') answerDashboards();
+          renderView(scope);
+        }
+        const sw = screen.getByRole('group', { name: 'Settings page' });
+        expect(within(sw).getAllByRole('button').map((b) => b.textContent)).toEqual(['Local', 'Shared', 'Dashboards']);
+        expect(within(sw).getByRole('button', { name: scope === 'local' ? 'Local' : scope === 'shared' ? 'Shared' : 'Dashboards' })).toHaveAttribute('aria-pressed', 'true');
+      }
+    });
 
-      cleanup();
-      renderView('shared');
-      expect(screen.queryByRole('button', { name: 'Local' })).toBeNull();
-      expect(screen.queryByRole('button', { name: 'Shared' })).toBeNull();
-
-      cleanup();
-      renderView('dashboards');
-      await screen.findByText(/connected/);
-      for (const name of ['Local', 'Shared', 'Dashboards']) expect(screen.queryByRole('button', { name })).toBeNull();
+    it('opens a row’s long text behind ⓘ more', async () => {
+      renderView();
+      const row = screen.getByText('Text size').closest('.set-row') as HTMLElement;
+      const more = within(row).getByRole('button', { name: 'ⓘ more' });
+      expect(more).toHaveAttribute('aria-expanded', 'false');
+      expect(within(row).queryByText(/the rail, the cards and the spacing move with it/)).toBeNull();
+      await userEvent.click(more);
+      expect(more).toHaveAttribute('aria-expanded', 'true');
+      expect(within(row).getByText(/the rail, the cards and the spacing move with it/)).toBeVisible();
     });
 
     /*
@@ -638,6 +653,7 @@ describe('SettingsView', () => {
         ['in-place', 'In place'],
         ['pr', 'PR']
       ]);
+      await openMore('Execute finish');
       expect(screen.getByText('PR mode works in its own worktree, reviews, pushes and opens a PR. It never merges.')).toBeInTheDocument();
       await userEvent.selectOptions(select, 'pr');
       expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').executeDefaultFinish).toBe('pr');
@@ -653,6 +669,7 @@ describe('SettingsView', () => {
         ['in-place', 'In place'],
         ['pr', 'PR']
       ]);
+      await openMore('Groom finish');
       expect(
         screen.getByText('PR mode writes the spec and plan in its own worktree, commits, pushes and opens a PR. It never merges.')
       ).toBeInTheDocument();
@@ -664,13 +681,11 @@ describe('SettingsView', () => {
       renderView();
       const autoMerge = await screen.findByRole('switch', { name: 'auto-merge PRs' });
       const fix = screen.getByRole('switch', { name: 'fix if it fails' });
+      await openMore('Auto-merge PRs');
+      await openMore('Fix if it fails');
+      expect(screen.getByText('Armed only if the GitHub repo allows auto-merge — GitHub does the merge.')).toBeInTheDocument();
       expect(
-        screen.getByText('Preselects Auto-merge on a PR launch. Armed only if the GitHub repo allows auto-merge — GitHub does the merge.')
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          'Preselects Fix on a PR launch: the session stays and fixes failing checks and base conflicts, up to 3 rounds in 45 minutes.'
-        )
+        screen.getByText('The session stays and fixes failing checks and base conflicts, up to 3 rounds in 45 minutes.')
       ).toBeInTheDocument();
       expect(autoMerge).toHaveAttribute('aria-checked', 'false');
       expect(fix).toBeDisabled();
@@ -694,30 +709,15 @@ describe('SettingsView', () => {
     // state to represent) and starts on 'merge', since that is the default
     // this whole feature must not silently change for a board that has never
     // touched the setting.
-    it('offers a default merge mode, starting on merge, and persists a pick', async () => {
+    // bug-36, kept through the card redraw: the long text behind `ⓘ more` still comes from `mergeModeOptionLabels(null)`, so it names no base — this row picks a
+    // default BEFORE any run exists — and the stale "every run does today" claim stays gone. The picks themselves are the Orchestrator group's card cases.
+    it('words its merge-mode text without a base and without the stale claim', async () => {
       renderView();
-      const select = (await screen.findByLabelText('Default merge mode')) as HTMLSelectElement;
-      expect(select.value).toBe('merge');
-      expect([...select.options].map((o) => o.value)).toEqual(['merge', 'branch', 'pr']);
-      // bug-36. Text as well as value, because the text is what was wrong:
-      // this row picks a default BEFORE any run exists, so it cannot know a
-      // base and must not name one. 'Merge to main' here was a claim about
-      // where every future run would land, which task-44 made false.
-      expect([...select.options].map((o) => o.textContent)).toEqual([
-        'Merge into the base branch',
-        'Leave branches for me',
-        'Open a PR into the base branch'
-      ]);
-      // The hint's own claim, separately false since task-44 whatever the
-      // picker is called: a run merges into the branch it was STARTED on, not
-      // into main. Asserted as an absence because the replacement sentence's
-      // exact wording is not what this row is for — the falsehood leaving is.
-      const hint = select.closest('.set-row')?.querySelector('.set-hint')?.textContent ?? '';
-      expect(hint).not.toContain('every run does today');
-
-      await userEvent.selectOptions(select, 'branch');
-      const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
-      expect(stored.orchestrateDefaultMergeMode).toBe('branch');
+      await openMore('Default merge mode');
+      const text = (screen.getByText('Default merge mode', { selector: '.set-name' }).closest('.set-row') as HTMLElement).textContent ?? '';
+      expect(text).toContain('Merge into the base branch');
+      expect(text).toContain('Open a PR into the base branch');
+      expect(text).not.toContain('every run does today');
     });
   });
 
@@ -810,10 +810,12 @@ describe('SettingsView', () => {
       expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').jiraDefaultPermission).toBe('auto');
     });
 
-    it('ends its hint with `Saved in this browser.`, because the choice is per browser', () => {
+    it('ends its long text with `Saved in this browser.`, because the choice is per browser', async () => {
       renderWithJira(jiraData());
-      const hint = screen.getByText(/^Listed first in a Jira card/);
-      expect(hint.textContent?.endsWith(' Saved in this browser.')).toBe(true);
+      // The sentence moved behind `ⓘ more` with the one-line hint in front of it; the claim that matters is that the long text still ends on the scope.
+      await openMore('Jira default action');
+      const text = screen.getByText(/^Marked default\./).textContent ?? '';
+      expect(text.endsWith(' Saved in this browser.')).toBe(true);
     });
 
     it('persists a pick as the setting string', async () => {
@@ -883,23 +885,40 @@ describe('SettingsView', () => {
       expect(stored.orchestrateDefaultQuestionMode).toBe('decide');
     });
 
-    it('keeps a stored pr default and falls back to merge for a value outside the vocabulary', async () => {
+    const pressedMode = (): string[] =>
+      within(screen.getByRole('group', { name: 'Default merge mode' }))
+        .getAllByRole('button')
+        .filter((b) => b.getAttribute('aria-pressed') === 'true')
+        .map((b) => b.getAttribute('aria-label') ?? '');
+
+    it('offers the three modes as icon cards, each with its one line, starting on Merge into base', () => {
+      renderView();
+      const group = screen.getByRole('group', { name: 'Default merge mode' });
+      expect(within(group).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Merge into base', 'Leave branches', 'Open a PR']);
+      expect(group).toHaveTextContent("each item lands on the run's base");
+      expect(group).toHaveTextContent('stop at a reviewed branch per item');
+      expect(group).toHaveTextContent('one PR per run, tracker projects');
+      expect(pressedMode()).toEqual(['Merge into base']);
+    });
+
+    it('keeps a stored pr default and falls back to merge for a value outside the vocabulary', () => {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ orchestrateDefaultMergeMode: 'pr' }));
       renderView();
-      expect(((await screen.findByLabelText('Default merge mode')) as HTMLSelectElement).value).toBe('pr');
+      expect(pressedMode()).toEqual(['Open a PR']);
       cleanup();
 
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ orchestrateDefaultMergeMode: 'pull' }));
       renderView();
-      expect(((await screen.findByLabelText('Default merge mode')) as HTMLSelectElement).value).toBe('merge');
+      expect(pressedMode()).toEqual(['Merge into base']);
     });
 
-    it('still persists a merge-mode pick from its new home', async () => {
+    it('persists a merge-mode pick from its card', async () => {
       renderView();
-      const select = (await screen.findByLabelText('Default merge mode')) as HTMLSelectElement;
-      await userEvent.selectOptions(select, 'branch');
-      const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
-      expect(stored.orchestrateDefaultMergeMode).toBe('branch');
+      await userEvent.click(screen.getByRole('button', { name: 'Open a PR' }));
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').orchestrateDefaultMergeMode).toBe('pr');
+      expect(pressedMode()).toEqual(['Open a PR']);
+      await userEvent.click(screen.getByRole('button', { name: 'Leave branches' }));
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').orchestrateDefaultMergeMode).toBe('branch');
     });
   });
   /*
@@ -934,7 +953,9 @@ describe('SettingsView', () => {
     it("renders the Local page's four cards, each with its own scope", () => {
       renderView();
       expect(groupTitles()).toEqual(['Display', 'Board', 'Orchestrator', 'Dispatch']);
-      expect(groupScopes()).toEqual(['this device', 'this device', 'this device', 'this device']);
+      // The scope moved from the sub-line to a pill beside the title (spec §4.10), so Local cards draw no sub-line and every one carries `this browser`.
+      expect(groupScopes()).toEqual([]);
+      expect(groupPills()).toEqual(['this browser', 'this browser', 'this browser', 'this browser']);
     });
 
     /*
@@ -1036,36 +1057,6 @@ describe('SettingsView', () => {
       for (const label of ['Density', 'Text size', 'Content width', 'Archive after']) {
         expect(screen.getByRole('group', { name: label })).toHaveClass('ui-seg-pill');
       }
-    });
-
-    /**
-     * The theme swatch keeps its job at 24 px and an 8 px radius — this design's
-     * own figure (§8.6), against the 34 px strip at a 2 px corner it drew
-     * before. Read off the stylesheet, since jsdom applies none.
-     */
-    it('sizes the theme swatch at 24 px and an 8 px radius', () => {
-      const block = ruleBlock(readStyles(), '.set-swatch') as string;
-      expect(block).toMatch(/width: *24px/);
-      expect(block).toMatch(/height: *24px/);
-      expect(block).toMatch(/border-radius: *8px/);
-    });
-
-    /**
-     * Settings' own breakpoint (§8.6): the two columns fold to one under
-     * 1100 px, ABOVE the 700 px phone break every other split on this board
-     * uses. A regression guard against unifying it with the others — which is
-     * the change a reader tidying up media queries would make, and which would
-     * squeeze a label, a hint and a 36 px control into one 800 px-wide row.
-     */
-    it('folds its columns at 1100 px, not at the board-wide 700 px', () => {
-      const css = readStyles();
-      const fold = /@media \(max-width: (\d+)px\) \{ \.set-cols \{[^}]*grid-template-columns: 1fr/.exec(css);
-      expect(fold?.[1]).toBe('1100');
-      // And the 700 px block that DOES exist for this page touches the row, not
-      // the grid: it stacks a control under its label and says nothing about
-      // `.set-cols`.
-      const phone = /@media \(max-width: 700px\) \{\s*\.set-row[\s\S]*?\n\}/.exec(css)?.[0] ?? '';
-      expect(phone).not.toMatch(/set-cols/);
     });
   });
 });

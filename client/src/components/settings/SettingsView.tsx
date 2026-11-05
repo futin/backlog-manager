@@ -2,7 +2,8 @@ import { useState } from 'react';
 
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { Band } from '../ui/Band';
-import { Pill } from '../ui/Pill';
+import { GlyphTile } from '../ui/GlyphTile';
+import { Glyph, type GlyphName } from '../ui/Glyphs';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
@@ -20,29 +21,10 @@ import { useSettings } from '../../hooks/useSettings';
 import { EXECUTE_FINISH_OPTIONS } from '../../lib/agents';
 import { jiraSettingOf, resolveJiraAction } from '../../lib/jira';
 import { mergeModeOptionLabels } from '../../lib/merge-mode';
-import { FONT_SCALES, JIRA_DEFAULT_PERMISSIONS, STALE_WINDOWS, THEMES, stopsWith, type ContentWidth, type JiraDefaultPermission, type Landing, type SettingsScope, type ThemeId } from '../../lib/settings';
+import { FONT_SCALES, JIRA_DEFAULT_PERMISSIONS, STALE_WINDOWS, THEMES, stopsWith, type ContentWidth, type JiraDefaultPermission, type Landing, type SettingsScope } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import { JIRA_BUILTIN_LABELS, MERGE_MODES } from '../../../../shared/types';
-import type { QuestionMode } from '../../../../shared/types';
-
-/**
- * Preview colors per theme — board / strip / accent, in that order. A mirror of
- * the `[data-theme]` blocks in shared/theme.css, kept here because it is
- * presentation: the swatch has to paint a palette that is NOT currently applied,
- * so it cannot read the live custom properties.
- *
- * The accent is each theme's `--cyan`, because `--accent` is `var(--cyan)` in every
- * theme — amber and nightshift override `--cyan`, not `--accent`. Those two once
- * mirrored `--amber` and `--green` instead and nothing noticed (#350); exported so
- * test/settings-view.test.tsx can hold all five against theme.css.
- */
-export const SWATCHES: Record<ThemeId, [string, string, string]> = {
-  midnight: ['#0c1220', '#182238', '#55d0dd'],
-  graphite: ['#111214', '#1f2124', '#6fc5cf'],
-  amber: ['#0a0805', '#1a150c', '#ffc76b'],
-  nightshift: ['#07120d', '#12251b', '#54cfba'],
-  daylight: ['#f4f4f3', '#ffffff', '#306c0f']
-};
+import type { MergeMode, QuestionMode } from '../../../../shared/types';
 
 const DENSITIES = [
   { value: 'comfortable' as const, label: 'Comfortable' },
@@ -134,43 +116,15 @@ export default function SettingsView({
 
   return (
     <div className="set">
-      {/* A band, like every other page on this board (DESIGN.md §8.2/§8.6):
-          the 19/500 title over a 13 px line. Its right slot carries ONE thing
-          and it is not a control — the scope pill, stating which backend this
-          page's cards write to. Every control on this page still belongs to a
-          row inside a card; one hoisted up here would be a setting with no
-          group saying what it scopes.
-
-          Both pages use `tone="neutral"` and let the WORD carry the
-          distinction. Deliberately not a green-tinted Shared pill of the kind
-          the dashboard this pattern came from draws: `PillTone`'s five members
-          each name a reading — live, warn, bad, done, neutral — none of them
-          means "shared", and minting a second pill look inside the settings
-          block would be a second home for a primitive, which
-          test/design-guards.test.ts's guard 7 exists to refuse.
-
-          The subtitle changes with the page because the one-line summary is now
-          the page's own, and it is the sentence that makes the pill mean
-          something rather than decorate. */}
-      <Band
-        title="Settings"
-        sub={BAND_SUB[scope]}
-      >
-        <Pill tone="neutral">{scope === 'local' ? 'this browser' : 'this machine'}</Pill>
+      {/* The page switch lives in the band (spec §3, §4.10), overriding the old "the rail is the only switch" rule: Local | Shared | Dashboards writes
+          `settingsScope` through `update`, the same field the rail's Settings tree writes, so the two can never disagree — both read the one stored value.
+          The sub-line says where THIS page saves, which is what the old band pill said in one word; the pill moved onto each card, where a card that wrote
+          somewhere else would say so. */}
+      <Band title="Settings" sub={BAND_SUB[scope]}>
+        <Segmented value={scope} options={SCOPE_OPTIONS} onChange={(settingsScope) => update({ settingsScope })} label="Settings page" pill />
       </Band>
 
-      {/* One of three card sets, never both — the page IS the scope (§8.6), so a
-          card that mixed backends would make the pill above a lie. That is why
-          the old `Claude Agents` card was split: its status lines report the
-          HOST's environment (now the Home row of `Dashboards`) while its model,
-          effort and link rows were this browser's localStorage all along (now
-          `Dispatch` on Local), and the split is what let each half sit under a
-          truthful heading.
-
-          There is no in-page control that moves between these three, at any
-          width. The rail's tree is the only one, the same rule Runs' three pages
-          follow since task-38; a second control here would be a second wording
-          free to disagree with the tree's. */}
+      {/* One of three pages, never a mix — the page IS the scope, so a card that mixed backends would make its pill a lie. */}
       {scope === 'shared' ? (
         <SharedPage onOpenWatchdog={onOpenWatchdog} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
       ) : scope === 'dashboards' ? (
@@ -182,16 +136,20 @@ export default function SettingsView({
   );
 }
 
+const SCOPE_OPTIONS: { value: SettingsScope; label: string }[] = [
+  { value: 'local', label: 'Local' },
+  { value: 'shared', label: 'Shared' },
+  { value: 'dashboards', label: 'Dashboards' }
+];
+
 /**
- * The band's one-line summary per page — the sentence that makes the scope pill mean something rather than decorate. The Dashboards line is its own and not
- * the page's footer lead (`Listed in prefer order — move a machine with ↑ ↓…`), which stays where the reader has the list in front of them.
+ * The band's sub-line per page: where the page saves. Local lives in this browser's localStorage; Shared and Dashboards are the API host's files, so a change
+ * there is a change for everyone who opens this board.
  */
 const BAND_SUB: Record<SettingsScope, string> = {
-  local: 'How this board looks and behaves on this device. These live in this browser and never leave it.',
-  shared:
-    'What the API reads off the host — the watchdog file beside the registry, and the environment the server was started with. Change one here and it changes for everyone.',
-  dashboards:
-    'The machines a launch can run on, in prefer order, and how the launch sheet picks one. Saved on the API host — change it here and it changes for everyone.'
+  local: 'saves in this browser only',
+  shared: 'saved on this machine',
+  dashboards: 'saved on this machine'
 };
 
 /**
@@ -216,21 +174,12 @@ function SharedPage({
   onOpenJiraPage?: (p: JiraPage) => void;
 }) {
   return (
-    <div className="set-cols">
-      <div className="set-col">
-        {/* The host's one report on this page: what this machine has connected, per source, and whether it works (source-sections spec). */}
-        <SourcesGroup onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
-      </div>
-
-      <div className="set-col">
-        <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
-        {/* Under the watchdog, in its column: both are machine-wide CONTROLS — a number written to a file on the host — where the left column is the host
-            REPORT. The breaker is the watchdog's sibling in subject too: one resumes a crashed run, the other stops a project that keeps failing. */}
-        <TickGroup />
-        {/* The third host CONTROL (#241): one zone every device reads the board in, written to a file beside the other two. Last in the column because it
-            is the one control here that changes no machine behaviour — it only moves how readings are drawn. */}
-        <TimeZoneGroup />
-      </div>
+    <div className="set-col">
+      {/* SHARED PAGE — Task 9 restyles these four cards in place. One column since Task 8; the order is the old reading order, report first. */}
+      <SourcesGroup onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+      <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
+      <TickGroup />
+      <TimeZoneGroup />
     </div>
   );
 }
@@ -242,137 +191,110 @@ function LocalPage() {
   const sources = useProjectsContext().drawn;
 
   return (
-    /* Two hand-balanced columns (§8.6), placed by hand rather than reflowed: a
-       masonry pass would move a card to the other side of the page as its
-       neighbour above grew a row, so a reader who learnt where a card sits
-       would find it somewhere else after a knob changed.
-
-       Each page has its own balance, and both are hand-checked. Local is two
-       short cards against two taller ones — `Display` over `Board` on the left,
-       `Orchestrator` over `Dispatch` on the right — which keeps the adjacency
-       that still carries meaning after the split: what a run is STARTED with,
-       beside what a dispatch is started with. `Orchestrator watchdog` used to
-       hang under `Orchestrator` for the same kind of reason, and that pairing
-       is gone by design — the watchdog is the server's and this page is the
-       browser's, and the split is what says so. Shared is the other shape
-       entirely: the Sources report alone against the watchdog's long card,
-       the tick breaker and the time zone (see `SharedPage`).
-
-       Folds to one column under 1100 px, which is Settings' own breakpoint and
-       deliberately NOT the 700 px phone break every other split on this board
-       uses: these cards are a label-and-control row each, so they run out of
-       width for a side-by-side row long before the columns do. */
-    <div className="set-cols">
-        <div className="set-col">
-          <SettingsGroup title="Display" scope="this device">
-            {/* Not a `SettingsRow`: the theme picker's control is a full-width
-                track under its own label rather than a control sitting to the
-                right of one, because five options with a swatch each cannot fit
-                a row's right-hand slot at any width this page has. The hint is
-                the SELECTED theme's own line, which is why it reads as a
-                description rather than as an instruction. */}
-            <div className="set-row set-row-stacked">
-              <div className="set-label">
-                <span className="set-name">Theme</span>
-                <span className="set-hint">{THEMES.find((t) => t.id === settings.theme)?.hint}</span>
-              </div>
-              {/* The `Switch` primitive's own ground, restated as a page layout
-                  rather than borrowed from its class family (§12.1 forbids the
-                  borrowing, guard 7 pins it): a recessed `--steel` track under
-                  raised `--strip` options. A raised option marks a STATE, which
-                  is §8's standing rule and the whole reason the selected theme
-                  is the one that lifts rather than the one that gains a colour.
-                  `aria-pressed` rather than a radio group, unchanged from what
-                  this picker always did — a pressed toggle is what a reader
-                  hears, and the five are not a form field. */}
-              <div className="set-themes" role="group" aria-label="Theme">
-                {THEMES.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className={t.id === settings.theme ? 'set-theme on' : 'set-theme'}
-                    aria-pressed={t.id === settings.theme}
-                    onClick={() => update({ theme: t.id })}
-                  >
-                    {/* 24 px at an 8 px radius — this design's own figure
-                        (§8.6), not the 34 px strip at a 2 px corner this
-                        carried before. Three bands: board, strip, accent. */}
-                    <span className="set-swatch">
-                      <i style={{ background: SWATCHES[t.id][0] }} />
-                      <i style={{ background: SWATCHES[t.id][1] }} />
-                      <i style={{ background: SWATCHES[t.id][2] }} />
-                    </span>
-                    <span className="set-theme-name">{t.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <SettingsRow name="Density" hint="Compact tightens padding and the gaps between cards — more items per screen.">
-              <Segmented value={settings.density} options={DENSITIES} onChange={(density) => update({ density })} label="Density" pill />
-            </SettingsRow>
-
-            <SettingsRow name="Text size" hint="Scales the whole board, not just type — the rail, the cards and the spacing move with it.">
-              <Segmented
-                value={settings.fontScale}
-                options={stopsWith(FONT_SCALES, settings.fontScale).map((v) => ({ value: v, label: `${v}%` }))}
-                onChange={(fontScale) => update({ fontScale })}
-                label="Text size"
-                pill
-              />
-            </SettingsRow>
-
-            {/* Between Text size and Opens on, because the three rows above it
-                are all "how big is this board" and this is the fourth reading
-                of that same question — how wide. `Opens on` is a different
-                subject (which section) and stays last. */}
-            <SettingsRow
-              name="Content width"
-              hint="Fixed keeps the measure this board was drawn at, which is what every screenshot and every column width was tuned against. Full drops the cap so every section — the board, Runs, Archive and this page — spans the window."
-            >
-              <Segmented value={settings.contentWidth} options={CONTENT_WIDTH_OPTIONS} onChange={(contentWidth) => update({ contentWidth })} label="Content width" pill />
-            </SettingsRow>
-
-            <SettingsRow name="Opens on" hint="Which section this device lands on when you load the page.">
-              <Select
-                label="Opens on"
-                value={settings.landing}
-                options={landingOptions(jiraConfigured, sources, settings.landing)}
-                onChange={(landing) => update({ landing })}
-              />
-            </SettingsRow>
-          </SettingsGroup>
-
-          <SettingsGroup title="Board" scope="this device">
-            <SettingsRow
-              name="Archive after"
-              hint={
-                <>
-                  How long an open item may go untouched before it leaves the Board for Archive. Grooming one brings it straight back — the stamp this reads is
-                  written by every start and stop. Tasks never leave: a stale one keeps its column and is marked instead.
-                </>
-              }
-            >
-              <Segmented
-                value={settings.staleDays}
-                options={stopsWith(STALE_WINDOWS, settings.staleDays).map((v) => ({ value: v, label: `${v}d` }))}
-                onChange={(staleDays) => update({ staleDays })}
-                label="Archive after"
-                pill
-              />
-            </SettingsRow>
-          </SettingsGroup>
-
+    /* One readable column (spec §4.10). The old two hand-balanced columns and their 1100 px fold are gone: a row is a label, a one-line description and a
+       control, and a single column of those reads top to bottom at every width. */
+    <div className="set-col">
+      <SettingsGroup title="Display" pill="this browser">
+        {/* Not a `SettingsRow`: the theme picker's control is a full-width track of picture cards under its own label, because five previews cannot fit a
+            row's right-hand slot at any width this page has. The hint is the SELECTED theme's own line. */}
+        <div className="set-row set-row-stacked">
+          <div className="set-label">
+            <span className="set-name">Theme</span>
+            <span className="set-hint">{THEMES.find((t) => t.id === settings.theme)?.hint}</span>
+          </div>
+          {/* `aria-pressed` buttons rather than a radio group, as this picker always was: they apply at once and there is no form to submit. */}
+          <div className="set-themes" role="group" aria-label="Theme">
+            {THEMES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={t.id === settings.theme ? 'set-theme on' : 'set-theme'}
+                aria-pressed={t.id === settings.theme}
+                onClick={() => update({ theme: t.id })}
+              >
+                {/* A mini board that carries THAT theme's `data-theme`, so board, card and accent resolve from the theme's own custom properties
+                    (shared/theme.css `[data-theme]` blocks) — no hex lives here, and a palette change in theme.css moves the preview with it. The
+                    previews that used to mirror those hexes by hand drifted once already (#350). */}
+                <span className="set-theme-board" data-theme={t.id} aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span className="set-theme-name">{t.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="set-col">
-          <OrchestratorGroup />
+        <SettingsRow name="Density" hint="tighter padding, more cards per screen">
+          <Segmented value={settings.density} options={DENSITIES} onChange={(density) => update({ density })} label="Density" pill />
+        </SettingsRow>
 
-          <DispatchGroup />
-        </div>
+        <SettingsRow
+          name="Text size"
+          hint="scales the whole board"
+          more="Scales the whole board, not just type — the rail, the cards and the spacing move with it."
+        >
+          <Segmented
+            value={settings.fontScale}
+            options={stopsWith(FONT_SCALES, settings.fontScale).map((v) => ({ value: v, label: `${v}%` }))}
+            onChange={(fontScale) => update({ fontScale })}
+            label="Text size"
+            pill
+          />
+        </SettingsRow>
+
+        {/* Between Text size and Opens on: "how big is this board" has a fourth reading, how wide. `Opens on` is a different subject and stays last. */}
+        <SettingsRow
+          name="Content width"
+          hint="fixed keeps the measure the board was drawn at"
+          more="Fixed keeps the measure this board was drawn at, which is what every screenshot and every column width was tuned against. Full drops the cap so every section — the board, Runs, Archive and this page — spans the window."
+        >
+          <Segmented value={settings.contentWidth} options={CONTENT_WIDTH_OPTIONS} onChange={(contentWidth) => update({ contentWidth })} label="Content width" pill />
+        </SettingsRow>
+
+        <SettingsRow name="Opens on" hint="the section this browser lands on">
+          <Select
+            label="Opens on"
+            value={settings.landing}
+            options={landingOptions(jiraConfigured, sources, settings.landing)}
+            onChange={(landing) => update({ landing })}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Board" pill="this browser">
+        <SettingsRow
+          name="Archive after"
+          hint="how long an open item may go untouched before it leaves the Board"
+          more="Grooming one brings it straight back — the stamp this reads is written by every start and stop. Tasks never leave: a stale one keeps its column and is marked instead."
+        >
+          <Segmented
+            value={settings.staleDays}
+            options={stopsWith(STALE_WINDOWS, settings.staleDays).map((v) => ({ value: v, label: `${v}d` }))}
+            onChange={(staleDays) => update({ staleDays })}
+            label="Archive after"
+            pill
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <OrchestratorGroup />
+
+      <DispatchGroup />
     </div>
   );
 }
+
+/**
+ * The three merge modes as icon cards: the title, the glyph and the one line are the brief's own words, in `MERGE_MODES` order, so a mode added to the union
+ * without a card here is a type error rather than a silent gap.
+ */
+const MERGE_CARDS: Record<MergeMode, { title: string; line: string; glyph: GlyphName }> = {
+  merge: { title: 'Merge into base', line: "each item lands on the run's base", glyph: 'merge' },
+  branch: { title: 'Leave branches', line: 'stop at a reviewed branch per item', glyph: 'branch' },
+  pr: { title: 'Open a PR', line: 'one PR per run, tracker projects', glyph: 'pull-request' }
+};
 
 /**
  * The two run-scoped defaults the Orchestrate sheet seeds its own pickers
@@ -405,28 +327,51 @@ function OrchestratorGroup() {
   const labels = mergeModeOptionLabels(null);
 
   return (
-    <SettingsGroup title="Orchestrator" scope="this device">
+    <SettingsGroup title="Orchestrator" pill="this browser">
+      {/* Three icon cards in place of the old select (spec §4.10): a choice that changes what a run DOES is worth seeing whole before it is made. The long
+          doctrine moved behind `ⓘ more`; the labels in it still come from `mergeModeOptionLabels`, so the sheet's picker and this text cannot disagree. */}
       <SettingsRow
+        stacked
         name="Default merge mode"
-        hint={`Preselected in the Orchestrate sheet. “${labels.merge}” merges each item into the branch the run was started on, which is main unless the launch picked another; “${labels.branch}” stops at a reviewed git branch per item instead; “${labels.pr}” drains the run onto a branch of its own and opens one pull request for the lot (tracker projects only). Overridable per launch.`}
+        hint="preselected in the Orchestrate sheet · overridable per launch"
+        more={`“${labels.merge}” merges each item into the branch the run was started on, which is main unless the launch picked another; “${labels.branch}” stops at a reviewed git branch per item instead; “${labels.pr}” drains the run onto a branch of its own and opens one pull request for the lot (tracker projects only).`}
       >
-        <Select
-          label="Default merge mode"
-          value={settings.orchestrateDefaultMergeMode}
-          options={MERGE_MODES.map((m) => ({ value: m, label: labels[m] }))}
-          onChange={(orchestrateDefaultMergeMode) => update({ orchestrateDefaultMergeMode })}
-        />
+        <div className="set-merge-cards" role="group" aria-label="Default merge mode">
+          {MERGE_MODES.map((m) => {
+            const on = settings.orchestrateDefaultMergeMode === m;
+            const card = MERGE_CARDS[m];
+            return (
+              <button
+                key={m}
+                type="button"
+                className={on ? 'set-merge-card on' : 'set-merge-card'}
+                aria-pressed={on}
+                // The name is the title alone; the one-liner is the description, so a reader's tool says "Open a PR, button, pressed" and then the line.
+                aria-label={card.title}
+                aria-describedby={`set-merge-${m}`}
+                onClick={() => update({ orchestrateDefaultMergeMode: m })}
+              >
+                <span className="set-merge-card-top">
+                  <GlyphTile glyph={card.glyph} tone={on ? 'green' : 'neutral'} />
+                  {on && <Glyph name="tick" size={16} />}
+                </span>
+                <span className="set-merge-card-title">{card.title}</span>
+                <span className="set-merge-card-line" id={`set-merge-${m}`}>
+                  {card.line}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </SettingsRow>
 
-      {/* The hint carries the whole doctrine, because this is one of the four
-          places a reader can arrive at this feature first (the others are the
-          sheet's own picker, SKILL.md §3 and CLAUDE.md's invariants). The two
-          modes are IDENTICAL whenever `AskUserQuestion` is reachable — the ask
-          itself is unchanged in both — so this setting only ever takes effect
-          in a headless run, which is the only kind the board can start. */}
+      {/* The doctrine lives behind `more`, because this is one of the four places a reader can arrive at this feature first (the others are the sheet's
+          own picker, SKILL.md §3 and CLAUDE.md's invariants). The two modes are IDENTICAL whenever `AskUserQuestion` is reachable, so this setting only
+          ever takes effect in a headless run, which is the only kind the board can start. */}
       <SettingsRow
         name="Default question mode"
-        hint="What a run does with an item's open questions when nobody can answer them. Want control over a question, start the run from a harness that has AskUserQuestion; start it from the board and you are choosing between skipping the item and letting the runner answer. Overridable per launch."
+        hint="what a run does with a question nobody can answer · headless runs only"
+        more="Want control over a question, start the run from a harness that has AskUserQuestion; start it from the board and you are choosing between skipping the item and letting the runner answer. Overridable per launch."
       >
         <Select
           label="Default question mode"
@@ -470,7 +415,7 @@ function DispatchGroup() {
   const jiraSkills = jira?.configured === true ? jira.skills : null;
 
   return (
-    <SettingsGroup title="Dispatch" scope="this device">
+    <SettingsGroup title="Dispatch" pill="this browser">
       {/* The two picker defaults, copied from the dashboard's own "New sessions
           · this device" group. `Default merge mode` used to sit beside them as
           a third and moved out in task-19: it never answered this card's
@@ -478,7 +423,8 @@ function DispatchGroup() {
           stopped being cosmetic. */}
       <SettingsRow
         name="Default model"
-        hint="Preselected in a card's launch sheet. “CLI default” sends no --model flag and lets Claude Code pick. Overridable per launch."
+        hint="a card's launch sheet starts from this"
+        more="“CLI default” sends no --model flag and lets Claude Code pick. Overridable per launch."
       >
         <Select
           label="Default model"
@@ -488,7 +434,7 @@ function DispatchGroup() {
         />
       </SettingsRow>
 
-      <SettingsRow name="Default effort" hint="Preselected in a card's launch sheet. “CLI default” sends no --effort flag.">
+      <SettingsRow name="Default effort" hint="a card's launch sheet starts from this" more="“CLI default” sends no --effort flag.">
         <Select
           label="Default effort"
           value={settings.dispatchDefaultEffort}
@@ -499,7 +445,7 @@ function DispatchGroup() {
 
       {/* The board's execute sheet's Finish default, beside the two it shares that sheet with. Labels are the sheet's own, so the row and the picker it seeds
           read as one control; the hint is the whole doctrine of the PR option, since this is where a reader can meet it before any launch. */}
-      <SettingsRow name="Execute finish" hint="PR mode works in its own worktree, reviews, pushes and opens a PR. It never merges.">
+      <SettingsRow name="Execute finish" hint="how an execute launch ends" more="PR mode works in its own worktree, reviews, pushes and opens a PR. It never merges.">
         <Select
           label="Execute finish"
           value={settings.executeDefaultFinish}
@@ -511,7 +457,7 @@ function DispatchGroup() {
       {/* The groom sheet's Finish default and the two PR defaults both PR launches (groom and execute) seed from, directly under the execute one so the four
           read as one cluster (§8.6: rows on the pill `Switch`/`Select` primitives). Fix is a refinement of auto-merge, so its switch is dead — and says why in
           its title — while auto-merge is off; turning auto-merge off leaves the stored fix value alone, since the launch sheet seeds Fix off itself. */}
-      <SettingsRow name="Groom finish" hint="PR mode writes the spec and plan in its own worktree, commits, pushes and opens a PR. It never merges.">
+      <SettingsRow name="Groom finish" hint="how a groom launch ends" more="PR mode writes the spec and plan in its own worktree, commits, pushes and opens a PR. It never merges.">
         <Select
           label="Groom finish"
           value={settings.groomDefaultFinish}
@@ -522,14 +468,16 @@ function DispatchGroup() {
 
       <SettingsRow
         name="Auto-merge PRs"
-        hint="Preselects Auto-merge on a PR launch. Armed only if the GitHub repo allows auto-merge — GitHub does the merge."
+        hint="preselects Auto-merge on a PR launch"
+        more="Armed only if the GitHub repo allows auto-merge — GitHub does the merge."
       >
         <Switch label="auto-merge PRs" checked={settings.prAutoMergeDefault} onChange={(prAutoMergeDefault) => update({ prAutoMergeDefault })} />
       </SettingsRow>
 
       <SettingsRow
         name="Fix if it fails"
-        hint="Preselects Fix on a PR launch: the session stays and fixes failing checks and base conflicts, up to 3 rounds in 45 minutes."
+        hint="preselects Fix on a PR launch"
+        more="The session stays and fixes failing checks and base conflicts, up to 3 rounds in 45 minutes."
       >
         <Switch
           label="fix if it fails"
@@ -543,7 +491,8 @@ function DispatchGroup() {
       {jiraSkills !== null && (
         <SettingsRow
           name="Jira default action"
-          hint="Listed first in a Jira card's Run menu, marked default. A skill that has since been deleted reads as Work it end to end. Saved in this browser."
+          hint="listed first in a Jira card's Run menu"
+          more="Marked default. A skill that has since been deleted reads as Work it end to end. Saved in this browser."
         >
           <Select
             label="Jira default action"
@@ -564,7 +513,8 @@ function DispatchGroup() {
       {jiraSkills !== null && (
         <SettingsRow
           name="Jira default permission"
-          hint="What a Jira launch's Permissions starts on. Per action is plan for Open with the ticket loaded, acceptEdits for the rest; a mode applies to every action. Capped by the host's ceiling at launch."
+          hint="what a Jira launch's Permissions starts on"
+          more="Per action is plan for Open with the ticket loaded, acceptEdits for the rest; a mode applies to every action. Capped by the host's ceiling at launch."
         >
           <Select<JiraDefaultPermission>
             label="Jira default permission"
@@ -586,7 +536,8 @@ function DispatchGroup() {
           setting used. */}
       <SettingsRow
         name="Dashboard link"
-        hint="Where THIS device reaches the dashboard — the laptop on loopback, a phone on its tailnet name. Used only for the link; the API calls it over BM_AGENTS_URL."
+        hint="where this browser reaches the dashboard"
+        more="The laptop on loopback, a phone on its tailnet name. Used only for the link; the API calls it over BM_AGENTS_URL."
       >
         <input
           type="text"
