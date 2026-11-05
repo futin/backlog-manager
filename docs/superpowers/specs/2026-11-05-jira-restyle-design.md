@@ -1,7 +1,7 @@
 # Jira board restyle — split Run button, grouped menu, marks on the card, Move-to popover (design, 2026-11-05)
 
 Mocks: `2026-11-05-jira-restyle-mockups/` beside this file (`RunButton.dc.html`, `Card.dc.html`, `Board.dc.html`, `Modal.dc.html`, copied off the canvas
-https://claude.ai/artifact/58gdjicygUebSYgFeCU83M, version 5) and `00-mock-audit.md`, which lists what each mock draws, what the code has, and what the
+https://claude.ai/artifact/58gdjicygUebSYgFeCU83M; `Board` and `Modal` re-copied from version 9) and `00-mock-audit.md`, which lists what each mock draws, what the code has, and what the
 mock drew that this spec does NOT build. Where a mock and this spec differ, the spec wins. Picked direction: **A — split Run + full restyle** (the user's
 choice between A and B on the canvas; B's tinted chip and in-menu search stay on the canvas for the record).
 
@@ -28,8 +28,9 @@ token the board already has, every tint is `color-mix` of a mark token over a su
 
 - No change to what a Run does: the launch sheet still opens on every pick, the action vocabulary (`execute`, `context`, skills) is unchanged, and the
   `no-repo` and `live` states keep their meaning and their titles.
-- No change to the band (picker, search, Filters, `Board | List` switch), the deck, the fold, the List view, Sessions, Setup, the launch sheet.
-  Those are restyled by `2026-11-05-app-restyle-design.md`, planned after this spec; this spec's plan does not touch them.
+- No change to the band (picker, search, Filters, `Board | List` switch), the deck, the fold, the List view, Sessions, Setup, the launch sheet —
+  except that `JiraRunMenu` has a third home, the Sessions page's rows (`JiraSessionList`), which take the same split control as the card (28 px). Those are
+  restyled by `2026-11-05-app-restyle-design.md`, planned after this spec; this spec's plan does not touch them.
 - No Done-column dimming, no "PR merged" line on a card, no column `⋯` menu, no sort control, no applied-filters row, no search inside the Run menu —
   all drawn on one mock or another and listed in `00-mock-audit.md` as not built.
 - No new theme tokens. No dark-theme-specific rules: the tints are `color-mix` over the theme's own surfaces and follow the theme.
@@ -56,13 +57,14 @@ These are the repo's guards and rules this work runs into. Each line says what t
   adds (§4.2, §4.1, §4.4) is listed in §6 so it joins the test's `PINNED` map.
 - **Primitives block** (guard): the `ui-*` families are declared once, inside the delimited block. The new `.ui-split` family (§4.1) goes in that block.
 - **Dialog count** (`test/dialog-count-docs.test.ts`, `.claude/rules/board.md`, `useDialogEscape`'s comment, `invariants.md`): `Popover` has seven
-  composers today. The Move-to popover (§4.4) is the eighth; the rule file's bullet, the hook comment and the test's `seven composers` line move to
-  eight together. The DIALOG count (eight: two `Modal`s, five `FormSheet`s, `Confirm`) does not move — a Popover is not a dialog in that count.
+  composers today. The Move-to popover (§4.4) is the eighth; the rule file's bullet, the hook comment, `invariants.md`'s popover paragraph and the test's
+  `seven composers` line move to eight together. The DIALOG count (eight: two `Modal`s, five `FormSheet`s, `ReleasesDrawer`) does not move — `Confirm` and
+  a Popover are not dialogs in that count.
 - **CSP** (`server/src/security.ts`): `style-src 'self'`. Any per-element colour (none is planned) goes through CSSOM; the tints are class rules.
 - **DESIGN.md is the visual language**: where this spec contradicts a §8.9 sentence, §7 lists the override and the plan carries a DESIGN.md task.
 - **The Run control on a Jira card is never hidden for the dashboard's sake** (`board.md`): the split button keeps that — it is the environment block's
   exception, as the chip was.
-- **Run ▾'s test selectors** (`test/jira-detail.test.tsx`, `jira-launch.test.tsx`, `jira-board.test.tsx`): the button named `Run <key>` stays — it is
+- **Run ▾'s test selectors** (`test/jira-detail.test.tsx`, `jira-list.test.tsx`, `jira-board.test.tsx`): the button named `Run <key>` stays — it is
   the split's LEFT half; the menu stays `role="dialog"` named `Run menu`; rows stay findable by their label. §6 lists what each test changes.
 
 ## 4. Decided
@@ -71,17 +73,17 @@ These are the repo's guards and rules this work runs into. Each line says what t
 
 **Shape.** One group, `.jira-run`, holding two buttons that share one outline: the LEFT half (`Run <key>` by `aria-label`, as today) is a play glyph
 (14 px outline, `currentColor`) and the word `Run`; the RIGHT half (`aria-label="Run options for <key>"`, `aria-haspopup="dialog"`,
-`aria-expanded`) is the `Chevron`, turning `up` while the menu is open. 28 px on the card, 32 px in the dialog (`home` keeps deciding the size, as it
-does today). Radius 10. Ink fill: the `.ui-chip-ink` precedent — `--ink` ground, `--on-accent` text — with a 1 px divider between the halves in
-`--on-accent` at reduced opacity (builder's call how: an `opacity` on a pseudo-element, not a `color-mix` over `transparent`, which the tint guard would
-read as a malformed tint). Hover lifts the half under the pointer one step (`--ink2`), never both.
+`aria-expanded`) is the `Chevron`, turning `up` while the menu is open. 28 px on the card and on a Sessions row, 32 px in the dialog (new: today `size={28}` in every home; `home` now decides
+the size). Radius 10. Ink fill: the `.ui-chip-ink` precedent — `--ink` ground, `--on-accent` text — with a 1 px divider between the halves in
+`--on-accent` at reduced opacity (builder's call how — an `opacity` on a pseudo-element is the simple route; a `color-mix` over `transparent` is legal
+for the tint guard but becomes a tint site measured on every theme surface). Hover lifts the half under the pointer one step (`--ink2`), never both.
 
 **Primitive.** This is a new ui family, `ui/SplitChip` (`.ui-split`, `.ui-split-main`, `.ui-split-more`, size modifier `.ui-split-28`), declared once in
 the primitives block, so the Board's dispatch button can adopt it later without a second declaration. Props: `label`, `labelMore`, `onMain`, `onMore`,
 `open`, `disabled`, `dashed`, `size`, `title`, `icon`. It is two `<button>`s in a `<span role="group">`, not one button with two targets.
 
 **Left click** = pick the preferred action — `resolveJiraAction(settings.jiraDefaultAction, data.skills)`, the row the menu marks `default` — exactly as
-choosing that row does today: `onPick(row)`, the launch sheet opens with that action. The menu does not open. **Chevron click** = the `Popover`.
+choosing that row does today: `onPick(action)`, the launch sheet opens with that action. The menu does not open. **Chevron click** = the `Popover`.
 
 **States** (from `runChipState`, unchanged):
 
@@ -90,12 +92,13 @@ choosing that row does today: `onPick(row)`, the launch sheet opens with that ac
   half reads `Run`, the title on the group and both halves `no repository mapped for <key> — Jira › Setup › Repositories`. Opens nothing.
 - `live`: both halves disabled; the group is a green tint — `color-mix(in srgb, var(--green-solid) 14%, var(--strip))`, the `.ui-pill-done` tint — with
   `--green` text; the left half reads `Running` followed by ` · <age>` when the age is known (`pollAge` of the newest live session's start), with a 6 px
-  `--green-solid` dot before the word (a steady dot, no animation — the deck card already carries the pulse, and two pulses on one page is one too many);
-  the title stays `a session is running on <key>`. The `aria-label` of the left half stays `Run <key>` (the tests' handle). On the shelves this state is
+  `--green-solid` dot before the word (a steady dot, no animation — the list rows' session dots already breathe, and two pulses on one page is one too many);
+  the title stays `a session is running on <key>`. The tint is a Jira-local rule (`.jira-run[data-state='live'] .ui-split`, where `data-state` already
+  lives), not a state on the primitive; `dashed` is the primitive's own prop. The `aria-label` of the left half stays `Run <key>` (the tests' handle). On the shelves this state is
   never seen — a live top is on the deck — so it is in practice the dialog's.
 
-**The menu** (`.jira-run-menu`, a `Popover` named `Run menu`, `role="dialog"`, 300 px in both homes — the dialog's Agent column is an even split of a
-1000 px shell, wide enough; `MODAL_PANEL_WIDTH` goes). Radius 14, padding 8. Contents, in order:
+**The menu** (`.jira-run-menu`, a `Popover` named `Run menu`, `role="dialog"`, 300 px in every home — the dialog shell is `min(1320px, …)` split `1.05fr 1fr`, so
+its Agent column is wide enough; `MODAL_PANEL_WIDTH` goes). Radius 14, padding 8. Contents, in order:
 
 1. Section header `Built in` — 11/600 `--ink3`, `letter-spacing: .04em`, 8 px above, 4 px below, 8 px inset.
 2. The two built-in rows, `execute` then `context`.
@@ -115,8 +118,8 @@ and the word `default` at 11/500 `--green`. The ARIA name of every row is its la
 `JiraTypeIcon` register. They live in one new file, `client/src/components/ui/Glyphs.tsx`, with the facts glyphs of §4.4 (person, flag, branch, tag,
 calendar, status ring). Builder draws the paths.
 
-**Keyboard and closing.** As today: the group stops the card's click and Enter/Space; the popover joins the Escape stack and closes on click-outside;
-after a pick the menu closes and focus returns to the chevron half.
+**Keyboard and closing.** As today: the group stops the card's click and Enter/Space; the popover joins the Escape stack and closes on click-outside.
+New: after a pick the menu closes and focus returns to the chevron half (today `pick` returns no focus; `Popover` restores it on Escape only).
 
 ### 4.2 The card (`JiraCard`, mock `Card.dc.html` "proposed · idle"; `Board.dc.html` for the columns)
 
@@ -129,7 +132,8 @@ Still §8.3's card composed, not a second card: `.board-card`'s ground, radius, 
 2. **Title**, unchanged.
 3. **Who row**: a **22 px initials disc** on `color-mix(in srgb, var(--magenta) 14%, var(--strip))` with the initials at 11/600 `--magenta` (unassigned:
    empty, dashed `--hairline2` outline on `--strip`, as today's `.none`), the name at 12/400 `--ink2` ellipsised; then the **status as a 6 px dot and the
-   raw status name** at 12/500 `--ink2` — the dot `--ink3` for the `todo` category, `--amber-solid` for `doing`, `--green-solid` for `done` — replacing
+   raw status name** at 12/500 `--ink2` — the dot `--ink3` for the `new` status category, `--amber-solid` for `indeterminate`, `--green-solid` for `done` (the categories of
+   `shared/types.ts`; `JIRA_COLUMNS` maps them to the `todo` / `doing` / `done` slugs) — replacing
    the neutral `Pill`; then the age at 12 `--ink3` and the `↗` link, unchanged.
 4. **Fold block**, unchanged.
 5. **Foot**: on the left, the **mapped repository** — a 14 px branch glyph and, for ONE mapped path, that path's basename at 12 px `--ink3`; for more,
@@ -156,7 +160,7 @@ dimmed cards and `PR #1182 merged` line: there is no PR fact on a `JiraIssue`; n
 
 Jira's three columns get a **ground**: `--steel`, radius 16, 12 px padding, the header inside it — and the header's dot takes the category's tone:
 `--ink3` for To Do, `--amber-solid` for In Progress, `--green-solid` for Done; the name at 13/600 `--ink`; the count pill on `--strip` (white on the
-steel ground) at 11/500 `--ink2`, still counting cards. `BoardColumn` grows one optional prop, `tone?: 'todo' | 'doing' | 'done'`, that only the Jira
+steel ground) at 11/500 `--ink2`, still counting cards. `BoardColumn` grows one optional prop, `tone?: 'todo' | 'doing' | 'done'` (the `JIRA_COLUMNS` slugs, each carrying its category), that only the Jira
 board passes: the Board and Archive columns are unchanged (plain dot, ramp hues, no ground), so §8.3 and §8.5 stand. DESIGN §8.9.1 "Columns" is
 overridden only in the dot's colour, and only for Jira, where a status category IS the column's one fact (§7). No `⋯` menu — there is nothing behind it.
 
@@ -186,12 +190,13 @@ the one place the paths are written — and reads `default: <label> · last run 
 **Status and Move to.** The status `Pill` and the `Move to…` `Select` become ONE control: a 28 px `Chip` (`.jira-detail-status`) reading a 6 px category
 dot, the raw status name and the `Chevron` — `aria-label="Move to"`, `aria-haspopup="dialog"`, `aria-expanded` — opening a 240 px `Popover` named
 `Move to` (`role="dialog"`, the eighth composer, §3) under it: a header `Move to` at 11/600 `--ink3` (sentence case), then one 36 px row per transition
-the detail offers, in Jira's order, each a 6 px dot in the LANDING status's category tone and the landing status's name at 13/500 `--ink` — the row whose
+the detail offers, in Jira's order, each a 6 px dot in the LANDING status's category tone and the label `transitionOptions` already gives (the landing status's name, or the
+transition's own name when two transitions land in one status) at 13/500 `--ink` — the row whose
 landing status is the current status, when Jira offers one, drawn first with a stroked tick and `aria-disabled`; hover `--strip-hi`; a footer `Jira
 transitions, applied on click` at 11 px `--ink3`. A pick posts `POST /api/jira/issue/transition { key, transitionId }` at once and closes the popover,
 exactly as the select's change did; the error line `.jira-modal-error` is unchanged. The chip is disabled, with the SAME titles — `transitions
-unavailable` after a failed detail read, `no transitions offered` when Jira offers none — and opens nothing; while the detail is loading it is disabled
-with no title, as the select was. The category word that followed the pill (`· to do`) goes: the dot says it.
+unavailable` after a failed detail read, `no transitions offered` when Jira offers none — and opens nothing; while the detail is loading, or while a write is out, it is disabled
+with no title, as the select was (`busy || !moveReady`). The category word that followed the pill (`· to do`) goes: the dot says it.
 
 `Assign to me` is unchanged: a 28 px `Chip` after the assignee value.
 
@@ -208,8 +213,8 @@ ended line stays after the foot (§4.2).
 
 ## 5. Left to the builder
 
-- Glyph paths (`ui/Glyphs.tsx`): play, document, sparkle, robot, person, flag, branch, tag, calendar, ring, tick, up/down triangle, `=`. 14 px box,
-  1.5 px stroke, round joins, `currentColor`.
+- Glyph paths (`ui/Glyphs.tsx`): play, document, sparkle, robot, person, flag, branch, tag, calendar, ring, tick, up/down triangle, `=`. 14 px box (the
+  dialog's empty-state robot is the one drawn at 16 px), 1.5 px stroke, round joins, `currentColor`.
 - The split's divider mechanism, inside the tint-form guard (§4.1).
 - Whether `.jira-run-opt`'s icon tile and the detail's facts glyphs share a `.ui-glyph-tile` rule or stay Jira-local; the primitives-block guard decides
   the first (declare once, in the block).
@@ -221,26 +226,31 @@ ended line stays after the foot (§4.2).
 ## 6. Tests this changes or adds (behaviour and cases, not code — the plan states this override of writing-plans' literal-code rule)
 
 - `test/jira-detail.test.tsx`: `moveSelect()` becomes the button named `Move to` (`aria-haspopup="dialog"`); opening it shows a dialog named `Move to`
-  with one row per transition named by its landing status; a row click posts `{ key, transitionId }` once and the dialog closes; the chip is disabled
+  with one row per transition labelled by `transitionOptions` (two transitions landing in one status show their own
+  names, as today's case does); a row click posts `{ key, transitionId }` once and the dialog closes; the chip is disabled
   with title `transitions unavailable` after a failed read and `no transitions offered` on an empty list; the current status's row is first and
   `aria-disabled`. `modalRun()` (`Run PAY-131`) still finds the left half; clicking it opens the launch sheet with the default action WITHOUT a dialog
   named `Run menu` appearing; the button named `Run options for PAY-131` opens that dialog; the `live` and `no-repo` cases keep their disabled and
-  title assertions on the left half, and assert the right half is disabled too.
-- `test/jira-launch.test.tsx`, `test/jira-board.test.tsx`: the card's foot holds a button `Run <key>` and a button `Run options for <key>`; the menu's
+  title assertions on the left half, and assert the right half is disabled too. The `Status` fact's `In Review · in progress` assertions (four sites)
+  become the raw name `In Review` plus a dot carrying the `indeterminate` tone class. After a menu pick, focus is on `Run options for PAY-131`; the chip is
+  disabled while a transition post is out.
+- `test/jira-list.test.tsx` (the Sessions rows: `Run PAY-131` now opens the launch sheet directly; the three sites that expect `Run menu` after it click
+  `Run options for PAY-131` instead), `test/jira-board.test.tsx`: the card's foot holds a button `Run <key>` and a button `Run options for <key>`; the menu's
   rows are found by label; the row carrying `default` is the resolved default action and is NOT first when the default is a skill; the `Skills on this
-  machine · N` header is absent when `data.skills` is empty; the repository name is drawn in the foot only when mapped.
+  machine · N` header is absent when `data.skills` is empty; the repository name is drawn in the foot only when mapped; the menu footer reads `Every
+  choice opens the launch sheet first` (the `opens the launch sheet` assertion in `jira-board.test.tsx` moves with it).
 - `test/jira-board.test.tsx` (card marks): priority `High` draws a pill titled `priority High` with the red tone class; `Medium` the amber tone;
   `Lowest` the grey tone; an unknown name the grey tone with no glyph; `null` draws no pill. Status text keeps the RAW name (`In Review`), with a dot
   element carrying the category's tone class. The type tile carries `bug` / `story` / neutral tone classes by `type.name` and `subtask`. The foot's
   repository reads the one path's basename, `2 repos` for two (both paths in its title), nothing when none is mapped; the ended line still follows.
-- `test/dialog-count-docs.test.ts`, `.claude/rules/board.md`, `useDialogEscape`'s comment: `seven composers` → `eight composers`, naming `JiraDetail`'s
+- `test/dialog-count-docs.test.ts`, `.claude/rules/board.md`, `useDialogEscape`'s comment, `docs/subsystems/invariants.md`: `seven composers` → `eight composers`, naming `JiraDetail`'s
   Move-to popover; the eight-DIALOG assertions do not move.
-- `test/daylight-contrast.test.ts` `PINNED`: add every new tint site with its hue, percentage and surface — `.jira-card-type[data-tone="bug"]`
+- `test/daylight-contrast.test.ts` `PINNED` (its case title `the ten tint sites` follows the new count): add every new tint site with its hue, percentage and surface — `.jira-card-type[data-tone="bug"]`
   (`--red` 12 `--strip`), `[data-tone="story"]` (`--green-solid` 14 `--strip`), `.jira-card-prio[data-tone="high"]` (`--red` 12), `[data-tone="med"]`
-  (`--amber-solid` 14), `.jira-card-av` (`--magenta` 14), `.jira-run-opt-default .jira-run-tile` (`--green-solid` 14), `.ui-split[data-state="live"]`
+  (`--amber-solid` 14), `.jira-card-av` (`--magenta` 14), `.jira-run-opt-default .jira-run-tile` (`--green-solid` 14), `.jira-run[data-state="live"] .ui-split`
   (`--green-solid` 14) — selectors are the builder's, the hue/percentage/surface are this spec's; and the words on them (`--red`, `--amber-ink`,
   `--magenta`, `--green`) pass the 4.5:1 check over their tints on daylight.
-- `test/design-guards.test.ts`: the `.ui-split` family is declared once inside the primitives block; no new rule uppercases; no font-size under 11 px.
+- `test/design-guards.test.ts`: the `.ui-split` family is appended to guard 7's hard-coded `FAMILIES` list and declared once inside the primitives block; no new rule uppercases; no font-size under 11 px.
 - `test/ui-chip.test.tsx` gains, or a new `test/ui-split.test.tsx` holds: `SplitChip` renders two buttons in a group; `disabled` disables both; `dashed`
   sets the dashed class; `onMain` and `onMore` fire from their own halves only; Enter/Space on either half does not reach the parent.
 - Last plan task is `/ui-verify`: the shelves at 1440 px against `Board.dc.html`, a card against `Card.dc.html` (idle), the open menu against
