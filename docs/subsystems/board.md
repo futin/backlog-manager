@@ -359,8 +359,8 @@ rail's tree. It mounts `useTicks({ live: true })` — the one source, a 15 s pol
 Three figures: the breaker (the halted count in the `bad` tone, naming the projects, or `none` over `after N failures in a row`), the last 24 hours
 (`ticksLast24h`, the one reading that moves with no new payload, so the page's clock ticks at a minute) and the policy (`halt after N failures`; `tick.json
 cannot be read — showing the default` when the server answers `source: "unreadable"`). Then a Projects sheet, one row per project the server listed, halted
-first (`sortTickProjects`) — the streak, the lock, the newest records and a `Reset` button — and an activity ledger of the newest records across projects
-(`tickActivity`). `streak`, `halted` and `haltedSince` arrive derived by the server (the rule is `server/src/tick/tick-breaker.util.ts`, never recomputed in the
+first (`sortTickProjects`) — the name, a `N failures in a row` pill (red on a halted project, with a `since <clock> · last: <reason> on <id>` line; amber on a project with a streak that is not halted), a strip of its newest twelve ticks (`tickStrip`, oldest left, a cell per tick, green ok / red failed / grey other, titled with the clock, kind, id and outcome, summarised once for a screen reader), the lock, the last-tick line and a `Reset` button on a halted row — and an activity ledger of the newest records across projects
+(`tickActivity`, its outcome a `Pill`). `streak`, `halted` and `haltedSince` arrive derived by the server (the rule is `server/src/tick/tick-breaker.util.ts`, never recomputed in the
 browser), so a row prints a verdict rather than computing one. Reset is guarded twice, both in the component: a ref-held in-flight set closes the button before
 the first POST settles, and the refusal (`saveError`, hook-wide) is shown under the one row last asked. A failed first read draws a notice, not an empty list,
 so a page that could not reach the server never says the breaker is quiet.

@@ -1,4 +1,5 @@
 import { unwrap } from './agents';
+import { formatClock } from './run-time';
 import type { TickConfig, TickProject, TickRecentEntry, TicksPayload } from '../../../shared/types';
 
 /**
@@ -132,4 +133,23 @@ export function ticksLast24h(ps: TickProject[], now: number): { total: number; o
     }
   }
   return { total, ok, failed };
+}
+
+/** How many of a project's newest ticks the row's strip draws — the mock's twelve; `recent` holds up to fifty, which would not fit a row. */
+export const TICK_STRIP_CELLS = 12;
+
+/**
+ * The strip beside a project's name (spec §4.7): its newest `TICK_STRIP_CELLS` ticks, oldest on the LEFT so a failing streak reads as a red run ending at
+ * the right edge. `recent` arrives newest-first, so the slice takes from the front and the result is reversed. A project with three ticks draws three cells —
+ * never padded with placeholders, because an empty cell would read as a tick that did nothing. `ok` and `failed` are the two outcomes the breaker reads;
+ * anything else (`skipped`, `idle`, a value a future `tick.mjs` writes) is `other`. The title is the hover text: `<clock> · <kind> <id> · <outcome>`.
+ */
+export function tickStrip(p: TickProject, zone: string): { tone: 'ok' | 'failed' | 'other'; title: string }[] {
+  return p.recent
+    .slice(0, TICK_STRIP_CELLS)
+    .reverse()
+    .map((e) => ({
+      tone: e.outcome === 'ok' ? 'ok' : e.outcome === 'failed' ? 'failed' : 'other',
+      title: `${formatClock(e.at, zone) ?? '—:—'} · ${e.kind} ${e.id} · ${e.outcome}`
+    }));
 }
