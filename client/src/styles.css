@@ -1557,16 +1557,16 @@ button.rail-count { cursor: pointer }
 /* `table-layout: fixed` with every column but Ticket given its width in the head: under `auto`, each column sized to its widest cell and the table came to
    1544 px in a 1150 px well. Ticket is the one auto column and takes what the px columns leave (~174 px at 1120, ~204 at 1150): the key over a one-line summary
    that ellipsises. Do not mix px and % or `calc()` here: a fixed-layout table reads those as `auto`. */
-.jira-list-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
+.jira-list-table { width: 100%; min-width: 1150px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
 .jira-list-table thead th:nth-child(2) { width: 190px }
 .jira-list-table thead th:nth-child(3) { width: 88px }
 .jira-list-table thead th:nth-child(4) { width: 104px }
-.jira-list-table thead th:nth-child(5) { width: 80px }
+.jira-list-table thead th:nth-child(5) { width: 88px } /* Where: `Dashboard` is 64 px of text plus the cell's 24 px of padding; 80 clipped it (ui-verify N1). */
 .jira-list-table thead th:nth-child(6) { width: 68px }
 .jira-list-table thead th:nth-child(7) { width: 96px }
 .jira-list-table thead th:nth-child(8) { width: 96px }
 .jira-list-table thead th:nth-child(9) { width: 52px }
-.jira-list-table thead th:nth-child(10) { width: 172px } /* Open: the split `Open in Desktop` is 148 px plus the cell's 24 px of padding; 124 overlapped For and wrapped an ended row's Reopen + Run. */
+.jira-list-table thead th:nth-child(10) { width: 192px } /* Open: an ended row's Reopen + Run needs about 168 px of content plus the cell's 24 px of padding; 172 stacked its label (ui-verify D13), 124 before that overlapped For. */
 .jira-list-table thead th {
   padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
   color: var(--ink3); border-bottom: 1px solid var(--hairline); white-space: nowrap;

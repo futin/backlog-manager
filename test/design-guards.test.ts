@@ -493,8 +493,9 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
     const widths = [...styles.matchAll(/\.jira-list-table thead th:nth-child\(\d+\)\s*\{\s*width:\s*(\d+)px/g)].map((m) => Number(m[1]));
     expect(widths).toHaveLength(9);
     expect(min).toBeLessThanOrEqual(1150);
-    // Ticket is the auto column: it must keep room for a key and a summary at the table's own minimum. 170, not the 210 it was: Open grew 124 → 172 so the split
-    // `Open in Desktop` stops overlapping For (ui-verify D13), and Ticket pays the difference — 204 px at the 1150 a 1440 viewport gives it.
+    // Ticket is the auto column: it must keep room for a key and a summary at the table's own minimum. 170, not the 210 it was: Open grew 124 → 192 so the split
+    // `Open in Desktop` stops overlapping For and an ended row's Reopen + Run fit (ui-verify D13), Where 80 → 88 so `Dashboard` is not clipped (N1), and the table's
+    // minimum rose to the 1150 a 1440 viewport gives it — Ticket keeps 176 px there, more as the viewport widens.
     expect(min - widths.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(170);
     // State (column 2) must hold `Waiting for plan approval` whole, or wrap it: never hard-clip.
     expect(widths[0]).toBeGreaterThanOrEqual(190);
