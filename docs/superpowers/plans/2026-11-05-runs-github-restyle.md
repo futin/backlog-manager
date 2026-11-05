@@ -37,6 +37,20 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 - Every component touched cites its DESIGN.md subsection in its header comment (§8.4.1, §8.4.2, §8.11); every new derivation lives in `lib/`.
 - Every `/api/prs/*` payload assertion in the PR suites is kept; only how a test reaches the control changes.
 
+## Required from plan 2
+
+Plan 2 (`2026-11-05-jira-rest-restyle.md`, Tasks 1–2) produces these; this plan consumes them exactly as spelled. If plan 2 shipped a different spelling,
+follow plan 2's code and report the difference.
+
+- `client/src/lib/tones.ts`: `type StateTone = 'amber' | 'green' | 'grey' | 'red'`; `runTone(status: OrchestratorRun['status']): StateTone` — `running`
+  green, `paused` amber, `done` / `aborted` grey, `failed` red.
+- CSS `.ui-stripe[data-tone]` (3 px left edge, inset box-shadow; `tr.ui-stripe > :first-child` on a table row) and `.ui-stripe-dot[data-tone]` (6 px dot),
+  tones `green` / `amber` / `red` / `grey`.
+- `GlyphTile({ glyph, tone = 'neutral', size = 28 }: { glyph: GlyphName; tone?: 'neutral' | 'green' | 'red' | 'amber' | 'ink'; size?: 18 | 28 | 32 })` —
+  `<span class="ui-glyph-tile" data-tone data-size aria-hidden>`.
+- `Segmented` options take `count?: number`, drawn as `<span class="ui-seg-count">` after the label, so the button's accessible name is `<label> <count>`
+  (`Needs you 1`). No other option field — an option carries no `Dot`.
+
 ## Review Focus
 
 1. A PR with checks `pending` on a repo with `autoMergeAllowed: false` — the main half must fall back to Merge with `mergeBlock`'s reason, not arm (Task 1).
@@ -69,9 +83,10 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
   `refresh`, `external`, `pause`, `cpu`, `coin` (skip any plan 2 already added).
 
 - [ ] **Step 1: Failing tests.** `prs-lib`: `mergeMain` cases — success checks, mergeable → `{merge, null}`; checks `failure` → `{merge, 'checks failing'}`
-  (exact `mergeBlock` string); `pending` + `autoMergeAllowed` → `{arm, null}`; `pending` + `autoMergeAllowed: false` → `{merge, <mergeBlock reason or null>}`;
-  armed → `{disarm, null}`; armed + `syncOff` → `{disarm, 'sync off'}`; draft + pending → `{merge, <draft reason>}`. `pr-layouts-lib`: `checksTone` for all
-  five values; `prPills` equals `prChips` for an ordinary row and adds exactly one `warn` chip for an unnamed `blocked` state. `ui-split`: `mainBlockedBy`
+  (exact `mergeBlock` string); `pending` + `autoMergeAllowed` → `{arm, null}`; `pending` + `autoMergeAllowed: false` (non-empty `methods`) → `{merge, null}`;
+  armed → `{disarm, null}`; armed + `syncOff` → `{disarm, 'sync off'}`; draft + pending → `{merge, 'draft'}`. `pr-layouts-lib`: `checksTone` for all
+  five values; `prPills` equals `prChips` for an ordinary row and adds exactly one `warn` chip for an unnamed `blocked` state (fixture: `mergeState: 'blocked'`, `checks` not `pending`, no other fact —
+  `pr-layouts.ts:87-88`). `ui-split`: `mainBlockedBy`
   sets `aria-disabled` + `aria-describedby` on the main half only; the main half is not `disabled` and is reachable by Tab; click calls `onMain` zero times;
   the chevron still calls `onMore`.
 - [ ] **Step 2: Run** `pnpm exec jest test/prs-lib.test.ts test/pr-layouts-lib.test.ts test/ui-split.test.tsx` — FAIL.
@@ -83,7 +98,7 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 
 **Files:**
 - Modify: `client/src/components/github/PrActions.tsx` (whole strip; props unchanged), `client/src/styles.css` (`.prs-keys*`), `client/src/hooks/useDialogEscape.ts:47`,
-  `.claude/rules/board.md:20` (and its Confirm list :10-23 if it names the keys), `docs/subsystems/invariants.md:2242`, `.claude/DESIGN.md` §8.7 (the
+  `.claude/rules/board.md:21-22` (the Popover-composer sentence; :20 is the Confirm list, still true), `docs/subsystems/invariants.md:2242`, `.claude/DESIGN.md` §8.7 (the
   Popover-composer sentence plans 1–2 wrote)
 - Test: `test/prs-actions.test.tsx`, `test/prs-inbox.test.tsx`, `test/prs-matrix.test.tsx`, `test/prs-view.test.tsx`, `test/dialog-count-docs.test.ts:87-96`,
   `test/daylight-contrast.test.ts`
@@ -112,7 +127,9 @@ lands on the first enabled row. `primaryKey`'s row (`merge` or `update`) carries
   `{enable:true}` (with `method` when `defaultMethod` gives one); armed → `Auto-merge on #12`, enabled, POSTs `{enable:false}`, and the menu row reads
   `Disable auto-merge`; failing checks → main reads `Blocked`, `aria-disabled="true"`, `title` `checks failing`, described by a span with that text, click
   POSTs nothing, chevron enabled; menu lists exactly `Merge`, `Enable auto-merge`, `Update branch` in that order; a blocked `Update branch` row is
-  `aria-disabled` with `updateBlock`'s reason; Escape closes and focuses the chevron; `Open #12 on GitHub` has `href` = `pr.url`. `prs-inbox` (`keysOf` :90,
+  `aria-disabled` with `updateBlock`'s reason; armed PR on a `syncOff` repo → main reads `Auto-merge on #12`,
+  `aria-disabled="true"`, `title` `sync off`, click POSTs nothing, the chevron is enabled and opens, and `Merge`, `Disable auto-merge` and `Update branch` are
+  each `aria-disabled` and described by `sync off`; Escape closes and focuses the chevron; `Open #12 on GitHub` has `href` = `pr.url`. `prs-inbox` (`keysOf` :90,
   `mergeKey` :91, `keyNames` :225, Update :210), `prs-matrix` (:111-112, :210-212, :324, :383), `prs-view` (`keysIn` :207, `action` :448, :967-970, :1031,
   :443-477, :502-520): swap lookups to the new helpers, keep every payload. `dialog-count-docs`: the hook comment says `ten composers` and keeps the
   earlier history sentences.
@@ -130,8 +147,8 @@ lands on the first enabled row. `primaryKey`'s row (`merge` or `update`) carries
 **Interfaces:** Consumes: plan 2's `Segmented` `count`, `GlyphTile`; Task 1's `checksTone`, `checksGlyph`, `prPills`; `LEVEL_LABEL`, `levelCounts`
 (`lib/pr-layouts.ts:30,163`).
 
-Behaviour: the three triage tiles become one `Segmented` (label `Triage`) whose options are the three levels with `count` from `levelCounts` and the level
-`Dot`; value `filter ?? 'all'` with no `all` option drawn, and choosing the pressed option clears the filter (today's toggle; the confirming-clear effect
+Behaviour: the three triage tiles become one `Segmented` (label `Triage`) whose options are the three levels with `count` from `levelCounts` (no level `Dot`
+inside the option — plan 2's `Segmented` carries none and spec §4.8's tabs draw counts only); value `filter ?? 'all'` with no `all` option drawn, and choosing the pressed option clears the filter (today's toggle; the confirming-clear effect
 stays). Each row: a `GlyphTile` size 32 in `checksTone` with `checksGlyph`; the `#n` link and title; a pill row from `prPills`; the meta line
 `author · head → base · age` with the run-warning pill at its end; then `PrFoot` and `PrActions`. The verdict line, steps list and quiet-facts line go.
 
@@ -145,20 +162,26 @@ stays). Each row: a `GlyphTile` size 32 in `checksTone` with `checksGlyph`; the 
 ### Task 4: Matrix and Cards (mock `PRsLayouts.dc.html`)
 
 **Files:** Modify: `client/src/components/github/PrMatrix.tsx`, `client/src/components/github/PrCards.tsx`, `client/src/styles.css` (`.prs-matrix*`,
-`.prs-cell-*`, `.prs-card*`). Test: `test/prs-matrix.test.tsx`, `test/prs-view.test.tsx`, `test/daylight-contrast.test.ts`.
+`.prs-cell-*`, `.prs-repo*`, `.prs-list`, `.prs-row*`, `.prs-chips`, `.prs-outcome` — Cards' families, `PrCards.tsx:40-126`). Test: `test/prs-matrix.test.tsx`, `test/prs-view.test.tsx`, `test/daylight-contrast.test.ts`.
 
 **Interfaces:** Consumes: `MATRIX_COLUMNS`, `matrixCells`, `columnCounts`, `LEVEL_DOT` (`lib/pr-layouts.ts:299,320,364,374`), Task 1–3 pieces, `PolledAge`.
 
 Behaviour — Matrix: header counts become pills (red for checks, amber otherwise, none at zero); a cell in tone `bad` or `meh` is a red / amber pill, every
 other tone plain `--ink2` text (colour marks problems only); the dot column stays the triage. The expansion row (`pr-expand-<key>`, one open at a time)
 holds `PrActions` with `blockedText` and `omitUpdatingReason`, then `PrFoot`. Narrow: the table keeps scrolling inside `.prs-matrix-scroll` (§7). The
-Merge Popover must escape that box: render it so the scroll box does not clip it (verify in Task 10). Cards: head = `GlyphTile` (worst row's
+Merge Popover must escape that box, and `Popover` portals nothing (`Popover.tsx:24-25`) while `.prs-matrix-scroll`'s `overflow-x: auto` clips both axes:
+so the open row's expansion (`PrActions` with `blockedText` and `omitUpdatingReason`, then `PrFoot`) renders as a panel directly AFTER
+`.prs-matrix-scroll`, a sibling inside the Matrix wrapper, carrying `data-testid="pr-expand-<key>"` and an `id`; the row's disclosure button gets
+`aria-expanded` and `aria-controls` = that id; the table keeps a pressed-row ground on the open row and no expansion `tr`. `Popover` is not changed.
+Spec §4.8's "shows the failing check names" is NOT built: the server serves no per-check names (`PullRequestRow.checks` is a five-value enum,
+`shared/types.ts:630`; `checksDetail` is one sentence per repo, :666) — report it as a §4.8 deviation under spec §2 ("no new data on any page"). Cards: head = `GlyphTile` (worst row's
 `checksTone`), repo, an `N open` pill, `PolledAge`; rows compact with the same tile, `prPills`, the split; a departed outcome stays one quiet
 `p.prs-outcome` line; an unreadable repo stays one line under the cards (`PrRepoNotes`).
 
 - [ ] **Step 1: Failing tests.** Matrix: header `Checks` holds a pill `1` when one row fails, no pill at zero; a failing checks cell is a pill with
   `data-tone="bad"`, a passing one has no pill; expanding row B collapses row A; a blocked Merge in the expansion reads the reason text (`checks failing`)
-  and is `aria-disabled`. Cards: head shows `2 open`; the departed line keeps its text; rows carry the tile and the split.
+  and is `aria-disabled`; with the expansion open and its chevron clicked, the `Merge menu` dialog is NOT a descendant of `.prs-matrix-scroll`
+  (`closest('.prs-matrix-scroll')` is null) and the row's disclosure button has `aria-expanded="true"` and `aria-controls` = the panel's `id`. Cards: head shows `2 open`; the departed line keeps its text; rows carry the tile and the split.
 - [ ] **Step 2–4: Run** `pnpm exec jest test/prs-matrix.test.tsx test/prs-view.test.tsx test/design-guards.test.ts test/daylight-contrast.test.ts` — FAIL, implement, PASS.
 - [ ] **Step 5: Commit** `feat(prs): matrix problem pills and card rows`.
 
@@ -206,8 +229,9 @@ The `PR #n` link leaves the head for a closing line `PR opened · <base> → <pr
 
 - [ ] **Step 1: Failing tests.** `runs-view`: a paused run's card has `data-tone="amber"` and a `paused` pill; a running fresh one green; a crashed one red
   with `crashed` and its line; card shows `1 of 3 items`. `run-detail`: remote line reads `controls live on the machine that ran it` (rewrite :1168 and
-  runs-view :2753); a pr-mode run with `prUrl` `…/pull/462` renders `PR opened · backlog/run-1 → main · #462` and none without `prUrl`; an item at `merged`
-  has a `merged` pill `data-tone`/class done, one at `fixing` live; facts still expose `run-detail-started`, `-on-machine`, `-base`, `-usage`, `-mode`;
+  runs-view :2753); a pr-mode run (its own fixture: `base: 'backlog/run-1'`, `prTarget: 'main'`, `prUrl` `…/pull/462` — today's fixtures have
+  `prUrl: null`) renders `PR opened · backlog/run-1 → main · #462` and none without `prUrl`; an item at `merged`
+  has a `merged` pill with class `ui-pill-done` (`Pill` sets no `data-tone`), one at `fixing` live; facts still expose `run-detail-started`, `-on-machine`, `-base`, `-usage`, `-mode`;
   chips keep their texts (:223-226, :970-990). `stagePillTone` for one stage of each tone.
 - [ ] **Step 2–4: Run** `pnpm exec jest test/runs-view.test.tsx test/run-detail.test.tsx test/run-controls.test.tsx test/watchdog-coupling.test.tsx test/run-pulse.test.ts test/design-guards.test.ts test/daylight-contrast.test.ts` — FAIL, implement, PASS.
 - [ ] **Step 5: Commit** `feat(runs): live run cards and an item-first detail`.
@@ -220,14 +244,16 @@ The `PR #n` link leaves the head for a closing line `PR opened · <base> → <pr
 **Interfaces:** Consumes: `stateLine`, `sweepFraction`, `WATCHDOG_KIND_TONE` (:280), `GlyphTile`, `Pill`. Produces: `stateWord(status): string` —
 `Off · <reason>`, `Idle · nothing to watch`, `Watching N` — beside `stateLine`, which stays the band's sub (`watchdog-state-line`).
 
-Behaviour: the status band is one sheet row — `GlyphTile` (ring), a `Dot` and `stateWord` in `watchdog-phase`, `next check in N s` from `nextTickAt` while
-armed (no `checked N s ago`), the sweep meter (`watchdog-sweep`) under it while armed, and the flat `Policy in Settings` chip (`watchdog-policy-link`). The
+Behaviour: the status band is one sheet row — `GlyphTile` (ring), a `Dot` and `stateWord` in `watchdog-phase`; the countdown is
+drawn ONCE, by `stateLine` in the band's sub (`watchdog-state-line`), in the code's `next check in 42s` form (no space — the code wins over the spec's
+`18 s`; no second countdown in the row, no `checked N s ago`); `watchdog-state` moves to the band row itself (`runs-view` :1838-1839 stays green), the sweep meter (`watchdog-sweep`) under it while armed, and the flat `Policy in Settings` chip (`watchdog-policy-link`). The
 policy moves to its own `FigureStrip cols={3}` below: Check every, Leave a resumed run alone, Give up after (`N resumes`), the resume-spawns line under it
 (`watchdog-config-line`, `watchdog-policy-line` kept). Watching: title `Watching` with a count pill; empty state one line (`watchdog-rows-empty`). Activity
 keeps its five columns; the kind cell becomes a `Pill` mapped live → live, done → done, bad → bad, warn → warn, muted → neutral, glyph kept.
 
 - [ ] **Step 1: Failing tests.** Off → `watchdog-phase` reads `Off · BM_AGENTS off`; idle → `Idle · nothing to watch`; the three policy figures are inside a
-  container that is NOT the status band and follows it in document order; armed with `nextTickAt` 42 s ahead → `next check in 42s` (keep :600-604); no text
+  container that is NOT the status band and follows it in document order; armed with `nextTickAt` 42 s ahead → `watchdog-state-line` reads
+  `next check in 42s` and the text `next check in` occurs exactly once in the band (keep :600-604); no text
   `checked`; Watching with none → one line; activity kind `failed` renders a pill with the `bad` tone (rewrite :512-513 from the class to the pill tone).
 - [ ] **Step 2–4: Run** `pnpm exec jest test/watchdog-monitor.test.tsx test/runs-view.test.tsx test/watchdog-coupling.test.tsx test/design-guards.test.ts test/daylight-contrast.test.ts` — FAIL, implement, PASS.
 - [ ] **Step 5: Commit** `feat(runs): watchdog status band over its policy`.
@@ -242,7 +268,7 @@ keeps its five columns; the kind cell becomes a `Pill` mapped live → live, don
 
 Behaviour: each row: name; a halted project gets a red `N failures in a row` pill and the reason line (`since <clock> · last: <reason> on <id>`); a
 non-halted project with `streak > 0` an amber pill of the same words; then the strip (`tick-strip`, cells `data-tone`, `title`, `aria-hidden` with one
-`sr-only` summary `last 12 ticks: N ok, N failed`); the last-tick line; `Reset` on a halted project. The row loses `tick-row-halted`. Band, figures and
+`sr-only` summary `last N ticks: N ok, N failed`, N the cells drawn); the last-tick line; `Reset` on a halted project. The row loses `tick-row-halted`. Band, figures and
 activity stay; the activity outcome cell becomes a Pill (ok done, failed bad, other neutral).
 
 - [ ] **Step 1: Failing tests.** 15 `recent` entries → 12 cells, the last cell's title names the newest entry; 3 entries → 3 cells; outcomes `ok`, `failed`,
