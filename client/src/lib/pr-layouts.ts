@@ -129,37 +129,6 @@ export function prSeverity(pr: PullRequestRow): number | null {
   return levelFacts(pr)[0]?.severity ?? null;
 }
 
-/** One sentence about a PR. `calm` is a step worth reading beside a problem (the run warning, `Approved.`), not one a person has to act on. */
-export interface PrProblem {
-  text: string;
-  calm: boolean;
-}
-
-/**
- * A PR's ordered problems: the level-driving facts (none for a draft — it is Quiet, so nothing about it is a problem yet), then the run-in-progress warning
- * verbatim (`prRunWarning`'s text, which the page derives), then the calm facts worth reading next to a problem. A calm fact is only said when true, and
- * `approved` is listed before `checks passing`, the order `prChips` reads them in.
- */
-export function prProblems(pr: PullRequestRow, warning: string | null): PrProblem[] {
-  const problems: PrProblem[] = pr.draft ? [] : levelFacts(pr).map((f) => ({ text: f.text, calm: false }));
-  if (warning !== null) problems.push({ text: warning, calm: true });
-  if (pr.review === 'approved') problems.push({ text: 'Approved.', calm: true });
-  if (pr.checks === 'success') problems.push({ text: 'Checks are passing.', calm: true });
-  return problems;
-}
-
-/** The first problem as the row's headline and the rest as its steps; no problems is no verdict (a quiet row says its facts instead, `quietFacts`). */
-export function prVerdict(problems: readonly PrProblem[]): { verdict: string | null; steps: PrProblem[] } {
-  return { verdict: problems[0]?.text ?? null, steps: problems.slice(1) };
-}
-
-/** A quiet row's one line: `prChips`' labels, joined. The same words Cards draws as chips — a PR is never described two ways. */
-export function quietFacts(pr: PullRequestRow): string {
-  return prChips(pr)
-    .map((chip) => chip.label)
-    .join(' · ');
-}
-
 /** A PR placed on the page: its key (`<repo>#<number>`, the id outcomes and update marks use), where it lives, and the two numbers the order came from. */
 export interface RankedPr {
   key: string;

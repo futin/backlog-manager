@@ -79,7 +79,7 @@ function InboxRow({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
   const write = (call: () => Promise<PrWriteResult>) => props.write(key, pr.headSha, call);
   const pills = prPills(pr);
   return (
-    <li className="prs-row prs-inbox-row" data-testid={`pr-row-${key}`}>
+    <li className="prs-row" data-testid={`pr-row-${key}`}>
       <GlyphTile glyph={checksGlyph(pr.checks)} tone={checksTone(pr.checks)} size={32} />
       <div className="prs-row-main">
         <div className="prs-row-title">

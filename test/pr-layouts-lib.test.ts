@@ -18,10 +18,7 @@ import {
   prLevel,
   prPills,
   primaryKey,
-  prProblems,
   prSeverity,
-  prVerdict,
-  quietFacts,
   rankPrs,
   splitReach,
   transientFailures
@@ -133,63 +130,6 @@ describe('prSeverity', () => {
     [{ mergeable: 'conflicting', review: 'changes-requested' }, 1]
   ] as const)('%j is %s', (over, severity) => {
     expect(prSeverity(row(over as Partial<PullRequestRow>))).toBe(severity);
-  });
-});
-
-describe('prProblems and prVerdict', () => {
-  it('lists the level-driving fact first, then the warning and the calm facts, all but the first being steps', () => {
-    const pr = row({ checks: 'failure', mergeState: 'behind', review: 'approved' });
-    // Failing checks and `approved` cannot coexist with `checks passing`, so the calm list here is just `Approved.`.
-    const { verdict, steps } = prVerdict(prProblems(pr, 'run 3 is working this branch'));
-    expect(verdict).toBe('Checks are failing.');
-    expect(steps.map((s) => s.text)).toEqual(['Behind its base.', 'run 3 is working this branch', 'Approved.']);
-    expect(steps.map((s) => s.calm)).toEqual([false, true, true]);
-  });
-
-  it('names the base a conflict is with', () => {
-    expect(prVerdict(prProblems(row({ mergeable: 'conflicting', base: 'release/2' }), null)).verdict).toBe('Conflicts with release/2.');
-  });
-
-  it('orders every level-driving sentence by severity across both levels', () => {
-    const pr = row({ checks: 'failure', mergeable: 'conflicting', review: 'changes-requested', mergeState: 'behind' });
-    expect(prProblems(pr, null).map((p) => p.text)).toEqual(['Checks are failing.', 'Conflicts with main.', 'Changes were requested.', 'Behind its base.']);
-    const soft = row({ review: 'review-required', checks: 'pending', mergeable: 'unknown' });
-    expect(prProblems(soft, null).map((p) => p.text)).toEqual([
-      'Waiting for a review.',
-      'Checks are still running.',
-      'GitHub is still working out whether it can merge.'
-    ]);
-  });
-
-  it('says what an unnamed block is, in GitHub\'s word', () => {
-    expect(prProblems(row({ mergeState: 'blocked' }), null).map((p) => p.text)).toEqual(['GitHub reports it blocked.']);
-    expect(prProblems(row({ mergeState: 'unstable' }), null).map((p) => p.text)).toEqual(['GitHub reports it unstable.']);
-  });
-
-  it('drops the pending sentence when auto-merge is armed, and adds `Checks are passing.` as a calm fact', () => {
-    const armed = { method: 'merge', enabledAt: '2026-10-29T09:00:00Z' } as const;
-    expect(prProblems(row({ checks: 'pending', autoMerge: armed }), null)).toEqual([]);
-    expect(prProblems(row({ checks: 'success' }), null)).toEqual([{ text: 'Checks are passing.', calm: true }]);
-  });
-
-  it('checks the token may not read are no fact at all: no problem, and no `Checks are passing.` either', () => {
-    expect(prProblems(row({ checks: 'unknown' }), null)).toEqual([]);
-    expect(prProblems(row({ checks: 'unknown', review: 'approved' }), null)).toEqual([{ text: 'Approved.', calm: true }]);
-  });
-
-  it('a clean quiet PR has no verdict', () => {
-    expect(prVerdict(prProblems(row(), null))).toEqual({ verdict: null, steps: [] });
-  });
-
-  it('a draft has no level-driving problem, only the calm ones', () => {
-    expect(prProblems(row({ draft: true, checks: 'failure', review: 'review-required' }), null)).toEqual([]);
-  });
-});
-
-describe('quietFacts', () => {
-  it('is the chips vocabulary, joined', () => {
-    expect(quietFacts(row({ draft: true, review: 'approved', checks: 'success' }))).toBe('draft · approved · checks passing');
-    expect(quietFacts(row({ review: 'approved', checks: 'unknown' }))).toBe('approved · checks unknown');
   });
 });
 

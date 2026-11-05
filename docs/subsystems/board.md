@@ -507,8 +507,9 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   every layout, never as a row.
  The layout is a `Segmented` in the toolbar offering
   all three at every width (`PR_LAYOUT_OPTIONS`), stored per device (`PR_LAYOUT_KEY`; an unknown word is Inbox). **Inbox** (default) ranks every shown PR across
-  repos (`rankPrs`: level, severity, newest) under three filtering count tiles, every row one `prs-row` — the fact line (a loud row's verdict and steps, a quiet
-  row's `quietFacts`), then `author · head → base · age` with the run warning as a warn pill. **Matrix** is a table, a column per check with a failure count in
+  repos (`rankPrs`: level, severity, newest) under a `Segmented` labelled `Triage` (a counted option per level, no `all`; the pressed one clears the filter), every row one `prs-row` — a 32 px
+  checks `GlyphTile` (`checksTone`, `checksGlyph`), the `#n` and title, the pill row (`prPills`), then `author · head → base · age` with the run warning as a warn
+  pill. **Matrix** is a table, a column per check with a failure count in
   its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; its row toggles one expansion, pinned to the box's visible width, holding
   the key strip and the foot. **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`); a repo read cleanly with none is counted in the
   toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — the split Merge (main half from `mergeMain`: `Merge`, `Auto-merge` or `Auto-merge on`; its chevron opens `Merge menu`: Merge, Enable/Disable auto-merge, Update branch, the row `primaryKey` names ticked) and an icon link `Open #n on GitHub` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,

@@ -3353,9 +3353,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-outcome-error { color: var(--red) }
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
 
-/* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The triage is a `Segmented` and each row leads with a `GlyphTile` in its checks tone. Its rows are the shared `.prs-row` above, boxless with a hairline between them.
-   Own `.prs-inbox*` and `.prs-notes*` classes only — a
-   `.ui-*` primitive is never restyled from here (guard 7). */
+/* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The triage is a `Segmented` and each row leads with a `GlyphTile` in its checks tone. Its rows are the shared
+   `.prs-row` above, boxless with a hairline between them. Own `.prs-inbox*` and `.prs-notes*` classes only — a `.ui-*` primitive is never restyled from here
+   (guard 7). */
 .prs-inbox { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
 .prs-inbox-triage { display: flex; min-width: 0 }
 .prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0 }
