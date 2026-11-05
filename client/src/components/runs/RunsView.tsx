@@ -14,6 +14,7 @@ import { runInvisibleElsewhere } from '../../lib/remote-run';
 import { startingOnText } from '../../lib/remote-starting';
 import { STATUS_ORDER, freshRunKey, mergeRuns, pickSelected, queueCounts, runKey, scopeRuns, windowHistory } from '../../lib/runs-list';
 import type { MergedRun } from '../../lib/runs-list';
+import { runTone } from '../../lib/tones';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES } from '../../lib/run-range';
 import { RUN_STATUS_GLYPH, runDotTone, runStatusChip } from '../../lib/run-stage';
 import { useRunsMode } from '../../hooks/useRunsMode';
@@ -818,6 +819,18 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
                   label="runs"
                   value={aggregates.runs}
                   line={
+                    <>
+                    {/* One segment per status with runs, in STATUS_ORDER, width = its share of the runs, toned by `runTone`. Decoration over the glyph line
+                        below, which states the same counts in words. Width is the `style` prop (CSSOM), never a markup attribute. */}
+                    <span className="runs-status-bar" aria-hidden="true">
+                      {STATUS_ORDER.filter((status) => aggregates.byStatus[status] > 0).map((status) => (
+                        <span
+                          key={status}
+                          data-tone={runTone(status)}
+                          style={{ width: `${((aggregates.byStatus[status] / Math.max(1, aggregates.runs)) * 100).toFixed(1)}%` }}
+                        />
+                      ))}
+                    </span>
                     <span className="runs-figure-breakdown" data-testid="runs-figure-runs-line">
                       {STATUS_ORDER.map((status) => (
                         <span key={status} className="runs-figure-breakdown-item">
@@ -825,6 +838,7 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
                         </span>
                       ))}
                     </span>
+                    </>
                   }
                 />
                 {/* "completed", not "merged": `itemsMerged` counts `branched`

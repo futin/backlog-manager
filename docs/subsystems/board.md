@@ -131,7 +131,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 `label` and `title` are separate props on both overlay shells because a dialog's accessible name and its visible title are different strings on every surface
 that draws one, and `title` is a node — a name cannot be derived from it.
 
-Two entries differ from the design spec's §12.2 table on purpose, and both are code's reading rather than the spec's: `StageBars` draws its own bar rows rather
+Two entries differ from the design spec's §12.2 table on purpose, and both are code's reading rather than the spec's: `StageBars` draws its own stacked bar rather
 than composing `ProgressRow` (the spec listed it as a composer), and `NumberField` has **one composer, and a late one** — the watchdog's three numeric
 policy values are `Select` ladders, and Settings' own numeric rows re-seed on commit with the same idiom rather than the component. It was kept unused because
 the family is part of the 36 px control set guard 7 pins, and because a numeric row was the next Settings addition's obvious control — which is what the
@@ -289,8 +289,8 @@ past. Its band counts all three states at once (`3 live · 1 starting · 28 past
 cell together.
 
 Directly under the band, the **figure strip**: five cells — runs, completed / queued, avg item work, rework / completed, verify pass — each a label, a value and
-a line saying what the figure above it means, all read from what `aggregateRuns` (`lib/run-stats.ts`) returns and nothing else. The sixth cell is full width and
-holds `StageBars`: machine time by stage, always the seven `MACHINE_STAGES` rows in pipeline order, `—` for a stage never recorded, queue wait excluded. The
+a line saying what the figure above it means (the runs cell also carries a 6 px status bar, one `runTone`-toned segment per status with runs), all read from what `aggregateRuns` (`lib/run-stats.ts`) returns and nothing else. The sixth cell is full width and
+holds `StageBars`: machine time by stage as one stacked 10 px bar (a segment only for a stage with time, width its share) over a legend of all seven `MACHINE_STAGES` in pipeline order, `—` for a stage never recorded, queue wait excluded. The
 strip hides with the list when the range or project filter empties it.
 
 Under the strip, the **split**: a 420 px list column carrying the Live sheet over the History sheet, and one always-visible detail sheet beside it. The two

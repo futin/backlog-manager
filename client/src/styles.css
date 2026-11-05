@@ -2502,6 +2502,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    over keeping the cell's height fixed. */
 .runs-figure-breakdown { display: flex; flex-wrap: wrap; gap: 2px 10px }
 .runs-figure-breakdown-item { white-space: nowrap }
+/* The Runs tile's status bar: one segment per status with runs, 6 px, 2 px gap, width set inline per segment from its share. Flat mark tokens by
+   `runTone` — green running, amber paused, red failed, grey for done and aborted — the same four the stripe and dot use. The 2 px floor keeps a one-in-
+   many status visible. Block-level so the glyph line sits under it rather than beside it. */
+.runs-status-bar { display: flex; gap: 2px; height: 6px; margin: 2px 0 6px; border-radius: 3px; overflow: hidden; background: var(--steel) }
+.runs-status-bar > span { display: block; height: 100%; min-width: 2px; flex: none; background: var(--hairline2) }
+.runs-status-bar > [data-tone='green'] { background: var(--green-solid) }
+.runs-status-bar > [data-tone='amber'] { background: var(--amber-solid) }
+.runs-status-bar > [data-tone='red'] { background: var(--red) }
 /* The project filter's native `<select>`, laid inside the `Chip` that is its
    label — the chip carries every visual decision, so this only strips the
    control's own chrome. */
@@ -2780,11 +2788,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  /* The bars' label and value columns narrow so the track keeps ~140 px at
-     the cell's 280 px inner width — below about 120 px a seven-row chart
-     stops being comparable, which is the only thing the chart is for. The
-     detail sheet's own instance keeps 80/60 (see `.run-detail-rollup`). */
-  .runs-board > .runs-stats .run-bars-row { grid-template-columns: 72px 1fr 56px }
 }
 
 /* ---------------------------------------------- run detail sheet (task-38)
@@ -2911,13 +2914,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   background: var(--steel); border: 1px solid var(--hairline);
   border-radius: 2px; padding: 10px 12px;
 }
-/* Pinned explicitly rather than left to inherit `.run-bars-row`'s own base
-   rule below (already this exact value today): Task 7 adds a SECOND caller
-   of `.run-bars-row` — a wide toolbar tile summing every run in view, which
-   needs its own column widths for a full-width strip — and this override is
-   what keeps a later change to that shared base rule from silently
-   reflowing this run-scoped instance too. */
-.run-detail-rollup .run-bars-row { grid-template-columns: 80px 1fr 60px }
 
 /* One item card's queue-wait / preflight lead line (Task 6) — printed here
    as CONTEXT between the card's head and its StageTrack, not folded back
@@ -2930,92 +2926,32 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    rather than a new one invented for an item-scoped reading. */
 .run-detail-lead { font-size: 12px; color: var(--ink3) }
 
-/* ---------------------------------------------- run stage bars (Task 4)
-   StageBars.tsx: the seven-row "where did the time go" widget, rendered
-   twice — once per run (inside the detail sheet) and once summed across a
-   whole visible range (the figure strip's wide sixth cell) — so its rules
-   live in their own block rather than folding into either caller's own
-   section.
-
-   TEN PIXELS TALL, up from the 6 px this shipped until task-38. §3 gives a
-   progress bar 10 px, and §8.4.1 states the reason this widget in particular
-   moves: at the figure strip's full width the bar is the cell's SUBJECT
-   rather than a sparkline beside a number, and a 6 px rule read as a hairline
-   at that size. The per-run instance takes the same height rather than
-   keeping the old one, because the two exist to be compared at a glance —
-   `fixing` sits at row 5 of both, every time — and two heights would make the
-   pair read as two different charts.
-
-   ONE SERIES, ONE HUE. Unlike the per-item .run-detail-stagebar (deleted in
-   Task 6; its segments were different STAGES packed into the same bar, and
-   therefore needed one tone per stage to stay legible), every bar here is
-   the same series — one stage's own total on its own row — so there is
-   exactly one thing for colour to distinguish (a filled row from an empty
-   one), not seven.
-   `--fill-progress` is not an arbitrary choice for that one hue: §8.2 gives
-   that token to work that has MOVED — a reached stage node on the track
-   below wears it too — and every millisecond on this chart is work that
-   happened. It is deliberately not `--fill-live`, which means "happening
-   right now": these are totals, including a still-open span, and a chart
-   painted in the live fill would read as seven things in progress.
-   All seven rows share it. `preflight` is not carved out even though the
-   item chip tones it differently, because this widget is answering "how much
-   orchestrator time", not "what stage is this item in", and `runStageTotals`
-   already counts `preflight` as machine time on that basis — one measurement
-   taken seven times.
-
-   THE ROW SET IS FIXED AND ORDERED — always all seven `MACHINE_STAGES`
-   entries, always in that constant's own pipeline order, whether or not a
-   given run/range ever recorded a millisecond in one of them (StageBars.tsx
-   prints `—` for an absent stage rather than omitting its row). This is what
-   keeps the per-run instance and the range-wide instance comparable at a
-   glance: `fixing` sits at row 5 of both, every time, so a reader moving
-   from the card to the tile is never re-scanning a reshuffled list.
-
-   THE VALUE IS INK, NOT THE FILL'S COLOUR. This codebase's colour vocabulary keeps data
-   colour off text on purpose (CONSTRAINTS.md: "text never wears a data
-   colour" — values print in --ink/--ink2/--ink3 regardless of what tone the
-   thing beside them uses). The bar is the data-coloured element; the number
-   restating that same measurement in words is the PRECISE reading a bar's
-   length can only approximate, and colouring it to match would make it read
-   as decoration rather than as the figure to actually trust. `--ink3` for
-   the `-none` modifier is the same muted tone the rest of this app already
-   uses for "nothing recorded" (`.board-card-stage-idle`, `.run-detail-
-   time`), not a new one invented for this widget.
-
-   NO IN-BAR LABEL. A label baked into the fill would
-   have to sit on top of it for a long bar and past its end for a short one —
-   two layouts fighting for the six pixels of height a widget built to
-   summarise seven rows in the space of one has no room to referee. The row's
-   own label/value columns already say both things (which stage, how long)
-   in a fixed place.
-   THE TRACK IS A TRACK, not a hairline baseline. §2 says the remainder of a
-   progress bar is a `--steel` track with no hatch, and the reason the old
-   left-edge rule gave for having no track at all — that an empty track would
-   be indistinguishable from "a value too small to see" — is answered by
-   StageBars.tsx's own `ms > 0` guard instead: an absent stage draws NO fill
-   and reads `—` beside it, where a value too small to see still draws the
-   3 px `min-width` floor. Two different renderings, neither of them an empty
-   track pretending to be a measurement. */
-.run-bars { display: flex; flex-direction: column; gap: 5px }
-.run-bars-row {
-  display: grid; grid-template-columns: 80px 1fr 60px;
-  align-items: center; gap: 8px;
-}
+/* ---------------------------------------------- run stage bars (Task 4, restyled in the runs-and-github plan)
+   StageBars.tsx: rendered twice — per run in the detail sheet, and summed across the visible range in the figure strip's wide sixth cell — so its rules
+   live in their own block. One stacked bar over a seven-entry legend; see the component header for why the legend is always seven and the bar is not. */
+.run-bars { display: flex; flex-direction: column; gap: 8px }
+/* ONE stacked bar, 10 px, segments only for stages that recorded time, widths set inline from each stage's share of the total. Segments touch (no gap) so
+   the whole reads as one length; the `--steel` base shows only when nothing is recorded, and a bar with no segment is still drawn. A stage's colour is a
+   FLAT token keyed by `data-stage`, shared with its legend swatch, never a tint: dispatched is the green mark, reviewing the cyan accent, fixing the amber
+   mark, verifying magenta, inspecting mustard, and the two bookends (preflight, merging) the quiet `--ink3`. */
+.run-bars-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--steel) }
+.run-bars-seg { display: block; height: 100%; flex: none; min-width: 2px }
+.run-bars-seg[data-stage='dispatched'], .run-bars-swatch[data-stage='dispatched'] { background: var(--green-solid) }
+.run-bars-seg[data-stage='reviewing'], .run-bars-swatch[data-stage='reviewing'] { background: var(--cyan) }
+.run-bars-seg[data-stage='fixing'], .run-bars-swatch[data-stage='fixing'] { background: var(--amber-solid) }
+.run-bars-seg[data-stage='verifying'], .run-bars-swatch[data-stage='verifying'] { background: var(--magenta) }
+.run-bars-seg[data-stage='inspecting'], .run-bars-swatch[data-stage='inspecting'] { background: var(--mustard) }
+.run-bars-seg[data-stage='preflight'], .run-bars-swatch[data-stage='preflight'],
+.run-bars-seg[data-stage='merging'], .run-bars-swatch[data-stage='merging'] { background: var(--ink3) }
+/* The legend lists all seven stages whether or not they have a segment, so the widget keeps one shape in both places it renders. Auto-fit columns let it
+   wrap to two rows in the narrower detail rollup without a media query. */
+.run-bars-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 4px 16px }
+.run-bars-item { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 6px }
+.run-bars-swatch { width: 8px; height: 8px; border-radius: 2px; background: var(--steel) }
 .run-bars-label { font-size: 12px; color: var(--ink2) }
-.run-bars-track { position: relative; height: 10px; border-radius: 8px; background: var(--steel) }
-/* The same floor `.run-detail-seg` (deleted in Task 6) used to carry, for
-   the identical reason: a genuinely brief stage (a few seconds) must stay a
-   visible sliver next to one that took most of an hour, not shrink to
-   nothing beside it. */
-.run-bars-fill {
-  position: absolute; left: 0; top: 0; height: 10px;
-  background: var(--fill-progress); border-radius: 8px; min-width: 3px;
-}
-.run-bars-value {
-  font-size: 12px; color: var(--ink);
-  text-align: right; font-variant-numeric: tabular-nums;
-}
+/* THE VALUE IS INK, NOT THE SEGMENT'S COLOUR: text never wears a data colour. The swatch carries the hue, the number is the precise reading. `--ink3` for
+   the `-none` modifier is the app's usual "nothing recorded". */
+.run-bars-value { font-size: 12px; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums }
 .run-bars-value-none { color: var(--ink3) }
 
 /* ---------------------------------------------- stage track (Task 5)

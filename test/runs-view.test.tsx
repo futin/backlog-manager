@@ -618,6 +618,21 @@ describe('RunsView', () => {
     }
   });
 
+  /* The Runs tile's status bar: one segment per status that has runs, in STATUS_ORDER, width proportional to the count, toned by `runTone`. Three done and one
+     failed is 75 / 25, and the glyph line under it still states the same counts in words. */
+  it('draws the Runs tile status bar, one toned segment per status with a count', async () => {
+    const doneAgain = { ...RUN_DONE_ALPHA, runId: 'run-20260830-100000' };
+    const doneThird = { ...RUN_DONE_BETA, runId: 'run-20260827-120000' };
+    await renderRunsView([RUN_DONE_ALPHA, doneAgain, doneThird, RUN_FAILED_BETA], []);
+
+    const bar = screen.getByTestId('runs-tile-runs').querySelector('.runs-status-bar') as HTMLElement;
+    const segs = Array.from(bar.children) as HTMLElement[];
+    expect(segs.map((seg) => seg.getAttribute('data-tone'))).toEqual(['grey', 'red']);
+    expect(segs.map((seg) => seg.style.width)).toEqual(['75.0%', '25.0%']);
+    expect(screen.getByTestId('runs-figure-runs-line')).toHaveTextContent('3 done');
+    expect(screen.getByTestId('runs-figure-runs-line')).toHaveTextContent('1 failed');
+  });
+
   it('narrows both the row list and the tiles to the selected project', async () => {
     await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
 
