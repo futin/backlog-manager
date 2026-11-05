@@ -62,14 +62,17 @@ export function FilterBar<K extends string = string>({
   count,
   onClear,
   children,
-  sort
+  sort,
+  showing
 }: {
   /** How many filters are set. Zero draws no badge and no raised look and makes `Clear all` inert. */
   count: number;
   onClear: () => void;
-  /** The filter popover's body, drawn under its `Filters` / `Clear all` header — the caller's sections. */
+  /** The filter popover's body, drawn above the foot (`Showing N of M` and `Clear`) — the caller's sections. */
   children: ReactNode;
   sort?: FilterBarSort<K>;
+  /** The foot's left side: `Showing <shown> of <total>`, then ` · <note>` when given. Omitted, the foot holds `Clear` alone. */
+  showing?: { shown: number; total: number; note?: string };
 }) {
   const [open, setOpen] = useState<Open>(null);
   // Each panel's anchor: a press on its own button is not "outside" it — the button's click is what toggles — so `Popover` is told which element that is.
@@ -123,22 +126,30 @@ export function FilterBar<K extends string = string>({
 
       {open === 'filter' && (
         <Popover label="Filters" width={300} anchor={filterButton} onClose={close}>
-          <div className="filter-bar-head">
-            <span>Filters</span>
+          {children}
+          {/* The foot ends the panel: the count line on the left, the clear control on the right. A `div`, not the Sort panel's `filter-bar-foot` paragraph. */}
+          <div className="filter-bar-footrow">
+            {showing !== undefined && (
+              <span className="filter-bar-showing">
+                Showing {showing.shown} of {showing.total}
+                {showing.note !== undefined && ` · ${showing.note}`}
+              </span>
+            )}
             {/* `aria-disabled`, not `disabled`: an inert control stays in the tab order, so a keyboard reader lands on it and hears that there is nothing to
-                clear, rather than the button vanishing from the sequence the moment the last filter is reset. The handler is the other half of the promise. */}
+                clear, rather than the button vanishing from the sequence the moment the last filter is reset. The handler is the other half of the promise.
+                The visible word is `Clear`; the name stays `Clear all` because every existing lookup, and what it does, is all of them. */}
             <button
               type="button"
               className="filter-bar-clear"
+              aria-label="Clear all"
               aria-disabled={count === 0 || undefined}
               onClick={() => {
                 if (count > 0) onClear();
               }}
             >
-              Clear all
+              Clear
             </button>
           </div>
-          {children}
         </Popover>
       )}
 

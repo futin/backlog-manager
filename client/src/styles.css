@@ -471,11 +471,13 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 
 /* Inside the panels. The header row, then sections: the heading is 12 px `--ink2` with its hint in `--ink3`, and a section after another opens a 14 px gap. */
 .filter-bar-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; font-size: 14px; font-weight: 500; color: var(--ink) }
+.filter-bar-footrow { display: flex; align-items: baseline; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hairline) }
+.filter-bar-showing { font-size: 11px; color: var(--ink3) }
 .filter-bar-clear { margin-left: auto; padding: 0; border: 0; background: none; font-size: 12px; color: var(--ink2); cursor: pointer }
 .filter-bar-clear[aria-disabled='true'] { color: var(--ink3); cursor: default }
-.filter-bar-section + .filter-bar-section { margin-top: 14px }
-.filter-bar-heading { margin-bottom: 8px; font-size: 12px; color: var(--ink2) }
-.filter-bar-hint { color: var(--ink3) }
+.filter-bar-section + .filter-bar-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hairline) }
+.filter-bar-heading { margin-bottom: 8px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ink3) }
+.filter-bar-hint { font-weight: 400 }
 /* `max-width` and `overflow` so a long project name clips inside the panel's content box rather than pushing the panel wider than it was told to be. */
 .filter-bar-picks { display: flex; flex-wrap: wrap; gap: 6px }
 .filter-bar-picks button { max-width: 100%; overflow: hidden }
