@@ -202,47 +202,51 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
 
       {(!narrow || menuOpen) &&
         SECTIONS.filter(drawn).map((id) => (
-          <div key={id} className={id === 'jira' ? 'rail-group' : undefined}>
+          <div key={id}>
             {id === 'settings' && <div className="rail-rule" aria-hidden="true" />}
-            <button
-              className={section === id ? 'rail-link on' : 'rail-link'}
-              aria-current={section === id ? 'page' : undefined}
-              onClick={() => {
-                onChange(id);
-                setMenuOpen(false);
-              }}
-            >
-              <GlyphTile glyph={RAIL_GLYPH[id]} tone={section === id ? 'ink' : 'neutral'} />
-              <span className="rail-label">{RAIL_LABEL[id]}</span>
-            </button>
-            {/* A sibling of the row's button, never inside it: a button in a button is invalid, and the row keeps meaning "open Jira" while the count means
-                "open what needs me". Hung over the row's right edge by `.rail-group`. Zero draws no element at all (§7.4). GitHub and Runs counts are plain
-                pills: the row itself is the control. */}
-            {id === 'jira' && needsYouCount > 0 && (
+            {/* The row and its count share `.rail-group`, which positions the count over the row's right end. The tree stays OUTSIDE it: a group that held the
+                open tree too would centre the count on row-plus-tree (ui-verify 2026-11-05). */}
+            <div className="rail-group">
               <button
-                type="button"
-                className="rail-count"
-                aria-label={`${needsYouCount} ${needsYouCount === 1 ? 'session needs' : 'sessions need'} you`}
+                className={section === id ? 'rail-link on' : 'rail-link'}
+                aria-current={section === id ? 'page' : undefined}
                 onClick={() => {
-                  setJiraPage('sessions');
-                  setJiraListFilters({ chip: 'needs-you', allTickets: true });
-                  onChange('jira');
+                  onChange(id);
                   setMenuOpen(false);
                 }}
               >
-                <Pill tone="warn">{needsYouCount}</Pill>
+                <GlyphTile glyph={RAIL_GLYPH[id]} tone={section === id ? 'ink' : 'neutral'} />
+                <span className="rail-label">{RAIL_LABEL[id]}</span>
               </button>
-            )}
-            {id === 'github' && (counts?.github ?? 0) > 0 && (
-              <span className="rail-count" role="img" aria-label={`${counts?.github} ${counts?.github === 1 ? 'PR needs' : 'PRs need'} you`}>
-                <Pill tone="warn">{counts?.github}</Pill>
-              </span>
-            )}
-            {id === 'runs' && (counts?.runs ?? 0) > 0 && (
-              <span className="rail-count" role="img" aria-label={`${counts?.runs} live ${counts?.runs === 1 ? 'run' : 'runs'}`}>
-                <Pill tone="neutral">{counts?.runs}</Pill>
-              </span>
-            )}
+              {/* A sibling of the row's button, never inside it: a button in a button is invalid, and the row keeps meaning "open Jira" while the count means
+                  "open what needs me". Hung over the row's right edge by `.rail-group`. Zero draws no element at all (§7.4). GitHub and Runs counts are plain
+                  pills: the row itself is the control. */}
+              {id === 'jira' && needsYouCount > 0 && (
+                <button
+                  type="button"
+                  className="rail-count"
+                  aria-label={`${needsYouCount} ${needsYouCount === 1 ? 'session needs' : 'sessions need'} you`}
+                  onClick={() => {
+                    setJiraPage('sessions');
+                    setJiraListFilters({ chip: 'needs-you', allTickets: true });
+                    onChange('jira');
+                    setMenuOpen(false);
+                  }}
+                >
+                  <Pill tone="warn">{needsYouCount}</Pill>
+                </button>
+              )}
+              {id === 'github' && (counts?.github ?? 0) > 0 && (
+                <span className="rail-count" role="img" aria-label={`${counts?.github} ${counts?.github === 1 ? 'PR needs' : 'PRs need'} you`}>
+                  <Pill tone="warn">{counts?.github}</Pill>
+                </span>
+              )}
+              {id === 'runs' && (counts?.runs ?? 0) > 0 && (
+                <span className="rail-count" role="img" aria-label={`${counts?.runs} live ${counts?.runs === 1 ? 'run' : 'runs'}`}>
+                  <Pill tone="neutral">{counts?.runs}</Pill>
+                </span>
+              )}
+            </div>
             {id === 'files' && treeOpen('files') && (
               <RailTree
                 label="Files pages"

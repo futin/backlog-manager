@@ -38,7 +38,8 @@ export function TimeZoneGroup() {
     <SettingsGroup title="Time zone" pill="this machine">
       <SettingsRow
         name="Time zone"
-        hint={
+        hint="used by run times and the tick schedule"
+        more={
           <>
             Stored in <code>~/.backlog-manager/settings/timezone.json</code> on the API host — every clock, day group, week range and created date reads
             it, on whichever phone or laptop opens the board. Unset, each browser uses its own zone.

@@ -102,17 +102,17 @@ export function SourcesGroup({
     setReading(false);
   };
 
+  // The per-project lines — a files project's connect command, a repo's reach — sit behind each row's `ⓘ more` (spec §4.10: text longer than a line). Ten
+  // repos drew ten hint lines on this machine, which pushed the card a screen tall where the mock draws one line per source (ui-verify 2026-11-05).
+  const fileLines = data === null ? [] : data.projects.filter((p) => sourceSectionOf(p.source) === 'files').flatMap(filesLine);
+  const repoLines = data === null ? [] : reachLines(data.projects, now).map((r) => r.line);
+
   return (
     <SettingsGroup title="Sources" pill="this machine">
       <SettingsRow
         name="Files"
-        hint={
-          data === null || counts === null ? (
-            <Lines lines={[pending]} />
-          ) : (
-            <Lines lines={['backlog/ folders in the registry', ...data.projects.filter((p) => sourceSectionOf(p.source) === 'files').flatMap(filesLine)]} />
-          )
-        }
+        hint={data === null || counts === null ? <Lines lines={[pending]} /> : <Lines lines={['backlog/ folders in the registry']} />}
+        more={fileLines.length > 0 ? <Lines lines={fileLines} /> : undefined}
       >
         <StatusPill tone={counts === null ? 'grey' : 'green'} word={counts === null ? pending : projectCount(counts.files)} />
         {drawn?.files === true && onOpenFilesPage && (
@@ -128,15 +128,10 @@ export function SourcesGroup({
           data === null || counts === null ? (
             <Lines lines={[pending]} />
           ) : (
-            <Lines
-              lines={[
-                ...(platform === undefined ? [] : [platformLine(platform, zone)]),
-                projectCount(counts.github),
-                ...reachLines(data.projects, now).map((r) => r.line)
-              ]}
-            />
+            <Lines lines={[...(platform === undefined ? [] : [platformLine(platform, zone)]), projectCount(counts.github)]} />
           )
         }
+        more={repoLines.length > 0 ? <Lines lines={repoLines} /> : undefined}
       >
         <StatusPill tone={githubTone ?? 'grey'} word={githubTone === null ? pending : CARD_WORD[githubTone]} />
         {/* Gated on the rail's `drawn`, never on `counts`: the counts read `/api/trackers` and the rail reads `/api/projects`, two separate fetches that can be

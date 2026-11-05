@@ -10,7 +10,7 @@ import { useNow } from '../hooks/useNow';
 import { useSweep } from '../hooks/useSweep';
 import { useTimeZone } from '../hooks/TimeZoneContext';
 import { errorOf, postJson } from '../lib/http';
-import { accessPhrase, boardsByName, failurePhrase, polledPhrase } from '../lib/jira';
+import { accessPhrase, boardsByName, failurePhrase, initialsOf, polledPhrase } from '../lib/jira';
 import { TONE_WORD, fastestInterval, jiraDown, newestAge, serviceTone } from '../lib/service-status';
 import { pollAge } from '../lib/tracker';
 import type { JiraPage } from '../lib/jira-page';
@@ -133,9 +133,6 @@ export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSet
   );
 }
 
-/** The one initial — the first letter of the (trimmed) name, `?` for none — in one place for the chip and its popover. */
-const initialOf = (name: string): string => (name === '' ? '?' : name.charAt(0).toUpperCase());
-
 /** A copy of `map` without `key` — the same map back when it holds no such key, so a `now` on a board that was never refused re-renders nothing. */
 function without(map: ReadonlyMap<string, string>, key: string): ReadonlyMap<string, string> {
   if (!map.has(key)) return map;
@@ -181,7 +178,7 @@ function JiraPopover({
   return (
     <Popover label="Jira" width={330} anchor={anchor} onClose={onClose}>
       <ServiceHead
-        initial={initialOf(name)}
+        initial={initialsOf(name)}
         name={name === '' ? 'no identity' : name}
         tone={tone}
         status={`${tone === 'red' ? 'not connected' : 'connected'} · ${data.site ?? 'no site'}`}

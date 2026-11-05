@@ -112,6 +112,10 @@ const pillOf = (name: string): string | null => rowOf(name).querySelector('.ui-s
 const toneOf = (name: string): string | null => rowOf(name).querySelector('.ui-status-dot')?.getAttribute('data-tone') ?? null;
 /** That row's hint, line by line — each line is its own element so a swapped or merged line reads differently. */
 const linesOf = (name: string): string[] => [...rowOf(name).querySelectorAll('.set-hint-line')].map((el) => el.textContent ?? '');
+/** Opens that row's `ⓘ more`, where the per-project lines live (spec §4.10), so `linesOf` reads the hint and the more text together. */
+async function openMore(name: string): Promise<void> {
+  await userEvent.click(within(rowOf(name)).getByRole('button', { name: 'ⓘ more' }));
+}
 const rowNames = (): string[] => [...document.querySelectorAll('.set-row .set-name')].map((el) => el.textContent ?? '');
 
 beforeEach(() => {
@@ -139,6 +143,8 @@ describe('the Sources card', () => {
 describe('the Files row', () => {
   it('counts every project the Files section draws — a files and an unsupported one — and carries each files project’s connect command', async () => {
     await renderCard();
+    expect(linesOf('Files')).toEqual(['backlog/ folders in the registry']);
+    await openMore('Files');
     const lines = linesOf('Files');
     expect(lines[0]).toBe('backlog/ folders in the registry');
     // The count is the pill's word now, green and ageless (no poll is served for files).
@@ -156,6 +162,7 @@ describe('the Files row', () => {
     payload = { platforms: [TOKEN], projects: [row(), { ...beta, connect: null }] };
     await renderCard();
     expect(linesOf('Files')).toEqual(['backlog/ folders in the registry']);
+    expect(within(rowOf('Files')).queryByRole('button', { name: 'ⓘ more' })).toBeNull();
     expect(pillOf('Files')).toBe('1 project');
   });
 
@@ -166,7 +173,7 @@ describe('the Files row', () => {
     cleanup();
 
     await renderCard(UNCONFIGURED, { files: false, github: true });
-    expect(within(rowOf('Files')).queryByRole('button')).toBeNull();
+    expect(within(rowOf('Files')).queryByRole('button', { name: 'Open' })).toBeNull();
   });
 });
 
@@ -177,6 +184,9 @@ describe('the GitHub row', () => {
       projects: [row(), row({ name: 'delta', path: '/abs/delta', repo: 'futin/y', access: 'not-found' }), beta]
     };
     await renderCard();
+    // The reach lines are behind `ⓘ more`; the hint itself is the budget and the count.
+    expect(linesOf('GitHub')).toHaveLength(2);
+    await openMore('GitHub');
     expect(linesOf('GitHub')).toEqual([
       `as futin · ${(4930).toLocaleString()} of ${(5000).toLocaleString()} left`,
       '2 projects',
@@ -188,6 +198,7 @@ describe('the GitHub row', () => {
   it('draws one reach line for two checkouts of one repo, and counts both projects', async () => {
     payload = { platforms: [TOKEN], projects: [row(), row({ name: 'alpha-twin', path: '/abs/alpha-twin' })] };
     await renderCard();
+    await openMore('GitHub');
     expect(linesOf('GitHub').slice(1)).toEqual(['2 projects', 'futin/x · connecting…']);
   });
 
@@ -213,7 +224,7 @@ describe('the GitHub row', () => {
   it('draws no link while the GitHub row is not drawn — the section it would open is not there', async () => {
     payload = { platforms: [TOKEN], projects: [beta] };
     await renderCard(UNCONFIGURED, { files: true, github: false });
-    expect(within(rowOf('GitHub')).queryByRole('button')).toBeNull();
+    expect(within(rowOf('GitHub')).queryByRole('button', { name: 'GitHub page' })).toBeNull();
   });
 
   it('gates the link on the rail`s drawn answer, not the tracker counts (final review M3)', async () => {
@@ -227,11 +238,11 @@ describe('the GitHub row', () => {
     // And the other way: tracker rows that count a github project, under a rail that does not draw GitHub (or has not answered yet), draw no link.
     payload = { platforms: [TOKEN], projects: [row(), beta, gamma] };
     await renderCard(UNCONFIGURED, { files: true, github: false });
-    expect(within(rowOf('GitHub')).queryByRole('button')).toBeNull();
+    expect(within(rowOf('GitHub')).queryByRole('button', { name: 'GitHub page' })).toBeNull();
     cleanup();
 
     await renderCard(UNCONFIGURED, null);
-    expect(within(rowOf('GitHub')).queryByRole('button')).toBeNull();
+    expect(within(rowOf('GitHub')).queryByRole('button', { name: 'GitHub page' })).toBeNull();
   });
 });
 

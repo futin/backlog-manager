@@ -5,7 +5,6 @@ import type { MachineUsage } from '../../../../shared/types';
 import { Dot } from '../ui/Dot';
 import { Meter } from '../ui/Meter';
 import { Pill } from '../ui/Pill';
-import { Sheet } from '../ui/Sheet';
 
 /**
  * The machine list on Settings › Dashboards (spec 2026-10-23 "The page" › List; `.claude/DESIGN.md` §8.6, and §7's status micro-labels for the pills).
@@ -59,18 +58,19 @@ export function MachineIdentity({
   );
 }
 
-/** The two windows as meters side by side; the labels are upper-case in the source because §1 allows exactly one uppercasing rule, the rail kicker's. */
+/** The two windows as meters side by side, labelled in sentence case as the detail and the mock label them — `5 H` / `WEEK` set in capitals were an
+ * uppercase run outside `.rail-kicker`, the one place the design allows one (ui-verify 2026-11-05). */
 function RowMeters({ usage }: { usage: MachineUsage }) {
   return (
     <span className="dash-page-meters">
       <Meter
-        label="5 H"
+        label="5 h"
         value={`${usagePercent(usage.fiveHour.pct)}%`}
         fraction={usage.fiveHour.pct / 100}
         tone={usageTone(usage.fiveHour.pct)}
         width="fill"
       />
-      <Meter label="WEEK" value={`${usagePercent(usage.week.pct)}%`} fraction={usage.week.pct / 100} tone={usageTone(usage.week.pct)} width="fill" />
+      <Meter label="week" value={`${usagePercent(usage.week.pct)}%`} fraction={usage.week.pct / 100} tone={usageTone(usage.week.pct)} width="fill" />
     </span>
   );
 }
@@ -88,7 +88,8 @@ export function DashboardsList({
   add: ReactNode;
 }) {
   return (
-    <Sheet className="dash-page-list">
+    // A plain list, not a Sheet: each row is its own white card standing on the well, as the mock draws it. Inside a white Sheet the rows had no fill.
+    <div className="dash-page-list">
       {machines.map((m) => (
         <button key={m.id} type="button" className="dash-page-row" aria-pressed={m.id === selected} onClick={() => onSelect(m.id)}>
           <MachineIdentity machine={m} />
@@ -96,6 +97,6 @@ export function DashboardsList({
         </button>
       ))}
       <span className="dash-page-add">{add}</span>
-    </Sheet>
+    </div>
   );
 }

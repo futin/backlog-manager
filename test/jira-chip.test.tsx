@@ -177,7 +177,7 @@ describe('the popover', () => {
     );
     await user.click(chip());
     const pop = screen.getByRole('dialog', { name: 'Jira' });
-    expect(within(pop).getByText('A')).toBeInTheDocument();
+    expect(within(pop).getByText('AL')).toBeInTheDocument();
     expect(within(pop).getByText('Ada Lovelace')).toBeInTheDocument();
     expect(within(pop).getByText(/connected · acme\.atlassian\.net/)).toBeInTheDocument();
     expect(within(pop).getByText('12 · last 429 4m ago')).toBeInTheDocument();

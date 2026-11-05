@@ -163,7 +163,9 @@ describe('WatchdogGroup', () => {
     // The hint is read as running text — same pattern
     // test/settings-view.test.tsx already relies on for AgentsStatusLines'
     // mixed-child `.set-hint` (regex search across one element's full text
-    // content, not a search for a single leaf node).
+    // content, not a search for a single leaf node). Behind the Live view row's `ⓘ more` since the ui-verify of 2026-11-05 (spec §4.10).
+    const liveRow = screen.getByText('Live view').closest('.set-row') as HTMLElement;
+    await userEvent.click(within(liveRow).getByRole('button', { name: 'ⓘ more' }));
     expect(screen.getByText(/~\/\.backlog-manager\/settings\/watchdog\.json/)).toBeInTheDocument();
     expect(screen.getByText(/every device/i)).toBeInTheDocument();
 

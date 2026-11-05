@@ -179,7 +179,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* A row: 28 px tile, label, and (as a sibling `.rail-count`) the count pill. The open row is `--strip` paper on the `--board` rail with the tile gone ink —
    a white row against the grey rail, never a colour change in the label (§5). Hover darkens the LABEL only, so a hovered row and a selected one never read as one fill. */
 .rail-link {
-  position: relative; display: flex; align-items: center; gap: 10px;
+  position: relative; display: flex; align-items: center; gap: 10px; width: 100%;
   min-height: 40px; padding: 6px; border-radius: 10px;
   font-size: 13px; font-weight: 500; text-align: left;
   color: var(--ink2); background: none; border: 0;
@@ -188,8 +188,11 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .rail-link:hover { color: var(--ink) }
 .rail-link.on { color: var(--ink); font-weight: 600; background: var(--strip); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 8%, transparent) }
 .rail-label { flex: 1; min-width: 0 }
-/* The Jira row's wrapper is the count's positioning parent: the count is a sibling of the row's button (a button in a button is invalid), placed over the
-   row's right end. Pills keep their primitive look; only the placement is the rail's. */
+/* Every row's wrapper is its count's positioning parent: the count is a sibling of the row's button (a button in a button is invalid), placed over the
+   row's right end. The wrapper holds the row and the count only, never the open tree — the tree sits beside it, or the count would centre on both. Without a
+   positioned wrapper per row, the GitHub and Runs counts hung from the sticky `.rail` and landed on one another mid-rail (ui-verify 2026-11-05). The row is
+   `width: 100%` because a `<button>` shrinks to its content, and the open row's white paper must span the rail as the mock's does. Pills keep their
+   primitive look; only the placement is the rail's. */
 .rail-group { position: relative }
 .rail-count {
   position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
@@ -329,15 +332,18 @@ button.rail-count { cursor: pointer }
 .tracker-pop-id > button { margin-left: auto; flex: none }
 .tracker-pop-who { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
 .tracker-pop-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.tracker-pop-sub { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink3); white-space: nowrap }
+.tracker-pop-sub { display: flex; align-items: flex-start; gap: 5px; font-size: 12px; line-height: 16px; color: var(--ink3); overflow-wrap: anywhere }
+/* The sub WRAPS rather than clipping under `Sync now`: `connected · timify.atlassian.net` is wider than the column beside the button, and the mock breaks it
+   onto two lines. The dot is pinned to the first line's middle, so a wrapped site never drags it down. */
+.tracker-pop-sub > .tracker-dot { margin-top: 5px }
 /* The dot is the pill's, at 6 px: a state in the tone's colour, with the word beside it saying the same thing. */
 .tracker-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--hairline2) }
 .tracker-dot[data-tone="green"] { background: var(--green-solid) }
 .tracker-dot[data-tone="amber"] { background: var(--amber-solid) }
 .tracker-dot[data-tone="red"] { background: var(--red) }
-/* Two figures, each a label over a value, hairline-topped like the rows below. They WRAP: `Last sweep` carries its interval, which is the long one. */
-.tracker-pop-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; padding: 8px 0 4px; border-top: 1px solid var(--hairline) }
-.tracker-pop-figure { display: flex; flex-direction: column; gap: 1px; min-width: 0 }
+/* Two figures, each a label over a value on a `--strip-hi` tile, as the mock draws them. They WRAP: `Last sweep` carries its interval, which is the long one. */
+.tracker-pop-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 0 0 10px }
+.tracker-pop-figure { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 8px 10px; border-radius: 10px; background: var(--strip-hi) }
 .tracker-pop-figure-label { font-size: 12px; color: var(--ink3) }
 .tracker-pop-figure-value { font-size: 12.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere }
 .tracker-row {
@@ -1792,11 +1798,12 @@ button.rail-count { cursor: pointer }
 .dash-page-list { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
 .dash-page-row {
   display: flex; flex-direction: column; gap: 8px; width: 100%; padding: 10px 12px; font-size: 13px; color: var(--ink); text-align: left;
-  background: none; border: 1px solid var(--hairline); border-radius: 12px; cursor: pointer; transition: background .15s
+  background: var(--strip); border: 1px solid var(--hairline); border-radius: 12px; cursor: pointer; transition: background .15s
 }
 .dash-page-row:hover { background: var(--strip-hi) }
-/* The mock's picked card is a 1.5 px ink outline; a 1 px border plus a 0.5 px inset ring gives it without moving the row's content. */
-.dash-page-row[aria-pressed="true"] { background: var(--steel); border-color: var(--ink); box-shadow: inset 0 0 0 .5px var(--ink) }
+/* The mock's picked card is a 1.5 px ink outline on the same white paper; a 1 px border plus a 0.5 px inset ring gives it without moving the row's content.
+   The rows stand straight on the well, each its own white card — no enclosing Sheet, which had left them no fill of their own (ui-verify 2026-11-05). */
+.dash-page-row[aria-pressed="true"] { background: var(--strip); border-color: var(--ink); box-shadow: inset 0 0 0 .5px var(--ink) }
 .dash-page-ident { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0 }
 .dash-page-account { margin-left: auto; display: inline-flex }
 .dash-page-order {

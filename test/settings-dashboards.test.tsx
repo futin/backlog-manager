@@ -201,7 +201,7 @@ const toneOf = (el: HTMLElement): string | null => {
   return [...dot.classList].find((c) => /^ui-dot-(live|paused|crashed)$/.test(c)) ?? null;
 };
 
-/** A meter's label and value, as `5 H 64%`. */
+/** A meter's label and value, as `5 h 64%`. */
 const metersOf = (el: HTMLElement): string[] =>
   [...el.querySelectorAll('.ui-meter')].map((m) => `${m.querySelector('.ui-meter-label')?.textContent} ${m.querySelector('.ui-meter-value')?.textContent}`);
 
@@ -217,7 +217,7 @@ async function renderPage() {
 /** The page once the machines read has landed too — Pro's 5 h figure is drawn on its row only then. */
 async function renderSettled() {
   await renderPage();
-  await waitFor(() => expect(metersOf(rowOf('Pro'))).toEqual(['5 H 64%', 'WEEK 81%']));
+  await waitFor(() => expect(metersOf(rowOf('Pro'))).toEqual(['5 h 64%', 'week 81%']));
 }
 
 describe('DashboardsPage', () => {
@@ -238,7 +238,7 @@ describe('DashboardsPage', () => {
     it('draws a 76 % week meter amber and a 91 % one red', async () => {
       stubFetch({ machines: { machines: [machineOf('home', { usage: usageOf(12, 76) }), machineOf('Pro', { usage: usageOf(91, 30) }), machineOf('Max')] } });
       await renderPage();
-      await waitFor(() => expect(metersOf(rowOf('Home'))).toEqual(['5 H 12%', 'WEEK 76%']));
+      await waitFor(() => expect(metersOf(rowOf('Home'))).toEqual(['5 h 12%', 'week 76%']));
       expect([...rowOf('Home').querySelectorAll<HTMLElement>('.ui-meter')].map((m) => m.dataset.tone)).toEqual(['green', 'amber']);
       expect([...rowOf('Pro').querySelectorAll<HTMLElement>('.ui-meter')].map((m) => m.dataset.tone)).toEqual(['red', 'green']);
       expect(document.body.textContent).not.toMatch(/sessions in use/i);
@@ -465,8 +465,8 @@ describe('DashboardsPage', () => {
     it('draws each machine’s own usage on its row, and none on a machine without a figure', async () => {
       stubFetch();
       await renderSettled();
-      expect(metersOf(rowOf('Home'))).toEqual(['5 H 12%', 'WEEK 30%']);
-      expect(metersOf(rowOf('Pro'))).toEqual(['5 H 64%', 'WEEK 81%']);
+      expect(metersOf(rowOf('Home'))).toEqual(['5 h 12%', 'week 30%']);
+      expect(metersOf(rowOf('Pro'))).toEqual(['5 h 64%', 'week 81%']);
       expect(metersOf(rowOf('Max'))).toEqual([]);
       // Home's detail draws its own two windows full width, lower-case.
       expect(metersOf(detail())).toEqual(['5 h 12%', 'week 30%']);
@@ -598,7 +598,7 @@ describe('DashboardsPage', () => {
     it('ignores a machine the view lacks, and reads a view machine the answer lacks as checking', async () => {
       stubFetch({ machines: { machines: [machineOf('home'), machineOf('Pro', { usage: usageOf(64, 81) }), machineOf('Ghost', { usage: usageOf(5, 6) })] } });
       await renderPage();
-      await waitFor(() => expect(metersOf(rowOf('Pro'))).toEqual(['5 H 64%', 'WEEK 81%']));
+      await waitFor(() => expect(metersOf(rowOf('Pro'))).toEqual(['5 h 64%', 'week 81%']));
       expect(names()).toEqual(['Home', 'Pro', 'Max']);
       expect(screen.queryByText('Ghost')).toBeNull();
       expect(toneOf(rowOf('Max'))).toBeNull();

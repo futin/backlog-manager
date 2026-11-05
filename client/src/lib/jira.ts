@@ -198,7 +198,7 @@ export function crumbText(crumb: JiraCrumb): string | null {
 
 /**
  * The card's person badge: the first letter of the first two words, upper-cased. `Jean-Luc Picard Jr` is `JP` — a hyphenated name is one word. Nothing to
- * read is `?`. (The rail chip draws ONE initial, `me.name`'s first letter; this two-letter reading is the card's alone.)
+ * read is `?`. The Jira popover's head disc draws the same two letters for `me.name` — `AJ`, as the shell mock does (ui-verify 2026-11-05).
  */
 export function initialsOf(name: string): string {
   const letters = name

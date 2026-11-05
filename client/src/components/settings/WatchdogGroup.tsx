@@ -217,11 +217,14 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
       </div>
     ) : null;
 
+  // Each row's hint is the mock's one line; the paragraph that used to be the hint is its `ⓘ more` (spec §4.10 — text longer than a line moves behind the
+  // toggle). Five paragraph hints made this card the tallest on the page (ui-verify 2026-11-05).
   return (
     <SettingsGroup title="Orchestrator watchdog" pill="this machine">
       <SettingsRow
         name="Enabled"
-        hint="Your own switch (design's 'Disabled'), separate from the sweeper's own phase: watching, arming and reporting a crashed run all continue either way. Turning this off only withholds the resume spawn itself."
+        hint="restart a run whose session died"
+        more="Your own switch (design's 'Disabled'), separate from the sweeper's own phase: watching, arming and reporting a crashed run all continue either way. Turning this off only withholds the resume spawn itself."
       >
         {/* The pill `Switch` (§8.6), where this was a bare checkbox: a recessed
             `--steel` track under a raised `--strip` option, so "on" is legible
@@ -236,7 +239,8 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
 
       <SettingsRow
         name="Check every"
-        hint="How often the sweeper re-reads every project's run file for staleness while armed. Shorter notices a crash sooner; longer costs less on a server watching many projects."
+        hint="how often it looks for dead runs"
+        more="How often the sweeper re-reads every project's run file for staleness while armed. Shorter notices a crash sooner; longer costs less on a server watching many projects."
       >
         {ladderField('Check every', TICK_LADDER, config.tickMs, formatSpanCompact, (v) => void save({ tickMs: v }))}
       </SettingsRow>
@@ -244,7 +248,8 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
 
       <SettingsRow
         name="Leave a resumed run alone for"
-        hint="How long a crashed run is left alone after any resume attempt or failure before the sweeper tries again. The floor is five minutes: a resume spawned into the same overload that caused the crash can take several minutes just to run its first command."
+        hint="grace before it checks that run again"
+        more="How long a crashed run is left alone after any resume attempt or failure before the sweeper tries again. The floor is five minutes: a resume spawned into the same overload that caused the crash can take several minutes just to run its first command."
       >
         {ladderField('Leave a resumed run alone for', GRACE_LADDER, config.graceMs, formatSpanCompact, (v) => void save({ graceMs: v }))}
       </SettingsRow>
@@ -252,7 +257,8 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
 
       <SettingsRow
         name="Give up after"
-        hint="How many resume spawns one crashed run gets before the sweeper marks it exhausted and stops trying — past that point the crashed strip's own Resume button is the way forward, by hand."
+        hint="resumes before the run is left stopped"
+        more="How many resume spawns one crashed run gets before the sweeper marks it exhausted and stops trying — past that point the crashed strip's own Resume button is the way forward, by hand."
       >
         {ladderField('Give up after', ATTEMPT_LADDER, config.maxAttempts, String, (v) => void save({ maxAttempts: v }))}
       </SettingsRow>
@@ -278,7 +284,8 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
       </div>
       <SettingsRow
         name="Live view"
-        hint={
+        hint="the sweeper's state and activity, on Runs › Watchdog"
+        more={
           <>
             These values live on the API host, in <code>~/.backlog-manager/settings/watchdog.json</code> — not this browser's storage. Every device that opens
             this board reads and writes that same one file, unlike the per-device settings on the Local page. The sweeper's state, the runs it is watching and
