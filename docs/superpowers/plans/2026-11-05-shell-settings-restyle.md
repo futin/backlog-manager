@@ -44,7 +44,9 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 1. A Jira site in a stored 429 window when Sync now is pressed — 429 with the stored `retryAt`, no outbound call, and the popover says
    `Jira asked to wait until <HH:MM>` rather than an error (Tasks 4, 7).
 2. Sync now pressed twice quickly, and pressed while the timed sweep is already running — one outbound sweep, both callers get the same answer (Tasks 4, 5).
-3. Every GitHub repo `off`, or no token — the GitHub pill is red/grey not green, the PR reader never mounts, and Sync now answers 409 (Tasks 3, 5, 7).
+3. Every GitHub repo `off`, or no token — the GitHub pill is red/grey not green, the rail's GitHub count is hidden, and Sync now answers 409. The PR
+   reader stays gated on `hasTracker` (a registered GitHub project), so it still mounts: GET `/api/prs` answers `{ token: false, repos: [] }` with no
+   outbound call (`pulls.service.ts:171-178`), and the PRs page keeps its no-token message (Tasks 3, 5, 7).
 4. A tab whose runs request fails or has not answered — the cursor stays solid (`working` undefined), the Runs pill is hidden, no view crashes (Task 2).
 5. A Watchdog value saved on the host that is not on today's ladder (an old `watchdog.json`) — the stepper shows it and steps to the neighbouring rungs
    (Tasks 1, 9).
@@ -84,16 +86,18 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 
 **Files:**
 - Create: `client/src/hooks/OrchestratorRunsContext.tsx`
-- Modify: `client/src/lib/run-pulse.ts:24` (add beside `runsWorking`), `client/src/App.tsx:76-97` (provider), `:184-229` (pulse/report machinery removed),
+- Modify: `client/src/hooks/useOrchestratorRuns.ts:109-117` (return gains `answered`), `client/src/lib/run-pulse.ts:24` (add beside `runsWorking`), `client/src/App.tsx:76-97` (provider), `:184-229` (pulse/report machinery removed),
   `:371-378`, `:416-426` (no `onWorking`); `ArchiveView.tsx:99,143-144`, `BoardView.tsx:123,161-165`, `PullRequestsView.tsx:81,84-85`,
   `RunsView.tsx:490,505-510`; `test/run-pulse.test.ts:64-94`
 - Delete: `client/src/hooks/useReportWorking.ts`
 
 **Interfaces:**
+- Produces: `useOrchestratorRuns()` returns `answered: boolean` beside its fields — `false` until the first successful payload, `true` from then on, and
+  it STAYS `true` when a later fetch fails (today's return has no such field, and `runs` is `[]` both before and after an empty first answer).
 - Consumes: `useOrchestratorRuns()` (`hooks/useOrchestratorRuns.ts:109`), `runsWorking` (`lib/run-pulse.ts:24`), `isRemoteRun` (`lib/remote-run.ts:24`).
 - Produces: `liveRunCount(runs, remote): number` in `lib/run-pulse.ts` — local runs whose status is `running` or `paused` plus remote runs in either status
   (what `splitLive` puts in Live). `OrchestratorRunsProvider({ children })` calls `useOrchestratorRuns()` once and provides its whole return plus
-  `working: boolean | undefined` (`undefined` until the first answer, else `runsWorking(runs, starting)`) and `liveCount: number`.
+  `working: boolean | undefined` (`undefined` while `answered` is false, else `runsWorking(runs, starting)`) and `liveCount: number`.
   `useOrchestratorRunsContext()` returns that value and THROWS outside the provider (a bare render must fail loudly, not draw an empty runs list).
 - Mounted in `App` inside `ProjectsProvider`, around `AppShell`; `AppShell` passes `working` to `SideRail` exactly as today.
 
@@ -102,8 +106,11 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
   `hooks/OrchestratorRunsContext.tsx`; `App.tsx` does not match; each of the four `VIEWS` calls `useOrchestratorRunsContext()`; the case
   `has each of those views report its own runs and starting entries up` is deleted (no view reports any more), and no file under `client/src` mentions
   `useReportWorking`. A provider case: two consumers under one provider, fake timers, 10 s → `fetchOrchestratorRuns` called 3 times (mount + two 5 s ticks),
-  not 6.
-- [ ] **Step 2: Run** `pnpm exec jest test/run-pulse.test.ts` — FAIL.
+  not 6 (flush the resolved fetch between timer advances: `useRefreshing` re-arms after each answer settles, `board.md:151-153` — never loosen to
+  `>= 2`). An orchestrator-hook case (`test/orchestrator-hook.test.tsx`): `answered` is `false`
+  before the first fetch resolves, `true` after an empty `{ runs: [] }` answer, and still `true` after a later fetch rejects; the provider's `working` is
+  `undefined` before that first answer.
+- [ ] **Step 2: Run** `pnpm exec jest test/run-pulse.test.ts` plus that hook suite — FAIL.
 - [ ] **Step 3: Implement**; move the `working` comment at `App.tsx:185-200` into the provider, rewritten (the views no longer report).
 - [ ] **Step 4: Guard suites.** `grep -l 'useOrchestratorRuns\|useReportWorking' test/` — today dispatch-button, board-live-cards, orchestrator-start-ui,
   watchdog-hook, agents-client, run-pulse, board-run-chip, orchestrator-hook, runs-view, orchestrator-archive-hook, nav, poll-coalescing, prs-view. Every one
@@ -121,7 +128,8 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 **Interfaces:**
 - Produces: `PullRequestsProvider({ children })` reads `useTrackersContext()`; enabled iff `hasTracker(data.projects)` (a GitHub project is registered —
   the PRs page's own no-token message keeps working). While enabled it mounts an inner reader calling `usePullRequests()` (unchanged: 60 s, `armed: true`);
-  while disabled nothing mounts and nothing is read. `usePullRequestsContext(): { data; error; refresh; enabled: boolean }` (disabled: `data` and `error`
+  while disabled nothing mounts and nothing is read. Tests add a no-token case: a registered GitHub project and GET `/api/prs` answering
+  `{ token: false, repos: [] }` → `enabled` true, `needsYouCount` 0, the rail's GitHub count hidden. `usePullRequestsContext(): { data; error; refresh; enabled: boolean }` (disabled: `data` and `error`
   null, `refresh` resolves `null`). Throws outside the provider.
 - Produces: `needsYouCount(data: PullRequestsPayload | null): number` in `lib/pr-layouts.ts` — the Inbox's `Needs you` number: the same pipeline
   `PullRequestsView.tsx:198` feeds the Inbox (`groupRepos`, `lib/prs.ts:242` → `splitReach(...).shown` → `rankPrs` → `levelCounts`);
@@ -139,25 +147,29 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 ### Task 4: `POST /api/jira/sweep` (spec §5)
 
 **Files:**
-- Modify: `server/src/jira/poller.service.ts` (beside `boardSaved` :272), `server/src/jira/jira-write.controller.ts:65+`
+- Modify: `server/src/jira/poller.service.ts` (beside `boardSaved` :272), `server/src/jira/jira-write.controller.ts` (beside #472's `boards/sweep`
+  :101-123), `test/jira-write-routes.test.ts` (the new route joins the guarded-path `it.each` :86-137), `docs/subsystems/jira.md` (route table :139, and
+  :350 beside the `boards/sweep` paragraph)
 - Create: `test/jira-sweep-route.test.ts`
 
+**This route is SITE-WIDE only.** #472 already ships the per-board sweep: `POST /api/jira/boards/sweep { id }` (`jira-write.controller.ts:101-123`), which
+reuses `boardSaved`, sweeps an `off` board too (a manual-only board is the one a `now` exists for) and is not refused inside a 429 window. That route and
+its semantics are unchanged; Task 7's per-row icon posts it. `POST /api/jira/sweep` takes no target and is the popover head's `Sync now` only.
+
 **Interfaces:**
-- Produces: `JiraPollerService.sweepNow(boardId?: string): Promise<SweepNowResult>` with
-  `SweepNowResult = { kind: 'done' } | { kind: 'not-armed' } | { kind: 'unknown' } | { kind: 'wait'; retryAt: number }`; `SWEEP_FLOOR_MS = 5_000` exported.
-  Order: not armed and nothing in flight → `not-armed`; `boardId` not in config → `unknown`; `expireWindow(now)` then `inWindow(now)` → `wait` with
-  `boot.retryAt`, no call; a sweep in flight → join it; last sweep finished < `SWEEP_FLOOR_MS` ago → `done` without calling out; else mark every non-`off`
-  board (or the named one, unless `off` — skipped, `done`) in `forced` and `await tick()`.
-- Route: `@Post('sweep')`, guarded, body optional `{ boardId: string }`. 200 → the `status()` payload with `live` filled as GET `/api/jira/status` does
-  (`jira.controller.ts:63-66`); 409 `{ message: 'Jira is not being polled' }`; 404 `unknown board`; 400 for a body that is not an object or a non-string
-  `boardId`; 429 `{ message: 'rate limited', retryAt: <ISO> }`. A 401/5xx/transport failure inside the sweep is a 200 (the poller records it as a timed sweep).
+- Produces: `JiraPollerService.sweepNow(): Promise<SweepNowResult>` with
+  `SweepNowResult = { kind: 'done' } | { kind: 'not-armed' } | { kind: 'wait'; retryAt: number }`; `SWEEP_FLOOR_MS = 5_000` exported.
+  Order: not armed and nothing in flight → `not-armed`; `expireWindow(now)` then `inWindow(now)` → `wait` with `boot.retryAt`, no call; a sweep in flight →
+  join it; last sweep finished < `SWEEP_FLOOR_MS` ago → `done` without calling out; else mark every non-`off` board in `forced` and `await tick()`.
+- Route: `@Post('sweep')`, guarded, no body read. 200 → the `status()` payload with `live` filled as GET `/api/jira` does (`jira.controller.ts:45,63-66`);
+  409 `{ message: 'Jira is not being polled' }`; 429 `{ message: 'rate limited', retryAt: <ISO> }` — this site-wide button is the only Jira sweep that
+  answers 429 in a window. A 401/5xx/transport failure inside the sweep is a 200 (the poller records it as a timed sweep).
 
 - [ ] **Step 1: Write the failing tests** (pattern of `test/jira-poller.test.ts`, `test/jira-write-routes.test.ts`): 409 when unconfigured; 409 when only
-  `off` boards remain swept (disarmed); 200 and one search call per non-`off` board; an `off` named board → 200, zero calls; two concurrent POSTs → one
-  sweep's calls; a second POST 1 s after the first → zero new calls; unknown `boardId` → 404 `unknown board`; body `[]` or `{ boardId: 4 }` → 400; inside a
+  `off` boards remain swept (disarmed); 200 and one search call per non-`off` board, none for the `off` one; two concurrent POSTs → one
+  sweep's calls; a second POST 1 s after the first → zero new calls; `jira-write-routes` `boards/sweep` cases (:200-216) unchanged and green; inside a
   stored 429 window → 429 with that `retryAt`, zero calls; a 401 from Jira → 200, `access: 'unauthorized'`; a cross-origin POST → refused by the guard.
 - [ ] **Step 2–4:** run `pnpm exec jest test/jira-sweep-route.test.ts test/jira-poller.test.ts test/jira-write-routes.test.ts` FAIL → implement → PASS.
-- [ ]
 - [ ] **Step 5: Commit** `feat(jira): POST /api/jira/sweep`.
 
 ### Task 5: `POST /api/github/sweep` (spec §5)
@@ -183,7 +195,6 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
   no `repo` with one asleep → 200, that repo untouched; a 401 → 200 with the cache unchanged; the PR cache is re-read once per swept repo inside its TTL;
   cross-origin → refused.
 - [ ] **Step 2–4:** FAIL → implement → PASS (`test/github-sweep-route.test.ts test/tracker-poll.test.ts test/prs-cache.test.ts`).
-- [ ]
 - [ ] **Step 5: Commit** `feat(tracker): POST /api/github/sweep`.
 
 ### Task 6: The rail (mock `Shell.dc.html`, rail column)
@@ -205,8 +216,8 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 - No page CSS names `ui-pill` or `ui-glyph-tile`: the row's layout classes sit on the row, the pill/tile keep their primitive looks.
 
 - [ ] **Step 1: Write the failing tests** (`rail`): every count is a `.ui-pill`; Jira pill is a button named `2 sessions need you` that opens Sessions with
-  the needs-you filter (existing case, new markup); GitHub 3 → amber pill `3`, 0 → none; Runs 2 → neutral pill; the current sub-page row has
-  `aria-current="page"`; `api='down'` → `API unreachable`; the cursor blinks only for `working === true`. `nav` keeps its cases.
+  the needs-you filter (existing case, new markup); GitHub 3 → amber pill `3`, 0 → none; Runs 2 → neutral pill; the section row keeps
+  `aria-current="page"` (spec :289) and the current sub-page row keeps `aria-current="true"` (`SideRail.tsx:319-326`; rail :160-161, :253-259, :268 unchanged); `api='down'` → `API unreachable`; the cursor blinks only for `working === true`. `nav` keeps its cases.
 - [ ] **Step 2–4:** FAIL → implement → PASS (`test/rail.test.tsx test/nav.test.tsx test/shell-strip.test.tsx test/design-guards.test.ts
   test/daylight-contrast.test.ts`; guard grep `useOrchestratorRunsContext\|usePullRequestsContext\|needsYouCount`).
 - [ ] **Step 5: Commit** `feat(shell): rail tiles and counts`.
@@ -215,8 +226,9 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 
 **Files:**
 - Create: `client/src/lib/service-status.ts`, `client/src/lib/sweep.ts`, `test/service-status.test.ts`
-- Modify: `client/src/components/TrackerChip.tsx`, `client/src/components/JiraChip.tsx`, `client/src/styles.css`, `test/tracker-chip.test.tsx`,
-  `test/jira-chip.test.tsx`, `test/rail-bar-style.test.ts`
+- Modify: `client/src/components/TrackerChip.tsx`, `client/src/components/JiraChip.tsx` (keeps #472's per-board sweep callback, :67-89, with its
+  `sweeping` / `refused` state), `client/src/styles.css`, `test/tracker-chip.test.tsx`, `test/jira-chip.test.tsx` (the `now` button becomes the `Sync <board>` icon: :214's
+  `boards/sweep` URL and :253's `off` board keeping its button are re-pointed at that name and keep their assertions), `test/rail-bar-style.test.ts`
 
 **Interfaces:**
 - Produces: `serviceTone(input: { down: boolean; rows: readonly { polledAt: string | null; interval: SyncInterval | null }[]; limited: boolean }, now: number):
@@ -224,14 +236,15 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
   2 × SYNC_INTERVALS[interval]`, its OWN interval, never the 15 s tick); else `green`. `newestAge(rows, now): string | null` via `pollAge`. GitHub: `down` =
   no token or every row's `access` ∉ {`ok`, `rate-limited`, `null`}; Jira: `down` = `access` ∉ {`ok`, `rate-limited`}; `limited` = `rate-limited`.
 - Produces: `postSweep(service: 'github' | 'jira', target?: string): Promise<SweepOutcome>`, `SweepOutcome = { ok: true } | { ok: false; status: number;
-  message: string; retryAt: string | null }` (`/api/github/sweep` body `{ repo }`, `/api/jira/sweep` body `{ boardId }`).
+  message: string; retryAt: string | null }` (GitHub: `/api/github/sweep`, body `{ repo }` when targeted; Jira site-wide: `/api/jira/sweep`, no body).
+  A Jira ROW does not use `postSweep`: it keeps #472's `/api/jira/boards/sweep { id }` callback in `JiraChip`, unchanged.
 - The chips render `<button>` (own class) holding `StatusPill word="GitHub"|"Jira"`, `aria-label` `GitHub: <on time|late|down>, <age>`. The popover (330 px)
   head: initials disc (`login` / `me.name`), name, `● connected · <site>` (GitHub: `github.com`), `Sync now`; two figures (last sweep + interval; Jira
-  `calls.sweep` and `last429At`, GitHub `remaining of limit`); then today's rows, each with `polled <age>` and a sync icon button `Sync <repo|board>` (disabled
-  for `off`, title `sync is off`); then the setup link (`GitHub page` → GitHub › Settings, `Jira setup` → Jira › Setup). Focus lands on `Sync now`. While a
+  `calls.sweep` and `last429At`, GitHub `remaining of limit`); then today's rows, each with `polled <age>` and a sync icon button `Sync <repo|board>` (a GitHub row:
+  disabled for `off`, title `sync is off`; a Jira row: enabled for `off` too, #472's semantics); then the setup link (`GitHub page` → GitHub › Settings, `Jira setup` → Jira › Setup). Focus lands on `Sync now`. While a
   post runs its button is disabled; 200 → the context `reload()`; 429 → `<Jira|GitHub> asked to wait until <HH:MM>`; 409 → button disabled, title the message;
   a 200 whose reload carries a non-ok `detail` shows that detail.
-- `test/rail-bar-style.test.ts`: the login- and `.tracker-meters`-hiding cases are deleted (the chip has neither now; spec §4.9); the ☰ `flex: none` case stays.
+- `test/rail-bar-style.test.ts`: the four `.tracker-name` / `.tracker-meters` cases (:24-58) are deleted (the chip has neither now; spec §4.9); the ☰ `flex: none` case stays.
 
 - [ ] **Step 1: Write the failing tests.** `service-status`: green on time; amber at 2 × interval + 1 s; a `5m` row 4 min old is green while a `15s` row 31 s
   old is amber; `off` rows ignored; red on no token; grey with nothing polled. Chips: pill tone per fixture; `Sync now` posts once on a double click, is
@@ -306,7 +319,10 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
   `SuggestCard` and Home's steps keep their behaviour in the card/row language. Stacks below 1100 px.
 
 - [ ] **Step 1: Write the failing tests.** ↑ on the first row and ↓ on the last are disabled; ↓ on row 1 posts `{ order }` with rows 1 and 2 swapped and the
-  list redraws in that order; a disallowed model renders `.ui-pill-off` with its title; a 76 % week meter is amber, 91 % red; no `sessions in use` text.
+  list redraws in that order; a disallowed model renders `.ui-pill-off` with its title; a 76 % week meter is amber, 91 % red; no `sessions in use` text. These pass today
+  (`DashboardsPage.tsx:175,221-224`, `lib/dashboards.ts:233-236`) — keep them as regression cases; the cases that fail first: a list row holds a status
+  dot, two meters each with its own `data-tone`, and the `this machine` tag on the local row only; the detail draws two usage tiles with their reset text,
+  a Models and an Efforts pill row, and the four facts (dashboard URL, board URL, machine name, account); the stylesheet stacks the two panes below 1100 px.
 - [ ] **Step 2–4:** FAIL → implement → PASS (`test/settings-dashboards.test.tsx test/dashboards-client.test.ts test/dashboards-suggest.test.ts
   test/design-guards.test.ts test/daylight-contrast.test.ts`).
 - [ ] **Step 5: Commit** `feat(settings): Dashboards two-pane page`.
@@ -320,7 +336,7 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
   footer; status pills replacing the meter chips, and the popover is no longer "a reading with no links and no buttons" — it carries Sync now, per-row sync
   icons and the setup link (spec §3 override). §8.6 / `board.md`: the in-page `Local | Shared | Dashboards` switch replaces "the rail is the only switch",
   one column, scope pills, `ⓘ more`, picture and icon cards, steppers, the two-pane Dashboards; the Sources links per Task 9. Each override names spec §3.
-- [ ] **Step 2:** `pnpm exec jest test/dialog-count-docs.test.ts test/design-guards.test.ts` and any suite `grep -l 'DESIGN.md\|board.md' test/` lists — PASS.
+- [ ] **Step 2:** `pnpm exec jest test/dialog-count-docs.test.ts test/design-guards.test.ts` and any suite `grep -l 'readFileSync.*DESIGN' test/` lists — PASS.
 - [ ] **Step 3: Commit** `docs: shell and settings restyle in DESIGN.md and board.md`.
 
 ### Task 12: `/ui-verify` against the mocks
