@@ -1541,12 +1541,12 @@ button.rail-count { cursor: pointer }
 .jira-list { display: flex; flex-direction: column; gap: 12px }
 .jira-list-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px }
 /* Overflow is a container query, as the issue List's (`.jira-issues-frame`, below): a scroll box (`overflow-x: auto`) makes overflow-y auto too and clips the
-   `Session actions` menu and the Run menu, which hang below their cell. The table's fixed columns are 946 px and its `min-width` is 1120, so at 1440 px with the
-   rail open (1150 px inside the box border) nothing scrolls; below 1122 px of frame the box scrolls sideways and the page never does. The frame holds nothing but
+   `Session actions` menu and the Run menu, which hang below their cell. The table's fixed columns are 974 px and its `min-width` is 1150, so at 1440 px with the
+   rail open (1150 px inside the box border) nothing scrolls; below 1152 px of frame the box scrolls sideways and the page never does. The frame holds nothing but
    the box, because `container-type` also becomes the containing block of `position: fixed` descendants (the phone shape of a menu panel). */
 .jira-list-frame { container-type: inline-size }
 .jira-list-scroll { border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
-@container (max-width: 1121px) {
+@container (max-width: 1151px) {
   .jira-list-scroll { overflow-x: auto }
 }
 /* The same fold as the issue table's, for the same reason: no containing block for the Run and `Session actions` bottom sheets but the viewport. */
@@ -1555,7 +1555,7 @@ button.rail-count { cursor: pointer }
   .jira-list-scroll { overflow-x: auto }
 }
 /* `table-layout: fixed` with every column but Ticket given its width in the head: under `auto`, each column sized to its widest cell and the table came to
-   1544 px in a 1150 px well. Ticket is the one auto column and takes what the px columns leave (~174 px at 1120, ~204 at 1150): the key over a one-line summary
+   1544 px in a 1150 px well. Ticket is the one auto column and takes what the px columns leave (~176 px at 1150, more as the well widens): the key over a one-line summary
    that ellipsises. Do not mix px and % or `calc()` here: a fixed-layout table reads those as `auto`. */
 .jira-list-table { width: 100%; min-width: 1150px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
 .jira-list-table thead th:nth-child(2) { width: 190px }
