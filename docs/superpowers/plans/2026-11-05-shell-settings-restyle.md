@@ -129,7 +129,7 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 - Produces: `PullRequestsProvider({ children })` reads `useTrackersContext()`; enabled iff `hasTracker(data.projects)` (a GitHub project is registered —
   the PRs page's own no-token message keeps working). While enabled it mounts an inner reader calling `usePullRequests()` (unchanged: 60 s, `armed: true`);
   while disabled nothing mounts and nothing is read. Tests add a no-token case: a registered GitHub project and GET `/api/prs` answering
-  `{ token: false, repos: [] }` → `enabled` true, `needsYouCount` 0, the rail's GitHub count hidden. `usePullRequestsContext(): { data; error; refresh; enabled: boolean }` (disabled: `data` and `error`
+  `{ token: false, repos: [] }` → `enabled` true, `needsYouCount(data)` 0 (the hidden rail pill is pinned in Task 6, where `SideRail` gains `counts`). `usePullRequestsContext(): { data; error; refresh; enabled: boolean }` (disabled: `data` and `error`
   null, `refresh` resolves `null`). Throws outside the provider.
 - Produces: `needsYouCount(data: PullRequestsPayload | null): number` in `lib/pr-layouts.ts` — the Inbox's `Needs you` number: the same pipeline
   `PullRequestsView.tsx:198` feeds the Inbox (`groupRepos`, `lib/prs.ts:242` → `splitReach(...).shown` → `rankPrs` → `levelCounts`);
@@ -148,13 +148,14 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 
 **Files:**
 - Modify: `server/src/jira/poller.service.ts` (beside `boardSaved` :272), `server/src/jira/jira-write.controller.ts` (beside #472's `boards/sweep`
-  :101-123), `test/jira-write-routes.test.ts` (the new route joins the guarded-path `it.each` :86-137), `docs/subsystems/jira.md` (route table :139, and
+  :101-123), `test/jira-write-routes.test.ts` (the new route joins the guard describe's `it.each` lists :86-113 only — NOT the `unconfigured` describe :115-147, whose 400/503 cases contradict this route's no-body read and 409), `docs/subsystems/jira.md` (route table :139, and
   :350 beside the `boards/sweep` paragraph)
 - Create: `test/jira-sweep-route.test.ts`
 
 **This route is SITE-WIDE only.** #472 already ships the per-board sweep: `POST /api/jira/boards/sweep { id }` (`jira-write.controller.ts:101-123`), which
 reuses `boardSaved`, sweeps an `off` board too (a manual-only board is the one a `now` exists for) and is not refused inside a 429 window. That route and
-its semantics are unchanged; Task 7's per-row icon posts it. `POST /api/jira/sweep` takes no target and is the popover head's `Sync now` only.
+its semantics are unchanged; Task 7's per-row icon posts it. `POST /api/jira/sweep` takes no target and is the popover head's `Sync now` only. This is a deviation from spec §5 and §8 (no optional `{ boardId }`, so
+no 404 `unknown board` and no malformed-body 400), per #472's `boards/sweep`: report it with the plan's deviations, and Task 11 lists it.
 
 **Interfaces:**
 - Produces: `JiraPollerService.sweepNow(): Promise<SweepNowResult>` with
@@ -210,7 +211,7 @@ its semantics are unchanged; Task 7's per-row icon posts it. `POST /api/jira/swe
   `liveCount`; `api` follows `useTrackersContext()` (`error` → `down`, `data` → `ok`, else `null`) — no new poller.
 - Header: 28 px `GlyphTile` `tone="ink"`, `backlog manager` at 14/700 with the existing `.rail-cursor` (blinks while `working === true`), the `.rail-kicker`
   `this machine` below (uppercase by that rule). Rows: 28 px tile + label + count `Pill`; the open section's row is white (`--strip`) with an ink tile; its
-  sub-list rows are 28 px at 12.5 px, the current one a white row at 600 carrying `aria-current="page"` (was a dot). Counts: Jira = needs-you, `warn`, inside
+  sub-list rows are 28 px at 12.5 px, the current one a white row at 600 keeping `aria-current="true"` (the white row replaces the dot; the section row holds `"page"`). Counts: Jira = needs-you, `warn`, inside
   a `button.rail-count` (the old `rail-badge` behaviour and name); GitHub = `warn`; Runs = `neutral`; 0 or absent hides the pill. Footer card: dot + version
   (still the releases button with its unseen dot) + `API connected` / `API unreachable` (red dot); nothing while `api` is `null`.
 - No page CSS names `ui-pill` or `ui-glyph-tile`: the row's layout classes sit on the row, the pill/tile keep their primitive looks.
@@ -335,8 +336,8 @@ its semantics are unchanged; Task 7's per-row icon posts it. `POST /api/jira/swe
 - [ ] **Step 1:** Rewrite to what Tasks 6–10 built: icon tiles, one count pill (`Pill`, amber waiting / grey otherwise), the white current row, the API
   footer; status pills replacing the meter chips, and the popover is no longer "a reading with no links and no buttons" — it carries Sync now, per-row sync
   icons and the setup link (spec §3 override). §8.6 / `board.md`: the in-page `Local | Shared | Dashboards` switch replaces "the rail is the only switch",
-  one column, scope pills, `ⓘ more`, picture and icon cards, steppers, the two-pane Dashboards; the Sources links per Task 9. Each override names spec §3.
-- [ ] **Step 2:** `pnpm exec jest test/dialog-count-docs.test.ts test/design-guards.test.ts` and any suite `grep -l 'readFileSync.*DESIGN' test/` lists — PASS.
+  one column, scope pills, `ⓘ more`, picture and icon cards, steppers, the two-pane Dashboards; the Sources links per Task 9. Each override names spec §3; the site-wide-only Jira sweep is listed as a spec §5 deviation beside them.
+- [ ] **Step 2:** `pnpm exec jest test/dialog-count-docs.test.ts test/design-guards.test.ts` — PASS (`design-guards` is the only suite that reads `DESIGN.md`).
 - [ ] **Step 3: Commit** `docs: shell and settings restyle in DESIGN.md and board.md`.
 
 ### Task 12: `/ui-verify` against the mocks
