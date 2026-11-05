@@ -3948,6 +3948,32 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-split-dashed .ui-split-more { background: var(--strip); color: var(--ink3) }
 .ui-split-dashed .ui-split-more::before { background: var(--hairline2); opacity: 1 }
 
+/* StateStripe — a state's mark on the left edge of a card or row: a 3 px inset box-shadow, so it takes no layout width and survives the card's own border.
+   A table row cannot carry a box-shadow on the `tr` in every engine, so there the first cell does. `grey` is the rule colour: a quiet row is marked as
+   present, never as an alert. The dot is the same four marks at 6 px for a place a stripe cannot go. */
+.ui-stripe[data-tone='green'] { --stripe: var(--green-solid) }
+.ui-stripe[data-tone='amber'] { --stripe: var(--amber-solid) }
+.ui-stripe[data-tone='red'] { --stripe: var(--red) }
+.ui-stripe[data-tone='grey'] { --stripe: var(--hairline2) }
+.ui-stripe { box-shadow: inset 3px 0 0 var(--stripe, transparent) }
+tr.ui-stripe { box-shadow: none }
+tr.ui-stripe > :first-child { box-shadow: inset 3px 0 0 var(--stripe, transparent) }
+.ui-stripe-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--hairline2) }
+.ui-stripe-dot[data-tone='green'] { background: var(--green-solid) }
+.ui-stripe-dot[data-tone='amber'] { background: var(--amber-solid) }
+.ui-stripe-dot[data-tone='red'] { background: var(--red) }
+.ui-stripe-dot[data-tone='grey'] { background: var(--hairline2) }
+
+/* GlyphTile — a glyph on a tinted square. The tint is the dark themes' own surface mixed 12-14 % toward the hue (daylight keeps the -solid mark), and the glyph
+   takes the text token of its hue so it clears 4.5:1 over it. Radius steps with the box: 5 / 8 / 9. */
+.ui-glyph-tile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--strip-hi); color: var(--ink2) }
+.ui-glyph-tile[data-size='18'] { width: 18px; height: 18px; border-radius: 5px }
+.ui-glyph-tile[data-size='32'] { width: 32px; height: 32px; border-radius: 9px }
+.ui-glyph-tile[data-tone='green'] { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
+.ui-glyph-tile[data-tone='red'] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
+.ui-glyph-tile[data-tone='amber'] { background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)); color: var(--amber-ink) }
+.ui-glyph-tile[data-tone='ink'] { background: var(--ink); color: var(--on-accent) }
+
 /* ── end ui primitives ────────────────────────────────────────────────────────
    A closing marker, not decoration. Guard 7 has to be able to say whether a
    selector is inside this block, and the block sits last in the file: with an
