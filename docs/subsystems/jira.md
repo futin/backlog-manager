@@ -136,6 +136,7 @@ a save while the credential is rejected or the site `unsupported` touches only `
 | ------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `POST /api/jira/boards`         | `{ id?, name, interval, roots, queries }` | the board as stored, ids server-minted; waits for `boardSaved` (below); 404 for an `id` the file does not hold |
 | `POST /api/jira/boards/delete`  | `{ id }`                                | `{ ok: true }`; drops the board's cache at once (`boardDeleted`) and re-`arm()`s; 404 for an unknown id, a second delete included |
+| `POST /api/jira/sweep`          | none read                               | the `GET /api/jira` payload, `live` filled; the popover head's site-wide `Sync now`: forces every non-`off` board and sweeps once, joins a sweep in flight, answers `done` with no call inside `SWEEP_FLOOR_MS` (5 s) of the last one; 409 `{ message: 'Jira is not being polled' }` when nothing is armed, 429 `{ message: 'rate limited', retryAt }` inside a stored window (the only Jira sweep that refuses there); a 401/5xx is a 200 carrying `access` |
 | `POST /api/jira/boards/sweep`   | `{ id }`                                | `{ ok: true }`; writes NOTHING — the chip's per-board `now`: awaits `boardSaved(id)`, a save's own sweep, so a 429 window or an unanswered boot leaves the board owed rather than refusing; 409 for an unreadable file, 404 `unknown board` |
 | `POST /api/jira/repos`          | `{ project, paths }`                    | `{ project, paths }` as stored, normalised and deduplicated; `[]` removes the project's key; re-aims no poller, arms the session reconciler |
 | `POST /api/jira/repo-defaults`  | `{ path, base, namePattern }`           | `{ path, base, namePattern }` as stored, `null` for unset; both `null` deletes the path's entry; a base failing Table A or a pattern failing `patternProblem` is a 400 naming the field; after the 409, 400 `<path> is not mapped` unless SOME project maps it; re-aims nothing |
@@ -344,6 +345,9 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `origin/` itself, so a stored prefix would make every Start exit 4.
   `JiraConnectionGroup` is a read-only report. Every landed write reloads the shell's status, even if
   the page has gone.
+- **`POST /api/jira/sweep` is site-wide only** — it takes no `{ boardId }` (a deviation from spec §5/§8): the per-board `now` already exists as `boards/sweep`, which
+  reuses `boardSaved`, sweeps an `off` board and is not refused inside a 429 window. `JiraPollerService.sweepNow` decides everything before its first await, so two
+  presses in one tick share one sweep.
 - **The chip and the Sources card's Jira row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` —
   the strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
   `Popover` with no links; each board's row carries a `next` meter (`boardPollReading`, the chip's POLL reading is the same function on the soonest board)

@@ -2,7 +2,7 @@ import { Body, Controller, HttpCode, HttpException, Post, UseGuards } from '@nes
 import { homedir } from 'node:os';
 
 import { isJiraKey } from '../../../shared/types';
-import type { JiraBoard, JiraIssueWriteResult, JiraRepoDefaultsWriteResult, JiraSkill } from '../../../shared/types';
+import type { JiraBoard, JiraIssueWriteResult, JiraRepoDefaultsWriteResult, JiraSkill, JiraStatusPayload } from '../../../shared/types';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import {
   JIRA_TRANSITION_ID_MAX_CHARS,
@@ -95,6 +95,23 @@ export class JiraWriteController {
     this.poller.boardDeleted(id);
     this.poller.arm();
     return { ok: true };
+  }
+
+  /**
+   * `POST /api/jira/sweep` — the popover head's site-wide `Sync now`. No body is read and no target taken (the per-board button is `boards/sweep`, below).
+   * Guard → `sweepNow`: `not-armed` is a 409, a 429 window a 429 carrying the stored end, anything else a 200 with the same payload `GET /api/jira` answers,
+   * `live` filled from the live map so the client can replace its cache with it. A 401, a 5xx or a transport failure inside the sweep is the poller's to
+   * record (`access`, `detail`) and is a 200 here: the request itself worked.
+   */
+  @Post('sweep')
+  @HttpCode(200)
+  @UseGuards(SameOriginPostGuard)
+  async sweepSite(): Promise<JiraStatusPayload> {
+    const result = await this.poller.sweepNow();
+    if (result.kind === 'not-armed') throw new HttpException({ message: 'Jira is not being polled' }, 409);
+    if (result.kind === 'wait') throw new HttpException({ message: 'rate limited', retryAt: new Date(result.retryAt).toISOString() }, 429);
+    const status = this.poller.status();
+    return status.configured ? { ...status, live: this.live.snapshot() } : status;
   }
 
   /**
