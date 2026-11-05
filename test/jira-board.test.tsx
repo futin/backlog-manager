@@ -345,6 +345,18 @@ describe('the band', () => {
 });
 
 describe('the columns', () => {
+  it('gives each shelf a tone, a page-local dot and a page-local count in place of the Dot and Pill', async () => {
+    await renderAlpha();
+    const cols = screen.getAllByTestId('board-col');
+    expect(cols.map((c) => c.getAttribute('data-tone'))).toEqual(['todo', 'doing', 'done']);
+    for (const c of cols) {
+      expect(c.querySelectorAll('.board-col-head .board-col-dot')).toHaveLength(1);
+      expect(c.querySelector('.board-col-head .ui-dot')).toBeNull();
+      expect(c.querySelector('.board-col-head .ui-pill')).toBeNull();
+    }
+    expect(cols.map((c) => c.querySelector('.board-col-count')?.textContent)).toEqual(['2', '1', '1']);
+  });
+
   it('draws To Do, In Progress and Done with their counts, Done holding the done issue, newest first', async () => {
     await renderAlpha();
     expect(screen.getAllByTestId('col-name').map((n) => n.textContent)).toEqual(['To Do', 'In Progress', 'Done']);

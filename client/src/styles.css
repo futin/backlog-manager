@@ -1148,6 +1148,16 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    in place of the stack, and any per-column overflow later has to scroll the
    cards without dragging the header off its rule with them. */
 .board-col-cards { display: flex; flex-direction: column; gap: var(--card-gap) }
+/* The Jira shelves' toned column (restyle spec §4.3, mock Board.dc.html): a `--steel` well, radius 16, 12 px padding with the header inside it. The dot and
+   the count are page-local spans rather than `.ui-dot` / `.ui-pill` — `Dot` has no todo/doing/done tones and guard 7 forbids a page rule naming a ui-* family
+   token. Plain colours and a solid `--strip` pill, no tint, so nothing joins the daylight-contrast PINNED list; 11/500 `--ink2` on `--strip` is a
+   surface pair the contrast suite already measures. */
+.board-col[data-tone] { background: var(--steel); border-radius: 16px; padding: 12px }
+.board-col-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ink3) }
+.board-col[data-tone='doing'] .board-col-dot { background: var(--amber-solid) }
+.board-col[data-tone='done'] .board-col-dot { background: var(--green-solid) }
+.board-col[data-tone] .board-col-name { font-size: 13px; font-weight: 600; color: var(--ink) }
+.board-col-count { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--strip); font-size: 11px; font-weight: 500; color: var(--ink2) }
 
 /* ---------------------------------------------- archive month groups
    Archive's columns are grouped by the month of `updated ?? created` rather

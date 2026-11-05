@@ -158,6 +158,27 @@ describe('BoardColumn', () => {
   /** The count is a `Pill` — the primitive — inside the span that lays it out.
    *  The old `.board-col-count` text node went with `.board-col-h` in task-39,
    *  when Archive — its last reader — moved onto this component. */
+  it('writes data-tone and swaps Dot/Pill for the page-local spans only when a tone is passed', () => {
+    const { container, rerender } = render(
+      <BoardColumn slug="todo" label="Plain" count={4}>
+        <i />
+      </BoardColumn>,
+    );
+    expect(container.querySelector('[data-tone]')).toBeNull();
+    expect(container.querySelector('.ui-dot')).not.toBeNull();
+    expect(container.querySelector('.ui-pill')).not.toBeNull();
+    rerender(
+      <BoardColumn slug="doing" tone="doing" label="Toned" count={4}>
+        <i />
+      </BoardColumn>,
+    );
+    const col = container.querySelector('.board-col') as HTMLElement;
+    expect(col).toHaveAttribute('data-tone', 'doing');
+    expect(col.querySelector('.board-col-dot')).not.toBeNull();
+    expect(col.querySelector('.ui-dot, .ui-pill')).toBeNull();
+    expect(col.querySelector('[data-testid="col-count"].board-col-pill .board-col-count')?.textContent).toBe('4');
+  });
+
   it('carries the count in a neutral Pill pushed right', async () => {
     await renderBoard();
     const counts = screen.getAllByTestId('col-count');

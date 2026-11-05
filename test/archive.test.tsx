@@ -320,6 +320,11 @@ describe('ArchiveView', () => {
     expect(within(column('Bugs')).queryByText('fresh bug')).not.toBeInTheDocument();
   });
 
+  it('draws no tone on its columns: only the Jira shelves carry data-tone', async () => {
+    await renderArchive();
+    for (const c of screen.getAllByTestId('board-col')) expect(c).not.toHaveAttribute('data-tone');
+  });
+
   it('counts what each column actually holds', async () => {
     await renderArchive();
     // refactors 1, ideas 1, bugs 2 (alpha's stale one and beta's), oos 1.
