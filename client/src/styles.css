@@ -288,6 +288,13 @@ button.rail-count { cursor: pointer }
     overflow-x: hidden; overflow-y: visible;
     border-bottom: 1px solid var(--hairline);
     transition: transform .2s ease;
+    /* The open menu scrolls inside the bar rather than past the viewport. The bar stays sticky, so a menu taller than the screen used to run off its
+       bottom with nothing to scroll it: plan 4's tiles and `.rail-group` gaps grew it from 862 to 889 px at 390 × 844 (1024 px with Files projects, which
+       outgrows even 600 × 1000), and the version chip and `API connected` row in `.rail-foot` could not be reached until the page itself ran out. The cap
+       is the desktop rail's own height, font scale included; `overflow-x: hidden` already turns the y-axis into `auto`, so the cap alone makes it scroll,
+       and `overscroll-behavior` keeps the page behind from scrolling along once the menu reaches its end. A closed bar is ~53 px and never meets it. */
+    max-height: calc(100vh / var(--font-scale, 1));
+    overscroll-behavior: contain;
   }
   .rail[data-hidden="true"] { transform: translateY(-100%) }
   /* Brand, the status pills when there are any, then ☰ — which keeps `margin-left: auto`, so the pills sit beside it and need no margin of their own. */
