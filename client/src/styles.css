@@ -151,9 +151,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   padding: 24px 12px;
   background: var(--board);
 }
-/* The app's only wordmark, in the rail rather than the page: a terminal prompt — the 11/400 kicker stacked 4 px over `› manager▌` at 22/600 (§8.0;
+/* The app's only wordmark, in the rail rather than the page: a terminal prompt — `backlog manager▌` at 14/700 with the 11/400 `this machine` kicker stacked 4 px under it (§8.0;
    the dashboard's own, from its design handoff "1h"). One face, not a mono (§1 allows exactly one). Left-aligned in a column, because the prompt is a
-   line of text and the kicker labels it from above. The 24 px under it is padding rather than a margin so the phone block's `padding: 0` takes it away
+   line of text and the kicker labels it from below. The 24 px under it is padding rather than a margin so the phone block's `padding: 0` takes it away
    in the same breath. */
 .rail-brand {
   display: flex; align-items: center; gap: 10px;

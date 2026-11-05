@@ -162,12 +162,12 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   const [githubPage, setGithubPage] = useGithubPage();
 
   /*
-    The wordmark (§8.0): a `BACKLOG` kicker over `› manager▌`, a terminal prompt in the one UI face — the dashboard's own, so the two neighbouring tabs
+    The wordmark (§8.0): `backlog manager▌`, a terminal prompt in the one UI face, over a `this machine` kicker — the dashboard's own, so the two neighbouring tabs
     still draw one sidebar. The cursor is the only part that moves: it blinks while a run on this machine is working and stands solid otherwise, which
     makes it a hint and never the record — RunChip and the Runs page say it in words. Reduced motion stops the blink, not the cursor.
 
     Rendered once, in whichever home the width picks (the rail's head, or the phone bar), so the document has exactly one <h1>. It carries the app's name
-    as its `aria-label` and hides its drawn parts, because read verbatim they would be "BACKLOG › manager" and an empty box.
+    as its `aria-label` and hides its drawn parts, because read verbatim they would be "backlog manager" and "this machine" with an empty box between.
   */
   const brand = (
     <h1 className="rail-brand" aria-label="Backlog Manager">

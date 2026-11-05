@@ -488,6 +488,10 @@ describe('prPills', () => {
     const p = row({ mergeState: 'blocked', checks: 'none', review: null });
     expect(prPills(p)).toEqual([...prChips(p), { label: 'blocked', tone: 'warn' }]);
   });
+  it('adds the mergeState word for an unnamed unstable state too', () => {
+    const p = row({ mergeState: 'unstable', checks: 'none', review: null });
+    expect(prPills(p)).toEqual([...prChips(p), { label: 'unstable', tone: 'warn' }]);
+  });
   it('adds nothing when a named fact already explains the state', () => {
     const p = row({ mergeState: 'blocked', checks: 'pending' });
     expect(prPills(p)).toEqual(prChips(p));
