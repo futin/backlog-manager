@@ -4051,7 +4051,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* A blocked main half (mainBlockedBy) stays enabled for focus and the reason, so :disabled never matches: it needs its own no-pointer, no-lift rule. */
 .ui-split-main[aria-disabled='true'] { cursor: default }
 .ui-split:not(.ui-split-dashed):not(.ui-split-outline) .ui-split-main[aria-disabled='true']:hover { background: var(--ink) }
-.ui-split-outline .ui-split-main[aria-disabled='true']:hover { background: var(--strip) }
 .ui-split-dashed { background: var(--strip); border: 1px dashed var(--hairline2) }
 .ui-split-dashed .ui-split-main { background: var(--strip); color: var(--ink3) }
 .ui-split-dashed .ui-split-more { background: var(--strip); color: var(--ink3) }
@@ -4063,6 +4062,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-split-outline .ui-split-more::before { background: var(--hairline2); opacity: 1 }
 .ui-split-outline .ui-split-main:hover:not(:disabled) { background: var(--hover-fill) }
 .ui-split-outline .ui-split-more:hover:not(:disabled) { background: var(--hover-fill) }
+/* After the outline hover above: both are 0,4,0, so only source order lets the blocked half's no-lift win. */
+.ui-split-outline .ui-split-main[aria-disabled='true']:hover { background: var(--strip) }
 .ui-split-outline .ui-split-main:disabled { opacity: .45 }
 .ui-split-outline .ui-split-more:disabled { opacity: .45 }
 
