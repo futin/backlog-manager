@@ -511,10 +511,9 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   row's `quietFacts`), then `author · head → base · age` with the run warning as a warn pill. **Matrix** is a table, a column per check with a failure count in
   its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; its row toggles one expansion, pinned to the box's visible width, holding
   the key strip and the foot. **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`); a repo read cleanly with none is counted in the
-  toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — `Merge`, `Auto-merge`, `Update`, `Open ↗`, one
-  of them filled by `primaryKey` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
-  the method `Select` inside it, then `PrOutcomeLine`. A blocked key is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
-  off` on each for a sync-off repo) as its `title` and its `aria-describedby`; a key is `disabled` outright only while its PR's write runs, because the page
+  toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — the split Merge (main half from `mergeMain`: `Merge`, `Auto-merge` or `Auto-merge on`; its chevron opens `Merge menu`: Merge, Enable/Disable auto-merge, Update branch, the row `primaryKey` names ticked) and an icon link `Open #n on GitHub` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
+  the method `Select` inside it, then `PrOutcomeLine`. A blocked main half (dashed, reading `Blocked`) or menu row is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
+  off` on each for a sync-off repo) as its `title` (the half) and its `aria-describedby` (both; a row's sub-line is the reason); the split is `disabled` outright only while its PR's write runs, because the page
   owns an in-flight set keyed `<repo>#<number>` (`prKey` / `parsePrKey`, `lib/prs.ts`). The page holds ONE `confirming` key, so a second `Merge` moves the Confirm, and a write leaving, a layout
   switch, a re-read that drops the PR or blocks the merge, a filter hiding the row or a collapse closes it, nothing sent. `PrRepoNotes` says the merged
   outcomes, the `sync off` sentence and `showing n of total` once above Inbox and Matrix, then the `Can't read` lines below; Cards says the first three in each

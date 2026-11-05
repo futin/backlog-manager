@@ -44,10 +44,10 @@ import { useEffect, useRef } from 'react';
  * beside this one, and one press would close it and the dialog under it.
  *
  * The second non-dialog entry is `ui/Popover.tsx`, the panel that hangs under a control, in the same shape: mounted only while open, one call to this hook,
- * closing only itself. It has nine composers — the tracker strip's (`components/TrackerChip.tsx`), the band's Filters and Sort, and since Jira phase 2
+ * closing only itself. It has ten composers — the tracker strip's (`components/TrackerChip.tsx`), the band's Filters and Sort, and since Jira phase 2
  * the Jira chip's (`components/JiraChip.tsx`), the Jira board picker (`components/jira/JiraBoardPicker.tsx`) and the board sheet's roots search
  * (`components/jira/JiraBoardSheet.tsx`, drawn OVER that sheet, so it is the topmost entry while open) and, since Jira phase 5, `Run ▾`'s panel
- * (`components/jira/JiraRunMenu.tsx`, on the card and in the modal) `JiraDetail`'s Move-to panel (`components/jira/JiraDetail.tsx`, the Status chip's) and `SessionOpen`'s `Session actions` menu (`components/jira/SessionOpen.tsx`, on the deck card and in Detail's session card) — and each is its own entry while it is open. The Jira
+ * (`components/jira/JiraRunMenu.tsx`, on the card and in the modal) `JiraDetail`'s Move-to panel (`components/jira/JiraDetail.tsx`, the Status chip's) and `SessionOpen`'s `Session actions` menu (`components/jira/SessionOpen.tsx`, on the deck card and in Detail's session card) and, since the Runs and GitHub restyle, `PrActions`' `Merge menu` (`components/github/PrActions.tsx`, beside every pull request in all three layouts) — and each is its own entry while it is open. The Jira
  * board's Filters are `FilterBar`'s own panel, already counted. Its click-outside is its own `pointerdown` listener — this module owns the key, not the
  * pointer.
  *

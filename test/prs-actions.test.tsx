@@ -10,6 +10,7 @@ import { PrActions } from '../client/src/components/github/PrActions';
 import { PrFoot } from '../client/src/components/github/PrFoot';
 import { PrOutcomeLine } from '../client/src/components/github/PrOutcomeLine';
 import type { PrOutcome } from '../client/src/lib/prs';
+import { mainOf, moreOf, openOf, type MenuRowName } from './helpers/pr-keys';
 import type { PrRepoView, PrWriteResult, PullRequestRow } from '../shared/types';
 
 /**
@@ -111,7 +112,7 @@ async function answerAll(): Promise<void> {
 }
 
 /** The page, reduced to what the strip and the foot need from it: one confirming key, and a write that closes a matching Confirm before the call. */
-function Harness({ rows, busy = false }: { rows: Row[]; busy?: boolean }) {
+function Harness({ rows, busy = false, blockedText = false }: { rows: Row[]; busy?: boolean; blockedText?: boolean }) {
   const [confirming, setConfirming] = useState<string | null>(null);
   return (
     <>
@@ -133,6 +134,7 @@ function Harness({ rows, busy = false }: { rows: Row[]; busy?: boolean }) {
               onMerge={() => setConfirming(key)}
               onWrite={onWrite}
               omitUpdatingReason={omitUpdatingReason}
+              blockedText={blockedText}
             />
             <PrFoot
               repo={r}
@@ -151,8 +153,17 @@ function Harness({ rows, busy = false }: { rows: Row[]; busy?: boolean }) {
 }
 
 const strip = (key: string) => screen.getByTestId(`pr-keys-${key}`);
-const key = (k: string, name: string) => within(strip(k)).getByRole('button', { name });
-const openLink = (k: string) => within(strip(k)).getByRole('link', { name: 'Open ↗' });
+/** The main half of the split Merge: `Merge #n`, `Auto-merge #n` or `Auto-merge on #n`, whichever `mergeMain` says. */
+const main = (k: string) => mainOf(strip(k));
+/** The chevron: `Merge options for #n`. */
+const more = (k: string) => moreOf(strip(k));
+const openLink = (k: string) => openOf(strip(k));
+const menu = (k: string) => within(strip(k)).getByRole('dialog', { name: 'Merge menu' });
+/** Opens the Merge menu of a row and presses one of its rows, the way a person does. */
+async function pick(user: ReturnType<typeof userEvent.setup>, k: string, row: MenuRowName): Promise<void> {
+  await user.click(more(k));
+  await user.click(within(menu(k)).getByRole('button', { name: row }));
+}
 const why = (k: string) => screen.getByTestId(`row-${k}`).querySelector('.prs-why');
 
 /** The element a control's `aria-describedby` points at, or `null`. */
@@ -161,50 +172,108 @@ function description(el: HTMLElement): HTMLElement | null {
   return id === null ? null : document.getElementById(id);
 }
 
-describe('PrActions — the four keys', () => {
-  it('draws Merge, Auto-merge, Update and Open ↗ in that order, Open ↗ a link to the PR in a new tab', () => {
+describe('PrActions — the split Merge', () => {
+  it('draws the split Merge and the Open link, in that order, the link to the PR in a new tab with no referrer', () => {
     render(<Harness rows={[x5()]} />);
     const root = strip('futin/x#5');
     expect(root).toHaveClass('prs-keys-side');
     const keys = root.querySelector('.prs-keys');
     expect(keys).not.toBeNull();
-    expect([...keys!.querySelectorAll('.ui-chip')]).toEqual([
-      key('futin/x#5', 'Merge'),
-      key('futin/x#5', 'Auto-merge'),
-      key('futin/x#5', 'Update'),
-      openLink('futin/x#5')
-    ]);
+    expect([...keys!.children].map((el) => el.className.split(' ')[0])).toEqual(['prs-keys-merge', 'ui-chip']);
+    expect(within(keys!.firstElementChild as HTMLElement).getByRole('group')).toHaveClass('ui-split');
     expect(openLink('futin/x#5')).toHaveAttribute('href', 'https://github.com/futin/x/pull/5');
     expect(openLink('futin/x#5')).toHaveAttribute('target', '_blank');
-    // An open key carries none of the blocked key's attributes.
-    expect(key('futin/x#5', 'Merge')).not.toHaveAttribute('aria-disabled');
-    expect(key('futin/x#5', 'Merge')).not.toHaveAttribute('aria-describedby');
+    expect(openLink('futin/x#5')).toHaveAttribute('rel', expect.stringContaining('noreferrer'));
+    expect(openLink('futin/x#5')).not.toHaveAttribute('aria-disabled');
+    // The main half is open: none of a blocked half's attributes.
+    expect(main('futin/x#5')).toHaveTextContent('Merge');
+    expect(main('futin/x#5')).not.toHaveAttribute('aria-disabled');
+    expect(main('futin/x#5')).not.toHaveAttribute('aria-describedby');
+    expect(more('futin/x#5')).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('fills the primary key ink and leaves the rest outline — Update on a behind PR, Merge on a clean one, none on a failing one', () => {
+  it('fills the main half ink and ticks the primary row — Update branch on a behind PR, Merge on a clean one, nothing on a failing one', async () => {
+    const user = userEvent.setup();
     render(<Harness rows={[x5({ mergeState: 'behind' }), y6({ checks: 'failure' }), { ...x5(), repo: repo('futin/z') }]} />);
-    expect(key('futin/x#5', 'Update')).toHaveClass('ui-chip-ink');
-    for (const name of ['Merge', 'Auto-merge']) expect(key('futin/x#5', name)).toHaveClass('ui-chip-outline');
-    expect(openLink('futin/x#5')).toHaveClass('ui-chip-outline');
-    expect(strip('futin/y#6').querySelector('.ui-chip-ink')).toBeNull();
-    expect(key('futin/z#5', 'Merge')).toHaveClass('ui-chip-ink');
-    expect(key('futin/z#5', 'Update')).toHaveClass('ui-chip-outline');
+    expect(strip('futin/x#5').querySelector('.ui-split')).toHaveClass('ui-split-outline');
+    expect(strip('futin/z#5').querySelector('.ui-split')).not.toHaveClass('ui-split-outline');
+    await user.click(more('futin/x#5'));
+    expect(menu('futin/x#5').querySelectorAll('.prs-keys-tick')).toHaveLength(1);
+    expect(within(menu('futin/x#5')).getByRole('button', { name: 'Update branch' }).querySelector('.prs-keys-tick')).toHaveAttribute('aria-hidden', 'true');
+    await user.click(more('futin/z#5'));
+    expect(within(menu('futin/z#5')).getByRole('button', { name: 'Merge' }).querySelector('.prs-keys-tick')).not.toBeNull();
+    expect(within(menu('futin/z#5')).getByRole('button', { name: 'Update branch' }).querySelector('.prs-keys-tick')).toBeNull();
+    await user.click(more('futin/y#6'));
+    expect(menu('futin/y#6').querySelector('.prs-keys-tick')).toBeNull();
+    expect(strip('futin/y#6').querySelector('.ui-split')).toHaveClass('ui-split-dashed');
+  });
+
+  it('names the main half by its mode: Merge #12, Auto-merge #12 while checks run, Auto-merge on #12 once armed', () => {
+    const armed = { method: 'squash' as const, enabledAt: '2026-10-29T11:00:00Z' };
+    render(
+      <Harness
+        rows={[
+          x5({ number: 12, url: 'https://github.com/futin/x/pull/12' }),
+          { ...x5({ number: 13, checks: 'pending' }), repo: repo('futin/p') },
+          { ...x5({ number: 14, autoMerge: armed }), repo: repo('futin/q') }
+        ]}
+      />
+    );
+    expect(main('futin/x#12')).toHaveTextContent(/^Merge$/);
+    expect(more('futin/x#12')).toHaveAccessibleName('Merge options for #12');
+    expect(main('futin/p#13')).toHaveAccessibleName('Auto-merge #13');
+    expect(main('futin/p#13')).toHaveTextContent(/^Auto-merge$/);
+    expect(main('futin/q#14')).toHaveAccessibleName('Auto-merge on #14');
+    expect(main('futin/q#14')).toHaveTextContent(/^Auto-merge on$/);
+    expect(main('futin/q#14')).toBeEnabled();
+    expect(main('futin/q#14')).not.toHaveAttribute('aria-disabled');
+    expect(openLink('futin/x#12')).toHaveAccessibleName('Open #12 on GitHub');
+  });
+
+  it('opens the menu with exactly Merge, Enable auto-merge and Update branch, focus on the first, and Escape closes it back onto the chevron', async () => {
+    const user = userEvent.setup();
+    render(<Harness rows={[x5({ mergeState: 'behind' })]} />);
+    expect(screen.queryByRole('dialog', { name: 'Merge menu' })).toBeNull();
+    await user.click(more('futin/x#5'));
+    expect(more('futin/x#5')).toHaveAttribute('aria-expanded', 'true');
+    const rows = within(menu('futin/x#5')).getAllByRole('button');
+    expect(rows.map((b) => b.getAttribute('aria-labelledby') && document.getElementById(b.getAttribute('aria-labelledby')!)?.textContent)).toEqual([
+      'Merge',
+      'Enable auto-merge',
+      'Update branch'
+    ]);
+    expect(menu('futin/x#5')).toHaveTextContent('asks first, then merges into main');
+    expect(menu('futin/x#5')).toHaveTextContent('GitHub merges when checks pass');
+    expect(menu('futin/x#5')).toHaveTextContent('merge main into feature/5');
+    expect(rows[0]).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Merge menu' })).toBeNull();
+    expect(more('futin/x#5')).toHaveFocus();
+  });
+
+  it('lands focus on the first ENABLED row when the first is blocked', async () => {
+    const user = userEvent.setup();
+    render(<Harness rows={[x5({ checks: 'failure' })]} />);
+    await user.click(more('futin/x#5'));
+    expect(within(menu('futin/x#5')).getByRole('button', { name: 'Merge' })).toHaveAttribute('aria-disabled', 'true');
+    expect(within(menu('futin/x#5')).getByRole('button', { name: 'Update branch' })).toHaveFocus();
   });
 });
 
 describe('PrActions + PrFoot — the merge Confirm', () => {
-  it('opens under its own row with the method Select and the question, and accept posts once with the picked method and head SHA', async () => {
+  it('Merge #n opens under its own row with the method Select and the question, and accept posts once with the picked method and head SHA', async () => {
     const user = userEvent.setup();
     render(<Harness rows={[x5(), y6()]} />);
-    await user.click(key('futin/x#5', 'Merge'));
+    expect(main('futin/x#5')).toHaveAccessibleName('Merge #5');
+    await user.click(main('futin/x#5'));
     expect(screen.getAllByTestId('pr-merge-confirm')).toHaveLength(1);
     const confirm = within(screen.getByTestId('row-futin/x#5')).getByTestId('pr-merge-confirm');
     expect(confirm).toHaveTextContent('Merge #5 into main?');
     const select = within(confirm).getByRole<HTMLSelectElement>('combobox', { name: 'Merge method' });
     expect(within(select).getAllByRole<HTMLOptionElement>('option').map((o) => o.value)).toEqual(['squash', 'merge']);
     expect(select.value).toBe('squash');
-    // Merge does not swap the strip: the key is still there, unchanged.
-    expect(key('futin/x#5', 'Merge')).toBeInTheDocument();
+    // Merge does not swap the strip: the main half is still there, unchanged.
+    expect(main('futin/x#5')).toBeInTheDocument();
     expect(posts).toEqual([]);
 
     await user.selectOptions(select, 'merge');
@@ -218,13 +287,24 @@ describe('PrActions + PrFoot — the merge Confirm', () => {
     expect(posts).toHaveLength(1);
   });
 
+  it('the menu\'s Merge row asks the same question and closes the menu, leaving focus to the Confirm\'s safe answer', async () => {
+    const user = userEvent.setup();
+    render(<Harness rows={[x5()]} />);
+    await pick(user, 'futin/x#5', 'Merge');
+    expect(screen.getByTestId('pr-merge-confirm')).toHaveTextContent('Merge #5 into main?');
+    expect(screen.queryByRole('dialog', { name: 'Merge menu' })).toBeNull();
+    // The row hands focus to the chevron, and the Confirm that mounts in the same beat takes it for its safe answer (`Confirm`'s own rule), so it ends there.
+    expect(screen.getByTestId('pr-merge-confirm-dismiss')).toHaveFocus();
+    expect(posts).toEqual([]);
+  });
+
   it('sends nothing on Cancel or Escape, and either closes the Confirm', async () => {
     const user = userEvent.setup();
     render(<Harness rows={[x5()]} />);
-    await user.click(key('futin/x#5', 'Merge'));
+    await user.click(main('futin/x#5'));
     await user.click(screen.getByTestId('pr-merge-confirm-dismiss'));
     expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
-    await user.click(key('futin/x#5', 'Merge'));
+    await user.click(main('futin/x#5'));
     expect(screen.getByTestId('pr-merge-confirm')).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
@@ -235,63 +315,111 @@ describe('PrActions + PrFoot — the merge Confirm', () => {
   it('keeps one Confirm when Merge is clicked twice', async () => {
     const user = userEvent.setup();
     render(<Harness rows={[x5()]} />);
-    await user.click(key('futin/x#5', 'Merge'));
-    await user.click(key('futin/x#5', 'Merge'));
+    await user.click(main('futin/x#5'));
+    await user.click(main('futin/x#5'));
     expect(screen.getAllByTestId('pr-merge-confirm')).toHaveLength(1);
   });
 
-  it('closes the open Confirm when Auto-merge is clicked, sending one auto-merge POST and no merge', async () => {
+  it('closes the open Confirm when Enable auto-merge is picked, sending one auto-merge POST and no merge', async () => {
     const user = userEvent.setup();
     render(<Harness rows={[x5()]} />);
-    await user.click(key('futin/x#5', 'Merge'));
-    await user.click(key('futin/x#5', 'Auto-merge'));
+    await user.click(main('futin/x#5'));
+    await pick(user, 'futin/x#5', 'Enable auto-merge');
     expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
     expect(posts).toEqual([{ url: '/api/prs/auto-merge', body: { repo: 'futin/x', number: 5, enable: true, method: 'squash' } }]);
   });
 });
 
-describe('PrActions — blocked keys and the why-line', () => {
-  it('failing checks: Merge is aria-disabled with its reason as title and description, no why-line, and a click opens nothing', async () => {
+describe('PrActions — blocked halves and the why-line', () => {
+  it('failing checks: the main half reads Blocked, aria-disabled, titled and described by its reason, and a click opens nothing; the chevron still opens', async () => {
     const user = userEvent.setup();
     render(<Harness rows={[x5({ checks: 'failure' })]} />);
-    const merge = key('futin/x#5', 'Merge');
+    const merge = main('futin/x#5');
+    expect(merge).toHaveTextContent(/^Blocked$/);
+    expect(merge).toHaveAccessibleName('Merge #5');
     expect(merge).toHaveAttribute('aria-disabled', 'true');
     expect(merge).not.toHaveAttribute('disabled');
     expect(merge).toHaveAttribute('title', 'checks failing');
     expect(description(merge)).toHaveTextContent(/^checks failing$/);
     expect(description(merge)).toHaveClass('sr-only');
+    expect(strip('futin/x#5').querySelector('.ui-split')).toHaveClass('ui-split-dashed');
     expect(why('futin/x#5')).toBeNull();
     await user.click(merge);
     expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
     expect(posts).toEqual([]);
+    expect(more('futin/x#5')).toBeEnabled();
+    await user.click(more('futin/x#5'));
+    const rows = within(menu('futin/x#5')).getAllByRole('button');
+    expect(rows.map((b) => document.getElementById(b.getAttribute('aria-labelledby')!)?.textContent)).toEqual(['Merge', 'Enable auto-merge', 'Update branch']);
+    // Merge and Enable auto-merge share the PR's own reason; Update branch is open.
+    expect(rows[0]).toHaveAttribute('aria-disabled', 'true');
+    expect(rows[1]).toHaveAttribute('aria-disabled', 'true');
+    expect(rows[2]).not.toHaveAttribute('aria-disabled');
+    expect(description(rows[0])).toHaveTextContent(/^checks failing$/);
+    expect(rows[0]).not.toHaveTextContent('asks first');
   });
 
-  it('a repo without auto-merge says so on the why-line, and Auto-merge is aria-disabled', async () => {
+  it('a repo without auto-merge says so on the why-line, and the Enable auto-merge row is aria-disabled with the reason as its sub-line', async () => {
     const user = userEvent.setup();
     render(<Harness rows={[x5({}, { autoMergeAllowed: false })]} />);
     expect(why('futin/x#5')).toHaveTextContent(/^auto-merge not enabled on the repo$/);
-    const auto = key('futin/x#5', 'Auto-merge');
+    await user.click(more('futin/x#5'));
+    const auto = within(menu('futin/x#5')).getByRole('button', { name: 'Enable auto-merge' });
     expect(auto).toHaveAttribute('aria-disabled', 'true');
-    expect(auto).toHaveAttribute('title', 'auto-merge not enabled on the repo');
+    expect(description(auto)).toHaveTextContent(/^auto-merge not enabled on the repo$/);
+    expect(auto).not.toHaveTextContent('GitHub merges when checks pass');
     await user.click(auto);
     expect(posts).toEqual([]);
+    // A blocked row keeps the menu open: nothing was picked.
+    expect(screen.getByRole('dialog', { name: 'Merge menu' })).toBeInTheDocument();
   });
 
-  it('sync off blocks the three buttons with `sync off`, says it once on the why-line, and leaves Open ↗ a link', async () => {
+  it('sync off blocks the main half and every menu row with `sync off`, says it once on the why-line, and leaves Open a link', async () => {
     const user = userEvent.setup();
     render(<Harness rows={[x5({ mergeState: 'behind' }, { syncOff: 'sync is off for futin/x — turn it on in GitHub › Settings' })]} />);
-    for (const name of ['Merge', 'Auto-merge', 'Update']) {
-      const k = key('futin/x#5', name);
-      expect(k).toHaveAttribute('aria-disabled', 'true');
-      expect(k).toHaveAttribute('title', 'sync off');
-      expect(description(k)).toHaveTextContent(/^sync off$/);
-      await user.click(k);
+    const m = main('futin/x#5');
+    expect(m).toHaveAttribute('aria-disabled', 'true');
+    expect(m).toHaveAttribute('title', 'sync off');
+    expect(description(m)).toHaveTextContent(/^sync off$/);
+    await user.click(m);
+    await user.click(more('futin/x#5'));
+    for (const name of ['Merge', 'Enable auto-merge', 'Update branch'] as const) {
+      const r = within(menu('futin/x#5')).getByRole('button', { name });
+      expect(r).toHaveAttribute('aria-disabled', 'true');
+      expect(description(r)).toHaveTextContent(/^sync off$/);
+      await user.click(r);
     }
     expect(why('futin/x#5')).toHaveTextContent(/^sync off$/);
     expect(openLink('futin/x#5')).toHaveAttribute('href', 'https://github.com/futin/x/pull/5');
     expect(openLink('futin/x#5')).not.toHaveAttribute('aria-disabled');
     expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
     expect(posts).toEqual([]);
+  });
+
+  it('an armed PR on a sync-off repo keeps its name, Auto-merge on #12, but reads Blocked and sends nothing; Disable auto-merge is blocked too', async () => {
+    const user = userEvent.setup();
+    const armed = { method: 'squash' as const, enabledAt: '2026-10-29T11:00:00Z' };
+    render(<Harness rows={[x5({ number: 12, autoMerge: armed }, { syncOff: 'sync is off for futin/x' })]} />);
+    const m = main('futin/x#12');
+    expect(m).toHaveAccessibleName('Auto-merge on #12');
+    expect(m).toHaveTextContent(/^Blocked$/);
+    expect(m).toHaveAttribute('aria-disabled', 'true');
+    expect(m).toHaveAttribute('title', 'sync off');
+    await user.click(m);
+    expect(posts).toEqual([]);
+    expect(more('futin/x#12')).toBeEnabled();
+    await user.click(more('futin/x#12'));
+    for (const name of ['Merge', 'Disable auto-merge', 'Update branch'] as const) {
+      const r = within(menu('futin/x#12')).getByRole('button', { name });
+      expect(r).toHaveAttribute('aria-disabled', 'true');
+      expect(description(r)).toHaveTextContent(/^sync off$/);
+    }
+  });
+
+  it('shows the reason in place of Blocked with blockedText', () => {
+    render(<Harness rows={[x5({ checks: 'failure' })]} blockedText />);
+    expect(main('futin/x#5')).toHaveTextContent(/^checks failing$/);
+    expect(main('futin/x#5')).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('leaves updating… off the why-line with omitUpdatingReason, and says it without', () => {
@@ -301,52 +429,86 @@ describe('PrActions — blocked keys and the why-line', () => {
   });
 });
 
-describe('PrActions — Auto-merge and Update', () => {
-  it('arms an unarmed PR with the default method, and sends no method when the repo allows none', async () => {
+describe('PrActions — auto-merge and Update branch', () => {
+  it('while checks run, the main half arms with the default method, and sends no method when the repo allows none', async () => {
+    const user = userEvent.setup();
+    render(<Harness rows={[x5({ checks: 'pending' }), y6({ checks: 'pending' }, { methods: [] })]} />);
+    expect(main('futin/x#5')).toHaveAccessibleName('Auto-merge #5');
+    await user.click(main('futin/x#5'));
+    await user.click(main('futin/y#6'));
+    expect(posts).toEqual([
+      { url: '/api/prs/auto-merge', body: { repo: 'futin/x', number: 5, enable: true, method: 'squash' } },
+      { url: '/api/prs/auto-merge', body: { repo: 'futin/y', number: 6, enable: true } }
+    ]);
+    expect(screen.queryByTestId('pr-merge-confirm')).not.toBeInTheDocument();
+  });
+
+  it('Enable auto-merge arms a passing PR with the default method, and sends no method when the repo allows none', async () => {
     const user = userEvent.setup();
     render(<Harness rows={[x5(), y6({}, { methods: [] })]} />);
-    const auto = key('futin/x#5', 'Auto-merge');
-    expect(auto).toHaveAttribute('aria-pressed', 'false');
-    await user.click(auto);
-    await user.click(key('futin/y#6', 'Auto-merge'));
+    await pick(user, 'futin/x#5', 'Enable auto-merge');
+    await pick(user, 'futin/y#6', 'Enable auto-merge');
     expect(posts).toEqual([
       { url: '/api/prs/auto-merge', body: { repo: 'futin/x', number: 5, enable: true, method: 'squash' } },
       { url: '/api/prs/auto-merge', body: { repo: 'futin/y', number: 6, enable: true } }
     ]);
   });
 
-  it('reads Auto-merge ✓ on an armed PR, named Auto-merge and pressed, and disarms it even with failing checks', async () => {
+  it('an armed PR reads Auto-merge on #5, enabled, disarms with one POST even with failing checks, and the menu row reads Disable auto-merge', async () => {
     const user = userEvent.setup();
-    render(<Harness rows={[x5({ checks: 'failure', autoMerge: { method: 'merge', enabledAt: '2026-10-29T11:00:00Z' } })]} />);
-    const auto = key('futin/x#5', 'Auto-merge');
-    expect(auto).toHaveTextContent('Auto-merge ✓');
-    expect(auto).toHaveAttribute('aria-pressed', 'true');
-    expect(auto).not.toHaveAttribute('aria-disabled');
-    await user.click(auto);
+    const armed = { method: 'merge' as const, enabledAt: '2026-10-29T11:00:00Z' };
+    render(<Harness rows={[x5({ checks: 'failure', autoMerge: armed }), y6({ autoMerge: armed })]} />);
+    const m = main('futin/x#5');
+    expect(m).toHaveAccessibleName('Auto-merge on #5');
+    expect(m).toBeEnabled();
+    expect(m).not.toHaveAttribute('aria-disabled');
+    await user.click(m);
     expect(posts).toEqual([{ url: '/api/prs/auto-merge', body: { repo: 'futin/x', number: 5, enable: false } }]);
+    await user.click(more('futin/y#6'));
+    expect(within(menu('futin/y#6')).queryByRole('button', { name: 'Enable auto-merge' })).toBeNull();
+    expect(menu('futin/y#6')).toHaveTextContent('GitHub stops waiting to merge');
+    await user.click(within(menu('futin/y#6')).getByRole('button', { name: 'Disable auto-merge' }));
+    expect(posts[1]).toEqual({ url: '/api/prs/auto-merge', body: { repo: 'futin/y', number: 6, enable: false } });
+    expect(screen.queryByRole('dialog', { name: 'Merge menu' })).toBeNull();
   });
 
-  it('updates a behind PR with one POST of its own head, and holds Update aria-disabled while the PR is updating', async () => {
+  it('Update branch sends one POST of its own head, and is aria-disabled while the PR is updating', async () => {
     const user = userEvent.setup();
     render(<Harness rows={[x5({ mergeState: 'behind' }), { ...y6({ mergeState: 'behind' }), updating: true }]} />);
-    await user.click(key('futin/x#5', 'Update'));
+    await pick(user, 'futin/x#5', 'Update branch');
     expect(posts).toEqual([{ url: '/api/prs/update-branch', body: { repo: 'futin/x', number: 5, headSha: SHA5 } }]);
-    const update = key('futin/y#6', 'Update');
+    expect(more('futin/x#5')).toHaveFocus();
+    await user.click(more('futin/y#6'));
+    const update = within(menu('futin/y#6')).getByRole('button', { name: 'Update branch' });
     expect(update).toHaveAttribute('aria-disabled', 'true');
-    expect(update).toHaveAttribute('title', 'updating…');
-    expect(update).not.toHaveClass('ui-chip-ink');
+    expect(description(update)).toHaveTextContent(/^updating…$/);
     await user.click(update);
     expect(posts).toHaveLength(1);
+  });
+
+  it('a blocked Update branch row says why it is blocked', async () => {
+    const user = userEvent.setup();
+    render(<Harness rows={[x5({ canUpdateBranch: false })]} />);
+    await user.click(more('futin/x#5'));
+    const update = within(menu('futin/x#5')).getByRole('button', { name: 'Update branch' });
+    expect(update).toHaveAttribute('aria-disabled', 'true');
+    expect(description(update)).toHaveTextContent(/^already up to date$/);
   });
 });
 
 describe('PrActions — a write in flight', () => {
-  it('disables the three buttons but never Open ↗ while busy, and frees them when it is not', () => {
-    const { rerender } = render(<Harness rows={[x5({ mergeState: 'behind' })]} busy />);
-    for (const name of ['Merge', 'Auto-merge', 'Update']) expect(key('futin/x#5', name)).toBeDisabled();
+  it('disables the split while busy, closes an open menu, keeps Open a link, and frees the split when it is not', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Harness rows={[x5({ mergeState: 'behind' })]} />);
+    await user.click(more('futin/x#5'));
+    rerender(<Harness rows={[x5({ mergeState: 'behind' })]} busy />);
+    expect(screen.queryByRole('dialog', { name: 'Merge menu' })).toBeNull();
+    expect(main('futin/x#5')).toBeDisabled();
+    expect(more('futin/x#5')).toBeDisabled();
     expect(openLink('futin/x#5')).not.toHaveAttribute('disabled');
     rerender(<Harness rows={[x5({ mergeState: 'behind' })]} busy={false} />);
-    for (const name of ['Merge', 'Auto-merge', 'Update']) expect(key('futin/x#5', name)).toBeEnabled();
+    expect(main('futin/x#5')).toBeEnabled();
+    expect(more('futin/x#5')).toBeEnabled();
   });
 });
 

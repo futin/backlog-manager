@@ -3,6 +3,7 @@
  */
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { mainOf, moreOf, menuRow } from './helpers/pr-keys';
 import '@testing-library/jest-dom';
 
 import PullRequestsView from '../client/src/components/github/PullRequestsView';
@@ -203,7 +204,19 @@ async function mount(props: { onOpenSettings?: () => void } = {}) {
 }
 
 const row = (key: string): HTMLElement => screen.getByTestId(`pr-row-${key}`);
-const action = (key: string, name: string | RegExp): HTMLElement => within(row(key)).getByRole('button', { name });
+/**
+ * A control of one row's key strip, by the name it had before the split Merge: `Merge` is the main half (whatever mode it is in), `Auto-merge` is the menu's
+ * Enable/Disable auto-merge row and `Update` its Update branch row. A menu row is read through `menuRow`, which opens the menu itself.
+ */
+const strip = (key: string): HTMLElement => row(key).querySelector('.prs-keys-side') as HTMLElement;
+const mainHalf = (key: string): HTMLElement => mainOf(strip(key));
+const chevron = (key: string): HTMLElement => moreOf(strip(key));
+function action(key: string, name: 'Merge' | 'Auto-merge' | 'Update'): HTMLElement {
+  if (name === 'Merge') return mainHalf(key);
+  if (name === 'Update') return menuRow(strip(key), 'Update branch');
+  const armed = within(row(key)).queryByRole('button', { name: /^Auto-merge on #/ }) !== null;
+  return menuRow(strip(key), armed ? 'Disable auto-merge' : 'Enable auto-merge');
+}
 const keysIn = (root: ParentNode = document): string[] =>
   [...root.querySelectorAll('[data-testid^="pr-row-"]')].map((el) => el.getAttribute('data-testid') ?? '');
 
@@ -444,7 +457,7 @@ describe('PullRequestsView — blocked actions', () => {
     payload.repos[1] = { ...payload.repos[1], syncOff: SYNC_OFF_Y };
     payload.repos[0] = { ...payload.repos[0], autoMergeAllowed: true };
     await mount();
-    for (const name of ['Merge', 'Auto-merge', 'Update']) {
+    for (const name of ['Merge', 'Auto-merge', 'Update'] as const) {
       const key = action('futin/y#12', name);
       expect(key).toHaveAttribute('aria-disabled', 'true');
       expect(key).toHaveAccessibleDescription('sync off');
@@ -484,15 +497,16 @@ describe('PullRequestsView — blocked actions', () => {
     }) as unknown as typeof fetch;
     const { user } = await mount();
     await user.click(action('futin/y#12', 'Update'));
-    expect(action('futin/y#12', 'Merge')).toBeDisabled();
-    expect(action('futin/y#12', 'Auto-merge')).toBeDisabled();
-    expect(action('futin/y#12', 'Update')).toBeDisabled();
-    expect(action('futin/x#9', 'Merge')).toBeEnabled();
+    expect(mainHalf('futin/y#12')).toBeDisabled();
+    expect(chevron('futin/y#12')).toBeDisabled();
+    expect(mainHalf('futin/x#9')).toBeEnabled();
+    expect(chevron('futin/x#9')).toBeEnabled();
     await act(async () => {
       release({ ok: true, status: 202, json: () => Promise.resolve({ ok: true, outcome: 'update-requested', pr: null, reread: false }) } as Response);
     });
     await flush();
-    expect(action('futin/y#12', 'Merge')).toBeEnabled();
+    expect(mainHalf('futin/y#12')).toBeEnabled();
+    expect(chevron('futin/y#12')).toBeEnabled();
   });
 });
 
@@ -507,16 +521,17 @@ describe('PullRequestsView — auto-merge and update branch', () => {
     expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent('auto-merge armed');
   });
 
-  it('reads Auto-merge ✓ on an armed PR, and a click sends enable: false', async () => {
+  it('reads Auto-merge on #12 on an armed PR, and a click sends enable: false — from the main half and from the menu row alike', async () => {
     payload.repos[1].prs = [{ ...PR12, autoMerge: { method: 'merge', enabledAt: ago(3_600_000) } }];
     answerPost = () => ({ status: 200, body: { ok: true, outcome: 'auto-merge-disabled', pr: null, reread: true } });
     await mount();
     expect(within(row('futin/y#12')).getByText('auto-merge · merge')).toBeInTheDocument();
-    const auto = action('futin/y#12', 'Auto-merge');
-    expect(auto).toHaveTextContent('Auto-merge ✓');
-    expect(auto).toHaveAttribute('aria-pressed', 'true');
+    const auto = mainHalf('futin/y#12');
+    expect(auto).toHaveAccessibleName('Auto-merge on #12');
+    expect(auto).toHaveTextContent(/^Auto-merge on$/);
     await clickAndSettle(auto);
     expect(posts.map((p) => p.body)).toEqual([{ repo: 'futin/y', number: 12, enable: false }]);
+    expect(action('futin/y#12', 'Auto-merge')).toHaveTextContent('Disable auto-merge');
   });
 
   it('says branch updated once a re-read brings a new head SHA, and still says it 30 s and a read later', async () => {
@@ -964,10 +979,10 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
       await user.click(screen.getByTestId('pr-mrow-futin/y#12'));
       strip = screen.getByTestId('pr-expand-futin/y#12');
     } else strip = row('futin/y#12');
-    if (kind === 'update') await clickAndSettle(within(strip).getByRole('button', { name: 'Update' }));
-    else if (kind === 'auto-merge') await clickAndSettle(within(strip).getByRole('button', { name: 'Auto-merge' }));
+    if (kind === 'update') await clickAndSettle(menuRow(strip, 'Update branch'));
+    else if (kind === 'auto-merge') await clickAndSettle(menuRow(strip, 'Enable auto-merge'));
     else {
-      await user.click(within(strip).getByRole('button', { name: 'Merge' }));
+      await user.click(mainOf(strip));
       await clickAndSettle(within(strip).getByTestId('pr-merge-confirm-accept'));
     }
   }
@@ -1028,23 +1043,25 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
     const { user } = await mount();
 
     await user.click(screen.getByTestId('pr-mrow-futin/y#12'));
-    await user.click(within(screen.getByTestId('pr-expand-futin/y#12')).getByRole('button', { name: 'Update' }));
+    await user.click(menuRow(screen.getByTestId('pr-expand-futin/y#12'), 'Update branch'));
 
     // Cards: a full strip drawn after the write started — every key of that PR is still off, the neighbour's are not.
     await switchTo(user, 'Cards');
-    for (const name of ['Merge', 'Auto-merge', 'Update']) expect(action('futin/y#12', name)).toBeDisabled();
-    expect(action('futin/x#9', 'Merge')).toBeEnabled();
+    expect(mainHalf('futin/y#12')).toBeDisabled();
+    expect(chevron('futin/y#12')).toBeDisabled();
+    expect(mainHalf('futin/x#9')).toBeEnabled();
 
     // Inbox: a strip mounted fresh by the switch must not forget the write either.
     await switchTo(user, 'Inbox');
-    for (const name of ['Merge', 'Auto-merge', 'Update']) expect(action('futin/y#12', name)).toBeDisabled();
+    expect(mainHalf('futin/y#12')).toBeDisabled();
+    expect(chevron('futin/y#12')).toBeDisabled();
 
     await act(async () => {
       release({ ok: true, status: 202, json: () => Promise.resolve({ ok: true, outcome: 'update-requested', pr: null, reread: false }) } as Response);
     });
     await flush();
-    expect(action('futin/y#12', 'Merge')).toBeEnabled();
-    expect(action('futin/y#12', 'Auto-merge')).toBeEnabled();
+    expect(mainHalf('futin/y#12')).toBeEnabled();
+    expect(chevron('futin/y#12')).toBeEnabled();
   });
 
   /** A write that ENDS badly must release its PR as surely as one that ends well, or its keys stay dead until a reload. */
@@ -1083,7 +1100,8 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
       if (layout === 'cards') await switchTo(user, 'Cards');
       if (layout === 'matrix') await user.click(screen.getByTestId('pr-mrow-futin/y#12'));
       const strip = layout === 'matrix' ? screen.getByTestId('pr-expand-futin/y#12') : row('futin/y#12');
-      for (const name of ['Merge', 'Auto-merge', 'Update']) expect(within(strip).getByRole('button', { name })).toBeEnabled();
+      expect(mainOf(strip)).toBeEnabled();
+      expect(moreOf(strip)).toBeEnabled();
     });
   });
 });

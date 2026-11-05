@@ -9,6 +9,7 @@ import '@testing-library/jest-dom';
 import { PrMatrix } from '../client/src/components/github/PrMatrix';
 import type { PrLayoutProps } from '../client/src/components/github/pr-layout-props';
 import { prRunWarning } from '../client/src/lib/pr-run';
+import { mainOf, moreOf, openOf, menuRow } from './helpers/pr-keys';
 import type { OrchestratorRun, ProjectSummary, PrRepoView, PullRequestRow, RunQueueItem } from '../shared/types';
 
 /**
@@ -107,9 +108,8 @@ function hp(repos: PrRepoView[], over: Partial<PrLayoutProps> = {}) {
   return rest;
 }
 
-/** The `Merge` key of an open expansion — the Confirm's accept is also named `Merge`, so the key is found in the strip. */
-const mergeKey = (key: string) =>
-  within(screen.getByTestId(`pr-expand-${key}`).querySelector('.prs-keys-side') as HTMLElement).getByRole('button', { name: 'Merge' });
+/** The main half of the split Merge in an open expansion — the Confirm's accept is also named `Merge`, so the key is found in the strip. */
+const mergeKey = (key: string) => mainOf(screen.getByTestId(`pr-expand-${key}`).querySelector('.prs-keys-side') as HTMLElement);
 
 const row = (key: string) => screen.getByTestId(`pr-mrow-${key}`);
 const rowIds = () => screen.getAllByTestId(/^pr-mrow-/).map((el) => el.getAttribute('data-testid'));
@@ -200,7 +200,7 @@ describe('PrMatrix — header, cells and order', () => {
 });
 
 describe('PrMatrix — the expansion', () => {
-  it('opens the four keys under a row on click and reaches the merge confirm through Merge', async () => {
+  it('opens the split Merge and Open link under a row on click and reaches the merge confirm through Merge', async () => {
     const user = userEvent.setup();
     render(<Harness {...hp([repo('a/x', [clean])])} />);
     expect(screen.queryByTestId('pr-expand-a/x#3')).not.toBeInTheDocument();
@@ -208,8 +208,8 @@ describe('PrMatrix — the expansion', () => {
     expect(row('a/x#3')).toHaveAttribute('aria-expanded', 'true');
     const expansion = screen.getByTestId('pr-expand-a/x#3');
     const keys = within(expansion.querySelector('.prs-keys') as HTMLElement);
-    expect(keys.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Merge', 'Auto-merge', 'Update']);
-    expect(keys.getByRole('link', { name: 'Open ↗' })).toHaveAttribute('href', 'https://github.com/a/x/pull/3');
+    expect(keys.getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Merge #3', 'Merge options for #3']);
+    expect(keys.getByRole('link', { name: 'Open #3 on GitHub' })).toHaveAttribute('href', 'https://github.com/a/x/pull/3');
     await user.click(mergeKey('a/x#3'));
     expect(within(expansion).getByTestId('pr-merge-confirm')).toBeInTheDocument();
   });
@@ -321,7 +321,7 @@ describe('PrMatrix — the expansion', () => {
     const write = jest.fn(() => Promise.resolve());
     render(<PrMatrix {...props([repo('a/x', [behind])], { write })} />);
     await user.click(row('a/x#2'));
-    await user.click(within(screen.getByTestId('pr-expand-a/x#2')).getByRole('button', { name: 'Update' }));
+    await user.click(menuRow(screen.getByTestId('pr-expand-a/x#2'), 'Update branch'));
     expect(write).toHaveBeenCalledWith('a/x#2', SHA, expect.any(Function));
   });
 });
@@ -380,9 +380,9 @@ describe('PrMatrix — outcomes, run warning and failing repos', () => {
     await user.click(row('a/x#2'));
     const expansion = screen.getByTestId('pr-expand-a/x#2');
     expect(screen.queryByTestId('pr-outcome')).not.toBeInTheDocument();
-    const update = within(expansion).getByRole('button', { name: 'Update' });
+    const update = menuRow(expansion, 'Update branch');
     expect(update).toHaveAttribute('aria-disabled', 'true');
-    expect(update).toHaveAttribute('title', 'updating…');
+    expect(update).toHaveAccessibleDescription('updating…');
     expect(expansion.querySelector('.prs-why')?.textContent ?? '').not.toContain('updating…');
   });
 

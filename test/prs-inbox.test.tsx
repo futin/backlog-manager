@@ -9,6 +9,7 @@ import '@testing-library/jest-dom';
 import { PrInbox } from '../client/src/components/github/PrInbox';
 import type { PrLayoutProps } from '../client/src/components/github/pr-layout-props';
 import { prRunWarning } from '../client/src/lib/pr-run';
+import { mainOf, moreOf, openOf, menuRow } from './helpers/pr-keys';
 import type { OrchestratorRun, ProjectSummary, PrRepoView, PullRequestRow, RunQueueItem } from '../shared/types';
 
 /**
@@ -86,9 +87,9 @@ function hp(repos: PrRepoView[], over: Partial<PrLayoutProps> = {}) {
   return rest;
 }
 
-/** The keys column of a row, and its `Merge` key — the Confirm's own accept is also named `Merge`, so a key is always found in the column. */
+/** The keys column of a row, and its split Merge's main half — the Confirm's own accept is also named `Merge`, so the half is always found in the column. */
 const keysOf = (row: HTMLElement) => row.querySelector('.prs-keys-side') as HTMLElement;
-const mergeKey = (row: HTMLElement) => within(keysOf(row)).getByRole('button', { name: 'Merge' });
+const mergeKey = (row: HTMLElement) => mainOf(keysOf(row));
 
 const EMPTY_CTX: PrLayoutProps['ctx'] = { projects: [], items: [], runs: [], remote: [], remoteStarting: [] };
 
@@ -207,7 +208,7 @@ describe('PrInbox — items', () => {
     const user = userEvent.setup();
     const write = jest.fn(() => Promise.resolve());
     render(<PrInbox {...props([repo('a/x', [behind])], { write })} />);
-    await user.click(within(screen.getByTestId('pr-row-a/x#2')).getByRole('button', { name: 'Update' }));
+    await user.click(menuRow(keysOf(screen.getByTestId('pr-row-a/x#2')), 'Update branch'));
     expect(write).toHaveBeenCalledWith('a/x#2', SHA, expect.any(Function));
   });
 
@@ -221,11 +222,12 @@ describe('PrInbox — items', () => {
 });
 
 describe('PrInbox — one row vocabulary', () => {
-  const KEYS = ['Merge', 'Auto-merge', 'Update', 'Open ↗'];
+  const KEYS = ['Merge', 'Open on GitHub'];
+  /** The strip is the split Merge and the Open link, named by their labels (not the face, which reads `Blocked` on a loud row) minus the PR's `#n`. */
   const keyNames = (row: HTMLElement) =>
-    Array.from(keysOf(row).querySelectorAll('.prs-keys > *')).map((el) => (el.getAttribute('aria-label') ?? el.textContent ?? '').replace(' ✓', '').trim());
+    [mainOf(keysOf(row)), openOf(keysOf(row))].map((el) => (el.getAttribute('aria-label') ?? '').replace(/ #\d+/, ''));
 
-  it('draws the four keys on a loud row and on a quiet one, and a quiet row has no toggle', () => {
+  it('draws the same strip on a loud row and on a quiet one, and a quiet row has no toggle', () => {
     render(<PrInbox {...props([trio()])} />);
     const loud = screen.getByTestId('pr-row-a/x#1');
     const quiet = screen.getByTestId('pr-row-a/x#3');
@@ -238,7 +240,8 @@ describe('PrInbox — one row vocabulary', () => {
         .getAllByRole('link')
         .map((a) => a.textContent)
     ).toEqual(['#3']);
-    expect(document.querySelector('[aria-expanded]')).toBeNull();
+    // A row is not a toggle; the only `aria-expanded` here is the split Merge's chevron.
+    expect(document.querySelector('[aria-expanded]:not(.ui-split-more)')).toBeNull();
     expect(within(quiet).queryByRole('button', { name: /Actions for/ })).not.toBeInTheDocument();
   });
 

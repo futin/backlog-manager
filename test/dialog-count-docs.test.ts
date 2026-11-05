@@ -84,13 +84,13 @@ describe('the Escape rule reads eight dialogs, not three, four, five, six or sev
      is the sentence after them. The
      Popover count (R6) is pinned beside it, because it is the other number in
      that comment and rots the same way. */
-  it("the hook's own comment keeps the three's, five's, six's and seven's history and says eight, with nine Popover composers", () => {
+  it("the hook's own comment keeps the three's, five's, six's and seven's history and says eight, with ten Popover composers", () => {
     const hook = readFileSync(join(ROOT, 'client', 'src', 'hooks', 'useDialogEscape.ts'), 'utf8');
     expect(hook).toMatch(/Three of them now, not four/);
     expect(hook).toMatch(/Five since Jira phase 2/);
     expect(hook).toMatch(/Six since the What's new drawer/);
     expect(hook).toMatch(/Seven since Jira phase 5/);
     expect(hook).toMatch(/Eight since the Dashboards card's add\/edit sheet/);
-    expect(hook).toMatch(/nine composers/);
+    expect(hook).toMatch(/ten composers/);
   });
 });
