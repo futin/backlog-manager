@@ -1378,14 +1378,15 @@ describe('the issue List', () => {
     await renderList();
     await userEvent.click(within(row('PAY-120')).getByRole('link', { name: /open PAY-120 in Jira/ }));
     expect(onOpenIssue).not.toHaveBeenCalled();
-    await userEvent.click(within(row('PAY-120')).getByText('Payments epic'));
+    // The Type cell is plain text: only the row's own handler can open the modal from it (the summary button has its own).
+    await userEvent.click(within(row('PAY-120')).getByText('Epic'));
     expect(onOpenIssue).toHaveBeenCalledTimes(1);
     const [opened, index] = onOpenIssue.mock.calls[0] as [JiraIssue, ReadonlyMap<string, readonly JiraIssue[]>];
     expect(opened).toBe(G_120);
     expect(index.get('PAY-160')?.map((i) => i.key)).toEqual(['PAY-162']);
   });
 
-  it('says `No issues match` when a search cuts every row, and `No issues` for an empty list', async () => {
+  it('says `No issues match` when a search cuts every row', async () => {
     await renderList();
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'zzzz');
     expect(screen.getByText('No issues match')).toBeInTheDocument();

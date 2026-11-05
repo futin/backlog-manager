@@ -14,6 +14,7 @@ import {
   buildListRows,
   forLabel,
   listDotTone,
+  rowOpens,
   startedLabel,
   type ListChip,
   type ListRow,
@@ -226,20 +227,6 @@ function ListGroup({ title, count, children }: { title: string; count: number; c
       {children}
     </tbody>
   );
-}
-
-/** Every element inside a row that owns its own click: the Open chips are links, `Run ▾` a button, and its `Popover` panel a `role="dialog"` in the cell. */
-const ROW_OWN_CONTROLS = 'a, button, input, select, textarea, label, [role="dialog"]';
-
-/**
- * Whether a click on a List row is the row's — opening Detail — rather than a control's. A target inside one of `ROW_OWN_CONTROLS` is that control's (the
- * summary button included: it opens Detail through its own `onClick`, so the row must not open it a second time); a target outside the row is a React
- * synthetic event bubbling from somewhere the DOM does not nest; and a click that leaves a text selection behind was someone copying a branch name.
- */
-export function rowOpens(row: Element, target: EventTarget | null, selection: string): boolean {
-  if (!(target instanceof Element) || !row.contains(target)) return false;
-  if (target.closest(ROW_OWN_CONTROLS) !== null) return false;
-  return selection === '';
 }
 
 function ListRowView({

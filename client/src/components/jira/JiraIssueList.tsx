@@ -5,13 +5,12 @@ import type { JiraIssue } from '../../../../shared/types';
 import { elapsedSince } from '../../lib/item-age';
 import { rolledUpdated, type JiraChildrenIndex, type JiraFold } from '../../lib/jira';
 import { issueCellWord } from '../../lib/jira-deck';
-import { listDotTone } from '../../lib/jira-list';
+import { listDotTone, rowOpens } from '../../lib/jira-list';
 import { Dot } from '../ui/Dot';
 import { Pill } from '../ui/Pill';
-import { rowOpens } from './JiraSessionList';
 
 /**
- * Jira › Board › List — the picked board's issues as a table (Jira › Sessions plan, Task 4; spec "Jira › Board", D2–D4; mock `Main.dc.html`).
+ * DESIGN.md §8.9.1 — Jira › Board › List: the picked board's issues as a table (Jira › Sessions plan, Task 4; spec "Jira › Board", D2–D4; mock `Main.dc.html`).
  *
  * **One row per board card, never per issue.** `tops` is the filtered fold's top list in `sortTops` order, so the table lists exactly what the Board's shelves
  * would, only uncut: a folded sub-task is a `N under it` suffix on its top's summary and never a row of its own (the mock's indented children were a rejected
