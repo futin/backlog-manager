@@ -2,24 +2,19 @@ import { useMemo, useRef, useState } from 'react';
 
 import { useFetched } from '../../hooks/useFetched';
 import { useJiraContext } from '../../hooks/JiraContext';
-import { useJiraBoard } from '../../hooks/useJiraBoard';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useJiraView } from '../../hooks/useJiraView';
 import { useNow } from '../../hooks/useNow';
-import { usePersistedState } from '../../hooks/usePersistedState';
+import { usePickedJiraBoard } from '../../hooks/usePickedJiraBoard';
 import {
-  JIRA_BOARD_KEY,
   NO_JIRA_FILTERS,
   bandSub,
   boardFilterCount,
   boardFilterOptions,
-  boardsByName,
   effectiveBoardFilters,
   fetchJiraWorktrees,
-  foldBoard,
   foldMatches,
   matchesBoardFilters,
-  pickBoard,
   ticketWorktrees,
   type JiraAssigneeFilter,
   type JiraBoardFilters,
@@ -30,10 +25,9 @@ import type { JiraPage } from '../../lib/jira-page';
 import type { JiraAction, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { FilterBar, FilterSection } from '../FilterBar';
 import { Band } from '../ui/Band';
-import { Chevron } from '../ui/Chevron';
 import { Chip } from '../ui/Chip';
-import { Popover } from '../ui/Popover';
 import { JiraAgentDeck } from './JiraAgentDeck';
+import { JiraBoardPicker } from './JiraBoardPicker';
 import { JiraSessionList } from './JiraSessionList';
 import { JiraShelves } from './JiraShelves';
 import { JiraViewSwitch } from './JiraViewSwitch';
@@ -117,13 +111,7 @@ export function JiraBoardView({
   nudge: number;
 }) {
   const { data } = useJiraContext();
-  const [stored, setStored] = usePersistedState<unknown>(JIRA_BOARD_KEY, null);
-  const boards = data?.boards ?? [];
-  const unreadable = data?.configUnreadable ?? null;
-  // Resolved against the live list every render; `null` while unreadable, so nothing is requested from a board list the server could not read.
-  const board = unreadable === null ? pickBoard(stored, boards) : null;
-  // The ONLY id this page ever asks the server about (Review Focus 3).
-  const list = useJiraBoard(board?.id ?? null, board?.interval ?? null, nudge);
+  const { boards, board, unreadable, pick, list, fold, loaded, shown } = usePickedJiraBoard(nudge);
   // Card ages are relative (`now`, `4m`, `2h`, `6d`), so a minute's tick is plenty; the band's seconds have their own clock below.
   const now = useNow(true);
 
@@ -141,7 +129,6 @@ export function JiraBoardView({
   const treesOf = (key: string): readonly JiraWorktree[] => (lastTrees.current === null ? NO_TREES : ticketWorktrees(key, lastTrees.current));
   const options = useMemo(() => boardFilterOptions(list.issues), [list.issues]);
   const applied = useMemo(() => effectiveBoardFilters(filters, options, me), [filters, options, me]);
-  const fold = useMemo(() => foldBoard(list.issues), [list.issues]);
   const sessions = useJiraSessionsContext();
   const [view] = useJiraView();
   // Memoised on the fold, the filters and the sessions answer — never on `now`, so the minute tick re-ages the cards without re-folding or re-filtering up
@@ -156,10 +143,8 @@ export function JiraBoardView({
       shelves: boardShelves(fold, kept, agents, sessions.data)
     };
   }, [fold, applied, me, sessions.data, live]);
-  // "The list has loaded" is the condition the columns below are drawn under, read once so the band and the columns cannot disagree about it.
-  const loaded = !list.loading && !(list.error && list.issues.length === 0);
 
-  if (unreadable !== null || board === null) {
+  if (unreadable !== null || board === null || shown === null) {
     return (
       <div className="board">
         <Band title="Jira" />
@@ -177,8 +162,6 @@ export function JiraBoardView({
     );
   }
 
-  const shown: JiraBoardStatus = list.polledAt !== null && newer(list.polledAt, board.polledAt) ? { ...board, polledAt: list.polledAt } : board;
-
   return (
     <div className="board">
       <Band
@@ -186,7 +169,7 @@ export function JiraBoardView({
         sub={<BandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />}
       >
         <JiraViewSwitch />
-        <BoardPicker boards={boards} current={board} onPick={setStored} />
+        <JiraBoardPicker boards={boards} current={board} onPick={pick} />
         <input
           type="search"
           className="board-band-search"
@@ -249,12 +232,6 @@ export function JiraBoardView({
   );
 }
 
-/** Whether stamp `a` is strictly later than `b` (an unparseable or absent `b` loses). */
-function newer(a: string, b: string | null): boolean {
-  const tb = b === null ? NaN : Date.parse(b);
-  return Number.isNaN(tb) || Date.parse(a) > tb;
-}
-
 /**
  * The band's sub-line on its own one-second clock: `polled 12 s ago` needs seconds, and ticking the whole page for it would re-render every card once a
  * second for a date that changes once a day. `.failing` is the red reading — the class rather than a colour on the text, so the theme owns the red.
@@ -263,51 +240,6 @@ function BandSub({ board, site, fold }: { board: JiraBoardStatus; site: string; 
   const now = useNow(true, 1_000);
   const sub = bandSub(board, site, now, fold);
   return <span className={sub.failing ? 'jira-band-sub failing' : 'jira-band-sub'}>{sub.text}</span>;
-}
-
-/**
- * The board picker: a `Chip` reading the board's name that opens a `Popover` listing every board by name — pick only (spec §1: Edit and New belong to
- * Setup). A pick stores the board's id and closes the panel; nothing else happens, because what the page draws follows from the stored id alone. The chip is
- * the popover's anchor (its own click toggles; Escape hands focus back to it), which is what `Chip`'s ref is for.
- */
-function BoardPicker({ boards, current, onPick }: { boards: readonly JiraBoardStatus[]; current: JiraBoardStatus; onPick: (id: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const chip = useRef<HTMLButtonElement>(null);
-  return (
-    <div className="jira-picker">
-      <Chip
-        ref={chip}
-        aria-label={`Pick a Jira board: ${current.name}`}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span className="jira-picker-name">{current.name}</span>
-        <Chevron dir={open ? 'up' : 'down'} />
-      </Chip>
-      {open && (
-        <Popover label="Boards" width={320} anchor={chip} onClose={() => setOpen(false)}>
-          {boardsByName(boards).map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              className={b.id === current.id ? 'jira-picker-opt on' : 'jira-picker-opt'}
-              aria-pressed={b.id === current.id}
-              onClick={() => {
-                onPick(b.id);
-                setOpen(false);
-              }}
-            >
-              <span>{b.name}</span>
-              <svg className="jira-picker-tick" viewBox="0 0 20 20" aria-hidden="true">
-                <path d="M4 10.5l4 4 8-9" />
-              </svg>
-            </button>
-          ))}
-        </Popover>
-      )}
-    </div>
-  );
 }
 
 /**

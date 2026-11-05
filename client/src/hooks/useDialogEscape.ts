@@ -45,7 +45,7 @@ import { useEffect, useRef } from 'react';
  *
  * The second non-dialog entry is `ui/Popover.tsx`, the panel that hangs under a control, in the same shape: mounted only while open, one call to this hook,
  * closing only itself. It has seven composers — the tracker strip's (`components/TrackerChip.tsx`), the band's Filters and Sort, and since Jira phase 2
- * the Jira chip's (`components/JiraChip.tsx`), the Jira board's picker (`components/jira/JiraBoardView.tsx`) and the board sheet's roots search
+ * the Jira chip's (`components/JiraChip.tsx`), the Jira board picker (`components/jira/JiraBoardPicker.tsx`) and the board sheet's roots search
  * (`components/jira/JiraBoardSheet.tsx`, drawn OVER that sheet, so it is the topmost entry while open) and, since Jira phase 5, `Run ▾`'s panel
  * (`components/jira/JiraRunMenu.tsx`, on the card and in the modal) — and each is its own entry while it is open. The Jira
  * board's Filters are `FilterBar`'s own panel, already counted. Its click-outside is its own `pointerdown` listener — this module owns the key, not the
