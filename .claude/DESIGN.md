@@ -653,8 +653,9 @@ The footer: a 12 px `--ink3` note (`polled right after you create it` / `polled 
 
 **The status pill.** `JiraChip`: §8.0's GitHub status pill a second time, on the same `.tracker-chip*` classes — one look, because a second family for the same
 pill is how two of them come to disagree — drawn after it in the strip and only while Jira is configured. A 28 px `StatusPill`: a dot, the word `Jira` and the
-age of the newest board's last poll. The tone is `serviceTone` over `jiraDown`: red whenever access is not `ok`, and for 15 min after Jira's last 429
-(`JIRA_429_RED_MS`) — a window, not a latch; amber when a board is overdue or sync is idle; green on time. The old `Jira · <first name>`, the 26 px avatar, the
+age of the newest board's last poll. The tone is `serviceTone` over `jiraDown`: red only when access is neither `ok` nor `rate-limited` (`jiraDown`); grey
+while no board with sync on has been polled; amber while access is `rate-limited` or a board is overdue (polled more than twice its own interval ago); green on time.
+`JIRA_429_RED_MS` does not feed the pill — only `callsReading`, the popover's `Calls` figure, reads it. The old `Jira · <first name>`, the 26 px avatar, the
 `POLL` and `CALLS` meters and the caret are gone. The accessible name is `Jira: on time|late|down` with no age, for the reason §8.0 gives (#230).
 
 Its popover is `Popover` at 330 px with the same `ServiceHead` as GitHub's, and like it no longer "a reading with no links and no buttons" (spec §3): the

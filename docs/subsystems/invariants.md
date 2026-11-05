@@ -2266,7 +2266,7 @@ The strip's height and the well's gap are one token, `--main-gap`, read by the s
 
 **Why the strip exists at all.** Since the redesign, `.main` carried a 24 px top margin and a 24 px top-left radius so the grey well would curve in where it
 meets the white rail. It never showed: `body` paints `--board` too, so the margin was grey on grey and the corner was invisible. The strip is `.maincol`'s
-paper — `--strip`, the rail's own token rather than a new one, because the point is that the rail and the strip read as ONE white L around the well — and the
+paper — `--strip`, the rail's own token rather than a new one, because the point is that the strip is the one white band beside the rail's `--board` (decision 63; the rail is no longer white) around the well — and the
 well now begins exactly where the strip ends, so its radius is finally drawn against white. `body` stays `--board`: below the fold and behind a short section
 the page is still the well's colour, which the rail's bottom edge expects.
 
@@ -3293,8 +3293,8 @@ than no test at all.
 The machine list started as a Shared card, grew a per-machine detail (URLs, the claim `host`, models, efforts, a token fact), then a health dot and two usage
 meters per machine, and a card holding a list beside a detail beside a Suggest control stopped being a card. It is a page of its own, so the pair the first
 split argued from — local against host — is unchanged: Dashboards writes `dashboards.json` on the API host, so its pill reads `this machine` and nothing on it
-is per device. Not a sub-section of Shared, because the rail's tree is the only switch and a second in-page level would be a second wording free to disagree
-with it.
+is per device. Not a sub-section of Shared, because the rail's tree is the first switch and a second in-page level would be a second wording free to disagree
+with it — which spec §3 of the app restyle answered by drawing the band's `Segmented` as a second writer of the same `settingsScope`, not a second state.
 
 What the page reads is two requests that never wait on each other. `GET /api/dashboards` is the file (cheap, no outbound call) and draws the list and the detail
 at once; `GET /api/dashboards/machines` is a health probe of every remote plus each machine's usage, up to two outbound budgets, and only colours the dots and
@@ -3587,7 +3587,7 @@ was out is newer news.
 
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
 board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip
-counts the sweep down on its POLL meter (#228 — the board's band printed `futin/x · polled 12 s ago` before that), the item modal prints it beside the body it drew from that same cache, and the Sources card prints it per repo. A cache
+prints the sweep's age on its status pill (#228 — the board's band printed `futin/x · polled 12 s ago` before that), the item modal prints it beside the body it drew from that same cache, and the Sources card prints it per repo. A cache
 whose staleness is on screen is a different object from one that is not.
 
 **The orchestrator's queue preview is the fourth reader of that age, and a named id gets one retry before it is refused (bug-41).** `trackerCandidates`
@@ -4834,7 +4834,7 @@ ui-kit v0.3.0 took this board's look as its canonical one and moved every shape 
 tokens onto the board's own, and place the chip.
 
 **What stays here, and why it is enough.** `styles.css`'s `:root` mapping (each token pointed at a theme variable, so all five palettes carry through) and
-`.rail-release`, a wrapper that sinks the chip to the rail's foot and makes it the phone menu's last row. `--uk-chip-bg` is mapped to `--steel` because the
+`.rail-foot`, a wrapper that sinks the chip to the rail's foot and makes it the phone menu's last row. `--uk-chip-bg` is mapped to `--steel` because the
 kit's default is a light well that would show on a dark rail; `--uk-zoom` is mapped to `--font-scale` because `.shell`'s `zoom` leaves `100vw` and `100dvh`
 meaning the unzoomed screen, and the kit divides its drawer's size by it — undivided, the panel overhangs the screen by the text scale. Notes go through the
 kit's own escape-first `renderNotesHtml`, so a PR body is safe to set as HTML with no sanitiser here and a `###` line reads as a heading in every app.

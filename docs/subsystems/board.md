@@ -86,7 +86,7 @@ sessions answer — `JiraSessionsProvider` (`hooks/JiraSessionsContext.tsx`), ho
 `enabled` = Jira configured (no poll and no badge otherwise) and `open` = Jira is the current section, so with the section closed the request carries no
 `open=1` — and counts `needsYouCount` (`lib/jira-list.ts`): plan, permission, reply and answer across EVERY linked ticket, not the picked board's, each
 session once, by `sessionId`, even when it is linked to two tickets. Zero draws no element. While the dashboard is unreachable (`reachable: false`, every live link reads Lost contact) or a read fails, the
-hook keeps the last count it was sure of. The badge is a `button.rail-badge` beside the row's button, inside `.rail-group` (a button in a button is invalid, and
+hook keeps the last count it was sure of. The count is a `button.rail-count` beside the row's button, inside `.rail-group` (a button in a button is invalid, and
 the row must still just open Jira); its click sets the Jira page to `sessions` and the filters to `{ chip: 'needs-you', allTickets: true }`
 through the two module stores, then `change('jira')`, so the Sessions page it lands on shows every session it counted; it never touches the Board page's view.
 
@@ -477,7 +477,7 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   the whole tracker, so it is drawn once, in the strip above the well (`.topstrip`, `var(--main-gap)` tall) — or, below 700 px, where the strip does not exist,
   in the rail's phone bar beside ☰, through `SideRail`'s `chipSlot`. `App` builds the one element and hands it to exactly one of those two homes. It is drawn
   only while `hasTracker` finds a github row in the `/api/trackers` payload, and is a `StatusPill` — a dot, `GitHub`, and the age of the newest sweep — whose tone
-  is `serviceTone`: green on time, amber late (`sweepProgress` past a cycle, or a repo not `ok`), red down. Its accessible name is `GitHub: on time|late|down`, with no
+  is `serviceTone`: grey while no repo with sync on has been polled, amber while a repo is `rate-limited` or one is polled more than twice its own interval ago, red when there is no token or every repo's access is neither `ok`, `rate-limited` nor unread (`githubDown`), green on time (`sweepProgress` is not used by the pill). Its accessible name is `GitHub: on time|late|down`, with no
   age. Below 700 px the pill drops only the age. Clicking it opens `TrackerPopover` (`ui/Popover`, 330 px): a `ServiceHead` (initials disc, name, `connected`,
   and a `Sync now` chip that takes focus and posts `POST /api/github/sweep`), two figures (`Last sweep`, `Rate limit` — `apiUsage`, `resetClock`), one row per
   connected repo with its own `pollProgress` countdown and a sync icon (`POST /api/github/sweep { repo }`), a `GitHub page ↗` link, or the `BM_GITHUB_TOKEN`
