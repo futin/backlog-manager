@@ -814,7 +814,11 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // Disarmed the tick that finds either half missing (spec §5.1): no token,
     // nothing connected, or both. Nothing below may run without a token — this
     // is the loop's whole "off" state.
-    if (token === null || repos.length === 0) return;
+    if (token === null || repos.length === 0) {
+      // A press that armed this tick marked repos to force; this exit consumes none of them, and left behind they would force the next armed sweep.
+      this.forceNow.clear();
+      return;
+    }
     // Taken before any await: a press that lands while this sweep is out joins it instead (`sweepNow`), so nothing can add to the set mid-sweep.
     const forced = new Set(this.forceNow);
     this.forceNow.clear();

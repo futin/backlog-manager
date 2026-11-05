@@ -91,6 +91,14 @@ describe('POST /api/github/sweep', () => {
     expect(gh.calls).toEqual([]);
   });
 
+  it('a press whose sweep finds the token gone leaves no forced repo behind for the next one', async () => {
+    await build([FAKE_REPO], { intervals: { [FAKE_REPO]: '5m' } });
+    // Armed (a timer is pending) but the token is removed before the sweep runs: the sweep exits at its no-token check.
+    delete process.env[GITHUB_TOKEN_ENV];
+    await poller.sweepNow();
+    expect((poller as unknown as { forceNow: Set<string> }).forceNow.size).toBe(0);
+  });
+
   it('is 409 when nothing is armed: every connected repo off, its cold sync spent', async () => {
     await build([OFF_REPO], { intervals: { [OFF_REPO]: 'off' } });
     expect((await sweep().expect(409)).body).toEqual({ message: 'GitHub is not being polled' });
