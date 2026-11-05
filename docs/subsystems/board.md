@@ -350,8 +350,10 @@ the sweep meter while armed, and a flat `Policy in Settings ›` chip, because t
 BELOW the band — `Check every`, `Leave a resumed run alone`, `Give up after` (`N resumes`) — with the enabled switch's state as a line under it. Then the
 Watching sheet: a count pill beside the title and the `⚠ 1 crashed · 2 fresh · 1 not yet watched` split as its sub, one row per `running` run, annotated from
 the sweeper's own set with the skew rendered rather than hidden, each with a heartbeat meter against `RUN_STALE_MS`, and on a crashed row the attempt pips, the
-clause, the session id, the grace remaining and a `Resume now` chip drawn only when `watchdogStoodDown` allows. A row jumps to History with that run selected. Last, the activity ledger: the last
-`WATCHDOG_EVENT_CAP` events, held in the API process's memory and emptied by a restart, which its subtitle says rather than buries.
+clause, the session id, the grace remaining and the Resume control (`RunControls`, the component the run detail's head draws) drawn only when
+`watchdogStoodDown` allows. A row jumps to History with that run selected. Last, the activity ledger: the last `WATCHDOG_EVENT_CAP` events, held in the API
+process's memory and emptied by a restart, which its subtitle says rather than buries. The kind cell is a `Pill` holding the kind's glyph and word (`live`,
+`done`, `bad`, `warn`, and `neutral` for the muted kinds).
 
 **Ticks** — the tick breaker's page (`TickMonitor`, `RunsMode` `'ticks'`), the third Runs page, built as the Watchdog page is and reached only through the
 rail's tree. It mounts `useTicks({ live: true })` — the one source, a 15 s poll while the page is open — and takes no props. Its band (`Runs · Ticks`) carries
