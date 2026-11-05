@@ -136,6 +136,7 @@ a save while the credential is rejected or the site `unsupported` touches only `
 | ------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `POST /api/jira/boards`         | `{ id?, name, interval, roots, queries }` | the board as stored, ids server-minted; waits for `boardSaved` (below); 404 for an `id` the file does not hold |
 | `POST /api/jira/boards/delete`  | `{ id }`                                | `{ ok: true }`; drops the board's cache at once (`boardDeleted`) and re-`arm()`s; 404 for an unknown id, a second delete included |
+| `POST /api/jira/boards/sweep`   | `{ id }`                                | `{ ok: true }`; writes NOTHING — the chip's per-board `now`: awaits `boardSaved(id)`, a save's own sweep, so a 429 window or an unanswered boot leaves the board owed rather than refusing; 409 for an unreadable file, 404 `unknown board` |
 | `POST /api/jira/repos`          | `{ project, paths }`                    | `{ project, paths }` as stored, normalised and deduplicated; `[]` removes the project's key; re-aims no poller, arms the session reconciler |
 | `POST /api/jira/repo-defaults`  | `{ path, base, namePattern }`           | `{ path, base, namePattern }` as stored, `null` for unset; both `null` deletes the path's entry; a base failing Table A or a pattern failing `patternProblem` is a 400 naming the field; after the 409, 400 `<path> is not mapped` unless SOME project maps it; re-aims nothing |
 | `POST /api/jira/skills`         | `{ id?, name, prompt }`                 | the skill as stored, an `s_` id minted on create; a trimmed `name` of 1–60 and `prompt` of 1–2 000; 404 `unknown skill` for an `id` the file does not hold; re-aims nothing |
@@ -345,7 +346,9 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   the page has gone.
 - **The chip and the Sources card's Jira row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` —
   the strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
-  `Popover` reading with no links or buttons. With both chips in the rail bar neither draws its meters (a CSS rule in the 700 px block). The Settings › Shared ›
+  `Popover` with no links; each board's row carries a `next` meter (`boardPollReading`, the chip's POLL reading is the same function on the soonest board)
+  and a `now` button that posts `POST /api/jira/boards/sweep` — the chip holds the in-flight set, so `syncing…` survives a close and reopen, and re-reads the
+  status when the answer lands, which `useJiraBoard`'s `polledAt` watch turns into a fresh read of the cards on screen. With both chips in the rail bar neither draws its meters (a CSS rule in the 700 px block). The Settings › Shared ›
   Sources card (`components/settings/SourcesGroup.tsx`) carries one Jira row from the same `useJira`, drawn whatever Jira's state — `configured · <site> · N
   boards`, `not configured`, or `checking…`/`unavailable` before Jira has answered — with no control, because a board's interval is set on Setup. While
   configured it carries one link, `Jira › Setup ↗`, which is `onOpenJiraPage('setup')` threaded down from `App` through `SettingsView`: the tree's own pair,
