@@ -405,6 +405,7 @@ describe('the Sessions page', () => {
   it('draws its own band: title Sessions, the board picker, Search sessions, and no Board | List switch and no Filters button', async () => {
     await renderList();
     expect(screen.getByRole('heading', { name: 'Sessions' })).toBeInTheDocument();
+    expect(screen.getByText('Alpha board ·', { selector: '.jira-band-sub' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Pick a Jira board/ })).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: 'Search sessions' })).toHaveAttribute('placeholder', 'search key, summary, repo, branch');
     expect(screen.queryByRole('group', { name: 'View' })).toBeNull();

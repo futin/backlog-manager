@@ -68,7 +68,9 @@ export function JiraSessionsView({
     ) : board === null || shown === null ? (
       'no board to scope to'
     ) : (
+      // The board's name leads (spec: the sub "names the picked board") — Sessions' title is the page's, not the board's, as it is on the Board page.
       <>
+        <span className="jira-band-sub">{shown.name} · </span>
         <JiraBandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />
         {!loaded &&
           (list.loading ? ' · loading…' : <span className="jira-band-sub failing"> · board unavailable</span>)}
