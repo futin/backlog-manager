@@ -30,8 +30,8 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 - Tests: flat in `test/`, jest. Run only touched suites locally (`pnpm exec jest <files>`); CI runs the rest. Before each commit,
   `grep -l <symbol> test/` for every shared symbol the task adds a caller of, and add the hits to the run.
 - Comments explain why, at the repo's existing density. Wrap new prose at 160 columns.
-- Commit after each task: `git add <paths>` then `git commit` (never `git add -A`), message ending
-  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Commit after each task: `git add <paths>` then `git commit` (never `git add -A`), message ending with
+  the executing session's own attribution line.
 
 ## Review Focus
 
@@ -81,7 +81,7 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 ### Task 2: `JiraRunMenu` becomes the split Run with a grouped menu (mock `RunButton.dc.html`, column A)
 
 **Files:**
-- Modify: `client/src/components/jira/JiraRunMenu.tsx` (whole component; `MODAL_PANEL_WIDTH` at :61 goes), `client/src/styles.css` (`.jira-run*` section)
+- Modify: `client/src/components/jira/JiraRunMenu.tsx` (whole component; `MODAL_PANEL_WIDTH` at :62 goes), `client/src/styles.css` (`.jira-run*` section)
 - Test: `test/jira-board.test.tsx`, `test/jira-detail.test.tsx`, `test/jira-list.test.tsx`, `test/daylight-contrast.test.ts`
 
 **Interfaces:**
@@ -98,9 +98,13 @@ sheet first` above a hairline. Rows 40 px, 28 px radius-8 tile on `--strip-hi` w
 stays in place (no longer pulled first), its tile `color-mix(in srgb, var(--green-solid) 14%, var(--strip))` with a `--green` glyph and a right-end tick +
 `default` at 11/500 `--green`; the row's accessible name is its label only (sub-line and mark `aria-hidden`). After a pick the menu closes and focus moves to
 the chevron. States from `runChipState` (unchanged): `no-repo` → `dashed` + `disabled`, title `no repository mapped for <key> — Jira › Setup ›
-Repositories`; `live` → `disabled`, title `a session is running on <key>`, text `Running` + ` · <age>` when known, a 6 px steady `--green-solid` dot before
-it, and the Jira-local tint `.jira-run[data-state='live'] .ui-split` = `color-mix(in srgb, var(--green-solid) 14%, var(--strip))` with `--green` text.
-`data-state` stays on the `.jira-run` wrapper.
+Repositories`; `live` → `disabled`, title `a session is running on <key>`, text `Running` + ` · <age>` — `pollAge` of the newest live link's `startedAt` among `sessions.links` for the key, omitted when the live reading comes
+from `status.live` alone (sessions not landed) — a 6 px steady `--green-solid` dot before
+it, and the Jira-local tint `.jira-run[data-state='live'] > [role='group']` = `color-mix(in srgb, var(--green-solid) 14%, var(--strip))` with `--green`
+text. Spec §4.1 writes this selector as `… .ui-split`, which guard 7 (`test/design-guards.test.ts:380-396`) fails: no selector outside the primitives block
+may carry a `ui-*` family token anywhere in it. The `> [role='group']` form follows the `> button` precedent at `styles.css:1288`; report the deviation.
+`data-state` stays on the `.jira-run` wrapper. `.jira-run[data-state='no-repo'] > button { border-style: dashed }` (`styles.css:1288`) goes (the `dashed`
+prop replaces it); `.jira-modal-controls .jira-run { position: static }` (`:1293`) goes with the modal controls row (Task 5).
 
 - [ ] **Step 1: Update/write the failing tests.**
   - `jira-board.test.tsx`: a card's foot holds buttons `Run <key>` and `Run options for <key>`; clicking `Run <key>` opens the launch sheet with the default
@@ -108,13 +112,17 @@ it, and the Jira-local tint `.jira-run[data-state='live'] .ui-split` = `color-mi
     carrying `default` is that skill and the first row is still `execute`; with `jiraDefaultAction` naming a skill not in `data.skills`, `default` sits on
     the row `resolveJiraAction` returns; with `data.skills` empty there is no `Skills on this machine` text; the footer text is exactly `Every choice opens
     the launch sheet first` (the existing `opens the launch sheet` assertion at :831 moves to it); after picking a row, `document.activeElement` is
-    `Run options for <key>`. The existing no-repo case at :761-767 asserts BOTH halves are disabled and carry the no-repo title.
+    `Run options for <key>`. The existing no-repo case at :761-767 asserts BOTH halves are disabled and carry the no-repo title. The sites that click
+    `runChip()` (`/^Run PAY-/`, the left half, :756) and then read `Run menu` — :826, :838, :849, :862, :931 — click `Run options for <key>` instead.
   - `jira-detail.test.tsx`: `modalRun()` still finds `Run PAY-131`; clicking it opens the launch sheet with no `Run menu`; `Run options for PAY-131` opens it;
-    `live` and `no-repo` cases assert both halves disabled with the existing titles; the live left half's text starts `Running`.
+    `live` and `no-repo` cases assert both halves disabled with the existing titles; the live left half's text starts `Running`, and with a live link started
+    `hoursAgo(2)` reads `Running · 2h`. The sites that click `modalRun()` and then read `Run menu` — :550, :555, :568, :1061 — click `Run options for
+    PAY-131`; :570 `--ui-popover-width` `234px` → `300px`; :572-573 (`scrollIntoView({ block: 'nearest' })` on open in the modal) STAYS — the band can still
+    sit in a column that scrolls under 700 px. :589-590 (no-repo click opens nothing) stands.
   - `jira-list.test.tsx` (Sessions rows): the sites at :308 and :500-501 that click `Run PAY-131` and expect `Run menu` (:290 only asserts presence and stands) click `Run options for
     PAY-131` instead; add one case: clicking `Run PAY-131` on a Sessions row opens the launch sheet directly.
-  - `daylight-contrast.test.ts` `PINNED`: add `.jira-run-opt-default .jira-run-tile` (`--green-solid`, 14, `--strip`) and `.jira-run[data-state="live"]
-    .ui-split` (`--green-solid`, 14, `--strip`) — use your actual selectors; retitle the case from `the ten tint sites` to the new count after Task 3.
+  - `daylight-contrast.test.ts` `PINNED`: add `.jira-run-opt-default .jira-run-tile` (`--green-solid`, 14, `--strip`) and `.jira-run[data-state='live'] >
+    [role='group']` (`--green-solid`, 14, `--strip`) — the key must equal the CSS selector after whitespace normalisation, quotes included; retitle the case from `the ten tint sites` to the new count after Task 3.
 - [ ] **Step 2: Run** `pnpm exec jest test/jira-board.test.tsx test/jira-detail.test.tsx test/jira-list.test.tsx test/daylight-contrast.test.ts` — FAIL.
 - [ ] **Step 3: Implement** in `JiraRunMenu.tsx` and the `.jira-run*` CSS.
 - [ ] **Step 4: Run** the same command plus `test/design-guards.test.ts` — PASS.
@@ -133,7 +141,7 @@ it, and the Jira-local tint `.jira-run[data-state='live'] .ui-split` = `color-mi
   - `typeTone(type: JiraIssue['type']): 'bug' | 'story' | 'neutral'` — the SAME precedence `JiraTypeIcon` uses (`ui/JiraTypeIcon.tsx:5-13`): a sub-task or a
     level ≥ 1 type is `neutral` whatever its name; then name `bug` → `bug`, `story` → `story`; else `neutral`. Extract the shared test so both read it.
   - `statusTone(category: JiraStatusCategory): JiraColumnSlug` — via `JIRA_COLUMNS` (`new` → `todo`, `indeterminate` → `doing`, `done` → `done`).
-- Consumes: `Glyph` (Task 1); `useJiraContext` for `status.repos[issue.project.key]` (`JiraRunMenu.tsx:65` reads it the same way).
+- Consumes: `Glyph` (Task 1); `useJiraContext` for `status.repos[issue.project.key]` (the read is `lib/jira.ts:731`).
 
 Behaviour (spec §4.2): head = 18 px radius-5 `.jira-card-type[data-tone]` tile around `JiraTypeIcon` (bug `color-mix(--red 12%, --strip)` + `--red`
 glyph; story `color-mix(--green-solid 14%, --strip)` + `--green`; neutral `--strip-hi` + `--ink2`; title = type name), key at 600 `--ink`, crumb as today,
@@ -146,7 +154,7 @@ name at 12/500 `--ink2` replacing the neutral `Pill`; age and `↗` unchanged. F
 stays after the foot.
 
 - [ ] **Step 1: Failing tests.**
-  - `jira-lib.test.ts`: `priorityTone` for `Highest`, `high`, `MEDIUM`, `Low`, `lowest`, `P1` (→ `other`), `''` (→ `other`), `null`; `typeTone` for a bug, a
+  - `jira-lib.test.ts`: `priorityTone` for `Highest`, `high`, `MEDIUM`, `Low`, `lowest`, `P1` (→ `other`), `''` (→ `other`; the card treats `''` like `null` and draws no pill, as `JiraDetail.tsx:364` does), `null`; `typeTone` for a bug, a
     story, a task, a sub-task whose type name is `Bug` (→ `neutral`), an epic named `Story` at level 1 (→ `neutral`); `statusTone` for all three categories.
   - `jira-board.test.tsx`: `High` → a pill titled `priority High` with `data-tone="high"` and a glyph; `Medium` → `med`; `Lowest` → `low`; `P1` → `other`
     and no glyph; `null` → no element titled `priority …`. Status renders `In Review` (no `· in progress`) and a `.jira-status-dot` with
@@ -172,10 +180,13 @@ stays after the foot.
 - Produces: `BoardColumn` gains optional `tone?: 'todo' | 'doing' | 'done'`, written as `data-tone` on the column root; only `JiraShelves` passes it.
 
 Behaviour (spec §4.3): with `tone`, the column has a `--steel` ground, radius 16, 12 px padding with the header inside; header dot `--ink3` / `--amber-solid`
-/ `--green-solid`; name 13/600 `--ink`; count pill on `--strip` at 11/500 `--ink2` as a page rule under the toned column (not a new `Pill` tone). Without
-`tone`, nothing changes.
+/ `--green-solid`; name 13/600 `--ink`; count pill on `--strip` at 11/500 `--ink2` (not a new `Pill` tone). Mechanism: `Dot` has no such tones and a page
+rule naming `.ui-dot` / `.ui-pill` fails guard 7, so with `tone` set `BoardColumn` draws a page-local `.board-col-dot` span in place of `Dot` and a
+page-local `.board-col-count` span in place of the `Pill`, both styled under `.board-col[data-tone]`. Without `tone`, nothing changes (still `Dot` +
+`Pill`).
 
-- [ ] **Step 1: Failing tests.** Jira shelves: the three columns carry `data-tone` `todo`, `doing`, `done` in that order. A Board (and Archive, if a suite
+- [ ] **Step 1: Failing tests.** Jira shelves: the three columns carry `data-tone` `todo`, `doing`, `done` in that order, each with one `.board-col-dot`
+  and a `.board-col-count` holding the column's count. A Board (and Archive, if a suite
   renders it) column has no `data-tone` attribute.
 - [ ] **Step 2: Run** the suites — FAIL. **Step 3: Implement.** **Step 4: Run** — PASS (plus `test/design-guards.test.ts`, `test/daylight-contrast.test.ts`).
 - [ ] **Step 5: Commit** `feat(jira): toned column ground on the Jira shelves`.
@@ -183,7 +194,8 @@ Behaviour (spec §4.3): with `tone`, the column has a `--steel` ground, radius 1
 ### Task 5: Detail dialog — head tile, Agent band, glyph-labelled facts (mock `Modal.dc.html`)
 
 **Files:**
-- Modify: `client/src/components/jira/JiraDetail.tsx`, `client/src/styles.css` (`.jira-detail-*`)
+- Modify: `client/src/components/jira/JiraDetail.tsx`, `client/src/components/ui/Fact.tsx` (gains `icon?: ReactNode`), `client/src/styles.css`
+  (`.jira-detail-*`)
 - Test: `test/jira-detail.test.tsx`
 
 **Interfaces:**
@@ -191,15 +203,22 @@ Behaviour (spec §4.3): with `tone`, the column has a `--steel` ground, radius 1
 
 Behaviour (spec §4.4, "Head", "Agent column", "Ticket column"): crumbs lead with the Task 3 type tile; key 600 `--ink`; title stays 22/600. The Agent column
 opens with `.jira-detail-agent-band` (`--strip`, radius 12, 16 px padding): the `Agent` label row; when no session is live, a 36 px dashed tile with a
-16 px robot glyph in `--ink3`, `No session on this ticket` 13/500 `--ink`, sub-line 12 `--ink3` `default: <default action's label> · last run <age>` (`·
-last run …` omitted when never run; no repository here), and the 32 px split Run on that row; with live sessions, `.jira-sess` cards follow inside the
-band and the Run sits on the label row. `History` stays below. `.jira-modal-controls` loses `jira-detail-run`. Facts `dl`: label column 96 px, each `dt` a
-14 px glyph + word (Status ring, Assignee person, Reporter person, Priority flag, Sprint calendar, Parent branch, Labels tag, Created · updated calendar, On
+16 px robot glyph in `--ink3`, `No session on this ticket` 13/500 `--ink`, sub-line 12 `--ink3` `default: <default action's label> · last run <age>` (`last
+run <age>` = `pollAge(endedAt, now)` of the newest ended link — the same `ended` list `History` draws, `JiraDetail.tsx:304-311` — and `· last run …` is
+omitted when `ended` is empty; no repository here), and the 32 px split Run on that row; with live sessions, `.jira-sess` cards follow inside the
+band and the Run sits on the label row, with `Next session takes over once this one ends.` (`JiraDetail.tsx:316`) beside it. `History` stays below the
+band. The `.jira-modal-controls jira-detail-run` row and `no session is running on this ticket` (`:301`) go. Facts `dl`: label column 96 px, each `dt` a
+14 px glyph + word — via `Fact`'s new optional `icon`, drawn as an `aria-hidden` sibling BEFORE the label, the word left a direct text node of the `dt`
+(the suite's `fact()` helper, `test/jira-detail.test.tsx:194-200`, matches direct text only; the item modal passes no icon and is unchanged) (Status ring, Assignee person, Reporter person, Priority flag, Sprint calendar, Parent branch, Labels tag, Created · updated calendar, On
 boards grid, Repository branch, Session play); all eleven rows, order and conditions as today. Values as today except: priority = the Task 3 pill;
 assignee gets the 22 px magenta disc before the name; labels as 24 px `--strip-hi` chips `.jira-detail-label` at 11/500 `--ink2`, wrapping.
 
-- [ ] **Step 1: Failing tests.** No live session: the band shows `No session on this ticket` and `default: Work the ticket` style sub-line with the
-  default action's actual label, and the button `Run PAY-131` is inside the band; a ticket run before shows `· last run`; never run omits it. With a live
+- [ ] **Step 1: Failing tests.** No live session: the band shows `No session on this ticket`; with the built-in default the sub-line is exactly
+  `default: Work it end to end`, with `jiraDefaultAction` set to the `Groom ticket` skill fixture it is `default: Groom ticket` (two cases, so a
+  sub-line-vs-label swap fails); the button `Run PAY-131` is inside `.jira-detail-agent-band`. With one ended link `endedAt: hoursAgo(1)` the sub-line ends
+  `· last run 1h`; with none it has no `last run`. Existing cases that invert: :548 (`.jira-modal-controls` contains the Run) → the band contains it; :748
+  (`no session is running on this ticket`) → that text is absent and `No session on this ticket` present; :808-814 (Run last in the column, after
+  `.jira-hist-list`) → the band, holding the Run, PRECEDES `.jira-hist-list`. With a live
   session the `.jira-sess` card is inside the band. Facts: `Priority` value has `data-tone`; labels render one element per label; the eleven `dt` words
   are unchanged and in today's order (`On boards`, `Repository`, `Session` assertions stand).
 - [ ] **Step 2: Run** `pnpm exec jest test/jira-detail.test.tsx` — FAIL. **Step 3: Implement.** **Step 4: Run** — PASS (plus guards).
@@ -218,7 +237,8 @@ assignee gets the 22 px magenta disc before the name; labels as 24 px `--strip-h
 Behaviour (spec §4.4, "Status and Move to"): one 28 px `Chip` `.jira-detail-status` — 6 px `statusTone` dot, raw status name, `Chevron` — with
 `aria-label="Move to"`, `aria-haspopup="dialog"`, `aria-expanded`; opens a 240 px `Popover` labelled `Move to`: header `Move to` 11/600 `--ink3`; one 36 px row
 per transition, Jira's order, except the row whose `to.name` equals the current status (when offered) which is drawn FIRST with a stroked tick and
-`aria-disabled="true"` (clicking it does nothing); each row a 6 px dot in `statusTone(t.to.category)` and the `transitionOptions` label; footer `Jira
+`aria-disabled="true"` (clicking it does nothing) — every row landing on the
+current status is pinned first, in Jira's order, then the rest in Jira's order; each row a 6 px dot in `statusTone(t.to.category)` and the `transitionOptions` label; footer `Jira
 transitions, applied on click` 11 px `--ink3`. A pick posts `POST /api/jira/issue/transition { key, transitionId }` once and closes. Disabled exactly when the
 select was (`busy || !moveReady`), titles `transitions unavailable` (failed detail read) / `no transitions offered` (empty), no title while loading or busy.
 The `· <category>` word after the status goes. First enabled row takes focus on open.
@@ -226,7 +246,10 @@ The `· <category>` word after the status goes. First enabled row takes focus on
 - [ ] **Step 1: Failing tests** (`jira-detail.test.tsx`): `moveSelect()` → the button named `Move to`; opening shows a dialog `Move to` with one row per
   transition labelled by `transitionOptions` (the existing two-to-one-status fixture shows the transitions' own names); a row click posts `{ key,
   transitionId }` exactly once and closes the dialog; two quick clicks post once; the chip is disabled while the post is pending; title `transitions
-  unavailable` after a failed read; `no transitions offered` on an empty list; the current-status row is first and `aria-disabled`. The four `In Review ·
+  unavailable` after a failed read; `no transitions offered` on an empty list; current status pinning, two fixtures: (a) a new three-transition fixture `[Start → In Progress, Back to
+  review → In Review, Done → Done]` on an `In Review` issue renders rows `[Back to review (aria-disabled), Start, Done]`; (b) the :867-874 fixture renders
+  `[In Review, In Review (2)]` both `aria-disabled`, then `In testing`. Focus: on open the first ENABLED row is `document.activeElement` (in (a), `Start`);
+  Escape closes and returns focus to the `Move to` chip. The four `In Review ·
   in progress` assertions (:235, :421, :437, :446) become `In Review` plus a dot with
   `data-tone="doing"`. `dialog-count-docs.test.ts`: `seven composers` → `eight composers` (the hook comment), DIALOG count assertions unchanged.
 - [ ] **Step 2: Run** `pnpm exec jest test/jira-detail.test.tsx test/dialog-count-docs.test.ts` — FAIL.
@@ -239,7 +262,7 @@ The `· <category>` word after the status goes. First enabled row takes focus on
 
 **Files:** Modify: `.claude/DESIGN.md` (§8.9.1 "The card", "Columns", "`Run ▾` and the ended line"; §8.9.2 "Agent column", "Ticket column", "Controls").
 
-Write spec §7's five bullets into those paragraphs, each with its reason from the spec (§4.2 for the priority sentence it replaces). Edit sentences in
+Write spec §7's first four bullets into those paragraphs (the fifth, §8.7's composer count, is Task 6's), each with its reason from the spec (§4.2 for the priority sentence it replaces). Edit sentences in
 place; do not reflow untouched prose. No test; run `pnpm exec jest test/design-guards.test.ts test/dialog-count-docs.test.ts` in case either reads
 DESIGN.md. Commit `docs(design): Jira restyle overrides in §8.9`.
 
