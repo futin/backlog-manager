@@ -1,11 +1,11 @@
 import { useTicks } from '../../hooks/useTicks';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
-import { Select } from '../ui/Select';
+import { NumberField } from '../ui/NumberField';
 import { TICK_CAP_LIMITS, TICK_HALT_LIMITS } from '../../../../shared/types';
 
 /**
  * The tick breaker's Settings card (tick-breaker spec, "Settings"; drawn to `.claude/DESIGN.md` §8.6 — a `SettingsGroup` of three `SettingsRow`s, each a
- * 36 px `Select`, the same composition `WatchdogGroup` makes of its three ladders). Three knobs: how many failed ticks in a row halt a project, and the two
+ * ladder stepper, the same composition `WatchdogGroup` makes of its three ladders). Three knobs: how many failed ticks in a row halt a project, and the two
  * caps a tick job applies when its prompt carries no `--max-plans` / `--max-prs` flag (#378) — how many plans may wait in `plan-review` before a tick stops
  * grooming, and how many `execute/*` PRs may be open before it stops executing. A job's flag still wins over either cap: a number written into one
  * schedule's prompt is a fact about that schedule, and this card sets the default for every job on this machine that does not say.
@@ -15,7 +15,7 @@ import { TICK_CAP_LIMITS, TICK_HALT_LIMITS } from '../../../../shared/types';
  * Shared page's pill and its other host cards use — rather than the watchdog's `this server`: the setting binds every tick job that runs on this machine,
  * whichever process is asking.
  *
- * Selects of 1–10, not number fields, for `WatchdogGroup`'s reason: the server clamps `haltAfter` to `TICK_HALT_LIMITS` and each cap to `TICK_CAP_LIMITS`
+ * Ladder steppers over 1–10 (`NumberField` ladder mode, `−` / `+`, no textbox), not free number fields, for `WatchdogGroup`'s reason: the server clamps `haltAfter` to `TICK_HALT_LIMITS` and each cap to `TICK_CAP_LIMITS`
  * quietly and a POST outside them is a 400, so a free-text field could be typed past the bound and silently snap. The options are built from the same shared
  * limits the server clamps against,
  * which leaves no value on offer that the server would have to correct. There is no "off-ladder current value" splice as in the watchdog's ladders, because
@@ -35,11 +35,8 @@ import { TICK_CAP_LIMITS, TICK_HALT_LIMITS } from '../../../../shared/types';
  *   - a refused save (`saveError`): one `role="alert"` row under the controls, saying the pick was not saved and that the values shown are the ones still
  *     on the server. Each pick posts only its own key, so a refusal can leave no Select off the server's value. `data` is intact in that state, which is why it is a field of its own beside the failed-GET `error` (`useTicks`' comment has the argument).
  */
-function ladder(limits: { min: number; max: number }): { value: string; label: string }[] {
-  return Array.from({ length: limits.max - limits.min + 1 }, (_, i) => {
-    const n = String(limits.min + i);
-    return { value: n, label: n };
-  });
+function ladder(limits: { min: number; max: number }): number[] {
+  return Array.from({ length: limits.max - limits.min + 1 }, (_, i) => limits.min + i);
 }
 const HALT_OPTIONS = ladder(TICK_HALT_LIMITS);
 const PLANS_OPTIONS = ladder(TICK_CAP_LIMITS.maxPlans);
@@ -50,7 +47,7 @@ export function TickGroup() {
 
   if (data === null) {
     return (
-      <SettingsGroup title="Backlog tick" scope="this machine">
+      <SettingsGroup title="Backlog tick" pill="this machine">
         <div className="set-row set-row-stacked">
           <div className="set-label">
             <span className="set-name">Unavailable</span>
@@ -67,7 +64,7 @@ export function TickGroup() {
   const unreadable = config.source === 'unreadable';
 
   return (
-    <SettingsGroup title="Backlog tick" scope="this machine">
+    <SettingsGroup title="Backlog tick" pill="this machine">
       <SettingsRow
         name="Halt after"
         hint={
@@ -76,14 +73,16 @@ export function TickGroup() {
             : 'A halted project stops ticking until reset on Runs › Ticks.'
         }
       >
-        <Select
+        <NumberField
           label="Halt after"
-          value={String(config.haltAfter)}
-          options={HALT_OPTIONS}
+          value={config.haltAfter}
+          min={HALT_OPTIONS[0]}
+          max={HALT_OPTIONS[HALT_OPTIONS.length - 1]}
+          ladder={HALT_OPTIONS}
+          unit="failures in a row"
           disabled={unreadable}
-          onChange={(v) => void save({ haltAfter: Number(v) })}
+          onCommit={(v) => void save({ haltAfter: v })}
         />
-        <span className="set-hint">failures in a row</span>
       </SettingsRow>
       <SettingsRow
         name="Plans awaiting review"
@@ -93,12 +92,14 @@ export function TickGroup() {
           </>
         }
       >
-        <Select
+        <NumberField
           label="Plans awaiting review"
-          value={String(config.maxPlans)}
-          options={PLANS_OPTIONS}
+          value={config.maxPlans}
+          min={PLANS_OPTIONS[0]}
+          max={PLANS_OPTIONS[PLANS_OPTIONS.length - 1]}
+          ladder={PLANS_OPTIONS}
           disabled={unreadable}
-          onChange={(v) => void save({ maxPlans: Number(v) })}
+          onCommit={(v) => void save({ maxPlans: v })}
         />
       </SettingsRow>
       <SettingsRow
@@ -109,12 +110,14 @@ export function TickGroup() {
           </>
         }
       >
-        <Select
+        <NumberField
           label="Open execute PRs"
-          value={String(config.maxPrs)}
-          options={PRS_OPTIONS}
+          value={config.maxPrs}
+          min={PRS_OPTIONS[0]}
+          max={PRS_OPTIONS[PRS_OPTIONS.length - 1]}
+          ladder={PRS_OPTIONS}
           disabled={unreadable}
-          onChange={(v) => void save({ maxPrs: Number(v) })}
+          onCommit={(v) => void save({ maxPrs: v })}
         />
       </SettingsRow>
       {saveError !== null && (

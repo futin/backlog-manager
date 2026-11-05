@@ -76,6 +76,9 @@ function jiraStatus(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
 
 const UNCONFIGURED = jiraStatus({ configured: false, site: null, me: null, access: 'unconfigured', boards: [], home: null });
 
+let onOpenFilesPage: jest.Mock;
+let projectsReload: jest.Mock;
+let jiraReload: jest.Mock;
 let onOpenGithubPage: jest.Mock;
 let onOpenJiraPage: jest.Mock;
 
@@ -85,12 +88,12 @@ let onOpenJiraPage: jest.Mock;
  */
 async function renderCard(jira: JiraStatusPayload | null = UNCONFIGURED, drawn: DrawnSources | null = { files: true, github: true }): Promise<void> {
   stubFetch();
-  const state: JiraState = { data: jira, loading: jira === null, error: false, reload: () => {} };
+  const state: JiraState = { data: jira, loading: jira === null, error: false, reload: jiraReload };
   render(
     <JiraContext.Provider value={state}>
-      <ProjectsContext.Provider value={{ data: null, drawn, reload: () => {} }}>
+      <ProjectsContext.Provider value={{ data: null, drawn, reload: projectsReload }}>
         <TrackersProvider>
-          <SourcesGroup onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+          <SourcesGroup onOpenFilesPage={onOpenFilesPage} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
         </TrackersProvider>
       </ProjectsContext.Provider>
     </JiraContext.Provider>
@@ -104,12 +107,18 @@ const rowOf = (name: string): HTMLElement => {
   if (!found) throw new Error(`no row named ${name}`);
   return found as HTMLElement;
 };
+/** That row's status pill word (`connected`, `2 projects`), or null when it draws none. */
+const pillOf = (name: string): string | null => rowOf(name).querySelector('.ui-status-word')?.textContent ?? null;
+const toneOf = (name: string): string | null => rowOf(name).querySelector('.ui-status-dot')?.getAttribute('data-tone') ?? null;
 /** That row's hint, line by line — each line is its own element so a swapped or merged line reads differently. */
 const linesOf = (name: string): string[] => [...rowOf(name).querySelectorAll('.set-hint-line')].map((el) => el.textContent ?? '');
 const rowNames = (): string[] => [...document.querySelectorAll('.set-row .set-name')].map((el) => el.textContent ?? '');
 
 beforeEach(() => {
   payload = { platforms: [TOKEN], projects: [row(), beta, gamma] };
+  onOpenFilesPage = jest.fn();
+  projectsReload = jest.fn();
+  jiraReload = jest.fn();
   onOpenGithubPage = jest.fn();
   onOpenJiraPage = jest.fn();
 });
@@ -131,7 +140,11 @@ describe('the Files row', () => {
   it('counts every project the Files section draws — a files and an unsupported one — and carries each files project’s connect command', async () => {
     await renderCard();
     const lines = linesOf('Files');
-    expect(lines[0]).toBe('2 projects');
+    expect(lines[0]).toBe('backlog/ folders in the registry');
+    // The count is the pill's word now, green and ageless (no poll is served for files).
+    expect(pillOf('Files')).toBe('2 projects');
+    expect(toneOf('Files')).toBe('green');
+    expect(rowOf('Files').querySelector('.ui-status-age')).toBeNull();
     expect(lines).toContain(`beta · ${CONNECT}`);
     // The command is a `code` element, selectable text — not a button (the card has no control but its links).
     expect(within(rowOf('Files')).getByText(CONNECT).tagName).toBe('CODE');
@@ -142,7 +155,18 @@ describe('the Files row', () => {
   it('says `1 project` for one, and draws no line for a files project with nothing to connect', async () => {
     payload = { platforms: [TOKEN], projects: [row(), { ...beta, connect: null }] };
     await renderCard();
-    expect(linesOf('Files')).toEqual(['1 project']);
+    expect(linesOf('Files')).toEqual(['backlog/ folders in the registry']);
+    expect(pillOf('Files')).toBe('1 project');
+  });
+
+  it('links to the Files board through the shell’s pair, only while the Files section is drawn', async () => {
+    await renderCard();
+    await userEvent.click(within(rowOf('Files')).getByRole('button', { name: 'Open' }));
+    expect(onOpenFilesPage).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    await renderCard(UNCONFIGURED, { files: false, github: true });
+    expect(within(rowOf('Files')).queryByRole('button')).toBeNull();
   });
 });
 
@@ -179,9 +203,9 @@ describe('the GitHub row', () => {
     expect(linesOf('GitHub')[0]).toBe('no token — set BM_GITHUB_TOKEN in .env and restart');
   });
 
-  it('links to GitHub › Settings through the shell’s pair', async () => {
+  it('links to the GitHub page through the shell’s pair', async () => {
     await renderCard();
-    await userEvent.click(within(rowOf('GitHub')).getByRole('button', { name: /GitHub › Settings/ }));
+    await userEvent.click(within(rowOf('GitHub')).getByRole('button', { name: 'GitHub page' }));
     expect(onOpenGithubPage).toHaveBeenCalledWith('settings');
     expect(onOpenJiraPage).not.toHaveBeenCalled();
   });
@@ -197,7 +221,7 @@ describe('the GitHub row', () => {
     // project (`0 projects`) while the rail still draws the row. The link follows the rail, because the rail is what it lands on.
     payload = { platforms: [TOKEN], projects: [beta] };
     await renderCard(UNCONFIGURED, { files: true, github: true });
-    expect(within(rowOf('GitHub')).getByRole('button', { name: /GitHub › Settings/ })).toBeInTheDocument();
+    expect(within(rowOf('GitHub')).getByRole('button', { name: 'GitHub page' })).toBeInTheDocument();
     cleanup();
 
     // And the other way: tracker rows that count a github project, under a rail that does not draw GitHub (or has not answered yet), draw no link.
@@ -212,10 +236,10 @@ describe('the GitHub row', () => {
 });
 
 describe('the Jira row', () => {
-  it('reads `configured · <site> · n boards` and links to Jira › Setup through the shell’s pair', async () => {
+  it('reads `configured · <site> · n boards` and links to Jira setup through the shell’s pair', async () => {
     await renderCard(jiraStatus());
     expect(linesOf('Jira')).toEqual(['configured · acme.atlassian.net · 2 boards']);
-    await userEvent.click(within(rowOf('Jira')).getByRole('button', { name: /Jira › Setup/ }));
+    await userEvent.click(within(rowOf('Jira')).getByRole('button', { name: 'Jira setup' }));
     expect(onOpenJiraPage).toHaveBeenCalledWith('setup');
     expect(onOpenGithubPage).not.toHaveBeenCalled();
   });
@@ -249,6 +273,9 @@ describe('before and after a failed read', () => {
     );
     expect(linesOf('Files')).toEqual(['checking…']);
     expect(linesOf('GitHub')).toEqual(['checking…']);
+    // Grey before the first answer, on every pill that is waiting on the trackers.
+    expect([toneOf('Files'), toneOf('GitHub')]).toEqual(['grey', 'grey']);
+    expect(pillOf('Files')).toBe('checking…');
     await act(async () => {
       await Promise.resolve();
     });
@@ -261,6 +288,103 @@ describe('before and after a failed read', () => {
       window.dispatchEvent(new Event('focus'));
     });
     expect(await screen.findByText('the last read failed — showing the previous answer')).toBeInTheDocument();
-    expect(linesOf('Files')[0]).toBe('2 projects');
+    expect(pillOf('Files')).toBe('2 projects');
+  });
+});
+
+describe('the status pills', () => {
+  it('draws GitHub green `connected` once a repo has been polled on time, red `down` with no token', async () => {
+    payload = { platforms: [TOKEN], projects: [row({ polledAt: new Date().toISOString() }), beta] };
+    await renderCard();
+    expect([pillOf('GitHub'), toneOf('GitHub')]).toEqual(['connected', 'green']);
+    cleanup();
+
+    payload = { platforms: [{ kind: 'github', hasToken: false, login: null, limit: null, remaining: null, reset: null }], projects: [beta] };
+    await renderCard();
+    expect([pillOf('GitHub'), toneOf('GitHub')]).toEqual(['down', 'red']);
+  });
+
+  it('draws GitHub grey before any repo has been polled', async () => {
+    await renderCard();
+    expect(toneOf('GitHub')).toBe('grey');
+  });
+
+  it('draws Jira green when configured and polled, grey `not configured` otherwise', async () => {
+    const polled = jiraStatus({ boards: [{ ...jiraBoard('b_00000001'), polledAt: new Date().toISOString() }] });
+    await renderCard(polled);
+    expect([pillOf('Jira'), toneOf('Jira')]).toEqual(['connected', 'green']);
+    cleanup();
+
+    await renderCard(UNCONFIGURED);
+    expect([pillOf('Jira'), toneOf('Jira')]).toEqual(['not configured', 'grey']);
+  });
+});
+
+describe('the foot: Last read and Read again', () => {
+  /** Every POST the card made, by URL, and how many times `/api/trackers` was read. */
+  function stubRead(sweeps: { github?: number; jira?: number } = {}): { posts: () => string[]; trackerReads: () => number } {
+    const fn = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const status = init?.method === 'POST' ? (url.endsWith('/github/sweep') ? sweeps.github : sweeps.jira) ?? 200 : 200;
+      return Promise.resolve({ ok: status < 300, status, json: () => Promise.resolve(init?.method === 'POST' ? { message: 'nothing is being polled' } : payload) } as Response);
+    });
+    global.fetch = fn as unknown as typeof fetch;
+    return {
+      posts: () => fn.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST').map(([u]) => String(u)),
+      trackerReads: () => fn.mock.calls.filter(([u, init]) => String(u).endsWith('/api/trackers') && (init as RequestInit | undefined)?.method !== 'POST').length
+    };
+  }
+
+  async function renderWithStub(sweeps?: { github?: number; jira?: number }) {
+    const probe = stubRead(sweeps);
+    const state: JiraState = { data: jiraStatus(), loading: false, error: false, reload: jiraReload };
+    render(
+      <JiraContext.Provider value={state}>
+        <ProjectsContext.Provider value={{ data: null, drawn: { files: true, github: true }, reload: projectsReload }}>
+          <TrackersProvider>
+            <SourcesGroup onOpenFilesPage={onOpenFilesPage} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+          </TrackersProvider>
+        </ProjectsContext.Provider>
+      </JiraContext.Provider>
+    );
+    await waitFor(() => expect(linesOf('GitHub')[0]).not.toBe('checking…'));
+    return probe;
+  }
+
+  it('says how long ago the sources answered, in the client’s own time', async () => {
+    await renderWithStub();
+    expect(await screen.findByText(/^Last read \d+ s ago$/)).toBeInTheDocument();
+  });
+
+  it('posts both sweeps once and reloads projects, trackers and Jira', async () => {
+    const probe = await renderWithStub();
+    const readsBefore = probe.trackerReads();
+    await userEvent.click(screen.getByRole('button', { name: 'Read again' }));
+
+    await waitFor(() => expect(jiraReload).toHaveBeenCalledTimes(1));
+    expect(probe.posts().sort()).toEqual(['/api/github/sweep', '/api/jira/sweep']);
+    expect(projectsReload).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(probe.trackerReads()).toBeGreaterThan(readsBefore));
+    expect(screen.queryByRole('alert')).toBeNull();
+    // Enabled again once the round trip is over.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Read again' })).toBeEnabled());
+  });
+
+  it('still reloads all three, and shows no error, when a sweep answers 409', async () => {
+    const probe = await renderWithStub({ github: 409 });
+    await userEvent.click(screen.getByRole('button', { name: 'Read again' }));
+
+    await waitFor(() => expect(jiraReload).toHaveBeenCalledTimes(1));
+    expect(probe.posts()).toHaveLength(2);
+    expect(projectsReload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says so, and still reloads, when a sweep fails some other way', async () => {
+    await renderWithStub({ jira: 500 });
+    await userEvent.click(screen.getByRole('button', { name: 'Read again' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('nothing is being polled');
+    expect(jiraReload).toHaveBeenCalledTimes(1);
   });
 });

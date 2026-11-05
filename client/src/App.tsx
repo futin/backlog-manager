@@ -294,6 +294,12 @@ function AppShell() {
     The GitHub section's pair, the same shape for the same reason: the Sources card's `GitHub › Settings` link (Settings › Shared) is this, never a
     `change('github')` of its own — a section set without its page would open whichever GitHub page was last stored, not the one the link names.
   */
+  /* The Files section's pair, for the Sources card's `Open`: the Files board, page store first like its two siblings. */
+  const onOpenFilesPage = (): void => {
+    setFilesPage('board');
+    change('files');
+  };
+
   const onOpenGithubPage = (p: GithubPage): void => {
     setGithubPage(p);
     change('github');
@@ -417,6 +423,7 @@ function AppShell() {
                         setRunsMode('watchdog');
                         change('runs');
                       }}
+                      onOpenFilesPage={onOpenFilesPage}
                       onOpenGithubPage={onOpenGithubPage}
                       onOpenJiraPage={onOpenJiraPage}
                     />

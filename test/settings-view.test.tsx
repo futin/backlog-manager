@@ -985,7 +985,9 @@ describe('SettingsView', () => {
       // `Sources` replaced `Trackers` in the source-sections change and comes FIRST: the spec puts it at the page's top, so the one host report now
       // opens the left column and the three controls moved to the right. `Trackers` is gone from this page — its pickers are GitHub › Settings'.
       expect(groupTitles()).toEqual(['Sources', 'Orchestrator watchdog', 'Backlog tick', 'Time zone']);
-      expect(groupScopes()).toEqual(['this machine', 'this server', 'this machine', 'this server']);
+      // Task 9 of the app restyle: Shared's four cards state their scope with the `this machine` pill, as Local's say `this browser`, and draw no sub-line.
+      expect(groupScopes()).toEqual([]);
+      expect(groupPills()).toEqual(['this machine', 'this machine', 'this machine', 'this machine']);
     });
 
     /** And the same rows inside them — the three cards this file owns outright.

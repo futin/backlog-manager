@@ -1006,7 +1006,13 @@ button.rail-count { cursor: pointer }
   background: var(--strip); border: 1px solid var(--hairline2); border-radius: 12px;
   cursor: pointer; transition: background .15s;
 }
-.set-link:hover { background: var(--strip-hi) }
+.set-link:hover:not(:disabled) { background: var(--strip-hi) }
+.set-link:disabled { opacity: .4; cursor: default }
+/* The Sources card's foot (Task 9): when the three sources last answered, and the one control that asks again. Hairline above, like a row's. */
+.set-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--ink3);
+}
 
 /* The theme picker (spec §4.10): five picture cards, each a mini board. The preview element carries its theme's own `data-theme`, so `--board`, `--strip` and
    `--cyan` below resolve from THAT theme's `[data-theme]` block in shared/theme.css rather than from the live page — which is the whole point of drawing

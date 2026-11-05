@@ -1,14 +1,18 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
+import { StatusPill } from '../ui/StatusPill';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useProjectsContext } from '../../hooks/ProjectsContext';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
 import { useTrackersContext } from '../../hooks/TrackersContext';
 import type { JiraPage } from '../../lib/jira-page';
 import type { GithubPage } from '../../lib/source-page';
+import { githubDown, jiraDown, serviceTone } from '../../lib/service-status';
 import { projectsPerSource, sourceSectionOf } from '../../lib/sources';
-import { platformLine, reachLines } from '../../lib/tracker';
+import { postSweep, refusalText, type SweepOutcome } from '../../lib/sweep';
+import type { StateTone } from '../../lib/tones';
+import { platformLine, pollAge, reachLines } from '../../lib/tracker';
 import type { TrackerProjectRow } from '../../../../shared/types';
 
 /**
@@ -32,12 +36,28 @@ import type { TrackerProjectRow } from '../../../../shared/types';
  * It owns no fetch: the shell's `TrackersProvider`, `JiraProvider` and `ProjectsProvider` do, so this card, GitHub › Settings, the rail and the strip chips
  * read one answer each.
  */
-export function SourcesGroup({ onOpenGithubPage, onOpenJiraPage }: { onOpenGithubPage?: (p: GithubPage) => void; onOpenJiraPage?: (p: JiraPage) => void }) {
+export function SourcesGroup({
+  onOpenFilesPage,
+  onOpenGithubPage,
+  onOpenJiraPage
+}: {
+  onOpenFilesPage?: () => void;
+  onOpenGithubPage?: (p: GithubPage) => void;
+  onOpenJiraPage?: (p: JiraPage) => void;
+}) {
   const { zone } = useTimeZone();
   const { data, loading, error } = useTrackersContext();
   const jira = useJiraContext();
   // The rail's own answer (`GET /api/projects`), read for the GitHub link's gate alone — see the comment on the link.
-  const drawn = useProjectsContext().drawn;
+  const projects = useProjectsContext();
+  const drawn = projects.drawn;
+  const trackers = useTrackersContext();
+  const answers = [useAnsweredAt(projects.data), useAnsweredAt(data), useAnsweredAt(jira.data)].filter((t): t is number => t !== null);
+  // The oldest of the three latest answers: the moment since which ALL answered. Sources that have not answered at all do not hold the foot back.
+  const answeredAt = answers.length === 0 ? null : Math.min(...answers);
+  const [reading, setReading] = useState(false);
+  const [readNotice, setReadNotice] = useState<string | null>(null);
+  const inFlight = useRef(false);
   // One instant for the whole card, read here and passed down, because `lib/tracker.ts` reads no clock: every age on one surface is aged against one moment.
   // The card has no ticking clock of its own — it re-renders when the shell's `useTrackers` answers — so "now" is the moment it rendered.
   const now = Date.now();
@@ -46,18 +66,61 @@ export function SourcesGroup({ onOpenGithubPage, onOpenJiraPage }: { onOpenGithu
   const counts = data === null ? null : projectsPerSource(data.projects);
   const platform = data?.platforms.find((p) => p.kind === 'github');
 
+  // The three pills. Each reads its source's own answer through the same predicates the shell's strip chips use (`serviceTone`, `githubDown`, `jiraDown`), so
+  // a card and a chip cannot disagree about "down" or "late". Files has no age and no poll: it is green the moment the registry answered.
+  const githubRows = data?.projects.filter((p) => p.source === 'github') ?? [];
+  const githubTone: StateTone | null =
+    data === null
+      ? null
+      : serviceTone(
+          { down: githubDown(platform?.hasToken === true, githubRows.map((r) => r.access)), rows: githubRows, limited: githubRows.some((r) => r.access === 'rate-limited') },
+          now
+        );
+  const jiraTone: StateTone | null =
+    jira.data === null || !jira.data.configured
+      ? null
+      : serviceTone({ down: jiraDown(jira.data.access), rows: jira.data.boards, limited: jira.data.access === 'rate-limited' }, now);
+
+  // Read again: both sweeps, then every context re-reads. A sweep's 409 means nothing is armed to sweep (Jira unconfigured, no github repo), which is not an
+  // error on a card whose job is to say what the machine has; anything else is a sentence under the foot. A ref guards the double click `reading` cannot.
+  const readAgain = async (): Promise<void> => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setReading(true);
+    setReadNotice(null);
+    const [github, jiraOutcome] = await Promise.all([postSweep('github'), postSweep('jira')]);
+    const outcomes: ['github' | 'jira', SweepOutcome][] = [
+      ['github', github],
+      ['jira', jiraOutcome]
+    ];
+    projects.reload();
+    trackers.reload();
+    jira.reload();
+    const refused = outcomes.flatMap(([service, o]) => (o.ok || o.status === 409 ? [] : [refusalText(service, o, zone)]));
+    setReadNotice(refused.length === 0 ? null : refused.join(' · '));
+    inFlight.current = false;
+    setReading(false);
+  };
+
   return (
-    <SettingsGroup title="Sources" scope="this machine">
+    <SettingsGroup title="Sources" pill="this machine">
       <SettingsRow
         name="Files"
         hint={
           data === null || counts === null ? (
             <Lines lines={[pending]} />
           ) : (
-            <Lines lines={[projectCount(counts.files), ...data.projects.filter((p) => sourceSectionOf(p.source) === 'files').flatMap(filesLine)]} />
+            <Lines lines={['backlog/ folders in the registry', ...data.projects.filter((p) => sourceSectionOf(p.source) === 'files').flatMap(filesLine)]} />
           )
         }
-      />
+      >
+        <StatusPill tone={counts === null ? 'grey' : 'green'} word={counts === null ? pending : projectCount(counts.files)} />
+        {drawn?.files === true && onOpenFilesPage && (
+          <button type="button" className="set-link" onClick={onOpenFilesPage}>
+            Open
+          </button>
+        )}
+      </SettingsRow>
 
       <SettingsRow
         name="GitHub"
@@ -75,28 +138,60 @@ export function SourcesGroup({ onOpenGithubPage, onOpenJiraPage }: { onOpenGithu
           )
         }
       >
+        <StatusPill tone={githubTone ?? 'grey'} word={githubTone === null ? pending : CARD_WORD[githubTone]} />
         {/* Gated on the rail's `drawn`, never on `counts`: the counts read `/api/trackers` and the rail reads `/api/projects`, two separate fetches that can be
             out of step. "Drawn only while the section it opens is drawn" is the rail's fact, so it is read where the rail reads it; unknown (`null`) draws no
             link, as the rail draws no row on a guess. */}
         {drawn?.github === true && onOpenGithubPage && (
           // A button, not an anchor: the destination is the shell's own state, not an href (the watchdog card's `Runs › Watchdog ↗` is the precedent).
           <button type="button" className="set-link" onClick={() => onOpenGithubPage('settings')}>
-            GitHub › Settings ↗
+            GitHub page
           </button>
         )}
       </SettingsRow>
 
       <SettingsRow name="Jira" hint={<Lines lines={[jiraLine(jira.data, jira.loading)]} />}>
+        <StatusPill
+          tone={jiraTone ?? 'grey'}
+          word={jiraTone !== null ? CARD_WORD[jiraTone] : jira.data === null ? (jira.loading ? 'checking…' : 'unavailable') : 'not configured'}
+        />
         {jira.data?.configured === true && onOpenJiraPage && (
           <button type="button" className="set-link" onClick={() => onOpenJiraPage('setup')}>
-            Jira › Setup ↗
+            Jira setup
           </button>
         )}
       </SettingsRow>
 
       {error && data !== null && <SettingsRow name="Last read" hint="the last read failed — showing the previous answer" />}
+
+      {readNotice !== null && (
+        <div className="set-row set-error-row" role="alert">
+          <span className="set-error">{readNotice}</span>
+        </div>
+      )}
+
+      {/* The card's foot: when all three sources last answered (client time — none of the three payloads is stamped with one) and the one control that asks them
+          again. Never a ticking clock: the age is as of this render, like every other age on the card. */}
+      <div className="set-foot">
+        <span>{answeredAt === null ? 'Not read yet' : `Last read ${pollAge(new Date(answeredAt).toISOString(), now)} ago`}</span>
+        <button type="button" className="set-link set-foot-action" disabled={reading} onClick={() => void readAgain()}>
+          Read again
+        </button>
+      </div>
     </SettingsGroup>
   );
+}
+
+/** The word on a source's pill for each tone — the card's own vocabulary ("connected"), where the strip chip's `TONE_WORD` is its accessible name ("on time"). */
+const CARD_WORD: Record<StateTone, string> = { green: 'connected', amber: 'late', red: 'down', grey: 'not polled yet' };
+
+/** The client time a context's payload last changed to a non-null answer, or `null` before the first. A fresh object per fetch is the contexts' contract. */
+function useAnsweredAt(data: unknown): number | null {
+  const [at, setAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (data !== null) setAt(Date.now());
+  }, [data]);
+  return at;
 }
 
 /** A hint of several lines, each its own block (`.set-hint-line`), so one line is one reading and no reader — or test — sees two run together. */

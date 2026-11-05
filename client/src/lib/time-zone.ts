@@ -85,6 +85,25 @@ function offsetAt(ms: number, zone: string): number {
   return wall - (ms - (((ms % 60_000) + 60_000) % 60_000));
 }
 
+/**
+ * `<zone> · UTC+1` — the Settings select's option label, so a reader can tell two zones apart by their clocks and not only by a city's name. A whole-hour
+ * offset prints bare (`UTC+1`), a part-hour one prints its minutes (`UTC+5:30`), and a zero offset prints `UTC` alone (`UTC · UTC`). The offset is the one in
+ * force at `now`, so a DST zone reads its summer or winter figure honestly, and a zone this engine rejects is its bare id; `now` stays the caller's parameter like every function in this file.
+ */
+export function zoneOffsetLabel(zone: string, now: number): string {
+  let minutes: number;
+  try {
+    minutes = Math.round(offsetAt(now, zone) / 60_000);
+  } catch {
+    // A stored zone this browser rejects (`readableZone`'s case) still has to be an option, or the select reads as its first one; it has no offset to print.
+    return zone;
+  }
+  if (minutes === 0) return `${zone} · UTC`;
+  const abs = Math.abs(minutes);
+  const mm = abs % 60;
+  return `${zone} · UTC${minutes < 0 ? '-' : '+'}${Math.floor(abs / 60)}${mm === 0 ? '' : `:${String(mm).padStart(2, '0')}`}`;
+}
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**

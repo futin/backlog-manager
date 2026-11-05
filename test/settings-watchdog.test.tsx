@@ -132,7 +132,7 @@ function renderView(): void {
    browser's, which is the one thing this group's own header comment argues at
    length. */
 const GROUP_TITLE = 'Orchestrator watchdog';
-const GROUP_SCOPE = 'this server';
+const GROUP_SCOPE = 'this machine';
 
 describe('WatchdogGroup', () => {
   afterEach(() => {
@@ -174,7 +174,7 @@ describe('WatchdogGroup', () => {
     // the destination for a reader who is only scanning, and the button is what
     // the redraw added.
     expect(screen.getByText(/The sweeper's state, the runs it is watching/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Runs › Watchdog/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Live view in Runs' })).toBeInTheDocument();
     expect(screen.queryByText(/^idle — /)).not.toBeInTheDocument();
     expect(screen.queryByText('Activity')).not.toBeInTheDocument();
   });
@@ -204,7 +204,7 @@ describe('WatchdogGroup', () => {
     );
     await screen.findByRole('switch', { name: 'Enabled' });
 
-    await userEvent.click(screen.getByRole('button', { name: /Runs › Watchdog/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Live view in Runs' }));
     expect(onOpenWatchdog).toHaveBeenCalledTimes(1);
   });
 
@@ -260,13 +260,14 @@ describe('WatchdogGroup', () => {
     stubFetch({ watchdog: watchdogStatus({ phase: 'idle' }) });
     renderView();
 
-    const tick = (await screen.findByLabelText('Check every')) as HTMLSelectElement;
-    const grace = screen.getByLabelText('Leave a resumed run alone for') as HTMLSelectElement;
-    const attempts = screen.getByLabelText('Give up after') as HTMLSelectElement;
-
-    expect(tick.options[tick.selectedIndex].textContent).toBe('1m');
-    expect(grace.options[grace.selectedIndex].textContent).toBe('10m');
-    expect(attempts.options[attempts.selectedIndex].textContent).toBe('2');
+    // Ladder mode shows the value as text, with no textbox and no <select>.
+    expect((await screen.findByLabelText('Check every')).textContent).toBe('1m');
+    expect(screen.getByLabelText('Leave a resumed run alone for').textContent).toBe('10m');
+    expect(screen.getByLabelText('Give up after').textContent).toBe('2');
+    // (Scoped to the card: the Time zone card beside it on the page is a real select.)
+    const card = screen.getByText(GROUP_TITLE).closest('.set-group') as HTMLElement;
+    expect(within(card).queryByRole('combobox')).toBeNull();
+    expect(within(card).queryByRole('spinbutton')).toBeNull();
   });
 
   // --- 6: an off-ladder value still renders as its own selected option ------
@@ -304,27 +305,46 @@ describe('WatchdogGroup', () => {
   //     `WatchdogStatus.config.maxAttempts` this test hands to `WatchdogGroup`
   //     directly, exactly like every other case in this file stubs the GET
   //     response rather than running it through the real API.
+  // The stepper's own contract (Task 1) is that an off-ladder stored figure sits in order and steps to its neighbours; this is the Review Focus case that
+  // the watchdog card, which owns the splice (`ladderWithSelected`), still shows such a value and presses from it, per field.
   it.each([
-    ['Check every', 'tickMs', 45_000, '45s', '45000'],
-    ['Leave a resumed run alone for', 'graceMs', 900_000, '15m', '900000'],
-    ['Give up after', 'maxAttempts', 2.5, '2.5', '2.5']
-  ] as [string, 'tickMs' | 'graceMs' | 'maxAttempts', number, string, string][])(
-    'shows an off-ladder %s value as an extra selected option, never snapped to a neighbour',
-    async (label, field, value, expectedText, expectedValue) => {
-      stubFetch({
+    ['Check every', 'tickMs', 45_000, '45s', 30_000, 60_000],
+    ['Leave a resumed run alone for', 'graceMs', 900_000, '15m', 600_000, 1_200_000],
+    ['Give up after', 'maxAttempts', 2.5, '2.5', 2, 3]
+  ] as [string, 'tickMs' | 'graceMs' | 'maxAttempts', number, string, number, number][])(
+    'shows an off-ladder %s value as its own figure and steps to its neighbours, never snapped',
+    async (label, field, value, expectedText, below, above) => {
+      const fetchMock = stubFetch({
         watchdog: watchdogStatus({ config: { ...DEFAULT_WATCHDOG_CONFIG, [field]: value } })
       });
       renderView();
 
-      const select = (await screen.findByLabelText(label)) as HTMLSelectElement;
-      expect(select.options[select.selectedIndex].textContent).toBe(expectedText);
-      expect(select.value).toBe(expectedValue);
+      expect((await screen.findByLabelText(label)).textContent).toBe(expectedText);
+      const posted = (): Record<string, unknown>[] =>
+        fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog/config')).map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+
+      await userEvent.click(screen.getByRole('button', { name: `Increase ${label}` }));
+      await waitFor(() => expect(posted()).toEqual([{ [field]: above }]));
+      await userEvent.click(screen.getByRole('button', { name: `Decrease ${label}` }));
+      await waitFor(() => expect(posted()).toEqual([{ [field]: above }, { [field]: below }]));
     }
   );
 
+  it('posts exactly {tickMs: 120000} from `Increase Check every` at the default 60000', async () => {
+    const fetchMock = stubFetch({ watchdog: watchdogStatus({ phase: 'idle' }) });
+    renderView();
+    await screen.findByLabelText('Check every');
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Check every' }));
+    await waitFor(() => {
+      const posts = fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog/config'));
+      expect(posts).toHaveLength(1);
+      expect(JSON.parse(String((posts[0][1] as RequestInit).body))).toEqual({ tickMs: 120_000 });
+    });
+  });
+
   // --- 7: Give up after -> exactly one POST, redraw from the response ------
 
-  it('posts exactly {maxAttempts} on a change and redraws the select from the response', async () => {
+  it('posts exactly {maxAttempts} on a change and redraws the stepper from the response', async () => {
     const responded = watchdogStatus({
       config: { ...DEFAULT_WATCHDOG_CONFIG, maxAttempts: 3 }
     });
@@ -334,7 +354,7 @@ describe('WatchdogGroup', () => {
     });
     renderView();
 
-    const attempts = (await screen.findByLabelText('Give up after')) as HTMLSelectElement;
+    await screen.findByLabelText('Give up after');
 
     // The "before" half of the Minor finding's call-count assertion: taken
     // only once `findByLabelText` above has resolved, i.e. only once the
@@ -343,7 +363,7 @@ describe('WatchdogGroup', () => {
     const getsToWatchdog = (): number => fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog')).length;
     const getsBeforeSave = getsToWatchdog();
 
-    await userEvent.selectOptions(attempts, '3');
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Give up after' }));
 
     await waitFor(() => {
       const posts = fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog/config'));
@@ -353,7 +373,7 @@ describe('WatchdogGroup', () => {
     expect(JSON.parse(String(init.body))).toEqual({ maxAttempts: 3 });
 
     await waitFor(() => {
-      expect((screen.getByLabelText('Give up after') as HTMLSelectElement).value).toBe('3');
+      expect(screen.getByLabelText('Give up after').textContent).toBe('3');
     });
 
     // The behaviour itself: `useWatchdog.save` redraws `status` straight
@@ -454,7 +474,7 @@ describe('WatchdogGroup', () => {
     expect(getsToWatchdog()).toBe(1);
   });
 
-  it('opens with the Live view pointer and then the four knobs, in that order', async () => {
+  it('opens with the four knobs and ends on the Live view pointer, in that order', async () => {
     stubFetch({ watchdog: watchdogStatus({ phase: 'idle' }) });
     storeSharedPage();
     const { container } = render(
@@ -472,7 +492,7 @@ describe('WatchdogGroup', () => {
     // matching on the title is what made this immune to the move.
     const group = Array.from(container.querySelectorAll('.set-group')).find((el) => el.querySelector('.ui-sheet-title')?.textContent === GROUP_TITLE);
     const names = Array.from(group?.querySelectorAll('.set-name') ?? []).map((el) => el.textContent);
-    expect(names).toEqual(['Live view', 'Enabled', 'Check every', 'Leave a resumed run alone for', 'Give up after']);
+    expect(names).toEqual(['Enabled', 'Check every', 'Leave a resumed run alone for', 'Give up after', 'Live view']);
   });
   // --- bug-24: a refused save says so, beside the control that was changed --
   //
@@ -497,8 +517,8 @@ describe('WatchdogGroup', () => {
     stubRefusedSave();
     renderView();
 
-    const attempts = (await screen.findByLabelText('Give up after')) as HTMLSelectElement;
-    await userEvent.selectOptions(attempts, '3');
+    await screen.findByLabelText('Give up after');
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Give up after' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/Not saved/);
@@ -507,7 +527,7 @@ describe('WatchdogGroup', () => {
     // The select showing the old value is not a second defect: it is
     // controlled off `status.config`, which a failed write left at the last
     // value the server actually returned. What was missing is the line above.
-    expect((screen.getByLabelText('Give up after') as HTMLSelectElement).value).toBe('2');
+    expect(screen.getByLabelText('Give up after').textContent).toBe('2');
     expect(screen.getByLabelText('Enabled')).toBeInTheDocument();
     expect(screen.getByLabelText('Check every')).toBeInTheDocument();
     expect(screen.getByLabelText('Leave a resumed run alone for')).toBeInTheDocument();
@@ -520,8 +540,8 @@ describe('WatchdogGroup', () => {
     stubRefusedSave();
     renderView();
 
-    const attempts = (await screen.findByLabelText('Give up after')) as HTMLSelectElement;
-    await userEvent.selectOptions(attempts, '3');
+    await screen.findByLabelText('Give up after');
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Give up after' }));
 
     // This is the assertion a group-level banner fails, which is what makes
     // "beside the control" a tested claim rather than a comment in the file.
@@ -555,15 +575,15 @@ describe('WatchdogGroup', () => {
     });
     renderView();
 
-    const attempts = (await screen.findByLabelText('Give up after')) as HTMLSelectElement;
-    await userEvent.selectOptions(attempts, '3');
+    await screen.findByLabelText('Give up after');
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Give up after' }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
 
     refuse = false;
-    await userEvent.selectOptions(screen.getByLabelText('Give up after'), '4');
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Give up after' }));
 
     await waitFor(() => {
-      expect((screen.getByLabelText('Give up after') as HTMLSelectElement).value).toBe('4');
+      expect(screen.getByLabelText('Give up after').textContent).toBe('4');
     });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });

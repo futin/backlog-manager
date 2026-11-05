@@ -98,16 +98,18 @@ function landingOptions(jiraConfigured: boolean, drawn: DrawnSources | null, cur
  * renders this view bare predates the link and none of them needs a
  * destination for it.
  *
- * `onOpenGithubPage` and `onOpenJiraPage` are the same kind of pair, for the Sources card's two links (GitHub › Settings, Jira › Setup): built once in
+ * `onOpenFilesPage`, `onOpenGithubPage` and `onOpenJiraPage` are the same kind of pair, for the Sources card's three links (Files › Open, GitHub page, Jira setup): built once in
  * `App` as page store first, then `change`, and threaded through Shared to the card rather than rebuilt here — the source-sections rule that a source's
  * pages are switched by the rail's tree or by that pair, never by an in-page control. Optional for the same reason.
  */
 export default function SettingsView({
   onOpenWatchdog,
+  onOpenFilesPage,
   onOpenGithubPage,
   onOpenJiraPage
 }: {
   onOpenWatchdog?: () => void;
+  onOpenFilesPage?: () => void;
   onOpenGithubPage?: (p: GithubPage) => void;
   onOpenJiraPage?: (p: JiraPage) => void;
 }) {
@@ -126,7 +128,7 @@ export default function SettingsView({
 
       {/* One of three pages, never a mix — the page IS the scope, so a card that mixed backends would make its pill a lie. */}
       {scope === 'shared' ? (
-        <SharedPage onOpenWatchdog={onOpenWatchdog} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+        <SharedPage onOpenWatchdog={onOpenWatchdog} onOpenFilesPage={onOpenFilesPage} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
       ) : scope === 'dashboards' ? (
         <DashboardsPage />
       ) : (
@@ -166,17 +168,19 @@ const BAND_SUB: Record<SettingsScope, string> = {
  */
 function SharedPage({
   onOpenWatchdog,
+  onOpenFilesPage,
   onOpenGithubPage,
   onOpenJiraPage
 }: {
   onOpenWatchdog?: () => void;
+  onOpenFilesPage?: () => void;
   onOpenGithubPage?: (p: GithubPage) => void;
   onOpenJiraPage?: (p: JiraPage) => void;
 }) {
   return (
     <div className="set-col">
       {/* SHARED PAGE — Task 9 restyles these four cards in place. One column since Task 8; the order is the old reading order, report first. */}
-      <SourcesGroup onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+      <SourcesGroup onOpenFilesPage={onOpenFilesPage} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
       <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
       <TickGroup />
       <TimeZoneGroup />

@@ -1,4 +1,4 @@
-import { formatZonedClock, readableZone, startOfZonedDay, timeZoneOptions, zonedDayStart, zonedParts } from '../client/src/lib/time-zone';
+import { formatZonedClock, readableZone, startOfZonedDay, timeZoneOptions, zoneOffsetLabel, zonedDayStart, zonedParts } from '../client/src/lib/time-zone';
 
 /**
  * The zone helper every board reading goes through (#241). Every case names its zone, so nothing here depends on the `TZ` the run happens under — the
@@ -76,5 +76,30 @@ describe('readableZone', () => {
 
   it('is the browser zone for a stored id this engine rejects, rather than throwing', () => {
     expect(readableZone('Mars/Olympus', 'America/New_York')).toBe('America/New_York');
+  });
+});
+
+describe('zoneOffsetLabel', () => {
+  const JAN = Date.UTC(2026, 0, 15, 12);
+  const JUL = Date.UTC(2026, 6, 15, 12);
+
+  it('prints a whole-hour offset bare and a part-hour one with its minutes', () => {
+    expect(zoneOffsetLabel('Europe/Belgrade', JAN)).toBe('Europe/Belgrade · UTC+1');
+    expect(zoneOffsetLabel('Asia/Kolkata', JAN)).toBe('Asia/Kolkata · UTC+5:30');
+    expect(zoneOffsetLabel('Asia/Kathmandu', JAN)).toBe('Asia/Kathmandu · UTC+5:45');
+  });
+
+  it('prints a west offset with a minus, and zero as a bare UTC', () => {
+    expect(zoneOffsetLabel('America/New_York', JAN)).toBe('America/New_York · UTC-5');
+    expect(zoneOffsetLabel('America/St_Johns', JAN)).toBe('America/St_Johns · UTC-3:30');
+    expect(zoneOffsetLabel('UTC', JAN)).toBe('UTC · UTC');
+  });
+
+  it('reads the offset in force at `now`, so a DST zone moves with the season', () => {
+    expect(zoneOffsetLabel('Europe/Belgrade', JUL)).toBe('Europe/Belgrade · UTC+2');
+  });
+
+  it('returns the bare id for a zone this engine rejects, instead of throwing', () => {
+    expect(zoneOffsetLabel('Mars/Olympus', JAN)).toBe('Mars/Olympus');
   });
 });
