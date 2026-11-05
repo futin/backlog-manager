@@ -11,8 +11,8 @@ import { Select } from '../ui/Select';
  *
  * It sits on the SHARED page because the value is a file on the API host (`~/.backlog-manager/settings/timezone.json`), so a phone, a laptop and a tailnet
  * browser that open this board read — and edit — the same one zone. That is the whole point of the setting: a per-browser zone was what let two devices
- * disagree about when a run started and which day it belongs to. The scope pill reads `this machine` (it said `this server` before the app restyle): the file is the API host's, and every browser
- * that host answers reads it. Option labels carry the UTC offset, `Europe/Belgrade · UTC+1`.
+ * disagree about when a run started and which day it belongs to. The scope pill reads `this machine` (it said `this server` before the app restyle): the file
+ * is the API host's, and every browser that host answers reads it. Option labels carry the UTC offset, `Europe/Belgrade · UTC+1`.
  *
  * The first option is "unset" — the empty string here, `null` on the wire — labelled with THIS browser's zone, so a reader can see what unset means on the
  * device in front of them. A Select over the platform's own list, never a free-text field: the server refuses an id it cannot canonicalise with a 400, and a
