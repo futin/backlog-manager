@@ -343,6 +343,7 @@ describe('guard 7 — one home per primitive', () => {
     '.ui-run-on',
     '.ui-split',
     '.ui-stripe',
+    '.ui-status',
     '.ui-glyph-tile',
     '.chev'
   ];

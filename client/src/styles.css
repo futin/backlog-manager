@@ -3800,6 +3800,30 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .ui-number:focus { outline: none; border-color: var(--ink3) }
 .ui-number-unit { font-size: 12px; color: var(--ink3) }
+/* The stepper around it (`− value unit +`): − and + are 36 px squares of the family's fill, the value sits between them. Structural `button` selectors are
+   not needed — the buttons carry the `.ui-number-step` class of this family. */
+.ui-number-stepper { display: inline-flex; align-items: center; gap: 8px }
+.ui-number-stepper .ui-number { width: 64px; text-align: center }
+.ui-number-step {
+  width: 36px; height: 36px; padding: 0; border-radius: 12px; font-size: 16px; line-height: 1; color: var(--ink);
+  background: var(--strip); border: 1px solid var(--hairline2);
+}
+.ui-number-step:hover:not(:disabled) { border-color: var(--ink3) }
+.ui-number-step:disabled { opacity: .4; cursor: default }
+.ui-number-value { min-width: 40px; text-align: center; font-size: 13px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums }
+
+/* StatusPill — the 28 px state chip (Shell mock): dot, word, optional age. Neutral fill, so no tint to pin; the dot reuses `.ui-stripe-dot`'s tone colours at
+   7 px. */
+.ui-status {
+  display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border-radius: 999px; white-space: nowrap;
+  font-size: 12.5px; font-weight: 600; color: var(--ink); background: var(--strip-hi);
+}
+.ui-status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--hairline2) }
+.ui-status-dot[data-tone='green'] { background: var(--green-solid) }
+.ui-status-dot[data-tone='amber'] { background: var(--amber-solid) }
+.ui-status-dot[data-tone='red'] { background: var(--red) }
+.ui-status-dot[data-tone='grey'] { background: var(--hairline2) }
+.ui-status-age { font-weight: 500; color: var(--ink3) }
 
 /* Switch — the family's pill member (§8.6): a recessed --steel track under a
    raised --strip option, so "on" is legible from the geometry before any
