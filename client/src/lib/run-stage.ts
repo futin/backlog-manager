@@ -119,7 +119,7 @@ export function stageChipClass(stage: RunStage): string {
  * The `ui/Pill` tone an item's outcome pill wears in the run detail (spec §4.6) — the same six-tone reading `STAGE_TONE` already decided, narrowed to the
  * five tones a pill has: active → `live`, done → `done`, bad → `bad`, warn → `warn`, and both quiet ones (idle, muted) → `neutral`. The stage WORD is
  * always printed in the pill, so folding the two quiet tones loses nothing a reader could have told apart by colour. Restated as a string union rather
- * than imported as `PillTone`: `lib/` imports nothing from `components/`, and the two unions are structurally the same, so the pill takes this directly.
+ * than imported as `PillTone`: `lib/` has no value imports from `components/` (type-only ones are allowed), and the two unions are structurally the same, so the pill takes this directly.
  * `stageChipClass` stays for the board cards, which still draw the old chip.
  */
 export type StagePillTone = 'neutral' | 'live' | 'warn' | 'bad' | 'done';
@@ -320,7 +320,7 @@ export function runStatusChip(
  * second `status === 'running' && !fresh` written here.
  *
  * The return type is a plain string union rather than `ui/Dot`'s own `DotTone`
- * on purpose: `lib/` must not import from `components/`, and these four names
+ * on purpose: `lib/` has no value imports from `components/` (type-only ones are allowed), and these four names
  * are a subset `Dot` accepts structurally.
  */
 export function runDotTone(
