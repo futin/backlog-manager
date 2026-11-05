@@ -45,8 +45,7 @@ its own file both pages draw. `JiraBoardView`'s `list` view draws a new `JiraIss
 **Files:**
 - Modify: `client/src/lib/jira-page.ts` (type, `JIRA_PAGES`, header comment)
 - Modify: `client/src/components/SideRail.tsx` (~L209-222 badge `onClick`; ~L478-490 `RAIL_JIRA_LABEL` + its comment)
-- Modify: `client/src/components/jira/JiraView.tsx` (page dispatch: `'sessions'` draws the Board page until Task 3 lands — one-line temporary fallthrough
-  is fine, Task 3 replaces it)
+- (`JiraView.tsx` needs no edit here: its `page === 'setup' ? … : <Board>` already draws the Board page for `'sessions'` until Task 3.)
 - Test: `test/jira-lib.test.ts` (~L597), `test/rail.test.tsx` (~L625-656)
 
 **Interfaces:**
@@ -75,7 +74,8 @@ Pure refactor — no behaviour change. The Board page must render byte-for-byte 
 - Create: `client/src/hooks/usePickedJiraBoard.ts`
 - Create: `client/src/components/jira/JiraBoardPicker.tsx` (today's `BoardPicker` from `JiraBoardView.tsx`, moved; same markup, aria and classes)
 - Modify: `client/src/components/jira/JiraBoardView.tsx` (consume both)
-- Modify: `.claude/rules/board.md` L21 (the Jira picker `Popover` composer now lives in `components/jira/JiraBoardPicker.tsx`)
+- Modify: `.claude/rules/board.md` L21 and `client/src/hooks/useDialogEscape.ts` ~L48 (both name the Jira picker's `Popover` composer; it now lives in
+  `components/jira/JiraBoardPicker.tsx`)
 - Test: `test/jira-board.test.tsx` (existing suite is the regression net)
 
 **Interfaces:**
@@ -84,7 +84,7 @@ Pure refactor — no behaviour change. The Board page must render byte-for-byte 
   fold: JiraFold; loaded: boolean; shown: JiraBoardStatus | null }`. Semantics exactly today's `JiraBoardView` lines: stored pick under `JIRA_BOARD_KEY`,
   `pickBoard`, `board === null` when `configUnreadable` is set, `loaded = !list.loading && !(list.error && list.issues.length === 0)`, `shown` = the board
   with `polledAt` advanced to the list's when newer (today's `newer()` moves with it). `fold = foldBoard(list.issues)`, memoised on `list.issues`.
-- Produces: `JiraBoardPicker({ boards, current, onPick })` — today's `BoardPicker` props.
+- Produces: `JiraBoardPicker({ boards, current, onPick })` — today's `BoardPicker` props; `current` is non-null, so callers draw it only once `board` is.
 
 - [ ] **Step 1:** Run `pnpm exec jest test/jira-board.test.tsx test/jira-list.test.tsx test/jira-detail.test.tsx` — green baseline.
 - [ ] **Step 2: Implement** the hook and the picker file; `JiraBoardView` calls them and keeps everything else (filters, deck, shelves, worktrees, band).
@@ -136,6 +136,10 @@ Behaviour:
   - "a row click opens Detail on the Sessions page, and a landed write re-reads the board list": count fetches of `/api/jira/boards/<id>/issues`; open
     Detail from a row; fire `Assign to me` (stub `/api/jira/issue/assign` ok); the count goes up by one without advancing timers.
   - "search is per page: text typed on Sessions is not in the Board page's search after a switch".
+  - "a Sessions row's `Run ▾` › a pick opens the launch sheet": an ended row on a ticket with no live run; open `Run ▾`, pick `Work it end to end`; a dialog
+    named for the launch sheet (as `test/jira-launch.test.tsx` finds it) is open, hosted by `JiraView`, and Detail is not.
+  - In `test/jira-board.test.tsx`: "the FilterBar is drawn in List too" (Filters button present with view `list`) and "the search reads `Search issues` in
+    both views" — these pin Step 3's C1 change in this task, not Task 4.
 - [ ] **Step 2:** `pnpm exec jest test/jira-list.test.tsx` — the new cases fail.
 - [ ] **Step 3: Implement** the page, the prop, the `JiraView` dispatch and the `JiraBoardView` `list` branch removal. The `JiraBoardView` search label
   becomes `Search issues` / `search summaries` in both views, and the FilterBar is drawn in both views (C1) — move its `view === 'board'` guard out now,
@@ -161,20 +165,21 @@ option: draw **no** indented rows.
 **Interfaces:**
 - Consumes: `foldBoard`, `foldMatches`, `matchesBoardFilters`, `boardAgents` (existing); Task 3's `JiraBoardView` without the session table.
 - Produces:
-  - `rolledUpdatedMs(top: JiraIssue, under: JiraFold['under']): number` in `lib/jira.ts` — newest `updated` across the top and its folded issues;
-    `sortTops` calls it.
+  - `rolledUpdated(top: JiraIssue, under: JiraFold['under']): string | null` in `lib/jira.ts` — the newest parseable `updated` ISO across the top and
+    its folded issues, as given; `null` when none parses. `sortTops` parses it (`null` → 0, today's "unparseable is oldest"), so the sort and the column read
+    one value. The Updated cell is `elapsedSince(rolled, now)` when non-null, empty otherwise.
   - `topSessionState(agents: readonly DeckEntry[]): Map<string, JiraSessionState>` in `lib/jira-deck.ts` — per `top.key`, the state of the **first**
     entry in the array as given. `boardAgents` already returns entries in `deckOrder` (group, then newest start, then id), so the cell and the deck agree on
     which session leads a card; this helper adds no ordering of its own.
   - `issueCellWord(state: JiraSessionState): string` in `lib/jira-deck.ts` — `plan|permission|reply|answer → 'needs you'`, `working → 'working'`,
-    `quiet → 'quiet'`, `lost → 'lost contact'`, `starting → 'starting'`.
+    `quiet → 'quiet'`, `lost → 'lost contact'`, `starting → 'starting'`, `ended → ''` (never reached — `boardAgents` drops ended links).
   - `JiraIssueList({ tops, fold, sessions, now, onOpenIssue })` where `tops` is the filtered top list in `sortTops` order and `sessions` the map above.
 
 Behaviour (spec "Jira › Board"):
 - One row per kept top (`foldMatches(fold, keep)` keys), all of them, `sortTops` order, no cut. Folded issues are never rows.
 - Columns: Session (dot via `listDotTone` + word, or empty) · Key · Summary (+ ` N under it` muted, `N = fold.under.get(key).length`, only when N > 0) ·
   Type (`type.name`) · Status (raw `status.name` in the card's `Pill tone="neutral"`) · Assignee (`name` or `unassigned`) · Sprint (`sprint` or `—`) ·
-  Updated (`elapsedSince(<rolled-up ISO>, now)` from `lib/item-age.ts`).
+  Updated (`elapsedSince(rolledUpdated(...), now)` from `lib/item-age.ts`; empty when `null`).
 - Row click (anywhere but a link) → `onOpenIssue(top, fold.childrenOf)`. The Session cell is not a link. Each row carries `data-key`.
 - No rows after filters → `board-empty` line `No issues match` (or `No issues` when no filter or search is applied — builder may reuse the Board's own empty
   wording if it has one; pick one and test it).
@@ -184,9 +189,12 @@ Behaviour (spec "Jira › Board"):
     and `plan` on its child → A `plan`; top B with `lost` started 10:00 and `starting` (a status reservation) at 10:05 on its child → B `starting` (newest
     start leads inside `other`, `deckOrder`'s rule); no live links → empty map; A and B in one call stay apart.
   - `jira-lib.test.ts` `issueCellWord`: each of the nine states except `ended` maps to its word above.
-  - `jira-lib.test.ts` `rolledUpdatedMs`: top updated 5 d ago with a child updated 1 d ago → the child's ms; no children → its own.
+  - `jira-lib.test.ts` `rolledUpdated`: top updated 5 d ago with a child updated 1 d ago → the child's ISO string; no children → its own; top
+    unparseable with a parseable child → the child's; nothing parseable → `null`. Existing `sortTops` cases stay green unedited.
   - `jira-board.test.tsx`, new `describe('the issue List')` using the `GROUP` fold fixture (~L534-575), `setJiraView('list')`:
-    - "draws one row per top and no folded issue": row `data-key`s equal the Board view's card keys for the same fixture, in the same order.
+    - "draws one row per top and no folded issue, in `sortTops` order": row `data-key`s equal `['PAY-120', 'PAY-180', 'PAY-190']` (the fixture's
+      `sortTops(fold.tops, fold.under)`), and no folded key is a row. Plus a case where an In Progress or Done top is the newest, so the List's order
+      differs from the Board's column order — the List puts it first.
     - "names how many issues fold under a top": `PAY-120` row reads `<fold.under.get('PAY-120').length> under it` — the whole fold, so pick a fixture top
       whose under count differs from its direct-children count and assert the under count; a top with exactly one folded issue reads `1 under it`; a top
       with none has no suffix.
@@ -195,11 +203,10 @@ Behaviour (spec "Jira › Board"):
     - "the deck's lead session names the card": `working` on the top and `answer` on its child → `needs you`, and the deck (Board view) leads that card
       with the same session.
     - "keeps a top whose folded issue matches the search" (F1 parity): search a grandchild's summary; the top's row is drawn.
-    - "the FilterBar is drawn in List and filters the rows": Filters button present; assignee `me` leaves only my tops.
+    - "the FilterBar filters the List's rows": assignee `me` leaves only my tops.
     - "Updated reads the rolled-up time": a top 5 d old with a child 1 d old reads `1d` (whatever `elapsedSince` prints for 1 day — assert against
       `elapsedSince` called with the same instant).
     - "a row click opens the modal with the fold": same assertion as the card-click case (~L621).
-    - "the search reads `Search issues` in both views".
 - [ ] **Step 2:** `pnpm exec jest test/jira-lib.test.ts test/jira-board.test.tsx` — fail.
 - [ ] **Step 3: Implement** helpers, component, styles, wiring.
 - [ ] **Step 4:** Same command + `test/design-guards.test.ts test/csp.test.ts test/filter-bar.test.tsx`, `pnpm run typecheck` — green.
