@@ -321,8 +321,8 @@ function AppShell() {
   // renders `null` otherwise — so the strip (always in the tree) and the rail bar hold zero, one or two chips, never a hidden one.
   const chip = (
     <>
-      <TrackerChip section={section} />
-      <JiraChip section={section} />
+      <TrackerChip section={section} onOpenSettings={() => onOpenGithubPage('settings')} />
+      <JiraChip section={section} onOpenSetup={onOpenJiraPage} />
     </>
   );
 

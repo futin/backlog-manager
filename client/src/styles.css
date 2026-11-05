@@ -287,29 +287,15 @@ button.rail-count { cursor: pointer }
     transition: transform .2s ease;
   }
   .rail[data-hidden="true"] { transform: translateY(-100%) }
-  /* Brand, the tracker chip when there is one, then ☰ — which keeps `margin-left: auto`, so the chip sits beside it and needs no margin of its own. */
+  /* Brand, the status pills when there are any, then ☰ — which keeps `margin-left: auto`, so the pills sit beside it and need no margin of their own. */
   .rail-bar { display: flex; align-items: center; gap: 8px }
-  /* The bar has no slack (#229). At 375 px its content box is 351 px, and brand 83.8 + chip 224.3 + ☰ 36 + two gaps came to 360.1: 9 px over. The chip
-     is `flex: none`, its meters are pinned to `max-content` and the brand cannot go below its min-content, so the whole deficit landed on ☰ — measured
-     26.9 px wide, a thumb target already eaten — and once ☰ hit its own min-content the row overflowed the `overflow-x: hidden` rail and ☰ was cut off
-     (POLL `overdue` put it 0.9 px past the edge; a 19-character login, entirely off-screen). So ☰ no longer yields: it stays 36 × 36. */
+  /* The bar has no slack (#229). At 375 px its content box is 351 px: brand 88 + ☰ 36 + two gaps leave ~211 for the pills, and two pills with their ages
+     (`GitHub 12 s`, `Jira 12 s`) measure ~215. Every item but ☰ is `flex: none`, so the deficit would land on ☰ — the phone's only section switch, which
+     DESIGN.md §8.0 says never gives up space — and push it past `.rail`'s `overflow-x: hidden`. So ☰ stays 36 × 36 and the pills drop their age here: the
+     button's `aria-label` still says it, and the popover prints it one tap away. The age is the pill's third span, reached structurally because guard 7
+     forbids restating a `ui-status` token outside the primitives block; a pill with no age has no third span and the rule matches nothing. */
   .rail-menu { flex: none }
-  /* And the variable-width reading leaves the phone's bar instead. The login, not a meter: its width tracks the account (GitHub allows 39 characters),
-     so no fixed trim fixes it, and it is the least load-bearing reading here — the avatar carries its initial, the button's `aria-label` names it, and
-     the popover's `.tracker-pop-who` prints it in full one tap away. Scoped to `.tracker-chip`, the button, because the popover reuses `.tracker-name`;
-     and only when meters follow it, because the no-token chip renders none — it is avatar, label and caret with room to spare, and "no token" is the one
-     login text that is itself the message. With both rules the worst case (POLL `overdue`, API `100%`) leaves 24.5 px of slack, whatever the login — 28.7 until the
-     wordmark took the dashboard's 10 px dot and 9 px gap (2026-10-01), which made the brand 88 px rather than 83.8. The prompt-cursor wordmark that
-     replaced it (2026-10-14) measures 87.8 px in this bar at 375 px, so the slack stands. */
-  .rail-bar .tracker-chip .tracker-name:has(+ .tracker-meters) { display: none }
-  /* Jira phase 2: two chips in the bar — the GitHub tracker and Jira, siblings straight out of `chipSlot`, each a `.tracker-chip-root` — drop their
-     meters too, leaving avatar, pip and caret. The login rule above is not enough: with both chips the row measured ~178 px over the 351 px content box,
-     and since every item but ☰ is `flex: none`, ☰ — the phone's only section switch — was pushed past `.rail`'s `overflow-x: hidden` and clipped, the
-     failure #229 fixed for one chip and DESIGN.md §8.0's rule that ☰ never gives up space forbids. The pip still carries the one reading that must not
-     hide (red = access failing) and the popover prints every meter one tap away. `:has(+ …)` catches the first chip, `+` the second; a lone chip matches
-     neither and keeps its meters, and the desktop strip is outside this block entirely. */
-  .rail-bar .tracker-chip-root:has(+ .tracker-chip-root) .tracker-meters,
-  .rail-bar .tracker-chip-root + .tracker-chip-root .tracker-meters { display: none }
+  .rail-bar .tracker-chip > span > span:nth-child(3) { display: none }
   /* In a bar the wordmark is a label rather than a page heading: the prompt drops to 17 px and the cursor scales with it (8 × 17, 6 px from the
      word). The kicker stays at 11 px where the dashboard's bar draws 10 — guard 3's floor (test/design-guards.test.ts), which this board keeps. */
   .rail-brand { padding: 0 }
@@ -324,56 +310,59 @@ button.rail-count { cursor: pointer }
   .main { border-top-left-radius: 0 }
 }
 
-/* ---------------------------------------------- Tracker chip
-   §8.0's shell strip, and the tracker strip spec §2: the dashboard's `.acct` pill applied to the connected tracker — 36 px bare pill, 26 px avatar,
-   12.5/600 login, two `Meter`s and an 11 px caret (the dashboard's 9 px caret is under guard 3's floor). Transparent at rest, --strip-hi on hover and
-   while its popover is open: the same fill the rail's active row uses, so "this is the thing you are looking at" reads one way across the shell.
-   The meters' look is `Meter`'s, in the primitives block; this section only lays them out. */
+/* ---------------------------------------------- Status pills
+   §8.0's shell strip and the shell mock's top right: GitHub and Jira are each a `StatusPill` (primitives block) inside a bare button, and a popover hangs from
+   it. The button draws nothing of its own — the pill is the look — and only moves the pill's fill while hovered or open, the same "this is the thing you are
+   looking at" the rail's active row gives. The pill is the button's span child, reached with `> span`: guard 7 forbids naming a `ui-status` token here. */
 .tracker-chip-root { position: relative; flex: none }
 .tracker-chip {
-  display: inline-flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px 0 5px;
-  border: 0; border-radius: 999px; background: none; color: var(--ink); cursor: pointer; font: inherit;
-  transition: background .15s;
+  display: inline-flex; align-items: center; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--ink); cursor: pointer; font: inherit;
 }
-.tracker-chip:hover, .tracker-chip[aria-expanded="true"] { background: var(--strip-hi) }
+.tracker-chip:hover > span, .tracker-chip[aria-expanded="true"] > span { background: var(--hairline) }
 .tracker-av {
   position: relative; flex: none; width: 26px; height: 26px; border-radius: 999px; background: var(--strip-hi);
   display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--ink);
 }
-/* Two states only: amber for no token, red when some repo's access is not ok. No pip is the "all healthy" reading — a green dot on every healthy
-   screen would be a signal that never changes, which is decoration pretending to be status. The ring is the strip's paper so the pip reads as cut
-   out of the avatar rather than stuck on it. */
-.tracker-pip { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border-radius: 999px; border: 1.5px solid var(--strip) }
-.tracker-pip[data-tone="amber"] { background: var(--amber-solid) }
-.tracker-pip[data-tone="red"] { background: var(--red) }
-.tracker-name { font-size: 12.5px; font-weight: 600; white-space: nowrap }
-/* At guard 3's 11 px label, `POLL overdue` is wider than the meter's 56 px, so the chip's meters grow to their content rather than wrapping — a
-   two-line head would change the pill's height the moment the clock goes overdue. The bar lengthens with them, which is only ever in a warning state.
-   The child combinator, not `.ui-meter`, because guard 7 lets a page lay a primitive out only from the page's own class. */
-.tracker-meters { display: flex; gap: 10px }
-.tracker-meters > * { min-width: max-content }
-/* The caret is `ui/Chevron` (`.chev`, in the primitives block): colour only here. The open state is the component's `dir="up"`, not a rotate rule — a
-   second transform on the same element would turn an `up` chevron back down. */
-.tracker-caret { color: var(--ink3) }
-/* The panel's shell is `ui/Popover`'s (`.ui-popover`, in the primitives block); what follows is only what is drawn inside it. */
-.tracker-pop-id { display: flex; align-items: center; gap: 10px; margin-bottom: 12px }
+/* The panel's shell is `ui/Popover`'s (`.ui-popover`, in the primitives block); what follows is only what is drawn inside it. The head is the initials disc,
+   the name over `● connected · site`, and `Sync now` pushed to the right. */
+.tracker-pop-id { display: flex; align-items: center; gap: 10px; margin-bottom: 10px }
+.tracker-pop-id > button { margin-left: auto; flex: none }
 .tracker-pop-who { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
-.tracker-pop-sub { font-size: 12px; color: var(--ink3) }
+.tracker-pop-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.tracker-pop-sub { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink3); white-space: nowrap }
+/* The dot is the pill's, at 6 px: a state in the tone's colour, with the word beside it saying the same thing. */
+.tracker-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--hairline2) }
+.tracker-dot[data-tone="green"] { background: var(--green-solid) }
+.tracker-dot[data-tone="amber"] { background: var(--amber-solid) }
+.tracker-dot[data-tone="red"] { background: var(--red) }
+/* Two figures, each a label over a value, hairline-topped like the rows below. They WRAP: `Last sweep` carries its interval, which is the long one. */
+.tracker-pop-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; padding: 8px 0 4px; border-top: 1px solid var(--hairline) }
+.tracker-pop-figure { display: flex; flex-direction: column; gap: 1px; min-width: 0 }
+.tracker-pop-figure-label { font-size: 12px; color: var(--ink3) }
+.tracker-pop-figure-value { font-size: 12.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere }
 .tracker-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) 120px; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px;
   padding: 6px 0; border-top: 1px solid var(--hairline);
 }
 .tracker-row-text { display: flex; flex-direction: column; gap: 1px; min-width: 0 }
 .tracker-row-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .tracker-row-repo { font-size: 12px; color: var(--ink3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.tracker-pop-api {
-  display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding-top: 10px;
-  border-top: 1px solid var(--hairline); font-size: 12px; color: var(--ink2);
+.tracker-row-line { font-size: 12px; color: var(--ink3); overflow-wrap: anywhere }
+/* The per-row sync icon: a 28 px square, bare until hovered, the Glyph's own ink. Disabled reads as faint, as `.ui-chip:disabled` does. */
+.tracker-sync {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 8px; background: none; color: var(--ink2); cursor: pointer;
 }
-.tracker-pop-note { margin: 0; font-size: 13px; color: var(--ink2); line-height: 1.45 }
-/* The Jira chip's popover (§8.9.4) draws the dashboard's sync row per board: name over a sub-line, `.tracker-row`'s 120 px `next` meter, then the board's
-   `now` chip in a third, content-sized column. The sub-line wraps, unlike `.tracker-row-name`, because a failure's sentence is what a person acts on. */
-.jira-chip-board { grid-template-columns: minmax(0, 1fr) 120px auto }
+.tracker-sync:hover:not(:disabled) { background: var(--strip-hi); color: var(--ink) }
+.tracker-sync:disabled { cursor: default; opacity: .45 }
+/* The setup link, bottom of the popover: ink2 with the external glyph, as the mock's `Jira setup ↗`. A button, because the shell sets a section and its page
+   as one pair and a bare `href` could not. */
+.tracker-link {
+  display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 6px; padding: 8px 0 0; border: 0; border-top: 1px solid var(--hairline);
+  background: none; color: var(--ink2); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left;
+}
+.tracker-link:hover { color: var(--ink) }
+.tracker-pop-note { margin: 0 0 6px; font-size: 13px; color: var(--ink2); line-height: 1.45 }
+/* The Jira popover's board row is `.tracker-row` with a sub-line that WRAPS, unlike `.tracker-row-name`, because a failure's sentence is what a person acts on. */
 .jira-chip-board-line { font-size: 12px; color: var(--ink3); overflow-wrap: anywhere }
 
 /* ---------------------------------------------- Board section
@@ -3692,7 +3681,7 @@ button.rail-count { cursor: pointer }
    the clock a second late forever. Tone is the root's `data-tone`, one of the three accents every theme declares. */
 .ui-meter { display: inline-flex; flex-direction: column; gap: 3px; flex: none }
 /* The head may wrap: a popover row's value can be a whole access sentence in a 120 px meter, and it breaks onto its own lines there rather than
-   running out of the track. The chip keeps its meters on one line by letting them grow instead (`.tracker-meters`). */
+   running out of the track. The chip keeps its meters on one line by letting them grow instead (the old meters). */
 .ui-meter-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 6px }
 .ui-meter-label { font-size: 11px; font-weight: 500; color: var(--ink3) }
 .ui-meter-value { font-size: 11px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums }

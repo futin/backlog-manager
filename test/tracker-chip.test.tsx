@@ -6,7 +6,6 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { TrackerChip } from '../client/src/components/TrackerChip';
-import { Meter } from '../client/src/components/ui/Meter';
 import { TrackersContext } from '../client/src/hooks/TrackersContext';
 import type { TrackersState } from '../client/src/hooks/useTrackers';
 import { useDialogEscape } from '../client/src/hooks/useDialogEscape';
@@ -21,7 +20,7 @@ import type { TrackerPlatform, TrackerProjectRow, TrackersPayload } from '../sha
 const ZONE = 'America/New_York';
 
 /**
- * The strip chip and its popover (the tracker strip spec, §2). The context is provided directly rather than through a stubbed fetch: what this suite owns
+ * The GitHub status pill and its popover (spec §4.9; Shell mock). The context is provided directly rather than through a stubbed fetch: what this suite owns
  * is what the chip READS off a payload, and `use-trackers.test.tsx` owns how the payload arrives. Fake timers pin `useNow`'s one-second tick.
  */
 
@@ -42,12 +41,15 @@ function payload(rows: TrackerProjectRow[] = [row()], plat: TrackerPlatform = pl
   return { platforms: [plat], projects: rows };
 }
 
+let reload: jest.Mock;
+let openSettings: jest.Mock;
+
 function wrap(data: TrackersPayload | null, section: Section, extra?: React.ReactNode) {
-  const value: TrackersState = { data, loading: false, error: false, reload: () => {}, saveInterval: () => Promise.resolve(), refusals: {} };
+  const value: TrackersState = { data, loading: false, error: false, reload, saveInterval: () => Promise.resolve(), refusals: {} };
   return (
     <TrackersContext.Provider value={value}>
       {extra}
-      <TrackerChip section={section} />
+      <TrackerChip section={section} onOpenSettings={openSettings} />
     </TrackersContext.Provider>
   );
 }
@@ -58,19 +60,29 @@ function renderChip(data: TrackersPayload | null, section: Section = 'github') {
 }
 
 const chip = () => screen.getByTestId('tracker-chip');
-const meterOf = (scope: HTMLElement, label: string) => within(scope).getByText(label).closest('.ui-meter') as HTMLElement;
-const fillOf = (meter: HTMLElement) => (meter.querySelector('.ui-meter-fill') as HTMLElement).style.width;
 
 let user: ReturnType<typeof userEvent.setup>;
+let fetchMock: jest.Mock;
+let answer: (res: { ok: boolean; status: number; body: unknown }) => void;
 
 beforeEach(() => {
   jest.useFakeTimers();
   jest.setSystemTime(NOW);
   user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+  reload = jest.fn();
+  openSettings = jest.fn();
+  fetchMock = jest.fn(
+    () =>
+      new Promise((resolve) => {
+        answer = ({ ok, status, body }) => resolve({ ok, status, json: () => Promise.resolve(body) });
+      })
+  );
+  (globalThis as { fetch?: unknown }).fetch = fetchMock;
 });
 
 afterEach(() => {
   jest.useRealTimers();
+  Reflect.deleteProperty(globalThis, 'fetch');
   delete (window as unknown as { matchMedia?: unknown }).matchMedia;
 });
 
@@ -80,7 +92,9 @@ function stubNarrow(matches: boolean): void {
   Object.defineProperty(window, 'matchMedia', { value: matchMedia, configurable: true, writable: true });
 }
 
-describe('TrackerChip', () => {
+const dotTone = () => chip().querySelector('.ui-status-dot')?.getAttribute('data-tone');
+
+describe('the GitHub pill', () => {
   it('renders nothing when no project is a tracker', () => {
     const { update } = renderChip(payload([row({ source: 'files' })]));
     expect(screen.queryByTestId('tracker-chip')).toBeNull();
@@ -88,272 +102,132 @@ describe('TrackerChip', () => {
     expect(screen.queryByTestId('tracker-chip')).toBeNull();
   });
 
-  it('draws the login, a POLL countdown and the API share for a healthy payload', () => {
-    renderChip(payload());
-    const c = chip();
-    expect(within(c).getByText('F')).toBeInTheDocument();
-    expect(within(c).getByText('futin')).toBeInTheDocument();
-    expect(within(meterOf(c, 'POLL')).getByText('12s')).toBeInTheDocument();
-    expect(within(meterOf(c, 'API')).getByText('1.4%')).toBeInTheDocument();
-    expect(screen.queryByTestId('tracker-pip')).toBeNull();
+  it('draws the word GitHub and the newest poll’s age, named for a screen reader', () => {
+    renderChip(payload([row({ polledAt: ago(20_000) }), beta({ polledAt: ago(12_000) })]));
+    expect(within(chip()).getByText('GitHub')).toBeInTheDocument();
+    expect(within(chip()).getByText('12 s')).toBeInTheDocument();
+    expect(chip()).toHaveAccessibleName('GitHub: on time, 12 s');
+    expect(dotTone()).toBe('green');
   });
 
-  it('advances the countdown once a second', () => {
+  it('moves the age on the tick and nothing else', () => {
     renderChip(payload());
     act(() => {
       jest.advanceTimersByTime(1_000);
     });
-    expect(within(meterOf(chip(), 'POLL')).getByText('11s')).toBeInTheDocument();
+    expect(chip()).toHaveAccessibleName('GitHub: on time, 6 s');
   });
 
-  it('reads overdue on a full amber bar at two cycles', () => {
-    renderChip(payload([row({ polledAt: ago(34_000) })]));
-    const poll = meterOf(chip(), 'POLL');
-    expect(within(poll).getByText('overdue')).toBeInTheDocument();
-    expect(poll).toHaveAttribute('data-tone', 'amber');
-    expect(fillOf(poll)).toBe('100%');
+  it('is amber and named late past twice the repo’s own interval', () => {
+    const { update } = renderChip(payload([row({ polledAt: ago(31_000) })]));
+    expect(dotTone()).toBe('amber');
+    expect(chip()).toHaveAccessibleName('GitHub: late, 31 s');
+    // A 5m repo four minutes old is on time.
+    update(payload([row({ interval: '5m', polledAt: ago(4 * 60_000) })]));
+    expect(dotTone()).toBe('green');
   });
 
-  it('reads failing on a full red bar when every repo is failing, and only a red pip when some are', () => {
-    const { update } = renderChip(payload([row({ access: 'forbidden' }), beta({ access: 'forbidden' })]));
-    let poll = meterOf(chip(), 'POLL');
-    expect(within(poll).getByText('failing')).toBeInTheDocument();
-    expect(poll).toHaveAttribute('data-tone', 'red');
-    expect(fillOf(poll)).toBe('100%');
-
+  it('is red and named down with no token, or when every repo is refused, and not when only some are', () => {
+    const { update } = renderChip(payload([row()], platform({ hasToken: false, login: null })));
+    expect(dotTone()).toBe('red');
+    expect(chip()).toHaveAccessibleName('GitHub: down, 5 s');
+    update(payload([row({ access: 'forbidden' }), beta({ access: 'not-found' })]));
+    expect(dotTone()).toBe('red');
     update(payload([row(), beta({ access: 'forbidden' })]));
-    poll = meterOf(chip(), 'POLL');
-    expect(within(poll).getByText('12s')).toBeInTheDocument();
-    expect(poll).toHaveAttribute('data-tone', 'green');
-    expect(screen.getByTestId('tracker-pip')).toHaveAttribute('data-tone', 'red');
+    expect(dotTone()).toBe('green');
   });
 
-  it('reads … before the first poll', () => {
-    renderChip(payload([row({ polledAt: null })]));
-    const poll = meterOf(chip(), 'POLL');
-    expect(within(poll).getByText('…')).toBeInTheDocument();
-    expect(fillOf(poll)).toBe('0%');
+  it('is amber while a repo is rate-limited, grey before anything has polled', () => {
+    const { update } = renderChip(payload([row({ access: 'rate-limited' })]));
+    expect(dotTone()).toBe('amber');
+    update(payload([row({ polledAt: null })]));
+    expect(dotTone()).toBe('grey');
+    expect(chip()).toHaveAccessibleName('GitHub: not polled yet');
   });
 
-  it('takes no-token from the platform, not from the rows', () => {
-    // Review Focus 5: `hasToken` decides the no-token state; `access` decides the red pip.
-    const { update } = renderChip(payload([row({ access: 'ok' })], platform({ hasToken: false, login: null })));
-    let c = chip();
-    expect(within(c).getByText('no token')).toBeInTheDocument();
-    expect(within(c).getByText('—')).toBeInTheDocument();
-    expect(screen.getByTestId('tracker-pip')).toHaveAttribute('data-tone', 'amber');
-    expect(within(c).queryByText('POLL')).toBeNull();
-    expect(within(c).queryByText('API')).toBeNull();
-
-    update(payload([row({ access: 'no-token' }), beta({ access: 'no-token' })], platform({ hasToken: true })));
-    c = chip();
-    expect(within(c).getByText('futin')).toBeInTheDocument();
-    expect(screen.getByTestId('tracker-pip')).toHaveAttribute('data-tone', 'red');
-    expect(within(meterOf(c, 'POLL')).getByText('failing')).toBeInTheDocument();
-  });
-
-  it('colours the API meter by the budget ramp: green under 60 %, amber from 60 %, red from 90 %', () => {
-    // Remaining counts at each edge of the ramp, out of 5000: 2001 left is 59.98 % used, 2000 is exactly 60 %, 500 is exactly 90 %.
-    const cases: [number, string][] = [
-      [2001, 'green'],
-      [2000, 'amber'],
-      [501, 'amber'],
-      [500, 'red']
-    ];
-    const { update } = renderChip(payload());
-    for (const [remaining, tone] of cases) {
-      update(payload([row()], platform({ remaining })));
-      expect({ remaining, tone: meterOf(chip(), 'API').getAttribute('data-tone') }).toEqual({ remaining, tone });
-    }
-  });
-
-  it('hides the API meter until the platform has a limit', () => {
-    renderChip(payload([row()], platform({ limit: null, remaining: null, reset: null })));
-    expect(within(chip()).queryByText('API')).toBeNull();
-    expect(within(chip()).getByText('POLL')).toBeInTheDocument();
-  });
-});
-
-/**
- * #230 — what a screen reader hears. The button's NAME is the stable `Tracker: <login>`, because a focused element whose name changes is re-announced and
- * the POLL value changes every second; the readings ride as its DESCRIPTION instead. The last case pins the literal space inside `Meter` that keeps
- * `POLL 12s` from running together as `POLL12s` wherever text is read without layout.
- */
-describe('the chip as a screen reader reads it (#230)', () => {
-  const named = (name: string) => screen.getByRole('button', { name });
-
-  it('names the button by its login and describes it by both readings', () => {
-    renderChip(payload());
-    expect(named('Tracker: futin')).toHaveAccessibleDescription('POLL 12s API 1.4%');
-  });
-
-  it('moves the description on the tick and never the name', () => {
-    renderChip(payload());
-    act(() => {
-      jest.advanceTimersByTime(1_000);
-    });
-    const button = named('Tracker: futin');
-    expect(button).toHaveAccessibleName('Tracker: futin');
-    expect(button).toHaveAccessibleDescription('POLL 11s API 1.4%');
-  });
-
-  it('carries no description, and no dangling aria-describedby, without a token', () => {
-    renderChip(payload([row()], platform({ hasToken: false, login: null })));
-    const button = named('Tracker: no token');
-    expect(button).not.toHaveAttribute('aria-describedby');
-    expect(button).toHaveAccessibleDescription('');
-  });
-
-  it('describes sync off when every repo is off', () => {
-    renderChip(payload([row({ interval: 'off' }), beta({ interval: 'off' })]));
-    expect(named('Tracker: futin')).toHaveAccessibleDescription('POLL sync off API 1.4%');
-  });
-
-  it('reads a Meter on its own as two words', () => {
-    // Text content, not the accessible name: jsdom's name computation already puts a space between any two element children, so a name assertion would
-    // pass without the literal space. A browser's does not for inline runs, and text content is what copy, find-in-page and a naive reader take.
-    const { container } = render(<Meter label="API" value="1.4%" fraction={0.014} />);
-    expect(container.textContent).toBe('API 1.4%');
-  });
-});
-
-/**
- * #17 — a repo on its own interval. `off` reads as itself on the chip and in the popover, never as `overdue`: nothing is late when nothing was asked for.
- * A slowed repo runs its own clock, so `1m` at 40 s is a countdown, not an alarm.
- */
-describe('sync intervals on the chip (#17)', () => {
-  it('reads sync off on the POLL meter when every repo is off', () => {
-    renderChip(payload([row({ interval: 'off', polledAt: ago(600_000) }), beta({ interval: 'off' })]));
-    const poll = meterOf(chip(), 'POLL');
-    expect(within(poll).getByText('sync off')).toBeInTheDocument();
-    expect(poll).toHaveAttribute('data-tone', 'amber');
-  });
-
-  it('follows the syncing repo when another is off, and does not call the off one failing', () => {
-    renderChip(payload([row(), beta({ interval: 'off', access: 'forbidden' })]));
-    expect(within(meterOf(chip(), 'POLL')).getByText('12s')).toBeInTheDocument();
-  });
-
-  it('runs a 5m repo on a five-minute clock', () => {
-    renderChip(payload([row({ interval: '5m', polledAt: ago(40_000) })]));
-    const poll = meterOf(chip(), 'POLL');
-    expect(within(poll).getByText('300s')).toBeInTheDocument();
-    expect(poll).toHaveAttribute('data-tone', 'green');
-  });
-
-  it('draws an off repo’s popover row as sync off and a 1m repo’s as its own countdown', async () => {
-    renderChip(payload([row({ interval: '1m', polledAt: ago(40_000) }), beta({ interval: 'off', polledAt: ago(600_000) })]));
-    await user.click(chip());
-    const [slow, off] = screen.getAllByTestId('tracker-row');
-    expect(within(slow!).getByText('28s')).toBeInTheDocument();
-    expect(within(off!).getByText('sync off')).toBeInTheDocument();
-    expect(within(off!).queryByText('overdue')).toBeNull();
-  });
-});
-
-describe('TrackerPopover', () => {
-  it('opens a read-only popover with one row per connected repo', async () => {
-    renderChip(payload([row(), beta(), row({ name: 'gamma', path: '/abs/gamma', source: 'files', repo: null })]));
-    await user.click(chip());
-    const dialog = screen.getByRole('dialog', { name: 'Tracker' });
-    expect(within(dialog).getAllByTestId('tracker-row')).toHaveLength(2);
-    expect(within(dialog).getByText('GitHub · 2 repos connected')).toBeInTheDocument();
-    expect(within(dialog).queryAllByRole('button')).toHaveLength(0);
-    expect(within(dialog).queryAllByRole('link')).toHaveLength(0);
-  });
-
-  it('draws a failing repo as a full red bar carrying the access reason', async () => {
-    const failing = beta({ access: 'forbidden', detail: 'x' });
-    renderChip(payload([row(), failing]));
-    await user.click(chip());
-    const rows = screen.getAllByTestId('tracker-row');
-    const bad = rows[1]!;
-    const reason = accessReason(failing)!;
-    const meter = within(bad).getByText(reason).closest('.ui-meter') as HTMLElement;
-    expect(meter).toHaveAttribute('data-tone', 'red');
-    expect(fillOf(meter)).toBe('100%');
-  });
-
-  it('draws the API line with the remaining count and the reset clock', async () => {
-    renderChip(payload());
-    await user.click(chip());
-    const dialog = screen.getByRole('dialog', { name: 'Tracker' });
-    const usage = `${(4930).toLocaleString()} of ${(5000).toLocaleString()} left · resets ${resetClock(1_790_000_000, ZONE)}`;
-    expect(within(dialog).getByText(usage)).toBeInTheDocument();
-  });
-
-  it("runs the popover's API bar the whole width of the panel, whatever the panel's width", async () => {
-    // Not a px width: under 700 px the panel is the viewport less 24 px (351 px at 375), and a 388 px bar ran off its right edge.
-    renderChip(payload());
-    await user.click(chip());
-    const dialog = screen.getByRole('dialog', { name: 'Tracker' });
-    expect(meterOf(dialog, 'API').style.width).toBe('100%');
-  });
-
-  it('replaces the rows with the token sentence when there is no token', async () => {
-    renderChip(payload([row()], platform({ hasToken: false, login: null })));
-    await user.click(chip());
-    const dialog = screen.getByRole('dialog', { name: 'Tracker' });
-    expect(dialog).toHaveTextContent('BM_GITHUB_TOKEN');
-    expect(within(dialog).queryAllByTestId('tracker-row')).toHaveLength(0);
-  });
-
-  it('escapes the phone rail: under 700 px the popover carries ui-popover-narrow', async () => {
-    // The narrow `.rail` is a scroll container, so an absolute popover inside it is clipped to the 53 px bar; the fixed shape that escapes it is the
-    // `.ui-popover-narrow` class, which `Popover` applies from `useNarrow`. jsdom does no layout, so what this pins is that the tracker's panel asks —
-    // the CSS half of the phone shape is pinned where the rule lives, in `ui-popover.test.tsx`.
-    stubNarrow(true);
-    renderChip(payload());
-    await user.click(chip());
-    expect(screen.getByRole('dialog', { name: 'Tracker' })).toHaveClass('ui-popover', 'ui-popover-narrow');
-  });
-
-  it('is the plain desktop panel when the viewport is not narrow', async () => {
-    stubNarrow(false);
-    renderChip(payload());
-    await user.click(chip());
-    const dialog = screen.getByRole('dialog', { name: 'Tracker' });
-    expect(dialog).toHaveClass('ui-popover');
-    expect(dialog).not.toHaveClass('ui-popover-narrow');
-  });
-
-  it('closes on a pointerdown outside and stays open on one inside', async () => {
-    renderChip(payload([row(), beta()]));
-    await user.click(chip());
-    fireEvent.pointerDown(document.body);
-    expect(screen.queryByRole('dialog', { name: 'Tracker' })).toBeNull();
-
-    await user.click(chip());
-    fireEvent.pointerDown(screen.getAllByTestId('tracker-row')[0]!);
-    expect(screen.getByRole('dialog', { name: 'Tracker' })).toBeInTheDocument();
-  });
-
-  it('closes on a second click of the chip rather than closing and reopening', async () => {
-    // The chip is `Popover`'s anchor: its pointerdown is not "outside", so the click that follows toggles the panel shut. Were the anchor treated as outside,
-    // the pointerdown would close it and that click would open it again, and the chip would appear to do nothing.
-    renderChip(payload());
-    await user.click(chip());
-    expect(screen.getByRole('dialog', { name: 'Tracker' })).toBeInTheDocument();
-    await user.click(chip());
-    expect(screen.queryByRole('dialog', { name: 'Tracker' })).toBeNull();
-    expect(chip()).toHaveAttribute('aria-expanded', 'false');
-  });
-
-  it('points the caret up while open and down otherwise, and no CSS turns it a second time', async () => {
-    // The direction is the Chevron's `dir`, not an `[aria-expanded]` rotate rule: a rule turning an element that already carries `.chev-up` would flip it back.
-    renderChip(payload());
-    const caret = () => chip().querySelector('.tracker-caret');
-    expect(caret()).toHaveClass('chev', 'chev-down');
-    await user.click(chip());
-    expect(caret()).toHaveClass('chev', 'chev-up');
-    await user.click(chip());
-    expect(caret()).toHaveClass('chev-down');
+  it('ignores an off repo when judging late', () => {
+    renderChip(payload([row(), beta({ interval: 'off', polledAt: ago(86_400_000) })]));
+    expect(dotTone()).toBe('green');
   });
 
   it('closes when the section changes', async () => {
     const { update } = renderChip(payload());
     await user.click(chip());
     update(payload(), 'runs');
+    expect(screen.queryByRole('dialog', { name: 'Tracker' })).toBeNull();
+  });
+});
+
+describe('the popover head', () => {
+  it('shows the initials disc, login, connected · github.com, Sync now, and the two figures', async () => {
+    renderChip(payload([row({ polledAt: ago(12_000) })]));
+    await user.click(chip());
+    const dialog = screen.getByRole('dialog', { name: 'Tracker' });
+    expect(within(dialog).getByText('F')).toBeInTheDocument();
+    expect(within(dialog).getByText('futin')).toBeInTheDocument();
+    expect(within(dialog).getByText('connected · github.com')).toBeInTheDocument();
+    expect(within(dialog).getByText('12 s ago · every 15s')).toBeInTheDocument();
+    expect(within(dialog).getByText(`${(4930).toLocaleString()} of ${(5000).toLocaleString()} · resets ${resetClock(1_790_000_000, ZONE)}`)).toBeInTheDocument();
+  });
+
+  it('puts focus on Sync now', async () => {
+    renderChip(payload());
+    await user.click(chip());
+    expect(screen.getByRole('button', { name: 'Sync now' })).toHaveFocus();
+  });
+
+  it('with no token: the sentence replaces the rows, and Sync now is disabled', async () => {
+    renderChip(payload([row()], platform({ hasToken: false, login: null })));
+    await user.click(chip());
+    const dialog = screen.getByRole('dialog', { name: 'Tracker' });
+    expect(dialog).toHaveTextContent('BM_GITHUB_TOKEN');
+    expect(within(dialog).getByText('not connected · github.com')).toBeInTheDocument();
+    expect(within(dialog).queryAllByTestId('tracker-row')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Sync now' })).toBeDisabled();
+  });
+
+  it('draws one row per repo with `polled <age> ago`, a failing repo’s reason, and an off repo as sync off', async () => {
+    const failing = beta({ access: 'forbidden', detail: 'x', polledAt: ago(90_000) });
+    renderChip(payload([row({ polledAt: ago(12_000) }), failing, row({ name: 'gamma', path: '/abs/gamma', repo: 'futin/gamma', interval: 'off', polledAt: null }), row({ name: 'f', path: '/f', source: 'files', repo: null })]));
+    await user.click(chip());
+    const rows = screen.getAllByTestId('tracker-row');
+    expect(rows).toHaveLength(3);
+    expect(within(rows[0]!).getByText('polled 12 s ago')).toBeInTheDocument();
+    expect(within(rows[1]!).getByText('polled 1m ago')).toBeInTheDocument();
+    expect(within(rows[1]!).getByText(accessReason(failing)!)).toBeInTheDocument();
+    expect(within(rows[2]!).getByText('not polled yet · sync off')).toBeInTheDocument();
+  });
+
+  it('the setup link navigates to GitHub › Settings and closes the popover', async () => {
+    renderChip(payload());
+    await user.click(chip());
+    await user.click(screen.getByRole('button', { name: /GitHub page/ }));
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog', { name: 'Tracker' })).toBeNull();
+  });
+
+  it('escapes the phone rail under 700 px, and is the plain desktop panel otherwise', async () => {
+    stubNarrow(true);
+    const { unmount } = renderChip(payload());
+    await user.click(chip());
+    expect(screen.getByRole('dialog', { name: 'Tracker' })).toHaveClass('ui-popover', 'ui-popover-narrow');
+    unmount();
+    stubNarrow(false);
+    renderChip(payload());
+    await user.click(chip());
+    expect(screen.getByRole('dialog', { name: 'Tracker' })).not.toHaveClass('ui-popover-narrow');
+  });
+
+  it('closes on a pointerdown outside, stays open on one inside, and a second click of the pill closes it', async () => {
+    renderChip(payload([row(), beta()]));
+    await user.click(chip());
+    fireEvent.pointerDown(screen.getAllByTestId('tracker-row')[0]!);
+    expect(screen.getByRole('dialog', { name: 'Tracker' })).toBeInTheDocument();
+    await user.click(chip());
+    expect(screen.queryByRole('dialog', { name: 'Tracker' })).toBeNull();
+    expect(chip()).toHaveAttribute('aria-expanded', 'false');
+    await user.click(chip());
+    fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('dialog', { name: 'Tracker' })).toBeNull();
   });
 
@@ -373,15 +247,84 @@ describe('TrackerPopover', () => {
   });
 
   it('follows the payload while open', async () => {
-    // Review Focus 3: a repo disconnected or the token removed while the popover is up.
     const { update } = renderChip(payload([row(), beta()]));
     await user.click(chip());
     update(payload([row()]));
-    const dialog = screen.getByRole('dialog', { name: 'Tracker' });
-    expect(within(dialog).getAllByTestId('tracker-row')).toHaveLength(1);
+    expect(within(screen.getByRole('dialog', { name: 'Tracker' })).getAllByTestId('tracker-row')).toHaveLength(1);
     update(payload([row()], platform({ hasToken: false, login: null })));
-    const again = screen.getByRole('dialog', { name: 'Tracker' });
-    expect(again).toHaveTextContent('BM_GITHUB_TOKEN');
-    expect(within(again).queryAllByTestId('tracker-row')).toHaveLength(0);
+    expect(screen.getByRole('dialog', { name: 'Tracker' })).toHaveTextContent('BM_GITHUB_TOKEN');
+  });
+});
+
+describe('Sync now and a row’s sync icon', () => {
+  const syncNow = () => screen.getByRole('button', { name: 'Sync now' });
+
+  it('posts once on a double click, is disabled while pending, then re-reads and shows the new age', async () => {
+    const { update } = renderChip(payload());
+    await user.click(chip());
+    await user.dblClick(syncNow());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/github/sweep');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeUndefined();
+    expect(syncNow()).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sync futin/alpha' })).toBeDisabled();
+    expect(reload).not.toHaveBeenCalled();
+    await act(async () => answer({ ok: true, status: 200, body: {} }));
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(syncNow()).toBeEnabled();
+    // The reload the context performs lands as a fresher payload, and the pill reads it.
+    update(payload([row({ polledAt: ago(1_000) })]));
+    expect(chip()).toHaveAccessibleName('GitHub: on time, 1 s');
+  });
+
+  it('a row’s icon posts that repo and nothing else', async () => {
+    renderChip(payload([row(), beta()]));
+    await user.click(chip());
+    await user.click(screen.getByRole('button', { name: 'Sync futin/beta' }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({ repo: 'futin/beta' });
+    expect(within(screen.getAllByTestId('tracker-row')[1]!).getByText('syncing…')).toBeInTheDocument();
+    await act(async () => answer({ ok: true, status: 200, body: {} }));
+  });
+
+  it('an off repo’s icon is disabled with the title `sync is off`', async () => {
+    renderChip(payload([row({ interval: 'off' })]));
+    await user.click(chip());
+    const icon = screen.getByRole('button', { name: 'Sync futin/alpha' });
+    expect(icon).toBeDisabled();
+    expect(icon).toHaveAttribute('title', 'sync is off');
+  });
+
+  it('a 429 reads `GitHub asked to wait until HH:MM`, in the board’s zone', async () => {
+    renderChip(payload());
+    await user.click(chip());
+    await user.click(syncNow());
+    await act(async () => answer({ ok: false, status: 429, body: { message: 'rate limited', retryAt: '2026-09-18T12:05:00Z' } }));
+    // 12:05 UTC is 08:05 in New York.
+    expect(screen.getByText('GitHub asked to wait until 08:05')).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    expect(syncNow()).toBeEnabled();
+  });
+
+  it('a 409 disables the buttons and puts the server’s sentence in their title', async () => {
+    renderChip(payload());
+    await user.click(chip());
+    await user.click(syncNow());
+    await act(async () => answer({ ok: false, status: 409, body: { message: 'GitHub is not being polled' } }));
+    expect(syncNow()).toBeDisabled();
+    expect(syncNow()).toHaveAttribute('title', 'GitHub is not being polled');
+    expect(screen.getByRole('button', { name: 'Sync futin/alpha' })).toBeDisabled();
+  });
+
+  it('survives the popover closing mid-sweep: still disabled when it opens again', async () => {
+    renderChip(payload());
+    await user.click(chip());
+    await user.click(syncNow());
+    await user.keyboard('{Escape}');
+    await user.click(chip());
+    expect(syncNow()).toBeDisabled();
+    await act(async () => answer({ ok: true, status: 200, body: {} }));
   });
 });

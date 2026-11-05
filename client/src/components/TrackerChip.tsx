@@ -1,64 +1,65 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
-import { Chevron } from './ui/Chevron';
-import { Meter } from './ui/Meter';
+import { ServiceHead } from './ServiceHead';
+import { Glyph } from './ui/Glyphs';
 import { Popover } from './ui/Popover';
+import { StatusPill } from './ui/StatusPill';
 import { useTrackersContext } from '../hooks/TrackersContext';
 import { useNow } from '../hooks/useNow';
-import { apiUsage, hasTracker, rowReading, sweepReading, type PollReading } from '../lib/tracker';
+import { useSweep } from '../hooks/useSweep';
+import { useTimeZone } from '../hooks/TimeZoneContext';
+import { TONE_WORD, fastestInterval, githubDown, newestAge, serviceTone } from '../lib/service-status';
+import { accessReason, hasTracker, pollAge, resetClock } from '../lib/tracker';
 import type { Section } from '../lib/sections';
 import type { TrackerPlatform, TrackerProjectRow } from '../../../shared/types';
-import { useTimeZone } from '../hooks/TimeZoneContext';
 
 /**
- * The tracker chip (.claude/DESIGN.md §8.0's shell strip; the tracker strip spec, §2) — login, a `POLL` line timer counting down to the server's next
- * sweep, an `API` usage meter, and a read-only popover with one timer per connected repo.
+ * The GitHub status pill (Shell mock, top right; spec §4.9) — a 28 px `StatusPill`: a dot whose colour is the service's state, the word `GitHub`, and how
+ * long ago the newest repo was polled. Everything the old chip drew as numbers (the login, a POLL countdown, an API meter) moved into the popover, because a
+ * poll age and an API budget are things you look up and not things you glance at; the pill keeps the one glanceable fact — alive or not, and how fresh.
  *
  * **In the shell, not in a section.** A connected tracker is a property of the machine: the token, the login, the hourly budget and the poll clock are the
- * same whichever section is open. The dashboard's rule for its account header applies — what is true of the machine wherever you stand moves out of the
- * section and into the shell — so `App` renders this once, in the strip (or the rail bar below 700 px), from the shell's one `useTrackers`.
+ * same whichever section is open, so `App` renders this once, in the strip (or the rail bar below 700 px), from the shell's one `useTrackers`.
  *
- * **The panel is `ui/Popover`'s, and so is its dismissal.** Escape and click-outside, and the phone shape that escapes the rail bar's clip,
- * moved there when the band's Filters and Sort wanted the same panel: a second copy of any of them is how two panels come to behave differently. What
- * stays here is the section-change close, which only this chip's host knows about, and the chip button as `Popover`'s anchor, so a second click on it
- * toggles the panel shut instead of racing the outside-press listener.
+ * **The button names the pill.** `StatusPill` is a span with no name of its own (the dot and word would otherwise be read twice), so this button carries
+ * `GitHub: <on time|late|down>, <age>`. The name changes only when the state or the age rung does — a one-second tick moves a seconds age, and a screen
+ * reader re-announces a focused element whose name changes, so the age is rounded to `pollAge`'s own ladder and is the only part that ticks.
  *
- * **No links and no buttons in the popover.** The rail's sub-nav tree is the only thing that switches sections or Settings' pages, and a "Trackers ›" link
- * here would be the in-page switch that rule forbids. The popover is a reading; the Settings card is one rail click away.
+ * **The popover is `ui/Popover`'s, and so is its dismissal.** Escape and click-outside, and the phone shape, are there; what stays here is the section-change
+ * close, which only this chip's host knows about, and the pill as `Popover`'s anchor, so a second click on it toggles the panel shut instead of racing the
+ * outside-press listener. It carries two writes now: `Sync now` (every repo) and a sync icon per repo, both `POST /api/github/sweep`; and one link, to
+ * GitHub › Settings, handed down as `onOpenSettings` because only the shell sets a section and its page as one pair.
  */
-export function TrackerChip({ section }: { section: Section }) {
+export function TrackerChip({ section, onOpenSettings }: { section: Section; onOpenSettings?: () => void }) {
   const { zone } = useTimeZone();
-  const { data } = useTrackersContext();
+  const { data, reload } = useTrackersContext();
   const visible = data !== null && hasTracker(data.projects);
-  // A one-second tick is what a seconds readout needs, and it runs only while a tracker exists — a machine with no tracker pays for no interval.
+  // A one-second tick is what a seconds age needs, and it runs only while a tracker exists — a machine with no tracker pays for no interval.
   const now = useNow(visible, 1_000);
   const [open, setOpen] = useState(false);
-  // The popover's anchor: a press on the chip is not "outside" it — the chip's own click toggles — so `Popover` is told which element that is.
+  // The popover's anchor: a press on the pill is not "outside" it — the pill's own click toggles — so `Popover` is told which element that is.
   const button = useRef<HTMLButtonElement>(null);
-  const metersId = useId();
+  // The sweep state lives here and not in the popover, which unmounts on close: a sweep out when it closes must still read as out when it opens again.
+  const sweep = useSweep('github', reload, zone, data);
 
-  // The chip outlives every section; the popover has no reason to.
+  // The pill outlives every section; the popover has no reason to.
   useEffect(() => setOpen(false), [section]);
 
   if (!visible) return null;
 
   const githubRows = data.projects.filter((p) => p.source === 'github');
   const plat = data.platforms.find((p) => p.kind === 'github');
-  const noToken = plat === undefined || !plat.hasToken;
-  const login = noToken ? 'no token' : (plat.login ?? 'token set');
-  const initial = noToken ? '—' : (plat.login?.[0]?.toUpperCase() ?? '·');
-  // The no-token state reads `hasToken`, never `access`: a stale payload can say every row is `no-token` while the platform already has one, and the
-  // pip must say which fix is still owed. `access` is what the red pip reads.
-  const pip = noToken ? 'amber' : githubRows.some((r) => r.access !== 'ok') ? 'red' : null;
-  const usage = noToken ? null : apiUsage(plat, zone);
+  const hasToken = plat !== undefined && plat.hasToken;
+  // `limited` reads the rows' own access, never the platform's remaining count: a rate-limited repo is the poller's own report that it is waiting.
+  const tone = serviceTone(
+    { down: githubDown(hasToken, githubRows.map((r) => r.access)), rows: githubRows, limited: githubRows.some((r) => r.access === 'rate-limited') },
+    now
+  );
+  const age = newestAge(githubRows, now);
 
   return (
     <div className="tracker-chip-root">
-      {/* Name versus description (#230). The name stays `Tracker: <login>` and never moves, because a screen reader re-announces a focused element whose
-          name changes and the POLL countdown changes every second — a name built from the meters would be spoken once a second for as long as the chip held
-          focus. The readings ride as the DESCRIPTION instead, which is read on focus and not re-spoken on change. A no-token chip has no meters, so it
-          carries no `aria-describedby` at all rather than one pointing at nothing. */}
       <button
         ref={button}
         type="button"
@@ -66,33 +67,33 @@ export function TrackerChip({ section }: { section: Section }) {
         data-testid="tracker-chip"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Tracker: ${login}`}
-        aria-describedby={noToken ? undefined : metersId}
+        aria-label={`GitHub: ${TONE_WORD[tone]}${age === null ? '' : `, ${age}`}`}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="tracker-av">
-          {initial}
-          {pip !== null && <span className="tracker-pip" data-testid="tracker-pip" data-tone={pip} />}
-        </span>
-        <span className="tracker-name">{login}</span>
-        {!noToken && (
-          <span className="tracker-meters" id={metersId}>
-            {/* The space keeps the description `POLL 12s API 1.4%` rather than `…12sAPI…`; `.tracker-meters` is flex, so it renders as nothing. */}
-            <Meter label="POLL" {...sweepReading(githubRows, now)} />{' '}
-            {usage !== null && <Meter label="API" value={usage.label} fraction={usage.fraction} tone={usageTone(usage.fraction)} />}
-          </span>
-        )}
-        {/* `up` while open, chosen here and not by a `[aria-expanded]` rule turning the element: the rotation lives on `.chev-up` alone. */}
-        <Chevron dir={open ? 'up' : 'down'} className="tracker-caret" />
+        <StatusPill tone={tone} word="GitHub" age={age} />
       </button>
-      {open && <TrackerPopover platform={noToken ? undefined : plat} rows={githubRows} now={now} anchor={button} onClose={() => setOpen(false)} />}
+      {open && (
+        <TrackerPopover
+          platform={hasToken ? plat : undefined}
+          rows={githubRows}
+          tone={tone}
+          now={now}
+          zone={zone}
+          anchor={button}
+          sweep={sweep}
+          onOpenSettings={
+            onOpenSettings === undefined
+              ? undefined
+              : () => {
+                  setOpen(false);
+                  onOpenSettings();
+                }
+          }
+          onClose={() => setOpen(false)}
+        />
+      )}
     </div>
   );
-}
-
-/** The dashboard's budget ramp: amber from 60 %, red from 90 %. */
-function usageTone(fraction: number): PollReading['tone'] {
-  return fraction >= 0.9 ? 'red' : fraction >= 0.6 ? 'amber' : 'green';
 }
 
 /**
@@ -100,62 +101,100 @@ function usageTone(fraction: number): PollReading['tone'] {
  * the Escape stack with a plain `useDialogEscape` call: mounted last, it is topmost; unmounted, the key goes back to whatever is under it.
  *
  * Rows are read off the live payload on every render, never copied into state when it opened, so a repo disconnected or a token removed while it is up
- * drops out of it on the next answer rather than lingering.
+ * drops out of it on the next answer rather than lingering. A repo that answered something other than ok says why, in the access card's own words
+ * (`accessReason`) — which is also where a sweep that returned 200 with a failure inside it shows its `detail`.
  */
 function TrackerPopover({
   platform,
   rows,
+  tone,
   now,
+  zone,
   anchor,
+  sweep,
+  onOpenSettings,
   onClose
 }: {
   platform: TrackerPlatform | undefined;
   rows: TrackerProjectRow[];
+  tone: ReturnType<typeof serviceTone>;
   now: number;
+  zone: string;
   anchor: RefObject<HTMLElement>;
+  sweep: ReturnType<typeof useSweep>;
+  onOpenSettings: (() => void) | undefined;
   onClose: () => void;
 }) {
-  const { zone } = useTimeZone();
-  const usage = platform === undefined ? null : apiUsage(platform, zone);
-  const connected = `GitHub · ${rows.length} ${rows.length === 1 ? 'repo' : 'repos'} connected`;
-
+  const busy = sweep.pending !== null;
+  const interval = fastestInterval(rows);
+  const last = newestAge(rows, now);
+  const login = platform === undefined ? null : platform.login;
   return (
-    // 420 px, not the dashboard's 372: a repo name, a 120 px timer and its seconds do not fit 372 without wrapping. This number is the only thing the tracker
-    // asks of the panel — the look, the 8 px drop, the phone shape and both dismissals are `Popover`'s.
-    <Popover label="Tracker" width={420} anchor={anchor} onClose={onClose}>
-      <div className="tracker-pop-id">
-        <span className="tracker-av">{platform === undefined ? '—' : (platform.login?.[0]?.toUpperCase() ?? '·')}</span>
-        <span className="tracker-pop-who">
-          <span className="tracker-name">{platform === undefined ? 'no token' : (platform.login ?? 'token set')}</span>
-          <span className="tracker-pop-sub">{connected}</span>
-        </span>
-      </div>
+    // 330 px, the mock's: the rows are a name over `polled 12 s ago` and an icon, which need no timer column any more. The look, the 8 px drop, the phone
+    // shape and both dismissals are `Popover`'s.
+    <Popover label="Tracker" width={330} anchor={anchor} onClose={onClose}>
+      <ServiceHead
+        initial={platform === undefined ? '—' : (login?.[0]?.toUpperCase() ?? '·')}
+        name={platform === undefined ? 'no token' : (login ?? 'token set')}
+        tone={tone}
+        status={tone === 'red' ? 'not connected · github.com' : 'connected · github.com'}
+        busy={busy}
+        disabledReason={platform === undefined ? 'no token' : sweep.blocked}
+        notice={sweep.notice}
+        onSync={() => sweep.run()}
+        figures={[
+          { label: 'Last sweep', value: `${last === null ? 'not yet' : `${last} ago`} · ${interval === 'off' ? 'sync off' : `every ${interval}`}` },
+          {
+            label: 'Rate limit',
+            value:
+              platform === undefined || platform.limit === null || platform.remaining === null
+                ? '—'
+                : `${platform.remaining.toLocaleString()} of ${platform.limit.toLocaleString()}${platform.reset === null ? '' : ` · resets ${resetClock(platform.reset, zone)}`}`
+          }
+        ]}
+      />
       {platform === undefined ? (
         // The same fix `accessReason` and the Settings card name, so the operator reads one instruction wherever they meet the state.
         <p className="tracker-pop-note">
           No token on this machine. Put <code>BM_GITHUB_TOKEN</code> in <code>.env</code> and restart the stack.
         </p>
       ) : (
-        <>
-          {rows.map((row) => (
+        rows.map((row) => {
+          const off = row.interval === 'off';
+          const reason = accessReason(row);
+          const name = row.repo ?? row.name;
+          const polled = pollAge(row.polledAt, now);
+          const mine = sweep.pending === name;
+          return (
             <div className="tracker-row" data-testid="tracker-row" key={row.path}>
               <span className="tracker-row-text">
                 <span className="tracker-row-name">{row.name}</span>
                 {row.repo !== null && <span className="tracker-row-repo">{row.repo}</span>}
+                <span className="tracker-row-line">
+                  {mine ? 'syncing…' : polled === null ? 'not polled yet' : `polled ${polled} ago`}
+                  {off ? ' · sync off' : ''}
+                </span>
+                {reason !== null && <span className="tracker-row-line jira-setup-failure">{reason}</span>}
               </span>
-              <Meter label="next" width={120} {...rowReading(row, now)} />
+              <button
+                type="button"
+                className="tracker-sync"
+                aria-label={`Sync ${name}`}
+                title={off ? 'sync is off' : (sweep.blocked ?? `Sync ${name} now`)}
+                disabled={off || busy || sweep.blocked !== null}
+                onClick={() => sweep.run(name)}
+              >
+                <Glyph name="refresh" />
+              </button>
             </div>
-          ))}
-          {usage !== null && (
-            <div className="tracker-pop-api">
-              <Meter label="API" value={usage.label} fraction={usage.fraction} tone={usageTone(usage.fraction)} width="fill" />
-              <span className="tracker-pop-api-line">
-                {`${usage.left.toLocaleString()} of ${(platform.limit ?? 0).toLocaleString()} left`}
-                {usage.resetsAt !== null && ` · resets ${usage.resetsAt}`}
-              </span>
-            </div>
-          )}
-        </>
+          );
+        })
+      )}
+      {onOpenSettings !== undefined && (
+        <button type="button" className="tracker-link" onClick={onOpenSettings}>
+          GitHub page
+          <Glyph name="external" />
+        </button>
       )}
     </Popover>
   );
