@@ -1591,14 +1591,16 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    (a ~1150 px well) it keeps ~380 px and the box needs no sideways scroll; below 980 px the BOX scrolls and the page never does. `table-layout: fixed` with
    widths on the head, for the reason the session table's comment gives: under `auto` a long summary widens its column and pushes Updated off the edge. */
 .jira-issues-scroll { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
-.jira-issues-table { width: 100%; min-width: 980px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
-.jira-issues-table thead th:nth-child(1) { width: 124px }
+.jira-issues-table { width: 100%; min-width: 1280px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
+.jira-issues-table thead th:nth-child(1) { width: 188px } /* Session: the longest word, `Waiting on your answer`, plus ` · 2h`. */
 .jira-issues-table thead th:nth-child(2) { width: 120px } /* Key: fits a twelve-character key (TIMIFY-28086); the mock's PAY-131 hid that 96 px clips it. */
-.jira-issues-table thead th:nth-child(4) { width: 84px }
-.jira-issues-table thead th:nth-child(5) { width: 128px }
-.jira-issues-table thead th:nth-child(6) { width: 140px }
-.jira-issues-table thead th:nth-child(7) { width: 96px }
-.jira-issues-table thead th:nth-child(8) { width: 76px }
+.jira-issues-table thead th:nth-child(4) { width: 112px }
+.jira-issues-table thead th:nth-child(5) { width: 132px }
+.jira-issues-table thead th:nth-child(6) { width: 132px } /* Priority: the pill, `Not prioritised` at its longest. */
+.jira-issues-table thead th:nth-child(7) { width: 148px }
+.jira-issues-table thead th:nth-child(8) { width: 88px }
+.jira-issues-table thead th:nth-child(9) { width: 68px }
+.jira-issues-table thead th:nth-child(10) { width: 112px } /* The unlabelled Run cell. */
 .jira-issues-table thead th {
   padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
   color: var(--ink3); border-bottom: 1px solid var(--hairline); white-space: nowrap;
@@ -1622,6 +1624,15 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-issues-under, .jira-issues-muted { color: var(--ink3) }
 .jira-issues-under { font-size: 12px }
 .jira-issues-updated { color: var(--ink3) }
+/* A cell's text beside a mark ellipsises on its own, so the mark keeps its size (the flex row is `min-width: 0`). */
+.jira-issues-cut { min-width: 0; overflow: hidden; text-overflow: ellipsis }
+/* The card's pill sits right on the card head (`margin-left: auto`); in a cell it sits at the start. */
+.jira-issues-prio { margin-left: 0 }
+/* The split Run is there for the keyboard and invisible to the eye until the row is pointed at or focused into: `opacity`, never `display` or `visibility`,
+   so it stays in the tab order and `:focus-within` can reveal it. The cell does not clip, or the open menu's panel would be cut at the cell edge. */
+.jira-issues-act { overflow: visible; text-align: right }
+.jira-issues-act .jira-run { display: inline-block; opacity: 0; transition: opacity .12s }
+.jira-issues-row:hover .jira-issues-act .jira-run, .jira-issues-row:focus-within .jira-issues-act .jira-run { opacity: 1 }
 
 /* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
    what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px

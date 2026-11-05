@@ -74,7 +74,7 @@ import {
 import type { JiraFold } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
-import { SHELF_LIMIT, boardAgents, boardShelves, deckCrumb, deckGroup, deckTally, endedLine, issueCellWord, topSessionState } from '../client/src/lib/jira-deck';
+import { SHELF_LIMIT, boardAgents, boardShelves, deckCrumb, deckGroup, deckTally, endedLine, topSessionCell } from '../client/src/lib/jira-deck';
 import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
 import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraRepoRefs, JiraSessionsPayload, JiraSkill, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
@@ -1621,29 +1621,42 @@ describe('lib/jira-deck', () => {
     expect(deckCrumb(own, [])).not.toContain('↳');
   });
 
-  describe('topSessionState and issueCellWord (the List\u2019s Session cell)', () => {
+  describe('topSessionCell (the List\u2019s Session cell)', () => {
     const tree = foldBoard([top, child, other]);
+    const cellOf = (links: Link[], live: Record<string, JiraLiveSession> = {}) => topSessionCell(boardAgents(tree, answer(links), live), links, tree);
 
-    it('names the deck\u2019s lead session per top: needs you on a child beats working on the top', () => {
-      const entries = boardAgents(tree, answer([link('PAY-1', 'a', 'working', 3), link('PAY-2', 'b', 'plan', 2)]), {});
-      expect(topSessionState(entries).get('PAY-1')).toBe('plan');
+    it('names the deck\u2019s lead session per top with its own `since`: needs you on a child beats working on the top', () => {
+      expect(cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-2', 'b', 'plan', 2)]).get('PAY-1')).toEqual({ state: 'plan', since: hoursAgo(2) });
+    });
+
+    it('a live plan on the top gives { plan, since }', () => {
+      const links = [link('PAY-1', 'a', 'plan', 4)];
+      expect(cellOf(links).get('PAY-1')).toEqual({ state: 'plan', since: links[0].stateSince });
     });
 
     it('lets the newest start lead inside one group: a reservation on a child outranks an older lost session on the top', () => {
-      const entries = boardAgents(tree, answer([link('PAY-1', 'a', 'lost', 2)]), { 'PAY-2': { ...reservation(1), starting: true } });
-      expect(topSessionState(entries).get('PAY-1')).toBe('starting');
+      expect(cellOf([link('PAY-1', 'a', 'lost', 2)], { 'PAY-2': { ...reservation(1), starting: true } }).get('PAY-1')?.state).toBe('starting');
     });
 
-    it('is empty with no live links, and keeps two tops apart', () => {
-      expect(topSessionState(boardAgents(tree, answer([]), {})).size).toBe(0);
-      const both = topSessionState(boardAgents(tree, answer([link('PAY-1', 'a', 'working', 3), link('PAY-3', 'b', 'quiet', 2)]), {}));
-      expect([...both]).toEqual([['PAY-1', 'working'], ['PAY-3', 'quiet']]);
+    it('prefers a live child over an older ended top', () => {
+      const cell = cellOf([link('PAY-2', 'b', 'working', 2), link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) })]);
+      expect(cell.get('PAY-1')?.state).toBe('working');
     });
 
-    it('words each live state, and never an ended one', () => {
-      const words = (['plan', 'permission', 'reply', 'answer', 'working', 'quiet', 'lost', 'starting'] as const).map((s) => issueCellWord(s));
-      expect(words).toEqual(['needs you', 'needs you', 'needs you', 'needs you', 'working', 'quiet', 'lost contact', 'starting']);
-      expect(issueCellWord('ended')).toBe('');
+    it('reads an ended session on a folded child as { ended, since: endedAt }', () => {
+      const cell = cellOf([link('PAY-2', 'b', 'ended', 5, { endedAt: hoursAgo(2) })]);
+      expect(cell.get('PAY-1')).toEqual({ state: 'ended', since: hoursAgo(2) });
+    });
+
+    it('takes the newer of two ended links', () => {
+      const cell = cellOf([link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) }), link('PAY-2', 'b', 'ended', 6, { endedAt: hoursAgo(3) })]);
+      expect(cell.get('PAY-1')?.since).toBe(hoursAgo(3));
+    });
+
+    it('has no key with nothing live or ended, and keeps two tops apart', () => {
+      expect(cellOf([]).size).toBe(0);
+      const both = cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-3', 'b', 'quiet', 2)]);
+      expect([...both].map(([k, v]) => [k, v.state])).toEqual([['PAY-1', 'working'], ['PAY-3', 'quiet']]);
     });
   });
 

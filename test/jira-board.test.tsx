@@ -1474,7 +1474,7 @@ describe('the issue List', () => {
 
   it('draws the columns of the mock: key, summary, type, raw status, assignee, sprint and the rolled-up age', async () => {
     await renderList();
-    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Assignee', 'Sprint', 'Updated']);
+    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Priority', 'Assignee', 'Sprint', 'Updated', '']);
     const r = row('PAY-190');
     expect(within(r).getByText('PAY-190')).toBeInTheDocument();
     expect(within(r).getByText('Payout retries')).toBeInTheDocument();
@@ -1483,7 +1483,16 @@ describe('the issue List', () => {
     expect(within(r).getByText('Ada Lovelace')).toBeInTheDocument();
     expect(within(r).getByText('Sprint 44')).toBeInTheDocument();
     expect(within(row('PAY-180')).getByText('unassigned')).toBeInTheDocument();
-    expect(within(row('PAY-180')).getByText('—')).toBeInTheDocument();
+    // The Sprint cell is the 8th; the Session cell reads `—` too when nothing ran, so the lookup is scoped.
+    expect(within((row('PAY-180') as HTMLTableRowElement).cells[7]).getByText('—')).toBeInTheDocument();
+  });
+
+  it('draws a priority pill per row, `Not prioritised` for null, a Run split per row, and the full summary as the cell title', async () => {
+    await renderList([issue({ key: 'PAY-1', summary: 'A very long summary that the cell will cut', priority: 'High' }), issue({ key: 'PAY-2', summary: 'Plain', priority: null })]);
+    expect(within(row('PAY-1')).getByTitle('priority High')).toHaveClass('jira-card-prio');
+    expect(within(row('PAY-2')).getByText('Not prioritised')).toHaveAttribute('data-tone', 'low');
+    for (const key of ['PAY-1', 'PAY-2']) expect(within(row(key)).getAllByRole('button', { name: `Run ${key}` })).toHaveLength(1);
+    expect(row('PAY-1').querySelector('.jira-issues-summary')).toHaveAttribute('title', 'A very long summary that the cell will cut');
   });
 
   it('names how many issues fold under a top: the whole fold, one for a single, nothing for none', async () => {
@@ -1497,19 +1506,25 @@ describe('the issue List', () => {
   it('marks a top for a session live only on a folded child, and never draws the child', async () => {
     sessionsAnswer = () => ({ links: [linkOn('PAY-162', 's162', 'working', 2)], reachable: true, rowsAt: null });
     await renderList();
-    await waitFor(() => expect(sessionCell('PAY-120')).toContain('working'));
-    expect(sessionCell('PAY-180')).toBe('');
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Working · 2h'));
+    expect(sessionCell('PAY-180')).toBe('—');
     expect(row('PAY-162')).toBeNull();
   });
 
   it('names the deck’s lead session on a card with two: needs you beats working, and the deck leads with the same one', async () => {
     sessionsAnswer = () => ({ links: [linkOn('PAY-120', 'a', 'working', 3), linkOn('PAY-162', 'b', 'answer', 2)], reachable: true, rowsAt: null });
     await renderList();
-    await waitFor(() => expect(sessionCell('PAY-120')).toContain('needs you'));
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Waiting on your answer'));
     await userEvent.click(screen.getByRole('button', { name: 'Board' }));
     const first = document.querySelector('.jira-deck-card');
     expect(first?.getAttribute('data-state')).toBe('answer');
     expect(first?.getAttribute('data-key')).toBe('PAY-162');
+  });
+
+  it('reads `Ended · 2h` for a top whose only session ended on a folded child', async () => {
+    sessionsAnswer = () => ({ links: [{ ...linkOn('PAY-162', 'e', 'ended', 5), endedAt: hoursAgo(2), endReason: 'finished' }], reachable: true, rowsAt: null });
+    await renderList();
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Ended · 2h'));
   });
 
   it('keeps a top whose folded issue matches the search', async () => {
