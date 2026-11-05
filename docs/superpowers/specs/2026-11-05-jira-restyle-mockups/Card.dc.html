@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jira card, now versus proposed</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:#131313;-webkit-font-smoothing:antialiased}
+a{color:#525252}a:hover{color:#131313}
+</style>
+</helmet>
+<div style="width: 1280px; height: 420px; box-sizing: border-box; padding: 40px 48px; background: #ffffff; display: flex; flex-direction: column; gap: 24px; font-family: 'Hanken Grotesk', system-ui, sans-serif; color: #131313;">
+
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <div style="font-size: 20px; font-weight: 600; letter-spacing: -0.01em;">The card</div>
+    <div style="font-size: 13px; color: #6b6b6b;">Same data. Type and priority become marks, the assignee becomes an avatar, a live session gets a strip, and the Run button is the split button from board 1.</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 300px 300px 300px; gap: 40px; align-items: start;">
+
+    <!-- NOW -->
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6b6b;">Now</span>
+      <div style="background: #f4f4f3; border-radius: 16px; padding: 20px; box-sizing: border-box;">
+        <article style="background: #ffffff; border: 1px solid #eaeae8; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b6b6b;">
+            <span style="width: 14px; height: 14px; border-radius: 3px; background: #63ba3c; display: inline-block;"></span>
+            <span style="font-weight: 500; color: #525252;">TMF-412</span>
+            <span>· root</span>
+          </div>
+          <div style="font-size: 14px; font-weight: 500; line-height: 1.35;">Booking widget drops the selected resource when the page is refreshed</div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b6b6b;">
+            <span style="font-weight: 500; color: #525252;">AJ</span><span>Andreja Jevtic</span>
+            <span style="border: 1px solid #dcdcda; border-radius: 999px; padding: 1px 7px; font-size: 11px; color: #525252;">To Do</span>
+            <span>3d</span>
+            <span style="margin-left: auto;">↗</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 8px; border-top: 1px solid #eaeae8;">
+            <span style="font-size: 12px; color: #6b6b6b;">Medium</span>
+            <button type="button" aria-label="Run, open menu" style="height: 28px; padding: 0 10px; border-radius: 10px; border: 1px solid #dcdcda; background: #ffffff; font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">Run <span style="font-size: 10px;">▾</span></button>
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <!-- PROPOSED, idle -->
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #38631a;">Proposed · idle</span>
+      <div style="background: #f4f4f3; border-radius: 16px; padding: 20px; box-sizing: border-box;">
+        <article style="background: #ffffff; border: 1px solid #eaeae8; border-radius: 14px; padding: 12px 14px 12px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 1px 2px rgba(19,19,19,0.04);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span title="Bug" style="width: 18px; height: 18px; border-radius: 5px; background: #fbe9e5; color: #b03b28; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg></span>
+            <span style="font-size: 12px; font-weight: 600; color: #525252; letter-spacing: 0.01em;">TMF-412</span>
+            <span style="font-size: 11px; color: #6b6b6b; background: #f2f2f1; border-radius: 999px; padding: 1px 7px;">root</span>
+            <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: #8a5214; background: #fbf1e4; border-radius: 999px; padding: 2px 7px;"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4l8 14H4z"/></svg>Medium</span>
+          </div>
+          <div style="font-size: 14px; font-weight: 500; line-height: 1.35; color: #131313;">Booking widget drops the selected resource when the page is refreshed</div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b6b6b;">
+            <span aria-label="Andreja Jevtic" style="width: 22px; height: 22px; border-radius: 999px; background: #e3e0f3; color: #6b52a8; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">AJ</span>
+            <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; color: #525252;"><span style="width: 6px; height: 6px; border-radius: 999px; background: #a3a3a0;"></span>To Do</span>
+            <span>· 3d</span>
+            <a href="#jira" aria-label="Open in Jira" style="margin-left: auto; color: #6b6b6b; display: inline-flex;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></a>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 10px; border-top: 1px solid #eaeae8;">
+            <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: #6b6b6b;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>timify-web</span>
+            <div style="display: inline-flex; height: 28px; border-radius: 9px; overflow: hidden; background: #131313; color: #ffffff;">
+              <button type="button" style="height: 28px; padding: 0 10px; border: 0; background: transparent; color: #ffffff; font: 600 12.5px 'Hanken Grotesk', system-ui, sans-serif; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>Run</button>
+              <button type="button" aria-label="More ways to run" style="height: 28px; width: 24px; border: 0; border-left: 1px solid rgba(255,255,255,0.18); background: transparent; color: #ffffff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <!-- PROPOSED, live -->
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #38631a;">Proposed · session live</span>
+      <div style="background: #f4f4f3; border-radius: 16px; padding: 20px; box-sizing: border-box;">
+        <article style="background: #ffffff; border: 1px solid #cfe5b8; border-radius: 14px; padding: 0 0 12px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 1px 2px rgba(19,19,19,0.04); overflow: hidden;">
+          <div style="height: 3px; background: linear-gradient(90deg, #7dc242 0 62%, #eef6e6 62% 100%);"></div>
+          <div style="display: flex; align-items: center; gap: 8px; padding: 0 14px;">
+            <span title="Story" style="width: 18px; height: 18px; border-radius: 5px; background: #eef6e6; color: #38631a; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v16l-6-4-6 4z"/></svg></span>
+            <span style="font-size: 12px; font-weight: 600; color: #525252;">TMF-398</span>
+            <span style="font-size: 11px; color: #6b6b6b; background: #f2f2f1; border-radius: 999px; padding: 1px 7px;">root</span>
+            <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: #b03b28; background: #fbe9e5; border-radius: 999px; padding: 2px 7px;"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4l8 14H4z"/></svg>High</span>
+          </div>
+          <div style="font-size: 14px; font-weight: 500; line-height: 1.35; padding: 0 14px;">Show the resource's working hours in the booking widget calendar</div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b6b6b; padding: 0 14px;">
+            <span aria-label="Andreja Jevtic" style="width: 22px; height: 22px; border-radius: 999px; background: #e3e0f3; color: #6b52a8; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">AJ</span>
+            <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; color: #525252;"><span style="width: 6px; height: 6px; border-radius: 999px; background: #f5a15c;"></span>In Progress</span>
+            <span>· 1d</span>
+            <a href="#jira" aria-label="Open in Jira" style="margin-left: auto; color: #6b6b6b; display: inline-flex;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></a>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 14px; padding-top: 10px; border-top: 1px solid #eaeae8;">
+            <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 600; color: #38631a;"><span style="width: 7px; height: 7px; border-radius: 999px; background: #7dc242; box-shadow: 0 0 0 3px rgba(125,194,66,0.28);"></span>Working · 12m · tests</span>
+            <a href="#session" style="height: 28px; padding: 0 10px; border-radius: 9px; border: 1px solid #dcdcda; background: #ffffff; font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">Open session<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>
+          </div>
+        </article>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":420}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# Jira restyle mocks — picked artboards audited against the code (2026-11-05)
+
+The canvas is https://claude.ai/artifact/58gdjicygUebSYgFeCU83M (version 5). The four HTML files beside this one are the picked artboards copied out of
+the canvas (the canvas runtime is not here, so they render approximately, standalone). They are drawn with the board's own daylight tokens but none of
+their CSS ships — the real surfaces compose `client/src/styles.css`. The spec is `../2026-11-05-jira-restyle-design.md`; where a mock and the spec
+differ, the spec wins. Direction A was picked; column B of `RunButton.dc.html` stays for the record.
+
+## Per screen: what the mock draws, what the code has today, what changes
+
+| screen (file)                          | mock                                                                                          | code today                                                                                         | change (spec §)                                                              |
+| -------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Run control (`RunButton.dc.html`, A)   | dark split button: play + `Run` \| chevron; divider at 18% white; radius 10                   | one outlined 28 px `Chip` `Run ▾` (`JiraRunMenu`), `aria-label="Run <key>"`                        | `ui/SplitChip`, two buttons in a group; left half keeps the name (§4.1)      |
+| Run menu (A)                           | 300 px; uppercase 10.5 px headers; 28 px icon tiles; label + 11.5 px sub-line; default row marked; footer + `↵` kbd | 320/234 px `Popover`; flat 36 px rows label + hint; `hr` between groups; default pulled first | grouped, 40 px rows with tiles, default marked in place; headers sentence case 11 px; no kbd (§4.1, §3) |
+| Run states (A)                         | dashed `Map a repo`; green `Running · 12m` with a pulsing dot                                  | dashed chip titled `no repository mapped…`; disabled chip titled `a session is running…`           | same titles; left half reads `Run` / `Running · <age>`; steady dot (§4.1)    |
+| card (`Card.dc.html`, proposed · idle) | 18 px tinted type tile; key 600; crumb pill; priority pill right; 22 px tinted avatar; status dot + word; repo + branch glyph in foot; 28 px split Run | 14 px bare glyph; key 500 `--ink2`; crumb text; priority as `Marker kind`; 20 px grey disc; status `Pill neutral`; no repo in foot; `Run ▾` chip | §4.2 — crumb stays text (the pill was a mock flourish); everything else as drawn |
+| card (proposed · live)                 | green border, 3 px progress strip, `Working · 12m · tests`, `Open session`                     | a live top is not on the shelves; the deck card draws exactly this                                 | NOT built (§4.2, anti-goal)                                                  |
+| board (`Board.dc.html`) band           | h1 + picker chip; sub-line with polled dot; `Board/List` with icons; search 220; Filter chip with count badge; Sort chip | `Band` + `JiraBoardPicker`; `JiraBandSub`; `Segmented`; `board-band-search`; `FilterBar` with count | NOT built — band is a non-goal (§2)                                        |
+| board applied-filters row              | `Assignee · me ×  Showing 3 of 6`                                                               | none                                                                                               | NOT built (§2)                                                               |
+| board columns                          | `--steel` radius-16 ground; tone dot; 13/600 name; white count pill; `⋯`                       | `BoardColumn` plain dot, count pill, no ground                                                     | ground + tone dot via a `tone` prop, Jira only; no `⋯` (§4.3)                 |
+| board Done cards                       | opacity .82; `PR #1182 merged`                                                                 | plain cards; no PR fact on `JiraIssue`                                                             | NOT built (§4.2)                                                             |
+| dialog head (`Modal.dc.html`)          | tile · key · Bug · Globals · root; 19 px title; `Open in Jira`                                  | glyph · key 600 · type · parent · sprint; 22 px title; `Open in Jira ↗`                            | tile in the crumbs; title stays 22 px (§4.4)                                 |
+| dialog Agent column                    | `#fafaf9` band; dashed robot tile; `No session on this ticket`; repo/default/last-run line; 32 px split Run | `.jira-detail-agent` label + `no session is running on this ticket` + `.jira-sess` cards; Run chip in `.jira-modal-controls` | band on `--board`; empty state as drawn; Run in the band (§4.4)   |
+| dialog Ticket aside                    | icon-labelled facts in a 96 px/1fr grid; Status chip `● To Do ▾` + open `Move to` popover; Priority pill; Repo + branch mono; Labels chips; Dates | `dl.jira-detail-facts` 110 px labels; Status `Pill · category` + `Select` `Move to…`; Priority text; Labels text | glyph labels, 96 px; status chip + popover (eighth Popover composer); label chips; Repo row NOT added (no repo fact in the detail read) (§4.4) |
+
+## Drawn on a mock, not built
+
+uppercase section headers (guard: one uppercase rule); 10.5 px and 11.5 px text (guard: 11 px floor); the `↵` keyboard hint (no shortcut exists); the
+live card variant (the deck owns it); Done-card dimming and the PR line (no fact to draw); the `⋯` column menu (nothing behind it); the Sort chip (the
+order is fixed); the applied-filters row and the band's icons (band is a non-goal); column B's search field and `change the default` link (direction B);
+the crumb drawn as a pill (stays text); the 19 px dialog title (the shell's is 22).
