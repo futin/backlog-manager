@@ -3,7 +3,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 import { useJira, type JiraState } from './useJira';
 
 /**
- * The shell's one `useJira` instance (Jira phase 2), handed to every reader — the rail, the chip, and the Jira section's two pages. `TrackersContext`'s
+ * The shell's one `useJira` instance (Jira phase 2), handed to every reader — the rail, the chip, and the Jira section's three pages. `TrackersContext`'s
  * shape and its reason: two instances would be two clocks that could hold two different answers. The provider sits in `App`, above the rail and every
  * section, because the rail's Jira entry and the chip outlive any section.
  *
