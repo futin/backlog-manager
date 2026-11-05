@@ -7,7 +7,6 @@ import { useFetched } from '../../hooks/useFetched';
 import { useNow } from '../../hooks/useNow';
 import { useSettings } from '../../hooks/useSettings';
 import {
-  JIRA_COLUMNS,
   displayPath,
   failureOf,
   fetchJiraDetail,
