@@ -1,4 +1,4 @@
-import { actionLabel, deriveAction, dispatchGate, inReviewBlock, planReviewBlock, unvettedBlock } from '../../../../shared/agent';
+import { actionLabel, deriveAction, dispatchGate, itemLadderBlock, PLAN_REVIEW_REASON } from '../../../../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 import { disabledReason } from '../../lib/gate-view';
 import { progressBlock } from '../../lib/item-progress';
@@ -49,7 +49,8 @@ export function dispatchAvailable(item: BacklogItem, status: AgentsStatus | null
  * its plan was written unattended and awaits a person's review (`planReviewBlock`, the fourth of those:
  * the `plan-review` label or frontmatter line backlog-tick sets, rendered
  * exactly as the in-review one is — a ladder rung, nothing visual of its own,
- * so no DESIGN.md subsection of its own either), and an
+ * so no DESIGN.md subsection of its own either; those three this file reads as
+ * one answer, `itemLadderBlock`, which holds their order), and an
  * orchestrator run has already claimed this item (handed in as `runBlock`,
  * because nothing in the item file or the status payload can know it). All
  * six disable with their reason; see the comment above `gateBlock` below for
@@ -166,7 +167,8 @@ export function DispatchButton({
 
   /*
    * Order is the invariant, not a preference: ENVIRONMENT-level → per-item
-   * project visibility → in progress → in review → unvetted → plan review → run claim. The first still returns
+   * project visibility → in progress → the item ladder (`itemLadderBlock`, which
+   * holds the order of its own rungs) → run claim. The first still returns
    * `null` above (no control at all — see the file comment and `dispatchGate`
    * for why), and the other six disable with a reason. The run claim reads
    * LAST of the six because it is the most volatile and the least
@@ -187,17 +189,15 @@ export function DispatchButton({
      bug-13's re-ask has to know WHICH of the six is speaking. Kept as one
      value because the answer it feeds is the same for all five: refuse, ask
      nothing. */
-  /* The in-review rung (spec decision 9) sits between them: a tracker issue whose PR is open carries the flag on the item this board renders, so it
-     outranks the volatile run claim, while a live session's stamp still names the more immediate fact. */
-  /* The plan-review rung (backlog-tick) follows it, the same ladder as the server's: a plan written unattended carries the mark until a person approves it,
-     and it reuses the in-review rendering — same disabled state, same reason as title and described-by. In-review first, so an item holding both says the PR. */
-  /* The unvetted rung (#341) sits between them: an outsider's issue that no trusted groom has pinned. Before plan-review, because approving the plan does
-     not vet it — so an item carrying both says the reason the approval would not clear, and never offers `Review plan` as if reviewing were the way out. */
+  /* The item ladder sits between them: its facts are on the item this board renders, so it outranks the volatile run claim, while a live session's stamp
+     still names the more immediate fact. */
+  /* `null` for execute-held, on purpose: that rung needs a git read per request, and `.claude/rules/board.md` says it is the server's alone. */
+  /* `reviewing` asks which rung spoke rather than whether plan-review applies, so `Review plan` is never offered as if reviewing were the way out — not for
+     the unvetted rung, whose reason approving would not clear, and not for any rung later added above plan-review. */
   const progress = progressBlock(item, Date.now());
-  const inReview = inReviewBlock(item);
-  const unvetted = unvettedBlock(item);
-  const itemBlock = progress ?? inReview ?? unvetted ?? planReviewBlock(item) ?? runBlock;
-  const reviewing = onReview !== undefined && progress === null && inReview === null && unvetted === null && planReviewBlock(item) !== null;
+  const ladder = itemLadderBlock(item, null);
+  const itemBlock = progress ?? ladder ?? runBlock;
+  const reviewing = onReview !== undefined && progress === null && ladder === PLAN_REVIEW_REASON;
 
   return (
     <>

@@ -571,26 +571,31 @@ the mapper fills from an unreleased claim and disables the control with its usua
 item's claim at dispatch (`itemClaimBlock`) where it never re-checks a files item's stamp.
 
 **An `in-review` issue keeps its control, disabled with `a PR is open for this item`** (execute `pr` mode). `inReviewBlock` (`shared/agent.ts`) reads the
-mapped `inReview` flag after `progressBlock` and before `runClaimBlock`, and the server's `plan`/`dispatch` read the same helper. The label goes on once execute
+mapped `inReview` flag. It is the first rung of `itemLadderBlock` (`shared/agent.ts`, the one home of the order of those rungs), which `DispatchButton` reads
+after
+`progressBlock` and before `runClaimBlock`, and which the server's `plan`/`dispatch` read too. The label goes on once execute
 has pushed a `pr`-mode branch — the moment its claim is released and the still-open issue would otherwise read ready — and comes off when the PR merges and
 closes the issue, or by `backlog.mjs review <id> off`. A `Refs #<n>` PR closes nothing, so the flag is also lifted without a write once the latest closed
 referencing PR merged into the default branch and none is open (#411, `TrackerPollerService.reviewLifted`) — the label stays, the card reads ready. A files item never carries it.
 
 **A files item an execute branch or tree holds is refused by the launch sheet, and its control stays enabled** (#427). A `--finish pr` execute in a new tree leaves
 `execute/<id>` and `.worktrees/execute-<id>` behind while the item stays in `open/`; one that reused a linked worktree leaves neither, and is not caught. `plan` and `dispatch` refuse it with `an execute branch or worktree already holds this item`
-(`executeHeldBlock`, `server/src/agents/execute-held.util.ts`), right after the in-review rung; `DispatchButton` does not read this one, because the answer is a
+(`executeHeldBlock`, `server/src/agents/execute-held.util.ts`), right after the in-review rung, handed to `itemLadderBlock` as a value; `DispatchButton` passes
+`null` for this one, because the answer is a
 git read the board's payload never carries, so the click opens the sheet and the sheet says why. Execute only — a groom of such an item still opens — and a tracker
 item is not asked. Deleting the branch and tree frees the item on the next plan: nothing is memoised.
 
 **A plan that awaits review keeps the control too, disabled with `this plan awaits review`** (backlog-tick, #330). `planReviewBlock` (`shared/agent.ts`) is the
-next rung, after `inReviewBlock` and before the run claim, so an item carrying both says the PR. It reads `BacklogItem.planReview`, which — unlike `inReview` —
+next rung of `itemLadderBlock`, after `inReviewBlock` and before the run claim, so an item carrying both says the PR. It reads `BacklogItem.planReview`, which —
+unlike `inReview` —
 both sources carry: a tracker issue while its `plan-review` label is on, a files item while its frontmatter has a `plan-review:` line. The tick's groom adds the
 mark in the write that wrote the plan, and a person removes it to approve the plan — the label through `backlog.mjs plan-review <id> off`, the files line by
 deleting it. It reuses the in-review rendering — same disabled state, same reason as title — and, in the item modal, draws nothing of its own.
 
 **An outsider's issue that no groom of ours has pinned keeps its control, disabled with `filed from outside the repo — groom it to vet the plan`** (#341).
 `unvettedBlock` (`shared/agent.ts`) sits between the two rungs above — after `inReviewBlock`, before `planReviewBlock` — because approving the plan does not
-vet it, so an item carrying both must say the reason the approval would not clear; the server's `plan`/`dispatch` read the same helper in the same order. It
+vet it, so an item carrying both must say the reason the approval would not clear; the server's `plan`/`dispatch` read the same order through `itemLadderBlock`.
+It
 reads `BacklogItem.unvetted`, which only a tracker bug or task carries: `mapIssue` sets it when the issue's author is not `OWNER`/`MEMBER`/`COLLABORATOR` and
 the body does not hash to the pin a trusted groom's `body` write left in its claim. A files item never carries it. Same in-review rendering, and while it
 speaks `Review plan` is NOT drawn — reviewing is not the way out, grooming is

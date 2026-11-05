@@ -19,11 +19,9 @@ import {
   deriveAction,
   dispatchBlock,
   FINISH_FLAG,
-  inReviewBlock,
   isExecuteFinish,
+  itemLadderBlock,
   modesUpTo,
-  planReviewBlock,
-  unvettedBlock,
   pickFrom,
   projectDispatchGate,
   runClaimBlock,
@@ -370,20 +368,12 @@ export class AgentsService {
       // from — a sheet that offers a launch button for an item the dispatch
       // route below is about to 409 is the half-fixed state.
       // #17: a project whose sync is off is the third, after the run claim — the sheet must not offer what `dispatch` below would refuse.
-      // The in-review rung (spec decision 9) sits between the dashboard ladder and the run claim, the client's order: a PR is open for this tracker
-      // item, and `dispatch` below refuses it with the same sentence.
-      // The plan-review rung (backlog-tick) follows it, in the client's order: a plan written unattended and not yet approved, refused by `dispatch` below with
-      // the same sentence. In-review first, so an item holding both says the PR reason.
-      // The unvetted rung (#341) sits between those two, the client's order again: an outsider's issue no trusted groom has pinned, which approving the
-      // plan would not clear — so its reason reads before plan-review's.
-      // The execute-held rung (#427) sits right after in-review, because it is that rung's files half: this work has been done on a branch already. Its read
-      // is the `await` above this return, per request and never mapped onto the item.
+      // The per-item ladder sits between the dashboard ladder and the run claim, the client's order: `itemLadderBlock` holds its rungs' order and the reason
+      // for it, and `dispatch` below refuses with the same sentences. The execute-held rung's read is the `await` above this return, per request and never
+      // mapped onto the item.
       blocked:
         dispatchBlock(item, status) ??
-        inReviewBlock(item) ??
-        executeHeld ??
-        unvettedBlock(item) ??
-        planReviewBlock(item) ??
+        itemLadderBlock(item, executeHeld) ??
         runClaimBlock(item, runs, starting) ??
         this.poller.syncOffBlock(item.projectPath) ??
         undefined,
@@ -540,26 +530,18 @@ export class AgentsService {
       throw new HttpException({ error: "the desktop app is not available on this machine's dashboard — launch on Dashboard instead" }, 409);
     }
 
-    // The in-review block (spec decision 9), re-checked for the reason the run claim below is: the sheet's plan was read once, and execute in `pr` mode
-    // may have labelled the issue since. Uncoded 409, the run-claim refusal's status — a fact about this item a person can go and resolve (merge or
-    // close the PR, or `backlog.mjs review <id> off`), with no upstream to blame.
-    const inReview = inReviewBlock(item);
-    if (inReview !== null) throw new HttpException({ error: inReview }, 409);
-
-    // The execute-held block (#427), the files half of in-review and re-checked for the same reason: an execute started by hand or by a tick may have cut its
-    // branch since the sheet's plan was read. Same uncoded 409 — a person resolves it by merging the PR or deleting the branch and worktree.
-    const executeHeld = await executeHeldBlock(item, action);
-    if (executeHeld !== null) throw new HttpException({ error: executeHeld }, 409);
-
-    // The unvetted block (#341), re-checked for the same reason: an outsider may have edited the body since the sheet's plan was read, which un-pins it.
-    // Same uncoded 409 — a person resolves it by grooming the item, whose `body` write pins it. Between in-review and plan-review, the ladder's order.
-    const unvetted = unvettedBlock(item);
-    if (unvetted !== null) throw new HttpException({ error: unvetted }, 409);
-
-    // The plan-review block (backlog-tick), re-checked for the same reason: a tick may have written a plan and marked the item since the sheet's plan was read.
-    // Same uncoded 409 — a person resolves it by removing the label (or the `plan-review:` line) once they have read the plan. After in-review, the ladder's order.
-    const planReview = planReviewBlock(item);
-    if (planReview !== null) throw new HttpException({ error: planReview }, 409);
+    // The per-item ladder, re-checked for the reason the run claim below is: the sheet's plan was read once, and the item may have changed since. Execute in
+    // `pr` mode may have labelled the issue, an execute started by hand or by a tick may have cut its branch, an outsider may have edited the body, which
+    // un-pins it, and a tick may have written a plan and marked the item. `itemLadderBlock` holds the order.
+    //
+    // Uncoded 409, the run-claim refusal's status — a fact about this item a person can go and resolve, with no upstream to blame: in-review by merging or
+    // closing the PR, or `backlog.mjs review <id> off`; execute-held by merging the PR or deleting the branch and worktree; unvetted by grooming the item,
+    // whose `body` write pins it; plan-review by removing the label (or the `plan-review:` line) once they have read the plan.
+    //
+    // The git read runs ahead of the in-review test, and that costs nothing: `executeHeldBlock` returns at once unless the item is a files item, and only a
+    // tracker item carries `inReview` (`mapIssue`), so no in-review item ever reaches the read.
+    const itemBlock = itemLadderBlock(item, await executeHeldBlock(item, action));
+    if (itemBlock !== null) throw new HttpException({ error: itemBlock }, 409);
 
     // The run-claim block, re-checked here rather than trusted from `plan()`.
     // This is the layer that actually holds: LaunchSheet fetches its plan once

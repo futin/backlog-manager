@@ -13,6 +13,7 @@ import {
   EXECUTE_HELD_REASON,
   IN_REVIEW_REASON,
   inReviewBlock,
+  itemLadderBlock,
   PLAN_REVIEW_REASON,
   UNVETTED_REASON,
   planReviewBlock,
@@ -1228,6 +1229,47 @@ describe('EXECUTE_HELD_REASON', () => {
 });
 
 /*
+ * The per-item ladder (#468): the one home of the order of in-review, execute-held, unvetted and plan-review. A PR first, then the branch that is its files
+ * half, then the vetting, then the review — approving a plan does not vet it, so an item holding both must say the reason the approval would not clear.
+ */
+describe('itemLadderBlock', () => {
+  const held = EXECUTE_HELD_REASON;
+  it.each<[string, Partial<BacklogItem>, string | null, string | null]>([
+    ['no flags, not held', {}, null, null],
+    ['no flags, held', {}, held, EXECUTE_HELD_REASON],
+    ['plan-review alone', { planReview: true }, null, PLAN_REVIEW_REASON],
+    ['unvetted over plan-review', { unvetted: true, planReview: true }, null, UNVETTED_REASON],
+    ['held over unvetted and plan-review', { unvetted: true, planReview: true }, held, EXECUTE_HELD_REASON],
+    ['in-review over unvetted and plan-review', { inReview: true, unvetted: true, planReview: true }, null, IN_REVIEW_REASON],
+    ['in-review over held', { inReview: true, unvetted: true, planReview: true }, held, IN_REVIEW_REASON]
+  ])('%s', (_name, flags, executeHeld, expected) => {
+    expect(itemLadderBlock(fakeItem(flags), executeHeld)).toBe(expected);
+  });
+
+  /* The source guard the table cannot be: a reader that goes back to composing the rungs by hand keeps every behaviour test green until the order moves, and
+     then only the reader that was edited moves with it. `(` is what tells a call from the doc comments, which name these helpers freely. */
+  describe('its readers', () => {
+    const read = (...path: string[]): string => readFileSync(join(__dirname, '..', ...path), 'utf8');
+    const count = (text: string, needle: string): number => text.split(needle).length - 1;
+    const service = read('server', 'src', 'agents', 'agents.service.ts');
+    const button = read('client', 'src', 'components', 'board', 'DispatchButton.tsx');
+
+    it.each(['inReviewBlock(', 'unvettedBlock(', 'planReviewBlock('])('neither calls %s directly', (call) => {
+      expect(count(service, call)).toBe(0);
+      expect(count(button, call)).toBe(0);
+    });
+
+    it('agents.service.ts reads it twice, plan and dispatch', () => {
+      expect(count(service, 'itemLadderBlock(')).toBe(2);
+    });
+
+    it('DispatchButton.tsx reads it once', () => {
+      expect(count(button, 'itemLadderBlock(')).toBe(1);
+    });
+  });
+});
+
+/*
  * The unvetted guard (#341): a tracker bug or task filed from outside the repository whose body no trusted groom has pinned. One sentence again, shared by
  * the board's button, the server's two ladders, the orchestrator's hand-kept copy and execute's refusal — and one rung, between in-review and plan-review.
  */
@@ -1240,14 +1282,6 @@ describe('unvettedBlock', () => {
   it('is null for an item without the flag', () => {
     expect(unvettedBlock(fakeItem())).toBeNull();
     expect(unvettedBlock(fakeItem({ source: 'github', planReview: true }))).toBeNull();
-  });
-
-  /* The ladder's order, as every reader composes it: a PR first, then the vetting, then the review. Approving a plan does not vet it, so an item holding
-     both must say the reason the approval would not clear. */
-  it('reads after in-review and before plan-review', () => {
-    const ladder = (item: BacklogItem): string | null => inReviewBlock(item) ?? unvettedBlock(item) ?? planReviewBlock(item);
-    expect(ladder(fakeItem({ inReview: true, unvetted: true, planReview: true }))).toBe(IN_REVIEW_REASON);
-    expect(ladder(fakeItem({ unvetted: true, planReview: true }))).toBe(UNVETTED_REASON);
   });
 
   it('is the same sentence the orchestrator gate carries by hand', () => {

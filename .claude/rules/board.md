@@ -97,10 +97,13 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   "improve" that into disabled buttons. The stated exception is the Jira card's `Run ▾`, which is not a Board dispatch control (next bullet). Five per-item blocks keep their button, read by `DispatchButton` in this order: project visibility (`dispatchGate`), a
   local session's `started:` stamp (`progressBlock`, `client/src/lib/item-progress.ts` — ANY stamp, fresh or stale, for a files item; a tracker claim past
   `CLAIM_STALE_MS` lets the click through unless a run or the board's own session holds it, #227), an open PR (`inReviewBlock`, `shared/agent.ts` — a
-  tracker issue labelled `in-review`; the server's `plan`/`dispatch` read the same helper), an outsider's issue no groom of ours has pinned
-  (`unvettedBlock`, `shared/agent.ts` — `BacklogItem.unvetted`, #341; after in-review and before plan-review, here and in both server ladders), an
-  orchestrator claim (`runClaimBlock`). A sixth refusal is the server's alone and `DispatchButton` must not learn it: `executeHeldBlock`
-  (`server/src/agents/execute-held.util.ts`, #427) reads git, per request, for a files item whose action is `execute`, so the button stays enabled and the launch
+  tracker issue labelled `in-review`), an outsider's issue no groom of ours has pinned
+  (`unvettedBlock`, `shared/agent.ts` — `BacklogItem.unvetted`, #341; after in-review and before plan-review), an
+  orchestrator claim (`runClaimBlock`). `itemLadderBlock` (`shared/agent.ts`, #468) is the one home of the order of in-review, execute-held, unvetted and
+  plan-review, and the button and the server's `plan`/`dispatch` all read it. A sixth refusal is the server's alone and `DispatchButton` must not learn it:
+  `executeHeldBlock`
+  (`server/src/agents/execute-held.util.ts`, #427) reads git, per request, for a files item whose action is `execute`, and reaches that function as a value,
+  `null` from the button, so the button stays enabled and the launch
   sheet and `dispatch` say `an execute branch or worktree already holds this item`.
   Exactly one lets the click through, and only when it speaks alone: the visibility block re-asks the status through `useReverify`
   (`client/src/hooks/useReverify.ts`), whose one caller is `GatedChip` (`components/ui/GatedChip.tsx`, rule in `lib/gate-view.ts`), which `DispatchButton` and
