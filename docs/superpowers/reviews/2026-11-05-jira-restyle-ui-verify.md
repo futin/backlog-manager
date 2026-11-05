@@ -171,3 +171,29 @@ Note: after a 390 → 600 resize the pane once kept a 1.51 visual-viewport zoom;
 (`getBoundingClientRect`, `scrollWidth`), not read off a zoomed frame.
 
 Servers: pids 52962 (Vite 5197) and 52961 (http.server 5198) killed by pid after an `lsof` check; 5177/4322 untouched.
+
+## Re-measure after cb995d1c
+
+Method: Vite on 5197 (pid-owned, killed after) proxying the live API, `/api/jira/sessions` fixtured by a patched `window.fetch`, light theme, widths 1440 / 600 / 390,
+the skill's overflow script per view. Setup at 600 and 390 was measured inside same-origin iframes of that width, because the pane kept a stale 1340 px layout viewport.
+Screenshots: `remeasure/` in the session scratchpad.
+
+Per defect:
+
+- D1-D12, D14-D18: fixed. Proven by the layout numbers re-read at 1440, 600 and 390 (no element past the viewport, bottom sheets scroll with every row reachable).
+- D13: partly fixed. The ended-row Open cell still stacks its label: it would need about 192 px and Ticket is guard-limited to 170 (design-guards). Left, minor.
+- D19: not fixed by the wave. Fixed here: `.jira-setup-repo { flex-wrap: nowrap }`, so one long worktree path no longer widens the card (docW 1579 -> 1425 at 1440, `×` inside card).
+- D20, D21: fixed (Setup skill rows stay rows at 600 and 390, add-path input 489x36 / 279x36).
+
+New defects from the wave, both fixed here:
+
+- N2: the live Run split `Running · 1h` is 140 px of content in a 112 px Run column and overflowed. Column is now 164 px (ready split 93 px).
+- N3: under 700 px the phone block's `.set-row { align-items: flex-start }` beat `.set-row-stacked`, so the expanded worktree list sized to its content (542 px in a 489 px row at 600).
+  Fixed with `align-items: stretch` on `.jira-setup-repo`.
+
+Still open:
+
+- N1: Sessions Where cell `Dashboard` is 88 px in an 80 px column (clipped). Minor, left.
+
+Overflow output after the fixes (elements past the viewport, non-fixed): List, Sessions, Detail + Move-to, Run menu (390 sheet), deck card, Launch sheet: none at 1440 / 600 / 390.
+Setup: 1440 none (docW 1425); 600 none (docW 585 = viewport less scrollbar); 390 none (docW 375).

@@ -1640,7 +1640,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-issues-table thead th:nth-child(7) { width: 124px }
 .jira-issues-table thead th:nth-child(8) { width: 76px }
 .jira-issues-table thead th:nth-child(9) { width: 60px }
-.jira-issues-table thead th:nth-child(10) { width: 112px } /* The unlabelled Run cell: the split Run is 93 px, which 80 px less its padding spilled past the box. */
+.jira-issues-table thead th:nth-child(10) { width: 164px } /* The unlabelled Run cell: a live ticket's split `Running · 1h` is 135 px (140 of content after 24 px of padding), the ready one 93. Summary pays. */
 .jira-issues-table thead th {
   padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
   color: var(--ink3); border-bottom: 1px solid var(--hairline); white-space: nowrap;
@@ -1701,7 +1701,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 @media (max-width: 700px) { .jira-setup-add-path { flex: 1 1 auto; align-self: stretch } }
 /* A mapping's row (spec §4.4): a head line — key pill, the path (the code-span treatment `.set-hint code` has uses; §8.1 has one face, so "mono" is the span),
    the worktree toggle, the × pushed right — then, under the path's first row only, the two labelled fields and Save, then the expanded tree list. */
-.jira-setup-repo { gap: 10px }
+.jira-setup-repo { gap: 10px; flex-wrap: nowrap; align-items: stretch } /* `.set-row` wraps: a wrapping column's line is as wide as its widest item's max-content, not the card, so one long worktree path pushed every child past the card (page 1579 px at 1440). One line = the container's own cross size. `align-items: stretch` re-asserts `.set-row-stacked`: the phone block's `.set-row { align-items: flex-start }` (line ~1079) comes later and
+   won, so under 700 px the tree list sized to its content (542 px in a 489 px row at 600). */
 .jira-setup-repo-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-width: 0 }
 /* The code-span treatment (§8.1 has one face, so "mono" is the span `.set-hint code` / `.item-body code` draw): --ink on --steel, 4 px radius, the face
    inherited. Setup rows only — the repo path, a worktree's path and a skill's command sub-line carry `jira-setup-code`; the modal's rows and the Run menu do not. */
