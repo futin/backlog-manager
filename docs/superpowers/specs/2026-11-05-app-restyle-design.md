@@ -33,7 +33,7 @@ one product. It adds no palette: every colour is a token the board already has a
 
 **Non-goals**
 
-- No change to what any action does: Run, Merge, Auto-merge, Update branch, Reset, Resume, Stop, Remove (still copies a command), Add skill, Map a
+- No change to what any action does: Run, Merge, Auto-merge, Update branch, Reset, Pause, Cancel, Stop, Resume, Remove (still copies a command), Add skill, Map a
   repository keep their routes, payloads and confirmations. The one new behaviour is Sync now (§5).
 - No new data on any page except what §5 adds. Where a mock drew a number the server does not have, §6 says what is built instead.
 - No applied-filters row (the count lives in the Filter chip and its popover, as the Jira spec already decided), no sort chips, no column `⋯` menus.
@@ -51,15 +51,16 @@ one product. It adds no palette: every colour is a token the board already has a
 
 The Jira spec §3 applies in full (uppercase, 11 px floor, tint form, primitives block, dialog and popover counts, CSP, DESIGN.md). In addition:
 
-- **Popover composers.** The Jira spec moves the count from seven to eight. `FilterBar` is restyled, not replaced, so it adds none. The PR split Merge's
-  menu adds one unless `SplitChip` owns the menu's `Popover` (then the Run menu and the Merge menu are one composer); the deck card's split Open the same.
+- **Popover composers.** The Jira spec moves the count from seven to eight. `FilterBar` is restyled, not replaced, so it adds none. `SplitChip` stays
+  menu-less, as the Jira spec §4.1 defines it — each menu is its own `Popover` composer — so the PR split Merge's menu is the ninth and the deck card's split
+  Open menu the tenth.
   The plan states the final number and moves it in the same three places the Jira spec names (`.claude/rules/board.md`, `useDialogEscape`'s comment,
   `test/dialog-count-docs.test.ts`). The DIALOG count does not move: nothing here adds a `Modal`, `FormSheet` or `Confirm`.
 - **The server never writes git.** The worktree list's `Remove` keeps copying `removeCommand` and running nothing.
 - **Source guards over shared hooks.** `test/run-pulse.test.ts` pins every `useOrchestratorRuns()` caller and bars `App` from calling it; the shell has
   only a boolean `working` today. Any reader §4.9's counts need moves that guard in the same commit with the reason. The same check
   (`grep -l <symbol> test/`) runs for every hook or poller a new view reads.
-- **Two documented rules this spec overrides** (the user adopted both mocks; §9 lists them): DESIGN §8.6 / `board.md` "the rail is the only switch" — the
+- **Two documented rules this spec overrides** (the user adopted both mocks; §9 lists them): DESIGN §8.6 / `board.md` "the rail is the only switch" (pinned by `test/settings-view.test.tsx`) — the
   Settings page gains an in-page `Local | Shared | Dashboards` switch; DESIGN §8.0 / §8.9.4 "a reading with no links and no buttons" — the status popover
   gains `Sync now`, per-row sync icons and the setup link (the user asked for the sync button on the canvas).
 - **The pollers stay armed only while something is connected**, and the tracker, Jira and PR cache ages stay rendered values. Sync now (§5) runs one sweep
@@ -76,12 +77,15 @@ The Jira spec §3 applies in full (uppercase, 11 px floor, tint form, primitives
 
 - **`ui/SplitChip`** — the Jira spec §4.1's control, reused unchanged by the PR Merge (§4.8) and the deck card's Open (§4.5). Its `dashed` state is the
   blocked state everywhere (Run with no repository, Merge that cannot merge), with the reason as the title and, in the Matrix, as the label.
-- **State stripe** — a 3 px left edge in the state's tone on a row or card: needs you (amber), working (green), ended (grey), failed (red). Used by the
-  Sessions rows, the deck cards and the live run cards. The tone is never the only carrier: the state word sits in the row.
-- **`FilterBar`, restyled in place** — it is already a `Filter` chip with a count and a popover (Files, Archive, the Jira band, Sessions). Its popover
+- **State stripe** — a 3 px left edge in the state's tone on a row or card: every state maps to one tone. Sessions (`JiraSessionState`,
+  `shared/jira-sessions.ts`): `plan` / `permission` / `reply` / `answer` amber, `starting` and `working` green, `quiet` and `ended` grey, `lost` red (there is
+  no `failed` session state). Runs (`status`): `running` green, `paused` amber, `done` and `aborted` grey, `failed` red. Used by the Sessions rows, the deck
+  cards and the live run cards. The tone is never the only carrier: the state word sits in the row.
+- **`FilterBar`, restyled in place** — it is already a `Filter` chip with a count and a popover (Files, Archive, the Jira band). Its popover
   becomes labelled chip groups with a `Showing N of M` line and `Clear`; every page that uses it gets the new look, which is the point. No new component
-  and no new Popover composer. The Jira List keeps Type, Assignee, Sprint (options from the loaded issues); Sessions moves its Repository and Run selects,
-  the ended-row window (24 h / 7 d / 30 d / All) and the `All tickets` scope into it as chip groups.
+  and no new Popover composer. The Jira List keeps Type, Assignee, Sprint (options from the loaded issues). Sessions has no `FilterBar` today (two
+  `Select`s, a window `Select` and an `All tickets` chip, `JiraSessionList.tsx`); it gains one, and its Repository and Run selects, the ended-row window
+  (24 h / 7 d / 30 d / All) and the `All tickets` scope move into it as chip groups. A new `FilterBar` user is not a new composer.
 - **Segmented with counts** — `Segmented` gains an optional count per option (Sessions' All / Needs you / Working / Ended; PR Inbox's triage tabs).
 - **Stepper** — `NumberField`'s look becomes `−  value unit  +`; typing into the value still works, and min/max clamp as today.
 - **Status pill** — a dot plus a word plus an age, in tone (green connected, amber late, red down); the shell chips (§4.9) and the Sources rows (§4.10).
@@ -91,28 +95,32 @@ The Jira spec §3 applies in full (uppercase, 11 px floor, tint form, primitives
 
 The table keeps today's columns (Session, Key, Summary, Type, Status, Assignee, Sprint, Updated) and gains Priority after Status, as the mock draws. Each
 cell uses the card's marks from the Jira spec §4.2: type tile in the Type cell, status dot + raw status word, the three-tone priority pill (`Not
-prioritised` grey), the 22 px initials disc. The Session cell (filled today) takes the deck's state word and tone (`Working · 12m`, `Needs you · plan`, `ended 2h ago`, `—`). The split Run shows on row hover and on keyboard focus
+prioritised` grey), the 22 px initials disc. The Session cell (filled today) takes the session's state word and tone: today's
+`STATE_LABEL` words (`shared/jira-sessions.ts`, pinned by `test/jira-sessions-state.test.ts`) unchanged, plus the age (`Working · 12m`, `Waiting for plan
+approval · 3m`, `Ended · 2h`, `—`). No label is renamed; `Needs you · plan` is mock wording. The split Run shows on row hover and on keyboard focus
 within the row only, so a page of ink buttons never stacks up; it is always in the DOM and tabbable. The summary is one line with an ellipsis and the full
 text as its title. The band's `FilterBar` takes the §4.1 restyle; the band's sub-line keeps `JiraBandSub`.
 
 ### 4.3 Jira › Sessions (`JiraSessionsView`, `JiraSessionList`; mock `JiraSessions.dc.html`)
 
 The state filter is a `Segmented` with counts; the other filters, `All tickets` included, go into the restyled `FilterBar`. Rows carry the state stripe; the Ticket cell is key over summary;
-State is the deck's word and tone with the phase (`Needs you · plan`); Repository is mono; Started is time · age. Each row ends in the deck's action for that
-state (§4.5). The Cost column is built only if the session's dashboard row carries a cost today; otherwise it is left out (the builder checks `row`). The
-empty state is a centred block: a title naming the board and window (`No sessions on Globals this week`; `No linked sessions this week` while `All tickets` is on), one line on why, and two buttons — `Go to the
-board` and `Show 30 days` (sets the existing window filter to 30 d; hidden when the window is already 30 d or All).
+State is today's `STATE_LABEL` word in its §4.1 tone (`Waiting for plan approval`, not the mock's `Needs you · plan`); Repository is mono; Started is time · age. Each row ends in the deck's action for that
+state (§4.5). The Cost column is not built: the session row carries `contextPct` and no cost. The
+empty state is a centred block: a title naming the board and window (`No sessions on Globals in the last 24 hours` / `… 7 days` / `… 30 days`, and
+`No sessions on Globals` for All; with `All tickets` on, `No linked sessions` plus the same window phrase), one line on why, and two buttons — `Go to the
+board` (through the `onOpenJiraPage` link the rail already threads down) and `Show 30 days` (sets the existing window filter to 30 d; hidden when the window is already 30 d or All).
 
 ### 4.4 Jira › Setup (`JiraSetupView` and its groups; mock `JiraSetup.dc.html`)
 
-- **Connection banner** on top: avatar, `Connected as <name>`, site and the token kind (`tokenKind`; scopes are not served and are not drawn), then
+- **Connection banner** on top: an initials disc (no avatar is served: Jira gives `me.name` / `me.accountId`), `Connected as <name>`, site and the token kind (`tokenKind`; scopes are not served and are not drawn), then
   three figures (last sweep, every, sweep calls with the last 429's age when there is one — `calls.sweep`, `last429At`) and a `Healthy` status pill. A disconnected or failing connection turns the banner's pill amber or red with today's error text.
 - **Boards** become rows: name, then facts as chips (`6 roots`, `6 issues`, `every 1m`), then the polled age and `Open`. `New board` is the group's action.
 - **Repositories** become one row per mapping: project key pill, path (mono), a worktree-count toggle chip, then labelled fields `Base branch` and `Branch
   name` (the placeholder text becomes `(default)` after the value when it is the default). The toggle expands `Open worktrees beside this checkout`: one
   `JiraWorktreeRow` per tree with branch, path, state pill, ticket pill and `Remove` (copies the command, as today).
 - **Skills** use the Run menu's rows (Jira spec §4.1): built-ins first, then `Skills on this machine · N`, each with tile, label, command sub-line, and
-  `default` or `Make default`. What a user adds here is what the Run menu shows.
+  `default` or `Make default`. `Make default` writes `jiraDefaultAction`, the same per-browser Local setting Settings › Local
+  shows (its title says `default in this browser`); the page's server scope does not change that. What a user adds here is what the Run menu shows.
 
 ### 4.5 Launch sheet and deck (`JiraLaunchSheet`, `JiraAgentDeck`, `JiraSessionCard`; mock `JiraLaunch.dc.html`)
 
@@ -125,18 +133,19 @@ board` and `Show 30 days` (sets the existing window filter to 30 d; hidden when 
   the choice), both on one row; Model, Effort and Permissions on one row of selects; Remote control as a switch with its one-line
   description; the foot says where it starts (`Starts in microservice on a new worktree`) with `Copy prompt` and the ink `Start session`.
 - **The deck card**: state stripe; state word with phase and age; key + root pill; summary; repository; a context meter (today's context percentage); the
-  split Open — main half opens the session as today, the chevron holds the card's other actions today (Stop, Unlink), each with its existing confirm. The main half is ink only when the
+  split Open — main half opens the session as today, the chevron holds the card's other actions today (Stop, Unlink), each with its existing confirm; with neither drawn (Unlink only on a `branch` link, Stop only with `stopState`), the split collapses to the one Open button. The main half is ink only when the
   session needs you; a working session's Open is outlined. Its label is today's action wording; `Review plan` on the mock is mock wording (§6).
 
 ### 4.6 Runs › History (`RunsView`, `StageBars`, `RunDetail`; mock `Runs.dc.html`)
 
-- The five figure tiles stay, each gaining its own breakdown: Runs as a stacked bar of done / aborted / failed / live with the counts under it; the other
+- The five figure tiles stay, each gaining its own breakdown: Runs as a stacked bar of done / aborted / failed / paused / running
+  (each `status`, tones per §4.1) with the counts under it; the other
   four keep their number and one-line context.
 - Machine time by stage is one stacked bar with a legend (stage, hours) in place of seven one-hue bars. No stage tokens exist and none are added: the
   segments use the existing mark tokens in this order — dispatched `--green-solid`, reviewing `--cyan`, fixing `--amber-solid`, verifying `--magenta`,
   inspecting `--mustard`, preflight and merging `--ink3`, any other stage `--steel`; the legend carries the word, so hue is never the only carrier.
 - Live runs are cards: project, state pill (`paused`, `running`), run id, machine and age, `N of M items` with a progress bar. A click opens the detail.
-- The detail's head holds the run's controls (Resume, Stop) and the `paused at a boundary` / `controls live on the machine that ran it` line; its facts are
+- The detail's head holds the run's controls (`RunControls`: Pause, Cancel, Stop, Resume, each where today draws it) and the `paused at a boundary` / `controls live on the machine that ran it` line; its facts are
   a glyph-labelled grid (Started, Machine, Base · mode, Cost); it opens on the timeline of its items, each with outcome pill, title, duration and its stage
   split; the run's outcome line (`PR opened · <branch> → main · #462`) closes it.
 
@@ -152,19 +161,20 @@ board` and `Show 30 days` (sets the existing window filter to 30 d; hidden when 
 
 ### 4.8 GitHub › Pull requests (`PrInbox`, `PrMatrix`, `PrCards`, `PrActions`; mocks `PRs.dc.html`, `PRsLayouts.dc.html`)
 
-- **Inbox**: triage tabs as `Segmented` with counts (Needs you / Worth a look / Quiet). Each row leads with a status tile (red failing, amber pending, green
-  ready), then title, then checks and mergeability as pills, then author · branch → base · age. The four outlined chips become one split Merge: the main
+- **Inbox**: triage tabs as `Segmented` with counts (Needs you / Worth a look / Quiet). Each row leads with a status tile in the `checks` tone (`failure` red, `pending` amber, `success` green, `none` and `unknown`
+  grey; conflicts, changes requested and behind are carried by the pills, not the tile), then title, then checks and mergeability as pills, then author · branch → base · age. The four outlined chips become one split Merge: the main
   half merges, or enables auto-merge while checks are still running; the menu holds Merge, Enable auto-merge and Update branch, each with one line on what it
   does; `Open on GitHub` becomes an icon button. A PR that cannot merge shows the dashed `Blocked` main half, `aria-disabled` and focusable with the
   reason via `aria-describedby` as today; the chevron stays enabled while any menu action is allowed (Update branch, auto-merge). With auto-merge already
-  armed the main half reads `Auto-merge on` and the menu's row is `Disable auto-merge`, as today's toggle does. Merge still opens today's Confirm with its
+  armed the main half reads `Auto-merge on`, stays enabled and disarms on click (today's toggle, `enable: false`), and the menu's row is `Disable
+  auto-merge`. Merge still opens today's Confirm with its
   method select (default `defaultMethod`).
 - **Matrix**: one row per PR, one column per fact (`MATRIX_COLUMNS`: checks, review, mergeable, base, auto-merge, plus Updated). Colour marks a problem only;
   each header counts its bad rows. The leading dot is the triage tone. One row expands at a time and shows the failing check names plus the Inbox row's
   actions; a blocked PR's Merge is the dashed half with the reason written in it.
 - **Cards**: one card per repository with open PRs (none for a repo with nothing open), head `repo · N open · polled age`, then compact PR rows with the
   same status tile, pills and split Merge. A PR merged from this page stays as one quiet line until the next poll, as today; a repository that could not be
-  read is one line under the cards, not a red card.
+  read is one line under the cards, not a red card, as today.
 
 ### 4.9 The shell (`SideRail`, `TrackerChip`, `JiraChip`; mock `Shell.dc.html`)
 
@@ -178,7 +188,7 @@ board` and `Show 30 days` (sets the existing window filter to 30 d; hidden when 
   client talks to its own origin through the proxy and never sees 4322, so the mock's port is not drawn. The dot reads whether the client's existing reads are answering — red with `API unreachable` when they fail; no new poller is added
   for it, and the builder picks which existing read it follows.
 - **Top right**: one status pill per service (`GitHub ● 2m ago`, `Jira ● 9s ago`) replacing the meter chips. Green when the last sweep is on time, amber when
-  it is late, red when the service is down. The popover keeps today's detail and gains a head: avatar, name, `● connected · <site>`, and `Sync now`; then
+  it is late, red when the service is down. The popover keeps today's detail and gains a head: initials disc (no avatar is served: Jira `me.name`, GitHub `login`), name, `● connected · <site>`, and `Sync now`; then
   two figures (last sweep with its interval; for Jira the sweep calls and last 429, for GitHub the rate-limit remaining of limit — what is served); then the per-board (Jira) or per-repo (GitHub) rows with their polled age and
   a per-row sync icon; then the setup link.
 
@@ -187,17 +197,23 @@ board` and `Show 30 days` (sets the existing window filter to 30 d; hidden when 
 Nothing in the shell knows either number today: the PR poll (60 s) runs only while the PRs page or GitHub Settings is mounted, and the shell has only
 the boolean `working` for runs. The user chose counts on every page, so the shell gains an always-on reader for each:
 
-- **GitHub**: the PR poll is armed whenever a board tab is open and GitHub is connected (still never while nothing is connected — the poller invariant
-  holds), at its existing 60 s interval. The count is the Inbox's `Needs you` number, amber; 0 hides the pill.
-- **Runs**: the shell reads the live-run count from one shared reader (a context over the existing runs poll, so the shell and Runs page share one
-  request, never two). `test/run-pulse.test.ts`'s caller list and its `App` bar move in the same commit, with this section as the reason. The count is
+- **GitHub**: the server's PR cache has no timer and stays that way (on demand, `PullRequestsService`); the shell's client gains the 60 s
+  `GET /api/prs` read the PRs page runs today, mounted whenever a board tab is open and GitHub is connected (never while nothing is connected), shared with
+  the PRs page so one tab makes one read a minute. This overturns the stated reason "nothing reads pull requests except the PRs page"
+  (`server/src/tracker/pulls.service.ts`'s header comment, `.claude/rules/tracker.md`'s PR-cache bullet); both move in the same commit, with this section
+  as the reason. The count is the Inbox's `Needs you` number, amber; 0 hides the pill.
+- **Runs**: one `useOrchestratorRuns()` poll per tab moves up into a shell-level context, and every view that calls the hook today (Board,
+  Archive, PRs, Runs — `test/run-pulse.test.ts`'s `VIEWS`) reads the context instead, so the shell's count and every view share one 5 s request, never
+  two. That keeps the guard's purpose (no second poller for the shell) and changes its shape: the caller list becomes the one provider, and the `App` bar
+  becomes "only the provider calls the hook". Both move in the same commit, with this section as the reason. The count is
   grey; 0 hides the pill.
 - Both readers pause with the page's existing visibility handling, if the poll they reuse has it.
 
 ### 4.10 Settings (`SettingsView`, `SourcesGroup`, `TimeZoneGroup`, `WatchdogGroup`, `TickGroup`, `Dashboards*`; mocks `Settings.dc.html`, `SettingsMore.dc.html`)
 
-- **All pages**: a `Local | Shared | Dashboards` segmented head with a sub-line saying where the page saves (`saves in this browser only` / `saved on the
-  server`). One readable column of cards; each card has a title and a scope pill (`this machine`, `this server`); each row is a label, a one-line
+- **All pages**: a `Local | Shared | Dashboards` segmented head with a sub-line saying where the page saves (`saves in this browser only` / `saved on this
+  machine`). One readable column of cards; each card has a title and a scope pill (`this browser`, `this machine` — today's two words,
+  `SettingsView.tsx`; `this machine` is the server's host everywhere, as on Jira Setup); each row is a label, a one-line
   description and a control; text longer than a line moves behind an `ⓘ more` toggle (a button with `aria-expanded`).
 - **Local**: Theme as picture cards, each a mini board drawn from that theme's own tokens (the preview element carries the theme's `data-theme`, so no
   colour is hard-coded); Density, Text size, Content width, Opens on as `Segmented`; Default merge mode as three icon cards (Merge into base, Leave branches,
@@ -208,26 +224,30 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
 - **Dashboards**: a two-pane page. The list: one row per machine with the prefer-order number, status dot, name, `this machine` tag, account pill and two
   meters (5 h, week) that turn amber then red near the limit, plus `Add a dashboard`. The detail: name with ↑ ↓ (prefer order), Edit, Remove; a status line
   (connected · spawn; sessions in use is not served and is not drawn); two usage tiles (5-hour window, week) with reset times; Models and Efforts as pills, disallowed ones struck through
-  with a title saying so; then the facts (dashboard URL, board URL, machine name, account). ↑ ↓ use the order Dispatch already reads; if no write exists
-  for it today, the builder adds it to the existing dashboards write path rather than a new store. `SuggestCard` (strategy and threshold) and Home's setup
+  with a title saying so; then the facts (dashboard URL, board URL, machine name, account). ↑ ↓ write the existing `order` through `POST /api/dashboards/settings`, the
+  order Dispatch already reads. `SuggestCard` (strategy and threshold) and Home's setup
   steps stay, restyled into the same card and row language.
 
 ## 5. Server additions
 
-- **Sync now.** `POST /api/jira/sweep` (optional `{ boardId }`) and `POST /api/github/sweep` (optional `{ repo }`) — named `sweep`, not `sync`, because
+- **Sync now.** Both routes sit behind `SameOriginPostGuard`, as every POST here does. `POST /api/jira/sweep` (optional `{ boardId }`) and `POST /api/github/sweep` (optional `{ repo }`) — named `sweep`, not `sync`, because
   `POST /api/trackers/sync` already exists and writes a repo's sync interval — ask the already-armed poller for one
   sweep now and return when it has finished, with the new cache ages. A poller that is not armed answers 409 and the button is disabled with that reason; a
-  second call while a sweep runs joins it rather than starting another; calls closer than the poller's own interval floor (the builder sets it, at least
+  second call while a sweep runs joins it rather than starting another (a joined sweep may have started before the click, which is accepted); calls closer than the poller's own interval floor (the builder sets it, at least
   5 s) return the last result without calling out. Both are reads of the outside service, so they respect the existing budget and 429 handling. A repo
-  whose sync is `off` is skipped (it refuses every write path and is not polled; the row's sync icon is disabled). The GitHub sweep also refreshes the PR
-  cache when the PR poll is armed. A status pill is late against each row's own interval, not the 15 s tick.
+  whose sync is `off` is skipped (it refuses every write path and is not polled; the row's sync icon is disabled). The GitHub sweep also re-reads the PR
+  cache for the swept repos once, past its TTL, through the same one-in-flight-read-per-repo path. Failures: an unknown `boardId` is a 404 `unknown board`
+  and an unknown `repo` a 404 `unknown repo` (the repo convention); a malformed body is a 400. Inside a stored 429 window the sweep makes no call and answers
+  429 with the stored `retryAt` (the existing up-front refusal), and Sync now shows `Jira asked to wait until <time>` (GitHub: its sleep's end). A 401, 5xx
+  or transport failure answers 200 with the cache unchanged and `access` / `detail` saying why, as a timed sweep leaves it; the pill turns amber or red from
+  those, and Sync now shows the detail. A status pill is late against each row's own interval, not the 15 s tick.
 - **Read again** on the Sources card calls both and re-reads the registry; it shows the newest age when all three answer.
-- Nothing else is added server-side. Numbers a mock drew that are not served (Jira calls since start, GitHub call and 429 counts, token scopes,
+- Nothing else is added server-side. Numbers a mock drew that are not served (Jira calls since start, GitHub call and 429 counts, token scopes, avatars,
   Dashboards sessions in use, Watchdog last-check age, the API port) are replaced by what is served or left out, as each section says.
 
 ## 6. Drawn on a mock, built differently or not at all
 
-- Stage colours `#5c9a2e` and `#e9a24f` (Runs) and the theme-preview colours (Settings) are mock hex: the build uses stage tokens and each theme's own
+- Stage colours `#5c9a2e` and `#e9a24f` (Runs) and the theme-preview colours (Settings) are mock hex: the build uses the mark tokens §4.6 lists and each theme's own
   tokens.
 - `Review plan` on the deck and Sessions rows is mock wording: the label is today's action wording for that state.
 - The mock's 10.5 px and 11.5 px text, its uppercase micro headers and any lowercase kicker follow the Jira spec's rules (11 px floor, sentence case,
@@ -251,9 +271,11 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
 - **`SplitChip` reuse**: the PR row has a button named `Merge #<n>` and `Merge options for #<n>`; the main half posts merge when checks pass and auto-merge
   while they run; the menu lists Merge, Enable auto-merge, Update branch; a blocked PR's main half is disabled with its reason as the title. Existing
   `/api/prs/*` call assertions keep their payloads.
-- **`FilterBar` restyle**: existing FilterBar tests keep passing (Files, Archive, Jira band, Sessions); the popover shows chip groups, `Showing N of M`
+- **`FilterBar` restyle**: existing FilterBar tests keep passing (Files, Archive, Jira band); the popover shows chip groups, `Showing N of M`
   and `Clear`, which resets every group; Escape closes and returns focus to the chip. Sessions: the window, Repository, Run and `All tickets` groups drive
-  the existing state, and `Show 30 days` in the empty state sets the window.
+  the existing state, and `Show 30 days` in the empty state sets the window; the Sessions cases in `test/jira-list.test.tsx` and
+  `test/rail.test.tsx` that click the `All tickets` chip or pick from the Repository / Run / window selects now open the Filter popover and pick the chip.
+  The Session cell and State column assert today's `STATE_LABEL` words with the age; `test/jira-sessions-state.test.ts` is unchanged.
 - **Segmented counts**: the count renders beside each label and is part of the option's accessible name.
 - **Stepper**: − and + change the value by one step, clamp at min and max (the button at a bound is disabled), typing still works, and the existing
   NumberField tests keep passing against the new look.
@@ -264,13 +286,15 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
   the guard in `test/run-pulse.test.ts` still lists the same callers (or moves with a stated reason).
 - **Status pill**: green, amber and red by sweep age and connection; the popover's `Sync now` posts once, disables while running, and shows the new age.
 - **Sweep routes** (jest, server): an `off` repo is skipped; 409 when the poller is not armed; a concurrent second call joins the first sweep (one outbound call); a call inside the
-  floor returns the cached result without calling out; an unknown `boardId` or `repo` is a 400.
-- **Settings**: the info toggle has `aria-expanded` and reveals the long text; the theme cards set the theme; the merge-mode cards set
+  floor returns the cached result without calling out; an unknown `boardId` or `repo` is a 404, a malformed body a 400; inside a 429 window the answer is 429 with the
+  stored `retryAt` and no call is made; a 401 answers 200 with the cache unchanged; a cross-origin POST is refused by the guard.
+- **Settings**: `test/settings-view.test.tsx`'s "no in-page switch" assertions (and the comment that states that rule) invert to the
+  `Local | Shared | Dashboards` switch, with §3's override as the reason. The info toggle has `aria-expanded` and reveals the long text; the theme cards set the theme; the merge-mode cards set
   `orchestrateDefaultMergeMode`; every card has its scope pill.
 - **Dashboards**: ↑ on the first row and ↓ on the last are disabled; a move reorders the list and persists; a disallowed model renders struck through with
   its title.
 - **Guards**: `daylight-contrast` `PINNED` gains every new tint site (state stripes are marks, not tints; pills and tiles are tints); `design-guards` stays
-  green (one uppercase rule, 11 px floor, primitives declared once); `dialog-count-docs` moves to the final popover composer count.
+  green (one uppercase rule, 11 px floor, primitives declared once); `dialog-count-docs` moves to ten popover composers (Jira spec eight, plus the Merge and Open menus).
 - **Last task of each plan is `/ui-verify`**, comparing the live page at 1440 px against the mock it cites: List, Sessions (filled and empty), Setup (with
   worktrees open), launch sheet and deck, Runs History, Watchdog + Ticks, PRs Inbox, Matrix and Cards, the shell with a status popover open, and each
   Settings page.
