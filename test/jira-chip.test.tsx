@@ -238,6 +238,18 @@ describe('the popover', () => {
     expect(syncNow()).toHaveAttribute('title', 'Jira is not being polled');
   });
 
+  it('a 429 notice goes when the clock it names passes', async () => {
+    renderChip(status());
+    await user.click(chip());
+    await user.click(syncNow());
+    await act(async () => answer({ ok: false, status: 429, body: { message: 'slow down', retryAt: new Date(NOW + 60_000).toISOString() } }));
+    expect(screen.getByText(/^Jira asked to wait until/)).toBeInTheDocument();
+    act(() => {
+      jest.advanceTimersByTime(61_000);
+    });
+    expect(screen.queryByText(/^Jira asked to wait until/)).toBeNull();
+  });
+
   it('a 409 survives a status poll that changes nothing, and clears when `armed` flips', async () => {
     const { update } = renderChip(status());
     await user.click(chip());
