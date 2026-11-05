@@ -192,8 +192,9 @@ Since the source-sections change the rail lists five sections — Files, GitHub,
 amber (`warn`) when the number is people waiting, grey (`neutral`) when it is only a quantity. Jira's counts the sessions that need you — plan, permission,
 reply and answer, across every linked ticket, each session once; GitHub's the pull requests that need you (`needsYouCount`, Inbox's Needs-you level), read from
 the shell's one `PullRequestsProvider` so it is true on every section and not only while GitHub › PRs is open; Runs' the live runs, grey, from the shell's one
-`OrchestratorRunsProvider`. `.rail-count` hangs over the row's right end, 10 px in and vertically centred. Jira's is a real `<button>` beside the row's button
-inside `.rail-group` (a button in a button is invalid) — the row opens Jira, the count opens the Sessions page (§8.9.1) filtered to Needs you with All tickets —
+`OrchestratorRunsProvider`. `.rail-count` hangs over the row's right end, 10 px in and vertically centred: every row's button and its count share one
+`.rail-group`, the count's positioning parent, with the open tree outside it so the count centres on the row alone; the row is full width. Jira's is a real
+`<button>` beside the row's button (a button in a button is invalid) — the row opens Jira, the count opens the Sessions page (§8.9.1) filtered to Needs you with All tickets —
 and the other two are plain `role="img"` spans that let the click through to their row. Each is named in words (`4 sessions need you`, `2 PRs need you`, `1 live
 run`). Zero draws no element, not an empty pill; while the dashboard is unreachable Jira's keeps the last count rather than showing a false zero.
 
@@ -226,7 +227,8 @@ than the dialogs' `0 24px 64px`). It is no longer "a reading with no links and n
 none a section or Settings-page switch of its own. The head (`ServiceHead`, shared by both pills so they cannot disagree about where focus lands) is an initials
 disc, the login (or `no token`), `● connected · github.com` and `Sync now`, a 28 px outline `Chip` that posts `POST /api/github/sweep` for every repo through
 `useSweep`, is disabled while a sweep is out and carries its reason as a title when it cannot work (no token, a 409's sentence), and takes focus on open; under
-it two figures, `Last sweep` and `Rate limit` (`N of M · resets HH:MM`). Then one row per connected repo — its name over `owner/repo`, `polled 12 s ago`
+it two figures on `--strip-hi` tiles, `Last sweep` and `Rate limit` (`N of M · resets HH:MM`); the `● connected · site` line wraps under the name rather
+than clipping under `Sync now`. Then one row per connected repo — its name over `owner/repo`, `polled 12 s ago`
 (`syncing…` while its own sweep is out, `· sync off` for an off repo), the access sentence in `--red` when it is not `ok` — with a sync icon at its right (`Sync
 <repo>`, `POST /api/github/sweep { repo }`, disabled for an `off` repo). Last, one link, `GitHub page ↗`, which is `onOpenSettings`: the shell's pair, `App`
 setting the section and its page together, never a switch of the popover's own. With no token the rows give way to the `BM_GITHUB_TOKEN` note. The sweep's state
@@ -521,7 +523,8 @@ error on a card whose job is to say what the machine has) and then re-reads ever
 selection and each machine's health and usage outgrew a card. From the top, the Suggest card (`SuggestCard` — the three strategies as a radio group and the
 threshold) spans the well; under it two panes, a list column of 360 px beside the selected machine's detail, which takes the rest; under both a footer carrying
 the file's path and the lead line. A list row reads at a glance — its place in prefer order, a health dot, the name, the account, two usage meters drawn by the
-same `ui/` primitives every other meter uses — and the selected row sits on `--steel` with an ink edge. The detail is a `Sheet`: the head with the machine's
+same `ui/` primitives every other meter uses, labelled `5 h` and `week` — each row its own `--strip` card standing on the well with no enclosing `Sheet`,
+and the selected row keeps that paper with an ink edge. The detail is a `Sheet`: the head with the machine's
 controls, the dispatch status line for Home (setup steps under it while it is unhealthy), the two usage tiles, the models and efforts as pills, and one facts
 list. The facts list is where the account lives — the account pill is the `Account` fact, not the head's — and it is two kinds: Home draws three, `Dashboard`
 (its URL and the `BM_AGENTS_URL` pill), `Account` and `Token`; a remote draws five, adding `Board` and `Machine name` (the claim's `host`) between the URL and

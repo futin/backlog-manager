@@ -86,7 +86,8 @@ sessions answer — `JiraSessionsProvider` (`hooks/JiraSessionsContext.tsx`), ho
 `enabled` = Jira configured (no poll and no badge otherwise) and `open` = Jira is the current section, so with the section closed the request carries no
 `open=1` — and counts `needsYouCount` (`lib/jira-list.ts`): plan, permission, reply and answer across EVERY linked ticket, not the picked board's, each
 session once, by `sessionId`, even when it is linked to two tickets. Zero draws no element. While the dashboard is unreachable (`reachable: false`, every live link reads Lost contact) or a read fails, the
-hook keeps the last count it was sure of. The count is a `button.rail-count` beside the row's button, inside `.rail-group` (a button in a button is invalid, and
+hook keeps the last count it was sure of. The count is a `button.rail-count` beside the row's button, inside the row's `.rail-group` — every row has one, holding the button and its count but never
+the open tree (a button in a button is invalid, and
 the row must still just open Jira); its click sets the Jira page to `sessions` and the filters to `{ chip: 'needs-you', allTickets: true }`
 through the two module stores, then `change('jira')`, so the Sessions page it lands on shows every session it counted; it never touches the Board page's view.
 
