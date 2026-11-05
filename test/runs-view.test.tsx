@@ -1987,10 +1987,8 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
 
     // 2/2 is the LIVE queue (a-1 and a-2 both merged); the archive snapshot
     // beside it still says 1/2. Pre-fix this row read the archive.
-    // task-38: the count is §7's two-tone amount (`.runs-count`, the
-    // completed figure over the queue length), drawn by the row shape the
-    // redraw introduced. The claim is the number, which is unchanged.
-    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`).querySelector('.runs-count')?.textContent).toBe('2 / 2');
+    // The Live card reads `N of M items` over its meter (spec §4.6); the claim is still the number.
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveTextContent('2 of 2 items');
   });
 
   it("freezes the row wall time at the stale live entry's own last heartbeat", async () => {
@@ -2765,7 +2763,7 @@ describe('RunsView · a remote run (task-48)', () => {
     expect(screen.getByTestId(`runs-row-remote-${remote.runId}`)).toHaveTextContent('remote');
 
     await userEvent.click(screen.getByTestId(`runs-row-${remote.runId}`));
-    expect(await screen.findByTestId('run-detail-remote')).toHaveTextContent('Remote run: its controls are on the machine that ran it.');
+    expect(await screen.findByTestId('run-detail-remote')).toHaveTextContent('controls live on the machine that ran it');
     expect(screen.getByTestId('run-detail-remote-queue')).toHaveTextContent('Items this run has not claimed yet are not visible from here.');
     expect(document.querySelector('[data-testid^="run-controls-"]')).toBeNull();
     expect(mockFetchArchivedRun).not.toHaveBeenCalled();
@@ -2960,5 +2958,50 @@ describe('RunsView · the shared time zone (#241)', () => {
     const { startedAt, utcDay } = lateRun();
     const { container } = await renderInZone('America/New_York', startedAt);
     await waitFor(() => expect(kickers(container)).toEqual([label(utcDay)]));
+  });
+});
+
+/*
+  Plan 3 task 6 (spec §4.6): a Live run is a card — a `ui-stripe` edge in the run's tone, the state pill, `N of M items` over a 4 px progress fill — and
+  a crashed one keeps its second line. Selecting a card still opens the detail beside it.
+*/
+describe('RunsView — live run cards', () => {
+  const threeItems = [liveQueueItem('a-1', 'merged'), liveQueueItem('a-2', 'reviewing'), liveQueueItem('a-3', 'pending')];
+
+  it('draws a paused run as an amber-edged card with a paused pill and its progress', async () => {
+    await renderRunsView(ARCHIVE_RUNS, [{ ...LIVE_RUNS[0], status: 'paused', queue: threeItems }]);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card).toHaveClass('ui-stripe');
+    expect(card).toHaveAttribute('data-tone', 'amber');
+    expect(card.querySelector('.ui-pill')).toHaveTextContent('paused');
+    expect(card).toHaveTextContent('1 of 3 items');
+    expect(card.querySelector('.ui-meter[data-height="4"]')).not.toBeNull();
+    expect(card).toHaveTextContent(RUN_LIVE.runId);
+  });
+
+  it('draws a fresh running run green with a live pill', async () => {
+    await renderRunsView(ARCHIVE_RUNS, [{ ...LIVE_RUNS[0], queue: threeItems }]);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card).toHaveAttribute('data-tone', 'green');
+    expect(card.querySelector('.ui-pill-live')).toHaveTextContent('running');
+    expect(screen.queryByTestId(`runs-live-crashed-${RUN_LIVE.runId}`)).toBeNull();
+  });
+
+  it('draws a crashed run red, with the crashed pill and its second line', async () => {
+    await renderRunsView(ARCHIVE_RUNS, [{ ...LIVE_RUNS[0], fresh: false, queue: threeItems }]);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card).toHaveAttribute('data-tone', 'red');
+    expect(card.querySelector('.ui-pill')).toHaveTextContent('crashed');
+    expect(screen.getByTestId(`runs-live-crashed-${RUN_LIVE.runId}`)).toHaveTextContent('no heartbeat for');
+  });
+
+  it('puts no stripe inside another stripe', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card.querySelector('.ui-stripe')).toBeNull();
   });
 });

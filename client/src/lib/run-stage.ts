@@ -116,6 +116,21 @@ export function stageChipClass(stage: RunStage): string {
 }
 
 /**
+ * The `ui/Pill` tone an item's outcome pill wears in the run detail (spec §4.6) — the same six-tone reading `STAGE_TONE` already decided, narrowed to the
+ * five tones a pill has: active → `live`, done → `done`, bad → `bad`, warn → `warn`, and both quiet ones (idle, muted) → `neutral`. The stage WORD is
+ * always printed in the pill, so folding the two quiet tones loses nothing a reader could have told apart by colour. Restated as a string union rather
+ * than imported as `PillTone`: `lib/` imports nothing from `components/`, and the two unions are structurally the same, so the pill takes this directly.
+ * `stageChipClass` stays for the board cards, which still draw the old chip.
+ */
+export type StagePillTone = 'neutral' | 'live' | 'warn' | 'bad' | 'done';
+
+const PILL_OF_TONE: Record<StageTone, StagePillTone> = { active: 'live', done: 'done', bad: 'bad', warn: 'warn', idle: 'neutral', muted: 'neutral' };
+
+export function stagePillTone(stage: RunStage): StagePillTone {
+  return PILL_OF_TONE[STAGE_TONE[stage]];
+}
+
+/**
  * ---- RUN status vs. ITEM stage — two vocabularies that share one file on
  * purpose, and must never share one map ----
  *

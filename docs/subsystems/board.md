@@ -302,8 +302,9 @@ a media query cannot see the rail, the measure cap, the padding or `.shell`'s `z
 containment would make either the containing block for the fixed overlays rendered inside them. The 1280 px measure cap sits under the threshold, so the
 rail appears only with content width set to full. Watchdog renders no wrapper.
 
-- **The Live sheet** holds one row per run that is `running` or `paused`, plus one per `starting` entry — a dot, the project, `⚠ N` when the run carries
-  attention entries, the two-tone `1 / 5`, elapsed, and a status pill only where one is earned. A starting row reads `starting… · <age>`, carries no controls
+- **The Live sheet** holds one row per run that is `running` or `paused`, plus one per `starting` entry. A run is a **card** wearing the `ui-stripe` edge in its `runTone` (red when
+  crashed): the project, `⚠ N` when the run carries attention entries, a state pill (`running` live, `paused` warn with the pause glyph, `crashed` warn), the
+  run id as a code span, the machine tag and elapsed, and `N of M items` over a 4 px `Meter` fill. A card holds no other stripe — `--stripe` inherits. A starting row reads `starting… · <age>`, carries no controls
   and cannot be selected: there is no run file for the detail sheet to show. A remote orchestrate launch (`remoteStarting`) is a starting row of its own,
   `Starting on <machine>`, equally unselectable; the `remote` pill on a remote run's
   row gains a machine tag naming the dashboard the run is on, and the sheet's head and the page's count line say `N launching elsewhere`. A crashed run —
@@ -316,23 +317,23 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
 - **The History sheet** holds one row per finished run under day kickers, newest first: the dot and the status word from `runStatusChip`, the project, the
   two-tone count, wall time and the cost beside it when usage exists, behind a counted `load more` in pages of 25 — a render decision over a corpus the client
   already holds whole, exactly as the staleness window is. A row **selects**; nothing opens, and there is no run modal anywhere in the app.
-- **The detail sheet** shows the selected run whole: a head with the project, the run id and `RunControls` (Pause, Cancel with its `Pausing after <id>` note,
+- **The detail sheet** shows the selected run whole: a head with the project and the run id as a code span, the status pill (`runs-status`) with its note (`paused at a boundary`) and `RunControls` under them (Pause, Cancel with its `Pausing after <id>` note,
   Stop beside both — and on a crashed run too, which is the run a person most needs to end — Resume for a paused run with Stop beside it (#305, drawn even
   when the environment ladder hides the Resume), and Resume for a crashed one exactly when `watchdogStoodDown` says the sweeper will not. Stop asks first
   (bug-53): the chip is replaced in place by `ui/Confirm` naming the item it abandons and saying the run cannot be resumed — or, with nothing in flight and
   items parked, that the parked items keep their worktree and branch — and only its `Stop run` sends the
   request — `Keep running` and Escape send nothing. A run with a stop on file drops to the
   `Stopping` reading and offers no control at all — no withdrawal, because the `--abort` session has already been spawned, and no Resume in any branch) — and,
-  when the run file carries a `prUrl` that passes `isPrUrl`, a `PR #<n>` link-out in the head's sub line, opened with `rel="noopener noreferrer"`; then the
-  facts strip, the mode and question notes (`mergeModeLabel`'s pill reads `PR mode` for an effective `pr` run and `branch mode (downgraded)` for a degraded
-  one), the chip row, `git merge --no-ff <branch>` per branched item, the items in pipeline order — each with its stage chip, its `RowTime` reading, its
-  seven-node `StageTrack`, its usage line, its assumptions under `decide`, and its last verification as a disclosure, open when failed. Machine time by stage
+  when the run file carries a `prUrl` that passes `isPrUrl`, the sheet closes on `PR opened · <base> → <prTarget> · #<n>`, the number a link-out opened with `rel="noopener noreferrer"`; then the
+  facts grid (glyph-labelled cells: Started with the wall and the finish under it, Machine for a remote run, Base · mode with the question mode under it, Cost), the mode and question notes (`mergeModeLabel`'s pill reads `PR mode` for an effective `pr` run and `branch mode (downgraded)` for a degraded
+  one), the count pills (the same testids as the chips they replaced), `git merge --no-ff <branch>` per branched item, the items in pipeline order — each with
+  an outcome pill reading its real stage word (`stagePillTone`), its `RowTime` reading, a `stage span · stage span` line, its seven-node `StageTrack`, its usage line, its assumptions under `decide`, and its last verification as a disclosure, open when failed. Machine time by stage
   for this run alone comes after the items, and the attention entries last of all — an empty attention list is the common case and the chip row already carries
   its count, so the section earns the screen only when it has something in it. Selection is one run across both sheets: the first live run is selected on
   arrival, and with nothing live the newest History row is, so the Board's run chip lands a reader on the current item's stage track with no second click.
   Every reading in the head, the facts strip, the notes and the chip row is `runDetailModel` (`lib/run-detail.ts`, #271) — a pure function of the three
   tiers and one `now`, unit-tested without a render; the component keeps the fetch, the clock, the rows' own JSX and the machine-time rollup.
-  For a remote run the sheet is read-only: `Remote run: its controls are on the machine that ran it.` stands where `RunControls` would, nothing fetches
+  For a remote run the sheet is read-only: `controls live on the machine that ran it` stands where `RunControls` would, nothing fetches
   `archive/run`, and a line under the items says the ones the run has not claimed yet are not visible from here. A LOCAL run of a tracker project that has
   claimed nothing yet says `Not visible from other machines: this run has not claimed an issue yet.` — `lib/remote-run.ts` holds all three derivations, and
   `hooks/useProjectSources.ts` reads the project sources once on mount.

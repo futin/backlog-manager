@@ -1248,6 +1248,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    `.board-card-stage-glyph`'s, whose unconditional rule is two classes deep. */
 @media (prefers-reduced-motion: reduce) { .run-controls-needs-you { animation: none } }
 
+/* The head's right column (spec §4.6): the state pill and its note on one line, the controls (or the remote sentence) under them, both flush right to
+   match `SheetHead`'s own right-hand column. */
+.run-detail-head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px }
+.run-detail-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end }
+.run-detail-id { font-size: 12px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 1px 6px }
+/* The closing line of a pr-mode run: quiet ink like the sheet's other sub lines, with the number as the link. */
+.run-detail-outcome { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--ink2) }
+
 /* The slot the fade lands in, reserved by each host rather than by the control
    (§8.8): `RunControls` renders `null` for most run states, so a slot sized by
    its own content would be no slot at all. 28 px is the `Chip` size both
@@ -1896,11 +1904,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   border-radius: 2px; padding: 8px 10px; margin-bottom: 14px;
 }
 .run-drawer-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px }
-.run-drawer-chip {
-  font-size: 11px; color: var(--ink2);
-  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 4px 9px;
-}
 .run-drawer-chip-num { color: var(--ink); font-weight: 600; margin-right: 3px }
 
 .run-drawer-queue { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px }
@@ -2643,6 +2646,15 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .runs-count-done { font-size: 13px; font-weight: 500; color: var(--ink) }
 .runs-count-total { font-size: 13px; color: var(--ink3) }
 .runs-row-wall { flex: none; font-size: 12px; color: var(--ink3); font-variant-numeric: tabular-nums }
+/* The Live card (spec §4.6) is a `.runs-row` wearing the `ui-stripe` edge, so it keeps the row's hairline, padding and hover. Three things differ. Its
+   progress line sits 4 px under the meta line. The stripe and the selection marker both want `box-shadow`, and the selected row's inset 2 px ink rule
+   (`.runs-row[aria-current]`, earlier) would otherwise replace the stripe: the card keeps the stripe and draws the selection as an ink outline inside it.
+   And the stripe's inset 3 px needs 3 px more leading padding than the row's 12 so the project name clears it. The card contains no other stripe, because
+   `--stripe` is inherited and a nested one would repaint from this card's tone. */
+.runs-card { padding-left: 15px; gap: 6px }
+.runs-card[aria-current='true'] { box-shadow: inset 3px 0 0 var(--stripe, transparent), inset 0 0 0 1px var(--ink) }
+.runs-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0 }
+.runs-card-id { flex: none; font-size: 12px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 1px 6px; overflow-wrap: anywhere }
 /* The crashed Live row's second line — all three readings (`no heartbeat for
    <age>`, `last reported <id> at <stage>` or `all items at rest`, and
    `watchdogClause`'s sentence) in one wrapping amber line, because they travel
@@ -2814,7 +2826,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   gap: 12px 24px; margin: 16px 0;
 }
 .run-fact { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
-.run-fact-label { font-size: 12px; font-weight: 400; color: var(--ink2) }
+.run-fact-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 400; color: var(--ink2) }
+.run-fact-wall { color: var(--ink2); font-weight: 400 }
 .run-fact-value { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums }
 /* The `status` cell's second reading — `heartbeat live`, `paused after <id>`,
    `pausing · finishes <id>`. Quiet ink and a normal weight: it qualifies the
