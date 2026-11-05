@@ -3308,6 +3308,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-status-error { color: var(--red) }
 .prs-repo-inner { display: flex; flex-direction: column; min-width: 0 }
 .prs-repo-sub { display: flex; flex-wrap: wrap; gap: 4px 12px }
+/* A card's head: the tile leads the repo name inside the title, and the `N open` pill (with `sync off`) sits in the head's right slot. */
+.prs-repo-title { display: inline-flex; align-items: center; gap: 12px; min-width: 0; overflow-wrap: anywhere }
+.prs-repo-pills { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px }
 /* The repo's own note under its head — the sync-off sentence. Readable without hover: on a phone there is none. */
 .prs-note { font-size: 13px; color: var(--ink2); line-height: 1.45; margin-bottom: 12px }
 .prs-list { list-style: none; margin: 0; padding: 0 }
@@ -3315,6 +3318,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    top-aligned with the title. The text keeps a 320 px basis, so the keys drop under it whenever the title would get less — the title is never squeezed to
    make room for keys — and always below the narrow breakpoint, left-aligned there. The foot (Confirm, outcome) lives in the text column, never the keys'. */
 .prs-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; padding: 16px 0; min-width: 0 }
+/* Cards' rows are the compact ones: the head already says the repo, so each row needs less air between hairlines. */
+.prs-list .prs-row { padding: 12px 0 }
+.prs-list .prs-row:first-child { padding-top: 12px }
+.prs-list .prs-row:last-child { padding-bottom: 0 }
 .prs-row + .prs-row { border-top: 1px solid var(--hairline) }
 .prs-row:first-child { padding-top: 0 }
 .prs-row:last-child { padding-bottom: 0 }
@@ -3396,7 +3403,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-matrix-table td { padding: 14px 12px 14px 0; border-top: 1px solid var(--hairline); vertical-align: middle }
 .prs-matrix-table tbody tr:first-child td { border-top: 0 }
 .prs-matrix-table th:last-child, .prs-matrix-table td:last-child { padding-right: 0 }
-.prs-matrix-count { color: var(--ink); font-weight: 600 }
 /* Width as padding, not `width`: a table squeezed below its columns' sum shrinks a cell to its min-content, and a `width` is not min-content — padding is.
    Without this the dot sat flush against `#n` on a window just wide enough to offer Matrix. The left 12 px keeps the dot clear of the open row's ink bar. */
 .prs-matrix-table .prs-matrix-dot { width: 10px; padding-left: 12px; padding-right: 12px }
@@ -3408,10 +3414,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-matrix-row { cursor: pointer }
 .prs-matrix-row:hover td { background: var(--strip-hi) }
 .prs-matrix-row:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px }
-/* The open row and its expansion read as one block, as the dashboard's do: one `--strip-hi` ground under both, and an inset ink bar on the left edge — on the
-   expansion it rides the pinned block, so it stays in view while the table is scrolled. */
-.prs-matrix-row[aria-expanded="true"] td, .prs-matrix-expand td { background: var(--strip-hi) }
-.prs-matrix-row[aria-expanded="true"] td:first-child, .prs-matrix-expand .prs-matrix-pinned { box-shadow: inset 3px 0 0 var(--ink) }
+/* The open row keeps a pressed ground (`--strip-hi`) and an inset ink bar on its left edge; its expansion is the panel under the scroll box, which carries the
+   same ground, so the two still read as one block. */
+.prs-matrix-row[aria-expanded="true"] td { background: var(--strip-hi) }
+.prs-matrix-row[aria-expanded="true"] td:first-child { box-shadow: inset 3px 0 0 var(--ink) }
 /* The cap is on a block inside the cell, never on the `<td>` — CSS leaves `max-width` on a table cell undefined and Chrome ignores it. The dot and PR cells
    together take at most 60 % of the box (34 px dot, 12 px of the PR cell's padding), and the 200 px floor yields to that cap, so a 375 px phone keeps about
    120 px of evidence in view; the title wraps inside it rather than ellipsizing. */
@@ -3419,13 +3425,21 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-matrix-pr .prs-row-title { font-size: 14px }
 .prs-matrix-pr .prs-meta { margin-top: 3px; font-size: 12px; color: var(--ink3) }
 .prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
-.prs-matrix-outcome td, .prs-matrix-expand td { border-top: 0; padding-top: 0 }
-/* The expansion and a collapsed row's outcome are one cell across every column; their content is pinned to the box's visible width, so the keys, the
-   Confirm and the outcome never sit off-screen while the table is scrolled. 34 px starts them under the PR's `#n` rather than under the dot. */
+.prs-matrix-outcome td { border-top: 0; padding-top: 0 }
+/* A collapsed row's outcome is one cell across every column; its content is pinned to the box's visible width, so it never sits off-screen while the table is
+   scrolled. 34 px starts it under the PR's `#n` rather than under the dot. */
 .prs-matrix-pinned { position: sticky; left: 0; width: 100cqw; box-sizing: border-box; padding-left: 34px }
-.prs-matrix-expand .prs-matrix-pinned { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding-bottom: 6px }
-.prs-matrix-expand .prs-keys-side { align-items: flex-start }
-.prs-matrix-expand .prs-foot { margin-top: 2px }
+/* The open row's expansion is NOT in the table: the Merge menu is a `Popover`, which portals nothing, and the scroll box's `overflow-x: auto` clips both axes.
+   So the panel is the scroll box's next sibling, and the sheet's ledger wrapper (`overflow-x: auto` of its own) is let overflow, found structurally because a
+   page rule never names a `.ui-*` class (guard 7) — the scroll box scrolls the table, the ledger has nothing left to scroll. `min-width: 0` on the sheet so the
+   box still shrinks inside the flex column. */
+.prs-matrix-sheet { min-width: 0 }
+.prs-matrix-sheet > [role='group'] { overflow: visible }
+.prs-matrix-panel {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 12px 16px; border-radius: 12px; background: var(--strip-hi)
+}
+.prs-matrix-panel .prs-keys-side { align-items: flex-start; flex: none }
+.prs-matrix-panel .prs-foot { margin-top: 0 }
 .prs-matrix-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12px }
 .prs-cell-ok { color: var(--ink2) }
 .prs-cell-bad { color: var(--red) }

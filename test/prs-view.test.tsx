@@ -249,6 +249,24 @@ describe('PullRequestsView — grouping and the rows', () => {
     expect(within(r7).getByText('draft', { selector: '.ui-pill' })).toBeInTheDocument();
   });
 
+  it('heads each card with a tile in its worst checks tone, the repo, an `N open` pill and the age', async () => {
+    payload.repos[0] = repo({ repo: 'futin/x', prs: [PR7, { ...PR9, checks: 'failure' }] });
+    await mount();
+    const head = screen.getByTestId('pr-head-futin/x');
+    expect(head).toHaveTextContent('futin/x');
+    expect(within(head).getByText('2 open')).toHaveClass('ui-pill');
+    expect(head.querySelector('.ui-glyph-tile')).toHaveAttribute('data-tone', 'red');
+    expect(head).toHaveTextContent('polled 12 s ago');
+  });
+
+  it('draws each card row with its checks tile, the pills and the split Merge', async () => {
+    await mount();
+    const r = row('futin/y#12');
+    expect(r.firstElementChild).toHaveClass('ui-glyph-tile');
+    expect(r.querySelector('.prs-chips')).not.toBeNull();
+    expect(within(r).getByRole('button', { name: 'Merge options for #12' })).toBeInTheDocument();
+  });
+
   it("states each repo's own poll age", async () => {
     await mount();
     expect(screen.getByTestId('pr-repo-futin/x')).toHaveTextContent('polled 12 s ago');

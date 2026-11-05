@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useId, useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react';
 
 import { Dot } from '../ui/Dot';
 import { Ledger } from '../ui/Ledger';
@@ -56,11 +56,17 @@ import type { PrWriteResult } from '../../../../shared/types';
  * Enter or Space is the row's only when the row ITSELF holds focus — Enter on the `#n` link must follow the link, not also open the row. Space calls
  * `preventDefault` so the page does not scroll. The row is `tabIndex=0` with `aria-expanded`, the dashboard Git matrix's own keyboard contract.
  *
- * **The open row and its expansion are one block.** The expansion is ONE cell across every column holding the key strip with its why-line, then the foot
- * (the Confirm, then the outcome line), so a write's result lands inside the block that caused it rather than as a white row outside it. A COLLAPSED row's
- * outcome keeps a row of its own beneath it — a collapsed part never hides the result of a write. Both cells' content is pinned to the scroll box's visible
- * width, so `Merge`, `Cancel` and the outcome never sit off-screen while the table is scrolled. Collapsing a row whose Confirm is open — a second click, or
- * another row opening — closes that Confirm: the page owns it (`PrLayoutProps.confirming`), and a Confirm no row draws would still hold the Escape stack.
+ * **The expansion is a panel AFTER the scroll box, not a row in the table.** `Popover` portals nothing and `.prs-matrix-scroll`'s `overflow-x: auto` clips both
+ * axes, so a `Merge menu` opened from a key strip inside the table would be cut off at the box's edge. The open row's strip (`PrActions`, with `blockedText` so a
+ * blocked Merge says why, and `omitUpdatingReason`) and the foot (the Confirm, then the outcome line) therefore render in `.prs-matrix-panel`, the scroll box's
+ * next sibling; the row stays the disclosure (`aria-expanded`, `aria-controls` = the panel's id) and keeps a pressed ground in the table. A write's result still
+ * lands inside the block that caused it. A COLLAPSED row's outcome keeps a row of its own beneath it — a collapsed part never hides the result of a write — and
+ * that one row is pinned to the scroll box's visible width, so the outcome never sits off-screen while the table is scrolled. Collapsing a row whose Confirm is
+ * open — a second click, or another row opening — closes that Confirm: the page owns it (`PrLayoutProps.confirming`), and a Confirm no row draws would still hold
+ * the Escape stack. The panel is not drawn at spec §4.8's "failing check names": the server serves one five-value enum per PR, no names (spec §2, no new data).
+ *
+ * **Colour marks problems only, and as a pill.** A `bad` cell is a red pill and a `meh` cell an amber one; every other tone is plain `--ink2` text (`na` quieter).
+ * A header's count is a pill too, red under Checks and amber elsewhere, absent at zero.
  *
  * **`updating…` once.** In Matrix the Base cell says it, so the `updating` outcome draws no line here, collapsed or open, and the strip leaves it off its
  * why-line (`omitUpdatingReason`); `Update` still carries it as its own reason. The mark's PRESENCE decides, never its clock, so the cell, the key and the
@@ -73,6 +79,41 @@ import type { PrWriteResult } from '../../../../shared/types';
 
 const COLUMN_COUNT = 2 + MATRIX_COLUMNS.length + 1;
 
+/**
+ * The open row's strip and foot, drawn after the scroll box (see the file's doc). `omitUpdatingReason` and the dropped `updating` outcome are the row's: the Base
+ * cell says `updating…`, so neither the why-line nor an outcome line repeats it.
+ */
+function MatrixPanel({ r, props, id }: { r: RankedPr; props: PrLayoutProps; id: string }) {
+  const { pr, repo, key } = r;
+  const updating = props.marks[key] !== undefined;
+  const outcome = props.outcomes[key]?.kind === 'updating' ? undefined : props.outcomes[key];
+  const write = (call: () => Promise<PrWriteResult>) => props.write(key, pr.headSha, call);
+  return (
+    <div className="prs-matrix-panel" id={id} data-testid={`pr-expand-${key}`}>
+      <PrActions
+        repo={repo}
+        pr={pr}
+        updating={updating}
+        outcome={props.outcomes[key]}
+        busy={props.inFlight.has(key)}
+        onMerge={() => props.setConfirming(key)}
+        onWrite={write}
+        omitUpdatingReason
+        blockedText
+      />
+      <PrFoot
+        repo={repo}
+        pr={pr}
+        outcome={outcome}
+        updating={updating}
+        confirming={props.confirming === key}
+        onDismiss={() => props.setConfirming(null)}
+        onWrite={write}
+      />
+    </div>
+  );
+}
+
 /** The tones the legend names, in the order the spec lists them. Colour is for a problem; the words are the legend's. */
 const LEGEND: { tone: CellTone; word: string }[] = [
   { tone: 'ok', word: 'healthy' },
@@ -82,7 +123,28 @@ const LEGEND: { tone: CellTone; word: string }[] = [
   { tone: 'na', word: 'not applicable' }
 ];
 
-function MatrixRow({ r, props, open, onToggle }: { r: RankedPr; props: PrLayoutProps; open: boolean; onToggle: () => void }) {
+/** A cell's word: a problem is a pill (`bad` red, `meh` amber), anything else is quiet text. The tone class stays on the wrapper for the legend's colours. */
+function Cell({ tone, text }: { tone: CellTone; text: string }) {
+  return (
+    <span className={`prs-cell-${tone}`}>
+      {tone === 'bad' || tone === 'meh' ? <Pill tone={tone === 'bad' ? 'bad' : 'warn'}>{text}</Pill> : text}
+    </span>
+  );
+}
+
+function MatrixRow({
+  r,
+  props,
+  open,
+  panelId,
+  onToggle
+}: {
+  r: RankedPr;
+  props: PrLayoutProps;
+  open: boolean;
+  panelId: string;
+  onToggle: () => void;
+}) {
   const { pr, repo, key } = r;
   const updating = props.marks[key] !== undefined;
   const cells = matrixCells(pr, updating);
@@ -90,7 +152,6 @@ function MatrixRow({ r, props, open, onToggle }: { r: RankedPr; props: PrLayoutP
   const age = ageText(pr.updatedAt, props.now);
   // The Base cell says `updating…`; an outcome that only repeats it is not drawn here.
   const outcome = props.outcomes[key]?.kind === 'updating' ? undefined : props.outcomes[key];
-  const write = (call: () => Promise<PrWriteResult>) => props.write(key, pr.headSha, call);
 
   const onClick = (e: MouseEvent<HTMLTableRowElement>) => {
     const control = (e.target as Element).closest('a, button, select, input');
@@ -107,7 +168,15 @@ function MatrixRow({ r, props, open, onToggle }: { r: RankedPr; props: PrLayoutP
 
   return (
     <>
-      <tr className="prs-matrix-row" data-testid={`pr-mrow-${key}`} tabIndex={0} aria-expanded={open} onClick={onClick} onKeyDown={onKeyDown}>
+      <tr
+        className="prs-matrix-row"
+        data-testid={`pr-mrow-${key}`}
+        tabIndex={0}
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        onClick={onClick}
+        onKeyDown={onKeyDown}
+      >
         <td className="prs-matrix-dot prs-matrix-sticky">
           <Dot size={10} tone={LEVEL_DOT[r.level]} />
           <span className="sr-only">{LEVEL_LABEL[r.level]}</span>
@@ -129,7 +198,7 @@ function MatrixRow({ r, props, open, onToggle }: { r: RankedPr; props: PrLayoutP
         </td>
         {MATRIX_COLUMNS.map((column) => (
           <td key={column} className="prs-matrix-cell">
-            <span className={`prs-cell-${cells[column].tone}`}>{cells[column].text}</span>
+            <Cell tone={cells[column].tone} text={cells[column].text} />
           </td>
         ))}
         <td className="prs-matrix-age">{age ?? ''}</td>
@@ -143,33 +212,6 @@ function MatrixRow({ r, props, open, onToggle }: { r: RankedPr; props: PrLayoutP
           </td>
         </tr>
       )}
-      {open && (
-        <tr className="prs-matrix-expand" data-testid={`pr-expand-${key}`}>
-          <td colSpan={COLUMN_COUNT}>
-            <div className="prs-matrix-pinned">
-              <PrActions
-                repo={repo}
-                pr={pr}
-                updating={updating}
-                outcome={props.outcomes[key]}
-                busy={props.inFlight.has(key)}
-                onMerge={() => props.setConfirming(key)}
-                onWrite={write}
-                omitUpdatingReason
-              />
-              <PrFoot
-                repo={repo}
-                pr={pr}
-                outcome={outcome}
-                updating={updating}
-                confirming={props.confirming === key}
-                onDismiss={() => props.setConfirming(null)}
-                onWrite={write}
-              />
-            </div>
-          </td>
-        </tr>
-      )}
     </>
   );
 }
@@ -177,10 +219,12 @@ function MatrixRow({ r, props, open, onToggle }: { r: RankedPr; props: PrLayoutP
 export function PrMatrix(props: PrLayoutProps) {
   const { repos, outcomes } = props;
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const panelId = `${useId()}-expand`;
   const ranked = useMemo(() => rankPrs(repos), [repos]);
   const failures = transientFailures(repos);
   const counts = useMemo(() => columnCounts(ranked), [ranked]);
   const { confirming, setConfirming } = props;
+  const openRow = ranked.find((r) => r.key === openKey);
   // Opening another row, or closing this one, unmounts the expansion; a Confirm open in it goes with it.
   const toggle = (key: string) => {
     if (openKey !== null && confirming === openKey) setConfirming(null);
@@ -194,7 +238,7 @@ export function PrMatrix(props: PrLayoutProps) {
         failures.length === 0 && <p className="prs-status">no open pull requests</p>
       ) : (
         <>
-          <Sheet>
+          <Sheet className="prs-matrix-sheet">
             <Ledger label="Pull requests">
               <div className="prs-matrix-scroll">
                 <table className="prs-matrix-table">
@@ -212,7 +256,7 @@ export function PrMatrix(props: PrLayoutProps) {
                           {counts[column] > 0 && (
                             <>
                               {' '}
-                              <span className="prs-matrix-count">{counts[column]}</span>
+                              <Pill tone={column === 'checks' ? 'bad' : 'warn'}>{counts[column]}</Pill>
                             </>
                           )}
                         </th>
@@ -222,11 +266,12 @@ export function PrMatrix(props: PrLayoutProps) {
                   </thead>
                   <tbody>
                     {ranked.map((r) => (
-                      <MatrixRow key={r.key} r={r} props={props} open={openKey === r.key} onToggle={() => toggle(r.key)} />
+                      <MatrixRow key={r.key} r={r} props={props} open={openKey === r.key} panelId={panelId} onToggle={() => toggle(r.key)} />
                     ))}
                   </tbody>
                 </table>
               </div>
+              {openRow !== undefined && <MatrixPanel r={openRow} props={props} id={panelId} />}
             </Ledger>
           </Sheet>
           <p className="prs-matrix-legend" data-testid="pr-matrix-legend">

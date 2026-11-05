@@ -510,8 +510,11 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   repos (`rankPrs`: level, severity, newest) under a `Segmented` labelled `Triage` (a counted option per level, no `all`; the pressed one clears the filter), every row one `prs-row` — a 32 px
   checks `GlyphTile` (`checksTone`, `checksGlyph`), the `#n` and title, the pill row (`prPills`), then `author · head → base · age` with the run warning as a warn
   pill. **Matrix** is a table, a column per check with a failure count in
-  its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; its row toggles one expansion, pinned to the box's visible width, holding
-  the key strip and the foot. **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`); a repo read cleanly with none is counted in the
+  its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; a problem cell and a header count are pills (red for `bad` and Checks,
+  amber otherwise; a healthy cell is plain text); its row toggles one expansion, a panel that is the scroll box's next sibling (`aria-controls`; a `Popover`
+  portals nothing and the box's overflow would clip the Merge menu), holding the key strip with a blocked Merge's reason in words, then the foot.
+  **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`), its head a `GlyphTile` in the worst row's checks tone, the repo and an
+  `N open` pill, its rows the same `PrRow` Inbox draws (without the repo name); a repo read cleanly with none is counted in the
   toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — the split Merge (main half from `mergeMain`: `Merge`, `Auto-merge` or `Auto-merge on`; its chevron opens `Merge menu`: Merge, Enable/Disable auto-merge, Update branch, the row `primaryKey` names ticked) and an icon link `Open #n on GitHub` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
   the method `Select` inside it, then `PrOutcomeLine`. A blocked main half (dashed, reading `Blocked`) or menu row is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
   off` on each for a sync-off repo) as its `title` (the half) and its `aria-describedby` (both; a row's sub-line is the reason); the split is `disabled` outright only while its PR's write runs, because the page
