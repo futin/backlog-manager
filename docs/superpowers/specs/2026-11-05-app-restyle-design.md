@@ -231,14 +231,14 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
 
 ## 5. Server additions
 
-- **Sync now.** Both routes sit behind `SameOriginPostGuard`, as every POST here does. `POST /api/jira/sweep` (optional `{ boardId }`) and `POST /api/github/sweep` (optional `{ repo }`) — named `sweep`, not `sync`, because
+- **Sync now.** Both routes sit behind `SameOriginPostGuard`, as every POST here does. `POST /api/jira/sweep` (site-wide, no body — shipped without the optional `{ boardId } ` below; the per-board `now` stays #472's `POST /api/jira/boards/sweep`, see `docs/subsystems/jira.md`) and `POST /api/github/sweep` (optional `{ repo }`) — named `sweep`, not `sync`, because
   `POST /api/trackers/sync` already exists and writes a repo's sync interval — ask the already-armed poller for one
   sweep now and return when it has finished, with the new cache ages. A poller that is not armed answers 409 and the button is disabled with that reason; a
   second call while a sweep runs joins it rather than starting another (a joined sweep may have started before the click, which is accepted); calls closer than the poller's own interval floor (the builder sets it, at least
   5 s) return the last result without calling out. Both are reads of the outside service, so they respect the existing budget and 429 handling. A repo
   whose sync is `off` is skipped (it refuses every write path and is not polled; the row's sync icon is disabled). The GitHub sweep also re-reads the PR
-  cache for the swept repos once, past its TTL, through the same one-in-flight-read-per-repo path. Failures: an unknown `boardId` is a 404 `unknown board`
-  and an unknown `repo` a 404 with the existing text `<repo> is not the repo of a registered GitHub project` (`pulls.service.ts`); a malformed body is a
+  cache for the swept repos once, past its TTL, through the same one-in-flight-read-per-repo path. Failures: (no `boardId` 404 — see the deviation above)
+  an unknown `repo` a 404 with the existing text `<repo> is not the repo of a registered GitHub project` (`pulls.service.ts`); a malformed body is a
   400. Jira: inside a stored 429 window the sweep makes no call and answers 429 with the stored `retryAt` (the existing up-front refusal); Sync now shows
   `Jira asked to wait until <time>`. GitHub has no `retryAt`: its sleeps are per repo, in two pools (`sleepUntil`, `secondaryUntil`). With `repo` and that
   repo asleep, the answer is 429 carrying the later of the two ends and no call is made (Sync now shows `GitHub asked to wait until <time>`); without `repo`,
@@ -290,7 +290,7 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
   the guard in `test/run-pulse.test.ts` still lists the same callers (or moves with a stated reason).
 - **Status pill**: green, amber and red by sweep age and connection; the popover's `Sync now` posts once, disables while running, and shows the new age.
 - **Sweep routes** (jest, server): an `off` repo is skipped; 409 when the poller is not armed; a concurrent second call joins the first sweep (one outbound call); a call inside the
-  floor returns the cached result without calling out; an unknown `boardId` or `repo` is a 404, a malformed body a 400; Jira inside a 429 window answers 429 with the
+  floor returns the cached result without calling out; an unknown `repo` is a 404, a malformed body a 400 (the Jira route reads no body, so no `boardId` case); Jira inside a 429 window answers 429 with the
   stored `retryAt` and makes no call; GitHub with an asleep `repo` answers 429 with the later of `sleepUntil` / `secondaryUntil`, and without `repo` skips
   asleep repos with a 200; a 401 answers 200 with the cache unchanged; a cross-origin POST is refused by the guard.
 - **Settings**: `test/settings-view.test.tsx`'s "no in-page switch" assertions (and the comment that states that rule) invert to the

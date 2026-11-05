@@ -301,7 +301,7 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. The board draws the fold's tops only, each column sorted by
   `sortTops` and counting cards, and a filter that matches only a folded issue still shows its top, ringed. A card click lands in `JiraView`'s open-issue
   slot with the fold's `childrenOf` beside the issue. The band's `Board | List` switch (`JiraViewSwitch`, `hooks/useJiraView.ts`) picks the deck over the shelves or
-  `JiraIssueList`: one row per top, never a folded issue, in `sortTops`' order and uncut, with the deck's own session roll-up (`topSessionState`, `issueCellWord`
+  `JiraIssueList`: one row per top, never a folded issue, in `sortTops`' order and uncut, with the deck's own session roll-up (`topSessionCell`, `issueCellWord`
   in `lib/jira-deck.ts`) and `rolledUpdated` (`lib/jira.ts`) for the Updated cell; a row opens Detail through `rowOpens` (`lib/jira-list.ts`).
 - **Jira › Sessions** (`components/jira/JiraSessionsView.tsx`, `JiraBandSub.tsx`). The session table, `JiraSessionList`, on a page of its own: the shared board pick and
   load (`usePickedJiraBoard`), its own `Search sessions` text, no FilterBar and no view switch. The table's bar is drawn in every state and `All tickets` on is scoped
@@ -555,9 +555,9 @@ section (eight dialogs). The browser still never talks to Jira or the dashboard:
   still the shell's reservation source and still what the Run chip gates on; it no longer draws a strip on a card, so a `live` entry with no payload link yet
   (before the first sessions answer) leaves its top on the shelf with no deck card until that answer lands. The deck, like Detail, clears on the next read of
   the sessions provider.
-- **The modal's session.** A `session` fact (`<name> · <repo> · <elapsed>`, `starting`, or `—`) and `Stop session`, a 28 px chip replaced in place by
-  `ui/Confirm`, drawn only while agents are enabled AND the key has a confirmed, non-`starting` entry (`StopSession` is mounted for that case alone, so
-  `useAgents()` is read only then). It posts `stopJira(key, sessionId)` (`POST /api/agents/jira-stop`, naming the session the entry holds) through the same
+- **The modal's session.** A `session` fact (`<name> · <repo> · <elapsed>`, `starting`, or `—`) and `Stop session`, a row of `SessionOpen`'s `Session actions` menu whose
+  `Stop session` is replaced in place by `ui/Confirm` (focus returns to the split's chevron once it is answered), offered only while agents are enabled AND the
+  key has a confirmed, non-`starting` entry — the `stoppable && agentsOn` gate `JiraSessionCard` applies before it passes `onStop`. It posts `stopJira(key, sessionId)` (`POST /api/agents/jira-stop`, naming the session the entry holds) through the same
   `useAction` as the two writes, so one guard and one
   error line serve all three; a landed stop reloads the status and nudges the board.
 - **Skills and the default action.** `JiraSkillsGroup` (Jira › Setup, under Connection) lists the two locked built-ins and one row per stored skill, with an

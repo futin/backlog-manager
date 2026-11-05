@@ -4828,7 +4828,7 @@ heard.
 ## ui-kit draws the version chip and the What's new drawer; this board only maps its tokens and places the chip
 
 The version chip and the What's new drawer used to be two things in this repo: ui-kit's markup, and a block of this board's own rules laid over it — a pill drawn by
-`.rail-release`, a drawer width, an edge, a lift, a notes size and a baseline rule restyled under `.uk-*` selectors. Each override was a small, reasoned departure
+`.rail-release` (now `.rail-foot`, the placement wrapper), a drawer width, an edge, a lift, a notes size and a baseline rule restyled under `.uk-*` selectors. Each override was a small, reasoned departure
 from the kit's defaults, and together they made this board's drawer differ from the other two apps' — the opposite of why the surface moved into a shared package.
 ui-kit v0.3.0 took this board's look as its canonical one and moved every shape into the kit, which leaves the host exactly two jobs: map the public `--uk-*`
 tokens onto the board's own, and place the chip.
