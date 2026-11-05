@@ -10,13 +10,12 @@ import { JiraSessionsProvider } from '../client/src/hooks/JiraSessionsContext';
 import { JiraProvider } from '../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
-import { setJiraView } from '../client/src/hooks/useJiraView';
 import { resetJiraListFilters, setJiraListFilters } from '../client/src/hooks/useJiraListFilters';
 import { daysAgoStamp } from './helpers/dates';
 import type { JiraBoardStatus, JiraEndReason, JiraIssue, JiraLiveSession, JiraStatusPayload } from '../shared/types';
 
 /*
-  Jira › List (Jira sessions, Task 12; spec §7.2, C7; DESIGN.md §8.9.1) — the real page over a mocked `fetch`, rendered through `JiraView` because it hosts the
+  Jira › Sessions (Jira sessions, Task 12, moved here from the Board's List by the Sessions-page spec; spec §7.2, C7; DESIGN.md §8.9.1) — the real page over a mocked `fetch`, rendered through `JiraView` because it hosts the
   section's one sessions provider the List reads. Sessions are links handed to the sessions answer, each with a state of its own; a Starting row is NOT a link
   but a status `live` reservation, as the server hands it out. Every instant is relative to the clock the assertion runs under (`test/helpers/dates.ts`).
 */
@@ -158,8 +157,7 @@ beforeEach(() => {
 });
 
 async function renderList(): Promise<void> {
-  setJiraPage('board');
-  setJiraView('list');
+  setJiraPage('sessions');
   render(
     <SettingsProvider>
       <JiraProvider>
@@ -196,7 +194,7 @@ function standardLinks(): void {
   ];
 }
 
-describe('the List view', () => {
+describe('the Sessions page', () => {
   it('groups Live above Ended and sorts each: Live by state then newest start, Ended by newest end', async () => {
     standardLinks();
     await renderList();
@@ -401,5 +399,95 @@ describe('the List view', () => {
     await renderList();
     await waitFor(() => expect(rowTags().length).toBeGreaterThan(0));
     expect(screen.queryByRole('status', { name: 'Link store' })).toBeNull();
+  });
+
+  // Mock SessionsB.dc.html: the page's own band, not the Board page's.
+  it('draws its own band: title Sessions, the board picker, Search sessions, and no Board | List switch and no Filters button', async () => {
+    await renderList();
+    expect(screen.getByRole('heading', { name: 'Sessions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Pick a Jira board/ })).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search sessions' })).toHaveAttribute('placeholder', 'search key, summary, repo, branch');
+    expect(screen.queryByRole('group', { name: 'View' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Filters/ })).toBeNull();
+  });
+
+  it('with All tickets off and no boards, draws the bar and `No boards yet` with an Open Setup chip — and All tickets on draws the off-board rows', async () => {
+    statusAnswer = status({ boards: [] });
+    links = [link({ key: 'OFFBOARD-9', id: 'o1', state: 'working', startedAt: hoursAgo(1), summary: 'Off board thing' })];
+    await renderList();
+    expect(screen.getByRole('group', { name: 'Show' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'All tickets' })).toBeInTheDocument();
+    expect(screen.getByText(/No boards yet/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Setup' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'All tickets' }));
+    expect(await screen.findByRole('row', { name: 'Session on OFFBOARD-9' })).toBeInTheDocument();
+  });
+
+  it('with All tickets on, the table draws while the board list fails', async () => {
+    links = [
+      link({ key: 'PAY-131', id: 'on1', state: 'working', startedAt: hoursAgo(2) }),
+      link({ key: 'ZZ-9', id: 'off1', state: 'working', startedAt: hoursAgo(1) })
+    ];
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL) =>
+      /^\/api\/jira\/boards\/[^/]+\/issues$/.test(String(input)) ? Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}), text: () => Promise.resolve('') } as Response) : base(input)
+    ) as unknown as typeof fetch;
+    setJiraListFilters({ allTickets: true });
+    await renderList();
+    await waitFor(() => expect(rowTags()).toEqual(['ZZ-9:working', 'PAY-131:working']));
+    expect(screen.queryByText('board unavailable')).toBeNull();
+  });
+
+  it('with All tickets off and the board list failing, the body reads `board unavailable` under the bar', async () => {
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL) =>
+      /^\/api\/jira\/boards\/[^/]+\/issues$/.test(String(input)) ? Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}), text: () => Promise.resolve('') } as Response) : base(input)
+    ) as unknown as typeof fetch;
+    await renderList();
+    expect(await screen.findByText('board unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Show' })).toBeInTheDocument();
+    expect(document.querySelector('table')).toBeNull();
+  });
+
+  it("picking a board on the Sessions page is the Board page's pick", async () => {
+    await renderList();
+    await userEvent.click(screen.getByRole('button', { name: /^Pick a Jira board/ }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Boards' })).getByRole('button', { name: 'Beta board' }));
+    expect(JSON.parse(localStorage.getItem('backlog-manager.jira-board') ?? 'null')).toBe(BETA.id);
+    act(() => setJiraPage('board'));
+    expect(await screen.findByRole('heading', { name: 'Beta board' })).toBeInTheDocument();
+  });
+
+  it('a row click opens Detail on the Sessions page, and a landed write re-reads the board list', async () => {
+    links = [link({ key: 'PAY-131', id: 'w1', state: 'working', startedAt: hoursAgo(1) })];
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === '/api/jira/issue/assign' ? ok({ ok: true }) : base(input, init)
+    ) as unknown as typeof fetch;
+    const reads = (): number => (global.fetch as jest.Mock).mock.calls.filter((c) => String(c[0]) === `/api/jira/boards/${ALPHA.id}/issues`).length;
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBe(1));
+    await userEvent.click(within(screen.getByRole('row', { name: 'Session on PAY-131' })).getByRole('button', { name: 'Refund partial captures' }));
+    const dialog = await screen.findByRole('dialog', { name: /^PAY-131 / });
+    const before = reads();
+    await userEvent.click(await within(dialog).findByRole('button', { name: 'Assign to me' }));
+    await waitFor(() => expect(reads()).toBe(before + 1));
+  });
+
+  it("search is per page: text typed on Sessions is not in the Board page's search after a switch", async () => {
+    await renderList();
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search sessions' }), 'refund');
+    act(() => setJiraPage('board'));
+    expect(await screen.findByRole('searchbox', { name: 'Search issues' })).toHaveValue('');
+  });
+
+  it("a Sessions row's `Run ▾` › a pick opens the launch sheet", async () => {
+    links = [link({ key: 'PAY-131', id: 'e1', state: 'ended', startedAt: daysAgo(2), endedAt: daysAgo(1) })];
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Run PAY-131' }));
+    await userEvent.click(await within(await screen.findByRole('dialog', { name: 'Run menu' })).findByRole('button', { name: /Work it end to end/ }));
+    expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /^PAY-131 / })).toBeNull();
   });
 });

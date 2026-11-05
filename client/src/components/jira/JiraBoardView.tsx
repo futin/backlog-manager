@@ -28,7 +28,6 @@ import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
 import { JiraAgentDeck } from './JiraAgentDeck';
 import { JiraBoardPicker } from './JiraBoardPicker';
-import { JiraSessionList } from './JiraSessionList';
 import { JiraShelves } from './JiraShelves';
 import { JiraViewSwitch } from './JiraViewSwitch';
 
@@ -83,10 +82,9 @@ const NO_TREES: readonly JiraWorktree[] = [];
  * switch sits before the picker. `Run ▾` is the card's and `onRun` passes straight through; this page hosts NO sheet. `JiraView` does, one for the whole
  * section, because the sheet has to mount above an open modal as well and the modal is not this page's child.
  *
- * **The List is the same page's other view** (Jira sessions spec §7.2, C7; DESIGN.md §8.9.1): `JiraSessionList` replaces the deck and the shelves, fed the
- * loaded `issues`, the band's search text and the fold's `childrenOf`, and the search box re-aims at sessions (key, summary, repo, branch). `FilterBar` is
- * drawn only on the Board — its type, assignee and sprint describe an issue, and the List's own chips, selects and All tickets live in the List. The band's sub
- * stays the board's (`bandSub`), unchanged in either view, because it says where the data came from and the List's scope can be wider than the board.
+ * **The List is the same page's other view** (Sessions-page spec): it replaces the deck and the shelves with an issue table. The session table it used to
+ * hold is Jira › Sessions' (`JiraSessionsView`). `FilterBar` and the issue search are drawn in both views — type, assignee and sprint describe an issue, and the
+ * List's rows are issues now. The band's sub stays the board's (`bandSub`) in either view.
  *
  * **Worktree chips** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1). The page reads `GET /api/jira/worktrees` ONCE on mount and again only when the SET of
  * live keys changes — a Start or a Stop landing — compared as a sorted, joined key list, so a status reload that hands back a
@@ -173,16 +171,15 @@ export function JiraBoardView({
         <input
           type="search"
           className="board-band-search"
-          aria-label={view === 'list' ? 'Search sessions' : 'Search issues'}
-          placeholder={view === 'list' ? 'search key, summary, repo, branch' : 'search summaries'}
+          aria-label="Search issues"
+          placeholder="search summaries"
           value={filters.search}
           onChange={(e) => set('search', e.target.value)}
         />
-        {/* The board's filters (type, assignee, sprint) read issues and the List's rows are sessions, so the List has no track: its own bar sits under
-            the band. Within the Board view it is one element in one place on every render, for the reason BoardView gives at length: `FilterBar` keeps
-            which panel is open in its own state and a pick does not close it, so a remount on a pick would shut the panel under the reader's pointer. */}
-        {view === 'board' && (
-          <FilterBar count={boardFilterCount(applied)} onClear={() => setFilters((f) => ({ ...NO_JIRA_FILTERS, search: f.search }))}>
+        {/* One element in one place on every render, for the reason BoardView gives at length: `FilterBar` keeps which panel is open in its own state
+            and a pick does not close it, so a remount on a pick — or on a Board | List switch — would shut the panel under the reader's pointer. Drawn in
+            both views since the List became an issue table: its type, assignee and sprint describe issues, as the Board's do. */}
+        <FilterBar count={boardFilterCount(applied)} onClear={() => setFilters((f) => ({ ...NO_JIRA_FILTERS, search: f.search }))}>
             <Picks title="Type" all="All types" values={options.types} value={applied.type} onPick={(v) => set('type', v ?? undefined)} />
             <FilterSection title="Assignee">
               <div className="filter-bar-picks" role="group" aria-label="Assignee">
@@ -203,14 +200,11 @@ export function JiraBoardView({
               none={options.noSprint ? 'no sprint' : undefined}
               onPick={(v) => set('sprint', v)}
             />
-          </FilterBar>
-        )}
+        </FilterBar>
       </Band>
 
       {loaded ? (
-        view === 'list' ? (
-          <JiraSessionList issues={list.issues} search={filters.search} now={now} childrenOf={fold.childrenOf} onOpenIssue={onOpenIssue} onRun={onRun} />
-        ) : (
+        view === 'list' ? null /* Task 4 draws the issue table here; the session table is Jira › Sessions'. */ : (
           <>
             <JiraAgentDeck entries={deck} now={now} onOpenIssue={(issue) => onOpenIssue(issue, fold.childrenOf)} />
             <JiraShelves

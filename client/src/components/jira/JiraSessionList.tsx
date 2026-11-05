@@ -35,7 +35,7 @@ const NO_LIVE: Readonly<Record<string, JiraLiveSession>> = {};
 const CHIP_LABEL: Record<ListChip, string> = { all: 'All', 'needs-you': 'Needs you', working: 'Working', ended: 'Ended' };
 
 /**
- * JiraSessionList — the Board page's List view: one row per session, live above ended (Jira sessions spec §7.2, C7; DESIGN.md §8.9.1). It is the same sessions
+ * JiraSessionList — the Sessions page's table (it was the Board page's List view until the Sessions-page spec): one row per session, live above ended (Jira sessions spec §7.2, C7; DESIGN.md §8.9.1). It is the same sessions
  * the deck draws, as a table a person can scan, filter and search — and the only place a session on a ticket off the board, or one that has ended, is a row.
  *
  * **It draws what `lib/jira-list.ts` derived** — which sessions are in scope, which ended rows the window hides, the counts and both orders — and holds no
@@ -65,7 +65,8 @@ export function JiraSessionList({
   now,
   childrenOf,
   onOpenIssue,
-  onRun
+  onRun,
+  unavailable
 }: {
   /** The picked board's loaded list — every issue, folded or not. */
   issues: readonly JiraIssue[];
@@ -74,6 +75,12 @@ export function JiraSessionList({
   childrenOf: JiraChildrenIndex;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
+  /**
+   * What the board cannot give (`jira.json` unreadable, no board, still loading, load failed), or `null`. The bar and the link-store warning draw whatever
+   * this is, so `All tickets` stays reachable; the body under them gives way to this line while `All tickets` is off — with it on, the table is scoped to
+   * every linked ticket and needs no board (spec C8), so the prop is ignored.
+   */
+  unavailable: ReactNode | null;
 }) {
   const { data } = useJiraContext();
   const { data: payload } = useJiraSessionsContext();
@@ -135,7 +142,9 @@ export function JiraSessionList({
         </p>
       )}
 
-      {total === 0 ? (
+      {unavailable !== null && !filters.allTickets ? (
+        <div className="board-empty">{unavailable}</div>
+      ) : total === 0 ? (
         <div className="board-empty">No sessions{filters.chip === 'all' && search.trim() === '' ? '' : ' match'}</div>
       ) : (
         <div className="jira-list-scroll">
@@ -194,11 +203,13 @@ export function JiraSessionList({
           {handover.error}
         </p>
       )}
-      <p className="jira-list-foot">
-        {total} {total === 1 ? 'session' : 'sessions'}
-        {filters.window !== 'all' && ` · ended sessions older than ${LIST_WINDOWS.find((w) => w.value === filters.window)?.label ?? ''} are hidden`}
-        {!filters.allTickets && ' · this board only'}
-      </p>
+      {(unavailable === null || filters.allTickets) && (
+        <p className="jira-list-foot">
+          {total} {total === 1 ? 'session' : 'sessions'}
+          {filters.window !== 'all' && ` · ended sessions older than ${LIST_WINDOWS.find((w) => w.value === filters.window)?.label ?? ''} are hidden`}
+          {!filters.allTickets && ' · this board only'}
+        </p>
+      )}
     </section>
   );
 }

@@ -1165,8 +1165,19 @@ describe('the agent deck and the status shelves', () => {
     expect(list).toBeEnabled();
     await userEvent.click(list);
     expect(within(group).getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('region', { name: 'Sessions' })).toBeInTheDocument();
+    // The session table lives on Jira › Sessions now; Task 4 fills List with the issue table.
+    expect(screen.queryByRole('region', { name: 'Sessions' })).toBeNull();
     // Back to the Board for the cases that follow (the view is a module store that outlives a test).
+    await userEvent.click(within(group).getByRole('button', { name: 'Board' }));
+  });
+
+  it('the FilterBar is drawn in List too, and the search reads `Search issues` in both views', async () => {
+    await renderDeck('Refund partial captures');
+    const group = screen.getByRole('group', { name: 'View' });
+    expect(screen.getByRole('button', { name: /^Filters/ })).toBeInTheDocument();
+    await userEvent.click(within(group).getByRole('button', { name: 'List' }));
+    expect(screen.getByRole('button', { name: /^Filters/ })).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search issues' })).toHaveAttribute('placeholder', 'search summaries');
     await userEvent.click(within(group).getByRole('button', { name: 'Board' }));
   });
 
