@@ -341,6 +341,7 @@ describe('guard 7 — one home per primitive', () => {
     '.ui-number',
     '.ui-switch',
     '.ui-run-on',
+    '.ui-split',
     '.chev'
   ];
 
