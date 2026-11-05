@@ -489,6 +489,8 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
     expect(widths).toHaveLength(9);
     expect(min).toBeLessThanOrEqual(1150);
     // Ticket is the auto column: it must keep room for a key and a summary at the table's own minimum.
-    expect(min - widths.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(200);
+    expect(min - widths.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(210);
+    // State (column 2) must hold `Waiting for plan approval` whole, or wrap it: never hard-clip.
+    expect(widths[0]).toBeGreaterThanOrEqual(190);
   });
 });

@@ -1523,7 +1523,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-list { display: flex; flex-direction: column; gap: 12px }
 .jira-list-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px }
 /* Overflow is a container query, as the issue List's (`.jira-issues-frame`, below): a scroll box (`overflow-x: auto`) makes overflow-y auto too and clips the
-   `Session actions` menu and the Run menu, which hang below their cell. The table's fixed columns are 902 px and its `min-width` is 1120, so at 1440 px with the
+   `Session actions` menu and the Run menu, which hang below their cell. The table's fixed columns are 908 px and its `min-width` is 1120, so at 1440 px with the
    rail open (1150 px inside the box border) nothing scrolls; below 1122 px of frame the box scrolls sideways and the page never does. The frame holds nothing but
    the box, because `container-type` also becomes the containing block of `position: fixed` descendants (the phone shape of a menu panel). */
 .jira-list-frame { container-type: inline-size }
@@ -1532,17 +1532,17 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   .jira-list-scroll { overflow-x: auto }
 }
 /* `table-layout: fixed` with every column but Ticket given its width in the head: under `auto`, each column sized to its widest cell and the table came to
-   1544 px in a 1150 px well. Ticket is the one auto column and takes what the px columns leave (~218 px at 1120, ~248 at 1150): the key over a one-line summary
+   1544 px in a 1150 px well. Ticket is the one auto column and takes what the px columns leave (~212 px at 1120, ~242 at 1150): the key over a one-line summary
    that ellipsises. Do not mix px and % or `calc()` here: a fixed-layout table reads those as `auto`. */
 .jira-list-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
-.jira-list-table thead th:nth-child(2) { width: 150px }
-.jira-list-table thead th:nth-child(3) { width: 96px }
-.jira-list-table thead th:nth-child(4) { width: 112px }
-.jira-list-table thead th:nth-child(5) { width: 76px }
-.jira-list-table thead th:nth-child(6) { width: 76px }
-.jira-list-table thead th:nth-child(7) { width: 92px }
+.jira-list-table thead th:nth-child(2) { width: 200px }
+.jira-list-table thead th:nth-child(3) { width: 88px }
+.jira-list-table thead th:nth-child(4) { width: 104px }
+.jira-list-table thead th:nth-child(5) { width: 68px }
+.jira-list-table thead th:nth-child(6) { width: 68px }
+.jira-list-table thead th:nth-child(7) { width: 84px }
 .jira-list-table thead th:nth-child(8) { width: 120px }
-.jira-list-table thead th:nth-child(9) { width: 56px }
+.jira-list-table thead th:nth-child(9) { width: 52px }
 .jira-list-table thead th:nth-child(10) { width: 124px }
 .jira-list-table thead th {
   padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
@@ -1559,6 +1559,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-list-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }
 .jira-list-flex { display: flex; align-items: center; gap: 8px; min-width: 0 }
 .jira-list-state { font-weight: 500 }
+/* State is 200 px so `Waiting for plan approval` (~160 px beside the dot) shows whole; the word still ellipsises as a last resort rather than hard-clipping,
+   and the full text is the cell's title. */
+.jira-list-state .jira-list-flex > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis }
 .jira-list-mark { font-size: 12px; font-weight: 400; color: var(--ink3) }
 /* Ticket: the key over the summary, one line each. */
 .jira-list-key { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis }

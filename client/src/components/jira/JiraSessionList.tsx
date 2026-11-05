@@ -359,7 +359,7 @@ function ListRowView({
           </>
         )}
       </td>
-      <td>
+      <td title={age === null ? startedLabel(row.startedAt, now, zone) : `${startedLabel(row.startedAt, now, zone)} · ${age}`}>
         {startedLabel(row.startedAt, now, zone)}
         {age !== null && <span className="jira-list-mark"> · {age}</span>}
       </td>
