@@ -53,20 +53,20 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   Watchdog, Tick and Time zone in its right. One `RailTree` renders every tree — Files, GitHub, Jira, Runs and Settings, five call sites; `SECTIONS`/`Section`
   live in `client/src/lib/sections.ts` because the rail reading `useSettings` closed a cycle with `lib/settings.ts`. Why:
   [invariants.md](docs/subsystems/invariants.md#settings-is-three-pages-the-page-is-the-scope)
-- **The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
+- **The Jira section's three pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
   `GET /api/jira` says configured.** `jira` sits in `SECTIONS` (`lib/sections.ts`) between `github` and `runs` UNCONDITIONALLY — `resolveLegacySection`
   (`lib/source-page.ts`) runs in a `useState` initializer, before the status exists — and the conditional half is the shell's alone. `SideRail`'s `drawn` skips
   the row unless the shell's one `useJira` (`JiraProvider`) says `configured: true`, or the status is unknown (`data` null) while `jira` is the section on
   screen. `App`'s hold-and-fall effect moves a `jira` section on `configured === false` and on nothing else — through `change` to `firstDrawn`
   (`lib/sources.ts`) of the projects answer, or, unwritten, to the provisional `FALLBACK_SECTION` while that answer is unknown, for the settle to correct;
   unknown holds,
-  drawn in `JiraView`'s `loading…` or `Jira unavailable` shape. The page is `JIRA_PAGES` (`board | setup`), `JIRA_PAGE_KEY` and `isJiraPage` in
+  drawn in `JiraView`'s `loading…` or `Jira unavailable` shape. The page is `JIRA_PAGES` (`board | sessions | setup`), `JIRA_PAGE_KEY` and `isJiraPage` in
   `lib/jira-page.ts`, held by `hooks/useJiraPage.ts` — `useRunsMode`'s module store, because the rail's `RailTree` and the in-page links are two mounted
-  writers. The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
+  writers. The Board and Sessions pages share one board pick and load (`hooks/usePickedJiraBoard.ts`, `JiraBoardPicker`). The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board or Sessions page) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
   `change('jira')` and handed down through `JiraView`; the Sources card's `Jira › Setup ↗` link is the same pair, threaded `App` → `SettingsView` → `SharedPage`
   → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a switch of its own. Settings' `Opens on` offers `Jira` only while
   configured (`landingOptions`), keeping a stored `jira` pin's option; a `landing: 'jira'` takes the same fall. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
+  [invariants.md](docs/subsystems/invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
 - **A source row (Files, GitHub) is drawn only while a registered project has that source, and its pages are switched by the rail's tree or a link threaded down
   from it.** `files` and `github` sit in `SECTIONS` UNCONDITIONALLY and whether a row draws is the projects answer's: `ProjectsProvider`
   (`hooks/ProjectsContext.tsx`) is the shell's one read of `GET /api/projects`, through `useRefreshing` with no `armed` (mount + focus), keeping the last answer

@@ -32,7 +32,7 @@ answered; the conditional half is the shell's. The rail's `drawn` skips the Jira
 still unknown while `jira` is the section on screen; `App` falls a `jira` section to the first drawn source row (`firstDrawn`, Runs when there is none) on
 `configured: false` and holds it on anything else, drawn in `JiraView`'s `loading…` or `Jira unavailable` line; and Settings' `Opens on` offers `Jira` only
 while configured. Why each half is the way it is:
-[invariants.md](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
+[invariants.md](invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 
 `files` and `github` are members of the list unconditionally for the same reason, and their conditional half is the projects answer's. `ProjectsProvider`
 (`client/src/hooks/ProjectsContext.tsx`) is the shell's one read of `GET /api/projects` — through `useRefreshing`, mount and focus, no poll — keeping its last
@@ -70,7 +70,7 @@ selected, and the Settings watchdog card's `Live view` link opens Watchdog — a
 `lib/runs-mode.ts` stays the one home of the key, the member list and the guard. Settings' scope is a field on the settings object instead, because both of its
 readers already sit inside `SettingsProvider` and nothing outside Settings writes it. Jira's page takes Runs' road for Runs' reason: `useJiraPage`
 (`client/src/hooks/useJiraPage.ts`) is a module store over `lib/jira-page.ts`'s `JIRA_PAGES`, key and guard, because the tree is not its only writer either —
-Setup's `Open board` and the empty board's `Open Setup` land on a page too, through `onOpenJiraPage`, the tree's own pair (`setJiraPage`, then the shell's
+Setup's `Open board` and the empty board's (or Sessions page's) `Open Setup` land on a page too, through `onOpenJiraPage`, the tree's own pair (`setJiraPage`, then the shell's
 `change`) built once in `App` and handed down, as the Settings watchdog card's `Live view` is `onOpenWatchdog`. The source rows' pages take the same road:
 `useFilesPage` and `useGithubPage` (`client/src/hooks/useSourcePage.ts`) are module stores over `lib/source-page.ts`'s `FILES_PAGES`/`GITHUB_PAGES`, keys and
 guards, written by the tree, by the shell's legacy-landing initializer and — GitHub's — by the Sources card's `GitHub › Settings ↗`, which is
@@ -86,8 +86,8 @@ sessions answer — `JiraSessionsProvider` (`hooks/JiraSessionsContext.tsx`), ho
 `open=1` — and counts `needsYouCount` (`lib/jira-list.ts`): plan, permission, reply and answer across EVERY linked ticket, not the picked board's, each
 session once, by `sessionId`, even when it is linked to two tickets. Zero draws no element. While the dashboard is unreachable (`reachable: false`, every live link reads Lost contact) or a read fails, the
 hook keeps the last count it was sure of. The badge is a `button.rail-badge` beside the row's button, inside `.rail-group` (a button in a button is invalid, and
-the row must still just open Jira); its click sets the Jira page to `board`, the view to `list` and the filters to `{ chip: 'needs-you', allTickets: true }`
-through the three module stores, then `change('jira')`, so the List it lands on shows every session it counted.
+the row must still just open Jira); its click sets the Jira page to `sessions` and the filters to `{ chip: 'needs-you', allTickets: true }`
+through the two module stores, then `change('jira')`, so the Sessions page it lands on shows every session it counted; it never touches the Board page's view.
 
 Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it — the version chip is its last row. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
 JavaScript knows that breakpoint; everything else reads it from there or from a media query.
@@ -145,7 +145,7 @@ page's cards — and a component only one directory can import is the drift the 
 left their CSS byte-for-byte where both surfaces already read it. `LiveStrip` followed for the same reason in Jira phase 5: it was `ItemCard`'s inline markup
 until the Jira card needed the same band for a live session, and the component owns the markup while `.board-card-live` stays the stylesheet's, declared once.
 Everything else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`,
-`RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`, `StageBars`, `WatchdogMonitor` (runs); `JiraView`, `JiraBoardView`, `JiraCard`,
+`RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`, `StageBars`, `WatchdogMonitor` (runs); `JiraView`, `JiraBoardView`, `JiraSessionsView`, `JiraIssueList`, `JiraCard`,
 `JiraDetail`, `JiraSetupView`, `JiraBoardSheet`, `JiraReposGroup`, `JiraConnectionGroup`, `JiraSkillsGroup`, `JiraWorktreeRow`, `JiraRunMenu`,
 `JiraLaunchSheet`, `JiraBranchSection` (jira). `JiraChip` sits at the top level of `components/` beside
 `TrackerChip`, because the shell draws it. `FilterBar` sits at the top level of `components/`, like `lib/view-keys.ts`, because more than one lazy chunk
@@ -714,7 +714,7 @@ The rules this surface is held to — one implementation per derivation, board-v
 click through, the dialog escape stack and its eight dialogs, a crashed run rendering as crashed, "queue wait is not work",
 [Settings being three pages whose page IS the scope](invariants.md#settings-is-three-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
-row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), [the source rows' tree and
+row](invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), [the source rows' tree and
 their registered-only rows](invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree), and [the content-width stamp that
 the CSP hash travels with](invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it) — are in [invariants.md](invariants.md),
 with the failure each one encodes. Not restated here.

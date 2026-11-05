@@ -3,18 +3,18 @@ import { useEffect, useState } from 'react';
 import { DEFAULT_LIST_FILTERS, LIST_CHIPS, LIST_WINDOWS, type ListFilters } from '../lib/jira-list';
 
 /**
- * useJiraListFilters — the List view's chip, repo, run, window and All tickets (Jira sessions spec §7.2), shared by every surface that sets or reads them
- * (C4). `useJiraView`'s shape and its reason: the List's own bar and the rail badge's click are separate mounted writers of one value, and `usePersistedState`
+ * useJiraListFilters — the Sessions page's session table's chip, repo, run, window and All tickets (Jira sessions spec §7.2), shared by every surface that sets or reads them
+ * (C4). `useJiraView`'s shape and its reason: the session table's own bar and the rail badge's click are separate mounted writers of one value, and `usePersistedState`
  * is a `useState` per caller, so a write from one would never reach the other. The value is held once, at module level, with every mounted reader subscribed,
  * and `setJiraListFilters` is exported for a caller that is not a component at all: the rail badge writes `{ chip: 'needs-you', allTickets: true }` and
- * flips the view in the same handler, so the List it lands on is already showing every session that wants a person.
+ * opens the Sessions page in the same handler, so the table it lands on is already showing every session that wants a person.
  *
  * **Nothing is persisted.** The view mode is a preference a person returns to; these are a question they were asking a minute ago ("what is ended since
  * Monday"), and a stored `needs-you` chip would greet the next visit with a list that looks empty for no reason it can say. A reload starts from the
  * defaults — chip All, window 7 d, board scope — and the rail badge is how a person gets to "needs you" on purpose. The module value lives for the tab, so
  * leaving the Jira page and coming back keeps the filters, which is the case that matters.
  *
- * Every write goes through `clean`, so a caller handing over a chip or window this build does not have (a future badge, a typo) cannot leave the List with a
+ * Every write goes through `clean`, so a caller handing over a chip or window this build does not have (a future badge, a typo) cannot leave the session table with a
  * filter it has no chip for.
  */
 
