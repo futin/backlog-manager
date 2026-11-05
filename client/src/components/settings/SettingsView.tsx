@@ -179,7 +179,7 @@ function SharedPage({
 }) {
   return (
     <div className="set-col">
-      {/* SHARED PAGE — Task 9 restyles these four cards in place. One column since Task 8; the order is the old reading order, report first. */}
+      {/* The Shared page: one column, the old reading order, report first. */}
       <SourcesGroup onOpenFilesPage={onOpenFilesPage} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
       <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
       <TickGroup />

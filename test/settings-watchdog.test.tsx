@@ -210,16 +210,16 @@ describe('WatchdogGroup', () => {
 
   // --- 2: off, controls not gated on phase -----------------------------------
 
-  it('renders every control while the sweeper is off, and still says nothing about its phase', async () => {
+  it('renders every control while the sweeper is off, and says its phase only in the status line', async () => {
     stubFetch({
       watchdog: watchdogStatus({ phase: 'off', reason: 'BM_AGENTS off', nextTickAt: null })
     });
     renderView();
 
     expect(await screen.findByLabelText('Enabled')).toBeInTheDocument();
-    // The phase belongs to the monitor now — a knob is worth setting while
-    // the sweeper is off, but this group no longer reports that it is.
+    // The monitor's sentence is not repeated here; only the word of the status line is.
     expect(screen.queryByText('off — BM_AGENTS off')).not.toBeInTheDocument();
+    expect(screen.getByTestId('watchdog-settings-state')).toHaveTextContent('Off · BM_AGENTS off');
     expect(screen.getByLabelText('Check every')).toBeInTheDocument();
     expect(screen.getByLabelText('Leave a resumed run alone for')).toBeInTheDocument();
     expect(screen.getByLabelText('Give up after')).toBeInTheDocument();
@@ -443,6 +443,30 @@ describe('WatchdogGroup', () => {
     expect(screen.queryByLabelText('Give up after')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Enabled')).not.toBeInTheDocument();
   });
+  it.each([
+    ['idle', { phase: 'idle' as const }, 'Idle · nothing to watch'],
+    ['armed', { phase: 'armed' as const, watching: ['a', 'b'], nextTickAt: '2026-11-05T10:00:00.000Z' }, 'Watching 2'],
+    ['off', { phase: 'off' as const, reason: 'BM_AGENTS off' }, 'Off · BM_AGENTS off']
+  ])('draws the %s phase as the monitor words it, above Live view in Runs', async (_n, over, word) => {
+    stubFetch({ watchdog: watchdogStatus(over) });
+    renderView();
+
+    const line = await screen.findByTestId('watchdog-settings-state');
+    expect(line).toHaveTextContent(word);
+    // No age: none is served, and nothing here ticks.
+    expect(line.textContent).not.toMatch(/ago|checked/);
+    const link = screen.getByRole('button', { name: 'Live view in Runs' });
+    expect(line.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('draws no status line when the status is missing', async () => {
+    stubFetch({ watchdog: 'reject' });
+    renderView();
+
+    await screen.findByText(/Could not reach the watchdog/);
+    expect(screen.queryByTestId('watchdog-settings-state')).toBeNull();
+  });
+
   // --- task-18: nothing in Settings is live --------------------------------
 
   it('never polls the watchdog from Settings, even while the sweeper is armed', async () => {

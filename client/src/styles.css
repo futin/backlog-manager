@@ -1014,6 +1014,9 @@ button.rail-count { cursor: pointer }
   padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--ink3);
 }
 
+/* The watchdog card's status line (Task 9): the sweeper's phase word, a dot and nothing that moves. Sits above the `Live view` row. */
+.set-status { display: flex; align-items: center; gap: 8px; padding: 12px 0; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--ink2) }
+
 /* The theme picker (spec §4.10): five picture cards, each a mini board. The preview element carries its theme's own `data-theme`, so `--board`, `--strip` and
    `--cyan` below resolve from THAT theme's `[data-theme]` block in shared/theme.css rather than from the live page — which is the whole point of drawing
    it as CSS instead of mirroring five palettes in a table (the mirror drifted once, #350). `--cyan` is the accent in every theme (`--accent` is

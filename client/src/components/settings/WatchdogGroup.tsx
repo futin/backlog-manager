@@ -1,5 +1,7 @@
 import { useWatchdog } from '../../hooks/useWatchdog';
 import { formatSpanCompact } from '../../lib/run-time';
+import { stateWord } from '../../lib/run-watchdog';
+import { Dot } from '../ui/Dot';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { NumberField } from '../ui/NumberField';
 import { Switch } from '../ui/Switch';
@@ -27,24 +29,10 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * `useWatchdog({ live: false })` below: this group renders no text that
  * changes on a clock, so a poll here would redraw identical output forever.
  *
- * The card's scope subtitle says "this server", deliberately, against the
- * "this device" the Local page's cards carry and against the "this machine" of
- * `Claude Agents`, which since task-42 is the card beside this one on Settings'
- * Shared page. (It sat under `Orchestrator · this device` until then, the two
- * being one subject at two scopes; the Local/Shared split traded that adjacency
- * for a page that is honestly one backend throughout, and this card went with
- * the server it writes to.) `this device` really is per-device: `useSettings`
- * writes those to THIS browser's `localStorage`, so opening the board on a
- * phone shows different values than the laptop that set them. `WatchdogConfig` cannot be that — the sweeper it configures
- * runs once, on the API host, with no browser open at all (design §5.1), so
- * `~/.backlog-manager/settings/watchdog.json` is the only copy that exists,
- * read fresh on every tick and every GET. A phone opening this same board
- * reads and writes the identical file the laptop just touched. Naming that
- * plainly in the card's own subtitle — rather than reusing the "this machine"
- * of the card beside it, and letting a reader carry over a meaning it does not
- * have — is the whole point: silently reusing that
- * phrase would be a second thing this group gets wrong for free, on top of
- * the clamp problem the selects below exist to solve.
+ * The card's pill says `this machine`, like every card on Settings' Shared page: `WatchdogConfig` is not per-device the way the Local page's settings are
+ * (`useSettings` writes those to THIS browser's `localStorage`, so a phone shows different values than the laptop that set them). The sweeper it configures
+ * runs once, on the API host, with no browser open at all (design §5.1), so `~/.backlog-manager/settings/watchdog.json` is the only copy that exists, read
+ * fresh on every tick and every GET. A phone opening this same board reads and writes the identical file the laptop just touched.
  *
  * Ladder steppers (`NumberField` ladder mode), not free number fields, for the three numeric rows. `WATCHDOG_LIMITS`
  * (shared/types.ts) clamps every one of these server-side to `[min, max]`
@@ -58,7 +46,7 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * outright was equally silent until `saveError` below got a render site of
  * its own, because the only `error` render here sits behind `status ===
  * null` — a branch a successful mount GET closes forever.
- * A `<select>` whose options are built from the same `WATCHDOG_LIMITS`
+ * A ladder built from the same `WATCHDOG_LIMITS`
  * triples the server clamps against cannot offer a value the server would
  * ever have to correct — the UI and the clamp read one shared source of
  * truth (`TICK_LADDER`/`GRACE_LADDER`/`ATTEMPT_LADDER` below), so there is
@@ -66,7 +54,7 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * handling is a config value that is NOT on the ladder shown (set by an
  * older build, a hand-edited file, or a future ladder change) — see
  * `ladderWithSelected`'s own comment for why that value is rendered as an
- * extra option instead of the picker silently jumping to a neighbour, which
+ * extra rung instead of the stepper silently jumping to a neighbour, which
  * would be exactly the invisible-clamp failure this whole design choice
  * exists to avoid.
  *
@@ -77,9 +65,9 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * when that POST is refused, says so in a row of its own under the control
  * that was changed (`saveErrorSlot`). Rows
  * are not gated on `phase`: a knob is worth setting while nothing is
- * running, so the three selects and the switch render identically whether
- * the sweeper is `off`, `idle` or `armed` — and this group no longer reports
- * which of those it is, so `phase` is now read here for nothing at all.
+ * running, so the three steppers and the switch render identically whether
+ * the sweeper is `off`, `idle` or `armed`. `phase` is read for one thing only, the status line above `Live view in Runs`: a word, drawn from the reading the
+ * mount fetch already made — no poll, no ticking age.
  */
 
 /**
@@ -107,14 +95,14 @@ export const ATTEMPT_LADDER = [1, 2, 3, 4, 5] as const;
 /**
  * A ladder, with the CURRENT config value spliced in and the whole thing
  * numerically sorted — but only when that value is not already one of the
- * ladder's own options. This is the mechanism the whole "selects instead of
+ * ladder's own options. This is the mechanism the whole "steppers instead of
  * number fields" argument above depends on: without it, a `tickMs` of
  * `45_000` (set by an older build, hand-edited into `watchdog.json`, or left
- * over from a ladder that used to include it) would force the `<select>`
+ * over from a ladder that used to include it) would force the stepper
  * to either silently jump its displayed value to the nearest neighbour —
  * exactly the invisible clamp this design rejects — or lose the value
- * entirely by not appearing as a selected option at all. Splicing it in as
- * its own extra option keeps the true current value visible and selected,
+ * entirely by not appearing as a rung at all. Splicing it in as
+ * its own extra rung keeps the true current value visible and current,
  * `formatSpanCompact`/plain-number labelled like every other option, while
  * every OTHER ladder value still exists to be picked.
  */
@@ -190,8 +178,8 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
   // stale-but-real status is kept on a LATER failure while `null` is kept
   // on the FIRST one). A failed SAVE lands in `saveError` instead and is
   // rendered below, with `status` intact — the two failures are two fields
-  // because they need two places on screen. There is no `config` to bind three selects and a
-  // checkbox to in that state, so this group renders a one-line notice and
+  // because they need two places on screen. There is no `config` to bind three steppers and a
+  // switch to in that state, so this group renders a one-line notice and
   // nothing else — never a half-built row reading off a value that does
   // not exist, and never a thrown error from dereferencing `status.config`
   // on a `null` status.
@@ -240,7 +228,7 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
             from the geometry before any colour is read — which matters on the
             amber theme, the one with no second hue to spend on a state. The
             accessible name and the save call are unchanged; what changed is
-            that the control is now the same 36 px height as the three selects
+            that the control is now the same 36 px height as the steppers
             under it, where a UA checkbox was whatever the platform drew. */}
         <Switch label="Enabled" checked={config.enabled} onChange={(enabled) => void save({ enabled })} />
       </SettingsRow>
@@ -279,6 +267,15 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
           describing where it is. One row rather than two because both sentences
           still answer the same question a person arriving here has — where does
           this live, and where do I watch it work. */}
+      {/* The live status line (brief; mock `Idle · checked 12 s ago`): the sweeper's phase as the Runs monitor words it (`stateWord`, one wording for
+          two surfaces). The mock's `checked N s ago` is NOT drawn: no last-check time is served (`WatchdogStatus` carries `nextTickAt`, never a last
+          tick — the monitor's own comment says the same) and a countdown would need the 5 s poll this page deliberately does not have. So this is the
+          phase as of the last read, the mount fetch or the focus refetch, and nothing on it moves. A grey dot for idle/off, the live one only while
+          armed, as the monitor draws it. */}
+      <div className="set-status" data-testid="watchdog-settings-state">
+        {status.phase === 'armed' ? <Dot tone="live" /> : <Dot />}
+        <span>{stateWord(status)}</span>
+      </div>
       <SettingsRow
         name="Live view"
         hint={

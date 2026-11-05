@@ -46,12 +46,12 @@ export function SourcesGroup({
   onOpenJiraPage?: (p: JiraPage) => void;
 }) {
   const { zone } = useTimeZone();
-  const { data, loading, error } = useTrackersContext();
+  const trackers = useTrackersContext();
+  const { data, loading, error } = trackers;
   const jira = useJiraContext();
   // The rail's own answer (`GET /api/projects`), read for the GitHub link's gate alone — see the comment on the link.
   const projects = useProjectsContext();
   const drawn = projects.drawn;
-  const trackers = useTrackersContext();
   const answers = [useAnsweredAt(projects.data), useAnsweredAt(data), useAnsweredAt(jira.data)].filter((t): t is number => t !== null);
   // The oldest of the three latest answers: the moment since which ALL answered. Sources that have not answered at all do not hold the foot back.
   const answeredAt = answers.length === 0 ? null : Math.min(...answers);
