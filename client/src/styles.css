@@ -1455,7 +1455,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* One live session's card: the deck card's face, widened to Detail's half. The strip is the board card's own band (`ui/LiveStrip`), clipped to the card's
    radius; under it the facts are a grid of label-over-value cells, four across where the column has the width and fewer where it does not, then the
    buttons on one row with Stop pushed to its end. */
-.jira-sess { background: var(--strip); border-radius: 12px; overflow: hidden; min-width: 0 }
+/* No `overflow: hidden` on the card: `Session actions` hangs 8 px under the chevron at its bottom edge and a clip would cut it. The strip rounds its own top corners instead. */
+.jira-sess { background: var(--strip); border-radius: 12px; min-width: 0 }
+.jira-sess > .board-card-live { border-radius: 12px 12px 0 0 }
 .jira-sess-face { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px }
 .jira-sess-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px 14px; margin: 0 }
 .jira-sess-facts > div { min-width: 0 }
@@ -1473,8 +1475,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-deck-head h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink) }
 .jira-deck-need { font-weight: 600; color: var(--amber-text) }
 .jira-deck-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px }
-.jira-deck-card { background: var(--strip); border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden; min-width: 0 }
-.jira-deck-face { display: flex; flex-direction: column; gap: 8px; padding: 10px var(--card-pad-x) 12px }
+/* Not clipped, for the same reason as `.jira-sess`; the stripe is an inset box-shadow, which already follows the radius. */
+.jira-deck-card { background: var(--strip); border: 1px solid var(--hairline); border-radius: 12px; min-width: 0 }
+.jira-deck-face { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px var(--card-pad-x) 12px }
 .jira-deck-title {
   width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer;
   font: inherit; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--ink);

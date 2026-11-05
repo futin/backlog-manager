@@ -118,4 +118,33 @@ describe('SessionOpen', () => {
     expect(more()).toBeDisabled();
     expect(within(screen.getByRole('group')).getByRole('button', { name: 'Open in Dashboard' })).toBeDisabled();
   });
+
+  describe('with no Open to show (a phone answers Desktop-only as nothing)', () => {
+    const DESKTOP_ONLY: OpenButtons = { primary: { label: 'Open in Desktop', target: 'desktop' }, secondary: null };
+    const original = window.matchMedia;
+    beforeEach(() => {
+      window.matchMedia = ((q: string) => ({ matches: true, media: q, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
+    });
+    afterEach(() => {
+      window.matchMedia = original;
+    });
+
+    it('still offers Unlink as a plain chip, with no split', async () => {
+      const onUnlink = jest.fn();
+      mount({ buttons: DESKTOP_ONLY, onUnlink });
+      expect(document.querySelector('.ui-split')).toBeNull();
+      await userEvent.click(screen.getByRole('button', { name: 'Unlink' }));
+      expect(onUnlink.mock.calls).toEqual([['s1']]);
+    });
+
+    it('still offers Stop behind its Confirm, and renders nothing with no rows either', async () => {
+      const onStop = jest.fn();
+      const first = mount({ buttons: DESKTOP_ONLY, onStop });
+      await userEvent.click(screen.getByRole('button', { name: 'Stop session' }));
+      await userEvent.click(within(screen.getByTestId('jira-stop-confirm')).getByRole('button', { name: 'Stop session' }));
+      expect(onStop.mock.calls).toEqual([['s1']]);
+      first.unmount();
+      expect(mount({ buttons: DESKTOP_ONLY }).container).toBeEmptyDOMElement();
+    });
+  });
 });

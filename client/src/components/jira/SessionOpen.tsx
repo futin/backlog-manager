@@ -4,6 +4,7 @@ import { useNarrow } from '../../hooks/useNarrow';
 import { useSettings } from '../../hooks/useSettings';
 import { openTarget, type OpenButton, type OpenButtons, type SessionLink } from '../../lib/jira-sessions';
 import { needsYou, type JiraSessionState } from '../../../../shared/jira-sessions';
+import { Chip } from '../ui/Chip';
 import { Confirm } from '../ui/Confirm';
 import { Popover } from '../ui/Popover';
 import { SplitChip } from '../ui/SplitChip';
@@ -67,7 +68,8 @@ export function SessionOpen({
     if (open) menuRef.current?.querySelector<HTMLElement>('a, button:not([aria-disabled="true"])')?.focus();
   }, [open]);
 
-  if (primary === null) return null;
+  if (primary === null && !hasRows) return null;
+  if (primary === null) return <PlainActions sessionId={sessionId} busy={busy} onUnlink={onUnlink} onStop={onStop} />;
   if (!hasRows) return <OpenChip button={buttons.primary} sessionId={sessionId} row={row} launch={launch} primary onHandover={onHandover} />;
 
   if (asking)
@@ -159,5 +161,43 @@ export function SessionOpen({
         </Popover>
       )}
     </span>
+  );
+}
+
+/**
+ * No Open is shown (a phone's Desktop-only answer, say) but Unlink or Stop still is: today's plain controls, no split — a split with no main half would be a
+ * chevron over nothing. Stop keeps its `Confirm` in place of the chip.
+ */
+function PlainActions({ sessionId, busy, onUnlink, onStop }: { sessionId: string; busy: boolean; onUnlink?: (id: string) => void; onStop?: (id: string) => void }) {
+  const [asking, setAsking] = useState(false);
+  if (asking)
+    return (
+      <Confirm
+        label="confirm stop"
+        testId="jira-stop-confirm"
+        acceptLabel="Stop session"
+        dismissLabel="Keep running"
+        onDismiss={() => setAsking(false)}
+        onAccept={() => {
+          setAsking(false);
+          onStop?.(sessionId);
+        }}
+      >
+        Stop this session? It ends mid-work; its edits stay where it left them.
+      </Confirm>
+    );
+  return (
+    <>
+      {onUnlink !== undefined && (
+        <Chip size={28} variant="flat" disabled={busy} title="drop this link — the session itself is not touched" onClick={() => onUnlink(sessionId)}>
+          Unlink
+        </Chip>
+      )}
+      {onStop !== undefined && (
+        <Chip size={28} variant="danger" disabled={busy} title="end this session" onClick={() => setAsking(true)}>
+          Stop session
+        </Chip>
+      )}
+    </>
   );
 }
