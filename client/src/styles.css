@@ -1413,6 +1413,22 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-detail-facts dt > svg { flex: none }
 .jira-detail-facts dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; color: var(--ink); overflow-wrap: anywhere }
 .jira-detail-cat { color: var(--ink3) }
+/* The Status chip and its Move-to popover (`Modal.dc.html`). The chip is `ui/Chip`'s 28 px; the wrapper only anchors the panel, which hangs from the chip's left
+   edge as the mock draws it (the base popover is right-anchored, so the structural selector flips it). */
+.jira-detail-status { position: relative; display: inline-flex }
+.jira-detail-status > button { gap: 7px; padding: 0 8px 0 9px; font-size: 12px; font-weight: 500 }
+.jira-detail-status > [role='dialog'] { left: 0; right: auto; padding: 6px }
+.jira-move-head { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ink3) }
+.jira-move-row {
+  display: flex; align-items: center; gap: 9px; width: 100%; height: 36px; padding: 0 10px;
+  border: 0; border-radius: 8px; background: none; text-align: left;
+  font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer;
+}
+.jira-move-row:hover:not([aria-disabled='true']) { background: var(--strip-hi) }
+.jira-move-row[aria-disabled='true'] { cursor: default }
+.jira-move-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.jira-move-row > svg { flex: none; color: var(--green) }
+.jira-move-note { padding: 6px 10px 4px; margin-top: 4px; border-top: 1px solid var(--hairline2); font-size: 11px; color: var(--ink3) }
 .jira-detail-pane .jira-modal-error { margin-top: 12px }
 /* The Agent band (restyle §4.4): the pane's own ground, 12 px radius, 16 px padding. Its row is the Run menu's positioning parent, so the panel hangs from the
    row (right edges aligned) and not from the band's foot; the wrapper's own `position: relative` is switched off for it. */

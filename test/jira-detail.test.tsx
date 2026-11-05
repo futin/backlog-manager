@@ -165,7 +165,11 @@ const posts = (): { url: string; init?: RequestInit }[] => calls.filter((c) => c
 /** How many times one issue's detail was read. */
 const reads = (key: string, from: readonly string[] = urls): number => from.filter((u) => u === `/api/jira/issue/${key}`).length;
 const assignChip = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Assign to me' });
-const moveSelect = (): HTMLSelectElement => within(screen.getByRole('dialog')).getByRole('combobox', { name: 'Move to' });
+/** The Status chip — `Move to` is its accessible name and the popover's too, so the chip is looked up inside the Modal's own dialog, by role button. */
+const moveSelect = (): HTMLElement => within(screen.getByRole('dialog', { name: /PAY-131/ })).getByRole('button', { name: 'Move to' });
+/** The open Move-to popover's rows, in document order. */
+const moveRows = (): HTMLElement[] => within(screen.getByRole('dialog', { name: 'Move to' })).getAllByRole('button');
+const rowNames = (): string[] => moveRows().map((r) => r.textContent ?? '');
 /** Neither assigned to `me` (ADA) nor anyone: the case every Assign click mounts, since the default CARD is ADA's own. */
 const UNASSIGNED: JiraIssue = { ...CARD, assignee: null };
 const TRANSITIONS: JiraIssueDetail['transitions'] = [
@@ -235,7 +239,7 @@ describe('JiraDetail — the read', () => {
     // are facts in the ticket pane too.
     expect(document.querySelector('.jira-detail-crumbs')).toHaveTextContent('PAY-131· Story· in PAY-120 Refund flows· Sprint 42');
     expect(fact('Parent')).toHaveTextContent('PAY-120 Refund flows');
-    expect(fact('Status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Status')).toHaveTextContent('In Review');
     expect(fact('Priority')).toHaveTextContent('High');
     expect(fact('Sprint')).toHaveTextContent('Sprint 42');
     expect(fact('Assignee')).toHaveTextContent('Ada Lovelace');
@@ -421,7 +425,7 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     answer = () => new Promise<Response>((resolve) => (release = resolve));
     mount();
 
-    expect(fact('Status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Status')).toHaveTextContent('In Review');
     expect(Array.from(fact('Labels')?.querySelectorAll('.jira-detail-label') ?? []).map((n) => n.textContent)).toEqual(['payments', 'refunds']);
     expect(screen.getByText('loading…')).toBeInTheDocument();
     // `on boards` comes from the detail, so it is not guessed at while that is in flight.
@@ -437,7 +441,7 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     mount();
 
     expect(await screen.findByText('could not read the ticket — Jira unreachable: timeout')).toBeInTheDocument();
-    expect(fact('Status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Status')).toHaveTextContent('In Review');
     expect(fact('Assignee')).toHaveTextContent('Ada Lovelace');
     expect(screen.queryByText('loading…')).toBeNull();
   });
@@ -446,7 +450,7 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     answer = () => json({});
     mount();
     expect(await screen.findByText('could not read the ticket — malformed response')).toBeInTheDocument();
-    expect(fact('Status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Status')).toHaveTextContent('In Review');
   });
 
   it('does not paint a late answer for the issue the modal has since been reopened on', async () => {
@@ -917,21 +921,38 @@ describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
     expect(assignChip()).toHaveAttribute('title', 'already assigned to you');
   });
 
-  it('lists the offered transitions by the status each lands in, and a pick posts at once and returns to Move to…', async () => {
+  it('lists the offered transitions by the status each lands in, and a pick posts once and closes the popover', async () => {
     answer = () => json(detail({ transitions: TRANSITIONS }));
     mount();
     await screen.findByText('not');
-    const select = moveSelect();
-    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Move to…', 'In Progress', 'Done']);
+    expect(screen.queryByRole('dialog', { name: 'Move to' })).toBeNull();
+    expect(moveSelect()).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(moveSelect()).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(moveSelect());
+    expect(moveSelect()).toHaveAttribute('aria-expanded', 'true');
+    expect(rowNames()).toEqual(['In Progress', 'Done']);
+    expect(screen.getByText('Jira transitions, applied on click')).toBeInTheDocument();
+    // The dot on a row is the landing status's own tone, like the chip's.
+    expect(moveRows().map((r) => r.querySelector('.jira-status-dot')?.getAttribute('data-tone'))).toEqual(['doing', 'done']);
 
-    await userEvent.selectOptions(select, '41');
+    await userEvent.click(moveRows()[0]);
     await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
-    expect(posts().map((c) => [c.url, c.init?.body])).toEqual([['/api/jira/issue/transition', '{"key":"PAY-131","transitionId":"41"}']]);
-    expect(moveSelect()).toHaveDisplayValue('Move to…');
+    expect(posts().map((c) => [c.url, c.init?.body])).toEqual([['/api/jira/issue/transition', '{"key":"PAY-131","transitionId":"31"}']]);
+    expect(screen.queryByRole('dialog', { name: 'Move to' })).toBeNull();
   });
 
-  // Two transitions landing in one status would read as two identical options, so only those two bring their own name back.
-  it('names a transition only when another offered one lands in the same status', async () => {
+  it('draws the status as a toned dot and the raw name, with no category word', async () => {
+    answer = () => json(detail());
+    mount();
+    await screen.findByText('not');
+    const chip = moveSelect();
+    expect(chip).toHaveTextContent('In Review');
+    expect(chip.querySelector('.jira-status-dot')).toHaveAttribute('data-tone', 'doing');
+    expect(fact('Status')).not.toHaveTextContent('in progress');
+  });
+
+  // Two transitions landing in one status would read as two identical rows, so only those two bring their own name back.
+  it('names a transition only when another offered one lands in the same status, and pins every current-status row first', async () => {
     answer = () =>
       json(
         detail({
@@ -944,7 +965,44 @@ describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
       );
     mount();
     await screen.findByText('not');
-    expect(Array.from(moveSelect().options).map((o) => o.textContent)).toEqual(['Move to…', 'In Testing', 'In Review', 'In Review (2)']);
+    await userEvent.click(moveSelect());
+    expect(rowNames()).toEqual(['In Review', 'In Review (2)', 'In Testing']);
+    expect(moveRows().map((r) => r.getAttribute('aria-disabled'))).toEqual(['true', 'true', null]);
+  });
+
+  it('pins the current status first and disabled, leaves Jira order for the rest, and focuses the first enabled row', async () => {
+    answer = () =>
+      json(
+        detail({
+          transitions: [
+            { id: '1', name: 'Start', to: { name: 'In Progress', category: 'indeterminate' } },
+            { id: '2', name: 'Back to review', to: { name: 'In Review', category: 'indeterminate' } },
+            { id: '3', name: 'Done', to: { name: 'Done', category: 'done' } }
+          ]
+        })
+      );
+    mount();
+    await screen.findByText('not');
+    await userEvent.click(moveSelect());
+    expect(rowNames()).toEqual(['In Review', 'In Progress', 'Done']);
+    expect(moveRows()[0]).toHaveAttribute('aria-disabled', 'true');
+    expect(document.activeElement).toBe(moveRows()[1]);
+    // Clicking the current-status row does nothing: no post, popover still open.
+    await userEvent.click(moveRows()[0]);
+    expect(posts()).toHaveLength(0);
+    expect(screen.getByRole('dialog', { name: 'Move to' })).toBeInTheDocument();
+  });
+
+  it('closes on Escape and hands focus back to the Move to chip', async () => {
+    answer = () => json(detail({ transitions: TRANSITIONS }));
+    mount();
+    await screen.findByText('not');
+    await userEvent.click(moveSelect());
+    expect(document.activeElement).toBe(moveRows()[0]);
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Move to' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: /PAY-131/ })).toBeInTheDocument();
+    expect(document.activeElement).toBe(moveSelect());
   });
 
   it('disables Move while the detail is in flight, and with transitions unavailable once it failed — Assign stays usable', async () => {
@@ -1007,7 +1065,7 @@ describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
 
   // Review Focus 1: the guard is a ref, so two clicks dispatched before React re-renders — both inside one act — cannot both pass a `disabled` that has
   // not been painted yet. A state-only guard sends three POSTs here.
-  it('sends exactly one POST for a double click and a Move pick while that write is out', async () => {
+  it('sends exactly one POST for a double click while that write is out, and the Move chip is disabled meanwhile', async () => {
     answer = () => json(detail({ assignee: null, transitions: TRANSITIONS }));
     const out = held();
     post = () => out.promise;
@@ -1017,13 +1075,10 @@ describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
     act(() => {
       assignChip().click();
       assignChip().click();
-      fireEvent.change(moveSelect(), { target: { value: '41' } });
     });
     expect(posts()).toHaveLength(1);
     expect(assignChip()).toBeDisabled();
     expect(moveSelect()).toBeDisabled();
-    fireEvent.change(moveSelect(), { target: { value: '31' } });
-    expect(posts()).toHaveLength(1);
 
     await act(async () => out.release(json({ ok: true, reread: true })));
     await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
