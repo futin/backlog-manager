@@ -435,7 +435,18 @@ describe('the Sessions page', () => {
     setJiraListFilters({ allTickets: true });
     await renderList();
     await waitFor(() => expect(rowTags()).toEqual(['ZZ-9:working', 'PAY-131:working']));
-    expect(screen.queryByText('board unavailable')).toBeNull();
+    expect(screen.queryByText('board unavailable', { selector: '.board-empty' })).toBeNull();
+    // The band is the one place left that says the board is down.
+    const down = await screen.findByText(/board unavailable/);
+    expect(down).toHaveClass('failing');
+    expect(down.closest('.ui-band-sub')).not.toBeNull();
+  });
+
+  it("the band shows the board's sweep failure in red", async () => {
+    statusAnswer = status({ boards: [{ ...ALPHA, failures: [{ kind: 'query', id: 'q_00000001', message: "Field 'foo' does not exist" }] }, BETA] });
+    await renderList();
+    const sub = await screen.findByText(/Field 'foo' does not exist/);
+    expect(sub).toHaveClass('failing');
   });
 
   it('with All tickets off and the board list failing, the body reads `board unavailable` under the bar', async () => {

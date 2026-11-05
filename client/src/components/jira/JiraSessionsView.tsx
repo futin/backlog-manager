@@ -8,6 +8,7 @@ import type { JiraPage } from '../../lib/jira-page';
 import type { JiraAction, JiraIssue } from '../../../../shared/types';
 import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
+import { JiraBandSub } from './JiraBandSub';
 import { JiraBoardPicker } from './JiraBoardPicker';
 import { JiraSessionList } from './JiraSessionList';
 
@@ -39,7 +40,7 @@ export function JiraSessionsView({
   nudge: number;
 }) {
   const { data } = useJiraContext();
-  const { boards, board, unreadable, pick, list, fold, loaded } = usePickedJiraBoard(nudge);
+  const { boards, board, unreadable, pick, list, fold, loaded, shown } = usePickedJiraBoard(nudge);
   const now = useNow(true);
   const [search, setSearch] = useState('');
 
@@ -59,7 +60,20 @@ export function JiraSessionsView({
     ) : (
       'board unavailable'
     );
-  const sub = unreadable !== null ? 'jira.json cannot be read' : board === null ? 'no board to scope to' : `${board.name} · ${data?.site ?? ''}`;
+  // The Board page's own sub-line, so a sweep failure reads red here too; with the list not loaded the table can still be drawn (All tickets on), so the band
+  // is the one place left that says the board is down (spec: "The band still says what is wrong with the board").
+  const sub =
+    unreadable !== null ? (
+      'jira.json cannot be read'
+    ) : board === null || shown === null ? (
+      'no board to scope to'
+    ) : (
+      <>
+        <JiraBandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />
+        {!loaded &&
+          (list.loading ? ' · loading…' : <span className="jira-band-sub failing"> · board unavailable</span>)}
+      </>
+    );
 
   return (
     <div className="board">

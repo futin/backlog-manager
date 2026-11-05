@@ -8,7 +8,6 @@ import { useNow } from '../../hooks/useNow';
 import { usePickedJiraBoard } from '../../hooks/usePickedJiraBoard';
 import {
   NO_JIRA_FILTERS,
-  bandSub,
   boardFilterCount,
   boardFilterOptions,
   effectiveBoardFilters,
@@ -22,11 +21,12 @@ import {
 } from '../../lib/jira';
 import { boardAgents, boardShelves } from '../../lib/jira-deck';
 import type { JiraPage } from '../../lib/jira-page';
-import type { JiraAction, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
+import type { JiraAction, JiraIssue, JiraLiveSession, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { FilterBar, FilterSection } from '../FilterBar';
 import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
 import { JiraAgentDeck } from './JiraAgentDeck';
+import { JiraBandSub } from './JiraBandSub';
 import { JiraBoardPicker } from './JiraBoardPicker';
 import { JiraShelves } from './JiraShelves';
 import { JiraViewSwitch } from './JiraViewSwitch';
@@ -164,7 +164,7 @@ export function JiraBoardView({
     <div className="board">
       <Band
         title={board.name}
-        sub={<BandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />}
+        sub={<JiraBandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />}
       >
         <JiraViewSwitch />
         <JiraBoardPicker boards={boards} current={board} onPick={pick} />
@@ -224,16 +224,6 @@ export function JiraBoardView({
       )}
     </div>
   );
-}
-
-/**
- * The band's sub-line on its own one-second clock: `polled 12 s ago` needs seconds, and ticking the whole page for it would re-render every card once a
- * second for a date that changes once a day. `.failing` is the red reading — the class rather than a colour on the text, so the theme owns the red.
- */
-function BandSub({ board, site, fold }: { board: JiraBoardStatus; site: string; fold: { issues: number; cards: number } | null }) {
-  const now = useNow(true, 1_000);
-  const sub = bandSub(board, site, now, fold);
-  return <span className={sub.failing ? 'jira-band-sub failing' : 'jira-band-sub'}>{sub.text}</span>;
 }
 
 /**
