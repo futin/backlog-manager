@@ -40,6 +40,7 @@ import { useDialogEscape } from '../client/src/hooks/useDialogEscape';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import type { AgentsStatus, BacklogItem, ItemsIndex, JiraIssue, JiraStatusPayload, OrchestratorRunsPayload, ProjectSummary, ReleasesResponse } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 const READY: AgentsStatus = {
   enabled: true,
@@ -164,7 +165,7 @@ async function openDrawerThenSheet(): Promise<void> {
 describe('Escape with the launch sheet layered over the item drawer', () => {
   it('closes only the sheet on the board, leaving the drawer behind it open', async () => {
     stubFetch([fakeItem()]);
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await openDrawerThenSheet();
 
     await userEvent.keyboard('{Escape}');
@@ -175,7 +176,7 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
 
   it('closes the drawer on the second press', async () => {
     stubFetch([fakeItem()]);
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await openDrawerThenSheet();
 
     await userEvent.keyboard('{Escape}');
@@ -193,7 +194,7 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
      re-render with no timers to fake. */
   it('still closes only the sheet after the host re-renders underneath it', async () => {
     stubFetch([fakeItem()]);
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await openDrawerThenSheet();
 
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search items' }), 'a');
@@ -209,7 +210,7 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
   // pieces of state, so the defect is reachable there identically.
   it('closes only the sheet on Archive too', async () => {
     stubFetch([fakeItem({ updated: daysAgoStamp(90), section: 'bugs', id: 'bug-1', groomed: false })]);
-    render(<ArchiveView source="files" />);
+    render(<OrchestratorRunsProvider><ArchiveView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
     await userEvent.click(screen.getByText('a task'));
     const drawer = await screen.findByRole('dialog', { name: 'a task' });

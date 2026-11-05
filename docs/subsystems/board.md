@@ -54,9 +54,10 @@ answers Vite's `vite:preloadError` with one page reload, and a second failure wi
 boundary instead, so a chunk a reload cannot bring back never loops.
 
 The wordmark is a prompt, `BACKLOG` over `› manager▌`, whose cursor blinks while a run on this machine is working (`.claude/DESIGN.md` §8.0). The answer is
-`runsWorking` (`client/src/lib/run-pulse.ts`: a `starting` entry, or a local run `running` and not `isCrashed`), and `App` polls nothing to get it — each
-source's Board and Archive, and Runs, already run a `useOrchestratorRuns()` and report it up through `useReportWorking`; `App` keeps the report tagged with the
-view that made it (`files:board`, `github:archive`, `runs`, …) and drops it on a view change, so Settings, which reports nothing, always shows a solid cursor.
+`runsWorking` (`client/src/lib/run-pulse.ts`: a `starting` entry, or a local run `running` and not `isCrashed`). There is ONE `useOrchestratorRuns()` per tab,
+called by `OrchestratorRunsProvider` (`hooks/OrchestratorRunsContext.tsx`, mounted in `App` above `AppShell`); the shell and the four views that read the run
+payload (Board, Archive, GitHub › PRs, Runs) take it through `useOrchestratorRunsContext()`. The provider's `working` is `undefined` until the first answer
+(`answered`), so the cursor is solid then and on a crashed run, and a view switch — Settings included — loses nothing. Its `liveCount` (`liveRunCount`) is the Live sheet's row count.
 
 Every section has a sub-nav tree under its row: Files (Board, Archive), GitHub (Board, PRs, Archive, Settings), Jira (Board, Setup), Runs (History, Watchdog, Ticks)
 and Settings (Local, Shared, Dashboards). All five are drawn by one component, `RailTree`, because the markup carries three details that must not drift — the
@@ -533,8 +534,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   marks the PR at the head SHA it was asked from (`UpdateMark`): the row reads `updating…` while the mark is present — Matrix in its Base cell only — and a read
   that shows a new head drops it and says `branch updated`; `UPDATING_MS` (30 s, `PR_UPDATING_MS` in `shared/types.ts`) after the update the page re-reads once
   and judges that answer — a read the server answers from GitHub, because the update made the repo due at that same moment — and a same head or a failed read
-  just drops the mark. `updateBlock` reads `no permission to update` for a PR that cannot be updated while behind. The page reports the rail cursor as Board and
-  Archive do (`useReportWorking`).
+  just drops the mark. `updateBlock` reads `no permission to update` for a PR that cannot be updated while behind. Its runs come from the shell's one poll
+  (`useOrchestratorRunsContext`).
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live

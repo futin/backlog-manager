@@ -43,6 +43,7 @@ import type {
   WatchdogStatus
 } from '../shared/types';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 /**
  * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
@@ -477,7 +478,7 @@ async function renderRunsView(
 ): Promise<RenderResult> {
   mockArchive.mockResolvedValue({ runs: archiveRuns } satisfies OrchestratorArchivePayload);
   mockRuns.mockResolvedValue({ runs: liveRuns, starting, remote, remoteStarting } satisfies OrchestratorRunsPayload);
-  const result = render(<RunsView />);
+  const result = render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
   if (archiveRuns.length === 0 && liveRuns.length === 0 && starting.length === 0 && remote.length === 0 && remoteStarting.length === 0) {
     await screen.findByText('no runs yet');
   } else {
@@ -1080,7 +1081,7 @@ describe('RunsView', () => {
       mockArchive.mockResolvedValue({ runs: [archiveAlpha] } satisfies OrchestratorArchivePayload);
       mockRuns.mockResolvedValue({ runs: [liveAlpha], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
 
-      render(<RunsView />);
+      render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
       // Flushes the mount-time fetches (both hooks') and whatever effects
       // their landed state triggers — `advanceTimersByTimeAsync(0)` reaches
       // a real microtask-queue drain without any fake time actually
@@ -1886,7 +1887,7 @@ describe('RunsView history paging (task-16)', () => {
     // exactly what this page does not render.
     mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
     mockRuns.mockResolvedValue({ runs: LIVE_RUNS, starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
-    render(<RunsView />);
+    render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
 
     // `watchdog-phase`, not `watchdog-state`: the page renders a
     // `watchdog-state` box in BOTH of its states — the could-not-reach notice
@@ -2082,7 +2083,7 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
       mockArchive.mockResolvedValue({ runs: [archiveEntry] } satisfies OrchestratorArchivePayload);
       mockRuns.mockResolvedValue(staleAt('inspecting'));
 
-      render(<RunsView />);
+      render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
       await act(async () => {
         await jest.advanceTimersByTimeAsync(0);
       });
@@ -2385,7 +2386,7 @@ describe('RunsView · a starting run (task-21)', () => {
     mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
     mockRuns.mockResolvedValue({ runs: LIVE_RUNS } as unknown as OrchestratorRunsPayload);
 
-    render(<RunsView />);
+    render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
     await screen.findByTestId('runs-list');
 
     expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toBeInTheDocument();
@@ -2939,7 +2940,7 @@ describe('RunsView · the shared time zone (#241)', () => {
     mockRuns.mockResolvedValue({ runs: [], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
     const result = render(
       <TimeZoneProvider>
-        <RunsView />
+        <OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>
       </TimeZoneProvider>
     );
     await screen.findByTestId('runs-list');

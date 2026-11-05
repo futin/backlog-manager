@@ -54,8 +54,8 @@ interface Props {
   chipSlot?: ReactNode;
   /**
    * Whether a run on this machine is working — the wordmark cursor's one input (§8.0): it blinks while this is `true` and stands solid otherwise.
-   * `App` holds it from whichever view is mounted (`useReportWorking`); `undefined` — Settings, which polls nothing, or any view before its first poll
-   * lands — reads as not working, because nothing that knows of a run has said there is one.
+   * `App` reads it from the shell's one runs poll (`OrchestratorRunsProvider`); `undefined` — before that poll's first answer lands — reads as not
+   * working, because nothing that knows of a run has said there is one.
    */
   working?: boolean;
   /**

@@ -12,6 +12,7 @@ import BoardView from '../client/src/components/board/BoardView';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { readStyles, ruleBlock } from './helpers/css-rule';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 /**
  * `BoardColumn` and the card's marker row — the two pieces of §8.3 that are
@@ -110,7 +111,7 @@ function stub(items: ItemsIndex = ITEMS, agents: AgentsStatus | null = AGENTS_ST
 }
 
 async function renderBoard(): Promise<void> {
-  render(<BoardView source="files" />);
+  render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 

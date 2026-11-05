@@ -10,6 +10,7 @@ import PullRequestsView from '../client/src/components/github/PullRequestsView';
 import { PR_LAYOUT_KEY } from '../client/src/lib/pr-layouts';
 import { UPDATING_MS } from '../client/src/lib/prs';
 import type { OrchestratorRun, PrRepoView, PullRequestRow, PullRequestsPayload, RunQueueItem } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 /**
  * GitHub › PRs (source-sections spec, Goal 2 and "Left to the builder"; `.claude/DESIGN.md` §8.11). The page draws the server's PR cache grouped by repo and
@@ -198,7 +199,7 @@ async function clickAndSettle(el: HTMLElement): Promise<void> {
 
 async function mount(props: { onOpenSettings?: () => void } = {}) {
   const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-  const view = render(<PullRequestsView {...props} />);
+  const view = render(<OrchestratorRunsProvider><PullRequestsView {...props} /></OrchestratorRunsProvider>);
   await flush();
   return { user, ...view };
 }

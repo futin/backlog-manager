@@ -16,6 +16,7 @@ import { homeOffer, homeOnly, proOffer, proSuggested } from './helpers/offers';
 import { NO_MACHINE_TEXT } from '../client/src/lib/dashboards';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectOffers, ProjectSummary } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 // Same translation every other orchestrator suite (Task 8/10/11/12) already
 // applies: the fixture is plain JSON, so without this cast its string fields
@@ -199,7 +200,7 @@ describe('toolbar Orchestrate button', () => {
 
   // `source` is the page the project under test is drawn on (source-sections): `files` for the default fixture, `github` for a case that swaps in a tracker.
   async function renderNarrowed(source: SourceSection = 'files'): Promise<void> {
-    render(<BoardView source={source} />);
+    render(<OrchestratorRunsProvider><BoardView source={source} /></OrchestratorRunsProvider>);
     // Not just "the button exists" — the Filters popover renders with only
     // "All projects" the instant BoardView mounts, before `/api/projects`
     // has even resolved. Waiting for alpha's own chip is what proves the
@@ -216,7 +217,7 @@ describe('toolbar Orchestrate button', () => {
   // --- Test case 1 ---------------------------------------------------
   it('renders no button while the board is unfiltered, even with capability on', async () => {
     stub({});
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Orchestrate' })).not.toBeInTheDocument();
   });

@@ -4,8 +4,7 @@ import { useAgents } from '../../hooks/useAgents';
 import { useDashboards } from '../../hooks/useDashboards';
 import { elapsedSince } from '../../lib/item-age';
 import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
-import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
-import { useReportWorking } from '../../hooks/useReportWorking';
+import { useOrchestratorRunsContext } from '../../hooks/OrchestratorRunsContext';
 import { useProjectSources } from '../../hooks/useProjectSources';
 import { machineLabelByHost } from '../../lib/dashboards';
 import { projectLabel } from '../../lib/project-label';
@@ -494,8 +493,7 @@ interface Selection {
  */
 export const RUNS_PAGE_SIZE = 25;
 
-/** `onWorking` is the rail cursor's report (§8.0, `useReportWorking`) — this page's live poll is the one the shell reads, so `App` adds none. */
-export default function RunsView({ onWorking }: { onWorking?: (working: boolean) => void } = {}) {
+export default function RunsView() {
   const { zone } = useTimeZone();
   const { runs: archiveRuns, refresh: refreshArchive } = useOrchestratorArchive();
   // task-21: `starting` rides the same payload and the same poll `liveRuns`
@@ -510,12 +508,11 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
   // second expression agreeing with the first — the shape `watchdogStoodDown`
   // and `isStale` are each one function to avoid, and the one this repo has
   // already been bitten by twice.
-  const { runs: liveRuns, starting, remote: remoteRuns, remoteStarting, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
+  const { runs: liveRuns, starting, remote: remoteRuns, remoteStarting, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRunsContext();
   // Multi-dashboard task 10: the remotes' names, for a remote row's machine and a remote launch's `Starting on <machine>`. `null` until the first answer, which
   // both read as "no remote owns it" — a raw host or machine id is printed rather than nothing.
   const { view: dashboards } = useDashboards();
   // `liveRuns`, never the merged rows below: those fold remote runs in, and another machine's run is not this cursor's to blink for.
-  useReportWorking(liveRuns, starting, onWorking);
   // task-48: which projects are tracker-backed, for the one line a local run
   // that has not claimed an issue yet carries in its detail sheet.
   const projectSources = useProjectSources();

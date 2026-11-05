@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useWhatsNew } from 'ui-kit';
 
 import { SectionBoundary } from './components/SectionBoundary';
@@ -17,6 +17,7 @@ import { JiraSessionsProvider } from './hooks/JiraSessionsContext';
 import { setJiraPage } from './hooks/useJiraPage';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { ProjectsProvider, useProjectsContext } from './hooks/ProjectsContext';
+import { OrchestratorRunsProvider, useOrchestratorRunsContext } from './hooks/OrchestratorRunsContext';
 import { setFilesPage, setGithubPage, useFilesPage, useGithubPage } from './hooks/useSourcePage';
 import { TrackersProvider } from './hooks/TrackersContext';
 import { TimeZoneProvider } from './hooks/TimeZoneContext';
@@ -87,7 +88,10 @@ export function App() {
             {/* The shell's one projects answer (source-sections spec): the rail's Files and GitHub rows are drawn from it, and the shell settles a section
                 whose row has vanished. Inside `JiraProvider` only so the three shell-level answers nest in one place; it reads neither. */}
             <ProjectsProvider>
-              <AppShell />
+              {/* The shell's one runs poll (spec §4.9a): the rail's cursor and every view that reads the run payload share this answer and this clock. */}
+              <OrchestratorRunsProvider>
+                <AppShell />
+              </OrchestratorRunsProvider>
             </ProjectsProvider>
           </JiraProvider>
         </TimeZoneProvider>
@@ -102,6 +106,7 @@ export function App() {
  */
 function AppShell() {
   const { settings, update, legacyLanding } = useSettings();
+  const { working } = useOrchestratorRunsContext();
   /*
     The section is remembered across loads (`writeSection`): reopening on the section you left is what you want from a board you come back to.
 
@@ -181,49 +186,9 @@ function AppShell() {
     window.history.replaceState(window.history.state, '', withoutDeepLink(pathname, search, hash));
   }, []);
 
-  /*
-    Whether a run on this machine is working, for the rail's wordmark cursor (§8.0). Reported up by whichever of Board, Runs and Archive is mounted
-    (`useReportWorking`) — and GitHub › PRs, which runs one for its run-in-progress warning (§8.11) — rather than polled here: each of the three already
-    runs a `useOrchestratorRuns()`, every call is its own 5 s poller, and a fourth
-    in the shell would double the requests on all three pages to learn what the page on screen already knows. `undefined` is "nobody has said" — Settings,
-    which polls nothing, and any view before its first report — and the rail reads it as not working.
-
-    A view that unmounts reports nothing on its way out, so a report has to be dropped for it. The effect below does that on a VIEW change, so a Board that
-    said `true` neither blinks the cursor over Settings nor comes back with the Board before the new mount has said anything — and only on a change: a
-    click on the view already open (the rail's own row, a Runs tree pick) leaves it mounted, its report effect has no reason to run again, and resetting
-    there would stand the cursor solid over a run that is still working. Every report also carries the view that made it, read back only while that view
-    is open, so an old view's report never shows on the one commit between the switch and the reset.
-  */
-  /*
-    A report is tagged by VIEW — the section, and for a source section its page — not by section alone: GitHub › Board and GitHub › Archive are one
-    section, and a pick in the GitHub tree swaps the view without a section change. The tag alone was not enough: it hides the Board's last `true` while a
-    page that reports nothing is open, but that `true` is still there, under the Board's own tag, when the tree brings a new Board back (#401).
-  */
+  // The view on screen — the section, and for a source section its page. GitHub › Board and GitHub › Archive are one section, and a pick in the GitHub
+  // tree swaps the view without a section change, so the boundary below keys on this rather than on the section alone.
   const view = section === 'files' ? `files:${filesPage}` : section === 'github' ? `github:${githubPage}` : section;
-  const [pulse, setPulse] = useState<{ view: string; working: boolean } | null>(null);
-  const working = pulse !== null && pulse.view === view ? pulse.working : undefined;
-  /*
-    Conditional, because a view's report effect runs BEFORE this one, the parent's, in the same commit: an unconditional `setPulse(null)` would wipe the new
-    view's own first report, and `useReportWorking` keys on the boolean, so it would never say it again. Being an effect also settles the race with the OLD
-    view: a poll that landed just before the switch leaves that view's report effect pending, React flushes it ahead of the switch's render, and it lands
-    before this runs.
-  */
-  useEffect(() => {
-    setPulse((p) => (p !== null && p.view !== view ? null : p));
-  }, [view]);
-  // One stable callback per reporting view: the views' report effect lists `onWorking` as a dependency, and an inline arrow would re-run it on
-  // every render of this shell.
-  const report = useMemo(() => {
-    const reportFor = (from: string) => (w: boolean) => setPulse({ view: from, working: w });
-    return {
-      filesBoard: reportFor('files:board'),
-      filesArchive: reportFor('files:archive'),
-      githubBoard: reportFor('github:board'),
-      githubPrs: reportFor('github:prs'),
-      githubArchive: reportFor('github:archive'),
-      runs: reportFor('runs')
-    };
-  }, []);
 
   // A section the reader (or a link, or the shell's own fall) moved to is never provisional: clearing `pending` here is what keeps a click made before the
   // first projects answer from being yanked back to wherever the settle below would have put the guess.
@@ -413,17 +378,17 @@ function AppShell() {
                     <SectionLoading />
                   ) : (
                     <>
-                      {section === 'files' && filesPage === 'board' && <BoardView source="files" onOpenRuns={() => change('runs')} onWorking={report.filesBoard} />}
-                      {section === 'files' && filesPage === 'archive' && <ArchiveView source="files" onWorking={report.filesArchive} />}
-                      {section === 'github' && githubPage === 'board' && <BoardView source="github" onOpenRuns={() => change('runs')} onWorking={report.githubBoard} />}
+                      {section === 'files' && filesPage === 'board' && <BoardView source="files" onOpenRuns={() => change('runs')} />}
+                      {section === 'files' && filesPage === 'archive' && <ArchiveView source="files" />}
+                      {section === 'github' && githubPage === 'board' && <BoardView source="github" onOpenRuns={() => change('runs')} />}
                       {section === 'github' && githubPage === 'prs' && (
-                        <PullRequestsView onWorking={report.githubPrs} onOpenSettings={() => onOpenGithubPage('settings')} />
+                        <PullRequestsView onOpenSettings={() => onOpenGithubPage('settings')} />
                       )}
-                      {section === 'github' && githubPage === 'archive' && <ArchiveView source="github" onWorking={report.githubArchive} />}
+                      {section === 'github' && githubPage === 'archive' && <ArchiveView source="github" />}
                       {section === 'github' && githubPage === 'settings' && <GithubSettingsView />}
                     </>
                   )}
-                  {section === 'runs' && <RunsView onWorking={report.runs} />}
+                  {section === 'runs' && <RunsView />}
                   {section === 'jira' && <JiraView onOpenJiraPage={onOpenJiraPage} />}
                   {/* Settings' watchdog card carries a `Live view` link to Runs ›
                     Watchdog (DESIGN.md §8.6), and this is what it opens with — the

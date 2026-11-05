@@ -10,8 +10,7 @@ import { machineLabelByHost, machineLabelById } from '../../lib/dashboards';
 import { orchestrateStarting, startingOnForItem } from '../../lib/remote-starting';
 import { hasTracker, itemSyncOff, queuedReading, remoteBadge, syncOffReason, trackerLine } from '../../lib/tracker';
 import { remoteAsLive } from '../../lib/remote-run';
-import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
-import { useReportWorking } from '../../hooks/useReportWorking';
+import { useOrchestratorRunsContext } from '../../hooks/OrchestratorRunsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useSettings } from '../../hooks/useSettings';
 import { isStale, leavesBoard } from '../../lib/item-stale';
@@ -112,15 +111,12 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
  * `AppShell`. Optional, because every suite that renders this view bare
  * predates the chip and none of them needs a destination for it.
  *
- * `onWorking` is the rail cursor's report (§8.0, `useReportWorking`): this view's own poll is the one the shell reads, so `App` polls nothing itself.
- * Optional for the same reason `onOpenRuns` is.
- *
  * `source` (source-sections) is REQUIRED: this page draws ONE source's projects, Files or GitHub, and a page that could silently draw every one would be the
  * single board the rail reshape took apart. It narrows the fetched index before any other derivation — items, the project picks, the unreachable warnings,
  * the Orchestrate sheet's project list, the plan-review tally — through `narrowToSource`, so every one of them reads the same set. The run chip is the exception
  * and stays machine-wide (`runs` is never filtered): a run on the other source is still a run on this machine.
  */
-export default function BoardView({ source, onOpenRuns, onWorking }: { source: SourceSection; onOpenRuns?: () => void; onWorking?: (working: boolean) => void }) {
+export default function BoardView({ source, onOpenRuns }: { source: SourceSection; onOpenRuns?: () => void }) {
   const { items: fullIndex, projects: fullProjects, loading, error, refetch } = useBoard();
   /* The source split, once per fetch. `projects` stays `null` until the first answer, exactly as the hook hands it, because `hasTracker` and the hue memo
      below read the absence; `index` is `narrowToSource`'s cut (`lib/sources.ts`, which also owns the rule that routes each index error to the source it
@@ -158,11 +154,10 @@ export default function BoardView({ source, onOpenRuns, onWorking }: { source: S
   // resume is the Runs section's now (§8.4.1's moved-rules table), and this
   // view has no control that can start one. The hook still exports both for
   // that surface; what it no longer has on this page is a second caller.
-  const { runs, starting, remote, remoteStarting, refresh: refreshRuns } = useOrchestratorRuns();
+  const { runs, starting, remote, remoteStarting, refresh: refreshRuns } = useOrchestratorRunsContext();
   // Multi-dashboard task 10: the remotes' names and hosts. `null` until the first answer, which every reader below treats as "no remotes" — a card draws no
   // machine badge and offers no Stop & release for a remote claim for that one fetch, rather than guessing.
   const { view: dashboards } = useDashboards();
-  useReportWorking(runs, starting, onWorking);
   /* Separate from `open`: the sheet can be opened from a card (modal closed)
      or from inside the modal (the modal stays open behind it), so one piece of
      state cannot serve both. */

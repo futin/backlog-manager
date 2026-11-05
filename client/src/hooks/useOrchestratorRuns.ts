@@ -114,9 +114,14 @@ export function useOrchestratorRuns(): {
   refresh: () => void;
   noteResume: (project: string) => void;
   resuming: ReadonlySet<string>;
+  /** False until the first successful payload, true from then on — it stays true when a later fetch fails (the last good answer is still the answer). */
+  answered: boolean;
 } {
   const [runs, setRuns] = useState<OrchestratorRunsPayload['runs']>([]);
   const [starting, setStarting] = useState<OrchestratorRunsPayload['starting']>([]);
+  // `runs` is `[]` both before and after an empty first answer, so "has the server spoken yet" needs its own bit — the rail's cursor reads it to tell
+  // "nobody knows" (undefined) from "nothing is working" (false).
+  const [answered, setAnswered] = useState(false);
   // Other machines' runs on a tracker project (task-48). Their own state,
   // never folded into `runs`: every reader of `runs` here and on the board
   // assumes one run file per project on THIS machine.
@@ -156,6 +161,7 @@ export function useOrchestratorRuns(): {
         .then((payload) => {
           if (!mountedRef.current) return;
           setRuns(payload.runs);
+          setAnswered(true);
           // `payload.starting ?? []`, not `payload.starting`: this hook is the
           // one place a response from an OLDER server (one built before
           // task-14, which a dev box can absolutely be serving while a newer
@@ -308,5 +314,5 @@ export function useOrchestratorRuns(): {
     [refresh]
   );
 
-  return { runs, starting, remote, remoteStarting, refresh, noteResume, resuming };
+  return { runs, starting, remote, remoteStarting, refresh, noteResume, resuming, answered };
 }
