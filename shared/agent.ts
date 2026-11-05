@@ -520,9 +520,8 @@ export const IN_REVIEW_REASON = 'a PR is open for this item';
  * merge closes nothing, so the mapper drops the flag itself once such a PR has landed on the default branch (#411) — this rung never sees a stale label. Without this
  * rung that open, unclaimed issue reads ready to every gate, and a click would start a second execution of work already waiting on a reviewer.
  *
- * Per-item, beside `runClaimBlock` and read by both ladders — the client's `DispatchButton` (after the in-progress block, before the run claim: the label is
- * on the item this board renders, while a run claim is the volatile fact about another worktree) and the server's `plan`/`dispatch` (after `dispatchBlock`,
- * before the run claim, for the same reason). `dispatchGate`/`dispatchBlock` stay project-level and never learn about it. A files item never carries the
+ * Per-item, beside `runClaimBlock`, and the first rung of `itemLadderBlock`, which holds the order and is how the client and the server read this.
+ * `dispatchGate`/`dispatchBlock` stay project-level and never learn about it. A files item never carries the
  * flag — its nearest guard is a new tree's execute branch or directory, `EXECUTE_HELD_REASON` below — so this reads the flag alone and does not re-check the source.
  */
 export function inReviewBlock(item: BacklogItem): string | null {
@@ -549,9 +548,8 @@ export const UNVETTED_REASON = 'filed from outside the repo — groom it to vet 
  * `mapIssue` derives `unvetted` from the issue author's `author_association` and the pin a groom's `body` write leaves in its claim; without this rung an
  * outsider who fills in `## Plan` would have it executed on this machine, and an edit after the groom would be executed unread.
  *
- * Per-item, on the same ladder as the two around it, in all three places that read them — the client's `DispatchButton` and the server's `plan` and
- * `dispatch` re-check — AFTER `inReviewBlock` (a PR is the stronger fact) and BEFORE `planReviewBlock`: approving a plan does not vet it, so an item carrying
- * both must say the reason the approval would not clear. Reads the flag alone, like both neighbours; a files item never carries it.
+ * Per-item, a rung of `itemLadderBlock`, which holds the order and says why this one reads before plan-review. Reads the flag alone, like both neighbours; a
+ * files item never carries it.
  */
 export function unvettedBlock(item: BacklogItem): string | null {
   return item.unvetted === true ? UNVETTED_REASON : null;
@@ -570,13 +568,33 @@ export const PLAN_REVIEW_REASON = 'this plan awaits review';
  * tick's groom adds the mark in the one write that wrote the plan, and a person removes it to approve the plan for execution. Without this rung a groomed
  * item with an unreviewed plan reads ready to every gate, and a click would execute a plan nobody has read.
  *
- * Per-item, the second rung of the same ladder `inReviewBlock` sits on, in all three places that read it — the client's `DispatchButton`, and the server's
- * `plan` and `dispatch` re-check — always AFTER `inReviewBlock`, so an item carrying both says the PR reason (a PR is the stronger fact: the plan was already
- * approved and executed). Like it, this reads the flag alone and never re-checks the source: the board reads the files mark from the working tree, so a line
- * deleted but not yet committed still disables Run, the conservative direction.
+ * Per-item, the last rung of `itemLadderBlock`, which holds the order. Like `inReviewBlock`, this reads the flag alone and never re-checks the source: the
+ * board reads the files mark from the working tree, so a line deleted but not yet committed still disables Run, the conservative direction.
  */
 export function planReviewBlock(item: BacklogItem): string | null {
   return item.planReview === true ? PLAN_REVIEW_REASON : null;
+}
+
+/**
+ * The per-item ladder: the first of the four blocks this item carries, or null. The one home of their order (#468) — the client's `DispatchButton` and the
+ * server's `plan` and `dispatch` re-check all read this, so a new rung is added here and reaches all three in the right position, where it used to be written
+ * out by hand in each and only comments kept them in step.
+ *
+ * - **In-review first:** a PR is the strongest fact. The plan was already approved and executed, so an item carrying anything else as well says the PR.
+ * - **Execute-held next:** it is in-review's files half — this work has been done on a branch already.
+ * - **Unvetted before plan-review:** approving a plan does not vet it, so an item carrying both must say the reason the approval would not clear.
+ *
+ * The rungs outside it each need something the item alone does not carry: `dispatchBlock`/`dispatchGate` the status, `progressBlock` a clock (and it is the
+ * client's alone), `runClaimBlock` the run payload, `syncOffBlock` the poller. The ladder as a whole reads after the project-level blocks and before the run
+ * claim, on both sides: its facts are on the item this board renders, while a run claim is the volatile fact about another worktree.
+ *
+ * `executeHeld` is the held reason as a VALUE, required and with no default, the idiom `runClaimBlock`'s `starting` uses: a default would let a server caller
+ * drop the rung by omission. It is a value because the rung reads git and `shared/` cannot reach `runGit` — `executeHeldBlock`
+ * (`server/src/agents/execute-held.util.ts`) stays there, per request and memoised nowhere, never mapped onto the item. `DispatchButton` passes `null`, since
+ * its payload carries no such read and the button must not learn it.
+ */
+export function itemLadderBlock(item: BacklogItem, executeHeld: string | null): string | null {
+  return inReviewBlock(item) ?? executeHeld ?? unvettedBlock(item) ?? planReviewBlock(item);
 }
 
 /**

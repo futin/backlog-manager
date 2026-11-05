@@ -272,7 +272,8 @@ A person approves by removing it, and there is no `--no-plan-review` anywhere: a
 committing. Every gate that could execute the item reads the one flag and refuses with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON` in
 `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and in the execute skill's text, pinned to it by `test/agents-shared.test.ts`): the board's Run
 button, the server's `plan` and `dispatch` ladder (an uncoded 409), the orchestrator's queue — which turns the item `ungroomed` with that reason, the way
-`in-review` does, so no new verdict reaches the run's stages — and `backlog-execute`'s own refusal. The rung is `planReviewBlock`, always AFTER `inReviewBlock`:
+`in-review` does, so no new verdict reaches the run's stages — and `backlog-execute`'s own refusal. The rung is `planReviewBlock`, always AFTER `inReviewBlock`
+(`itemLadderBlock` is the one home of the order):
 an item carrying both says the PR, the stronger fact, since a PR means the plan was already approved and executed. Between the two sits `unvettedBlock` (#341), on a tracker item an outsider filed whose body no groom has pinned. The mark is read as the tool reads
 `runner-fix:`, by PRESENCE: a `plan-review: yes` that silently did not gate would be the failure the mark exists to prevent. Where it is read matters on a files
 project — the board reads the working tree, so a line deleted but not yet committed still disables Run (the conservative direction), while the tick and the
@@ -1807,7 +1808,8 @@ answer:
 - **A PR for this item is open** — `inReviewBlock` (`shared/agent.ts`), the execute pr-mode spec's decision 9: a tracker issue whose `in-review` label is on,
   mapped to `inReview: true`. Execute in `pr` mode releases its claim once the branch is pushed, and the issue stays open until the PR merges, so without
   this rung the item reads ready and a click starts a second execution of work already waiting on a reviewer. Unlike `progressBlock` it lives in `shared/` and
-  the server reads it too — `plan` and `dispatch()` refuse with the same sentence, `a PR is open for this item` — because the label is on the tracker, where
+  the server reads it too, through `itemLadderBlock`, the one home of the order of these rungs — `plan` and `dispatch()` refuse with the same sentence, `a PR is
+  open for this item` — because the label is on the tracker, where
   any machine's spawn can see it. A files item never carries the flag; its guard is the next entry's. **The guard ends when the work lands, label or
   no label** (#411): a partial fix ships as `Refs #<n>`, which closes nothing, so after #362 merged #266 kept its label and read "a PR is open" with none
   open, until a person noticed. The mapper now drops `inReview` while `TrackerPollerService.reviewLifted` holds — a PR whose body references the issue after a
@@ -1826,7 +1828,8 @@ answer:
 - **An outsider filed this item and no groom has pinned its body** — `unvettedBlock` (`shared/agent.ts`, #341): a tracker bug or task whose author is not
   OWNER, MEMBER or COLLABORATOR, mapped to `unvetted: true` until a live claim of ours carries `pin` equal to the body's hash. It reads `UNVETTED_REASON`, and
   the server's `plan` and `dispatch()` refuse with the same sentence, for the same reason the open PR does: the mark is derived from the tracker, which any
-  machine's spawn can see. It sits after the open PR, which is the stronger fact, and before plan-review, because a groom has to vet the body first.
+  machine's spawn can see. It sits after the open PR, which is the stronger fact, and before plan-review, because a groom has to vet the body first;
+  `itemLadderBlock` holds that order.
 - **An orchestrator run has already claimed this item** — `runClaimBlock` (`shared/agent.ts`), which reads the run payload rather than the item. It has to: a
   run works each item inside its own git worktree and nothing reaches `main` until the item merges, so while a run holds `task-7` at `reviewing` the `task-7`
   file `/api/items` scans on `main` looks untouched — no `started:`, no `phase:`, nothing `isInProgress` could key off. The item is not lying; it is telling the
