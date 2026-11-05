@@ -1492,12 +1492,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-list-warn-detail { color: var(--ink2); overflow-wrap: anywhere }
 /* Jira › Board › List — the issue table (`JiraIssueList`), the session table's twin: the same scroll box, hairline, row height and header type, so the two
    List-shaped pages read as one family. Eight columns; Summary is the one auto column and takes what the px columns leave, so at 1440 px with the rail open
-   (a ~1150 px well) it keeps ~400 px and the box needs no sideways scroll; below 980 px the BOX scrolls and the page never does. `table-layout: fixed` with
+   (a ~1150 px well) it keeps ~380 px and the box needs no sideways scroll; below 980 px the BOX scrolls and the page never does. `table-layout: fixed` with
    widths on the head, for the reason the session table's comment gives: under `auto` a long summary widens its column and pushes Updated off the edge. */
 .jira-issues-scroll { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
 .jira-issues-table { width: 100%; min-width: 980px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
 .jira-issues-table thead th:nth-child(1) { width: 124px }
-.jira-issues-table thead th:nth-child(2) { width: 96px }
+.jira-issues-table thead th:nth-child(2) { width: 120px } /* Key: fits a twelve-character key (TIMIFY-28086); the mock's PAY-131 hid that 96 px clips it. */
 .jira-issues-table thead th:nth-child(4) { width: 84px }
 .jira-issues-table thead th:nth-child(5) { width: 128px }
 .jira-issues-table thead th:nth-child(6) { width: 140px }
