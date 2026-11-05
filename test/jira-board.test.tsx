@@ -1550,7 +1550,7 @@ describe('the issue List', () => {
   });
 
   it('reads `Ended · 2h` for a top whose only session ended on a folded child', async () => {
-    sessionsAnswer = () => ({ links: [{ ...linkOn('PAY-162', 'e', 'ended', 5), endedAt: hoursAgo(2), endReason: 'finished' }], reachable: true, rowsAt: null });
+    sessionsAnswer = () => ({ links: [{ ...linkOn('PAY-162', 'e', 'ended', 5), endedAt: hoursAgo(2.05) /* a margin: the row's `now` is read at mount, before this stamp is minted, and exactly 2 h reads `1h` by a few ms */, endReason: 'finished' }], reachable: true, rowsAt: null });
     await renderList();
     await waitFor(() => expect(sessionCell('PAY-120')).toContain('Ended · 2h'));
   });
