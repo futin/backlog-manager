@@ -3860,8 +3860,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .ui-split-more::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 1px; background: var(--on-accent); opacity: .35 }
 .ui-split-icon { display: inline-flex; align-items: center; line-height: 1 }
-.ui-split-main:hover:not(:disabled) { background: var(--ink2) }
-.ui-split-more:hover:not(:disabled) { background: var(--ink2) }
+/* The ink hover is the solid chip's only: unscoped, its 0,3,0 beat the dashed variant's 0,2,0 ground and left --ink3 text on --ink2. */
+.ui-split:not(.ui-split-dashed) .ui-split-main:hover:not(:disabled) { background: var(--ink2) }
+.ui-split:not(.ui-split-dashed) .ui-split-more:hover:not(:disabled) { background: var(--ink2) }
+/* The group clips (overflow: hidden) and the halves fill it, so the quality floor's 1px-out ring would be cut off: draw it inside each half. */
+.ui-split-main:focus-visible { outline-offset: -2px }
+.ui-split-more:focus-visible { outline-offset: -2px }
 .ui-split-main:disabled { cursor: default }
 .ui-split-more:disabled { cursor: default }
 .ui-split-dashed { background: var(--strip); border: 1px dashed var(--hairline2) }
