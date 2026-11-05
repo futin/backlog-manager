@@ -120,7 +120,7 @@ board` (through the `onOpenJiraPage` link the rail already threads down) and `Sh
   `JiraWorktreeRow` per tree with branch, path, state pill, ticket pill and `Remove` (copies the command, as today).
 - **Skills** use the Run menu's rows (Jira spec §4.1): built-ins first, then `Skills on this machine · N`, each with tile, label, command sub-line, and
   `default` or `Make default`. `Make default` writes `jiraDefaultAction`, the same per-browser Local setting Settings › Local
-  shows (its title says `default in this browser`); the page's server scope does not change that. What a user adds here is what the Run menu shows.
+  shows as its `Jira default action` row (that row's hint gains `Saved in this browser.`, a copy change); the page's server scope does not change that. What a user adds here is what the Run menu shows.
 
 ### 4.5 Launch sheet and deck (`JiraLaunchSheet`, `JiraAgentDeck`, `JiraSessionCard`; mock `JiraLaunch.dc.html`)
 
@@ -205,7 +205,8 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
 - **Runs**: one `useOrchestratorRuns()` poll per tab moves up into a shell-level context, and every view that calls the hook today (Board,
   Archive, PRs, Runs — `test/run-pulse.test.ts`'s `VIEWS`) reads the context instead, so the shell's count and every view share one 5 s request, never
   two. That keeps the guard's purpose (no second poller for the shell) and changes its shape: the caller list becomes the one provider, and the `App` bar
-  becomes "only the provider calls the hook". Both move in the same commit, with this section as the reason. The count is
+  becomes "only the provider calls the hook". The provider also derives `working` for the wordmark cursor, so the four views' `useReportWorking`
+  calls and the guard's "each view reports" case (`run-pulse.test.ts`) leave in the same commit. Both move in the same commit, with this section as the reason. The count is
   grey; 0 hides the pill.
 - Both readers pause with the page's existing visibility handling, if the poll they reuse has it.
 
@@ -237,8 +238,11 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
   5 s) return the last result without calling out. Both are reads of the outside service, so they respect the existing budget and 429 handling. A repo
   whose sync is `off` is skipped (it refuses every write path and is not polled; the row's sync icon is disabled). The GitHub sweep also re-reads the PR
   cache for the swept repos once, past its TTL, through the same one-in-flight-read-per-repo path. Failures: an unknown `boardId` is a 404 `unknown board`
-  and an unknown `repo` a 404 `unknown repo` (the repo convention); a malformed body is a 400. Inside a stored 429 window the sweep makes no call and answers
-  429 with the stored `retryAt` (the existing up-front refusal), and Sync now shows `Jira asked to wait until <time>` (GitHub: its sleep's end). A 401, 5xx
+  and an unknown `repo` a 404 with the existing text `<repo> is not the repo of a registered GitHub project` (`pulls.service.ts`); a malformed body is a
+  400. Jira: inside a stored 429 window the sweep makes no call and answers 429 with the stored `retryAt` (the existing up-front refusal); Sync now shows
+  `Jira asked to wait until <time>`. GitHub has no `retryAt`: its sleeps are per repo, in two pools (`sleepUntil`, `secondaryUntil`). With `repo` and that
+  repo asleep, the answer is 429 carrying the later of the two ends and no call is made (Sync now shows `GitHub asked to wait until <time>`); without `repo`,
+  200, skipping asleep repos as the timed sweep does. A 401, 5xx
   or transport failure answers 200 with the cache unchanged and `access` / `detail` saying why, as a timed sweep leaves it; the pill turns amber or red from
   those, and Sync now shows the detail. A status pill is late against each row's own interval, not the 15 s tick.
 - **Read again** on the Sources card calls both and re-reads the registry; it shows the newest age when all three answer.
@@ -252,7 +256,7 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
 - `Review plan` on the deck and Sessions rows is mock wording: the label is today's action wording for that state.
 - The mock's 10.5 px and 11.5 px text, its uppercase micro headers and any lowercase kicker follow the Jira spec's rules (11 px floor, sentence case,
   `.rail-kicker` uppercase).
-- The Cost column on Sessions is built only if the data is already served (§4.3).
+- The Cost column on Sessions is not built: no cost is served (§4.3).
 - The `2 need you` sub-line under PRs in the rail is not built: the count pill already says it.
 - `Squash and merge` wording: the menu row reads `Merge`; the method stays in today's Confirm select.
 - The icon rail drawn on the first boards was a drawing shortcut; the rail is always open (§4.9).
@@ -273,8 +277,8 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
   `/api/prs/*` call assertions keep their payloads.
 - **`FilterBar` restyle**: existing FilterBar tests keep passing (Files, Archive, Jira band); the popover shows chip groups, `Showing N of M`
   and `Clear`, which resets every group; Escape closes and returns focus to the chip. Sessions: the window, Repository, Run and `All tickets` groups drive
-  the existing state, and `Show 30 days` in the empty state sets the window; the Sessions cases in `test/jira-list.test.tsx` and
-  `test/rail.test.tsx` that click the `All tickets` chip or pick from the Repository / Run / window selects now open the Filter popover and pick the chip.
+  the existing state, and `Show 30 days` in the empty state sets the window; the Sessions cases in `test/jira-list.test.tsx` that click the `All tickets` chip (:271, :361, :420) now open the Filter popover and pick the chip
+  (no existing case picks from the selects; the window is set programmatically).
   The Session cell and State column assert today's `STATE_LABEL` words with the age; `test/jira-sessions-state.test.ts` is unchanged.
 - **Segmented counts**: the count renders beside each label and is part of the option's accessible name.
 - **Stepper**: − and + change the value by one step, clamp at min and max (the button at a bound is disabled), typing still works, and the existing
@@ -286,8 +290,9 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
   the guard in `test/run-pulse.test.ts` still lists the same callers (or moves with a stated reason).
 - **Status pill**: green, amber and red by sweep age and connection; the popover's `Sync now` posts once, disables while running, and shows the new age.
 - **Sweep routes** (jest, server): an `off` repo is skipped; 409 when the poller is not armed; a concurrent second call joins the first sweep (one outbound call); a call inside the
-  floor returns the cached result without calling out; an unknown `boardId` or `repo` is a 404, a malformed body a 400; inside a 429 window the answer is 429 with the
-  stored `retryAt` and no call is made; a 401 answers 200 with the cache unchanged; a cross-origin POST is refused by the guard.
+  floor returns the cached result without calling out; an unknown `boardId` or `repo` is a 404, a malformed body a 400; Jira inside a 429 window answers 429 with the
+  stored `retryAt` and makes no call; GitHub with an asleep `repo` answers 429 with the later of `sleepUntil` / `secondaryUntil`, and without `repo` skips
+  asleep repos with a 200; a 401 answers 200 with the cache unchanged; a cross-origin POST is refused by the guard.
 - **Settings**: `test/settings-view.test.tsx`'s "no in-page switch" assertions (and the comment that states that rule) invert to the
   `Local | Shared | Dashboards` switch, with §3's override as the reason. The info toggle has `aria-expanded` and reveals the long text; the theme cards set the theme; the merge-mode cards set
   `orchestrateDefaultMergeMode`; every card has its scope pill.
