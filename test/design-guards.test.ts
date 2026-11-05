@@ -454,4 +454,20 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
     const readers = styleRules.reduce((n, r) => n + (r.body.match(/var\(--main-gap\)/g) ?? []).length, 0);
     expect(readers).toBe(2);
   });
+
+  /**
+   * jsdom never sees layout, so the two CSS facts the List's Run menu depends on are pinned as text. (1) The action cell must out-rank
+   * `.jira-issues-row td { overflow: hidden }` or the menu hanging under the cell is clipped on every row. (2) `.jira-issues-scroll` may scroll only inside
+   * the `@container` block: an `overflow-x: auto` anywhere else clips the menu's panel on the bottom rows even where the table fits.
+   */
+  it('the issue List keeps its Run menu visible: the action cell out-ranks the td rule and the scroll box scrolls only in the container query', () => {
+    const act = styleRules.find((r) => r.selector.includes('.jira-issues-act') && /overflow:\s*visible/.test(r.body ?? ''));
+    expect(act?.selector).toMatch(/\.jira-issues-row\s+td\.jira-issues-act/);
+    const at = styles.indexOf('@container (max-width');
+    expect(at).toBeGreaterThan(-1);
+    const hits = [...styles.matchAll(/\.jira-issues-scroll\s*\{[^}]*overflow-x:\s*auto/g)];
+    expect(hits).toHaveLength(1);
+    const block = styles.slice(at, styles.indexOf('\n}', at));
+    expect(block).toContain('.jira-issues-scroll { overflow-x: auto }');
+  });
 });

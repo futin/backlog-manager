@@ -46,28 +46,30 @@ export function JiraIssueList({
 }) {
   if (tops.length === 0) return <div className="board-empty">{filtered ? 'No issues match' : 'No issues'}</div>;
   return (
-    <div className="jira-issues-scroll" role="region" aria-label="Issues">
-      <table className="jira-issues-table">
-        <thead>
-          <tr>
-            <th scope="col">Session</th>
-            <th scope="col">Key</th>
-            <th scope="col">Summary</th>
-            <th scope="col">Type</th>
-            <th scope="col">Status</th>
-            <th scope="col">Priority</th>
-            <th scope="col">Assignee</th>
-            <th scope="col">Sprint</th>
-            <th scope="col">Updated</th>
-            <th scope="col" aria-label="Run" />
-          </tr>
-        </thead>
-        <tbody>
-          {tops.map((top) => (
-            <IssueRow key={top.key} top={top} fold={fold} cell={sessions.get(top.key) ?? null} now={now} onOpenIssue={onOpenIssue} onRun={onRun} />
-          ))}
-        </tbody>
-      </table>
+    <div className="jira-issues-frame">
+      <div className="jira-issues-scroll" role="region" aria-label="Issues">
+        <table className="jira-issues-table">
+          <thead>
+            <tr>
+              <th scope="col">Session</th>
+              <th scope="col">Key</th>
+              <th scope="col">Summary</th>
+              <th scope="col">Type</th>
+              <th scope="col">Status</th>
+              <th scope="col">Priority</th>
+              <th scope="col">Assignee</th>
+              <th scope="col">Sprint</th>
+              <th scope="col">Updated</th>
+              <th scope="col" aria-label="Run" />
+            </tr>
+          </thead>
+          <tbody>
+            {tops.map((top) => (
+              <IssueRow key={top.key} top={top} fold={fold} cell={sessions.get(top.key) ?? null} now={now} onOpenIssue={onOpenIssue} onRun={onRun} />
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -105,7 +107,7 @@ function IssueRow({
         ) : (
           <span className="jira-issues-flex">
             <span className="ui-stripe-dot" data-tone={sessionTone(cell.state)} aria-hidden="true" />
-            <span>{age === null ? STATE_LABEL[cell.state] : `${STATE_LABEL[cell.state]} · ${age}`}</span>
+            <span className="jira-issues-cut">{age === null ? STATE_LABEL[cell.state] : `${STATE_LABEL[cell.state]} · ${age}`}</span>
           </span>
         )}
       </td>
