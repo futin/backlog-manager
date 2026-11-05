@@ -389,10 +389,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   border-top: 1px solid var(--hairline); font-size: 12px; color: var(--ink2);
 }
 .tracker-pop-note { margin: 0; font-size: 13px; color: var(--ink2); line-height: 1.45 }
-/* The Jira chip's popover (§8.9.4) draws one line per board and no timer, so `.tracker-row`'s 120 px second column would be an empty gutter: one column
-   here. The line wraps, unlike `.tracker-row-name`, because a failure's sentence is the thing the row exists to show. */
-.jira-chip-board { grid-template-columns: minmax(0, 1fr) }
-.jira-chip-board-line { font-size: 13px; overflow-wrap: anywhere }
+/* The Jira chip's popover (§8.9.4) draws the dashboard's sync row per board: name over a sub-line, `.tracker-row`'s 120 px `next` meter, then the board's
+   `now` chip in a third, content-sized column. The sub-line wraps, unlike `.tracker-row-name`, because a failure's sentence is what a person acts on. */
+.jira-chip-board { grid-template-columns: minmax(0, 1fr) 120px auto }
+.jira-chip-board-line { font-size: 12px; color: var(--ink3); overflow-wrap: anywhere }
 
 /* ---------------------------------------------- Board section
    Every registered project's backlog on one board, read via GET /api/projects

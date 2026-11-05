@@ -574,9 +574,21 @@ export function soonestBoard(boards: readonly JiraBoardStatus[], _now: number): 
 export function jiraPollReading(boards: readonly JiraBoardStatus[], now: number): PollReading {
   const soonest = soonestBoard(boards, now);
   if (soonest === null) return boards.length === 0 ? { value: '—', fraction: null, tone: 'green' } : { value: 'sync off', fraction: null, tone: 'amber' };
-  const interval = SYNC_INTERVALS[soonest.interval];
-  const progress = interval === null ? null : pollProgress(soonest.polledAt, now, interval);
-  return countdownReading(progress, '…');
+  return boardPollReading(soonest, now, false);
+}
+
+/**
+ * One board's `next` meter in the chip popover (its row beside the `now` button — the dashboard's sync row, carried over): `syncing…` on a full green bar
+ * while that board's `now` is out, `sync off` (amber, empty) for a board with no interval, else the countdown to `polledAt` plus its own interval through
+ * `countdownReading` — `…` before its first poll, `overdue` after two silent intervals. The chip's POLL meter is this reading on `soonestBoard`, so the
+ * pill and the row it came from cannot count one board two ways. A failing board keeps its countdown: the failure is the row's red sub-line, worded by
+ * `failurePhrase`, and a red bar would say the same thing a second time with fewer words.
+ */
+export function boardPollReading(board: JiraBoardStatus, now: number, syncing: boolean): PollReading {
+  if (syncing) return { value: 'syncing…', fraction: 1, tone: 'green' };
+  const interval: unknown = SYNC_INTERVALS[board.interval];
+  if (typeof interval !== 'number') return { value: 'sync off', fraction: null, tone: 'amber' };
+  return countdownReading(pollProgress(board.polledAt, now, interval), '…');
 }
 
 const byName = (a: JiraBoardStatus, b: JiraBoardStatus): number => a.name.localeCompare(b.name);

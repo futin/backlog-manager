@@ -57,8 +57,8 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
   };
 }
 
-function wrap(data: JiraStatusPayload | null, section: Section) {
-  const value: JiraState = { data, loading: false, error: false, reload: () => {} };
+function wrap(data: JiraStatusPayload | null, section: Section, reload: () => void = () => {}) {
+  const value: JiraState = { data, loading: false, error: false, reload };
   return (
     <JiraContext.Provider value={value}>
       <JiraChip section={section} />
@@ -66,9 +66,9 @@ function wrap(data: JiraStatusPayload | null, section: Section) {
   );
 }
 
-function renderChip(data: JiraStatusPayload | null, section: Section = 'github') {
-  const utils = render(wrap(data, section));
-  return { ...utils, update: (next: JiraStatusPayload | null, nextSection: Section = section) => utils.rerender(wrap(next, nextSection)) };
+function renderChip(data: JiraStatusPayload | null, section: Section = 'github', reload: () => void = () => {}) {
+  const utils = render(wrap(data, section, reload));
+  return { ...utils, update: (next: JiraStatusPayload | null, nextSection: Section = section) => utils.rerender(wrap(next, nextSection, reload)) };
 }
 
 const chip = () => screen.getByTestId('jira-chip');
@@ -145,7 +145,7 @@ describe('JiraChip', () => {
     expect(meterOf(chip(), 'CALLS')).toHaveAttribute('data-tone', 'green');
   });
 
-  it('opens a popover that is a reading: site, one line per board with Jira’s own failure, calls, last 429 — no link and no button', async () => {
+  it('opens a popover: site, one row per board with Jira’s own failure and a `now` each, calls, last 429 — and no link', async () => {
     renderChip(
       status({
         access: 'rate-limited',
@@ -168,10 +168,10 @@ describe('JiraChip', () => {
     expect(within(pop).getByText('acme.atlassian.net')).toBeInTheDocument();
     const lines = within(pop).getAllByTestId('jira-chip-board');
     // By name (`boardsByName`), the order the picker and Setup use — not the file's order, which is Platform, Growth, Ops.
-    expect(lines.map((l) => l.textContent)).toEqual([
-      'Growth · not polled yet',
-      "Ops · polled 1m ago · Field 'foo' does not exist",
-      'Platform · polled 12 s ago'
+    expect(lines.map((l) => [l.querySelector('.tracker-row-name')?.textContent, l.querySelector('.jira-chip-board-line')?.textContent])).toEqual([
+      ['Growth', 'not polled yet · every 1m'],
+      ['Ops', "polled 1m ago · every 1m · Field 'foo' does not exist"],
+      ['Platform', 'polled 12 s ago · every 1m']
     ]);
     // The Connection card's copy, from the same two functions, so the two surfaces cannot word one fact two ways.
     const calls = status({ calls: { sweep: 12, last429At: ago(4 * 60_000) } }).calls;
@@ -180,8 +180,83 @@ describe('JiraChip', () => {
     expect(within(pop).getByText(sweep.rate)).toBeInTheDocument();
     expect(within(pop).getByText(accessPhrase('rate-limited') as string)).toBeInTheDocument();
     expect(within(pop).getByText(/Retry-After 60/)).toBeInTheDocument();
+    // No link — the rail is the only switch — and the only buttons are the boards' own `now`s, one per row.
     expect(pop.querySelector('a')).toBeNull();
-    expect(pop.querySelector('button')).toBeNull();
+    expect(within(pop).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Sweep Growth now', 'Sweep Ops now', 'Sweep Platform now']);
+  });
+
+  describe('a board’s `now`', () => {
+    let fetchMock: jest.Mock;
+    let answer: (res: { ok: boolean; status: number; body: unknown }) => void;
+
+    beforeEach(() => {
+      fetchMock = jest.fn(
+        () =>
+          new Promise((resolve) => {
+            answer = ({ ok, status, body }) => resolve({ ok, status, json: () => Promise.resolve(body) });
+          })
+      );
+      (globalThis as { fetch?: unknown }).fetch = fetchMock;
+    });
+    afterEach(() => {
+      Reflect.deleteProperty(globalThis, 'fetch');
+    });
+
+    const rowOf = (name: string) => screen.getAllByTestId('jira-chip-board').find((r) => r.querySelector('.tracker-row-name')?.textContent === name) as HTMLElement;
+
+    it('POSTs the board’s id, reads syncing… and is disabled until the answer, then re-reads the status once', async () => {
+      const reload = jest.fn();
+      renderChip(status({ boards: [board({ id: 'b_00000001', name: 'Platform' }), board({ id: 'b_00000002', name: 'Growth' })] }), 'github', reload);
+      await user.click(chip());
+      await user.click(screen.getByRole('button', { name: 'Sweep Platform now' }));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('/api/jira/boards/sweep');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body as string)).toEqual({ id: 'b_00000001' });
+      expect(within(meterOf(rowOf('Platform'), 'next')).getByText('syncing…')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Sweep Platform now' })).toBeDisabled();
+      // The other board's `now` is independent of this one's.
+      expect(screen.getByRole('button', { name: 'Sweep Growth now' })).toBeEnabled();
+      expect(reload).not.toHaveBeenCalled();
+      await act(async () => answer({ ok: true, status: 200, body: { ok: true } }));
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: 'Sweep Platform now' })).toBeEnabled();
+      expect(within(meterOf(rowOf('Platform'), 'next')).queryByText('syncing…')).toBeNull();
+    });
+
+    it('still reads syncing… when the popover is closed and opened again mid-sweep', async () => {
+      renderChip(status());
+      await user.click(chip());
+      await user.click(screen.getByRole('button', { name: 'Sweep Platform now' }));
+      await user.keyboard('{Escape}');
+      await user.click(chip());
+      expect(within(meterOf(rowOf('Platform'), 'next')).getByText('syncing…')).toBeInTheDocument();
+      await act(async () => answer({ ok: true, status: 200, body: { ok: true } }));
+    });
+
+    it('a refusal is drawn red in that row with the server’s sentence, and the next `now` clears it', async () => {
+      const reload = jest.fn();
+      renderChip(status(), 'github', reload);
+      await user.click(chip());
+      await user.click(screen.getByRole('button', { name: 'Sweep Platform now' }));
+      await act(async () => answer({ ok: false, status: 404, body: { error: 'unknown board' } }));
+      const refusal = within(rowOf('Platform')).getByText('unknown board');
+      expect(refusal).toHaveClass('jira-setup-failure');
+      // A refused sweep still re-reads the status: a board deleted elsewhere is exactly the case where the list is stale.
+      expect(reload).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByRole('button', { name: 'Sweep Platform now' }));
+      expect(within(rowOf('Platform')).queryByText('unknown board')).toBeNull();
+      await act(async () => answer({ ok: true, status: 200, body: { ok: true } }));
+    });
+
+    it('an `off` board reads sync off on its meter and keeps its `now`', async () => {
+      renderChip(status({ boards: [board({ interval: 'off' })] }));
+      await user.click(chip());
+      expect(within(meterOf(rowOf('Platform'), 'next')).getByText('sync off')).toBeInTheDocument();
+      expect(rowOf('Platform').querySelector('.jira-chip-board-line')?.textContent).toBe('last polled 5 s ago · sync off');
+      expect(screen.getByRole('button', { name: 'Sweep Platform now' })).toBeEnabled();
+    });
   });
 
   it('closes on Escape and on a change of section', async () => {
