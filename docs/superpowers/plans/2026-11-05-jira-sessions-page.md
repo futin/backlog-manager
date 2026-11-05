@@ -43,7 +43,7 @@ its own file both pages draw. `JiraBoardView`'s `list` view draws a new `JiraIss
 ### Task 1: `sessions` page in the model, the rail tree and the badge
 
 **Files:**
-- Modify: `client/src/lib/jira-page.ts` (type, `JIRA_PAGES`, header comment)
+- Modify: `client/src/lib/jira-page.ts` (type, `JIRA_PAGES`, header comment) and `client/src/hooks/useJiraPage.ts` (L6, L12 comments say "two pages")
 - Modify: `client/src/components/SideRail.tsx` (~L209-222 badge `onClick`; ~L478-490 `RAIL_JIRA_LABEL` + its comment)
 - (`JiraView.tsx` needs no edit here: its `page === 'setup' ? … : <Board>` already draws the Board page for `'sessions'` until Task 3.)
 - Test: `test/jira-lib.test.ts` (~L597), `test/rail.test.tsx` (~L625-656)
@@ -136,11 +136,12 @@ Behaviour:
   - "a row click opens Detail on the Sessions page, and a landed write re-reads the board list": count fetches of `/api/jira/boards/<id>/issues`; open
     Detail from a row; fire `Assign to me` (stub `/api/jira/issue/assign` ok); the count goes up by one without advancing timers.
   - "search is per page: text typed on Sessions is not in the Board page's search after a switch".
-  - "a Sessions row's `Run ▾` › a pick opens the launch sheet": an ended row on a ticket with no live run; open `Run ▾`, pick `Work it end to end`; a dialog
-    named for the launch sheet (as `test/jira-launch.test.tsx` finds it) is open, hosted by `JiraView`, and Detail is not.
+  - "a Sessions row's `Run ▾` › a pick opens the launch sheet": an ended row on `PAY-131` with no live run; open `Run ▾`, pick `Work it end to end`;
+    `findByRole('dialog', { name: 'run PAY-131' })` is open (the sheet's `FormSheet` name), and `queryByRole('dialog', { name: /^PAY-131 / })` (Detail) is
+    null.
   - In `test/jira-board.test.tsx`: "the FilterBar is drawn in List too" (Filters button present with view `list`) and "the search reads `Search issues` in
     both views" — these pin Step 3's C1 change in this task, not Task 4.
-- [ ] **Step 2:** `pnpm exec jest test/jira-list.test.tsx` — the new cases fail.
+- [ ] **Step 2:** `pnpm exec jest test/jira-list.test.tsx test/jira-board.test.tsx` — the new cases fail.
 - [ ] **Step 3: Implement** the page, the prop, the `JiraView` dispatch and the `JiraBoardView` `list` branch removal. The `JiraBoardView` search label
   becomes `Search issues` / `search summaries` in both views, and the FilterBar is drawn in both views (C1) — move its `view === 'board'` guard out now,
   keeping it the one element in one place (the existing comment explains why), and rewrite that comment.
@@ -193,8 +194,8 @@ Behaviour (spec "Jira › Board"):
     unparseable with a parseable child → the child's; nothing parseable → `null`. Existing `sortTops` cases stay green unedited.
   - `jira-board.test.tsx`, new `describe('the issue List')` using the `GROUP` fold fixture (~L534-575), `setJiraView('list')`:
     - "draws one row per top and no folded issue, in `sortTops` order": row `data-key`s equal `['PAY-120', 'PAY-180', 'PAY-190']` (the fixture's
-      `sortTops(fold.tops, fold.under)`), and no folded key is a row. Plus a case where an In Progress or Done top is the newest, so the List's order
-      differs from the Board's column order — the List puts it first.
+      `sortTops(fold.tops, fold.under)`), and no folded key is a row. That order is also the fixture's input order, so add a case that discriminates: an
+      In Progress top updated `daysAgoStamp(0)` (newer than everything else) **appended last** to the served list — it must be the first row.
     - "names how many issues fold under a top": `PAY-120` row reads `<fold.under.get('PAY-120').length> under it` — the whole fold, so pick a fixture top
       whose under count differs from its direct-children count and assert the under count; a top with exactly one folded issue reads `1 under it`; a top
       with none has no suffix.
