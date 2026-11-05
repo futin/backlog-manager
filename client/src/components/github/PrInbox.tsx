@@ -68,7 +68,10 @@ export function PrInbox(props: PrLayoutProps) {
       ) : (
         <>
           <div className="prs-inbox-triage">
+            {/* The track skin, the page's layout switch's own: the mock draws both as one recessed ground, and the default stroked row read as three loose
+                chips beside it (ui-verify D3, 2026-11-05). */}
             <Segmented<PrLevel | 'all'>
+              track
               label="Triage"
               value={filter ?? 'all'}
               options={LEVELS.map((level) => ({ value: level, label: LEVEL_LABEL[level], count: counts[level] }))}

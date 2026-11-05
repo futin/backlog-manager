@@ -206,6 +206,8 @@ describe('PrActions — the split Merge', () => {
     await user.click(more('futin/y#6'));
     expect(menu('futin/y#6').querySelector('.prs-keys-tick')).toBeNull();
     expect(strip('futin/y#6').querySelector('.ui-split')).toHaveClass('ui-split-dashed');
+    // Dashed alone: the outline skin's later rules would repaint the border solid and the word in ink.
+    expect(strip('futin/y#6').querySelector('.ui-split')).not.toHaveClass('ui-split-outline');
   });
 
   it('names the main half by its mode: Merge #12, Auto-merge #12 while checks run, Auto-merge on #12 once armed', () => {

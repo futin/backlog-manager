@@ -118,6 +118,7 @@ describe('PrInbox — tiles, order and filter', () => {
   it('counts one PR in each level and lists failing, then behind, then the quiet line', () => {
     render(<PrInbox {...props([trio()])} />);
     const triage = screen.getByRole('group', { name: 'Triage' });
+    expect(triage).toHaveClass('ui-seg-track');
     expect(within(triage).getAllByRole('button').map((b) => b.textContent)).toEqual(['Needs you 1', 'Worth a look 1', 'Quiet 1']);
     const order = ['pr-row-a/x#1', 'pr-row-a/x#2', 'pr-row-a/x#3'].map((id) => screen.getByTestId(id));
     expect(order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

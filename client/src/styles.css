@@ -2356,6 +2356,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    this page's own layout and the readings no primitive owns — the phase lamp,
    the policy table, a watching row, the activity table. */
 .watchdog-monitor { display: flex; flex-direction: column; gap: var(--group-gap); flex: 1 1 auto; min-height: 0 }
+/* Only the Activity sheet gives up height when the board is short; every other child keeps its content height. A flex item's automatic minimum is its
+   content only while its overflow is visible, so the Ticks figure strip — a primitive that clips its rounded corners with overflow: hidden — shrank to
+   5 px at 1440×1000 and its three figures vanished (ui-verify D5, 2026-11-05). Watchdog's strip escaped only because a wrapper sits around it. */
+.watchdog-monitor > :not(.watchdog-activity) { flex-shrink: 0 }
 
 /* The status band (§8.4.2, spec §4.7) — one sheet row: ring tile, a body column (phase word, `stateLine`, the sweep meter) and the flat policy chip at the
    far edge. The word is 16/500 and the sub 12 px, so the row reads as a headline with a caption; the body takes the slack so the chip never wraps under it. */
@@ -2480,7 +2484,11 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    first four are short tokens whose wrapping would only ever be an accident
    of width, where `detail` is a sentence. */
 .watchdog-table td { padding: 7px 12px 7px 0; border-top: 1px solid var(--hairline); vertical-align: baseline; white-space: nowrap }
-.watchdog-table-detail { white-space: normal; color: var(--ink) }
+/* `.watchdog-table td` (0,1,1) above out-ranked a bare `.watchdog-table-detail` (0,1,0), so the detail computed `nowrap` and never wrapped: a tick's
+   long reason held the Ticks Activity ledger at 1213 px in its 1104 px box at 1440, a sideways scroll at desktop width (ui-verify D6, 2026-11-05 — on main
+   too). The selector now matches that rule's weight and comes after it. `anywhere` rather than `break-word`, because only `anywhere` lowers the cell's
+   min-content, which is what an auto-layout table sizes by, and a reason can carry one long path. */
+.watchdog-table td.watchdog-table-detail { white-space: normal; overflow-wrap: anywhere; color: var(--ink) }
 .watchdog-table time { font-size: 12px; color: var(--ink3) }
 
 /* The stage-chip idiom applied to the kind column. Five tones, each a MEANING
@@ -2676,6 +2684,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .runs-card { padding-left: 15px; gap: 6px }
 .runs-card[aria-current='true'] { box-shadow: inset 3px 0 0 var(--stripe, transparent), inset 0 0 0 1px var(--ink) }
 .runs-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0 }
+/* The id holds the leading edge and everything after it — the machine tag, then the age — packs to the trailing one, as the mock's card draws it
+   (ui-verify D2, 2026-11-05). The first sibling takes the auto margin, so a local run's lone age lands there too. */
+.runs-card-id + * { margin-left: auto }
 .runs-card-id { flex: none; font-size: 12px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 1px 6px; overflow-wrap: anywhere }
 /* The crashed Live row's second line — all three readings (`no heartbeat for
    <age>`, `last reported <id> at <stage>` or `all items at rest`, and
@@ -2983,12 +2994,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The legend lists all seven stages whether or not they have a segment, so the widget keeps one shape in both places it renders. Auto-fit columns let it
    wrap to two rows in the narrower detail rollup without a media query. */
 .run-bars-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 4px 16px }
-.run-bars-item { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 6px }
+.run-bars-item { display: grid; grid-template-columns: 8px auto auto; justify-content: start; align-items: center; gap: 6px }
 .run-bars-swatch { width: 8px; height: 8px; border-radius: 2px; background: var(--steel) }
 .run-bars-label { font-size: 12px; color: var(--ink2) }
 /* THE VALUE IS INK, NOT THE SEGMENT'S COLOUR: text never wears a data colour. The swatch carries the hue, the number is the precise reading. `--ink3` for
    the `-none` modifier is the app's usual "nothing recorded". */
-.run-bars-value { font-size: 12px; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums }
+/* The value sits beside its word, not at the cell's far edge: right-aligned in a 1fr cell it landed nearer the NEXT column's swatch and read as that
+   stage's number (ui-verify D1, 2026-11-05; the mock draws `dispatched 2h 41m` as one phrase). */
+.run-bars-value { font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums }
 .run-bars-value-none { color: var(--ink3) }
 
 /* ---------------------------------------------- stage track (Task 5)
@@ -3410,6 +3423,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .prs-matrix-panel .prs-keys-side { align-items: flex-start; flex: none }
 .prs-matrix-panel .prs-foot { margin-top: 0 }
+/* In the panel the split sits at the leading edge, so the base popover's right-anchoring hung the 280 px Merge menu leftwards over the side rail (ui-verify
+   D7, 2026-11-05). It hangs from the split's left edge instead — the Jira Status chip's flip (`.jira-detail-status`), and for the same reasons: the phone
+   bottom sheet is skipped through `[class*='narrow']`, and the family is never named, which guard 7 forbids in a page selector. */
+.prs-matrix-panel .prs-keys-merge > [role='dialog']:not([class*='narrow']) { left: 0; right: auto }
 .prs-matrix-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12px }
 .prs-cell-ok { color: var(--ink2) }
 .prs-cell-bad { color: var(--red) }

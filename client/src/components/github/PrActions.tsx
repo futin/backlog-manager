@@ -125,7 +125,10 @@ export function PrActions({
           <SplitChip
             label={`${word} #${pr.number}`}
             labelMore={`Merge options for #${pr.number}`}
-            variant={primary === 'merge' && half.mode === 'merge' && half.block === null ? 'ink' : 'outline'}
+            // A blocked half wears the dashed skin ALONE: `.ui-split-outline` sits after `.ui-split-dashed` in the primitives block at equal specificity, so
+            // passing both drew a solid border and ink text on `Blocked` (ui-verify D4, 2026-11-05). `ink` is SplitChip's no-skin value, not a filled pill
+            // here — every ink rule is `:not(.ui-split-dashed)`.
+            variant={half.block === null && !(primary === 'merge' && half.mode === 'merge') ? 'outline' : 'ink'}
             dashed={half.block !== null}
             mainBlockedBy={half.block === null ? undefined : mainId}
             title={half.block ?? undefined}
