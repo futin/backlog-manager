@@ -10,6 +10,8 @@ import PullRequestsView from '../client/src/components/github/PullRequestsView';
 import { PR_LAYOUT_KEY } from '../client/src/lib/pr-layouts';
 import { UPDATING_MS } from '../client/src/lib/prs';
 import type { OrchestratorRun, PrRepoView, PullRequestRow, PullRequestsPayload, RunQueueItem } from '../shared/types';
+import { PullRequestsProvider } from '../client/src/hooks/PullRequestsContext';
+import { TrackersContext } from '../client/src/hooks/TrackersContext';
 import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 /**
@@ -199,7 +201,17 @@ async function clickAndSettle(el: HTMLElement): Promise<void> {
 
 async function mount(props: { onOpenSettings?: () => void } = {}) {
   const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-  const view = render(<OrchestratorRunsProvider><PullRequestsView {...props} /></OrchestratorRunsProvider>);
+  // The shell's PR read is enabled by a registered GitHub project, so the page is mounted under a trackers answer that holds one.
+  const trackers = { data: { platforms: [], projects: [{ source: 'github' }] } as never, loading: false, error: false, reload: () => {}, saveInterval: () => Promise.resolve(), refusals: {} };
+  const view = render(
+    <TrackersContext.Provider value={trackers}>
+      <OrchestratorRunsProvider>
+        <PullRequestsProvider>
+          <PullRequestsView {...props} />
+        </PullRequestsProvider>
+      </OrchestratorRunsProvider>
+    </TrackersContext.Provider>
+  );
   await flush();
   return { user, ...view };
 }

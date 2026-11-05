@@ -19,6 +19,7 @@ import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { ProjectsProvider, useProjectsContext } from './hooks/ProjectsContext';
 import { OrchestratorRunsProvider, useOrchestratorRunsContext } from './hooks/OrchestratorRunsContext';
 import { setFilesPage, setGithubPage, useFilesPage, useGithubPage } from './hooks/useSourcePage';
+import { PullRequestsProvider } from './hooks/PullRequestsContext';
 import { TrackersProvider } from './hooks/TrackersContext';
 import { TimeZoneProvider } from './hooks/TimeZoneContext';
 import { useNarrow } from './hooks/useNarrow';
@@ -90,7 +91,11 @@ export function App() {
             <ProjectsProvider>
               {/* The shell's one runs poll (spec §4.9a): the rail's cursor and every view that reads the run payload share this answer and this clock. */}
               <OrchestratorRunsProvider>
-                <AppShell />
+                {/* The shell's one `GET /api/prs` read (spec §4.9a), beside the runs poll: the rail's GitHub count is drawn on every page, so the read no
+                    longer belongs to the pages that draw PRs. Inside `TrackersProvider` because it is enabled by a registered GitHub project. */}
+                <PullRequestsProvider>
+                  <AppShell />
+                </PullRequestsProvider>
               </OrchestratorRunsProvider>
             </ProjectsProvider>
           </JiraProvider>

@@ -1,6 +1,6 @@
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { Pill } from '../ui/Pill';
-import { usePullRequests } from '../../hooks/usePullRequests';
+import { usePullRequestsContext } from '../../hooks/PullRequestsContext';
 import { splitReach } from '../../lib/pr-layouts';
 
 /**
@@ -20,16 +20,15 @@ import { splitReach } from '../../lib/pr-layouts';
  * its own: the next read that answers `ok`, or delivers every rollup, takes it off this card, with no button here, because there is nothing to retry from the
  * client.
  *
- * **It reads `usePullRequests`**, the PRs page's own hook, so the request, the server's 60 s cache and the payload are the same ones; this is the hook's
- * second mount. The server's PR cache still has no timer, so PRs are read only while a page that shows them is open — and this card counts as one, for the
- * same reason the PRs page does: it states a fact the read produced. Mounting Settings therefore costs at most one PR-list read per repo a minute.
+ * **It reads `usePullRequestsContext`**, the shell's one PR read (spec §4.9a), so the request, the server's 60 s cache and the payload are the PRs page's own.
+ * The shell reads while a GitHub project is registered, because the rail counts PRs that need you on every page; mounting Settings adds no read of its own.
  *
  * **No age on the rows.** `PrRepoView` carries `polledAt` (the last SUCCESSFUL read) and no attempt time, so a `checked … ago` would be a guess; the row is
  * the repo and its `detail`, in the `--red` text class (`.set-error`) a refusal already uses on this page. The fix note names the token's setting and the
  * variable it lives in, never a value.
  */
 export function GithubAccessGroup() {
-  const { data } = usePullRequests();
+  const { data } = usePullRequestsContext();
   if (data === null || !data.token) return null;
 
   const { shown, hidden } = splitReach(data.repos);

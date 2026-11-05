@@ -11,7 +11,7 @@ import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
 import { useOrchestratorRunsContext } from '../../hooks/OrchestratorRunsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { usePullRequests } from '../../hooks/usePullRequests';
+import { usePullRequestsContext } from '../../hooks/PullRequestsContext';
 import { emptyRepoNote, newestPolledAt, parseLayout, PR_LAYOUT_KEY, PR_LAYOUT_OPTIONS, splitReach, type PrLayout } from '../../lib/pr-layouts';
 import type { PrRunContext } from '../../lib/pr-run';
 import { applyUpdateOutcome, findPr, groupRepos, mergeBlock, outcomeLine, updateTransition, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
@@ -27,8 +27,8 @@ const WARNING_CLOCK_MS = 15_000;
  * GitHub › PRs (.claude/DESIGN.md §8.11; source-sections spec, Goal 2 and "Left to the builder"): the open pull requests of every registered GitHub repo,
  * with merge, auto-merge and update branch — grouped by repo in Cards, ranked across repos in Inbox and Matrix.
  *
- * **Reads.** `usePullRequests` is the page's one read of `GET /api/prs`, and this page is one of its two mounts (the other is GitHub › Settings' `Access` card)
- * — leaving both is what stops PR reads, because the server's PR cache has no timer of its own. The run-in-progress warning (`prRunWarning`) is derived from
+ * **Reads.** `usePullRequestsContext` is the shell's one read of `GET /api/prs` (spec §4.9a; `PullRequestsProvider`), shared with GitHub › Settings' `Access` card
+ * — the shell reads while a GitHub project is registered, because the rail counts PRs that need you on every page. The run-in-progress warning (`prRunWarning`) is derived from
  * what the Board already polls: `useBoard`'s items and projects and the shell's one runs poll (`useOrchestratorRunsContext`): runs, remote runs and remote
  * launches — no request of its own.
  *
@@ -76,7 +76,7 @@ const WARNING_CLOCK_MS = 15_000;
  * Default export, because `App` loads it lazily like every other page.
  */
 export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: () => void }) {
-  const { data, error, refresh } = usePullRequests();
+  const { data, error, refresh } = usePullRequestsContext();
   const { items, projects } = useBoard();
   const { runs, starting, remote, remoteStarting } = useOrchestratorRunsContext();
   const now = useNow(true, WARNING_CLOCK_MS);

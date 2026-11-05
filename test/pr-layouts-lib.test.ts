@@ -8,6 +8,7 @@ import {
   emptyRepoNote,
   isNoAccess,
   LEVEL_DOT,
+  needsYouCount,
   levelCounts,
   MATRIX_COLUMNS,
   MATRIX_LABEL,
@@ -23,7 +24,7 @@ import {
   splitReach,
   transientFailures
 } from '../client/src/lib/pr-layouts';
-import { mergeBlock, prChips, updateBlock, type PrOutcome } from '../client/src/lib/prs';
+import { groupRepos, mergeBlock, prChips, updateBlock, type PrOutcome } from '../client/src/lib/prs';
 import type { PrRepoView, PullRequestRow } from '../shared/types';
 
 /**
@@ -490,5 +491,26 @@ describe('prPills', () => {
   it('adds nothing when a named fact already explains the state', () => {
     const p = row({ mergeState: 'blocked', checks: 'pending' });
     expect(prPills(p)).toEqual(prChips(p));
+  });
+});
+
+describe('needsYouCount', () => {
+  const x = repo({ repo: 'a/x', prs: [row({ number: 1, review: 'changes-requested' }), row({ number: 2, checks: 'failure' }), row({ number: 7, review: 'approved', checks: 'success' })] });
+  const y = repo({ repo: 'a/y', prs: [row({ number: 3, mergeState: 'behind' }), row({ number: 4, draft: true })] });
+
+  it("equals the Inbox's Needs you figure for the same payload", () => {
+    const inbox = levelCounts(rankPrs(splitReach(groupRepos([x, y])).shown))['needs-you'];
+    expect(inbox).toBeGreaterThan(0);
+    expect(needsYouCount({ token: true, repos: [x, y] })).toBe(inbox);
+  });
+
+  it('does not count a repo the token cannot read', () => {
+    const forbidden = repo({ repo: 'a/z', access: 'forbidden', detail: 'no', prs: [row({ number: 9, review: 'changes-requested' })] });
+    expect(needsYouCount({ token: true, repos: [x, y, forbidden] })).toBe(needsYouCount({ token: true, repos: [x, y] }));
+    expect(needsYouCount({ token: true, repos: [forbidden] })).toBe(0);
+  });
+
+  it('is 0 before anything has answered', () => {
+    expect(needsYouCount(null)).toBe(0);
   });
 });

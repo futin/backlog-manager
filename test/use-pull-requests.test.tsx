@@ -1,9 +1,14 @@
 /**
  * @jest-environment jsdom
  */
-import { act, renderHook } from '@testing-library/react';
+import { act, render, renderHook, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import '@testing-library/jest-dom';
 
 import { PRS_POLL_MS, usePullRequests } from '../client/src/hooks/usePullRequests';
+import { PullRequestsProvider, usePullRequestsContext } from '../client/src/hooks/PullRequestsContext';
+import { TrackersContext } from '../client/src/hooks/TrackersContext';
+import { needsYouCount } from '../client/src/lib/pr-layouts';
 import { fetchPullRequests, mergePr, updateBranch } from '../client/src/lib/prs-api';
 import type { PullRequestsPayload } from '../shared/types';
 
@@ -244,5 +249,84 @@ describe('prs-api', () => {
     // JSON, but not ours: an outcome this page has no word for.
     global.fetch = jest.fn(() => Promise.resolve(res(200, { ok: true, outcome: 'exploded', pr: null, reread: true }))) as unknown as typeof fetch;
     await expect(updateBranch({ repo: 'futin/y', number: 3, headSha: 'b'.repeat(40) })).rejects.toThrow('update branch failed (200)');
+  });
+});
+
+/** The shell's PR read: on only while a GitHub project is registered, one request a minute however many readers there are. */
+describe('PullRequestsProvider', () => {
+  const trackers = (sources: string[]) => ({
+    data: { platforms: [], projects: sources.map((source) => ({ source })) } as never,
+    loading: false,
+    error: false,
+    reload: () => {},
+    saveInterval: () => Promise.resolve(),
+    refusals: {}
+  });
+  const wrap = (sources: string[]) =>
+    function Wrapper({ children }: { children: ReactNode }) {
+      return (
+        <TrackersContext.Provider value={trackers(sources)}>
+          <PullRequestsProvider>{children}</PullRequestsProvider>
+        </TrackersContext.Provider>
+      );
+    };
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    global.fetch = realFetch;
+  });
+
+  it('asks nothing, on mount or after 60 s, while no GitHub project is registered', async () => {
+    const fn = jest.fn(() => Promise.resolve(res(200, payload('futin/x'))));
+    global.fetch = fn as unknown as typeof fetch;
+    const { result } = renderHook(() => usePullRequestsContext(), { wrapper: wrap(['files']) });
+    await flush();
+    await advance(PRS_POLL_MS * 2);
+    expect(fn).not.toHaveBeenCalled();
+    expect(result.current.enabled).toBe(false);
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toBeNull();
+    await expect(result.current.refresh()).resolves.toBeNull();
+  });
+
+  it('with a GitHub project, two readers make ONE request per 60 s', async () => {
+    const fn = jest.fn(() => Promise.resolve(res(200, payload('futin/x'))));
+    global.fetch = fn as unknown as typeof fetch;
+    function Reader({ id }: { id: string }) {
+      const { data } = usePullRequestsContext();
+      return <p>{`${id}:${data === null ? 'none' : data.repos.length}`}</p>;
+    }
+    render(
+      <TrackersContext.Provider value={trackers(['github'])}>
+        <PullRequestsProvider>
+          <Reader id="view" />
+          <Reader id="access" />
+        </PullRequestsProvider>
+      </TrackersContext.Provider>
+    );
+    await flush();
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('view:1')).toBeInTheDocument();
+    expect(screen.getByText('access:1')).toBeInTheDocument();
+    await advance(PRS_POLL_MS);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('a registered project with no token is enabled and counts nothing', async () => {
+    global.fetch = jest.fn(() => Promise.resolve(res(200, { token: false, repos: [] }))) as unknown as typeof fetch;
+    const { result } = renderHook(() => usePullRequestsContext(), { wrapper: wrap(['github']) });
+    await flush();
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.data).toEqual({ token: false, repos: [] });
+    expect(needsYouCount(result.current.data)).toBe(0);
+  });
+
+  it('throws outside the provider', () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => renderHook(() => usePullRequestsContext())).toThrow('inside <PullRequestsProvider>');
+    spy.mockRestore();
   });
 });

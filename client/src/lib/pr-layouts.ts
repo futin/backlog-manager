@@ -1,8 +1,8 @@
 import { elapsedSince } from './item-age';
-import { parsePrKey, prChips, type PrChip, prKey, mergeBlock, updateBlock, type PrOutcome } from './prs';
+import { groupRepos, parsePrKey, prChips, type PrChip, prKey, mergeBlock, updateBlock, type PrOutcome } from './prs';
 import type { DotTone } from '../components/ui/Dot';
 import type { GlyphName } from '../components/ui/Glyphs';
-import type { PrRepoView, PullRequestRow } from '../../../shared/types';
+import type { PrRepoView, PullRequestRow, PullRequestsPayload } from '../../../shared/types';
 
 /**
  * What the GitHub › PRs layouts (Inbox, Matrix, Cards) say about a pull request, derived once (`.claude/DESIGN.md` §8.11; spec
@@ -160,6 +160,16 @@ export function levelCounts(ranked: readonly RankedPr[]): Record<PrLevel, number
   const counts: Record<PrLevel, number> = { 'needs-you': 0, 'worth-a-look': 0, quiet: 0 };
   for (const r of ranked) counts[r.level] += 1;
   return counts;
+}
+
+/**
+ * The Inbox's `Needs you` number, for the rail's GitHub count (spec §4.9a): the exact pipeline `PullRequestsView` feeds the Inbox — `groupRepos`, then only the
+ * repos the token can read (`splitReach(...).shown`), then `rankPrs` and `levelCounts` — so the rail and the tile can never disagree. A repo the token cannot
+ * read contributes nothing, as on the page. `null` (nothing has answered, or the shell does not read PRs) is 0.
+ */
+export function needsYouCount(data: PullRequestsPayload | null): number {
+  if (data === null) return 0;
+  return levelCounts(rankPrs(splitReach(groupRepos(data.repos)).shown))['needs-you'];
 }
 
 export type PrLayout = 'inbox' | 'matrix' | 'cards';

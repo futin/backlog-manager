@@ -5,6 +5,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
+import { PullRequestsProvider } from '../client/src/hooks/PullRequestsContext';
 import GithubSettingsView from '../client/src/components/github/GithubSettingsView';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { SYNC_INTERVALS } from '../shared/types';
@@ -71,7 +72,9 @@ async function renderPage(waitFor_ = 'alpha'): Promise<void> {
   stubFetch();
   render(
     <TrackersProvider>
-      <GithubSettingsView />
+      <PullRequestsProvider>
+        <GithubSettingsView />
+      </PullRequestsProvider>
     </TrackersProvider>
   );
   await waitFor(() => expect(screen.getByText(waitFor_)).toBeInTheDocument());
@@ -213,7 +216,9 @@ describe('GitHub › Settings: the sync card', () => {
     global.fetch = jest.fn(() => new Promise(() => {})) as jest.Mock;
     render(
       <TrackersProvider>
-        <GithubSettingsView />
+        <PullRequestsProvider>
+          <GithubSettingsView />
+        </PullRequestsProvider>
       </TrackersProvider>
     );
     expect(screen.getByText('checking…')).toBeInTheDocument();
@@ -225,7 +230,7 @@ describe('GitHub › Settings: the sync card', () => {
 
 /**
  * The `Access` card (PRs-layouts spec, "GitHub › Settings › Access"): the repos GitHub PRs hides because the token cannot read them, with the error GitHub
- * gave and the fix. It reads `usePullRequests` — the PRs page's own read — so it draws nothing until that answers and nothing when every repo reads.
+ * gave and the fix. It reads `usePullRequestsContext` — the shell's one PR read — so it draws nothing until that answers and nothing when every repo reads.
  */
 describe('GitHub › Settings: the Access card', () => {
   const card = (): HTMLElement => screen.getByText('Access').closest('.set-group') as HTMLElement;

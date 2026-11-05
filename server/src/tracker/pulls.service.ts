@@ -26,10 +26,11 @@ import {
  * ## Why on demand, and why no timer
  *
  * The issue poller sweeps on a clock because the board, the claim protocol and every run read its cache whether or not anybody is looking. Nothing reads
- * pull requests except the PRs page, so a sweep would spend GraphQL budget on a list nobody is drawing and break "the poller is armed only while something
- * is connected" in spirit — a page closed an hour ago would still be polling. So this service has NO `setTimeout`, no interval and no sweep: a read happens
- * only inside `list()` (a `GET /api/prs`) or, from task 4, inside a write's re-read. The page's own `useCoalescedFetch` at 60 s is the only cadence, and it
- * stops when the page unmounts.
+ * pull requests except the client shell's one reader (`PullRequestsProvider`, armed only while a GitHub project is registered; spec §4.9a — the rail counts
+ * PRs that need you on every page), so a sweep would spend GraphQL budget on a list nobody is drawing and break "the poller is armed only while something
+ * is connected" in spirit — a tab closed an hour ago would still be polling. So this service has NO `setTimeout`, no interval and no sweep: a read happens
+ * only inside `list()` (a `GET /api/prs`) or, from task 4, inside a write's re-read. The shell reader's 60 s poll is the only cadence, and it
+ * stops when no GitHub project is registered or the tab closes.
  *
  * ## Why a cache at all
  *
