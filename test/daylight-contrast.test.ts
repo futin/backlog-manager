@@ -242,7 +242,6 @@ describe('daylight status tokens hold AA', () => {
    *   would read 4.34:1 — a judgement about that set, not about whether a status word is legible, so it is left to whoever next retunes it.
    */
   it('every token client/src/styles.css sets text in clears 4.5:1 on each surface, unless it paints its own ground, is a mark glyph or a project hue', () => {
-    const MARK_GLYPHS: Record<string, string> = {};
     const sites = textSites();
     // Guards the parser, not the palette: these must be found, or the loop below passes on nothing. `.rail-link` declares `background: none` and must be
     // measured — the narrowing of the ground exemption, held by a real rule.
@@ -253,10 +252,6 @@ describe('daylight status tokens hold AA', () => {
     const fails: string[] = [];
     for (const s of sites) {
       if (s.ground.kind !== 'none' || s.token.startsWith('--proj-')) continue;
-      if (s.selector in MARK_GLYPHS) {
-        if (s.token !== MARK_GLYPHS[s.selector]) fails.push(`${s.selector} is a mark glyph and must read ${MARK_GLYPHS[s.selector]}, reads ${s.token}`);
-        continue;
-      }
       for (const bg of SURFACES) {
         const r = ratio(day(s.token), day(`--${bg}`));
         if (r < AA) fails.push(`${s.selector}: ${s.token} on --${bg}: ${r.toFixed(2)}:1`);

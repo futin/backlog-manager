@@ -234,12 +234,12 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
               </button>
             )}
             {id === 'github' && (counts?.github ?? 0) > 0 && (
-              <span className="rail-count">
+              <span className="rail-count" role="img" aria-label={`${counts?.github} ${counts?.github === 1 ? 'PR needs' : 'PRs need'} you`}>
                 <Pill tone="warn">{counts?.github}</Pill>
               </span>
             )}
             {id === 'runs' && (counts?.runs ?? 0) > 0 && (
-              <span className="rail-count">
+              <span className="rail-count" role="img" aria-label={`${counts?.runs} live ${counts?.runs === 1 ? 'run' : 'runs'}`}>
                 <Pill tone="neutral">{counts?.runs}</Pill>
               </span>
             )}
@@ -503,7 +503,6 @@ const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
   sessions: 'Sessions',
   setup: 'Setup'
 };
-
 
 /**
  * Both source trees' labels (source-sections spec), one map because the two trees name the same pages the same way — Board and Archive are the views the

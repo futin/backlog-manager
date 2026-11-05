@@ -1,6 +1,8 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { act, render, renderHook, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
@@ -733,6 +735,15 @@ describe('the rail rows and footer', () => {
     expect(pill).toHaveClass('ui-pill-warn');
     rerender(withProps({ counts: { github: 0 } }));
     expect(rowOf('GitHub').querySelector('.ui-pill')).toBeNull();
+  });
+
+  it('names each count by its meaning and lets a click on a plain count through to the row', () => {
+    render(withProps({ counts: { github: 3, runs: 1 } }));
+    expect(screen.getByRole('img', { name: '3 PRs need you' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '1 live run' })).toBeInTheDocument();
+    // jsdom applies no stylesheet, so the pass-through is pinned at its source: the rule that keeps a plain count from swallowing the row's click.
+    const css = readFileSync(join(__dirname, '../client/src/styles.css'), 'utf8');
+    expect(css).toMatch(/\.rail-count:not\(button\)\s*\{\s*pointer-events:\s*none/);
   });
 
   it('draws Runs’ count as a neutral pill', () => {

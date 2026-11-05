@@ -354,7 +354,7 @@ function AppShell() {
           api={api}
         />
         {whatsNew.open && whatsNew.data && <ReleasesDrawer data={whatsNew.data} onClose={whatsNew.close} />}
-        {/* The strip over the well (§8.0). `.maincol` is the rail's paper, so the rail and the strip are one white L and the well's 24 px top-left
+        {/* The strip over the well (§8.0). `.maincol` is `--strip` (white) while the rail is `--board`, so the well's 24 px top-left
             curve is drawn against white — it was grey on grey while `.main` made its own gap with a margin, because `body` is --board and stays so.
             The strip is always in the tree, empty without a tracker, so its height (`--main-gap`, which `.runs-board` subtracts) never depends on
             whether one is connected; CSS hides it below 700 px. */}

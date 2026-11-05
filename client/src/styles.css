@@ -177,7 +177,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 @media (prefers-reduced-motion: reduce) { .rail-cursor.blink { animation: none } }
 
 /* A row: 28 px tile, label, and (as a sibling `.rail-count`) the count pill. The open row is `--strip` paper on the `--board` rail with the tile gone ink —
-   a white row, never a colour change in the label (§5). Hover darkens the LABEL only, so a hovered row and a selected one never read as one fill. */
+   a white row against the grey rail, never a colour change in the label (§5). Hover darkens the LABEL only, so a hovered row and a selected one never read as one fill. */
 .rail-link {
   position: relative; display: flex; align-items: center; gap: 10px;
   min-height: 40px; padding: 6px; border-radius: 10px;
@@ -195,6 +195,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
   display: inline-flex; padding: 0; border: 0; background: none; cursor: default;
 }
+/* A plain count only states a fact: it lets the click through to the row beneath it. The Jira count is a real button and keeps its own pointer. */
+.rail-count:not(button) { pointer-events: none }
 button.rail-count { cursor: pointer }
 
 /* The sub-nav tree, drawn only for the open section (§8.0). Hung 24 px in — the
@@ -247,18 +249,17 @@ button.rail-count { cursor: pointer }
   background: none; color: var(--ink); font-size: 15px; cursor: pointer;
 }
 
-/* The column right of the rail: the shell strip over the well. Painted --strip — the rail's paper — so the rail and the strip read as one white L
-   around the well, and so the well's 24 px top-left radius is drawn against white. Before the strip, `.main` carried a 24 px top margin for that
-   curve, but `body` paints --board too, so the margin was grey on grey and the corner never showed (the tracker strip spec, §1). */
-.maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--board) }
+/* The column right of the rail: the shell strip over the well. Painted --strip, while the rail is --board (so its white open row shows): the strip is the white
+   band the well's 24 px top-left curve is drawn against. Before the strip, `.main` carried a 24 px top margin for that curve, but `body` paints --board too,
+   so the margin was grey on grey and the corner never showed (the tracker strip spec, §1). */
+.maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--strip) }
 /* The shell strip (§8.0): what is true of the machine wherever you stand — the tracker chip and the Jira chip, right-aligned, 8 px apart. Its height is `--main-gap`, and it
    keeps that height when empty, so the well's top edge never moves with whether a tracker is connected. */
 .topstrip {
   height: var(--main-gap); flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   padding: 0 var(--body-pad);
 }
-/* The well: --board with a 24 px top-LEFT radius — the one corner the rail and the strip meet, the design's app-shell inset (§8.0), visible now that
-   the strip above it is white. No top margin: the strip IS the gap, one token (guard 9). `body` stays --board, so below the fold and behind a short
+/* The well: --board with a 24 px top-LEFT radius — the corner against the white strip above it, the design's app-shell inset (§8.0). No top margin: the strip IS the gap, one token (guard 9). `body` stays --board, so below the fold and behind a short
    section the page is still the well's colour, which is what the rail's own bottom edge expects. */
 .main {
   flex: 1; min-width: 0; padding: var(--body-pad);
