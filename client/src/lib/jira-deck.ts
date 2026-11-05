@@ -140,8 +140,9 @@ export function deckTally(entries: readonly DeckEntry[]): { needs: number; worki
  * `↳ <top key>` — the card shows the session's own key, and this is what says which card of the board it hangs under. A reservation knows only its name and
  * repo, so the surface and the model are absent rather than guessed.
  */
-export function deckCrumb(entry: DeckEntry, skills: readonly { id: string; name: string }[]): string {
-  const parts: (string | null)[] = [entry.issue.key === entry.top.key ? null : `↳ ${entry.top.key}`];
+export function deckCrumb(entry: DeckEntry, skills: readonly { id: string; name: string }[], opts: { lead?: boolean } = {}): string {
+  // `lead: false` leaves the `↳ top` out: the deck card draws it as a pill beside the key and keeps the crumb to the run's own words.
+  const parts: (string | null)[] = [opts.lead === false || entry.issue.key === entry.top.key ? null : `↳ ${entry.top.key}`];
   const { link, starting } = entry;
   if (link !== null) {
     const row = link.row;

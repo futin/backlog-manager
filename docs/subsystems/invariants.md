@@ -2239,10 +2239,10 @@ the Detail dialog's session card `Stop` (in place of the button). It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 
-The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control, eight composers since the Jira restyle: the tracker
+The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control, nine composers since the Jira restyle: the tracker
 strip's (`TrackerPopover` in `components/TrackerChip.tsx`), the band's Filters and Sort, the Jira chip's (`JiraPopover` in `components/JiraChip.tsx`), the
 Jira board's picker, the board sheet's roots search, which hangs over that sheet and so is the topmost entry while it is open, and `Run ▾`'s panel
-(`jira/JiraRunMenu.tsx`, one composer drawn on the card and in the modal) and the Jira Detail's Move-to panel (`jira/JiraDetail.tsx`, the Status chip's). It joins for the same reason
+(`jira/JiraRunMenu.tsx`, one composer drawn on the card and in the modal) the Jira Detail's Move-to panel (`jira/JiraDetail.tsx`, the Status chip's) and `SessionOpen`'s `Session actions` menu (`jira/SessionOpen.tsx`, drawn on the deck card and in Detail's session card). It joins for the same reason
 and in the same shape: it MOUNTS only while open, calling `useDialogEscape` once, so a popover opened over the item modal takes the key from the modal and hands
 it back when it closes. What it does not take from the stack is click-outside — the stack owns a key, not the pointer, so `Popover` binds its own `pointerdown`
 on `document` while it is open, ignoring a press on its panel and on the control that opened it (that control's click is what toggles it). The dashboard's

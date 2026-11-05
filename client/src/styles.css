@@ -1464,7 +1464,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* One face everywhere (§8.1): the id and the branch are set apart by ink, not by a monospace. */
 .jira-sess-mono { color: var(--ink2) }
 .jira-sess-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
-.jira-sess-stop { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
 
 /* The agent deck (spec §7.1, DESIGN.md §8.9.1): a heading row with the tally, then a wrapping grid of session cards above the status shelves. A card wears
    `.jira-sess`'s ground, radius and face padding (restated at deck width, not composed: that class also fixes Detail's 290 px column), with the grid, the
@@ -1483,7 +1482,21 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .jira-deck-title:hover { text-decoration: underline }
 .jira-deck-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
-.jira-deck-ctx { margin-left: auto; font-size: 12px; color: var(--ink3); white-space: nowrap }
+/* The card's first line: the state's dot, its words and how long it has held, in the one small ink3 reading the deck head uses. */
+.jira-deck-state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink3) }
+/* The fold pill: `↳ <top key>`, drawn only when the session's ticket hangs under another card. */
+.jira-deck-fold { flex: none; padding: 1px 7px; border-radius: 8px; border: 1px solid var(--hairline2); font-size: 11px; font-weight: 500; color: var(--ink2); background: var(--strip) }
+/* SessionOpen — the anchor of its `Session actions` panel, and the panel's rows (36 px, `.jira-move-row`'s skin, which a row of links and presses also wears). */
+.jira-open { position: relative; display: inline-flex }
+.jira-open-rows { display: flex; flex-direction: column; gap: 2px; margin: -8px }
+.jira-open-row {
+  display: flex; align-items: center; width: 100%; height: 36px; padding: 0 10px; box-sizing: border-box;
+  border: 0; border-radius: 8px; background: var(--strip); text-align: left; text-decoration: none;
+  font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer;
+}
+.jira-open-row:hover:not([aria-disabled='true']) { background: var(--strip-hi) }
+.jira-open-row[aria-disabled='true'] { cursor: default; color: var(--ink3); background: var(--strip) }
+.jira-open-danger { color: var(--red); background: var(--strip) }
 /* A shelf's `+ N more` / `show fewer`: a quiet row at the foot of the column, left-aligned with the cards' own edge. */
 .jira-shelf-more { display: flex; padding-top: 2px }
 /* The shelf row's extra line (spec §7.1): the newest ended session, or `N sessions`. Quiet, a step under the marker row, and Reopen sits right after the words. */
@@ -3613,6 +3626,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-meter-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 6px }
 .ui-meter-label { font-size: 11px; font-weight: 500; color: var(--ink3) }
 .ui-meter-value { font-size: 11px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums }
+.ui-meter[data-height='4'] .ui-meter-track { height: 4px }
 .ui-meter-track { height: 3.5px; border-radius: 4px; background: var(--steel); overflow: hidden }
 .ui-meter-fill { display: block; height: 100%; border-radius: 4px; background: var(--green-solid) }
 .ui-meter[data-tone="amber"] .ui-meter-fill { background: var(--amber-solid) }
@@ -3933,7 +3947,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-split-28 { height: 28px }
 .ui-split-main {
   display: inline-flex; align-items: center; gap: 6px; padding: 0 10px 0 12px; border: 0; margin: 0; cursor: pointer;
-  font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--on-accent); background: var(--ink);
+  font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--on-accent); background: var(--ink); text-decoration: none;
   transition: background .15s;
 }
 .ui-split-more {
@@ -3943,8 +3957,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-split-more::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 1px; background: var(--on-accent); opacity: .35 }
 .ui-split-icon { display: inline-flex; align-items: center; line-height: 1 }
 /* The ink hover is the solid chip's only: unscoped, its 0,3,0 beat the dashed variant's 0,2,0 ground and left --ink3 text on --ink2. */
-.ui-split:not(.ui-split-dashed) .ui-split-main:hover:not(:disabled) { background: var(--ink2) }
-.ui-split:not(.ui-split-dashed) .ui-split-more:hover:not(:disabled) { background: var(--ink2) }
+.ui-split:not(.ui-split-dashed):not(.ui-split-outline) .ui-split-main:hover:not(:disabled) { background: var(--ink2) }
+.ui-split:not(.ui-split-dashed):not(.ui-split-outline) .ui-split-more:hover:not(:disabled) { background: var(--ink2) }
 /* The group clips (overflow: hidden) and the halves fill it, so the quality floor's 1px-out ring would be cut off: draw it inside each half. */
 .ui-split-main:focus-visible { outline-offset: -2px }
 .ui-split-more:focus-visible { outline-offset: -2px }
@@ -3954,6 +3968,15 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-split-dashed .ui-split-main { background: var(--strip); color: var(--ink3) }
 .ui-split-dashed .ui-split-more { background: var(--strip); color: var(--ink3) }
 .ui-split-dashed .ui-split-more::before { background: var(--hairline2); opacity: 1 }
+/* Outline is `Chip`'s outline look on the split: paper ground, a hairline2 stroke, ink type — the primary that is not asking for a person. */
+.ui-split-outline { background: var(--strip); border: 1px solid var(--hairline2) }
+.ui-split-outline .ui-split-main { background: var(--strip); color: var(--ink) }
+.ui-split-outline .ui-split-more { background: var(--strip); color: var(--ink) }
+.ui-split-outline .ui-split-more::before { background: var(--hairline2); opacity: 1 }
+.ui-split-outline .ui-split-main:hover:not(:disabled) { background: var(--hover-fill) }
+.ui-split-outline .ui-split-more:hover:not(:disabled) { background: var(--hover-fill) }
+.ui-split-outline .ui-split-main:disabled { opacity: .45 }
+.ui-split-outline .ui-split-more:disabled { opacity: .45 }
 
 /* StateStripe — a state's mark on the left edge of a card or row: a 3 px inset box-shadow, so it takes no layout width and survives the card's own border.
    A table row cannot carry a box-shadow on the `tr` in every engine, so there the first cell does. `grey` is the rule colour: a quiet row is marked as

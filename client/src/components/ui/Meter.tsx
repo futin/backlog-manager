@@ -25,17 +25,20 @@ export function Meter({
   value,
   fraction,
   tone = 'green',
-  width = 56
+  width = 56,
+  height
 }: {
   label: string;
   value: string;
   fraction: number | null;
   tone?: 'green' | 'amber' | 'red';
   width?: number | 'fill';
+  /** `4` draws a 4 px track (the deck card's context meter) as `data-height="4"`; absent is the 3.5 px track every other caller has. */
+  height?: 4;
 }) {
   const pct = fraction === null ? 0 : Math.min(Math.max(fraction, 0), 1) * 100;
   return (
-    <span className="ui-meter" data-tone={tone} style={{ width: width === 'fill' ? '100%' : `${width}px` }}>
+    <span className="ui-meter" data-tone={tone} data-height={height} style={{ width: width === 'fill' ? '100%' : `${width}px` }}>
       <span className="ui-meter-head">
         <span className="ui-meter-label">{label}</span>{' '}
         <span className="ui-meter-value">{value}</span>

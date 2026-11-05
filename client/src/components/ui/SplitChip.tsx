@@ -9,10 +9,15 @@ export type SplitChipProps = {
   /** The main half's visible content. */
   children: ReactNode;
   icon?: ReactNode;
-  onMain: () => void;
+  /** Absent when `href` is set: the main half is then a link and has nothing to call. */
+  onMain?: () => void;
   onMore: () => void;
   /** The chevron's `aria-expanded`; the mark turns `up` while it is true. */
   open: boolean;
+  /** The main half becomes a new-tab link named by `label`. While `disabled` it falls back to a disabled button — an anchor has no `disabled`. */
+  href?: string;
+  /** `ink` (default) is the solid pill; `outline` is `Chip`'s outline look, for a primary that is not asking for a person. */
+  variant?: 'ink' | 'outline';
   disabled?: boolean;
   dashed?: boolean;
   size?: 28 | 32;
@@ -35,29 +40,40 @@ const stopKey = (e: KeyboardEvent) => {
  * SplitChip — one ink pill that is two buttons: the main half does the thing (opens the repo), the chevron half opens a picker for it. Two real buttons in a
  * `role="group"` rather than one button with a click-position check, so each half has its own name, focus stop and disabled state.
  */
-export function SplitChip({ label, labelMore, children, icon, onMain, onMore, open, disabled, dashed, size = 28, title, moreRef }: SplitChipProps) {
-  const className = ['ui-split', size === 28 ? 'ui-split-28' : null, dashed ? 'ui-split-dashed' : null].filter(Boolean).join(' ');
+export function SplitChip({ label, labelMore, children, icon, onMain, onMore, open, disabled, dashed, size = 28, title, moreRef, href, variant = 'ink' }: SplitChipProps) {
+  const className = ['ui-split', size === 28 ? 'ui-split-28' : null, dashed ? 'ui-split-dashed' : null, variant === 'outline' ? 'ui-split-outline' : null].filter(Boolean).join(' ');
+  const face = (
+    <>
+      {icon && (
+        <span className="ui-split-icon" aria-hidden="true">
+          {icon}
+        </span>
+      )}
+      {children}
+    </>
+  );
   return (
     <span role="group" className={className} title={title}>
-      <button
-        type="button"
-        className="ui-split-main"
-        aria-label={label}
-        disabled={disabled}
-        title={title}
-        onClick={(e) => {
-          stopClick(e);
-          onMain();
-        }}
-        onKeyDown={stopKey}
-      >
-        {icon && (
-          <span className="ui-split-icon" aria-hidden="true">
-            {icon}
-          </span>
-        )}
-        {children}
-      </button>
+      {href !== undefined && !disabled ? (
+        <a className="ui-split-main" aria-label={label} href={href} target="_blank" rel="noreferrer" title={title} onClick={stopClick} onKeyDown={stopKey}>
+          {face}
+        </a>
+      ) : (
+        <button
+          type="button"
+          className="ui-split-main"
+          aria-label={label}
+          disabled={disabled}
+          title={title}
+          onClick={(e) => {
+            stopClick(e);
+            onMain?.();
+          }}
+          onKeyDown={stopKey}
+        >
+          {face}
+        </button>
+      )}
       <button
         type="button"
         ref={moreRef}

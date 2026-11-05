@@ -875,10 +875,11 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       expect(found).toHaveLength(1);
       return found;
     });
-    const strip = deck.querySelector('.board-card-live') as HTMLElement;
-    expect(strip).toHaveClass('hatch');
-    expect(strip).toHaveTextContent('Working');
-    expect(strip).toHaveTextContent('3h');
+    // The card is a stripe now: its tone is the state's mark, and the first line says the state and how long it has held.
+    expect(deck).toHaveClass('ui-stripe');
+    expect(deck).toHaveAttribute('data-tone', 'green');
+    expect(deck.querySelector('.ui-stripe-dot')).toHaveAttribute('data-tone', 'green');
+    expect(deck.querySelector('.jira-deck-state')).toHaveTextContent('Working · 3h');
     expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
     expect(onShelves('Refund partial captures')).toBe(false);
     // Another card is not the one with a session.
@@ -894,7 +895,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       return found;
     });
     expect(deck).toHaveAttribute('data-state', 'starting');
-    expect(deck.querySelector('.board-card-live')).toHaveTextContent('Starting…');
+    expect(deck).toHaveAttribute('data-tone', 'green');
+    expect(deck.querySelector('.jira-deck-state')).toHaveTextContent('Starting…');
     expect(within(deck).queryByRole('link')).toBeNull();
     expect(onShelves('Refund partial captures')).toBe(false);
   });
@@ -911,9 +913,24 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       expect(found).toHaveLength(1);
       return found;
     });
-    expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('↳ PAY-160');
+    // The fold is a pill beside the key now, not the crumb's lead.
+    expect(deck.querySelector('.jira-deck-fold')).toHaveTextContent('↳ PAY-160');
+    expect(deck.querySelector('.jira-card-crumb')).not.toHaveTextContent('↳');
     expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
     expect(onShelves('Top story')).toBe(false);
+  });
+
+  it('a deck card shows the session\'s context as a 4 px meter reading `context 42%`', async () => {
+    const live = { 'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } };
+    sessionsAnswer = () => ({ links: [runLink('PAY-131', live['PAY-131'], { id: 's1', status: 'busy', contextPct: 42 })], reachable: true, rowsAt: null });
+    await renderRun({ live });
+    const [deck] = await waitFor(() => {
+      const found = deckCards('PAY-131');
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    expect(deck.querySelector('.ui-meter')).toHaveAttribute('data-height', '4');
+    expect(deck.querySelector('.ui-meter')).toHaveTextContent('context 42%');
   });
 
   it('a ready chip opens a menu: both built-ins, a rule, the skills by name, and the note', async () => {
@@ -1114,7 +1131,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     // The deck card's summary opens Detail on the ticket.
     await userEvent.click(within(deckCards('PAY-131')[0]).getByRole('button', { name: 'Refund partial captures' }));
     const modal = await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
-    await userEvent.click(await within(modal).findByRole('button', { name: 'Stop session' }));
+    await userEvent.click(await within(modal).findByRole('button', { name: 'More for PAY-131' }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Session actions' })).getByRole('button', { name: 'Stop session' }));
     const statusBefore = statusReads();
     const boardBefore = boardRequests().length;
     await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));

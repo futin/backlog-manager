@@ -1,5 +1,6 @@
 import { QUIET_TITLE, type JiraSessionState } from '../../../shared/jira-sessions';
 import { JIRA_BUILTIN_LABELS, type DashboardRow, type JiraLink, type JiraSessionsPayload } from '../../../shared/types';
+import { sessionUrl } from './agents';
 import { elapsedSince } from './item-age';
 
 /**
@@ -148,6 +149,21 @@ export function openButtons(link: JiraLink, row: DashboardRow | null, state: Jir
     primary: { label: dashboardLabel(row, state), target: 'dashboard' },
     secondary: opts.phone ? null : { label: opts.wide ? 'Open in Desktop' : 'Desktop', target: 'desktop' }
   };
+}
+
+/**
+ * What ONE Open button does, decided once so the chip form (`OpenChip`) and the split form (`SessionOpen`) cannot disagree about C2: a link to open (`href`),
+ * a press that asks the dashboard to hand the session over (`handover`), a disabled press with C2's own title (`disabled`), or nothing at all (`null` — a
+ * phone has no Desktop). A history line's Reopen passes `row = null`: an ended session has no process, so the app's own resume link is safe.
+ */
+export type OpenPlan = { kind: 'href'; href: string } | { kind: 'handover' } | { kind: 'disabled'; title: string | null } | null;
+export function openTarget(button: OpenButton, sessionId: string, row: DashboardRow | null, launch: JiraLink['surface'], phone: boolean, linkBase: string): OpenPlan {
+  if (button.target === 'dashboard') return { kind: 'href', href: sessionUrl(linkBase, sessionId) };
+  if (row === null) return { kind: 'href', href: desktopHref(sessionId) };
+  const d = desktopButton(row, launch, phone);
+  if (!d.show) return null;
+  if (!d.enabled) return { kind: 'disabled', title: d.title };
+  return d.via === 'href' ? { kind: 'href', href: desktopHref(sessionId) } : { kind: 'handover' };
 }
 
 /** One link as `GET /api/jira/sessions` carries it: the link, its derived state, the dashboard's row for it, and when this server first saw it in that state. */

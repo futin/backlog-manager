@@ -478,7 +478,22 @@ const SESSION = (over: Partial<{ starting: boolean }> = {}) => ({
 });
 const modalRun = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Run PAY-131' });
 const modalMore = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Run options for PAY-131' });
-const stopChip = (): HTMLElement | null => within(screen.getByRole('dialog')).queryByRole('button', { name: 'Stop session' });
+/** The card's one control now: the split Open's chevron, which is there exactly when its menu would hold a row (Unlink, Stop, or an offered secondary Open). */
+const moreChip = (scope: HTMLElement = document.body): HTMLElement | null => within(scope).queryByRole('button', { name: 'More for PAY-131' });
+/** Whether the card's `Session actions` menu holds a row: opens it (a card whose menu has no rows has no chevron) and closes it again. */
+async function menuHas(name: string, scope: HTMLElement = document.body): Promise<boolean> {
+  const chev = moreChip(scope);
+  if (chev === null) return false;
+  await userEvent.click(chev);
+  const has = within(screen.getByRole('dialog', { name: 'Session actions' })).queryByRole('button', { name }) !== null;
+  await userEvent.click(chev);
+  return has;
+}
+/** Opens the card's `Session actions` menu and presses one row of it. */
+async function pressRow(name: string, scope: HTMLElement = document.body): Promise<void> {
+  await userEvent.click(within(scope).getByRole('button', { name: 'More for PAY-131' }));
+  await userEvent.click(within(screen.getByRole('dialog', { name: 'Session actions' })).getByRole('button', { name }));
+}
 /** Agents-status reads, which the modal mounts only for a confirmed session and which are kept out of `urls`. */
 const agentsReads = (): number => calls.filter((c) => c.url === '/api/agents/status').length;
 
@@ -626,24 +641,24 @@ describe('JiraDetail — Stop session (Jira phase 5)', () => {
   it('is drawn for a session whose row says it can be stopped, with agents on, and asks before it posts', async () => {
     mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
     await screen.findByText('not');
-    await waitFor(() => expect(stopChip()).not.toBeNull());
+    await waitFor(() => expect(moreChip()).not.toBeNull());
 
-    await userEvent.click(stopChip() as HTMLElement);
+    await pressRow('Stop session');
     expect(screen.getByTestId('jira-stop-confirm')).toBeInTheDocument();
     expect(posts()).toHaveLength(0);
 
     await userEvent.click(screen.getByTestId('jira-stop-confirm-dismiss'));
     expect(screen.queryByTestId('jira-stop-confirm')).toBeNull();
-    expect(stopChip()).not.toBeNull();
+    expect(moreChip()).not.toBeNull();
     expect(posts()).toHaveLength(0);
   });
 
   it('posts `{ key, sessionId }` to /api/agents/jira-stop on accept, then reloads the status and nudges the board', async () => {
     mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
     await screen.findByText('not');
-    await waitFor(() => expect(stopChip()).not.toBeNull());
+    await waitFor(() => expect(moreChip()).not.toBeNull());
 
-    await userEvent.click(stopChip() as HTMLElement);
+    await pressRow('Stop session');
     await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
     await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
     expect(posts()).toHaveLength(1);
@@ -659,9 +674,9 @@ describe('JiraDetail — Stop session (Jira phase 5)', () => {
     post = () => json({ error: 'no live session on PAY-131' }, { status: 409 });
     mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
     await screen.findByText('not');
-    await waitFor(() => expect(stopChip()).not.toBeNull());
+    await waitFor(() => expect(moreChip()).not.toBeNull());
 
-    await userEvent.click(stopChip() as HTMLElement);
+    await pressRow('Stop session');
     await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
     expect(await screen.findByRole('alert')).toHaveTextContent('no live session on PAY-131');
     expect(reload).not.toHaveBeenCalled();
@@ -673,20 +688,21 @@ describe('JiraDetail — Stop session (Jira phase 5)', () => {
     const off = mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
     await screen.findByText('not');
     await waitFor(() => expect(agentsReads()).toBeGreaterThan(0));
-    expect(stopChip()).toBeNull();
+    // The card's menu still holds its secondary Open (a disabled Desktop), so the chevron stays; Stop is the row that is not there.
+    expect(await menuHas('Stop session')).toBe(false);
     off.unmount();
 
     agentsStatus = AGENTS_ON;
     calls = [];
     const starting = mount({ status: { live: SESSION({ starting: true }) }, sessions: payload() });
     await screen.findByText('not');
-    expect(stopChip()).toBeNull();
+    expect(moreChip()).toBeNull();
     expect(agentsReads()).toBe(0);
     starting.unmount();
 
     mount();
     await screen.findByText('not');
-    expect(stopChip()).toBeNull();
+    expect(moreChip()).toBeNull();
     expect(agentsReads()).toBe(0);
   });
 });
@@ -730,8 +746,9 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     });
     await screen.findByText('not');
     const [runCard, branchCard] = cards();
-    expect(within(runCard).queryByRole('button', { name: 'Unlink' })).toBeNull();
-    await userEvent.click(within(branchCard).getByRole('button', { name: 'Unlink' }));
+    // A run link offers neither row, so its card has no menu at all; a branch link's menu holds Unlink.
+    expect(moreChip(runCard)).toBeNull();
+    await pressRow('Unlink', branchCard);
     await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
     const [{ url, init }] = posts();
     expect(url).toBe('/api/agents/jira-unlink');
@@ -750,11 +767,11 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
       )
     });
     await screen.findByText('not');
-    await waitFor(() => expect(within(cards()[0]).queryByRole('button', { name: 'Stop session' })).not.toBeNull());
-    expect(within(cards()[1]).queryByRole('button', { name: 'Stop session' })).toBeNull();
-    expect(within(cards()[2]).queryByRole('button', { name: 'Stop session' })).toBeNull();
+    await waitFor(() => expect(moreChip(cards()[0])).not.toBeNull());
+    expect(await menuHas('Stop session', cards()[1])).toBe(false);
+    expect(await menuHas('Stop session', cards()[2])).toBe(false);
 
-    await userEvent.click(within(cards()[0]).getByRole('button', { name: 'Stop session' }));
+    await pressRow('Stop session', cards()[0]);
     await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0].url).toBe('/api/agents/jira-stop');

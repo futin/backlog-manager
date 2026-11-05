@@ -98,4 +98,18 @@ describe('Glyph', () => {
       unmount();
     }
   });
+
+  it('with href the main half is a new-tab link named by label, and variant outline puts the class on the group', () => {
+    const { rerender } = render(<SplitChip {...base} href="https://x.test/s" variant="outline" />);
+    const main = screen.getByRole('link', { name: 'Open repo' });
+    expect(main).toHaveAttribute('href', 'https://x.test/s');
+    expect(main).toHaveAttribute('target', '_blank');
+    expect(main).toHaveAttribute('rel', 'noreferrer');
+    expect(screen.getByRole('group')).toHaveClass('ui-split-outline');
+    // Disabled: an anchor cannot be, so the main half is a disabled button with no href.
+    rerender(<SplitChip {...base} href="https://x.test/s" disabled />);
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open repo' })).toBeDisabled();
+    expect(screen.getByRole('group')).not.toHaveClass('ui-split-outline');
+  });
 });
