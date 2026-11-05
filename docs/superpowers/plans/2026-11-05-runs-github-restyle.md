@@ -98,7 +98,7 @@ follow plan 2's code and report the difference.
 
 **Files:**
 - Modify: `client/src/components/github/PrActions.tsx` (whole strip; props unchanged), `client/src/styles.css` (`.prs-keys*`), `client/src/hooks/useDialogEscape.ts:47`,
-  `.claude/rules/board.md:21-22` (the Popover-composer sentence; :20 is the Confirm list, still true), `docs/subsystems/invariants.md:2242`, `.claude/DESIGN.md` §8.7 (the
+  `.claude/rules/board.md:20-22` (the Popover-composer sentence, from `The second is` on :20; the Confirm list before it on :19-20 stays true), `docs/subsystems/invariants.md:2242`, `.claude/DESIGN.md` §8.7 (the
   Popover-composer sentence plans 1–2 wrote)
 - Test: `test/prs-actions.test.tsx`, `test/prs-inbox.test.tsx`, `test/prs-matrix.test.tsx`, `test/prs-view.test.tsx`, `test/dialog-count-docs.test.ts:87-96`,
   `test/daylight-contrast.test.ts`
@@ -127,7 +127,7 @@ lands on the first enabled row. `primaryKey`'s row (`merge` or `update`) carries
   `{enable:true}` (with `method` when `defaultMethod` gives one); armed → `Auto-merge on #12`, enabled, POSTs `{enable:false}`, and the menu row reads
   `Disable auto-merge`; failing checks → main reads `Blocked`, `aria-disabled="true"`, `title` `checks failing`, described by a span with that text, click
   POSTs nothing, chevron enabled; menu lists exactly `Merge`, `Enable auto-merge`, `Update branch` in that order; a blocked `Update branch` row is
-  `aria-disabled` with `updateBlock`'s reason; armed PR on a `syncOff` repo → main reads `Auto-merge on #12`,
+  `aria-disabled` with `updateBlock`'s reason; armed PR on a `syncOff` repo → main NAMED `Auto-merge on #12` but visibly reading `Blocked` (the blocked rule above),
   `aria-disabled="true"`, `title` `sync off`, click POSTs nothing, the chevron is enabled and opens, and `Merge`, `Disable auto-merge` and `Update branch` are
   each `aria-disabled` and described by `sync off`; Escape closes and focuses the chevron; `Open #12 on GitHub` has `href` = `pr.url`. `prs-inbox` (`keysOf` :90,
   `mergeKey` :91, `keyNames` :225, Update :210), `prs-matrix` (:111-112, :210-212, :324, :383), `prs-view` (`keysIn` :207, `action` :448, :967-970, :1031,
@@ -171,8 +171,8 @@ other tone plain `--ink2` text (colour marks problems only); the dot column stay
 holds `PrActions` with `blockedText` and `omitUpdatingReason`, then `PrFoot`. Narrow: the table keeps scrolling inside `.prs-matrix-scroll` (§7). The
 Merge Popover must escape that box, and `Popover` portals nothing (`Popover.tsx:24-25`) while `.prs-matrix-scroll`'s `overflow-x: auto` clips both axes:
 so the open row's expansion (`PrActions` with `blockedText` and `omitUpdatingReason`, then `PrFoot`) renders as a panel directly AFTER
-`.prs-matrix-scroll`, a sibling inside the Matrix wrapper, carrying `data-testid="pr-expand-<key>"` and an `id`; the row's disclosure button gets
-`aria-expanded` and `aria-controls` = that id; the table keeps a pressed-row ground on the open row and no expansion `tr`. `Popover` is not changed.
+`.prs-matrix-scroll`, a sibling inside the Matrix wrapper, carrying `data-testid="pr-expand-<key>"` and an `id`; the row `tr` (already the disclosure: `tabIndex`,
+`aria-expanded`, `PrMatrix.tsx:110`) keeps `aria-expanded` and gains `aria-controls` = that id; the table keeps a pressed-row ground on the open row and no expansion `tr`. `Popover` is not changed.
 Spec §4.8's "shows the failing check names" is NOT built: the server serves no per-check names (`PullRequestRow.checks` is a five-value enum,
 `shared/types.ts:630`; `checksDetail` is one sentence per repo, :666) — report it as a §4.8 deviation under spec §2 ("no new data on any page"). Cards: head = `GlyphTile` (worst row's
 `checksTone`), repo, an `N open` pill, `PolledAge`; rows compact with the same tile, `prPills`, the split; a departed outcome stays one quiet
@@ -181,7 +181,7 @@ Spec §4.8's "shows the failing check names" is NOT built: the server serves no 
 - [ ] **Step 1: Failing tests.** Matrix: header `Checks` holds a pill `1` when one row fails, no pill at zero; a failing checks cell is a pill with
   `data-tone="bad"`, a passing one has no pill; expanding row B collapses row A; a blocked Merge in the expansion reads the reason text (`checks failing`)
   and is `aria-disabled`; with the expansion open and its chevron clicked, the `Merge menu` dialog is NOT a descendant of `.prs-matrix-scroll`
-  (`closest('.prs-matrix-scroll')` is null) and the row's disclosure button has `aria-expanded="true"` and `aria-controls` = the panel's `id`. Cards: head shows `2 open`; the departed line keeps its text; rows carry the tile and the split.
+  (`closest('.prs-matrix-scroll')` is null) and the row `tr` (`pr-mrow-<key>`) has `aria-expanded="true"` and `aria-controls` = the panel's `id`. Rewrite `prs-matrix` :224-230 ("pins the expansion block to the visible width" — no expansion `td` exists any more): it asserts the `pr-expand-<key>` panel is `.prs-matrix-scroll`'s next element sibling. Cards: head shows `2 open`; the departed line keeps its text; rows carry the tile and the split.
 - [ ] **Step 2–4: Run** `pnpm exec jest test/prs-matrix.test.tsx test/prs-view.test.tsx test/design-guards.test.ts test/daylight-contrast.test.ts` — FAIL, implement, PASS.
 - [ ] **Step 5: Commit** `feat(prs): matrix problem pills and card rows`.
 
