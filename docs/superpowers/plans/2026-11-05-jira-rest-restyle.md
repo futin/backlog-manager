@@ -19,8 +19,8 @@ after plan 1 (`docs/superpowers/plans/2026-11-05-jira-restyle.md`) on the same b
 **How to read this plan (override of writing-plans' code-block rule).** This plan gives behaviour, names, signatures, exact values and exact test CASES —
 never literal code. Write the code and the test bodies yourself; if a case here looks wrong against the code, say so in your report rather than transcribe
 it. Line counts are soft. Where the plan and the spec differ, the spec wins; report the difference. Line numbers are pre-plan-1; plan 1 shifts some.
-#472 (b3c73fa5) also shifted test lines after this plan was written: `jira-board.test.tsx` List cases sit ~29 lower (:1330 → :1355, :1344 → :1373,
-:1345 → :1374, :1352 → :1381; :783-786 → :804-815, :802 → :830, :979 → :981) and `jira-lib.test.ts:1593-1615` → :1621-1644. Re-grep by case name.
+#472 (b3c73fa5) also shifted test lines after this plan was written (`jira-board.test.tsx` cases ~27-28 lower, `jira-lib.test.ts` ~28 lower): every test
+line cited here is a pointer to a case NAME — re-grep by that name before editing.
 
 ## Global Constraints
 
