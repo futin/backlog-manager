@@ -22,7 +22,10 @@ column widths were compared from the rendered frame plus the mock's source (`<th
 1440 px, Board › List, before the fix: `TD.jira-issues-key 105>96` on every row — real keys (`TIMIFY-27xxx`, twelve characters) clipped; the mock's `PAY-131`
 hid it. After widening Key to 120 px: only `BUTTON.jira-issues-title` (deliberate summary ellipsis). Summary column 382 px. No page sideways scroll.
 
-1440 px, Sessions (All tickets on): `jira-list-title 701>11`, `jira-list-run 208>120`, `jira-list-branch 171>104` — see "Pre-existing" below. No page scroll.
+1440 px, Sessions (All tickets on), before the second fix: `jira-list-title 701>11`, `jira-list-run 208>120`, `jira-list-branch 171>104`. After it (Ticket
+45%, Repo · branch 23%, Where 17%, Model 15%; columns 206/105/78/69): `jira-list-title 701>71` (summary ellipsis, as intended), `jira-list-run 208>120` and
+`jira-list-branch 171>81` (both ellipsise by design), and the Started cell `86>76` — see "Pre-existing" below. No page scroll. A 50 : 18 : 17 : 15 split was
+tried first: summary 94 px, but the repo name `backlog-manager` (75 px) clipped at 58, so it was rebalanced.
 
 600 px: `jira-issues-scroll 980>550` and `jira-list-scroll 1120>550`, both `overflow-x: auto` (the box scrolls, by design); the page never scrolls.
 
@@ -49,11 +52,12 @@ Sessions:
 
 Rail: Jira › Board / Sessions / Setup, Sessions has no count: **match**.
 
-## Pre-existing, out of this branch's scope
+## Pre-existing
 
-- Session table's Ticket column: `.jira-list-table` gives four columns percentages summing to 100% on top of 692 px of fixed columns, so under
-  `table-layout: fixed` they are scaled down and the Ticket cell's summary gets ~11 px beside a twelve-character key. CSS untouched by this branch; same on
-  main. Follow-up candidate.
+- Session table's Ticket column (fixed on this branch at the user's choice): the four percentage columns share the 458 px left over after 692 px of fixed
+  columns, and at 32 : 28 : 21 : 19 the summary got ~11 px beside a twelve-character key. Now 45 : 23 : 17 : 15, summary ~71 px, repo name, `Terminal` and
+  `sonnet` whole. Same on main before this branch.
+- Session table's Started column, untouched: 76 px holds 52 px of text, so `Wed 13:52` (62 px) clips by its last characters. Same on main.
 
 ## Screenshots
 
