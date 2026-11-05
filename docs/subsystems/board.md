@@ -343,12 +343,14 @@ Cost rides all three surfaces — the History row's foot line, the detail head's
 rather than zeroed for a run that predates the recording. Empty states are `no runs yet` and `no runs in this range`, the figure strip hidden alongside the
 second.
 
-**Watchdog** — the sweeper's own page (`WatchdogMonitor`), the only surface that additionally mounts `useWatchdog()`. Its band carries `stateLine`'s own
-sentence as its subtitle and a flat `Policy in Settings ›` chip, because the policy is read here and edited there. Three figures: the sweeper's phase as a word
-with a sweep meter under it while armed, the watched count over `⚠ 1 crashed · 2 fresh · 1 not yet watched`, and the three policy values with the enabled
-switch's state as their line. Then the Watching sheet — one row per `running` run, annotated from the sweeper's own set with the skew rendered rather than
-hidden, each with a heartbeat meter against `RUN_STALE_MS`, and on a crashed row the attempt pips, the clause, the session id, the grace remaining and a
-`Resume now` chip drawn only when `watchdogStoodDown` allows. A row jumps to History with that run selected. Last, the activity ledger: the last
+**Watchdog** — the sweeper's own page (`WatchdogMonitor`), the only surface that additionally mounts `useWatchdog()`. It opens on a `Runs · Watchdog` band, then
+the STATUS BAND — one `Sheet` row (`watchdog-state`): a ring `GlyphTile`, the phase as a word (`stateWord` beside a `Dot`: `Off · <reason>`,
+`Idle · nothing to watch`, `Watching N`), `stateLine`'s own sentence under it (`watchdog-state-line`, the only place the `next check in 42s` countdown is drawn),
+the sweep meter while armed, and a flat `Policy in Settings ›` chip, because the policy is read here and edited there. The policy is its own `FigureStrip`
+BELOW the band — `Check every`, `Leave a resumed run alone`, `Give up after` (`N resumes`) — with the enabled switch's state as a line under it. Then the
+Watching sheet: a count pill beside the title and the `⚠ 1 crashed · 2 fresh · 1 not yet watched` split as its sub, one row per `running` run, annotated from
+the sweeper's own set with the skew rendered rather than hidden, each with a heartbeat meter against `RUN_STALE_MS`, and on a crashed row the attempt pips, the
+clause, the session id, the grace remaining and a `Resume now` chip drawn only when `watchdogStoodDown` allows. A row jumps to History with that run selected. Last, the activity ledger: the last
 `WATCHDOG_EVENT_CAP` events, held in the API process's memory and emptied by a restart, which its subtitle says rather than buries.
 
 **Ticks** — the tick breaker's page (`TickMonitor`, `RunsMode` `'ticks'`), the third Runs page, built as the Watchdog page is and reached only through the

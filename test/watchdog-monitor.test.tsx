@@ -197,9 +197,14 @@ describe('WatchdogMonitor', () => {
     // change, which is the whole point of keeping the same words.
     const { tickMs, graceMs, maxAttempts } = DEFAULT_WATCHDOG_CONFIG;
     const policy = screen.getByTestId('watchdog-config-line');
-    expect(policy).toHaveTextContent(new RegExp(`check every\\s*${formatSpanCompact(tickMs)}`));
-    expect(policy).toHaveTextContent(new RegExp(`leave alone for\\s*${formatSpanCompact(graceMs)}`));
-    expect(policy).toHaveTextContent(new RegExp(`give up after\\s*${maxAttempts}`));
+    expect(policy).toHaveTextContent(new RegExp(`Check every\\s*${formatSpanCompact(tickMs)}`));
+    expect(policy).toHaveTextContent(new RegExp(`Leave a resumed run alone\\s*${formatSpanCompact(graceMs)}`));
+    expect(policy).toHaveTextContent(new RegExp(`Give up after\\s*${maxAttempts} resumes`));
+    // Plan 3 Task 7: the three figures live in their own container, which is NOT the status band and follows it in document order.
+    const band = screen.getByTestId('watchdog-state');
+    expect(band).not.toContainElement(policy);
+    expect(band.compareDocumentPosition(policy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(policy).getByTestId('watchdog-policy-line')).toHaveTextContent('resume spawns');
     // task-38: the sentence became the band's own flat chip — the policy is
     // read here and edited in Settings, and one chip says that where a
     // sentence under the third figure used to.
@@ -208,11 +213,10 @@ describe('WatchdogMonitor', () => {
     // Off has no timer at all, so there is no sweep to be partway through —
     // an empty bar would read as "a sweep is imminent".
     expect(screen.queryByTestId('watchdog-sweep')).not.toBeInTheDocument();
-    expect(screen.getByTestId('watchdog-phase')).toHaveTextContent('off');
+    expect(screen.getByTestId('watchdog-phase')).toHaveTextContent('Off · BM_AGENTS off');
     // Nothing is watched while off, and the tile says so rather than
     // printing a 0 that would look like a healthy reading.
-    expect(screen.getByTestId('watchdog-watching')).toHaveTextContent('—');
-    expect(screen.getByText('nothing is watched while off')).toBeInTheDocument();
+    expect(screen.queryByTestId('watchdog-watching')).not.toBeInTheDocument();
 
     // Nothing is being watched and the state line has already said why —
     // an empty-rows line here would be a second answer to a settled question.
@@ -224,12 +228,23 @@ describe('WatchdogMonitor', () => {
 
   // --- 3/4: the two empty states, which say different things ----------------
 
+  it('tones a failed activity line with a bad pill and states an empty Watching sheet as one line', async () => {
+    await renderMonitor(
+      watchdogStatus({ phase: 'idle', events: [{ at: '2026-09-05T09:00:00Z', project: '/abs/alpha', runId: 'run-a', kind: 'failed', detail: 'spawn refused' }] }),
+      []
+    );
+    const pill = within(screen.getByTestId('watchdog-events')).getByText('failed').closest('.ui-pill') as HTMLElement;
+    expect(pill).toHaveClass('ui-pill-bad');
+    expect(screen.getByTestId('watchdog-rows-empty')).toHaveTextContent('no running run');
+    expect(screen.getByTestId('watchdog-watching')).toHaveTextContent('0');
+  });
+
   it('reads "no running run" when idle with nothing in the payload', async () => {
     await renderMonitor(watchdogStatus({ phase: 'idle' }), []);
     expect(screen.getByTestId('watchdog-rows-empty')).toHaveTextContent('no running run');
     // Idle has nothing to watch, so no next tick to be partway through.
     expect(screen.queryByTestId('watchdog-sweep')).not.toBeInTheDocument();
-    expect(screen.getByTestId('watchdog-phase')).toHaveTextContent('idle');
+    expect(screen.getByTestId('watchdog-phase')).toHaveTextContent('Idle · nothing to watch');
   });
 
   it('reads the one-tick-skew line when armed with nothing in the payload', async () => {
@@ -275,10 +290,8 @@ describe('WatchdogMonitor', () => {
     expect(rows[0]).toHaveTextContent(`stale at ${formatSpanCompact(RUN_STALE_MS)}`);
 
     expect(screen.getByTestId('watchdog-watching')).toHaveTextContent('1');
-    // task-38: the tile became a `Figure` cell, so the ancestor this reads is
-    // the primitive's own `.ui-figure` rather than the page-local tile class
-    // the two pages used to share.
-    const tile = screen.getByTestId('watchdog-watching').closest('.ui-figure') as HTMLElement;
+    // Plan 3 Task 7: the counts moved from a figure cell to the Watching sheet's head, so the ancestor this reads is the sheet.
+    const tile = screen.getByTestId('watchdog-watching').closest('.ui-sheet') as HTMLElement;
     // `0 crashed` prints muted and glyphless — the tile must not cry wolf on
     // a healthy afternoon — but it prints, so the reading is never absent.
     expect(tile).toHaveTextContent('0 crashed');
@@ -509,8 +522,10 @@ describe('WatchdogMonitor', () => {
     // the sweeper's own phase, printed one tile up.
     const table = within(screen.getByTestId('watchdog-events'));
     for (const kind of kinds) {
-      const badge = table.getByText(kind).closest('.watchdog-kind') as HTMLElement;
-      expect(badge).toHaveClass(`watchdog-kind-${WATCHDOG_KIND_TONE[kind]}`);
+      // Plan 3 Task 7: the badge is a `Pill`, whose tone is its class (it has no data-tone); `muted` is the pill's `neutral`.
+      const badge = table.getByText(kind).closest('.ui-pill') as HTMLElement;
+      const tone = WATCHDOG_KIND_TONE[kind];
+      expect(badge).toHaveClass(`ui-pill-${tone === 'muted' ? 'neutral' : tone}`);
       expect(badge.querySelector('[aria-hidden="true"]')).toHaveTextContent(WATCHDOG_KIND_GLYPH[kind]);
     }
   });
@@ -598,6 +613,11 @@ describe('WatchdogMonitor', () => {
       []
     );
     expect(screen.getByTestId('watchdog-state-line')).toHaveTextContent('next check in 42s');
+    // Drawn ONCE: the band's sub is the only place the countdown prints, and there is no `checked N s ago` anywhere.
+    const band = screen.getByTestId('watchdog-state');
+    expect(band.textContent?.match(/next check in/g)).toHaveLength(1);
+    expect(screen.getByTestId('watchdog-phase')).toHaveTextContent('Watching 0');
+    expect(screen.queryByText(/checked/)).not.toBeInTheDocument();
     // `Math.round`, matching `stateLine`'s own countdown: the bar and the
     // sentence beside it must agree to the second.
     expect(within(screen.getByTestId('watchdog-sweep')).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '42');
@@ -629,10 +649,7 @@ describe('WatchdogMonitor', () => {
       liveRun({ runId: 'run-3', project: '/abs/gamma' })
     ]);
 
-    // task-38: the tile became a `Figure` cell, so the ancestor this reads is
-    // the primitive's own `.ui-figure` rather than the page-local tile class
-    // the two pages used to share.
-    const tile = screen.getByTestId('watchdog-watching').closest('.ui-figure') as HTMLElement;
+    const tile = screen.getByTestId('watchdog-watching').closest('.ui-sheet') as HTMLElement;
     expect(screen.getByTestId('watchdog-watching')).toHaveTextContent('3');
     expect(tile).toHaveTextContent('1 crashed');
     expect(tile).toHaveTextContent('2 fresh');

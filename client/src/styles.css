@@ -2347,7 +2347,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 
 /* Runs › Watchdog — the sweeper's own page (WatchdogMonitor.tsx, task-18,
    rebuilt as a console by task-26, redrawn as a page by task-38). One column:
-   a band, three figures, a Watching sheet, an Activity sheet.
+   a band, the status row, the policy figures, a Watching sheet, an Activity sheet.
 
    task-38 deleted this section's own tile family (`.watchdog-tiles` and the
    five `.runs-tile*` rules both pages shared): the figures are `Figure`/
@@ -2357,30 +2357,17 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    the policy table, a watching row, the activity table. */
 .watchdog-monitor { display: flex; flex-direction: column; gap: var(--group-gap); flex: 1 1 auto; min-height: 0 }
 
-/* The phase word and its lamp share the figure's value row, so the lamp reads
-   as part of the word rather than as a bullet beside it. */
-.watchdog-tile-phase { display: inline-flex; align-items: center; gap: 8px }
-
-/* Cyan and ringed while armed, a flat disc while idle, hollow while off —
-   three phases told apart by fill AND outline, never by colour alone, since
-   the phase word sits right beside it in text either way. Not a `Dot`: a Dot
-   says a status or an identity, and neither of its eight tones is "the
-   sweeper's own phase" — which is a fourth thing, drawn once, here. */
-.watchdog-lamp { flex: none; width: 10px; height: 10px; border-radius: 999px; background: var(--ink3) }
-.watchdog-lamp-armed { background: var(--fill-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--fill-live) 22%, transparent); animation: watchdog-lamp-ring 2.4s ease-in-out infinite }
-.watchdog-lamp-off { background: transparent; border: 1.5px solid var(--ink3) }
-/* The last keyframe is the RESTING appearance on purpose: the quality-floor
-   `prefers-reduced-motion` block runs every animation once, instantly, which
-   lands it here — the same trap `.board-card-stage-glyph`'s own carve-out
-   documents. The carve-out below cancels it outright anyway. */
-@keyframes watchdog-lamp-ring {
-  0% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--fill-live) 30%, transparent) }
-  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--fill-live) 8%, transparent) }
-  100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--fill-live) 22%, transparent) }
-}
-@media (prefers-reduced-motion: reduce) {
-  .watchdog-lamp-armed { animation: none !important }
-}
+/* The status band (§8.4.2, spec §4.7) — one sheet row: ring tile, a body column (phase word, `stateLine`, the sweep meter) and the flat policy chip at the
+   far edge. The word is 16/500 and the sub 12 px, so the row reads as a headline with a caption; the body takes the slack so the chip never wraps under it. */
+.watchdog-status { display: flex; align-items: center; gap: 14px }
+.watchdog-status-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px }
+.watchdog-status-word { display: inline-flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 500; color: var(--ink) }
+.watchdog-status-sub { font-size: 12px; color: var(--ink3) }
+.watchdog-sweep { max-width: 360px; margin-top: 4px }
+/* The policy row under the band: three figures, then the resume-spawns line the old third figure carried under its pairs. */
+.watchdog-policy-block { display: flex; flex-direction: column; gap: 8px }
+/* `Watching` and its count pill share the sheet title's row. */
+.watchdog-watching-title { display: inline-flex; align-items: center; gap: 8px }
 
 .watchdog-hint { font-size: 12px; color: var(--ink3) }
 .watchdog-warn { color: var(--amber-ink) }
