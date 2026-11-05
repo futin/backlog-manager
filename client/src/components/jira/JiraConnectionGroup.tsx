@@ -62,7 +62,8 @@ export function JiraConnectionGroup() {
             {sweep !== null && <span className={sweep.red ? 'jira-setup-failure' : 'jira-setup-fig-sub'}>{sweep.rate}</span>}
           </div>
         </div>
-        <Pill tone={tone}>{access ?? 'Healthy'}</Pill>
+        {/* No pill before the first read: `Connecting…` already says the state, and a green Healthy would claim what nothing has checked. */}
+        {data !== null && <Pill tone={tone}>{access ?? 'Healthy'}</Pill>}
       </div>
       {data?.detail && access !== null && <div className="jira-setup-failure jira-setup-banner-detail">{data.detail}</div>}
     </Sheet>

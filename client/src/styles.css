@@ -1672,9 +1672,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-setup-trees { gap: 0 }
 .jira-setup-trees-head { display: flex; align-items: center; gap: 8px }
 .jira-setup-trees .jira-wt-list { margin-top: 4px }
-/* The Connection card's value, in the control slot: 13 px as the mock draws it, `--ink`. */
-.jira-setup-value { font-size: 13px; color: var(--ink) }
-/* The filter row above the rows (from the sixth board): the field left, the sort note pushed right. Not a `.set-label` row, so it has no name to wrap. */
 /* The connection banner (spec §4.4): one wrapping row — the 40 px initials disc, who is connected, three figures, the status pill — with the server's `detail`
    on a red line under it when the pill is not Healthy. Page-local classes only (guard 7); one face, 11 px floor. */
 .jira-setup-banner-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px }
@@ -1698,6 +1695,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-setup-board-facts { display: flex; flex-wrap: wrap; gap: 6px }
 .jira-setup-board-age { flex: none; font-size: 12px; color: var(--ink3) }
 @media (max-width: 700px) { .jira-setup-board { flex-wrap: wrap } }
+/* The filter row above the rows (from the sixth board): the field left, the sort note pushed right. Not a `.set-label` row, so it has no name to wrap. */
 .jira-setup-filter { justify-content: flex-start }
 .jira-setup-filter .set-hint { margin-left: auto }
 

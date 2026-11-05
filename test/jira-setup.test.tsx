@@ -993,6 +993,20 @@ describe('the Connection banner', () => {
     expect(within(banner).getByText('Healthy')).toHaveClass('ui-pill-live');
   });
 
+  it('draws no health pill before the first status read: Connecting… and no Healthy', () => {
+    render(
+      <main>
+        <JiraProvider>
+          <JiraView onOpenJiraPage={jest.fn()} />
+        </JiraProvider>
+      </main>
+    );
+    const banner = connectionCard();
+    expect(within(banner).getByText('Connecting…')).toBeInTheDocument();
+    expect(within(banner).queryByText('Healthy')).toBeNull();
+    expect(banner.querySelector('.ui-pill')).toBeNull();
+  });
+
   it('draws the three figures: last sweep, every, calls', async () => {
     statusAnswer = status({
       armed: true,

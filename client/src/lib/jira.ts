@@ -527,9 +527,10 @@ export function boardRowLine(
     countOrNull(board.count, 'issue'),
     off ? 'sync off' : `every ${board.interval}`
   ].filter((s): s is string => s !== null);
-  const age = pollAge(board.polledAt, now) === null ? null : polledPhrase(board.polledAt, now, off);
+  const polled = polledPhrase(board.polledAt, now, off);
+  const age = pollAge(board.polledAt, now) === null ? null : polled;
   const failure = failurePhrase(board.failures);
-  return { text: [...facts, age ?? polledPhrase(board.polledAt, now, off)].join(' · '), facts, age, failing: failure !== null, failure };
+  return { text: [...facts, age ?? polled].join(' · '), facts, age, failing: failure !== null, failure };
 }
 
 // ── Meters and picks ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
