@@ -192,6 +192,17 @@ export class PullRequestsService {
   }
 
   /**
+   * The GitHub sweep's second half: re-read these repos' PR lists, each once and only past `PR_TTL_MS`, through `refresh` — so a repo already being read is
+   * joined, not read twice, and a repo asleep in the GraphQL pool is skipped. No token is nothing to do. Never rejects: a failed read is the entry's own
+   * `access`, as for `list()`.
+   */
+  async refreshNow(repos: string[], now: number = Date.now()): Promise<void> {
+    const token = githubToken();
+    if (token === null) return;
+    await Promise.all(repos.map((repo) => this.refresh(repo, now, token).catch(() => undefined)));
+  }
+
+  /**
    * Put one re-read PR into the cached list (task 4's writes call this after the write's own single-PR read): replace the row with this number, add it
    * when absent, or — `row` null, the re-read said `MERGED` or `CLOSED` — remove it. `total` follows so `truncated` stays true to the list: a removal of a
    * held row counts down, and an add counts up only when the list was COMPLETE — on a list truncated at 100, a PR absent from the page is one GitHub's

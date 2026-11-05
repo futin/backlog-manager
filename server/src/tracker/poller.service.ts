@@ -69,6 +69,15 @@ import { SYNC_INTERVALS, type SyncInterval } from '../../../shared/types';
  *  number, so a second copy of it would make the spec wrong somewhere. */
 export const TRACKER_POLL_MS = 15_000;
 
+/** Two "Sync now" presses closer than this share one sweep's answer: the second spends no call (spec §5; the Jira poller exports its own, same value). */
+export const SWEEP_FLOOR_MS = 5_000;
+
+/**
+ * What `sweepNow` answers; the route maps `not-armed` to a 409, `unknown` to a 404 and `wait` to a 429 carrying `retryAt`. Jira's has no `unknown`: its
+ * route is site-wide.
+ */
+export type SweepNowResult = { kind: 'done' } | { kind: 'not-armed' } | { kind: 'unknown' } | { kind: 'wait'; retryAt: number };
+
 /** A secondary (abuse) limit is not the hourly one and does not carry a reset:
  *  GitHub's own guidance is to wait at least a minute (spec §5.1). */
 export const SECONDARY_BACKOFF_MS = 60_000;
@@ -368,6 +377,10 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   private timer: NodeJS.Timeout | null = null;
   private inFlight: Promise<void> | null = null;
   private stopped = false;
+  /** When the last sweep finished, for `SWEEP_FLOOR_MS`. `null` until one has. */
+  private lastSweepEndAt: number | null = null;
+  /** Repos a "Sync now" asked to have synced whether or not they are due. Taken (and emptied) by the next sweep before its first await. */
+  private readonly forceNow = new Set<string>();
 
   private readonly repos = new Map<string, RepoState>();
 
@@ -452,9 +465,54 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     if (this.inFlight !== null) return this.inFlight;
     const running = this.sweep().finally(() => {
       this.inFlight = null;
+      this.lastSweepEndAt = Date.now();
     });
     this.inFlight = running;
     return running;
+  }
+
+  /**
+   * `POST /api/github/sweep`, the popover head's `Sync now` (or one repo's, with `repo`). Everything is decided synchronously before the first await, so two
+   * presses in one tick see the same `inFlight` and join it. Order: nothing armed and nothing running → `not-armed`; `repo` not a connected GitHub project →
+   * `unknown`; `repo` asleep → `wait` with the LATER of its hourly and secondary ends, no call (without `repo`, an asleep repo is simply skipped, as a timed
+   * sweep skips it); a sweep running → join it; one finished under `SWEEP_FLOOR_MS` ago → `done`, no call; else mark the `sweepTargets` to be synced
+   * regardless of `due` and sweep once. `sweep()` stamps `lastSyncAt` as it always does, so a pressed repo's interval restarts from the press.
+   */
+  async sweepNow(repo?: string): Promise<SweepNowResult> {
+    const now = Date.now();
+    if (this.stopped || (this.timer === null && this.inFlight === null)) return { kind: 'not-armed' };
+    if (repo !== undefined) {
+      if (!this.connectedRepos().includes(repo)) return { kind: 'unknown' };
+      const until = this.sleepEnd(repo, now);
+      if (until !== null) return { kind: 'wait', retryAt: until };
+    }
+    if (this.inFlight !== null) {
+      await this.inFlight.catch(() => undefined);
+      return { kind: 'done' };
+    }
+    if (this.lastSweepEndAt !== null && now - this.lastSweepEndAt < SWEEP_FLOOR_MS) return { kind: 'done' };
+    const targets = this.sweepTargets(repo);
+    if (targets.length === 0) return { kind: 'done' };
+    for (const target of targets) this.forceNow.add(target);
+    await this.tick().catch(() => undefined);
+    return { kind: 'done' };
+  }
+
+  /**
+   * The repos a "Sync now" sweeps: the named one or every connected one, minus any whose sync is `off` (it is not polled and refuses every write path) and
+   * any asleep under a limit. The route reads it again after the sweep to name the repos whose PR cache should be re-read.
+   */
+  sweepTargets(repo?: string): string[] {
+    const now = Date.now();
+    return this.connectedRepos().filter((r) => (repo === undefined || r === repo) && intervalFor(r) !== 'off' && this.sleepEnd(r, now) === null);
+  }
+
+  /** The later of a repo's hourly and secondary sleep ends when either is still ahead of `now`, else `null`. */
+  private sleepEnd(repo: string, now: number): number | null {
+    const state = this.repos.get(repo);
+    if (state === undefined) return null;
+    const until = Math.max(state.sleepUntil ?? 0, state.secondaryUntil ?? 0);
+    return until > now ? until : null;
   }
 
   /**
@@ -757,6 +815,9 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // nothing connected, or both. Nothing below may run without a token — this
     // is the loop's whole "off" state.
     if (token === null || repos.length === 0) return;
+    // Taken before any await: a press that lands while this sweep is out joins it instead (`sweepNow`), so nothing can add to the set mid-sweep.
+    const forced = new Set(this.forceNow);
+    this.forceNow.clear();
 
     // Once per token per process — see `identity` above. A failed read is not
     // stored (#270), but nor is it retried every tick: the sweep waits
@@ -772,7 +833,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // tick, and a sync already in flight for a repo just switched off finishes normally rather than being abandoned half-absorbed (Review Focus 2).
     const now = Date.now();
     for (const repo of repos) {
-      if (!this.due(repo, intervalFor(repo), now)) continue;
+      if (!forced.has(repo) && !this.due(repo, intervalFor(repo), now)) continue;
       const state = this.stateOf(repo);
       // The asleep early return in `syncRepo` makes no request, so it must not count as an attempt — see `lastSyncAt`.
       const asleep = this.asleep(state);
