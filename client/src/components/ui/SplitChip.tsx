@@ -18,6 +18,12 @@ export type SplitChipProps = {
   href?: string;
   /** `ink` (default) is the solid pill; `outline` is `Chip`'s outline look, for a primary that is not asking for a person. */
   variant?: 'ink' | 'outline';
+  /**
+   * Id of the element that says why the main half cannot act. The half gets `aria-disabled` + `aria-describedby`, stays focusable (a disabled button drops out of
+   * Tab, and the reason must be reachable) and its click is swallowed. It wins over `href`: an anchor cannot be meaningfully aria-disabled, so the main half is
+   * the button form. The chevron is untouched — a blocked Merge still has Update branch and auto-merge behind it.
+   */
+  mainBlockedBy?: string;
   disabled?: boolean;
   dashed?: boolean;
   size?: 28 | 32;
@@ -40,7 +46,7 @@ const stopKey = (e: KeyboardEvent) => {
  * SplitChip — one ink pill that is two buttons: the main half does the thing (opens the repo), the chevron half opens a picker for it. Two real buttons in a
  * `role="group"` rather than one button with a click-position check, so each half has its own name, focus stop and disabled state.
  */
-export function SplitChip({ label, labelMore, children, icon, onMain, onMore, open, disabled, dashed, size = 28, title, moreRef, href, variant = 'ink' }: SplitChipProps) {
+export function SplitChip({ label, labelMore, children, icon, onMain, onMore, open, disabled, dashed, size = 28, title, moreRef, href, variant = 'ink', mainBlockedBy }: SplitChipProps) {
   const className = ['ui-split', size === 28 ? 'ui-split-28' : null, dashed ? 'ui-split-dashed' : null, variant === 'outline' ? 'ui-split-outline' : null].filter(Boolean).join(' ');
   const face = (
     <>
@@ -54,7 +60,7 @@ export function SplitChip({ label, labelMore, children, icon, onMain, onMore, op
   );
   return (
     <span role="group" className={className} title={title}>
-      {href !== undefined && !disabled ? (
+      {href !== undefined && !disabled && mainBlockedBy === undefined ? (
         <a className="ui-split-main" aria-label={label} href={href} target="_blank" rel="noreferrer" title={title} onClick={stopClick} onKeyDown={stopKey}>
           {face}
         </a>
@@ -64,10 +70,12 @@ export function SplitChip({ label, labelMore, children, icon, onMain, onMore, op
           className="ui-split-main"
           aria-label={label}
           disabled={disabled}
+          aria-disabled={mainBlockedBy !== undefined ? true : undefined}
+          aria-describedby={mainBlockedBy}
           title={title}
           onClick={(e) => {
             stopClick(e);
-            onMain?.();
+            if (mainBlockedBy === undefined) onMain?.();
           }}
           onKeyDown={stopKey}
         >

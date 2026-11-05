@@ -13,7 +13,16 @@ export type GlyphName =
   | 'tick'
   | 'up'
   | 'down'
-  | 'equals';
+  | 'equals'
+  | 'cross'
+  | 'clock'
+  | 'pull-request'
+  | 'merge'
+  | 'refresh'
+  | 'external'
+  | 'pause'
+  | 'cpu'
+  | 'coin';
 
 /*
   One 16-unit grid, outline only, 1.5 px stroke with round caps and joins, `currentColor` — the wrapper's ink decides the colour, so a glyph never takes an
@@ -35,7 +44,16 @@ const PATHS: Record<GlyphName, string[]> = {
   tick: ['M3 8.5l3.2 3.2L13 4.8'],
   up: ['M8 13V3.5M4 7.5l4-4 4 4'],
   down: ['M8 3v9.5M4 8.5l4 4 4-4'],
-  equals: ['M3 6h10M3 10h10']
+  equals: ['M3 6h10M3 10h10'],
+  cross: ['M4 4l8 8M12 4l-8 8'],
+  clock: ['M8 13.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11z', 'M8 5v3.2l2 1.3'],
+  'pull-request': ['M4.5 5v6', 'M4.5 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z', 'M4.5 14a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z', 'M11.5 11V6.5a2 2 0 0 0-2-2H8', 'M11.5 14a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z'],
+  merge: ['M4.5 5v6', 'M4.5 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z', 'M4.5 14a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z', 'M11.5 11a1.5 1.5 0 1 0 0-.01', 'M4.5 5c0 3 7 2 7 6'],
+  refresh: ['M13 8a5 5 0 1 1-1.6-3.7', 'M13 2.5v3h-3'],
+  external: ['M9 2.5h4.5V7', 'M13.5 2.5L7.5 8.5', 'M11.5 9.5v3.5h-9v-9H6'],
+  pause: ['M5.5 3.5v9M10.5 3.5v9'],
+  cpu: ['M4.5 4.5h7v7h-7z', 'M6.5 6.5h3v3h-3z', 'M6.5 2v2.5M9.5 2v2.5M6.5 11.5V14M9.5 11.5V14M2 6.5h2.5M2 9.5h2.5M11.5 6.5H14M11.5 9.5H14'],
+  coin: ['M8 13.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11z', 'M9.8 6.2C9.4 5.7 8.8 5.5 8 5.5c-1 0-1.7.5-1.7 1.2 0 1.8 3.5.8 3.5 2.6 0 .7-.8 1.2-1.8 1.2-.8 0-1.5-.3-1.9-.9', 'M8 4.2v1.3M8 10.5v1.3']
 };
 
 /**

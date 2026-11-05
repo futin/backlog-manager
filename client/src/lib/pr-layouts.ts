@@ -1,6 +1,7 @@
 import { elapsedSince } from './item-age';
-import { parsePrKey, prChips, prKey, mergeBlock, updateBlock, type PrOutcome } from './prs';
+import { parsePrKey, prChips, type PrChip, prKey, mergeBlock, updateBlock, type PrOutcome } from './prs';
 import type { DotTone } from '../components/ui/Dot';
+import type { GlyphName } from '../components/ui/Glyphs';
 import type { PrRepoView, PullRequestRow } from '../../../shared/types';
 
 /**
@@ -88,6 +89,32 @@ function levelFacts(pr: PullRequestRow): LevelFact[] {
     facts.push({ kind: 'blocked', level: 'worth-a-look', severity: 4, text: `GitHub reports it ${pr.mergeState}.` });
   }
   return facts;
+}
+
+/** The status tile's tone for a PR's checks (spec §4.8): conflicts, changes requested and behind are carried by the pills, never the tile. */
+export function checksTone(checks: PullRequestRow['checks']): 'red' | 'amber' | 'green' | 'neutral' {
+  if (checks === 'failure') return 'red';
+  if (checks === 'pending') return 'amber';
+  if (checks === 'success') return 'green';
+  return 'neutral';
+}
+
+/** The glyph inside that tile; a PR with no (or unreadable) checks shows the plain pull-request mark. */
+export function checksGlyph(checks: PullRequestRow['checks']): GlyphName {
+  if (checks === 'failure') return 'cross';
+  if (checks === 'pending') return 'clock';
+  if (checks === 'success') return 'tick';
+  return 'pull-request';
+}
+
+/**
+ * `prChips` plus the one fact the Inbox verdict line used to carry alone: GitHub's own `blocked` / `unstable` word when nothing else names the reason
+ * (`levelFacts`' unnamed block). The verdict line goes with the restyle, so without this chip that fact would vanish from the row.
+ */
+export function prPills(pr: PullRequestRow): PrChip[] {
+  const chips = prChips(pr);
+  if (levelFacts(pr).some((f) => f.kind === 'blocked')) chips.push({ label: pr.mergeState, tone: 'warn' });
+  return chips;
 }
 
 /** Which of the three levels a PR sits in: a draft is Quiet before anything else is read; otherwise the first level-driving fact decides. */

@@ -1,5 +1,7 @@
 import {
   cardRepos,
+  checksGlyph,
+  checksTone,
   columnCounts,
   DEPARTED_KEEP,
   departedOutcomes,
@@ -14,6 +16,7 @@ import {
   parseLayout,
   PR_LAYOUT_OPTIONS,
   prLevel,
+  prPills,
   primaryKey,
   prProblems,
   prSeverity,
@@ -23,7 +26,7 @@ import {
   splitReach,
   transientFailures
 } from '../client/src/lib/pr-layouts';
-import { mergeBlock, updateBlock, type PrOutcome } from '../client/src/lib/prs';
+import { mergeBlock, prChips, updateBlock, type PrOutcome } from '../client/src/lib/prs';
 import type { PrRepoView, PullRequestRow } from '../shared/types';
 
 /**
@@ -519,5 +522,33 @@ describe('columnCounts', () => {
 describe('LEVEL_DOT', () => {
   it('maps the two loud levels to Dot tones and leaves Quiet toneless', () => {
     expect(LEVEL_DOT).toEqual({ 'needs-you': 'crashed', 'worth-a-look': 'paused', quiet: undefined });
+  });
+});
+
+describe('checksTone and checksGlyph', () => {
+  it.each([
+    ['failure', 'red', 'cross'],
+    ['pending', 'amber', 'clock'],
+    ['success', 'green', 'tick'],
+    ['none', 'neutral', 'pull-request'],
+    ['unknown', 'neutral', 'pull-request']
+  ] as const)('%s reads %s and draws %s', (checks, tone, glyph) => {
+    expect(checksTone(checks)).toBe(tone);
+    expect(checksGlyph(checks)).toBe(glyph);
+  });
+});
+
+describe('prPills', () => {
+  it('equals prChips for an ordinary row', () => {
+    const p = row({ checks: 'success', review: 'approved' });
+    expect(prPills(p)).toEqual(prChips(p));
+  });
+  it('adds exactly one warn chip with the mergeState word for an unnamed block', () => {
+    const p = row({ mergeState: 'blocked', checks: 'none', review: null });
+    expect(prPills(p)).toEqual([...prChips(p), { label: 'blocked', tone: 'warn' }]);
+  });
+  it('adds nothing when a named fact already explains the state', () => {
+    const p = row({ mergeState: 'blocked', checks: 'pending' });
+    expect(prPills(p)).toEqual(prChips(p));
   });
 });

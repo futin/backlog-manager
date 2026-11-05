@@ -90,7 +90,7 @@ describe('Glyph', () => {
   });
 
   it('draws every name and takes a size', () => {
-    const names = ['play', 'document', 'sparkle', 'robot', 'person', 'flag', 'branch', 'tag', 'calendar', 'ring', 'grid', 'tick', 'up', 'down', 'equals'] as const;
+    const names = ['play', 'document', 'sparkle', 'robot', 'person', 'flag', 'branch', 'tag', 'calendar', 'ring', 'grid', 'tick', 'up', 'down', 'equals', 'cross', 'clock', 'pull-request', 'merge', 'refresh', 'external', 'pause', 'cpu', 'coin'] as const;
     for (const name of names) {
       const { container, unmount } = render(<Glyph name={name} size={10} />);
       expect(container.querySelector('svg')!.children.length).toBeGreaterThan(0);
@@ -111,5 +111,38 @@ describe('Glyph', () => {
     expect(screen.queryByRole('link')).toBeNull();
     expect(screen.getByRole('button', { name: 'Open repo' })).toBeDisabled();
     expect(screen.getByRole('group')).not.toHaveClass('ui-split-outline');
+  });
+
+});
+
+describe('SplitChip mainBlockedBy', () => {
+  it('mainBlockedBy makes only the main half aria-disabled, still focusable, and a click calls nothing', async () => {
+    const onMain = jest.fn();
+    const onMore = jest.fn();
+    render(
+      <>
+        <span id="why">draft</span>
+        <SplitChip {...base} onMain={onMain} onMore={onMore} mainBlockedBy="why" />
+      </>
+    );
+    const main = screen.getByRole('button', { name: 'Open repo' });
+    const more = screen.getByRole('button', { name: 'Choose repo' });
+    expect(main).toHaveAttribute('aria-disabled', 'true');
+    expect(main).toHaveAttribute('aria-describedby', 'why');
+    expect(main).not.toBeDisabled();
+    expect(more).not.toHaveAttribute('aria-disabled');
+    expect(more).not.toHaveAttribute('aria-describedby');
+    await userEvent.tab();
+    expect(main).toHaveFocus();
+    await userEvent.click(main);
+    expect(onMain).toHaveBeenCalledTimes(0);
+    await userEvent.click(more);
+    expect(onMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('mainBlockedBy beats href: the main half is the aria-disabled button, not a link', () => {
+    render(<SplitChip {...base} href="https://x.test/s" mainBlockedBy="why" />);
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open repo' })).toHaveAttribute('aria-disabled', 'true');
   });
 });
