@@ -57,6 +57,9 @@ export function SessionOpen({
   const [asking, setAsking] = useState(false);
   const moreRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // `Confirm` unmounted the split, so the chevron that opened the menu is a new element once the question closes; set when the question is answered, spent by the
+  // effect below. A Stop that was accepted leaves the row busy, so the chevron may be disabled by then and the focus simply falls to the page — nothing to aim at.
+  const refocus = useRef(false);
 
   const plan = (b: OpenButton) => openTarget(b, sessionId, row, launch, phone, settings.linkBase);
   const primary = plan(buttons.primary);
@@ -67,6 +70,13 @@ export function SessionOpen({
   useEffect(() => {
     if (open) menuRef.current?.querySelector<HTMLElement>('a, button:not([aria-disabled="true"])')?.focus();
   }, [open]);
+
+  useEffect(() => {
+    if (!asking && refocus.current) {
+      refocus.current = false;
+      moreRef.current?.focus();
+    }
+  }, [asking]);
 
   if (primary === null && !hasRows) return null;
   if (primary === null) return <PlainActions sessionId={sessionId} busy={busy} onUnlink={onUnlink} onStop={onStop} />;
@@ -79,8 +89,12 @@ export function SessionOpen({
         testId="jira-stop-confirm"
         acceptLabel="Stop session"
         dismissLabel="Keep running"
-        onDismiss={() => setAsking(false)}
+        onDismiss={() => {
+          refocus.current = true;
+          setAsking(false);
+        }}
         onAccept={() => {
+          refocus.current = true;
           setAsking(false);
           onStop?.(sessionId);
         }}

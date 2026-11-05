@@ -93,6 +93,7 @@ describe('SessionOpen', () => {
     await userEvent.click(screen.getByTestId('jira-stop-confirm-dismiss'));
     expect(screen.queryByTestId('jira-stop-confirm')).toBeNull();
     expect(document.querySelector('.ui-split')).not.toBeNull();
+    expect(more()).toHaveFocus();
     expect(onStop).not.toHaveBeenCalled();
 
     await userEvent.click(more());
