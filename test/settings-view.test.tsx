@@ -255,8 +255,8 @@ describe('SettingsView', () => {
     );
   }
   const landingOptions = (): (string | null)[] =>
-    within(screen.getByLabelText('Opens on'))
-      .getAllByRole('option')
+    within(screen.getByRole('group', { name: 'Opens on' }))
+      .getAllByRole('button')
       .map((o) => o.textContent);
 
   it('offers every rail section as a landing choice, plus Last used', async () => {
@@ -266,7 +266,7 @@ describe('SettingsView', () => {
     // Files rather than GitHub, because GitHub is what an unrecognised section
     // resolves to anyway — picking it could pass on a picker that stored
     // nothing at all.
-    await userEvent.selectOptions(screen.getByLabelText('Opens on'), 'files');
+    await userEvent.click(within(screen.getByRole('group', { name: 'Opens on' })).getByRole('button', { name: 'Files' }));
     const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
     expect(stored.landing).toBe('files');
   });
@@ -285,7 +285,7 @@ describe('SettingsView', () => {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ landing: 'github' }));
     renderWithSources({ files: true, github: false });
     expect(landingOptions()).toEqual(['Last used', 'Files', 'GitHub', 'Runs', 'Settings']);
-    expect(screen.getByLabelText('Opens on')).toHaveValue('github');
+    expect(within(screen.getByRole('group', { name: 'Opens on' })).getByRole('button', { name: 'GitHub' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   /*

@@ -254,11 +254,12 @@ function LocalPage() {
         </SettingsRow>
 
         <SettingsRow name="Opens on" hint="the section this browser lands on">
-          <Select
-            label="Opens on"
+          <Segmented
             value={settings.landing}
             options={landingOptions(jiraConfigured, sources, settings.landing)}
             onChange={(landing) => update({ landing })}
+            label="Opens on"
+            pill
           />
         </SettingsRow>
       </SettingsGroup>
