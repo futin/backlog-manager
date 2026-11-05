@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import JiraView from '../client/src/components/jira/JiraView';
+import { JiraConnectionGroup } from '../client/src/components/jira/JiraConnectionGroup';
 import { JiraProvider } from '../client/src/hooks/JiraContext';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { JIRA_BOARD_KEY, JIRA_QUERY_PRESETS, accessPhrase, boardRowLine } from '../client/src/lib/jira';
@@ -997,7 +998,7 @@ describe('the Connection banner', () => {
     render(
       <main>
         <JiraProvider>
-          <JiraView onOpenJiraPage={jest.fn()} />
+          <JiraConnectionGroup />
         </JiraProvider>
       </main>
     );
