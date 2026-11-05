@@ -248,8 +248,14 @@ describe('the Boards card', () => {
 
     expect(rowNames()).toEqual(['Beta', 'Zed', 'alpha']);
     for (const b of [zed, alpha, beta]) {
-      expect(within(rowOf(b.name)).getByText(boardRowLine(b, Date.now()).text)).toBeInTheDocument();
+      const line = boardRowLine(b, Date.now());
+      for (const fact of line.facts) expect(within(rowOf(b.name)).getByText(fact)).toHaveClass('ui-pill');
+      expect(within(rowOf(b.name)).getByText(line.age ?? 'not polled yet')).toBeInTheDocument();
     }
+    expect(within(rowOf('Zed')).getByText('1 root')).toBeInTheDocument();
+    expect(within(rowOf('Zed')).getByText('every 1m')).toBeInTheDocument();
+    expect(within(rowOf('alpha')).getByText('sync off')).toBeInTheDocument();
+    expect(within(rowOf('Zed')).getByRole('button', { name: 'Open board Zed' })).toHaveTextContent('Open');
   });
 
   it('draws a failing board’s failure in red beside its line', async () => {
@@ -608,7 +614,7 @@ const PROJECTS = [
 ];
 
 const reposCard = (): HTMLElement => screen.getByRole('heading', { name: 'Repositories' }).closest('section') as HTMLElement;
-const connectionCard = (): HTMLElement => screen.getByRole('heading', { name: 'Connection' }).closest('section') as HTMLElement;
+const connectionCard = (): HTMLElement => screen.getByRole('region', { name: 'Connection' });
 const repoNames = (): string[] => Array.from(reposCard().querySelectorAll('.set-row .set-name')).map((n) => n.textContent ?? '');
 const repoHints = (): string[] => Array.from(reposCard().querySelectorAll('.set-row .set-hint')).map((n) => n.textContent ?? '');
 const addField = (): HTMLInputElement => within(reposCard()).getByRole('textbox', { name: 'Repository path' }) as HTMLInputElement;
@@ -972,39 +978,53 @@ describe('the Repositories card — a path\'s worktrees', () => {
   });
 });
 
-describe('the Connection card', () => {
-  const rowText = (name: string): string => (within(connectionCard()).getByText(name).closest('.set-row') as HTMLElement).textContent ?? '';
+describe('the Connection banner', () => {
+  const figure = (label: string): HTMLElement => within(connectionCard()).getByText(label).parentElement as HTMLElement;
 
-  it('reports the site, who is signed in, the token kind with the three scopes named, and the last sweep while armed', async () => {
+  it('says who is connected, the site and token kind, and that the server owns the change; no scopes are drawn', async () => {
     statusAnswer = status({ me: { accountId: 'acc-ada', name: 'Ada Lovelace' }, tokenKind: 'scoped', armed: true, calls: { sweep: 12, last429At: null } });
     await renderSetup();
-    expect(rowText('Site')).toContain('acme.atlassian.net');
-    expect(rowText('Signed in as')).toContain('Ada Lovelace');
-    const token = rowText('Token');
-    expect(token).toContain('scoped');
-    for (const scope of ['read:jira-work', 'write:jira-work', 'read:jira-user']) expect(token).toContain(scope);
-    expect(rowText('Last sweep')).toContain('every 15 s · 12 calls · no 429 since start');
-    expect(within(connectionCard()).getByText('restart the server to change it')).toBeInTheDocument();
+    const banner = connectionCard();
+    expect(within(banner).getByText('Connected as Ada Lovelace')).toBeInTheDocument();
+    expect(within(banner).getByText('acme.atlassian.net · scoped')).toBeInTheDocument();
+    expect(banner.textContent).not.toContain('read:jira-work');
+    expect(within(banner).getByText('restart the server to change it')).toBeInTheDocument();
+    expect(within(banner).getByText('AL')).toHaveClass('jira-setup-av');
+    expect(within(banner).getByText('Healthy')).toHaveClass('ui-pill-live');
   });
 
-  it('reads idle while the poller is not armed', async () => {
-    statusAnswer = status({ armed: false, calls: { sweep: 12, last429At: null } });
+  it('draws the three figures: last sweep, every, calls', async () => {
+    statusAnswer = status({
+      armed: true,
+      calls: { sweep: 12, last429At: null },
+      boards: [board({ polledAt: new Date(Date.now() - 9_000).toISOString() })]
+    });
     await renderSetup();
-    expect(rowText('Last sweep')).toContain('idle · 12 calls · no 429 since start');
+    expect(figure('Last sweep').textContent).toContain('9 s');
+    expect(figure('Every').textContent).toBe('Every15 s');
+    expect(figure('Calls').textContent).toBe('Calls12no 429 since start');
   });
 
-  it('says no identity when Jira has not answered /myself, and draws a classic token as classic', async () => {
+  it('has no last sweep when no board was ever polled, and reads idle while the poller is not armed', async () => {
+    statusAnswer = status({ armed: false, calls: { sweep: 12, last429At: null }, boards: [board({ polledAt: null })] });
+    await renderSetup();
+    expect(figure('Last sweep').textContent).toBe('Last sweep—');
+    expect(figure('Every').textContent).toBe('Everyidle');
+  });
+
+  it('says no identity when Jira has not answered /myself, with a question-mark disc', async () => {
     statusAnswer = status({ me: null, tokenKind: 'classic' });
     await renderSetup();
-    expect(rowText('Signed in as')).toContain('no identity');
-    expect(rowText('Token')).toContain('classic');
+    expect(within(connectionCard()).getByText('no identity')).toBeInTheDocument();
+    expect(within(connectionCard()).getByText('?')).toHaveClass('jira-setup-av');
+    expect(within(connectionCard()).getByText('acme.atlassian.net · classic')).toBeInTheDocument();
   });
 
-  it('draws a last 429 as an age, red while it is inside the red window', async () => {
+  it('draws a last 429 as an age under the calls, red while it is inside the red window', async () => {
     statusAnswer = status({ calls: { sweep: 3, last429At: new Date(Date.now() - 4 * 60_000 - 5_000).toISOString() } });
     await renderSetup();
     expect(within(connectionCard()).getByText('last 429 4m ago')).toHaveClass('jira-setup-failure');
-    expect(rowText('Last sweep')).toContain('every 15 s · 3 calls · last 429 4m ago');
+    expect(figure('Calls').textContent).toBe('Calls3last 429 4m ago');
   });
 
   it('draws an old 429 in the neutral colour', async () => {
@@ -1013,12 +1033,19 @@ describe('the Connection card', () => {
     expect(within(connectionCard()).getByText('last 429 2h ago')).not.toHaveClass('jira-setup-failure');
   });
 
-  it('names a refused credential in red on the Signed in as row, with the server\'s detail', async () => {
+  it('turns the pill red with the access phrase for a refused credential, and the detail follows on a red line', async () => {
     statusAnswer = status({ access: 'unauthorized', detail: 'Jira answered 401' });
     await renderSetup();
-    const row = within(connectionCard()).getByText('Signed in as').closest('.set-row') as HTMLElement;
-    expect(within(row).getByText(accessPhrase('unauthorized') as string)).toHaveClass('jira-setup-failure');
-    expect(row.textContent).toContain('Jira answered 401');
+    const pill = within(connectionCard()).getByText(accessPhrase('unauthorized') as string);
+    expect(pill).toHaveClass('ui-pill-bad');
+    expect(within(connectionCard()).queryByText('Healthy')).toBeNull();
+    expect(within(connectionCard()).getByText('Jira answered 401')).toHaveClass('jira-setup-failure');
+  });
+
+  it('turns the pill amber for a rate limit or an unreachable site', async () => {
+    statusAnswer = status({ access: 'rate-limited', detail: null });
+    await renderSetup();
+    expect(within(connectionCard()).getByText(accessPhrase('rate-limited') as string)).toHaveClass('ui-pill-warn');
   });
 
   it('draws nothing red while access is ok and no 429 is recent', async () => {
@@ -1070,10 +1097,10 @@ describe('the Skills card', () => {
     expect(within(groom).getByRole('button', { name: 'Remove Groom ticket' })).toBeInTheDocument();
   });
 
-  it('sits in the right-hand column under Connection', async () => {
+  it('sits in the right-hand column, apart from the Boards card (the Connection banner is above both columns)', async () => {
     await renderSetup();
     const column = skillsCard().closest('.set-col') as HTMLElement;
-    expect(within(column).getByRole('heading', { name: 'Connection' })).toBeInTheDocument();
+    expect(within(column).queryByRole('region', { name: 'Connection' })).toBeNull();
     expect(within(column).queryByRole('heading', { name: 'Boards' })).toBeNull();
   });
 

@@ -509,21 +509,27 @@ export function bandSub(
 }
 
 /**
- * Setup's one line per board: `2 roots · 1 query · 14 issues · every 1m · polled 12 s ago`. Zero counts are omitted, and the failure travels beside the text
+ * Setup's one line per board (and its `facts` / `age` halves, which the row draws as pills and a quiet age): `2 roots · 1 query · 14 issues · every 1m · polled 12 s ago`. Zero counts are omitted, and the failure travels beside the text
  * (`failure`, `failurePhrase`'s words) so Setup can draw it red without re-deriving it. An `off` board says `sync off` where the interval would be and `last
  * polled` where `polled` would, because for it the age is not a heartbeat but the date of the last time anyone looked.
  */
-export function boardRowLine(board: JiraBoardStatus, now: number): { text: string; failing: boolean; failure: string | null } {
+export function boardRowLine(
+  board: JiraBoardStatus,
+  now: number
+): { text: string; facts: string[]; age: string | null; failing: boolean; failure: string | null } {
   const off = board.interval === 'off';
-  const parts = [
+  // `facts` are the row's pills (`6 roots`, `every 1m`), `age` the polled phrase beside them — split so the row can draw the first as chips and the second as
+  // a quiet word, while `text` (their join) stays the one sentence a screen reader or a test can read whole. `age` is null for a board never swept: the
+  // row then says `not polled yet` itself, and `text` keeps that wording.
+  const facts = [
     countOrNull(board.roots.length, 'root'),
     countOrNull(board.queries.length, 'query'),
     countOrNull(board.count, 'issue'),
-    off ? 'sync off' : `every ${board.interval}`,
-    polledPhrase(board.polledAt, now, off)
+    off ? 'sync off' : `every ${board.interval}`
   ].filter((s): s is string => s !== null);
+  const age = pollAge(board.polledAt, now) === null ? null : polledPhrase(board.polledAt, now, off);
   const failure = failurePhrase(board.failures);
-  return { text: parts.join(' · '), failing: failure !== null, failure };
+  return { text: [...facts, age ?? polledPhrase(board.polledAt, now, off)].join(' · '), facts, age, failing: failure !== null, failure };
 }
 
 // ── Meters and picks ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

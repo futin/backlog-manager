@@ -385,11 +385,11 @@ describe('the four dark themes do not move', () => {
   });
 
   /**
-   * The twenty tint sites keep their own percentage and surface. A shared `--X-tint` token per hue (the dashboard's shape) was rejected for exactly this: the
+   * The twenty-one tint sites keep their own percentage and surface. A shared `--X-tint` token per hue (the dashboard's shape) was rejected for exactly this: the
    * board's tints run 6 to 14 % over `--strip` or `--steel`, and one token per hue would move every dark theme's pill fill. Only the hue each site mixes
    * changes — the `-solid` mark for green and amber, the bare token for mustard and cyan, which are dark enough in daylight to be a mark as they are.
    */
-  it('the twenty tint sites keep their percentage and surface, and mix the mark token of their hue', () => {
+  it('the twenty-one tint sites keep their percentage and surface, and mix the mark token of their hue', () => {
     const PINNED: Record<string, [string, number, string]> = {
       '.board-card-stage': ['--cyan', 10, 'var(--strip)'],
       '.board-card-stage-done': ['--green-solid', 10, 'var(--strip)'],
@@ -408,6 +408,7 @@ describe('the four dark themes do not move', () => {
       '.jira-card-prio[data-tone="high"]': ['--red', 12, 'var(--strip)'],
       '.jira-card-prio[data-tone="med"]': ['--amber-solid', 14, 'var(--strip)'],
       '.jira-card-av': ['--magenta', 14, 'var(--strip)'],
+      '.jira-setup-av': ['--magenta', 14, 'var(--strip)'],
       ".ui-glyph-tile[data-tone='green']": ['--green-solid', 14, 'var(--strip)'],
       ".ui-glyph-tile[data-tone='red']": ['--red', 12, 'var(--strip)'],
       ".ui-glyph-tile[data-tone='amber']": ['--amber-solid', 14, 'var(--strip)']

@@ -364,6 +364,8 @@ describe('boardRowLine', () => {
     const now = Date.now();
     expect(boardRowLine(board({ polledAt: ago(now, 12 * SECOND) }), now)).toEqual({
       text: '2 roots · 1 query · 14 issues · every 1m · polled 12 s ago',
+      facts: ['2 roots', '1 query', '14 issues', 'every 1m'],
+      age: 'polled 12 s ago',
       failing: false,
       failure: null
     });
@@ -406,6 +408,26 @@ describe('boardRowLine', () => {
 
   it('carries no failure for a clean board', () => {
     expect(boardRowLine(board({ polledAt: ago(Date.now(), SECOND) }), Date.now()).failure).toBeNull();
+  });
+
+  it('splits the line into facts and an age: an off board says sync off and last polled', () => {
+    const now = Date.now();
+    const row = boardRowLine(board({ interval: 'off', polledAt: ago(now, 12 * SECOND) }), now);
+    expect(row.facts).toEqual(['2 roots', '1 query', '14 issues', 'sync off']);
+    expect(row.age).toBe('last polled 12 s ago');
+  });
+
+  it('has no age for a never-polled board, and its facts still end on the interval', () => {
+    const row = boardRowLine(board({ polledAt: null }), Date.now());
+    expect(row.facts).toEqual(['2 roots', '1 query', '14 issues', 'every 1m']);
+    expect(row.age).toBeNull();
+  });
+
+  it('counts a three-root board in its facts and leaves the zero counts out', () => {
+    const now = Date.now();
+    const row = boardRowLine(board({ roots: ['A-1', 'A-2', 'A-3'], queries: [], count: 0, polledAt: ago(now, 12 * SECOND) }), now);
+    expect(row.facts).toEqual(['3 roots', 'every 1m']);
+    expect(row.age).toBe('polled 12 s ago');
   });
 });
 
