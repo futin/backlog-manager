@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { JIRA_PAGE_KEY, isJiraPage, type JiraPage } from '../lib/jira-page';
 
 /**
- * useJiraPage — the Jira section's page (`board` or `setup`), shared by every surface that names it. `useRunsMode`'s shape and its reason: the rail's
+ * useJiraPage — the Jira section's page (`board`, `sessions` or `setup`), shared by every surface that names it. `useRunsMode`'s shape and its reason: the rail's
  * sub-nav tree and a link inside the Board page both ask the same question at once, and `usePersistedState` is a `useState` per caller, so a write from
  * one would reach localStorage and never reach the already-mounted other. The value is held once, at module level, with every mounted reader subscribed.
  *

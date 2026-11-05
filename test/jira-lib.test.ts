@@ -593,8 +593,9 @@ describe('isJiraStatusPayload', () => {
 });
 
 describe('jira page key', () => {
-  it('names the two pages and the stored key', () => {
-    expect(JIRA_PAGES).toEqual(['board', 'setup']);
+  it('names the three pages and the stored key', () => {
+    expect(JIRA_PAGES).toEqual(['board', 'sessions', 'setup']);
+    expect(isJiraPage('sessions')).toBe(true);
     expect(JIRA_PAGE_KEY).toBe('backlog-manager.jira-page');
     expect(isJiraPage('setup')).toBe(true);
     expect(isJiraPage('banana')).toBe(false);
