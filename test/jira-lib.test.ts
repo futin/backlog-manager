@@ -66,7 +66,10 @@ import {
   pickBoard,
   soonestBoard,
   sortForBoard,
-  unmappedProjects
+  unmappedProjects,
+  priorityTone,
+  typeTone,
+  statusTone
 } from '../client/src/lib/jira';
 import type { JiraFold } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
@@ -1685,5 +1688,23 @@ describe('lib/jira-deck', () => {
     // A detected or hand-made link reads `run` too: §7.1 words the row, and `branch ended` would read as a branch that ended.
     const branch = link('PAY-3', 'b', 'ended', 5, { endedAt: hoursAgo(2), how: 'branch' });
     expect(endedLine([branch], NOW)?.text).toBe('run ended 2h ago');
+  });
+});
+
+describe('card tone helpers', () => {
+  it('priorityTone reads Jira names case-insensitively and sends any other string to `other`', () => {
+    expect(['Highest', 'high', 'MEDIUM', 'Low', 'lowest', 'P1', '', null].map(priorityTone)).toEqual(['high', 'high', 'med', 'low', 'low', 'other', 'other', null]);
+  });
+
+  it('typeTone: a sub-task or a level >= 1 type is neutral whatever its name, then bug, story, and the rest neutral', () => {
+    expect(typeTone({ name: 'Bug', level: 0, subtask: false })).toBe('bug');
+    expect(typeTone({ name: 'Story', level: 0, subtask: false })).toBe('story');
+    expect(typeTone({ name: 'Task', level: 0, subtask: false })).toBe('neutral');
+    expect(typeTone({ name: 'Bug', level: -1, subtask: true })).toBe('neutral');
+    expect(typeTone({ name: 'Story', level: 1, subtask: false })).toBe('neutral');
+  });
+
+  it('statusTone maps the three categories to the three column slugs', () => {
+    expect([statusTone('new'), statusTone('indeterminate'), statusTone('done')]).toEqual(['todo', 'doing', 'done']);
   });
 });

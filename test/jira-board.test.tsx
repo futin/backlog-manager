@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -373,6 +373,55 @@ describe('the card', () => {
     expect(within(c).getByText('In Review')).toBeInTheDocument();
     expect(within(c).getByText('High')).toBeInTheDocument();
     expect(within(c).getByTitle('Story')).toBeInTheDocument();
+  });
+
+  it('the priority pill: tone and glyph by name, grey and glyphless for a custom name, nothing for null', async () => {
+    const cases: [string | null, string | null, boolean][] = [
+      ['High', 'high', true],
+      ['Medium', 'med', true],
+      ['Lowest', 'low', true],
+      ['P1', 'other', false],
+      [null, null, false]
+    ];
+    for (const [name, tone, glyph] of cases) {
+      statusAnswer = status();
+      lists[ALPHA.id] = [issue({ key: 'PAY-7', summary: 'Pill case', priority: name })];
+      renderPage();
+      await screen.findByText('Pill case');
+      const pill = name === null ? null : within(card('Pill case')).getByTitle(`priority ${name}`);
+      if (tone === null) expect(card('Pill case').querySelector('[title^="priority "]')).toBeNull();
+      else {
+        expect(pill).toHaveAttribute('data-tone', tone);
+        expect(pill?.querySelector('svg') !== null).toBe(glyph);
+      }
+      cleanup();
+    }
+  });
+
+  it('the status is the raw name beside a tone dot, and the type tile carries a tone per type', async () => {
+    await renderAlpha();
+    const c = card('Refund partial captures');
+    expect(within(c).getByText('In Review')).toBeInTheDocument();
+    expect(c.textContent).not.toMatch(/in progress/);
+    expect(c.querySelector('.jira-status-dot')).toHaveAttribute('data-tone', 'doing');
+    expect(within(c).getByTitle('Story')).toHaveAttribute('data-tone', 'story');
+    expect(within(card('Currency symbol missing on receipts')).getByTitle('Bug')).toHaveAttribute('data-tone', 'bug');
+    expect(within(card('Refund flows')).getByTitle('Epic')).toHaveAttribute('data-tone', 'neutral');
+  });
+
+  it('the foot names the one mapped repository by basename, `N repos` for several with every path in the title, and nothing for none', async () => {
+    statusAnswer = status({ repos: { PAY: ['/x/microservice'] } });
+    await renderAlpha();
+    expect(within(card('Refund flows')).getByText('microservice')).toBeInTheDocument();
+    cleanup();
+    statusAnswer = status({ repos: { PAY: ['/x/microservice', '/y/other'] } });
+    await renderAlpha();
+    const many = within(card('Refund flows')).getByText('2 repos').closest('.jira-card-repo') as HTMLElement;
+    expect(many.getAttribute('title')).toBe('/x/microservice\n/y/other');
+    cleanup();
+    statusAnswer = status();
+    await renderAlpha();
+    expect(card('Refund flows').querySelector('.jira-card-repo')).toBeNull();
   });
 
   it('reads `root` for a root, `Assigned to me` for my own, and `unassigned`', async () => {

@@ -95,6 +95,39 @@ export function columnOf(issue: JiraIssue): JiraColumnSlug {
 }
 
 /**
+ * What a Jira issue type IS, by the one precedence the card's tile and its glyph both read (`ui/JiraTypeIcon`): a sub-task by Jira's own flag, an epic or
+ * anything above it by hierarchy level — both before the NAME, so a sub-task a team named `Bug` is never drawn as one — then `bug` and `story`, the two
+ * names every Jira site ships, and every other type the plain task. One home so the tile's tint and the glyph inside it cannot disagree.
+ */
+export function typeKind(type: JiraIssue['type']): 'subtask' | 'high' | 'bug' | 'story' | 'task' {
+  if (type.subtask) return 'subtask';
+  if (type.level >= 1) return 'high';
+  const name = type.name.toLowerCase();
+  return name === 'bug' ? 'bug' : name === 'story' ? 'story' : 'task';
+}
+
+/** The card's type tile tone: only a bug and a story are coloured; a sub-task, an epic and every other type take the neutral tile. */
+export function typeTone(type: JiraIssue['type']): 'bug' | 'story' | 'neutral' {
+  const kind = typeKind(type);
+  return kind === 'bug' || kind === 'story' ? kind : 'neutral';
+}
+
+/**
+ * The card's priority pill tone. Jira's own five names fold to three; any OTHER string (`P1`, `Blocker`, a site's custom scheme) is `other`, drawn grey with no
+ * glyph rather than guessed at, and `null` — no priority at all — is `null`, so the caller draws nothing.
+ */
+export function priorityTone(name: string | null): 'high' | 'med' | 'low' | 'other' | null {
+  if (name === null) return null;
+  const n = name.toLowerCase();
+  return n === 'highest' || n === 'high' ? 'high' : n === 'medium' ? 'med' : n === 'low' || n === 'lowest' ? 'low' : 'other';
+}
+
+/** A status category as the column slug it sits in — the tone of the card's status dot, so the dot and the column say the same thing. */
+export function statusTone(category: JiraStatusCategory): JiraColumnSlug {
+  return JIRA_COLUMNS.find((c) => c.category === category)?.slug ?? 'todo';
+}
+
+/**
  * Most recently updated first, ties by key in plain string order (`PAY-10` before `PAY-2` — a stable order a reader can predict is worth more here than
  * a natural one, and it is the order the server's own tie-break uses). An unparseable stamp sorts as the oldest. Returns a new array: the caller's list
  * is the poller's cache copy and is never mutated.

@@ -1,11 +1,12 @@
+import { useJiraContext } from '../../hooks/JiraContext';
 import { useNarrow } from '../../hooks/useNarrow';
-import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, type cardFold } from '../../lib/jira';
+import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, priorityTone, statusTone, typeTone, type cardFold } from '../../lib/jira';
 import { endedLine } from '../../lib/jira-deck';
 import { openButtons, type SessionLink } from '../../lib/jira-sessions';
 import type { JiraAction, JiraBoard, JiraIssue, JiraWorktree } from '../../../../shared/types';
+import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Marker } from '../ui/Marker';
-import { Pill } from '../ui/Pill';
 import { SpreadBar } from '../ui/SpreadBar';
 import { JiraRunMenu } from './JiraRunMenu';
 import { OpenChip } from './JiraSessionCard';
@@ -17,7 +18,10 @@ import { OpenChip } from './JiraSessionCard';
  * `.board-card-face`, `.board-card-title`, `.board-card-foot`, `.board-card-meta` and `.board-card-markers` — composed, never restated — so a density or
  * theme change to the Board's card moves this one with it. What a Jira issue has that a backlog item does not is ONE row: the head (type icon, key, crumb),
  * which is the only family this file adds (`.jira-card-*`), plus the initials disc in the foot. The column already says the status CATEGORY; the pill
- * carries the RAW status name, because `In Review` and `In Progress` are one column and two very different facts to the person reading it.
+ * carries the RAW status name beside a 6 px dot in the column's tone, because `In Review` and `In Progress` are one column and two very different facts to the person reading it.
+ * The card's marks (Card mock, spec §4.2): the type is an 18 px tinted tile, the priority a pill pushed right on the head (tone by `priorityTone`; a custom name
+ * like `P1` is the grey pill with no glyph, an empty or null one nothing), and the foot's left is the mapped repository — the basename of the one path, or
+ * `N repos` with every path in the title — so the marker row, now the foot, is always drawn.
  *
  * **Everything the card prints comes from `lib/jira.ts`.** The crumb's words (`root`, `↳ PAY-120 Refund flows`, `Assigned to me`) are `crumbText`'s, the
  * initials `initialsOf`'s, the age `cardAgeStamp`'s (a relative `4m` / `2d`, aged against the page's `now` so every card shares one clock), the fold
@@ -85,6 +89,11 @@ export function JiraCard({
   const open = (): void => onOpen(issue);
   const last = endedLine(ended, now);
   const phone = useNarrow();
+  const { data } = useJiraContext();
+  // The foot's repository is the status' own mapping for this project (`runChipState` reads the same field); a non-array is unmapped, as it is there.
+  const mapped: unknown = data?.repos[issue.project.key];
+  const paths = Array.isArray(mapped) ? (mapped as string[]) : [];
+  const prio = priorityTone(issue.priority === '' ? null : issue.priority);
 
   return (
     <div
@@ -103,11 +112,17 @@ export function JiraCard({
         <div className="jira-card-head">
           {/* The type is the icon's title rather than a word on the row: the key and the crumb need the width, and the type is the reading a person
               hovers for, not the one they scan by. */}
-          <span className="jira-card-type" title={issue.type.name}>
+          <span className="jira-card-type" data-tone={typeTone(issue.type)} title={issue.type.name}>
             <JiraTypeIcon type={issue.type} />
           </span>
           <span className="jira-card-key">{issue.key}</span>
           {crumb !== null && <span className="jira-card-crumb">{crumb}</span>}
+          {issue.priority !== null && prio !== null && (
+            <span className="jira-card-prio" data-tone={prio} title={`priority ${issue.priority}`}>
+              {prio !== 'other' && <Glyph name={prio === 'high' ? 'up' : prio === 'med' ? 'equals' : 'down'} size={10} />}
+              {issue.priority}
+            </span>
+          )}
         </div>
         <div className="board-card-title">{issue.summary}</div>
         <div className="board-card-foot">
@@ -119,7 +134,10 @@ export function JiraCard({
             </span>
             <span className="jira-card-name">{issue.assignee === null ? 'unassigned' : issue.assignee.name}</span>
           </span>
-          <Pill tone="neutral">{issue.status.name}</Pill>
+          <span className="jira-card-status">
+            <span className="jira-status-dot" data-tone={statusTone(issue.status.category)} aria-hidden="true" />
+            {issue.status.name}
+          </span>
           <span className="board-card-meta">{cardAgeStamp(issue, now)}</span>
           <a
             className="board-card-link"
@@ -147,9 +165,12 @@ export function JiraCard({
               {match.word}
             </Marker>
           )}
-          {/* `kind`, the marker's quiet `--ink3` word: a priority is a fact about the issue, not a state this board should colour — §8's "marks state
-              by ink, never by accent" — and Jira's own five-colour priority scale would be a second palette on the card. */}
-          {issue.priority !== null && <Marker tone="kind">{issue.priority}</Marker>}
+          {paths.length > 0 && (
+            <span className="jira-card-repo" title={paths.join('\n')}>
+              <Glyph name="branch" size={10} />
+              <span>{paths.length === 1 ? (paths[0].replace(/\/+$/, '').split('/').pop() ?? paths[0]) : `${paths.length} repos`}</span>
+            </span>
+          )}
           {trees.length > 0 && (
             <span className="jira-card-tree" title={trees.map((t) => t.path).join('\n')}>
               {trees.length === 1 ? (trees[0].branch ?? '') : `${trees.length} worktrees`}

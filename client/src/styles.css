@@ -659,7 +659,21 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The card's head: the type glyph and the key left, the crumb pushed right and ellipsised — the crumb is the one value on the row that can be long
    (`↳ PAY-120 Refund flows`), and the key is the card's handle, so the crumb is what gives. */
 .jira-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink3) }
-.jira-card-type { display: inline-flex; flex: none }
+/* The type tile (Card mock, spec §4.2): an 18 px radius-5 tile round the glyph. Bug and story are tinted marks; every other type is the neutral tile. The glyph
+   takes the tile's ink through a structural selector (`> svg`), because the glyph's own class is a ui-* family and a page rule may not name one. */
+.jira-card-type { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 5px }
+.jira-card-type > svg { stroke: currentColor }
+.jira-card-type[data-tone="neutral"] { background: var(--strip-hi); color: var(--ink2) }
+.jira-card-type[data-tone="bug"] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
+.jira-card-type[data-tone="story"] { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
+/* The priority pill, pushed right on the head: 18 px, 11/500. Jira's five names fold to three tones; a custom name is the low look with no glyph. */
+.jira-card-prio {
+  display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: auto; height: 18px; padding: 0 7px; border-radius: 999px;
+  font-size: 11px; font-weight: 500; white-space: nowrap;
+}
+.jira-card-prio[data-tone="high"] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
+.jira-card-prio[data-tone="med"] { background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)); color: var(--amber-ink) }
+.jira-card-prio[data-tone="low"], .jira-card-prio[data-tone="other"] { background: var(--strip-hi); color: var(--ink3) }
 /* The fold block (grouped-board spec §4, DESIGN.md §8.9.1): after the foot and before the marker row — the line, then the spread bar and its caption,
    which are `SpreadBar`'s own look. The line is 12/500 --ink2: a sub-line of the card, a step quieter than the title and a step louder than the caption. */
 .jira-card-fold { display: flex; flex-direction: column; gap: 6px }
@@ -667,17 +681,25 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* F1's ring (grouped-board spec §5): a top card shown only because an issue folded under it matches the filter. An INSET ring, so the card keeps its
    size and the column does not shift by 4 px when a search starts; `--amber-solid` is the mark, and the `match` marker's word beside it is --amber-text. */
 .jira-card-match { box-shadow: inset 0 0 0 2px var(--amber-solid) }
-.jira-card-key { flex: none; font-weight: 500; color: var(--ink2); white-space: nowrap }
-.jira-card-crumb { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-/* The foot's person: a 20 px initials disc on `--strip-hi` (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
+.jira-card-key { flex: none; font-weight: 600; color: var(--ink); white-space: nowrap }
+.jira-card-crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* The foot's person: a 22 px initials disc tinted magenta (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
    the Board card's project name. An unassigned issue draws the disc empty and dashed, so the row keeps its shape. */
 .jira-card-who { display: flex; align-items: center; gap: 6px; min-width: 0 }
 .jira-card-av {
-  display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 999px;
-  background: var(--strip-hi); color: var(--ink); font-size: 11px; font-weight: 600;
+  display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 999px;
+  background: color-mix(in srgb, var(--magenta) 14%, var(--strip)); color: var(--magenta); font-size: 11px; font-weight: 600;
 }
 .jira-card-av.none { background: none; border: 1px dashed var(--hairline2) }
-.jira-card-name { font-size: 12px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
+/* The status dot: 6 px, the column's own tone, so the raw status name beside it and the column it sits in agree. */
+.jira-status-dot { flex: none; width: 6px; height: 6px; border-radius: 999px; background: var(--ink3) }
+.jira-status-dot[data-tone="doing"] { background: var(--amber-solid) }
+.jira-status-dot[data-tone="done"] { background: var(--green-solid) }
+.jira-card-status { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-card-name { font-size: 12px; font-weight: 400; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
+/* The repository on the foot: branch glyph and the one path's basename (or `N repos`), quiet ink like the worktree chip beside it. */
+.jira-card-repo { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--ink3) }
+.jira-card-repo > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* The worktree chip on the marker row (DESIGN.md §8.9.1): the branch of the ticket's one tree, or `N worktrees`. Quiet `--ink3`, like a marker, and it
    ellipsises first — the Run chip beside it keeps its width. */
 .jira-card-tree { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink3) }
