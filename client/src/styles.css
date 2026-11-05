@@ -469,7 +469,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   .filter-bar-sep { margin: 0 2px }
 }
 
-/* Inside the panels. The header row, then sections: the heading is 12 px `--ink2` with its hint in `--ink3`, and a section after another opens a 14 px gap. */
+/* Inside the panels. The Sort panel keeps its header row; the Filters panel has none (spec §4.1). Sections are chip groups: the heading is 11/600 `--ink3`,
+   sentence case, and a section after another opens a 12 px gap over a hairline. The foot row ends the Filters panel: `Showing N of M` left, `Clear` right. */
 .filter-bar-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; font-size: 14px; font-weight: 500; color: var(--ink) }
 .filter-bar-footrow { display: flex; align-items: baseline; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hairline) }
 .filter-bar-showing { font-size: 11px; color: var(--ink3) }
