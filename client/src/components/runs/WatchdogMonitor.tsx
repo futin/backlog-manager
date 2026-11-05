@@ -2,14 +2,16 @@ import { useNow } from '../../hooks/useNow';
 import { useWatchdog } from '../../hooks/useWatchdog';
 import { projectLabel } from '../../lib/project-label';
 import { formatClock, formatSpanCompact, freshnessFraction, lastReportedEntry } from '../../lib/run-time';
-import { graceRemainingMs, isCrashed, stateLine, sweepFraction, watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE } from '../../lib/run-watchdog';
+import { graceRemainingMs, isCrashed, stateLine, stateWord, sweepFraction, watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_PILL, WATCHDOG_KIND_TONE } from '../../lib/run-watchdog';
 import { RunControls } from '../RunControls';
 import type { RunControlsChange } from '../RunControls';
 import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
 import { Dot } from '../ui/Dot';
 import { Figure, FigureStrip } from '../ui/Figure';
+import { GlyphTile } from '../ui/GlyphTile';
 import { Ledger } from '../ui/Ledger';
+import { Pill } from '../ui/Pill';
 import { ProgressRow } from '../ui/ProgressRow';
 import { Sheet, SheetHead } from '../ui/Sheet';
 import { RUN_STALE_MS, WATCHDOG_EVENT_CAP } from '../../../../shared/types';
@@ -205,115 +207,54 @@ export function WatchdogMonitor({
 
   return (
     <div className="watchdog-monitor" data-testid="watchdog-monitor">
-      {/* `stateLine` verbatim as the band's subtitle, and the reason this
-          component reads a function for it at all: two surfaces print one
-          sentence about one sweeper, and two hand-written copies would
-          drift. */}
-      <Band title="Runs · Watchdog" sub={<span data-testid="watchdog-state-line">{stateLine(status, now)}</span>}>
-        {/* Flat and inert: `SettingsView` has no section setter to plumb
-            through for one chip, and the rail is one click away. The knobs are
-            edited in exactly one place. */}
-        <Chip variant="flat" data-testid="watchdog-policy-link" title="Settings › Orchestrator watchdog">
-          Policy in Settings ›
-        </Chip>
-      </Band>
+      <Band title="Runs · Watchdog" />
 
-      {/* `watchdog-state` stays on the strip even though the single state card
-          became three figures: it is what the unavailable-notice case above
-          selects, and the meaning — "the sweeper's own reading, as opposed to
-          any one run's" — survived the shape change intact. */}
-      <div data-testid="watchdog-state">
-        <FigureStrip cols={3}>
-          <Figure
-            label="sweeper"
-            value={
-              <span className="watchdog-tile-phase">
-                <span className={`watchdog-lamp watchdog-lamp-${status.phase}`} aria-hidden="true" />
-                <span data-testid="watchdog-phase">{status.phase}</span>
-              </span>
-            }
-            /* The cadence is printed whether or not a sweep is pending — it
-               is the policy, and a reader wants it in both states — but the
-               countdown half only exists while one is actually running. */
-            line={
-              sweepSeconds === null
-                ? `every ${formatSpanCompact(config.tickMs)}`
-                : `next sweep in ${formatSpanCompact(sweepSeconds * 1000)} · every ${formatSpanCompact(config.tickMs)}`
-            }
-          >
+      {/* §4.7 / DESIGN §8.4.2 — the status band is ONE sheet row: the ring tile, the phase as a word (a `Dot` and `stateWord`), `stateLine` verbatim under it
+          as the band's sub (the one sentence two surfaces print about one sweeper, so the countdown is drawn exactly once, in its `next check in 42s` form), the
+          sweep meter under that while armed, and the flat `Policy in Settings ›` chip on the right — flat and inert because the policy is read here and
+          edited there. `watchdog-state` rides this row rather than the policy strip below: it is the sweeper's own reading, as opposed to its settings, and
+          the Runs suite waits on it. `checked N s ago` is not served and is not drawn. */}
+      <Sheet className="watchdog-status-sheet">
+        <div className="watchdog-status" data-testid="watchdog-state">
+          <GlyphTile glyph="ring" tone={status.phase === 'armed' ? 'green' : 'neutral'} size={32} />
+          <div className="watchdog-status-body">
+            <span className="watchdog-status-word">
+              {/* Untoned (grey) for idle and off, live and breathing only while a sweep is pending — the phase is told by the word as well, never by the dot. */}
+              {status.phase === 'armed' ? <Dot tone="live" breathe /> : <Dot />}
+              <span data-testid="watchdog-phase">{stateWord(status)}</span>
+            </span>
+            <span className="watchdog-status-sub" data-testid="watchdog-state-line">
+              {stateLine(status, now)}
+            </span>
             {sweep !== null && sweepSeconds !== null && (
-              // The countdown `stateLine` already prints in words, drawn — a
-              // depleting rule is what makes "armed" read as something
-              // happening rather than a label. Drawn only while armed:
-              // `idle` and `off` have no next tick to be partway through, and
-              // an empty bar reads as "a sweep is imminent".
-              //
-              // `hatch` because this one IS a quantity of work — the tick's
-              // own elapsing — which is the distinction `ProgressRow`'s own
-              // comment draws against the heartbeat meter below.
-              <div data-testid="watchdog-sweep">
+              // The countdown `stateLine` prints in words, drawn — a depleting rule is what makes "armed" read as something happening rather than a label.
+              // Drawn only while armed: `idle` and `off` have no next tick to be partway through, and an empty bar reads as "a sweep is imminent". `hatch`
+              // because this one IS a quantity of work, the tick's own elapsing, which is the distinction `ProgressRow`'s comment draws against the heartbeat.
+              <div className="watchdog-sweep" data-testid="watchdog-sweep">
                 <ProgressRow value={sweepSeconds} max={Math.round(config.tickMs / 1000)} height={6} hatch />
               </div>
             )}
-          </Figure>
+          </div>
+          <Chip variant="flat" data-testid="watchdog-policy-link" title="Settings › Orchestrator watchdog">
+            Policy in Settings ›
+          </Chip>
+        </div>
+      </Sheet>
 
-          <Figure
-            label="watching"
-            /* `—`, never `0`, while off: nothing is watched at all, and a zero
-               would read as a healthy count taken by a sweeper that is
-               actually not running. */
-            value={<span data-testid="watchdog-watching">{status.phase === 'off' ? '—' : running.length}</span>}
-            unit={status.phase === 'off' ? undefined : running.length === 1 ? 'running run' : 'running runs'}
-            line={
-              status.phase === 'off' ? (
-                'nothing is watched while off'
-              ) : (
-                <span className="watchdog-counts">
-                  {/* Printed at zero as well as above it, but muted and
-                      glyphless there: the count must always be readable, and
-                      the page must not cry wolf on a healthy afternoon. */}
-                  <span className={crashedCount > 0 ? 'watchdog-warn' : undefined}>
-                    {crashedCount > 0 && <span aria-hidden="true">⚠ </span>}
-                    {crashedCount} crashed
-                  </span>
-                  <span>{running.length - crashedCount} fresh</span>
-                  {unwatchedCount > 0 && <span>{unwatchedCount} not yet watched</span>}
-                </span>
-              )
-            }
-          />
-
-          <Figure label="policy">
-            {/* The same three words the old one-line sentence used, in rows:
-                the vocabulary is what a reader carries between this figure and
-                the Settings knobs, so it survives the shape change unchanged.
-                Every number prints from `config`, never a literal — their
-                bounds are `WATCHDOG_LIMITS`, which the Settings ladders and
-                the server's clamp already read as one triple. */}
-            <div className="watchdog-policy" data-testid="watchdog-config-line">
-              <span className="watchdog-policy-label">check every</span>
-              <span className="watchdog-policy-value">{formatSpanCompact(config.tickMs)}</span>
-              <span className="watchdog-policy-label">leave alone for</span>
-              <span className="watchdog-policy-value">{formatSpanCompact(config.graceMs)}</span>
-              <span className="watchdog-policy-label">give up after</span>
-              <span className="watchdog-policy-value">{config.maxAttempts}</span>
-            </div>
-            {/* The enabled switch's state, UNDER the three pairs — the cell's
-                12 px line (§8.4.2), drawn here rather than through `Figure`'s
-                own `line` prop because this cell has no value for that line to
-                sit under, and above the pairs it would read as a caption for
-                the label rather than as the reading it qualifies.
-                  It is named at all because two switches reach this page and
-                they are not interchangeable. `WatchdogConfig.enabled` is the
-                user's Settings toggle and withholds the SPAWN alone — a
-                watchdog disabled there still arms, still ticks, and still
-                reports the crashed run it would have resumed. The phase above
-                reads `off` only when the ENVIRONMENT says so. */}
-            <span className="watchdog-policy-line">
-              {config.enabled ? 'resume spawns on · your switch, not the phase' : 'resume spawns off · your switch, not the phase'}
-            </span>
-          </Figure>
+      {/* The policy in its own row BELOW the status — the user found three numbers inline hard to read. Every value prints from `config`, never a literal:
+          their bounds are `WATCHDOG_LIMITS`, which the Settings ladders and the server's clamp already read as one triple. */}
+      <div className="watchdog-policy-block" data-testid="watchdog-config-line">
+        <FigureStrip cols={3}>
+          <Figure label="Check every" value={formatSpanCompact(config.tickMs)} />
+          <Figure label="Leave a resumed run alone" value={formatSpanCompact(config.graceMs)} />
+          <Figure label="Give up after" value={`${config.maxAttempts} ${config.maxAttempts === 1 ? 'resume' : 'resumes'}`} />
         </FigureStrip>
+        {/* The enabled switch's state, UNDER the figures. It is named at all because two switches reach this page and they are not interchangeable.
+            `WatchdogConfig.enabled` is the user's Settings toggle and withholds the SPAWN alone — a watchdog disabled there still arms, still ticks, and
+            still reports the crashed run it would have resumed. The phase above reads `off` only when the ENVIRONMENT says so. */}
+        <span className="watchdog-policy-line" data-testid="watchdog-policy-line">
+          {config.enabled ? 'resume spawns on · your switch, not the phase' : 'resume spawns off · your switch, not the phase'}
+        </span>
       </div>
 
       {/* Omitted entirely while the sweeper is off — nothing is being
@@ -322,7 +263,28 @@ export function WatchdogMonitor({
           settled one line up. */}
       {status.phase !== 'off' && (
         <Sheet className="watchdog-watching-sheet">
-          <SheetHead title="Watching" sub={`${running.length} ${running.length === 1 ? 'run' : 'runs'} · annotated from the sweeper's own set`} />
+          {/* The count is a pill beside the title; the crashed / fresh / not-yet-watched split the old watching figure printed moves to the sub, derived from
+              the same `running` array as the rows so the two cannot disagree. */}
+          <SheetHead
+            title={
+              <span className="watchdog-watching-title">
+                Watching
+                <span data-testid="watchdog-watching">
+                  <Pill>{running.length}</Pill>
+                </span>
+              </span>
+            }
+            sub={
+              <span className="watchdog-counts">
+                <span className={crashedCount > 0 ? 'watchdog-warn' : undefined}>
+                  {crashedCount > 0 && <span aria-hidden="true">⚠ </span>}
+                  {crashedCount} crashed
+                </span>
+                <span>{running.length - crashedCount} fresh</span>
+                {unwatchedCount > 0 && <span>{unwatchedCount} not yet watched</span>}
+              </span>
+            }
+          />
           <div className="watchdog-rows" data-testid="watchdog-rows">
             {running.map((run) => {
               const crashed = isCrashed(run);
@@ -527,10 +489,10 @@ export function WatchdogMonitor({
                           never printed: a `failed` line and a `recovered` one
                           used to be the same grey until read. Glyph AND word,
                           so the tone is never the only carrier. */}
-                      <span className={`watchdog-kind watchdog-kind-${WATCHDOG_KIND_TONE[event.kind]}`}>
+                      <Pill tone={WATCHDOG_KIND_PILL[WATCHDOG_KIND_TONE[event.kind]]}>
                         <span aria-hidden="true">{WATCHDOG_KIND_GLYPH[event.kind]}</span>
                         {event.kind}
-                      </span>
+                      </Pill>
                     </td>
                     {/* An em dash, not a blank: a sweeper-level event (arming,
                         standing down) is about no one run, and an empty cell

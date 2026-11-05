@@ -136,6 +136,7 @@ a save while the credential is rejected or the site `unsupported` touches only `
 | ------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `POST /api/jira/boards`         | `{ id?, name, interval, roots, queries }` | the board as stored, ids server-minted; waits for `boardSaved` (below); 404 for an `id` the file does not hold |
 | `POST /api/jira/boards/delete`  | `{ id }`                                | `{ ok: true }`; drops the board's cache at once (`boardDeleted`) and re-`arm()`s; 404 for an unknown id, a second delete included |
+| `POST /api/jira/sweep`          | none read                               | the `GET /api/jira` payload, `live` filled; the popover head's site-wide `Sync now`: forces every non-`off` board and sweeps once, joins a sweep in flight, answers `done` with no call inside `SWEEP_FLOOR_MS` (5 s) of the last one; 409 `{ message: 'Jira is not being polled' }` when nothing is armed, 429 `{ message: 'rate limited', retryAt }` inside a stored window (the only Jira sweep that refuses there); a 401/5xx is a 200 carrying `access` |
 | `POST /api/jira/boards/sweep`   | `{ id }`                                | `{ ok: true }`; writes NOTHING — the chip's per-board `now`: awaits `boardSaved(id)`, a save's own sweep, so a 429 window or an unanswered boot leaves the board owed rather than refusing; 409 for an unreadable file, 404 `unknown board` |
 | `POST /api/jira/repos`          | `{ project, paths }`                    | `{ project, paths }` as stored, normalised and deduplicated; `[]` removes the project's key; re-aims no poller, arms the session reconciler |
 | `POST /api/jira/repo-defaults`  | `{ path, base, namePattern }`           | `{ path, base, namePattern }` as stored, `null` for unset; both `null` deletes the path's entry; a base failing Table A or a pattern failing `patternProblem` is a 400 naming the field; after the 409, 400 `<path> is not mapped` unless SOME project maps it; re-aims nothing |
@@ -300,7 +301,7 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. The board draws the fold's tops only, each column sorted by
   `sortTops` and counting cards, and a filter that matches only a folded issue still shows its top, ringed. A card click lands in `JiraView`'s open-issue
   slot with the fold's `childrenOf` beside the issue. The band's `Board | List` switch (`JiraViewSwitch`, `hooks/useJiraView.ts`) picks the deck over the shelves or
-  `JiraIssueList`: one row per top, never a folded issue, in `sortTops`' order and uncut, with the deck's own session roll-up (`topSessionState`, `issueCellWord`
+  `JiraIssueList`: one row per top, never a folded issue, in `sortTops`' order and uncut, with the deck's own session roll-up (`topSessionCell`, `issueCellWord`
   in `lib/jira-deck.ts`) and `rolledUpdated` (`lib/jira.ts`) for the Updated cell; a row opens Detail through `rowOpens` (`lib/jira-list.ts`).
 - **Jira › Sessions** (`components/jira/JiraSessionsView.tsx`, `JiraBandSub.tsx`). The session table, `JiraSessionList`, on a page of its own: the shared board pick and
   load (`usePickedJiraBoard`), its own `Search sessions` text, no FilterBar and no view switch. The table's bar is drawn in every state and `All tickets` on is scoped
@@ -344,11 +345,14 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `origin/` itself, so a stored prefix would make every Start exit 4.
   `JiraConnectionGroup` is a read-only report. Every landed write reloads the shell's status, even if
   the page has gone.
+- **`POST /api/jira/sweep` is site-wide only** — it takes no `{ boardId }` (a deviation from spec §5/§8): the per-board `now` already exists as `boards/sweep`, which
+  reuses `boardSaved`, sweeps an `off` board and is not refused inside a 429 window. `JiraPollerService.sweepNow` decides everything before its first await, so two
+  presses in one tick share one sweep.
 - **The chip and the Sources card's Jira row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` —
   the strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
-  `Popover` with no links; each board's row carries a `next` meter (`boardPollReading`, the chip's POLL reading is the same function on the soonest board)
-  and a `now` button that posts `POST /api/jira/boards/sweep` — the chip holds the in-flight set, so `syncing…` survives a close and reopen, and re-reads the
-  status when the answer lands, which `useJiraBoard`'s `polledAt` watch turns into a fresh read of the cards on screen. With both chips in the rail bar neither draws its meters (a CSS rule in the 700 px block). The Settings › Shared ›
+  330 px `Popover` with a `Sync now` head button (`POST /api/jira/sweep`, site-wide — a spec §5 deviation from the per-board sweep), a `Jira setup ↗` link and a
+  `Calls` figure; each board's row carries its `polled … · every …` line (`boardPollReading`) and a sync icon that posts `POST /api/jira/boards/sweep` — the chip holds the in-flight set, so `syncing…` survives a close and reopen, and re-reads the
+  status when the answer lands, which `useJiraBoard`'s `polledAt` watch turns into a fresh read of the cards on screen. With both pills in the rail bar each drops its age (a CSS rule in the 700 px block). The Settings › Shared ›
   Sources card (`components/settings/SourcesGroup.tsx`) carries one Jira row from the same `useJira`, drawn whatever Jira's state — `configured · <site> · N
   boards`, `not configured`, or `checking…`/`unavailable` before Jira has answered — with no control, because a board's interval is set on Setup. While
   configured it carries one link, `Jira › Setup ↗`, which is `onOpenJiraPage('setup')` threaded down from `App` through `SettingsView`: the tree's own pair,
@@ -551,9 +555,9 @@ section (eight dialogs). The browser still never talks to Jira or the dashboard:
   still the shell's reservation source and still what the Run chip gates on; it no longer draws a strip on a card, so a `live` entry with no payload link yet
   (before the first sessions answer) leaves its top on the shelf with no deck card until that answer lands. The deck, like Detail, clears on the next read of
   the sessions provider.
-- **The modal's session.** A `session` fact (`<name> · <repo> · <elapsed>`, `starting`, or `—`) and `Stop session`, a 28 px chip replaced in place by
-  `ui/Confirm`, drawn only while agents are enabled AND the key has a confirmed, non-`starting` entry (`StopSession` is mounted for that case alone, so
-  `useAgents()` is read only then). It posts `stopJira(key, sessionId)` (`POST /api/agents/jira-stop`, naming the session the entry holds) through the same
+- **The modal's session.** A `session` fact (`<name> · <repo> · <elapsed>`, `starting`, or `—`) and `Stop session`, a row of `SessionOpen`'s `Session actions` menu whose
+  `Stop session` is replaced in place by `ui/Confirm` (focus returns to the split's chevron once it is answered), offered only while agents are enabled AND the
+  key has a confirmed, non-`starting` entry — the `stoppable && agentsOn` gate `JiraSessionCard` applies before it passes `onStop`. It posts `stopJira(key, sessionId)` (`POST /api/agents/jira-stop`, naming the session the entry holds) through the same
   `useAction` as the two writes, so one guard and one
   error line serve all three; a landed stop reloads the status and nudges the board.
 - **Skills and the default action.** `JiraSkillsGroup` (Jira › Setup, under Connection) lists the two locked built-ins and one row per stored skill, with an

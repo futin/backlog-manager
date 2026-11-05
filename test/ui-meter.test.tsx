@@ -60,4 +60,11 @@ describe('Meter', () => {
     expect(screen.getByText('API')).toBeInTheDocument();
     expect(screen.getByText('1.4%')).toBeInTheDocument();
   });
+
+  it('height 4 sets data-height="4" on the meter; absent leaves no attribute', () => {
+    const { container, rerender } = render(<Meter label="L" value="v" fraction={0.5} height={4} />);
+    expect(container.querySelector('.ui-meter')).toHaveAttribute('data-height', '4');
+    rerender(<Meter label="L" value="v" fraction={0.5} />);
+    expect(container.querySelector('.ui-meter')).not.toHaveAttribute('data-height');
+  });
 });

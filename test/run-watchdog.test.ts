@@ -1,4 +1,4 @@
-import { graceRemainingMs, isCrashed, stateLine, sweepFraction, watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE } from '../client/src/lib/run-watchdog';
+import { graceRemainingMs, isCrashed, stateLine, stateWord, sweepFraction, watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE } from '../client/src/lib/run-watchdog';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
 import type { RunWatchdog, WatchdogEventKind, WatchdogStatus } from '../shared/types';
 
@@ -225,6 +225,19 @@ describe('stateLine', () => {
  * Each takes an explicit `now` and returns `null` for input it cannot read,
  * so a caller never has to tell a guess from a measurement.
  */
+describe('stateWord', () => {
+  it('names the off reason, the idle state and the armed watch count', () => {
+    expect(stateWord(watchdogStatus({ phase: 'off', reason: 'BM_AGENTS off' }))).toBe('Off · BM_AGENTS off');
+    expect(stateWord(watchdogStatus({ phase: 'off' }))).toBe('Off · unknown');
+    expect(stateWord(watchdogStatus({ phase: 'idle' }))).toBe('Idle · nothing to watch');
+    expect(stateWord(watchdogStatus({ phase: 'armed', watching: ['a', 'b'] }))).toBe('Watching 2');
+  });
+
+  it('carries no countdown — only stateLine does, so the band draws it once', () => {
+    expect(stateWord(watchdogStatus({ phase: 'armed', watching: ['a'], nextTickAt: new Date(Date.now() + 42_000).toISOString() }))).not.toMatch(/next check/);
+  });
+});
+
 describe('sweepFraction', () => {
   const now = Date.parse('2026-09-06T12:00:00.000Z');
 

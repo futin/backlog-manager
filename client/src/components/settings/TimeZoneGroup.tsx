@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
 import { useTimeZone } from '../../hooks/TimeZoneContext';
-import { timeZoneOptions } from '../../lib/time-zone';
+import { timeZoneOptions, zoneOffsetLabel } from '../../lib/time-zone';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { Select } from '../ui/Select';
 
@@ -11,8 +11,8 @@ import { Select } from '../ui/Select';
  *
  * It sits on the SHARED page because the value is a file on the API host (`~/.backlog-manager/settings/timezone.json`), so a phone, a laptop and a tailnet
  * browser that open this board read — and edit — the same one zone. That is the whole point of the setting: a per-browser zone was what let two devices
- * disagree about when a run started and which day it belongs to. The scope reads `this server`, the watchdog's word, because what the setting binds is every
- * browser this server answers, not the machine's own clock.
+ * disagree about when a run started and which day it belongs to. The scope pill reads `this machine` (it said `this server` before the app restyle): the file
+ * is the API host's, and every browser that host answers reads it. Option labels carry the UTC offset, `Europe/Belgrade · UTC+1`.
  *
  * The first option is "unset" — the empty string here, `null` on the wire — labelled with THIS browser's zone, so a reader can see what unset means on the
  * device in front of them. A Select over the platform's own list, never a free-text field: the server refuses an id it cannot canonicalise with a 400, and a
@@ -24,17 +24,22 @@ import { Select } from '../ui/Select';
  */
 export function TimeZoneGroup() {
   const { stored, browser, save, saveError } = useTimeZone();
-  // `Intl.supportedValuesOf` is a ~400-entry list; built once per stored value rather than on every render of the Settings page.
+  // `Intl.supportedValuesOf` is a ~400-entry list; built once per stored value rather than on every render of the Settings page. Each label carries its
+  // UTC offset (`zoneOffsetLabel`), read at the moment the list is built — a page that stays open across a DST change keeps the figure it opened with.
   const options = useMemo(
-    () => [{ value: '', label: `Each browser's own (${browser})` }, ...timeZoneOptions(stored).map((z) => ({ value: z, label: z }))],
+    () => [
+      { value: '', label: `Each browser's own (${browser})` },
+      ...timeZoneOptions(stored).map((z) => ({ value: z, label: zoneOffsetLabel(z, Date.now()) }))
+    ],
     [stored, browser]
   );
 
   return (
-    <SettingsGroup title="Time zone" scope="this server">
+    <SettingsGroup title="Time zone" pill="this machine">
       <SettingsRow
         name="Time zone"
-        hint={
+        hint="used by run times and the tick schedule"
+        more={
           <>
             Stored in <code>~/.backlog-manager/settings/timezone.json</code> on the API host — every clock, day group, week range and created date reads
             it, on whichever phone or laptop opens the board. Unset, each browser uses its own zone.

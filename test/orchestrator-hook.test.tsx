@@ -2,9 +2,10 @@
  * @jest-environment jsdom
  */
 import { StrictMode } from 'react';
-import { act, renderHook } from '@testing-library/react';
+import { act, render, renderHook, screen } from '@testing-library/react';
 
 import { RESUME_POLL_GRACE_MS, useOrchestratorRuns } from '../client/src/hooks/useOrchestratorRuns';
+import { OrchestratorRunsProvider, useOrchestratorRunsContext } from '../client/src/hooks/OrchestratorRunsContext';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun, OrchestratorRunsPayload } from '../shared/types';
 
@@ -782,5 +783,81 @@ describe('useOrchestratorRuns', () => {
 
     expect(result.current.refresh).toBe(refresh);
     expect(result.current.noteResume).toBe(noteResume);
+  });
+
+  // spec §4.9a: `runs` is `[]` both before and after an empty first answer, so `answered` is the only way to tell "nobody knows" from "nothing running".
+  it('answered is false before the first fetch resolves, true after an empty answer, and stays true after a later failure', async () => {
+    const empty: OrchestratorRunsPayload = { runs: [], starting: [], remote: [], remoteStarting: [] };
+    const fetchMock = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(empty) } as Response));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { result } = renderHook(() => useOrchestratorRuns());
+    expect(result.current.answered).toBe(false);
+
+    await flush();
+    expect(result.current.answered).toBe(true);
+    expect(result.current.runs).toEqual([]);
+
+    fetchMock.mockImplementation(() => Promise.reject(new Error('down')));
+    act(() => {
+      result.current.refresh();
+    });
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.answered).toBe(true);
+  });
+});
+
+describe('OrchestratorRunsProvider', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    global.fetch = realFetch;
+  });
+
+  function Probe({ id }: { id: string }) {
+    const { working, liveCount } = useOrchestratorRunsContext();
+    return <span data-testid={id}>{`${String(working)}/${liveCount}`}</span>;
+  }
+
+  it('polls once for two consumers', async () => {
+    const fetchMock = stubFetch(payload(true));
+    render(
+      <OrchestratorRunsProvider>
+        <Probe id="a" />
+        <Probe id="b" />
+      </OrchestratorRunsProvider>
+    );
+    await flush();
+    // Each 5 s tick re-arms only after the previous answer settled (useRefreshing), so flush between advances.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    await flush();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports working as undefined until the first answer, then derives it and the live count', async () => {
+    stubFetch(payload(true));
+    render(
+      <OrchestratorRunsProvider>
+        <Probe id="a" />
+      </OrchestratorRunsProvider>
+    );
+    expect(screen.getByTestId('a').textContent).toBe('undefined/0');
+    await flush();
+    expect(screen.getByTestId('a').textContent).toBe('true/1');
+  });
+
+  it('throws outside the provider', () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => render(<Probe id="a" />)).toThrow(/OrchestratorRunsProvider/);
+    spy.mockRestore();
   });
 });

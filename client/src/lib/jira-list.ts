@@ -269,16 +269,13 @@ export function applyListFilters(
 }
 
 /**
- * The State column's dot, as a `ui/Dot` tone: amber and breathing for the four states that want a person (the colour every "a human must act" mark in this app
- * is), green for Working, mustard for Quiet and Starting (nothing is wrong, nothing is happening yet), red for Lost contact, and none for Ended — an ended
- * session has no state to be in, so its dot is simply absent and the row reads quiet beside the live ones. The tones are `Dot`'s own member names.
+ * The Sessions page's empty title (spec §4.3): the board it is scoped to and the window ended rows are cut by, so the line says WHICH nothing it found. With
+ * `All tickets` on the scope is every linked ticket, not a board, and the lead says so. `all` has no window phrase.
  */
-export function listDotTone(state: SessionLink['state']): 'live' | 'ramp-tasks' | 'paused' | 'crashed' | null {
-  if (needsYou(state)) return 'live';
-  if (state === 'working') return 'ramp-tasks';
-  if (state === 'quiet' || state === 'starting') return 'paused';
-  if (state === 'lost') return 'crashed';
-  return null;
+export function sessionsEmptyTitle(board: string, window: ListWindow, allTickets: boolean): string {
+  const lead = allTickets ? 'No linked sessions' : `No sessions on ${board}`;
+  const span = window === '24h' ? ' in the last 24 hours' : window === '7d' ? ' in the last 7 days' : window === '30d' ? ' in the last 30 days' : '';
+  return lead + span;
 }
 
 /** Every element inside a row that owns its own click: the Open chips are links, `Run ▾` a button, and its `Popover` panel a `role="dialog"` in the cell. */

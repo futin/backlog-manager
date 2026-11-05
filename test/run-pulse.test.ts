@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { runsWorking } from '../client/src/lib/run-pulse';
+import { liveRunCount, runsWorking } from '../client/src/lib/run-pulse';
 import { remoteAsLive } from '../client/src/lib/remote-run';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun, OrchestratorRunsPayload, StartingRun } from '../shared/types';
@@ -62,11 +62,29 @@ describe('runsWorking', () => {
 });
 
 /**
- * The wiring, read from source because behaviour cannot see what is missing. Every `useOrchestratorRuns()` call is its own 5 s poller, so the shell must
- * not grow one more just to learn what the views already know: each view reports its own reading up, and `App` only holds it. GitHub › PRs is the fourth
- * view — it runs the hook for its run-warning chip anyway, so it reports the same reading Board and Archive do rather than leaving the cursor blind there.
+ * `liveRunCount` — the rail's Runs badge (spec §4.9a): the rows the Runs page's Live sheet holds, which is `splitLive`'s rule (`running` or `paused`) over the
+ * local runs plus every remote run.
  */
-describe('the cursor reads the views’ pollers rather than adding one', () => {
+describe('liveRunCount', () => {
+  it('counts a running and a paused local run, not a finished one', () => {
+    expect(liveRunCount([run({ status: 'running' }), run({ status: 'paused' }), run({ status: 'done' })], [])).toBe(2);
+  });
+
+  it('adds a running remote run', () => {
+    expect(liveRunCount([run({ status: 'running' }), run({ status: 'paused' }), run({ status: 'done' })], [{ status: 'running' }])).toBe(3);
+  });
+
+  it('is 0 for nothing', () => {
+    expect(liveRunCount([], [])).toBe(0);
+  });
+});
+
+/**
+ * The wiring, read from source because behaviour cannot see what is missing (spec §4.9a). Every `useOrchestratorRuns()` call is its own 5 s poller, so the
+ * hook is called ONCE, by `OrchestratorRunsProvider`, and every view — and the shell's cursor — reads that answer through `useOrchestratorRunsContext()`.
+ * A view that called the hook itself would be a second poller on its page, and a bare render of one would silently draw an empty list.
+ */
+describe('one runs poll per tab', () => {
   const SRC = join(__dirname, '..', 'client', 'src');
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
@@ -80,15 +98,19 @@ describe('the cursor reads the views’ pollers rather than adding one', () => {
     .filter((f) => /\.tsx?$/.test(f))
     .map((f) => ({ file: f.slice(SRC.length + 1), text: readFileSync(f, 'utf8') }));
 
-  it('calls useOrchestratorRuns() in exactly the four views, and App is not one of them', () => {
+  it('calls useOrchestratorRuns() in exactly the provider, and App is not it', () => {
     const callers = sources.filter((s) => /=\s*useOrchestratorRuns\(\)/.test(s.text)).map((s) => s.file);
-    expect(callers.sort()).toEqual(VIEWS);
+    expect(callers).toEqual(['hooks/OrchestratorRunsContext.tsx']);
   });
 
-  it('has each of those views report its own runs and starting entries up', () => {
+  it('has each of the four views read the context', () => {
     for (const file of VIEWS) {
       const text = sources.find((s) => s.file === file)?.text ?? '';
-      expect({ file, reports: /useReportWorking\(/.test(text) }).toEqual({ file, reports: true });
+      expect({ file, reads: /=\s*useOrchestratorRunsContext\(\)/.test(text) }).toEqual({ file, reads: true });
     }
+  });
+
+  it('leaves no useReportWorking behind', () => {
+    expect(sources.filter((s) => s.text.includes('useReportWorking')).map((s) => s.file)).toEqual([]);
   });
 });

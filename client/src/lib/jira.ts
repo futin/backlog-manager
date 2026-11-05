@@ -95,6 +95,39 @@ export function columnOf(issue: JiraIssue): JiraColumnSlug {
 }
 
 /**
+ * What a Jira issue type IS, by the one precedence the card's tile and its glyph both read (`ui/JiraTypeIcon`): a sub-task by Jira's own flag, an epic or
+ * anything above it by hierarchy level — both before the NAME, so a sub-task a team named `Bug` is never drawn as one — then `bug` and `story`, the two
+ * names every Jira site ships, and every other type the plain task. One home so the tile's tint and the glyph inside it cannot disagree.
+ */
+export function typeKind(type: JiraIssue['type']): 'subtask' | 'high' | 'bug' | 'story' | 'task' {
+  if (type.subtask) return 'subtask';
+  if (type.level >= 1) return 'high';
+  const name = type.name.toLowerCase();
+  return name === 'bug' ? 'bug' : name === 'story' ? 'story' : 'task';
+}
+
+/** The card's type tile tone: only a bug and a story are coloured; a sub-task, an epic and every other type take the neutral tile. */
+export function typeTone(type: JiraIssue['type']): 'bug' | 'story' | 'neutral' {
+  const kind = typeKind(type);
+  return kind === 'bug' || kind === 'story' ? kind : 'neutral';
+}
+
+/**
+ * The card's priority pill tone. Jira's own five names fold to three; any OTHER string (`P1`, `Blocker`, a site's custom scheme) is `other`, drawn grey with no
+ * glyph rather than guessed at, and `null` — no priority at all — is `null`, so the caller draws nothing.
+ */
+export function priorityTone(name: string | null): 'high' | 'med' | 'low' | 'other' | null {
+  if (name === null) return null;
+  const n = name.toLowerCase();
+  return n === 'highest' || n === 'high' ? 'high' : n === 'medium' ? 'med' : n === 'low' || n === 'lowest' ? 'low' : 'other';
+}
+
+/** A status category as the column slug it sits in — the tone of the card's status dot, so the dot and the column say the same thing. */
+export function statusTone(category: JiraStatusCategory): JiraColumnSlug {
+  return JIRA_COLUMNS.find((c) => c.category === category)?.slug ?? 'todo';
+}
+
+/**
  * Most recently updated first, ties by key in plain string order (`PAY-10` before `PAY-2` — a stable order a reader can predict is worth more here than
  * a natural one, and it is the order the server's own tie-break uses). An unparseable stamp sorts as the oldest. Returns a new array: the caller's list
  * is the poller's cache copy and is never mutated.
@@ -165,7 +198,7 @@ export function crumbText(crumb: JiraCrumb): string | null {
 
 /**
  * The card's person badge: the first letter of the first two words, upper-cased. `Jean-Luc Picard Jr` is `JP` — a hyphenated name is one word. Nothing to
- * read is `?`. (The rail chip draws ONE initial, `me.name`'s first letter; this two-letter reading is the card's alone.)
+ * read is `?`. The Jira popover's head disc draws the same two letters for `me.name` — `AJ`, as the shell mock does (ui-verify 2026-11-05).
  */
 export function initialsOf(name: string): string {
   const letters = name
@@ -476,21 +509,28 @@ export function bandSub(
 }
 
 /**
- * Setup's one line per board: `2 roots · 1 query · 14 issues · every 1m · polled 12 s ago`. Zero counts are omitted, and the failure travels beside the text
+ * Setup's one line per board (and its `facts` / `age` halves, which the row draws as pills and a quiet age): `2 roots · 1 query · 14 issues · every 1m · polled 12 s ago`. Zero counts are omitted, and the failure travels beside the text
  * (`failure`, `failurePhrase`'s words) so Setup can draw it red without re-deriving it. An `off` board says `sync off` where the interval would be and `last
  * polled` where `polled` would, because for it the age is not a heartbeat but the date of the last time anyone looked.
  */
-export function boardRowLine(board: JiraBoardStatus, now: number): { text: string; failing: boolean; failure: string | null } {
+export function boardRowLine(
+  board: JiraBoardStatus,
+  now: number
+): { text: string; facts: string[]; age: string | null; failing: boolean; failure: string | null } {
   const off = board.interval === 'off';
-  const parts = [
+  // `facts` are the row's pills (`6 roots`, `every 1m`), `age` the polled phrase beside them — split so the row can draw the first as chips and the second as
+  // a quiet word, while `text` (their join) stays the one sentence a screen reader or a test can read whole. `age` is null for a board never swept: the
+  // row then says `not polled yet` itself, and `text` keeps that wording.
+  const facts = [
     countOrNull(board.roots.length, 'root'),
     countOrNull(board.queries.length, 'query'),
     countOrNull(board.count, 'issue'),
-    off ? 'sync off' : `every ${board.interval}`,
-    polledPhrase(board.polledAt, now, off)
+    off ? 'sync off' : `every ${board.interval}`
   ].filter((s): s is string => s !== null);
+  const polled = polledPhrase(board.polledAt, now, off);
+  const age = pollAge(board.polledAt, now) === null ? null : polled;
   const failure = failurePhrase(board.failures);
-  return { text: parts.join(' · '), failing: failure !== null, failure };
+  return { text: [...facts, age ?? polled].join(' · '), facts, age, failing: failure !== null, failure };
 }
 
 // ── Meters and picks ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -702,6 +742,20 @@ export function boardsForSetup(boards: readonly JiraBoardStatus[]): JiraBoardSta
 /** The projects Setup still owes a repository: every one the status carries whose key has no `repos` entry. */
 export function unmappedProjects(status: Pick<JiraStatusPayload, 'projects' | 'repos'>): JiraProjectRef[] {
   return status.projects.filter((p) => !Object.prototype.hasOwnProperty.call(status.repos, p.key));
+}
+
+/**
+ * The launch sheet's foot line (spec §4.5): where the session will start, in the words of the branch choice. `null` without a repository — there is nothing to
+ * say about nowhere. A `null` choice is the Branch section not being ready (refs still loading, or refused); the line then ends after the basename rather than
+ * guessing a mode the person has not been shown. The basename, not the full path, because the foot is one 12 px line and the Repository control above it
+ * already carries the path in its title.
+ */
+export function launchFootLine(repo: string | null, choice: JiraBranchChoice | null): string | null {
+  if (repo === null || repo === '') return null;
+  const name = repo.replace(/\/+$/, '').split('/').pop() || repo;
+  const base = `Starts in ${name}`;
+  if (choice === null) return base;
+  return choice.mode === 'none' ? `${base} on the checkout itself` : choice.mode === 'new' ? `${base} on a new worktree` : `${base} on ${choice.branch}`;
 }
 
 /**

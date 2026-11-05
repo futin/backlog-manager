@@ -1,45 +1,52 @@
-import { useId } from 'react';
-import type { ReactNode } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { Chip } from '../ui/Chip';
+import { Glyph, type GlyphName } from '../ui/Glyphs';
+import { GlyphTile } from '../ui/GlyphTile';
+import { Popover } from '../ui/Popover';
+import { SplitChip } from '../ui/SplitChip';
 import { primaryKey } from '../../lib/pr-layouts';
-import { PR_KEYS, autoMergeBlock, defaultMethod, mergeBlock, prKey, updateBlock, whyLine, type PrKey, type PrOutcome } from '../../lib/prs';
+import { autoMergeBlock, defaultMethod, mergeBlock, mergeMain, prKey, updateBlock, whyLine, type PrOutcome } from '../../lib/prs';
 import { setAutoMerge, updateBranch } from '../../lib/prs-api';
 import type { PrAutoMergeRequest, PrRepoView, PrWriteResult, PullRequestRow } from '../../../../shared/types';
 
-/** The three keys that are writes; `open` is the link and has no block. */
-type WriteKey = Exclude<PrKey, 'open'>;
-
 /**
- * The one key strip every GitHub › PRs layout draws beside a pull request (.claude/DESIGN.md §8.11, "Actions and their reasons"; spec
- * `2026-10-30-prs-page-fixes-design.md`, "One key strip, one foot"): `Merge · Auto-merge · Update · Open ↗`, in `PR_KEYS` order, on every PR in every layout —
- * never one more, one fewer, or reordered. A person who has learned the strip on one row has learned it on all of them, so which keys a PR offers is not this
- * component's call: a key that cannot be used stays in its place, greyed, and says why.
+ * The one key strip every GitHub › PRs layout draws beside a pull request (.claude/DESIGN.md §8.11, "Actions and their reasons"; spec §4.8): a split Merge and
+ * an icon link out to GitHub, on every PR in every layout. A person who has learned the strip on one row has learned it on all of them, so which actions a PR
+ * offers is not this component's call: an action that cannot be used stays in its place, marked, and says why. The strip used to be four chips (`Merge`,
+ * `Auto-merge`, `Update`, `Open ↗`); it is now one split pill, because three of those four are three ways of asking GitHub to bring the PR in, and the row was
+ * paying for all of them in width.
  *
- * **The primary.** At most one key is filled (`ink`), the one `primaryKey` says a person most likely wants next — `Update` on a behind PR, `Merge` on a clean
- * quiet one, none on a PR with anything wrong, where the row's verdict is what the eye should land on. The rest are `outline`. `Open ↗` is never the primary:
- * it is the way out to GitHub, not a write.
+ * **The main half is `mergeMain`'s answer** (`lib/prs.ts`), the one derivation Inbox, Matrix and Cards share: `Merge` while the PR can be merged now,
+ * `Auto-merge` while its checks still run and GitHub may be asked to wait, `Auto-merge on` once armed (a press disarms). It is ink only when it is the thing a
+ * person most likely wants next (`primaryKey` says `merge`, nothing blocks it) and outline otherwise.
  *
- * **A blocked key is `aria-disabled`, never `disabled`.** `disabled` drops a button from the tab order and so out of a screen reader's reach, and every reason
- * here is a specific, fixable thing (`sync off`, `auto-merge not enabled on the repo`, `checks failing`). So the key keeps its focus, a click guard makes it
- * inert, its reason is its `title` and — because a tooltip cannot be read on a phone or announced reliably — the text of a visually hidden span its
- * `aria-describedby` points at: `GatedChip`'s pattern, by hand here because these keys are not dispatch gates. The reasons are `lib/prs.ts`' (`mergeBlock`,
- * `autoMergeBlock`, `updateBlock`), in their precedence order; this component only places them.
+ * **A blocked half is `aria-disabled`, never `disabled`.** `disabled` drops a button from the tab order and so out of a screen reader's reach, and every reason
+ * here is a specific, fixable thing (`sync off`, `checks failing`). So the half keeps its focus (`SplitChip`'s `mainBlockedBy`), a click is swallowed, it is
+ * drawn dashed reading `Blocked` — or the reason itself, with `blockedText`, for a layout with room to say it — and its reason is its `title` and the text of a
+ * visually hidden sibling span its `aria-describedby` points at (a tooltip cannot be read on a phone or announced reliably; a child of the button would become
+ * part of its name). The reasons are `lib/prs.ts`' (`mergeBlock`, `autoMergeBlock`, `updateBlock`), in their precedence order; this component only places
+ * them. An armed PR on a sync-off repo is the one half whose NAME and look disagree on purpose: it is still `Auto-merge on #n`, because that is what it is,
+ * and `Blocked`, because `sync off` stops a disarm like every write (parked: whether the page should let a person disarm from a repo it will not write to).
  *
- * **The why-line** under the keys is `whyLine`'s: only the reasons a row does not already state elsewhere — the repo's and the token's (`sync off` once, not
+ * **The chevron opens `Merge menu`, the tenth `Popover` composer**: `Merge` (asks first, then merges), `Enable auto-merge` / `Disable auto-merge` and
+ * `Update branch`, each a plain button with a tile. A blocked row is `aria-disabled` and its sub-line IS the reason, pointed at by `aria-describedby`, so the
+ * menu says the same thing the half does without a tooltip. The row `primaryKey` names carries an `aria-hidden` tick. Focus lands on the first enabled row when
+ * the menu opens; Escape (the Popover's) and a pick both hand it back to the chevron.
+ *
+ * **The why-line** under the strip is `whyLine`'s: only the reasons a row does not already state elsewhere — the repo's and the token's (`sync off` once, not
  * three times), never the PR's own facts, which its chips, cells and verdict already say. `omitUpdatingReason` drops `updating…` from it for a layout that
  * prints that word in a cell of its own (Matrix's Base column), so one row does not say it twice.
  *
- * **Merge only asks.** `Merge` is the one write that cannot be taken back, so its key sends nothing: it calls `onMerge`, the page records this row as the
- * confirming one, and `PrFoot` draws the Confirm under the row — the key itself neither swaps out nor changes its label, so the strip does not jump under the
- * pointer. Auto-merge and Update do not ask: arming is undone by the same key, and an update-branch is GitHub merging base into head, which the next push or
- * merge simply includes. `Auto-merge` is a toggle — `pressed` while armed, reading `Auto-merge ✓` with the tick `aria-hidden` so its name stays `Auto-merge`
- * either way — and arms with the repo's default method, leaving `method` out of the request entirely when the repo allows none.
+ * **Merge only asks.** `Merge` is the one write that cannot be taken back, so neither the half nor the row sends anything: they call `onMerge`, the page
+ * records this row as the confirming one, and `PrFoot` draws the Confirm under the row — the strip does not jump under the pointer. Auto-merge and Update do
+ * not ask: arming is undone by the same action, and an update-branch is GitHub merging base into head, which the next push or merge simply includes. Arming
+ * uses the repo's default method, leaving `method` out of the request entirely when the repo allows none.
  *
- * **In flight.** While a write of this PR runs, `busy` sets `disabled` on the three write keys — momentary, with no reason worth reading — and `Open ↗` stays a
- * link. `busy` is the page's in-flight set (`PrLayoutProps.inFlight`) and nothing else: this component keeps no busy state of its own, because a strip that
- * unmounts (an Inbox filter, a Matrix collapse, a layout switch) would forget it, and a key that came back while the write still ran would send a head SHA the
- * write may already have moved. The write and its outcome are the page's too (`onWrite`), so an outcome outlives a row the re-read removed.
+ * **In flight.** While a write of this PR runs, `busy` sets `disabled` on both halves — momentary, with no reason worth reading — closes an open menu, and the
+ * Open link stays a link. `busy` is the page's in-flight set (`PrLayoutProps.inFlight`) and nothing else: this component keeps no busy state of its own, because
+ * a strip that unmounts (an Inbox filter, a Matrix collapse, a layout switch) would forget it, and an action that came back while the write still ran would send
+ * a head SHA the write may already have moved. The write and its outcome are the page's too (`onWrite`), so an outcome outlives a row the re-read removed.
  */
 export function PrActions({
   repo,
@@ -49,7 +56,8 @@ export function PrActions({
   busy,
   onMerge,
   onWrite,
-  omitUpdatingReason = false
+  omitUpdatingReason = false,
+  blockedText = false
 }: {
   repo: PrRepoView;
   pr: PullRequestRow;
@@ -59,16 +67,32 @@ export function PrActions({
   outcome: PrOutcome | undefined;
   /** A write of this PR is in flight (the page's `inFlight`). */
   busy: boolean;
-  /** `Merge` was clicked: the page makes this row the confirming one. Sends nothing. */
+  /** `Merge` was picked: the page makes this row the confirming one. Sends nothing. */
   onMerge: () => void;
   /** Runs one write for this PR and resolves once its outcome is recorded and the page has re-read. Never rejects. */
   onWrite: (call: () => Promise<PrWriteResult>) => Promise<void>;
   /** Leave `updating…` off the why-line, for a layout that already prints it beside the row (Matrix's Base cell). */
   omitUpdatingReason?: boolean;
+  /** A blocked main half reads its reason instead of `Blocked`, for a layout that has the room. */
+  blockedText?: boolean;
 }) {
   const ids = useId();
+  const [open, setOpen] = useState(false);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const primary = primaryKey(pr, repo, updating);
   const armed = pr.autoMerge !== null;
+  const half = mergeMain(pr, repo);
+
+  /* A write of this PR started (from this strip or another layout's): the menu's rows could send a head SHA the write may already have moved. */
+  useEffect(() => {
+    if (busy) setOpen(false);
+  }, [busy]);
+
+  /* The first enabled row takes focus when the menu opens, so a keyboard reader lands inside it and Escape (Popover's) can hand focus back to the chevron. */
+  useEffect(() => {
+    if (open) menuRef.current?.querySelector<HTMLElement>('button:not([aria-disabled="true"])')?.focus();
+  }, [open]);
 
   const arm = (): void => {
     const target = { repo: repo.repo, number: pr.number };
@@ -78,69 +102,95 @@ export function PrActions({
     const body: PrAutoMergeRequest = armed ? { ...target, enable: false } : method === null ? { ...target, enable: true } : { ...target, enable: true, method };
     void onWrite(() => setAutoMerge(body));
   };
+  const update = (): void => void onWrite(() => updateBranch({ repo: repo.repo, number: pr.number, headSha: pr.headSha }));
 
-  const keys: Record<WriteKey, { label: ReactNode; block: string | null; act: () => void }> = {
-    merge: { label: 'Merge', block: mergeBlock(pr, repo), act: onMerge },
-    'auto-merge': {
-      label: armed ? (
-        <>
-          Auto-merge<span aria-hidden="true"> ✓</span>
-        </>
-      ) : (
-        'Auto-merge'
-      ),
-      block: autoMergeBlock(pr, repo),
-      act: arm
-    },
-    update: {
-      label: 'Update',
-      block: updateBlock(pr, repo, updating),
-      act: () => void onWrite(() => updateBranch({ repo: repo.repo, number: pr.number, headSha: pr.headSha }))
-    }
-  };
-  const reasonId = (key: WriteKey): string => `${ids}-${key}`;
-  const blocked = (Object.keys(keys) as WriteKey[]).filter((key) => keys[key].block !== null);
+  const base = pr.base;
+  const rows: { id: string; glyph: GlyphName; label: string; sub: string; block: string | null; act: () => void; primary: boolean }[] = [
+    { id: 'merge', glyph: 'merge', label: 'Merge', sub: `asks first, then merges into ${base}`, block: mergeBlock(pr, repo), act: onMerge, primary: primary === 'merge' },
+    armed
+      ? { id: 'auto', glyph: 'clock', label: 'Disable auto-merge', sub: 'GitHub stops waiting to merge', block: autoMergeBlock(pr, repo), act: arm, primary: false }
+      : { id: 'auto', glyph: 'clock', label: 'Enable auto-merge', sub: 'GitHub merges when checks pass', block: autoMergeBlock(pr, repo), act: arm, primary: false },
+    { id: 'update', glyph: 'refresh', label: 'Update branch', sub: `merge ${base} into ${pr.head}`, block: updateBlock(pr, repo, updating), act: update, primary: primary === 'update' }
+  ];
+
+  const mainId = `${ids}-main`;
+  const word = half.mode === 'merge' ? 'Merge' : half.mode === 'arm' ? 'Auto-merge' : 'Auto-merge on';
   const reasons = whyLine(pr, repo, updating, outcome?.kind).filter((reason) => !(omitUpdatingReason && reason === 'updating…'));
+  const close = (): void => setOpen(false);
 
   return (
     <div className="prs-keys-side" data-testid={`pr-keys-${prKey(repo.repo, pr.number)}`}>
       <div className="prs-keys">
-        {PR_KEYS.map((key) => {
-          if (key === 'open') {
-            return (
-              <Chip key={key} as="a" size={28} href={pr.url}>
-                Open ↗
-              </Chip>
-            );
-          }
-          const { label, block, act } = keys[key];
-          return (
-            <Chip
-              key={key}
-              size={28}
-              variant={key === primary ? 'ink' : 'outline'}
-              pressed={key === 'auto-merge' ? armed : undefined}
-              disabled={busy}
-              title={block ?? undefined}
-              aria-disabled={block === null ? undefined : 'true'}
-              aria-describedby={block === null ? undefined : reasonId(key)}
-              onClick={() => {
-                // The other half of `aria-disabled`: the browser does not stop a click on a control that is only labelled disabled, so this does.
-                if (block === null) act();
-              }}
-            >
-              {label}
-            </Chip>
-          );
-        })}
-      </div>
-      {/* Siblings of the keys, not children: inside a button the reason would become part of its accessible name, and a key named `Merge checks failing`
-          is not a key called Merge. Visually hidden, because the visible copy is the why-line's job and it says only what the row does not. */}
-      {blocked.map((key) => (
-        <span key={key} id={reasonId(key)} className="sr-only">
-          {keys[key].block}
+        <span className="prs-keys-merge">
+          <SplitChip
+            label={`${word} #${pr.number}`}
+            labelMore={`Merge options for #${pr.number}`}
+            // A blocked half wears the dashed skin ALONE: `.ui-split-outline` sits after `.ui-split-dashed` in the primitives block at equal specificity, so
+            // passing both drew a solid border and ink text on `Blocked` (ui-verify D4, 2026-11-05). `ink` is SplitChip's no-skin value, not a filled pill
+            // here — every ink rule is `:not(.ui-split-dashed)`.
+            variant={half.block === null && !(primary === 'merge' && half.mode === 'merge') ? 'outline' : 'ink'}
+            dashed={half.block !== null}
+            mainBlockedBy={half.block === null ? undefined : mainId}
+            title={half.block ?? undefined}
+            icon={<Glyph name={half.mode === 'merge' ? 'merge' : 'clock'} />}
+            disabled={busy}
+            onMain={half.mode === 'merge' ? onMerge : arm}
+            onMore={() => setOpen((o) => !o)}
+            open={open}
+            moreRef={moreRef}
+          >
+            {half.block === null ? word : blockedText ? half.block : 'Blocked'}
+          </SplitChip>
+          {open && !busy && (
+            <Popover label="Merge menu" width={280} anchor={moreRef} onClose={close}>
+              <div ref={menuRef} className="prs-keys-rows">
+                {rows.map((row) => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className="prs-keys-row"
+                    aria-labelledby={`${ids}-${row.id}-label`}
+                    aria-describedby={`${ids}-${row.id}-sub`}
+                    aria-disabled={row.block === null ? undefined : 'true'}
+                    onClick={() => {
+                      // The other half of `aria-disabled`: a click on a control that is only labelled disabled still arrives, so this makes it inert.
+                      if (row.block !== null) return;
+                      close();
+                      moreRef.current?.focus();
+                      row.act();
+                    }}
+                  >
+                    <GlyphTile glyph={row.glyph} size={18} />
+                    <span className="prs-keys-text">
+                      <span id={`${ids}-${row.id}-label`} className="prs-keys-label">
+                        {row.label}
+                      </span>
+                      <span id={`${ids}-${row.id}-sub`} className="prs-keys-sub">
+                        {row.block ?? row.sub}
+                      </span>
+                    </span>
+                    {row.primary && row.block === null && (
+                      <span className="prs-keys-tick" aria-hidden="true">
+                        <Glyph name="tick" />
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </Popover>
+          )}
         </span>
-      ))}
+        <Chip as="a" size={28} href={pr.url} aria-label={`Open #${pr.number} on GitHub`} title={`Open #${pr.number} on GitHub`}>
+          <Glyph name="external" />
+        </Chip>
+      </div>
+      {/* A sibling of the strip, not a child of the half: inside a button the reason would become part of its accessible name, and a half named `Merge #5
+          checks failing` is not a half called Merge #5. Visually hidden, because the visible copy is the why-line's job and it says only what the row does not. */}
+      {half.block !== null && (
+        <span id={mainId} className="sr-only">
+          {half.block}
+        </span>
+      )}
       {reasons.length > 0 && <p className="prs-why">{reasons.join(' · ')}</p>}
     </div>
   );

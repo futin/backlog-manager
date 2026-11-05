@@ -242,23 +242,16 @@ describe('daylight status tokens hold AA', () => {
    *   would read 4.34:1 — a judgement about that set, not about whether a status word is legible, so it is left to whoever next retunes it.
    */
   it('every token client/src/styles.css sets text in clears 4.5:1 on each surface, unless it paints its own ground, is a mark glyph or a project hue', () => {
-    const MARK_GLYPHS: Record<string, string> = {
-      '.rail-caret': '--green-solid'
-    };
     const sites = textSites();
     // Guards the parser, not the palette: these must be found, or the loop below passes on nothing. `.rail-link` declares `background: none` and must be
     // measured — the narrowing of the ground exemption, held by a real rule.
     const measured = sites.filter((s) => s.ground.kind === 'none').map((s) => s.selector);
-    for (const sel of ['.runs-status-live', '.runs-status-paused', '.watchdog-kind-live', '.set-error', '.rail-caret', '.rail-link']) {
+    for (const sel of ['.runs-status-live', '.runs-status-paused', '.watchdog-kind-live', '.set-error', '.rail-link']) {
       expect(measured).toContain(sel);
     }
     const fails: string[] = [];
     for (const s of sites) {
       if (s.ground.kind !== 'none' || s.token.startsWith('--proj-')) continue;
-      if (s.selector in MARK_GLYPHS) {
-        if (s.token !== MARK_GLYPHS[s.selector]) fails.push(`${s.selector} is a mark glyph and must read ${MARK_GLYPHS[s.selector]}, reads ${s.token}`);
-        continue;
-      }
       for (const bg of SURFACES) {
         const r = ratio(day(s.token), day(`--${bg}`));
         if (r < AA) fails.push(`${s.selector}: ${s.token} on --${bg}: ${r.toFixed(2)}:1`);
@@ -385,11 +378,11 @@ describe('the four dark themes do not move', () => {
   });
 
   /**
-   * The ten tint sites keep their own percentage and surface. A shared `--X-tint` token per hue (the dashboard's shape) was rejected for exactly this: the
+   * The twenty-one tint sites keep their own percentage and surface. A shared `--X-tint` token per hue (the dashboard's shape) was rejected for exactly this: the
    * board's tints run 6 to 14 % over `--strip` or `--steel`, and one token per hue would move every dark theme's pill fill. Only the hue each site mixes
    * changes — the `-solid` mark for green and amber, the bare token for mustard and cyan, which are dark enough in daylight to be a mark as they are.
    */
-  it('the ten tint sites keep their percentage and surface, and mix the mark token of their hue', () => {
+  it('the twenty-one tint sites keep their percentage and surface, and mix the mark token of their hue', () => {
     const PINNED: Record<string, [string, number, string]> = {
       '.board-card-stage': ['--cyan', 10, 'var(--strip)'],
       '.board-card-stage-done': ['--green-solid', 10, 'var(--strip)'],
@@ -400,7 +393,18 @@ describe('the four dark themes do not move', () => {
       '.run-detail-mode-note': ['--mustard', 10, 'var(--strip)'],
       '.run-detail-crashed': ['--amber-solid', 10, 'var(--strip)'],
       '.ui-pill-warn': ['--amber-solid', 14, 'var(--strip)'],
-      '.ui-pill-done': ['--green-solid', 14, 'var(--strip)']
+      '.ui-pill-done': ['--green-solid', 14, 'var(--strip)'],
+      '.jira-run-opt-default .jira-run-tile': ['--green-solid', 14, 'var(--strip)'],
+      ".jira-run[data-state='live'] > [role='group']": ['--green-solid', 14, 'var(--strip)'],
+      '.jira-card-type[data-tone="bug"]': ['--red', 12, 'var(--strip)'],
+      '.jira-card-type[data-tone="story"]': ['--green-solid', 14, 'var(--strip)'],
+      '.jira-card-prio[data-tone="high"]': ['--red', 12, 'var(--strip)'],
+      '.jira-card-prio[data-tone="med"]': ['--amber-solid', 14, 'var(--strip)'],
+      '.jira-card-av': ['--magenta', 14, 'var(--strip)'],
+      '.jira-setup-av': ['--magenta', 14, 'var(--strip)'],
+      ".ui-glyph-tile[data-tone='green']": ['--green-solid', 14, 'var(--strip)'],
+      ".ui-glyph-tile[data-tone='red']": ['--red', 12, 'var(--strip)'],
+      ".ui-glyph-tile[data-tone='amber']": ['--amber-solid', 14, 'var(--strip)']
     };
     const sites = tintSites();
     const actual: Record<string, [string, number, string] | undefined> = {};

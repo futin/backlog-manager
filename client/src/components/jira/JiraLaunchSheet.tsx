@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { errorMessage, useAction } from '../../hooks/useAction';
@@ -14,6 +14,7 @@ import {
   fetchJiraDetail,
   fetchJiraPrompt,
   jiraWritesStand,
+  launchFootLine,
   transitionOptions
 } from '../../lib/jira';
 import { clampMode, modesUpTo, projectDispatchGate } from '../../../../shared/agent';
@@ -21,6 +22,7 @@ import { JIRA_BUILTIN_LABELS, jiraActionParam } from '../../../../shared/types';
 import type { JiraAction, JiraDispatchResult, JiraIssue, LaunchSurface, PermissionMode } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
+import { GlyphTile } from '../ui/GlyphTile';
 import { JiraBranchSection, useBranchState } from './JiraBranchSection';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
@@ -241,17 +243,46 @@ export function JiraLaunchSheet({
     );
   };
 
-  const actionOptions = [
-    { value: 'execute', label: JIRA_BUILTIN_LABELS.execute },
-    { value: 'context', label: JIRA_BUILTIN_LABELS.context },
-    ...skills.map((k) => ({ value: `skill:${k.id}`, label: k.name }))
-  ];
+  // The three tiles are one control over the same `action` state the select used to be: `End to end` and `Ticket loaded` are the two built-ins, `A skill`
+  // is every `{ skill }` action. Pressing it with none picked takes the first skill, so the preview and Start are never asked about a half-chosen action.
+  const skillAction = typeof action === 'string' ? null : action.skill;
+  const pickAction = (next: JiraAction): void => {
+    setAction(next);
+    setPickedMode(null);
+  };
+  const skillOptions = skills.map((k) => ({ value: `skill:${k.id}`, label: k.name }));
   // A skill the menu no longer lists (deleted since the action was chosen) still has to be the select's value, or React would show the first option
   // while the preview — and Start — carry another action. It is listed by its id, and the preview's refusal says what happened.
-  if (typeof action !== 'string' && !skills.some((k) => k.id === action.skill)) actionOptions.push({ value: actionKey, label: `skill ${action.skill}` });
+  if (skillAction !== null && !skills.some((k) => k.id === skillAction)) skillOptions.push({ value: actionKey, label: `skill ${skillAction}` });
+  const skillSub = skillAction === null ? `${skills.length} on this machine` : (skills.find((k) => k.id === skillAction)?.name ?? `skill ${skillAction}`);
+  const tiles: { key: string; title: string; sub: string; glyph: 'play' | 'document' | 'sparkle'; on: boolean; disabled?: boolean; hint?: string; pick: () => void }[] = [
+    { key: 'execute', title: 'End to end', sub: 'plan, change, test, PR', glyph: 'play', on: action === 'execute', pick: () => pickAction('execute') },
+    { key: 'context', title: 'Ticket loaded', sub: 'you drive', glyph: 'document', on: action === 'context', pick: () => pickAction('context') },
+    {
+      key: 'skill',
+      title: 'A skill',
+      sub: skillSub,
+      glyph: 'sparkle',
+      on: skillAction !== null,
+      // Nothing to pick from: the tile stays drawn, so the machine's lack is visible, and says why it cannot be pressed.
+      disabled: skills.length === 0 && skillAction === null,
+      hint: skills.length === 0 && skillAction === null ? 'no skills on this machine' : undefined,
+      pick: () => {
+        if (skillAction === null && skills.length > 0) pickAction({ skill: skills[0].id });
+      }
+    }
+  ];
+  const tileIds = useId();
+
+  // Two to four paths with distinct basenames read as a segmented control of those basenames (the full path is each button's title); anything else — five or
+  // more, or two `api` checkouts a basename cannot tell apart — stays a select, whose options are the display paths.
+  const baseOf = (p: string): string => p.replace(/\/+$/, '').split('/').pop() || p;
+  const segmentRepos = paths.length >= 2 && paths.length <= 4 && new Set(paths.map(baseOf)).size === paths.length;
+  const footLine = launchFootLine(repo === '' ? null : repo, branch.ready ? branch.choice : null);
 
   const footer = started !== null ? null : (
     <>
+      {footLine !== null && <span className="launch-foot-line">{footLine}</span>}
       {canCopy && (
         <Chip size={28} variant="flat" disabled={promptText === null} onClick={copy}>
           {copied ? 'Copied' : 'Copy prompt'}
@@ -259,7 +290,7 @@ export function JiraLaunchSheet({
       )}
       {startDrawn && (
         <Chip size={28} variant="ink" disabled={busy || startBlock !== null} title={startBlock ?? undefined} onClick={start}>
-          {busy ? 'starting…' : 'Start'}
+          {busy ? 'starting…' : 'Start session'}
         </Chip>
       )}
     </>
@@ -304,18 +335,45 @@ export function JiraLaunchSheet({
         )
       ) : (
         <>
-          <label className="sheet-field">
+          {/* A group of buttons, not a select: three picture tiles, so what Claude will do is seen before it is chosen. `aria-pressed` rather than a radiogroup,
+              for Segmented's reason — each press applies at once. The name is the title; the sub-line is the description. */}
+          <div className="sheet-field">
             <span className="set-name">Action</span>
-            <Select
-              label="Action"
-              value={actionKey}
-              onChange={(v) => {
-                setAction(v === 'execute' || v === 'context' ? v : { skill: v.slice('skill:'.length) });
-                setPickedMode(null);
-              }}
-              options={actionOptions}
-            />
-          </label>
+            <div className="launch-tiles" role="group" aria-label="Action">
+              {tiles.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  className="launch-tile"
+                  aria-pressed={t.on}
+                  aria-label={t.title}
+                  aria-describedby={`${tileIds}-${t.key}`}
+                  disabled={t.disabled === true}
+                  title={t.hint}
+                  onClick={t.pick}
+                >
+                  <GlyphTile glyph={t.glyph} tone={t.on ? 'ink' : 'neutral'} />
+                  <span className="launch-tile-text">
+                    <span className="launch-tile-title">{t.title}</span>
+                    <span className="launch-tile-sub" id={`${tileIds}-${t.key}`}>
+                      {t.sub}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {skillAction !== null && (
+            <label className="sheet-field">
+              <span className="set-name">Skill</span>
+              <Select
+                label="Skill"
+                value={actionKey}
+                onChange={(v) => pickAction({ skill: v.slice('skill:'.length) })}
+                options={skillOptions}
+              />
+            </label>
+          )}
 
           {/* A div, not a label, for the board sheet's reason: a label's click goes to its first labelable descendant, so clicking "Open in" would press
               Dashboard. The group names itself through its own aria-label. */}
@@ -332,6 +390,14 @@ export function JiraLaunchSheet({
               <span className="sheet-static" title={paths[0]}>
                 {displayPath(paths[0], data?.home ?? null)}
               </span>
+            ) : segmentRepos ? (
+              // `repo` is `''` until a button is pressed, which matches no option: none starts pressed, as the select's `choose…` did, and the gate waits on it.
+              <Segmented<string>
+                label="Repository"
+                value={repo}
+                onChange={setRepo}
+                options={paths.map((p) => ({ value: p, label: baseOf(p), title: p }))}
+              />
             ) : (
               <Select
                 label="Repository"
@@ -344,10 +410,20 @@ export function JiraLaunchSheet({
 
           <JiraBranchSection branch={branch} action={action} repo={repo} home={data?.home ?? null} />
 
-          <label className="sheet-field">
+          {/* A div, not a label: the Copy chip is a second control inside it, and a label would hand its click to the first one. The textarea names itself. */}
+          <div className="sheet-field">
             <span className="set-name">Prompt</span>
             {promptText !== null ? (
-              <textarea aria-label="Prompt" className="sheet-prompt" rows={8} readOnly value={promptText} />
+              <div className="launch-code">
+                <textarea aria-label="Prompt" className="sheet-prompt" rows={8} readOnly value={promptText} />
+                {canCopy && (
+                  // Same handler as the foot's Copy prompt. A fixed accessible name: the foot's chip carries the `Copied` state for a screen reader, and two
+                  // buttons announcing it would be one fact said twice.
+                  <Chip size={28} variant="flat" aria-label="Copy" onClick={copy}>
+                    {copied ? 'Copied' : 'Copy'}
+                  </Chip>
+                )}
+              </div>
             ) : promptRefusal !== null ? (
               <div className="sheet-blocked">{promptRefusal}</div>
             ) : (
@@ -355,7 +431,7 @@ export function JiraLaunchSheet({
                 {repo === '' ? 'choose a repository to see the prompt' : branch.refusal !== null ? 'fix the branch above to see the prompt' : 'loading…'}
               </div>
             )}
-          </label>
+          </div>
 
           <div className="sheet-row">
             <div className="sheet-field">
@@ -383,17 +459,17 @@ export function JiraLaunchSheet({
 
           <div className="sheet-row">
             <label className="sheet-field">
-              <span className="set-name">Permissions</span>
-              {/* Only what the host's ceiling can deliver: offering a mode the dashboard would clamp is a promise this app cannot keep. */}
-              <Select<PermissionMode> label="Permissions" value={mode} onChange={setPickedMode} options={modes.map((m) => ({ value: m, label: m }))} />
-            </label>
-            <label className="sheet-field">
               <span className="set-name">Model</span>
               <Select label="Model" value={model} onChange={setModel} options={MODEL_OPTIONS} />
             </label>
             <label className="sheet-field">
               <span className="set-name">Effort</span>
               <Select label="Effort" value={effort} onChange={setEffort} options={EFFORT_OPTIONS} />
+            </label>
+            <label className="sheet-field">
+              <span className="set-name">Permissions</span>
+              {/* Only what the host's ceiling can deliver: offering a mode the dashboard would clamp is a promise this app cannot keep. */}
+              <Select<PermissionMode> label="Permissions" value={mode} onChange={setPickedMode} options={modes.map((m) => ({ value: m, label: m }))} />
             </label>
           </div>
 

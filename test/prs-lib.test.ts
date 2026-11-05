@@ -8,6 +8,7 @@ import {
   groupRepos,
   autoMergeBlock,
   mergeBlock,
+  mergeMain,
   outcomeLine,
   parsePrKey,
   prChips,
@@ -485,5 +486,28 @@ describe('one home for the key and for the head-moved rule', () => {
 
   it('PullRequestsView does not test the head itself', () => {
     expect(readFileSync(join(GITHUB, 'PullRequestsView.tsx'), 'utf8')).not.toContain('headSha !==');
+  });
+});
+
+describe('mergeMain', () => {
+  it('merges a mergeable PR with green checks', () => {
+    expect(mergeMain(pr({ checks: 'success' }), repo())).toEqual({ mode: 'merge', block: null });
+  });
+  it('merges with mergeBlock\'s own reason when checks fail', () => {
+    expect(mergeMain(pr({ checks: 'failure' }), repo())).toEqual({ mode: 'merge', block: 'checks failing' });
+  });
+  it('arms while checks are pending and the repo allows auto-merge', () => {
+    expect(mergeMain(pr({ checks: 'pending' }), repo({ autoMergeAllowed: true }))).toEqual({ mode: 'arm', block: null });
+  });
+  it('falls back to merge when pending but auto-merge is not allowed on the repo', () => {
+    expect(mergeMain(pr({ checks: 'pending' }), repo({ autoMergeAllowed: false }))).toEqual({ mode: 'merge', block: null });
+  });
+  it('disarms an armed PR, and keeps the sync-off reason on it', () => {
+    const armed = pr({ checks: 'pending', autoMerge: { method: 'squash' } as PullRequestRow['autoMerge'] });
+    expect(mergeMain(armed, repo())).toEqual({ mode: 'disarm', block: null });
+    expect(mergeMain(armed, repo({ syncOff: SYNC_OFF }))).toEqual({ mode: 'disarm', block: 'sync off' });
+  });
+  it('a draft with pending checks cannot arm: merge, blocked as a draft', () => {
+    expect(mergeMain(pr({ draft: true, checks: 'pending' }), repo())).toEqual({ mode: 'merge', block: 'draft' });
   });
 });

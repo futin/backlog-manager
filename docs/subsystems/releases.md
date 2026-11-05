@@ -44,7 +44,7 @@ HEAD or a tag next moves. Concurrent requests under one key share one read. The 
 
 `v0.3.0`, or `v0.3.0+2` when HEAD is two commits past the tag (ui-kit's `chipLabel`). No chip at all when `current` is null — which is what a checkout without
 the baseline tag shows. It is the rail's last element, sunk to its foot, and the last row of the phone menu, where tapping it closes the menu as every rail
-entry does. There the chip's `narrow` prop gives the pill a 44 px hit area, which overhangs it by 8 px above and below; `.rail-release`'s margins and the rail's
+entry does. There the chip's `narrow` prop gives the pill a 44 px hit area, which overhangs it by 8 px above and below; `.rail-foot`'s margins and the rail's
 padding keep that overhang inside the rail, whose `overflow-x: hidden` clips the y-axis too.
 
 **The dot.** A cyan dot sits in the chip while the newest release (the baseline counts) is above the version stored under `localStorage`

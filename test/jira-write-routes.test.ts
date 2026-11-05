@@ -90,7 +90,7 @@ describe('the guard, on all six config routes and the board sweep', () => {
   });
   afterAll(() => app.close());
 
-  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
+  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
     'POST %s with no content type is 403, and nothing is written',
     async (path) => {
       await request(app.getHttpServer()).post(`/api/jira${path}`).send('{}').expect(403);
@@ -98,12 +98,12 @@ describe('the guard, on all six config routes and the board sweep', () => {
     }
   );
 
-  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])('POST %s from another origin is 403', async (path) => {
+  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])('POST %s from another origin is 403', async (path) => {
     await post(path, {}).set('origin', 'http://evil.test').expect(403);
     expect(existsSync(file)).toBe(false);
   });
 
-  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
+  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
     'POST %s to a Host the allowlist does not know is 403',
     async (path) => {
       await post(path, {}).set('host', 'evil.example:4322').expect(403);

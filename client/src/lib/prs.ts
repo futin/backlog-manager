@@ -100,6 +100,19 @@ export function mergeBlock(pr: PullRequestRow, repo: PrRepoView): string | null 
 }
 
 /**
+ * What the split Merge's main half does, and why it cannot. One derivation so Inbox, Matrix and Cards cannot disagree (spec §4.8). Armed → `disarm`, whose block
+ * is `autoMergeBlock`'s (only `sync off` can block a disarm: taking an armed PR back must stay possible whatever else changed). Checks still running and arming
+ * allowed → `arm` (enable auto-merge rather than merge a PR GitHub would refuse right now). Anything else → `merge`, blocked by `mergeBlock`'s reason. A draft
+ * with pending checks therefore reads `merge` + `draft`: `autoMergeBlock` refuses to arm a draft, so the pending-checks shortcut never applies to it.
+ */
+export function mergeMain(pr: PullRequestRow, repo: PrRepoView): { mode: 'merge' | 'arm' | 'disarm'; block: string | null } {
+  const armBlock = autoMergeBlock(pr, repo);
+  if (pr.autoMerge !== null) return { mode: 'disarm', block: armBlock };
+  if (pr.checks === 'pending' && armBlock === null) return { mode: 'arm', block: null };
+  return { mode: 'merge', block: mergeBlock(pr, repo) };
+}
+
+/**
  * Why Update branch is disabled, or `null`. `canUpdateBranch` is GitHub's `viewerCanUpdateBranch`, which is false for "already up to date" and for "this
  * token may not" alike — so the row's `mergeState` tells them apart: a PR GitHub says is BEHIND its base is not up to date, and the only reason left is
  * that this token may not update it. Any other state reads up to date, which is what it almost always is.

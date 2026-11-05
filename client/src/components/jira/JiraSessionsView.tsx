@@ -98,6 +98,8 @@ export function JiraSessionsView({
         onOpenIssue={onOpenIssue}
         onRun={onRun}
         unavailable={unavailable}
+        boardName={shown?.name ?? ''}
+        onOpenJiraPage={onOpenJiraPage}
       />
     </div>
   );

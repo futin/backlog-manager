@@ -20,7 +20,7 @@ import {
   type JiraBoardFilters,
   type JiraChildrenIndex
 } from '../../lib/jira';
-import { boardAgents, boardShelves, topSessionState } from '../../lib/jira-deck';
+import { boardAgents, boardShelves, topSessionCell } from '../../lib/jira-deck';
 import type { JiraPage } from '../../lib/jira-page';
 import type { JiraAction, JiraIssue, JiraLiveSession, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { FilterBar, FilterSection } from '../FilterBar';
@@ -144,7 +144,7 @@ export function JiraBoardView({
       // The List's rows: every kept top, `sortTops` order, no cut. The Session cell reads the UNFILTERED `agents`, so a top's cell names the deck's lead session
       // for that card even when a filter would have dropped that session's own ticket from the deck (the card is the top; the filter kept the top).
       rows: sortTops(fold.tops.filter((t) => kept.has(t.key)), fold.under),
-      cellStates: topSessionState(agents)
+      cellStates: topSessionCell(agents, sessions.data?.links ?? [], fold)
     };
   }, [fold, applied, me, sessions.data, live]);
 
@@ -185,7 +185,10 @@ export function JiraBoardView({
         {/* One element in one place on every render, for the reason BoardView gives at length: `FilterBar` keeps which panel is open in its own state
             and a pick does not close it, so a remount on a pick — or on a Board | List switch — would shut the panel under the reader's pointer. Drawn in
             both views since the List became an issue table: its type, assignee and sprint describe issues, as the Board's do. */}
-        <FilterBar count={boardFilterCount(applied)} onClear={() => setFilters((f) => ({ ...NO_JIRA_FILTERS, search: f.search }))}>
+        <FilterBar
+          count={boardFilterCount(applied)}
+          showing={{ shown: rows.length, total: fold.tops.length, note: 'options come from the loaded issues' }}
+          onClear={() => setFilters((f) => ({ ...NO_JIRA_FILTERS, search: f.search }))}>
             <Picks title="Type" all="All types" values={options.types} value={applied.type} onPick={(v) => set('type', v ?? undefined)} />
             <FilterSection title="Assignee">
               <div className="filter-bar-picks" role="group" aria-label="Assignee">
@@ -218,6 +221,7 @@ export function JiraBoardView({
             now={now}
             filtered={boardFilterCount(applied) > 0 || filters.search.trim() !== ''}
             onOpenIssue={onOpenIssue}
+            onRun={onRun}
           />
         ) : (
           <>

@@ -125,14 +125,14 @@ describe('TickMonitor', () => {
     await renderMonitor(payload([HALTED, QUIET, NEVER]));
     const [halted, quiet, never] = rowsOf();
 
-    expect(within(halted).getByText('halted')).toBeInTheDocument();
-    expect(halted).toHaveTextContent('3 failures in a row since');
+    expect(within(halted).getByText('3 failures in a row')).toHaveClass('ui-pill-bad');
+    expect(halted).toHaveTextContent('since');
     expect(halted).toHaveTextContent('last: verify red on bug-9');
     expect(within(halted).getByRole('button', { name: 'Reset' })).toBeEnabled();
 
     expect(within(quiet).getByText('ticking')).toBeInTheDocument();
     expect(quiet).toHaveTextContent('last tick');
-    expect(quiet).toHaveTextContent('execute task-3 → failed · 1 failures in a row');
+    expect(quiet).toHaveTextContent('execute task-3 → failed');
     expect(within(quiet).queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
 
     // No lock, so no `ticking` pill — and nothing to say about a tick that never happened beyond that.
@@ -206,7 +206,7 @@ describe('TickMonitor', () => {
     expect(screen.queryByTestId('tick-row')).not.toBeInTheDocument();
   });
 
-  it('lists activity newest first across projects, in the six columns, with ✓ ok and ✕ failed', async () => {
+  it('lists activity newest first across projects, in the six columns, with the outcome as a pill', async () => {
     await renderMonitor(payload([HALTED, QUIET]));
 
     const table = screen.getByTestId('tick-events');
@@ -216,11 +216,11 @@ describe('TickMonitor', () => {
     // beta 5 min, zeta 1 h, zeta 2 h, beta 2 h (ties keep project order: HALTED is listed first), zeta 3 h
     expect(body.map((r) => within(r).getAllByRole('cell')[4].textContent)).toEqual(['task-3', 'bug-9', 'bug-9', 'task-2', 'bug-9']);
     const first = within(body[0]).getAllByRole('cell');
-    expect(first[1].textContent).toBe('✕ failed');
+    expect(first[1].textContent).toBe('failed');
     expect(first[2].textContent).toBe('beta');
     expect(first[3].textContent).toBe('execute');
     expect(first[5].textContent).toBe('flaky');
-    expect(within(body[3]).getAllByRole('cell')[1].textContent).toBe('✓ ok');
+    expect(within(body[3]).getAllByRole('cell')[1].textContent).toBe('ok');
   });
 
   it('posts that row\'s root on Reset and redraws from the answer, so the row loses halted', async () => {
@@ -232,7 +232,7 @@ describe('TickMonitor', () => {
 
     const post = fetchMock.mock.calls.find(([u]) => String(u).endsWith('/api/ticks/reset')) as [string, RequestInit];
     expect(JSON.parse(String(post[1].body))).toEqual({ project: '/abs/zeta' });
-    expect(screen.queryByText('halted', { selector: '.ui-pill' })).not.toBeInTheDocument();
+    expect(screen.queryByText('3 failures in a row')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
     expect(screen.getByTestId('tick-figure-breaker')).toHaveTextContent('nonehalted');
   });
@@ -274,7 +274,36 @@ describe('TickMonitor', () => {
     const untouched = rows[1 - names.indexOf('zeta')];
     expect(within(untouched).queryByRole('alert')).not.toBeInTheDocument();
     expect(within(target).getByRole('button', { name: 'Reset' })).toBeEnabled();
-    expect(target).toHaveClass('tick-row-halted');
+    expect(within(target).getByText('3 failures in a row')).toHaveClass('ui-pill-bad');
+    expect(target).not.toHaveClass('tick-row-halted');
+  });
+
+  it('draws a strip per project (cells, titles, one screen-reader summary) and an amber pill for a streak that has not halted', async () => {
+    const two = project({ root: '/abs/two', name: 'two', streak: 2, recent: [entry({ outcome: 'failed' }), entry({ outcome: 'failed' }), entry({ outcome: 'ok' })] });
+    await renderMonitor(payload([HALTED, two, NEVER]));
+    const [halted, quiet, never] = rowsOf();
+
+    expect(within(halted).getByTestId('tick-strip').children).toHaveLength(3);
+    expect(Array.from(within(halted).getByTestId('tick-strip').children).map((c) => c.getAttribute('data-tone'))).toEqual(['failed', 'failed', 'failed']);
+    expect(within(halted).getByTestId('tick-strip')).toHaveAttribute('aria-hidden', 'true');
+    expect(halted).toHaveTextContent('last 3 ticks: 0 ok, 3 failed');
+    expect(halted.querySelector('.tick-strip-cell')?.getAttribute('title')).toMatch(/ · execute bug-9 · failed$/);
+    expect(halted).not.toHaveClass('tick-row-halted');
+
+    expect(within(quiet).getByText('2 failures in a row')).toHaveClass('ui-pill-warn');
+    expect(quiet).toHaveTextContent('last 3 ticks: 1 ok, 2 failed');
+    expect(within(quiet).queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
+
+    expect(within(never).queryByTestId('tick-strip')).not.toBeInTheDocument();
+  });
+
+  it('draws the activity outcome as a pill: ok done, failed bad, anything else neutral', async () => {
+    const mixed = project({ recent: [entry({ at: ago(1 * MIN), outcome: 'ok' }), entry({ at: ago(2 * MIN), outcome: 'failed' }), entry({ at: ago(3 * MIN), outcome: 'skipped' })] });
+    await renderMonitor(payload([mixed]));
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('ok')).toHaveClass('ui-pill-done');
+    expect(within(table).getByText('failed')).toHaveClass('ui-pill-bad');
+    expect(within(table).getByText('skipped')).toHaveClass('ui-pill-neutral');
   });
 
   /* #367 — the caps the last `decide` recorded, the one place an `idle` tick says it is waiting on review. The clock reads through `formatClock` in the

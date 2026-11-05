@@ -61,98 +61,93 @@ describe('TickGroup', () => {
     stubFetch({ get: payload(4) });
     render(<TickGroup />);
 
-    const select = (await screen.findByRole('combobox', { name: 'Halt after' })) as HTMLSelectElement;
-    await waitFor(() => expect(select.value).toBe('4'));
+    const halt = await screen.findByLabelText('Halt after');
+    await waitFor(() => expect(halt.textContent).toBe('4'));
     expect(document.querySelector('.ui-sheet-title')).toHaveTextContent('Backlog tick');
-    expect(document.querySelector('.ui-sheet-sub')).toHaveTextContent('this machine');
+    expect(document.querySelector('.ui-pill-neutral')).toHaveTextContent('this machine');
     expect(screen.getByText('failures in a row')).toBeInTheDocument();
     expect(screen.getByText('A halted project stops ticking until reset on Runs › Ticks.')).toBeInTheDocument();
-    // 1 through 10, nothing else: the bounds the server clamps to, so no pick can be quietly corrected.
-    expect([...select.options].map((o) => o.value)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
-    expect(select).toBeEnabled();
+    // 1 through 10, nothing else: the bounds the server clamps to, so no press can be quietly corrected — the stepper stops at both ends.
+    expect(screen.queryByRole('spinbutton')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Increase Halt after' })).toBeEnabled();
   });
 
-  it('posts {haltAfter: 5} once and shows the answer, not the pick', async () => {
-    // The server answers 6, not 5: the select must redraw from the POST's own answer.
+  it('posts {haltAfter: 4} once from `Increase Halt after` and shows the answer, not the press', async () => {
+    // The server answers 6, not 4: the stepper must redraw from the POST's own answer.
     const fn = stubFetch({ get: payload(3), post: () => ({ status: 200, body: payload(6) }) });
     render(<TickGroup />);
 
-    const select = (await screen.findByRole('combobox', { name: 'Halt after' })) as HTMLSelectElement;
-    await waitFor(() => expect(select.value).toBe('3'));
-    await userEvent.selectOptions(select, '5');
+    const halt = await screen.findByLabelText('Halt after');
+    await waitFor(() => expect(halt.textContent).toBe('3'));
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Halt after' }));
 
-    await waitFor(() => expect(select.value).toBe('6'));
+    await waitFor(() => expect(screen.getByLabelText('Halt after').textContent).toBe('6'));
     expect(posts(fn)).toHaveLength(1);
     expect(posts(fn)[0][0]).toBe('/api/ticks/config');
-    expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ haltAfter: 5 });
+    expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ haltAfter: 4 });
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('draws the two caps beside Halt after, each 1–10 and showing the payload value', async () => {
+  it('draws the two caps beside Halt after, each showing the payload value', async () => {
     stubFetch({ get: payload(3, { maxPlans: 4, maxPrs: 6 }) });
     render(<TickGroup />);
 
-    const plans = (await screen.findByRole('combobox', { name: 'Plans awaiting review' })) as HTMLSelectElement;
-    const prs = screen.getByRole('combobox', { name: 'Open execute PRs' }) as HTMLSelectElement;
-    await waitFor(() => expect(plans.value).toBe('4'));
-    expect(prs.value).toBe('6');
-    const ladder = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
-    expect([...plans.options].map((o) => o.value)).toEqual(ladder);
-    expect([...prs.options].map((o) => o.value)).toEqual(ladder);
+    const plans = await screen.findByLabelText('Plans awaiting review');
+    await waitFor(() => expect(plans.textContent).toBe('4'));
+    expect(screen.getByLabelText('Open execute PRs').textContent).toBe('6');
     // Each hint names the job flag that still wins over the setting.
     expect(screen.getByText('--max-plans')).toBeInTheDocument();
     expect(screen.getByText('--max-prs')).toBeInTheDocument();
   });
 
-  it('posts {maxPlans: 5} once — only the key that was picked — and shows the answer', async () => {
+  it('posts {maxPlans: 4} once — only the key that was picked — and shows the answer', async () => {
     const fn = stubFetch({ get: payload(3), post: () => ({ status: 200, body: payload(3, { maxPlans: 5 }) }) });
     render(<TickGroup />);
 
-    const plans = (await screen.findByRole('combobox', { name: 'Plans awaiting review' })) as HTMLSelectElement;
-    await waitFor(() => expect(plans.value).toBe('3'));
-    await userEvent.selectOptions(plans, '5');
+    const plans = await screen.findByLabelText('Plans awaiting review');
+    await waitFor(() => expect(plans.textContent).toBe('3'));
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Plans awaiting review' }));
 
-    await waitFor(() => expect(plans.value).toBe('5'));
+    await waitFor(() => expect(screen.getByLabelText('Plans awaiting review').textContent).toBe('5'));
     expect(posts(fn)).toHaveLength(1);
-    expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ maxPlans: 5 });
+    expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ maxPlans: 4 });
   });
 
-  it('posts {maxPrs: 4} from the Open execute PRs Select', async () => {
+  it('posts {maxPrs: 3} from `Increase Open execute PRs`', async () => {
     const fn = stubFetch({ get: payload(3), post: () => ({ status: 200, body: payload(3, { maxPrs: 4 }) }) });
     render(<TickGroup />);
 
-    const prs = (await screen.findByRole('combobox', { name: 'Open execute PRs' })) as HTMLSelectElement;
-    await waitFor(() => expect(prs.value).toBe('2'));
-    await userEvent.selectOptions(prs, '4');
+    const prs = await screen.findByLabelText('Open execute PRs');
+    await waitFor(() => expect(prs.textContent).toBe('2'));
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Open execute PRs' }));
 
-    await waitFor(() => expect(prs.value).toBe('4'));
-    expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ maxPrs: 4 });
+    await waitFor(() => expect(screen.getByLabelText('Open execute PRs').textContent).toBe('4'));
+    expect(JSON.parse(String((posts(fn)[0][1] as RequestInit).body))).toEqual({ maxPrs: 3 });
   });
 
   it('shows the refusal and keeps every old value on a 409', async () => {
     stubFetch({ get: payload(3), post: () => ({ status: 409, body: { error: 'tick.json unreadable' } }) });
     render(<TickGroup />);
 
-    const select = (await screen.findByRole('combobox', { name: 'Halt after' })) as HTMLSelectElement;
-    const plans = screen.getByRole('combobox', { name: 'Plans awaiting review' }) as HTMLSelectElement;
-    const prs = screen.getByRole('combobox', { name: 'Open execute PRs' }) as HTMLSelectElement;
-    await waitFor(() => expect(select.value).toBe('3'));
-    await userEvent.selectOptions(plans, '5');
+    const halt = await screen.findByLabelText('Halt after');
+    await waitFor(() => expect(halt.textContent).toBe('3'));
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Plans awaiting review' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Not saved — tick.json unreadable');
-    expect([select.value, plans.value, prs.value]).toEqual(['3', '3', '2']);
+    expect(['Halt after', 'Plans awaiting review', 'Open execute PRs'].map((l) => screen.getByLabelText(l).textContent)).toEqual(['3', '3', '2']);
   });
 
-  it('disables the Select and names the file when tick.json is unreadable', async () => {
+  it('disables every stepper and names the file when tick.json is unreadable', async () => {
     // The shape the server sends since fix round 1: `<path>: <reason>`.
     stubFetch({ get: payload(3, { source: 'unreadable', error: '/home/me/.backlog-manager/settings/tick.json: Unexpected token } in JSON at position 12' }) });
     render(<TickGroup />);
 
-    const select = await screen.findByRole('combobox', { name: 'Halt after' });
-    expect(select).toBeDisabled();
-    // All three go together: the server refuses every write to an unreadable file, so no control may offer one.
-    expect(screen.getByRole('combobox', { name: 'Plans awaiting review' })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'Open execute PRs' })).toBeDisabled();
+    await screen.findByLabelText('Halt after');
+    // All three go together: the server refuses every write to an unreadable file, so no control may offer one — both buttons of each stepper are off.
+    for (const l of ['Halt after', 'Plans awaiting review', 'Open execute PRs']) {
+      expect(screen.getByRole('button', { name: `Increase ${l}` })).toBeDisabled();
+      expect(screen.getByRole('button', { name: `Decrease ${l}` })).toBeDisabled();
+    }
     expect(
       screen.getByText('/home/me/.backlog-manager/settings/tick.json: Unexpected token } in JSON at position 12 — fix or remove the file by hand.')
     ).toBeInTheDocument();
@@ -189,7 +184,7 @@ describe('the Backlog tick card, by page', () => {
   it('is on Shared, under the watchdog', async () => {
     stubFetch({ get: payload(3) });
     renderView('shared');
-    await screen.findByRole('combobox', { name: 'Halt after' });
+    await screen.findByLabelText('Halt after');
 
     expect(titles()).toContain('Backlog tick');
     expect(titles().indexOf('Backlog tick')).toBe(titles().indexOf('Orchestrator watchdog') + 1);

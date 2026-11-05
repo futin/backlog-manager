@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
@@ -6,14 +6,12 @@ import { useAction } from '../../hooks/useAction';
 import { useAgents } from '../../hooks/useAgents';
 import { useNarrow } from '../../hooks/useNarrow';
 import { useSettings } from '../../hooks/useSettings';
-import { sessionUrl } from '../../lib/agents';
 import { elapsedSince } from '../../lib/item-age';
 import { openDesktopJira, repoBasename } from '../../lib/jira';
 import {
-  desktopButton,
-  desktopHref,
   linkedHow,
   openButtons,
+  openTarget,
   runLabel,
   sessionDuration,
   shortSessionId,
@@ -27,9 +25,9 @@ import { pollAge } from '../../lib/tracker';
 import { STATE_LABEL } from '../../../../shared/jira-sessions';
 import type { JiraLiveSession } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
-import { Confirm } from '../ui/Confirm';
 import { LiveStrip } from '../ui/LiveStrip';
 import { Meter } from '../ui/Meter';
+import { SessionOpen } from './SessionOpen';
 
 /**
  * JiraSessionCard — one live Jira session as Detail draws it (Jira sessions spec §7.3, §7.5), and the history line under the cards. Exported on its own
@@ -46,6 +44,9 @@ import { Meter } from '../ui/Meter';
  * That one POST's refusal draws under the buttons in this card's own alert line; the card keeps its `useAction` for it because nothing above the card
  * has a reason to know a hand-over was refused.
  *
+ * **One control, `SessionOpen`, holds every button.** Its split's main half is the primary Open; the secondary Open, Unlink and Stop are the `Session actions` menu's
+ * rows, offered exactly where each used to be its own chip. With none of them it collapses to the single Open it always was.
+ *
  * **Unlink and Stop are the parent's writes.** Detail owns the one write guard and the page's error line (a refusal of either is the dialog's to say), so
  * the card takes `onUnlink` / `onStop` and DECIDES ONLY WHETHER TO OFFER THEM:
  * - **Unlink** — only for a `branch` link (C9). A `run` link ends with its session (the server answers an unlink of one with a 409), and a `manual` link is
@@ -53,7 +54,7 @@ import { Meter } from '../ui/Meter';
  * - **Stop** — only when the dashboard's row carries `stopState`, which is the dashboard's own rule for a session it can signal. A Desktop- or CLI-owned
  *   session, or a `processLive` one with no handle, gets none: Stop would end the link as `stopped` while the process kept running, and C5 would re-attach
  *   it at the next reconcile. `stopping` draws the chip disabled — the signal is already on its way. And, as before the sessions page, only while the
- *   dashboard has agents enabled (`StopSession` reads `useAgents()`), so a Stop the dashboard would refuse is not drawn.
+ *   dashboard has agents enabled (this card reads `useAgents()`; `Stop session` is a row of `SessionOpen`'s menu and its `Confirm` is `SessionOpen`'s), so a Stop the dashboard would refuse is not drawn.
  */
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -85,37 +86,20 @@ export function OpenChip({
   const { settings } = useSettings();
   const phone = useNarrow();
   const variant = primary ? 'ink' : 'outline';
-  if (button.target === 'dashboard') {
+  const plan = openTarget(button, sessionId, row, launch, phone, settings.linkBase);
+  if (plan === null) return null;
+  if (plan.kind === 'href')
     return (
-      <Chip as="a" size={28} variant={variant} href={sessionUrl(settings.linkBase, sessionId)}>
+      <Chip as="a" size={28} variant={variant} href={plan.href}>
         {button.label}
       </Chip>
     );
-  }
-  // A history line's Reopen has no row to judge by: an ended session has no process, so the app's own resume link is safe.
-  if (row === null) {
+  if (plan.kind === 'disabled')
     return (
-      <Chip as="a" size={28} variant={variant} href={desktopHref(sessionId)}>
+      <Chip size={28} variant={variant} disabled title={plan.title ?? undefined}>
         {button.label}
       </Chip>
     );
-  }
-  const d = desktopButton(row, launch, phone);
-  if (!d.show) return null;
-  if (!d.enabled) {
-    return (
-      <Chip size={28} variant={variant} disabled title={d.title ?? undefined}>
-        {button.label}
-      </Chip>
-    );
-  }
-  if (d.via === 'href') {
-    return (
-      <Chip as="a" size={28} variant={variant} href={desktopHref(sessionId)}>
-        {button.label}
-      </Chip>
-    );
-  }
   return (
     <Chip size={28} variant={variant} onClick={() => onHandover(sessionId)}>
       {button.label}
@@ -142,6 +126,7 @@ export function JiraSessionCard({
   const { zone } = useTimeZone();
   const phone = useNarrow();
   const handover = useAction();
+  const agents = useAgents();
   const { row, state } = link;
   const sessionId = link.sessionId;
   if (sessionId === null) return null;
@@ -155,6 +140,9 @@ export function JiraSessionCard({
     : [formatZonedClock(started, zone), elapsedSince(link.startedAt, now)].filter((p) => p !== null).join(' · ');
   const pct = row?.contextPct;
   const stoppable = row?.stopState !== undefined;
+  // `StopSession` read this itself; the menu's row is offered only while the dashboard has agents on, so a Stop it would refuse is not drawn.
+  const agentsOn = agents.status !== null && agents.status.enabled;
+  const stopping = row?.stopState === 'stopping';
 
   return (
     <article className="jira-sess" aria-label={`Session ${shortSessionId(sessionId)}`} data-state={state}>
@@ -180,28 +168,19 @@ export function JiraSessionCard({
           <Row label="Linked">{linkedHow(link.how)}</Row>
         </dl>
         <div className="jira-sess-acts">
-          <OpenChip
-            button={buttons.primary}
+          {/* One split Open: the secondary Open, Unlink and Stop are its menu's rows, offered exactly where each was a chip before. */}
+          <SessionOpen
+            issueKey={link.key}
             sessionId={sessionId}
             row={row}
             launch={link.surface}
-            primary
+            state={state}
+            buttons={buttons}
+            busy={busy || stopping}
             onHandover={(id) => handover.run(() => openDesktopJira(id))}
+            onUnlink={link.how === 'branch' ? onUnlink : undefined}
+            onStop={stoppable && agentsOn ? onStop : undefined}
           />
-          {buttons.secondary !== null && (
-            <OpenChip button={buttons.secondary} sessionId={sessionId} row={row} launch={link.surface} primary={false} onHandover={(id) => handover.run(() => openDesktopJira(id))} />
-          )}
-          {/* The session's own writes, pushed to the row's end as the mock draws Stop — apart from the two that only open it somewhere. */}
-          {(link.how === 'branch' || stoppable) && (
-            <span className="jira-sess-stop">
-              {link.how === 'branch' && (
-                <Chip size={28} variant="flat" disabled={busy} title="drop this link — the session itself is not touched" onClick={() => onUnlink(sessionId)}>
-                  Unlink
-                </Chip>
-              )}
-              {stoppable && <StopSession busy={busy || row?.stopState === 'stopping'} onStop={() => onStop(sessionId)} />}
-            </span>
-          )}
         </div>
         {handover.error !== null && (
           <p className="jira-modal-error" role="alert">
@@ -248,37 +227,5 @@ export function JiraHistoryLine({ link, now }: { link: SessionLink; now: number 
       {link.sessionId !== null && <OpenChip button={buttons.primary} sessionId={link.sessionId} row={null} launch={link.surface} primary={false} onHandover={() => {}} />}
       <span className="jira-hist-meta">{meta}</span>
     </li>
-  );
-}
-
-/**
- * `Stop session` and its confirmation (Jira phase 5, spec §7; DESIGN.md §8.9.2) — the modal's own control, moved here with the card that now owns it. Nothing
- * is drawn with agents off or before the answer lands: a Stop the dashboard would refuse is a promise it cannot keep. The question REPLACES the chip in
- * place (`ui/Confirm`, the claim release's precedent), and the safe answer holds the focus. The POST itself is Detail's, so its refusal draws in the one alert line.
- */
-export function StopSession({ busy, onStop }: { busy: boolean; onStop: () => void }) {
-  const { status } = useAgents();
-  const [asking, setAsking] = useState(false);
-  if (status === null || !status.enabled) return null;
-  if (!asking)
-    return (
-      <Chip size={28} variant="danger" disabled={busy} title="end this session" onClick={() => setAsking(true)}>
-        Stop session
-      </Chip>
-    );
-  return (
-    <Confirm
-      label="confirm stop"
-      testId="jira-stop-confirm"
-      acceptLabel="Stop session"
-      dismissLabel="Keep running"
-      onDismiss={() => setAsking(false)}
-      onAccept={() => {
-        setAsking(false);
-        onStop();
-      }}
-    >
-      Stop this session? It ends mid-work; its edits stay where it left them.
-    </Confirm>
   );
 }

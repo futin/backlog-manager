@@ -17,20 +17,20 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   so the three Jira surfaces and the Dashboards sheet joined by construction (`JiraLaunchSheet` is hosted once, in `JiraView`, and ranks above the issue modal because it MOUNTS later — it always opens while the modal is up — not because of its place in the JSX). `ReleasesDrawer` is the exception: its shell is ui-kit's since #298, so the wrapper calls the hook itself
   and passes `closeOnEscape={false}`, and ui-kit's drawer binds no key of its own. One further entry is not a dialog: `ui/Confirm.tsx` (bug-53), the inline confirmation the run's Stop, the
   item modal's claim release (#225), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`), the Jira Detail's session card `Stop` and GitHub › PRs' `Merge` (opened by `PrActions`, drawn by `PrFoot`) open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
-  — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with seven composers — the tracker's (`components/TrackerChip.tsx`), the band's
+  — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with ten composers — the tracker's (`components/TrackerChip.tsx`), the band's
   Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board picker (`components/jira/JiraBoardPicker.tsx`), the board sheet's roots
-  search (`components/jira/JiraBoardSheet.tsx`) and `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
+  search (`components/jira/JiraBoardSheet.tsx`) `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`) the Jira Detail's Move-to panel (`components/jira/JiraDetail.tsx`) and `SessionOpen`'s `Session actions` menu (`components/jira/SessionOpen.tsx`, on the deck card and in Detail) and `PrActions`' `Merge menu` (`components/github/PrActions.tsx`, beside every pull request); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
   only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still eight dialogs counted.
   Ranking is by mount order; entries are removed by identity, never popped.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
 - **ui-kit draws the version chip and the What's new drawer; this board only maps its tokens and places the chip.** Since ui-kit v0.3.0 every shape of the chip and the drawer — size, radius, spacing, the phone layout, the badge and baseline drawing — is
-  ui-kit's, so the board's look matches the other two apps. `client/src/styles.css` carries the `--uk-*` mapping block and `.rail-release`, a wrapper that
+  ui-kit's, so the board's look matches the other two apps. `client/src/styles.css` carries the `--uk-*` mapping block and `.rail-foot`, a wrapper that
   places `VersionChip` and styles nothing of it (the chip takes no `className`); a rule that restyles a `.uk-*` class, or sets a `--uk-*` property that is not
   one of the kit's public tokens, fails `test/ui-kit-guard.test.ts` (`ui-kit/guard`'s `checkHostCss` over every sheet this board ships, listed there so a new one
   is a deliberate add). The guard cannot see an unmapped token, so the same suite asserts the mapping sets `--uk-chip-bg` (the pill's well, per palette) and
   `--uk-zoom` (`--font-scale`, so the drawer fits the screen at any text size), and `test/ui-kit-tokens.test.ts` holds every token the kit reads to being mapped.
-  The narrow chip's 44 px hit area overhangs the pill by 8 px, so no ancestor of `.rail-release` may clip (`overflow: hidden`/`clip`). Notes render through the
+  The narrow chip's 44 px hit area overhangs the pill by 8 px, so no ancestor of `.rail-foot` may clip (`overflow: hidden`/`clip`). Notes render through the
   kit's own `renderNotesHtml`; the wrapper passes no `renderNotes`. Why: [invariants.md](docs/subsystems/invariants.md#ui-kit-draws-the-version-chip-and-the-whats-new-drawer-this-board-only-maps-its-tokens-and-places-the-chip)
 - **The strip's height and the well's gap are one token, `--main-gap`, read by the strip and the Runs page — never a px literal.** `--main-gap` is declared on
   `:root` (`50px`) and overridden to `0px` in the 700 px block, where `.topstrip` is `display: none`; `.topstrip`'s height is `var(--main-gap)`,
@@ -44,13 +44,14 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   or rejected is never stale; unparseable or absent stamps read as fresh; a task never leaves the Board, it gains a `stale` marker. `staleDays` (default 30)
   clamps to the DEFAULT below `min`, never to the bound. Why:
   [invariants.md](docs/subsystems/invariants.md#board-versus-archive-is-derived-and-last-touched-has-three-rungs)
-- **Settings is three pages, the page is the scope, and the rail is the only thing that switches them.** `settingsScope` (`client/src/lib/settings.ts`) is
+- **Settings is three pages, the page is the scope, and it is the one page with an in-page switch beside the rail's tree.** `settingsScope` (`client/src/lib/settings.ts`) is
   `local | shared | dashboards`: Local is this browser's `localStorage`, Shared and Dashboards are what the API reads off the host (Dashboards is the machine
-  list and each machine's health and usage, its own page since they outgrew a card; its scope pill reads `this machine`, as Shared's does). No card mixes local
-  and host — which is why `Claude Agents` was two cards and why `open dashboard ↗` sits beside the per-device field supplying its href — and there is no in-page
-  switch at any width, the same rule Runs' three pages follow, and Jira's since phase 2. A host card may also sit on a source's own settings page — GitHub ›
-  Settings' `Sync` (each repo's sync interval), as Jira › Setup holds `jira.json`'s — and Shared draws the read-only `Sources` card alone in its left column,
-  Watchdog, Tick and Time zone in its right. One `RailTree` renders every tree — Files, GitHub, Jira, Runs and Settings, five call sites; `SECTIONS`/`Section`
+  list and each machine's health and usage, its own page since they outgrew a card; it saves `on this machine`, as Shared does). Each card carries its own scope pill, `this browser` or `this machine`. No card mixes local
+  and host — which is why `Claude Agents` was two cards and why `open dashboard ↗` sits beside the per-device field supplying its href. The `Local | Shared |
+  Dashboards` `Segmented` in the band writes the same `settingsScope` as the rail's tree (spec §3 overrides "the rail is the only switch" for this page, and
+  only this one; Runs' three pages and Jira's are still the rail's alone). `Opens on` is a `Segmented`, not a select (decision 64). A host card may also sit on a source's own settings page — GitHub ›
+  Settings' `Sync` (each repo's sync interval), as Jira › Setup holds `jira.json`'s — and each of Local and Shared is ONE column (`.set-col`; `Sources`
+  first on Shared) — `.set-cols` survives only on GitHub › Settings and Jira › Setup. One `RailTree` renders every tree — Files, GitHub, Jira, Runs and Settings, five call sites; `SECTIONS`/`Section`
   live in `client/src/lib/sections.ts` because the rail reading `useSettings` closed a cycle with `lib/settings.ts`. Why:
   [invariants.md](docs/subsystems/invariants.md#settings-is-three-pages-the-page-is-the-scope)
 - **The Jira section's three pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
@@ -64,7 +65,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   `lib/jira-page.ts`, held by `hooks/useJiraPage.ts` — `useRunsMode`'s module store, because the rail's `RailTree` and the in-page links are two mounted
   writers. The Board and Sessions pages share one board pick and load (`hooks/usePickedJiraBoard.ts`, `JiraBoardPicker`). The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board or Sessions page) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
   `change('jira')` and handed down through `JiraView`; the Sources card's `Jira › Setup ↗` link is the same pair, threaded `App` → `SettingsView` → `SharedPage`
-  → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a switch of its own. Settings' `Opens on` offers `Jira` only while
+  → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a page switch of its own (its `Sync now` and per-board icons sweep, they do not navigate). Settings' `Opens on` offers `Jira` only while
   configured (`landingOptions`), keeping a stored `jira` pin's option; a `landing: 'jira'` takes the same fall. Why:
   [invariants.md](docs/subsystems/invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
 - **A source row (Files, GitHub) is drawn only while a registered project has that source, and its pages are switched by the rail's tree or a link threaded down
@@ -148,7 +149,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   mid-flight folds into one follow-up (`useTrackers` and `useJira` are the deliberate exceptions, #231).** `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure
   of React) is the one home of poll scheduling and `hooks/useCoalescedFetch.ts` is its React shell; `hooks/useRefreshing.ts` (#285) is the layer every board
   poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useTicks`, `useOrchestratorArchive`, `TimeZoneProvider` (#241) and
-  `ProjectsProvider` (no `armed`: none of the three polls) and `useJiraSessions` (15 s, one instance in `JiraSessionsContext`, mounted by the shell around the rail and the section, `enabled` only while Jira is configured) and `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) and `usePullRequests` (60 s, mounted by GitHub › PRs and by GitHub › Settings' Access card, same constant `armed` — the server's PR cache has no timer, so those two mounts are the only things that ever read PRs) — owning the
+  `ProjectsProvider` (no `armed`: none of the three polls) and `useJiraSessions` (15 s, one instance in `JiraSessionsContext`, mounted by the shell around the rail and the section, `enabled` only while Jira is configured) and `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) and `usePullRequests` (60 s, mounted ONCE by the shell's `PullRequestsProvider` while a GitHub project is registered — same constant `armed`; GitHub › PRs and Settings' Access card read its context. The server's PR cache has no timer, so that one mount is the only thing that ever reads PRs, and the rail counts PRs that need you on every page — spec §4.9a) — owning the
   mount + window-focus triggers once; no board poller is a `setInterval` (`useNow`'s clock tick is a display, not a request). `trigger()` while idle starts the task; while one is in flight it starts nothing and returns ONE queued follow-up's promise, shared
   by every trigger that arrived meanwhile and run when the flight settles, so its answer was requested after the caller asked. The timer is a `setTimeout`
   re-armed `intervalMs` after the LAST request of a chain settles, at most one pending, cleared the moment `armed` goes false (an in-flight request finishes;
