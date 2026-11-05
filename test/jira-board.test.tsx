@@ -782,6 +782,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
   }
 
   const runChip = (summary: string): HTMLElement => within(card(summary)).getByRole('button', { name: /^Run PAY-/ });
+  /** The chevron half: the one that opens the menu. The left half starts the default action and never opens it. */
+  const runMore = (summary: string): HTMLElement => within(card(summary)).getByRole('button', { name: /^Run options for PAY-/ });
   /** A live top has no shelf row any more (spec §7.1); its session is a deck card, found by the session's own key. */
   const deckCards = (key: string): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>(`.jira-deck-card[data-key="${key}"]`));
   const onShelves = (summary: string): boolean => screen.queryAllByText(summary).some((n) => n.closest('.board-card') !== null);
@@ -789,7 +791,11 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
   it('an unmapped project draws a dashed chip whose title names Setup, and a click opens no menu and no modal', async () => {
     await renderRun({ repos: {} });
     const chip = runChip('Refund partial captures');
-    expect(chip).toHaveAttribute('title', 'no repository mapped for PAY — Jira › Setup › Repositories');
+    const title = 'no repository mapped for PAY — Jira › Setup › Repositories';
+    expect(chip).toHaveAttribute('title', title);
+    expect(runMore('Refund partial captures')).toHaveAttribute('title', title);
+    expect(chip).toBeDisabled();
+    expect(runMore('Refund partial captures')).toBeDisabled();
     expect(chip.closest('.jira-run')).toHaveAttribute('data-state', 'no-repo');
     await userEvent.click(chip);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -851,18 +857,53 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
 
   it('a ready chip opens a menu: both built-ins, a rule, the skills by name, and the note', async () => {
     await renderRun();
-    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(runMore('Refund partial captures'));
     const menu = screen.getByRole('dialog', { name: 'Run menu' });
     expect(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute })).toBeInTheDocument();
     expect(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.context })).toBeInTheDocument();
     expect(within(menu).getByRole('button', { name: /Groom ticket/ })).toBeInTheDocument();
-    expect(within(menu).getByText('opens the launch sheet')).toBeInTheDocument();
-    expect(menu.querySelectorAll('hr')).toHaveLength(2);
+    expect(within(menu).getByText('Every choice opens the launch sheet first')).toBeInTheDocument();
+    expect(within(menu).getByText('Built in')).toBeInTheDocument();
+    expect(within(menu).getByText('Skills on this machine · 1')).toBeInTheDocument();
+  });
+
+  it('the foot holds both halves; the left one opens the sheet on the default action and no menu', async () => {
+    await renderRun();
+    const foot = card('Refund partial captures');
+    expect(within(foot).getByRole('button', { name: /^Run PAY-/ })).toBeInTheDocument();
+    expect(within(foot).getByRole('button', { name: /^Run options for PAY-/ })).toBeInTheDocument();
+    await userEvent.click(runChip('Refund partial captures'));
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('execute');
+    expect(screen.queryByRole('dialog', { name: 'Run menu' })).not.toBeInTheDocument();
+  });
+
+  it('the left half runs the configured default, not always execute', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction: SKILL.id }));
+    await renderRun();
+    await userEvent.click(runChip('Refund partial captures'));
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue(`skill:${SKILL.id}`);
+  });
+
+  it('with no skills on the machine the menu has no Skills header', async () => {
+    await renderRun({ skills: [] });
+    await userEvent.click(runMore('Refund partial captures'));
+    const menu = screen.getByRole('dialog', { name: 'Run menu' });
+    expect(within(menu).queryByText(/Skills on this machine/)).toBeNull();
+    expect(within(menu).getByText('Built in')).toBeInTheDocument();
+  });
+
+  it('after a pick, focus returns to the chevron', async () => {
+    await renderRun();
+    await userEvent.click(runMore('Refund partial captures'));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.context }));
+    expect(document.activeElement).toBe(runMore('Refund partial captures'));
   });
 
   it('a pick opens the launch sheet on that action, and not the issue modal', async () => {
     await renderRun();
-    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(runMore('Refund partial captures'));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.context }));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
     expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('context');
@@ -873,7 +914,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
 
   it('a skill pick opens the sheet on that skill', async () => {
     await renderRun();
-    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(runMore('Refund partial captures'));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: /Groom ticket/ }));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
     expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue(`skill:${SKILL.id}`);
@@ -886,57 +927,65 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction }));
     const openMenu = async (): Promise<HTMLElement> => {
       await renderRun();
-      await userEvent.click(runChip('Refund partial captures'));
+      await userEvent.click(runMore('Refund partial captures'));
       return screen.getByRole('dialog', { name: 'Run menu' });
     };
-    const rows = (menu: HTMLElement): [string, string][] =>
-      Array.from(menu.querySelectorAll<HTMLElement>('.jira-run-opt')).map((b) => {
-        const [label, hint] = Array.from(b.querySelectorAll('span')).map((n) => n.textContent ?? '');
-        return [label, hint];
-      });
+    /** Every row as [label, sub-line, carries the `default` mark], in menu order. */
+    const rows = (menu: HTMLElement): [string, string, boolean][] =>
+      Array.from(menu.querySelectorAll<HTMLElement>('.jira-run-opt')).map((b) => [
+        b.querySelector('.jira-run-label')?.textContent ?? '',
+        b.querySelector('.jira-run-sub')?.textContent ?? '',
+        b.querySelector('.jira-run-mark')?.textContent === 'default'
+      ]);
 
-    it('lists Work it end to end first, marked default, when that is the setting', async () => {
+    it('marks Work it end to end default, in place, when that is the setting', async () => {
       setDefault('execute');
       const menu = await openMenu();
       expect(rows(menu)).toEqual([
-        [JIRA_BUILTIN_LABELS.execute, 'default'],
-        [JIRA_BUILTIN_LABELS.context, 'built-in'],
-        ['Groom ticket', '/jira-groom']
+        [JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', true],
+        [JIRA_BUILTIN_LABELS.context, 'Open with the ticket loaded', false],
+        ['Groom ticket', '/jira-groom', false]
       ]);
     });
 
-    it('lists Open with the ticket loaded first when that is the setting, Work it end to end following as built-in', async () => {
+    it('marks Open with the ticket loaded default and leaves it second', async () => {
       setDefault('context');
       const menu = await openMenu();
       expect(rows(menu)).toEqual([
-        [JIRA_BUILTIN_LABELS.context, 'default'],
-        [JIRA_BUILTIN_LABELS.execute, 'built-in'],
-        ['Groom ticket', '/jira-groom']
+        [JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', false],
+        [JIRA_BUILTIN_LABELS.context, 'Open with the ticket loaded', true],
+        ['Groom ticket', '/jira-groom', false]
       ]);
     });
 
-    it('lists an existing skill first, marked default, and does not repeat it lower down', async () => {
+    it('marks an existing skill default without pulling it first, and does not repeat it', async () => {
       setDefault(SKILL.id);
       const menu = await openMenu();
       expect(rows(menu)).toEqual([
-        ['Groom ticket', 'default'],
-        [JIRA_BUILTIN_LABELS.execute, 'built-in'],
-        [JIRA_BUILTIN_LABELS.context, 'built-in']
+        [JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', false],
+        [JIRA_BUILTIN_LABELS.context, 'Open with the ticket loaded', false],
+        ['Groom ticket', '/jira-groom', true]
       ]);
       expect(within(menu).getAllByRole('button', { name: /Groom ticket/ })).toHaveLength(1);
     });
 
-    it('reads a deleted skill id as Work it end to end', async () => {
+    it('puts default on the row resolveJiraAction returns for a deleted skill id', async () => {
       setDefault('s_gone0000');
       const menu = await openMenu();
-      expect(rows(menu)[0]).toEqual([JIRA_BUILTIN_LABELS.execute, 'default']);
+      expect(rows(menu)[0]).toEqual([JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', true]);
       expect(rows(menu)).toHaveLength(3);
     });
 
-    it('opens the sheet on the promoted row\'s action', async () => {
-      setDefault('context');
+    it('a row\'s accessible name is its label only', async () => {
+      setDefault('execute');
       const menu = await openMenu();
-      await userEvent.click(within(menu).getAllByRole('button')[0]);
+      expect(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute })).toBeInTheDocument();
+    });
+
+    it('opens the sheet on a row\'s own action', async () => {
+      setDefault('execute');
+      const menu = await openMenu();
+      await userEvent.click(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.context }));
       const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
       expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('context');
     });
@@ -955,7 +1004,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       return (dispatched as jest.Mock)(input, init);
     }) as unknown as typeof fetch;
     const statusReads = (): number => requested.filter((u) => u === '/api/jira').length;
-    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(runMore('Refund partial captures'));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute }));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
     const start = await within(sheet).findByRole('button', { name: 'Start' });
@@ -1021,7 +1070,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
 
   it('the chip stops the card: a click or Enter on it opens no modal', async () => {
     await renderRun();
-    const chip = runChip('Refund partial captures');
+    const chip = runMore('Refund partial captures');
     await userEvent.click(chip);
     expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
     await userEvent.click(chip);

@@ -1,106 +1,132 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
+import { useNow } from '../../hooks/useNow';
 import { useSettings } from '../../hooks/useSettings';
 import { jiraSettingOf, resolveJiraAction, runChipState, skillCommand } from '../../lib/jira';
+import { pollAge } from '../../lib/tracker';
 import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
 import type { JiraAction, JiraIssue } from '../../../../shared/types';
-import { Chevron } from '../ui/Chevron';
-import { Chip } from '../ui/Chip';
+import { Glyph, type GlyphName } from '../ui/Glyphs';
 import { Popover } from '../ui/Popover';
+import { SplitChip } from '../ui/SplitChip';
+
+/**
+ * JiraRunMenu — the split `Run | ▾`, the control that starts a session on a Jira issue (Jira phase 5, spec §7; restyle spec §4.1; picked mock
+ * `RunButton.dc.html`, column A; DESIGN.md §8.9.1 on the card, §8.9.2 in the modal). One component for both homes — the card's marker row and the modal's
+ * controls row — because two copies would be two places to decide what "no repository" or "a session is running" looks like.
+ *
+ * **Two buttons, two jobs.** The left half runs the default action straight away: `onPick(resolveJiraAction(settings.jiraDefaultAction, data.skills))`, which
+ * opens the launch sheet on that action and never the menu. The chevron half opens the `Run menu` for a person who wants a different action. The stored
+ * setting goes through `resolveJiraAction` — the helper Settings' own select uses, so a deleted skill's id reads as `execute` here exactly as it does there.
+ *
+ * **It decides nothing itself.** `runChipState` (`lib/jira.ts`) is the one answer, read from the shell's status through `useJiraContext()` and the sessions
+ * payload through `useJiraSessionsContext()` (the one-run gate is a live `run` link, not any live session — that function's header says what each source adds):
+ * - `no-repo` — the primitive's `dashed` look and both halves disabled, titled `no repository mapped for <PROJECT> — Jira › Setup › Repositories`: there is
+ *   nowhere to run, and the title says where to fix that.
+ * - `live` — both halves disabled, titled `a session is running on <KEY>`, the left half reading `Running · <age>` behind a steady green dot. The age is the
+ *   status entry's `startedAt` when there is one, else the newest open `run` link's — the same two sources `runChipState` unions. The strip beside it carries
+ *   the session and Detail's Stop.
+ * - `ready` — the menu: `Built in` (the two built-ins), then `Skills on this machine · N` (omitted at zero), then a footer saying every choice opens the launch
+ *   sheet first. A pick calls `onPick(action)`, closes the menu and hands focus to the chevron; the sheet itself belongs to the page (`JiraView`), because it
+ *   has to mount ABOVE an open modal. The preferred row stays where it is and is only marked — a menu that reorders itself moves under the pointer.
+ *
+ * **Never hidden for agents' sake.** With agents off the control still draws and the menu still opens: the launch sheet's own `Copy prompt` needs no
+ * dashboard, so hiding it would take away the one half of the feature that works without one. The sheet is what hides `Start` (spec §7).
+ *
+ * **On a card, the control stops the card.** The wrapper swallows the click and Enter/Space — the card's own key handler `preventDefault()`s both, which would
+ * cancel a button's activation, and the click would open the issue modal under the menu. Only those two keys: stopping every key broke Escape for
+ * `DispatchButton`'s identical wrapper (the dialog stack's one `window` listener never saw it), and Escape here is what closes the panel. `SplitChip` stops
+ * them on each half too; the wrapper also covers the panel, which renders inside it.
+ *
+ * `jira-run-open` is a page class, not a look: the card clips its content (`overflow: hidden`, for the radius), and an absolute panel under the control would
+ * be clipped with it, so the stylesheet lets the card overflow while this class is on a descendant.
+ *
+ * **In the modal the panel still hangs from the controls row**, now 300 px wide in every home: the stylesheet makes `.jira-modal-controls` the positioning
+ * parent, the panel's right edge the row's. The row sits at the foot of a column that scrolls under 700 px, so the panel is scrolled into view
+ * (`block: 'nearest'`, which moves the column only as far as it must) on open.
+ */
+const MENU_WIDTH = 300;
 
 interface MenuRow {
   id: string;
   action: JiraAction;
   label: string;
-  hint: string;
-  /** A skill row: the rule above the first one separates it from the built-ins. */
-  skill: boolean;
+  sub: string;
+  glyph: GlyphName;
 }
-
-/**
- * JiraRunMenu — `Run ▾`, the chip that starts a session on a Jira issue (Jira phase 5, spec §7; DESIGN.md §8.9.1 on the card, §8.9.2 in the modal; the
- * picked mock is `RunMenu.html`, where the spec differs the spec wins). One component for both homes — the card's marker row and the modal's controls row —
- * because two copies would be two places to decide what "no repository" or "a session is running" looks like.
- *
- * **It decides nothing itself.** `runChipState` (`lib/jira.ts`) is the one answer, read from the shell's status through `useJiraContext()` and the sessions
- * payload through `useJiraSessionsContext()` (the one-run gate is a live `run` link, not any live session — that function's header says what each source adds):
- * - `no-repo` — a DASHED chip (the wrapper's `data-state`, so the stylesheet needs no class of this family on a `Chip`, which takes none) titled
- *   `no repository mapped for <PROJECT> — Jira › Setup › Repositories`. It opens nothing: there is nowhere to run, and the title says where to fix that.
- * - `live` — disabled, titled `a session is running on <KEY>`. The strip beside it carries the session and Detail's Stop.
- * - `ready` — a `Popover` with the two built-ins, a rule, this machine's skills by name, a rule, and the note `opens the launch sheet`. A pick calls
- *   `onPick(action)` and closes the panel; the sheet itself belongs to the page (`JiraView`), because it has to mount ABOVE an open modal.
- *
- * **The menu is where `Jira default action` is read.** Both homes of `Run ▾` hand the sheet the row that was clicked, so the sheet never seeds from the setting
- * (final review I1: a setting nothing read). The stored value goes through `resolveJiraAction` — the helper Settings' own select uses, so a deleted skill's id
- * reads as `execute` here exactly as it does there — and THAT row is listed first with the hint `default`, in place of `built-in` or a skill's slash command.
- * The other rows keep their order (built-ins, rule, skills) minus the promoted one, and the rule between built-ins and skills is drawn only while there are
- * skills left below it. A pick still opens the sheet on exactly the row's own action.
- *
- * **Never hidden for agents' sake.** With agents off the chip still draws and the menu still opens: the launch sheet's own `Copy prompt` needs no
- * dashboard, so hiding the chip would take away the one half of the feature that works without one. The sheet is what hides `Start` (spec §7).
- *
- * **On a card, the chip stops the card.** The wrapper swallows the click and Enter/Space — the card's own key handler `preventDefault()`s both, which would
- * cancel the button's activation, and the click would open the issue modal under the menu. Only those two keys: stopping every key broke Escape for
- * `DispatchButton`'s identical wrapper (the dialog stack's one `window` listener never saw it), and Escape here is what closes the panel.
- *
- * `jira-run-open` is a page class, not a look: the card clips its content (`overflow: hidden`, for the radius), and an absolute panel under the chip would be
- * clipped with it, so the stylesheet lets the card overflow while this class is on a descendant.
- *
- * **In the modal the panel hangs from the controls row, not the chip.** The facts column is 290 px and a scroll container (`overflow-y: auto` computes
- * `overflow-x` to auto too), so a 320 px panel right-aligned under a chip that sits mid-row ran out past the column's left edge and was cut off there — the
- * labels clipped to their last few letters. The stylesheet makes `.jira-modal-controls` the positioning parent instead, so the panel's right edge is the row's,
- * and `MODAL_PANEL_WIDTH` is the row's width, so the panel opens inside the details view. The row sits at the foot of the column, so the panel opens below
- * the column's visible bottom more often than not; it is scrolled into view (`block: 'nearest'`, which moves the column only as far as it must) on open.
- */
-/**
- * The modal panel's width: the controls row it hangs from, at its narrowest. The facts column is 290 px (DESIGN.md §8.7) less 20 px padding a side and its 1 px
- * rule, so the row is 249 — and 234 when the platform draws a classic 15 px scrollbar inside the column (measured). Sized to the narrower, the panel never
- * leaves the row; with overlay scrollbars it sits 15 px in from the row's left edge, right edges together.
- */
-const MODAL_PANEL_WIDTH = 234;
 
 export function JiraRunMenu({ issue, onPick, home = 'card' }: { issue: JiraIssue; onPick: (action: JiraAction) => void; home?: 'card' | 'modal' }) {
   const { data } = useJiraContext();
   const { data: sessions } = useJiraSessionsContext();
   const { settings } = useSettings();
   const [open, setOpen] = useState(false);
-  const chip = useRef<HTMLButtonElement>(null);
+  const more = useRef<HTMLButtonElement>(null);
   const wrapper = useRef<HTMLDivElement>(null);
+  const state = data === null ? null : runChipState(issue, data, sessions);
+  // The age clock ticks (once a minute) only while a Running reading is on screen.
+  const now = useNow(state === 'live');
   // The modal's panel, brought into the facts column's view once it is drawn (header). Optional-called: jsdom implements no `scrollIntoView`.
   useEffect(() => {
     if (open && home === 'modal') wrapper.current?.querySelector('[role="dialog"]')?.scrollIntoView?.({ block: 'nearest' });
   }, [open, home]);
-  if (data === null) return null;
+  if (data === null || state === null) return null;
 
-  const state = runChipState(issue, data, sessions);
   const title =
     state === 'no-repo'
       ? `no repository mapped for ${issue.project.key} — Jira › Setup › Repositories`
       : state === 'live'
         ? `a session is running on ${issue.key}`
         : undefined;
-  // One row per action, in the menu's own order — the built-ins, then the skills — with the resolved default pulled to the front and its hint replaced.
-  const preferred = jiraSettingOf(resolveJiraAction(settings.jiraDefaultAction, data.skills));
-  const all: MenuRow[] = [
-    ...(['execute', 'context'] as const).map((id) => ({
-      id,
-      action: id as JiraAction,
-      label: JIRA_BUILTIN_LABELS[id],
-      hint: 'built-in',
-      skill: false
-    })),
-    ...data.skills.map((k) => ({ id: k.id, action: { skill: k.id } as JiraAction, label: k.name, hint: skillCommand(k.prompt) ?? '', skill: true }))
+  const defaultAction = resolveJiraAction(settings.jiraDefaultAction, data.skills);
+  const preferred = jiraSettingOf(defaultAction);
+  const builtIns: MenuRow[] = [
+    { id: 'execute', action: 'execute', label: JIRA_BUILTIN_LABELS.execute, sub: 'Work the ticket end to end', glyph: 'play' },
+    { id: 'context', action: 'context', label: JIRA_BUILTIN_LABELS.context, sub: 'Open with the ticket loaded', glyph: 'document' }
   ];
-  const rows: MenuRow[] = [
-    ...all.filter((r) => r.id === preferred).map((r) => ({ ...r, hint: 'default' })),
-    ...all.filter((r) => r.id !== preferred)
-  ];
+  const skills: MenuRow[] = data.skills.map((k) => ({ id: k.id, action: { skill: k.id }, label: k.name, sub: skillCommand(k.prompt) ?? '', glyph: 'sparkle' }));
   const pick = (action: JiraAction): void => {
     setOpen(false);
     onPick(action);
+    // The panel unmounts under the pick; focus goes where the next Tab should start rather than to `body`.
+    more.current?.focus();
   };
+  const row = (r: MenuRow) => {
+    const isDefault = r.id === preferred;
+    return (
+      <button key={r.id} type="button" className={isDefault ? 'jira-run-opt jira-run-opt-default' : 'jira-run-opt'} title={r.label} onClick={() => pick(r.action)}>
+        <span className="jira-run-tile" aria-hidden="true">
+          <Glyph name={r.glyph} />
+        </span>
+        <span className="jira-run-text">
+          <span className="jira-run-label">{r.label}</span>
+          {r.sub !== '' && (
+            <span className="jira-run-sub" aria-hidden="true">
+              {r.sub}
+            </span>
+          )}
+        </span>
+        {isDefault && (
+          <span className="jira-run-mark" aria-hidden="true">
+            <Glyph name="tick" size={10} />
+            default
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  // The newest open `run` link is the fallback source of the age, the same predicate `runChipState` gates on.
+  const liveSince =
+    data.live[issue.key]?.startedAt ??
+    sessions?.links
+      .filter((l) => l.key === issue.key && l.how === 'run' && l.endedAt === null)
+      .map((l) => l.startedAt)
+      .sort()
+      .pop() ??
+    null;
+  const age = state === 'live' ? pollAge(liveSince, now) : null;
 
   return (
     <div
@@ -112,38 +138,29 @@ export function JiraRunMenu({ issue, onPick, home = 'card' }: { issue: JiraIssue
         if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
       }}
     >
-      <Chip
-        ref={chip}
-        size={28}
-        aria-label={`Run ${issue.key}`}
-        aria-haspopup={state === 'ready' ? 'dialog' : undefined}
-        aria-expanded={state === 'ready' ? open : undefined}
-        disabled={state === 'live'}
+      <SplitChip
+        label={`Run ${issue.key}`}
+        labelMore={`Run options for ${issue.key}`}
+        size={home === 'modal' ? 32 : 28}
+        icon={state === 'live' ? <span className="jira-run-dot" /> : <Glyph name="play" />}
+        open={open}
+        disabled={state !== 'ready'}
+        dashed={state === 'no-repo'}
         title={title}
-        onClick={() => {
-          if (state === 'ready') setOpen((o) => !o);
-        }}
+        moreRef={more}
+        onMain={() => onPick(defaultAction)}
+        onMore={() => setOpen((o) => !o)}
       >
-        Run <Chevron dir={open ? 'up' : 'down'} />
-      </Chip>
+        {state === 'live' ? (age === null ? 'Running' : `Running · ${age}`) : 'Run'}
+      </SplitChip>
       {open && state === 'ready' && (
-        <Popover label="Run menu" width={home === 'modal' ? MODAL_PANEL_WIDTH : 320} anchor={chip} onClose={() => setOpen(false)}>
-          {/* The right-hand hint is decorative and `aria-hidden`: a button's name is the words a person picks by; `built-in` or `default` is a category. */}
-          {rows.map((row, i) => (
-            <Fragment key={row.id}>
-              {/* The rule sits between the last built-in and the first skill, wherever the promoted row left them. */}
-              {i > 0 && row.skill && !rows[i - 1].skill && <hr className="jira-run-rule" />}
-              {/* The title is the whole label, which the row ellipsises — at the modal's narrower width (header) a long skill name always does. */}
-              <button type="button" className="jira-run-opt" title={row.label} onClick={() => pick(row.action)}>
-                <span>{row.label}</span>
-                <span className="jira-run-hint" aria-hidden="true">
-                  {row.hint}
-                </span>
-              </button>
-            </Fragment>
-          ))}
+        <Popover label="Run menu" width={MENU_WIDTH} anchor={more} onClose={() => setOpen(false)}>
+          <div className="jira-run-head">Built in</div>
+          {builtIns.map(row)}
+          {skills.length > 0 && <div className="jira-run-head">Skills on this machine · {skills.length}</div>}
+          {skills.map(row)}
           <hr className="jira-run-rule" />
-          <div className="jira-run-note">opens the launch sheet</div>
+          <div className="jira-run-note">Every choice opens the launch sheet first</div>
         </Popover>
       )}
     </div>

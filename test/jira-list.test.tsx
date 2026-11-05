@@ -305,7 +305,7 @@ describe('the Sessions page', () => {
     const ended = (): HTMLElement => within(group('Ended')).getByRole('row', { name: 'Session on PAY-131' });
 
     // Run ▾ is the button's, and so is a click on the panel it opens inside the cell: neither opens Detail.
-    await userEvent.click(within(ended()).getByRole('button', { name: 'Run PAY-131' }));
+    await userEvent.click(within(ended()).getByRole('button', { name: 'Run options for PAY-131' }));
     const panel = ended().querySelector('[role="dialog"]');
     expect(panel).not.toBeNull();
     await userEvent.click(panel as HTMLElement);
@@ -497,9 +497,18 @@ describe('the Sessions page', () => {
     links = [link({ key: 'PAY-131', id: 'e1', state: 'ended', startedAt: daysAgo(2), endedAt: daysAgo(1) })];
     await renderList();
     await waitFor(() => expect(rowTags().length).toBe(1));
-    await userEvent.click(screen.getByRole('button', { name: 'Run PAY-131' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Run options for PAY-131' }));
     await userEvent.click(await within(await screen.findByRole('dialog', { name: 'Run menu' })).findByRole('button', { name: /Work it end to end/ }));
     expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: /^PAY-131 / })).toBeNull();
+  });
+
+  it("a Sessions row's `Run` opens the launch sheet directly, with no menu", async () => {
+    links = [link({ key: 'PAY-131', id: 'e1', state: 'ended', startedAt: daysAgo(2), endedAt: daysAgo(1) })];
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Run PAY-131' }));
+    expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Run menu' })).toBeNull();
   });
 });

@@ -470,6 +470,7 @@ const SESSION = (over: Partial<{ starting: boolean }> = {}) => ({
   'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false, ...over }
 });
 const modalRun = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Run PAY-131' });
+const modalMore = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Run options for PAY-131' });
 const stopChip = (): HTMLElement | null => within(screen.getByRole('dialog')).queryByRole('button', { name: 'Stop session' });
 /** Agents-status reads, which the modal mounts only for a confirmed session and which are kept out of `urls`. */
 const agentsReads = (): number => calls.filter((c) => c.url === '/api/agents/status').length;
@@ -547,14 +548,22 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog.querySelector('.jira-modal-controls')).toContainElement(modalRun());
 
-    await userEvent.click(modalRun());
+    await userEvent.click(modalMore());
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: new RegExp(JIRA_BUILTIN_LABELS.context) }));
     expect(onRun).toHaveBeenCalledTimes(1);
     expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-131' }), 'context' satisfies JiraAction);
 
-    await userEvent.click(modalRun());
+    await userEvent.click(modalMore());
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: /Groom ticket/ }));
     expect(onRun).toHaveBeenLastCalledWith(expect.objectContaining({ key: 'PAY-131' }), { skill: 's_0a1b2c3d' });
+  });
+
+  it('the left half hands the default action up with no menu', async () => {
+    mount();
+    await screen.findByText('not');
+    await userEvent.click(modalRun());
+    expect(screen.queryByRole('dialog', { name: 'Run menu' })).toBeNull();
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-131' }), 'execute' satisfies JiraAction);
   });
 
   it('opens its panel inside the facts column: the row-wide width, every label as a title, and scrolled into view', async () => {
@@ -565,9 +574,9 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
     try {
       mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'A very long skill name that the narrow panel ellipsises', prompt: '/x {key}' }] } });
       await screen.findByText('not');
-      await userEvent.click(modalRun());
+      await userEvent.click(modalMore());
       const menu = screen.getByRole('dialog', { name: 'Run menu' });
-      expect(menu.style.getPropertyValue('--ui-popover-width')).toBe('234px');
+      expect(menu.style.getPropertyValue('--ui-popover-width')).toBe('300px');
       expect(within(menu).getByRole('button', { name: /A very long skill name/ })).toHaveAttribute('title', 'A very long skill name that the narrow panel ellipsises');
       expect(scrolled).toHaveBeenCalledWith({ block: 'nearest' });
       expect(scrolled.mock.contexts[0]).toBe(menu);
@@ -580,15 +589,29 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
     const view = mount({ status: { live: SESSION() } });
     await screen.findByText('not');
     expect(modalRun()).toBeDisabled();
+    expect(modalMore()).toBeDisabled();
     expect(modalRun()).toHaveAttribute('title', 'a session is running on PAY-131');
+    expect(modalMore()).toHaveAttribute('title', 'a session is running on PAY-131');
+    expect(modalRun()).toHaveTextContent('Running · 3h');
     view.unmount();
 
     mount({ status: { repos: {} } });
     await screen.findByText('not');
-    expect(modalRun()).toHaveAttribute('title', 'no repository mapped for PAY — Jira › Setup › Repositories');
+    const noRepo = 'no repository mapped for PAY — Jira › Setup › Repositories';
+    expect(modalRun()).toHaveAttribute('title', noRepo);
+    expect(modalMore()).toHaveAttribute('title', noRepo);
+    expect(modalRun()).toBeDisabled();
+    expect(modalMore()).toBeDisabled();
     await userEvent.click(modalRun());
     expect(screen.queryByRole('dialog', { name: 'Run menu' })).toBeNull();
     expect(onRun).not.toHaveBeenCalled();
+  });
+
+  it('with only a live run link on the sessions payload, the left half reads Running with that link\'s age', async () => {
+    mount({ sessions: payload(link({ startedAt: hoursAgo(2) })) });
+    await screen.findByText('not');
+    expect(modalRun()).toBeDisabled();
+    expect(modalRun()).toHaveTextContent('Running · 2h');
   });
 });
 
@@ -1058,7 +1081,7 @@ describe('JiraView — the open-issue slot draws the modal', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
     const modal = await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' });
-    await userEvent.click(within(modal).getByRole('button', { name: 'Run PAY-131' }));
+    await userEvent.click(within(modal).getByRole('button', { name: 'Run options for PAY-131' }));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: new RegExp(JIRA_BUILTIN_LABELS.execute) }));
     expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
 

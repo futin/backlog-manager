@@ -1279,31 +1279,40 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-modal-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
 .jira-modal-error { margin: 0; font-size: 12px; line-height: 1.45; color: var(--red) }
 
-/* Run ▾ (Jira phase 5, DESIGN.md §8.9.1): the chip's wrapper is the Popover's positioning parent, the panel hanging `100% + 8px` under it. On a card the
+/* The split Run (restyle §4.1, DESIGN.md §8.9.1): the wrapper is the Popover's positioning parent, the panel hanging `100% + 8px` under it. On a card the
    wrapper is the marker row's last item, pushed right; in the modal's controls row it sits in the flow. `data-state` is the wrapper's reading of the
-   chip (`Chip` takes no className and guard 7 keeps `.ui-chip` out of any selector but the primitives block), so the dashed no-repository look is an
-   attribute selector on the button inside it. */
+   control; the primitive carries the dashed no-repository look itself, and the live tint below reaches the group by structure (`> [role='group']`) because
+   guard 7 keeps every `ui-*` family token out of a selector outside the primitives block. */
 .jira-run { position: relative; flex: none }
 .board-card-markers .jira-run { margin-left: auto }
-.jira-run[data-state='no-repo'] > button { border-style: dashed }
-/* In the modal the facts column is a scroll container 290 px wide, and a 320 px panel right-aligned under a mid-row chip ran out past its left edge and was
-   cut there. So the ROW is the positioning parent: the panel hangs under the whole row, its right edge the row's, at the column's width (`JiraRunMenu`'s
-   `MODAL_PANEL_WIDTH`) — inside the details view. A tall menu lengthens the column's scroll rather than spilling out of it. */
+/* A running session: the whole pill goes green-on-tint, its dot steady (a pulse is the live strip's job, not the button's). The group's own ink background
+   and the halves' ink fill are overridden together, since the halves paint over the group. */
+.jira-run[data-state='live'] > [role='group'] { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); border-color: var(--hairline2); color: var(--green) }
+.jira-run[data-state='live'] > [role='group'] > button { background: transparent; color: var(--green) }
+.jira-run[data-state='live'] > [role='group'] > button:last-child::before { background: var(--green); opacity: .35 }
+.jira-run-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-solid) }
+/* In the modal the facts column is a scroll container 290 px wide, so the ROW is the positioning parent: the panel hangs under the whole row, its right edge
+   the row's — inside the details view. A tall menu lengthens the column's scroll rather than spilling out of it. */
 .jira-modal-controls { position: relative }
 .jira-modal-controls .jira-run { position: static }
 /* The card clips its content for the radius, which would clip the absolute panel with it: while the panel is open the card overflows, and the live
    strip, which no longer has the card's clip to round it, takes the top radius itself. */
 .board-card:has(.jira-run-open) { overflow: visible }
 .board-card:has(.jira-run-open) > .board-card-live:first-child { border-radius: 12px 12px 0 0 }
-/* The panel's rows are the picker's rows (the Sort panel's shape) with a quiet right-hand hint — the skill's slash command, or the built-in's one line. */
+/* Menu: group headers (sentence case, 11 px floor), 40 px rows with a 28 px tile, label over a quiet sub-line, the preferred row marked at its right end. */
+.jira-run-head { padding: 6px 10px 2px; font-size: 11px; font-weight: 500; color: var(--ink3) }
 .jira-run-opt {
-  display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px;
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 40px; padding: 0 10px;
   border: 0; border-radius: 8px; background: none; text-align: left;
   font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer;
 }
 .jira-run-opt:hover { background: var(--strip-hi) }
-.jira-run-opt > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.jira-run-hint { flex: none; margin-left: auto; font-size: 12px; font-weight: 400; color: var(--ink3) }
+.jira-run-tile { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: var(--strip-hi); color: var(--ink2) }
+.jira-run-opt-default .jira-run-tile { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
+.jira-run-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px }
+.jira-run-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2 }
+.jira-run-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; line-height: 1.2; color: var(--ink3) }
+.jira-run-mark { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 500; color: var(--green) }
 .jira-run-rule { margin: 6px 0; border: 0; border-top: 1px solid var(--hairline2) }
 .jira-run-note { padding: 2px 10px 4px; font-size: 12px; color: var(--ink2) }
 /* A long session label ellipsises inside the strip; the elapsed mark keeps its width. This rule is global, so it applies to the Board's own live strip too
