@@ -29,6 +29,7 @@ token the board already has, every tint is `color-mix` of a mark token over a su
 - No change to what a Run does: the launch sheet still opens on every pick, the action vocabulary (`execute`, `context`, skills) is unchanged, and the
   `no-repo` and `live` states keep their meaning and their titles.
 - No change to the band (picker, search, Filters, `Board | List` switch), the deck, the fold, the List view, Sessions, Setup, the launch sheet.
+  Those are restyled by `2026-11-05-app-restyle-design.md`, planned after this spec; this spec's plan does not touch them.
 - No Done-column dimming, no "PR merged" line on a card, no column `⋯` menu, no sort control, no applied-filters row, no search inside the Run menu —
   all drawn on one mock or another and listed in `00-mock-audit.md` as not built.
 - No new theme tokens. No dark-theme-specific rules: the tints are `color-mix` over the theme's own surfaces and follow the theme.

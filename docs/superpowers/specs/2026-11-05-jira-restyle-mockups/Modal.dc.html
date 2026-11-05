@@ -96,7 +96,7 @@ a{color:#525252}a:hover{color:#131313}
           <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: #6b6b6b;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>Status</span>
           <div style="position: relative; display: flex; align-items: center; gap: 8px;">
             <button type="button" aria-haspopup="menu" aria-expanded="true" style="height: 28px; padding: 0 8px 0 9px; border-radius: 9px; border: 1px solid #dcdcda; background: #ffffff; font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; display: inline-flex; align-items: center; gap: 7px; cursor: pointer;"><span style="width: 7px; height: 7px; border-radius: 999px; background: #a3a3a0;"></span>To Do<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
-            <div role="menu" aria-label="Move to" style="position: absolute; top: 34px; left: 0; width: 220px; background: #ffffff; border: 1px solid #dcdcda; border-radius: 12px; padding: 6px; box-sizing: border-box; box-shadow: 0 12px 32px rgba(19,19,19,0.12), 0 1px 2px rgba(19,19,19,0.06); display: flex; flex-direction: column; z-index: 2;">
+            <div role="menu" aria-label="Move to" style="position: absolute; z-index: 5; top: 34px; left: 0; width: 220px; background: #ffffff; border: 1px solid #dcdcda; border-radius: 12px; padding: 6px; box-sizing: border-box; box-shadow: 0 12px 32px rgba(19,19,19,0.12), 0 1px 2px rgba(19,19,19,0.06); display: flex; flex-direction: column; z-index: 2;">
               <div style="padding: 6px 10px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6b6b;">Move to</div>
               <button type="button" role="menuitem" aria-checked="true" style="display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 0; background: transparent; border-radius: 8px; font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;"><span style="width: 7px; height: 7px; border-radius: 999px; background: #a3a3a0;"></span>To Do<svg style="margin-left: auto;" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#38631a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L19 7"/></svg></button>
               <button type="button" role="menuitem" style="display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 0; background: #f2f2f1; border-radius: 8px; font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;"><span style="width: 7px; height: 7px; border-radius: 999px; background: #f5a15c;"></span>In Progress</button>
@@ -108,7 +108,6 @@ a{color:#525252}a:hover{color:#131313}
           </div>
         </div>
 
-        <div style="height: 150px;"></div>
 
         <div style="display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #eaeae8;">
           <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: #6b6b6b;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Assignee</span>
@@ -141,8 +140,13 @@ a{color:#525252}a:hover{color:#131313}
         </div>
 
         <div style="display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #eaeae8;">
-          <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: #6b6b6b;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16"/><path d="M8 3v4"/><path d="M16 3v4"/></svg>Dates</span>
-          <div style="font-size: 12.5px; color: #525252; display: flex; flex-direction: column; gap: 2px;"><span>Created 3 Nov · updated 2 h ago</span><span style="color: #6b6b6b;">Reporter Mila K.</span></div>
+          <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: #6b6b6b;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16"/><path d="M8 3v4"/><path d="M16 3v4"/></svg>Created</span>
+          <span style="font-size: 12.5px; color: #525252;">3 Nov 2026</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #eaeae8;">
+          <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: #6b6b6b;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16"/><path d="M8 3v4"/><path d="M16 3v4"/></svg>Updated</span>
+          <span style="font-size: 12.5px; color: #525252;">2 h ago</span>
         </div>
 
       </aside>
