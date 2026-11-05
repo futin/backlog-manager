@@ -9,27 +9,29 @@ import { useNarrow } from '../../hooks/useNarrow';
 import { openDesktopJira, repoBasename, runChipState, type JiraChildrenIndex } from '../../lib/jira';
 import {
   LIST_CHIPS,
+  DEFAULT_LIST_WINDOW,
   LIST_WINDOWS,
   applyListFilters,
   buildListRows,
   forLabel,
-  listDotTone,
   rowOpens,
+  sessionsEmptyTitle,
   startedLabel,
   type ListChip,
   type ListRow,
   type ListWindow
 } from '../../lib/jira-list';
 import { openButtons, runLabel, stripTitle, surfaceWord } from '../../lib/jira-sessions';
+import type { JiraPage } from '../../lib/jira-page';
+import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
 import { STATE_LABEL } from '../../../../shared/jira-sessions';
 import type { JiraAction, JiraIssue, JiraLiveSession } from '../../../../shared/types';
+import { FilterBar, FilterSection } from '../FilterBar';
 import { Chip } from '../ui/Chip';
-import { Dot } from '../ui/Dot';
-import { JiraTypeIcon } from '../ui/JiraTypeIcon';
-import { Select } from '../ui/Select';
+import { Segmented } from '../ui/Segmented';
 import { JiraRunMenu } from './JiraRunMenu';
-import { OpenChip } from './JiraSessionCard';
+import { SessionOpen } from './SessionOpen';
 
 const NO_LIVE: Readonly<Record<string, JiraLiveSession>> = {};
 
@@ -46,7 +48,7 @@ const CHIP_LABEL: Record<ListChip, string> = { all: 'All', 'needs-you': 'Needs y
  * badge (C4), which sets `needs-you` and All tickets from outside the page.
  *
  * **The bar.** Four chips with their counts (All, Needs you, Working, Ended — each count is what the chip WOULD show under the other filters, so a pressed
- * chip does not shrink its neighbours), the Repo and Run selects, the window for ended rows (24 h, 7 d, 30 d, All; live rows are never hidden by age), and the
+ * chip does not shrink its neighbours), the Filters popover (Repository, Run, the window for ended rows — 24 h, 7 d, 30 d, All; live rows are never hidden by age — and the
  * All tickets toggle that widens the scope from the picked board's tickets to every linked one.
  *
  * **The row.** State · Ticket · Run · Repo and branch · Where · Model · Context · Started · For · Open. The ticket cell is the type glyph, the key and the
@@ -67,7 +69,9 @@ export function JiraSessionList({
   childrenOf,
   onOpenIssue,
   onRun,
-  unavailable
+  unavailable,
+  boardName,
+  onOpenJiraPage
 }: {
   /** The picked board's loaded list — every issue, folded or not. */
   issues: readonly JiraIssue[];
@@ -82,6 +86,10 @@ export function JiraSessionList({
    * every linked ticket and needs no board (spec C8), so the prop is ignored.
    */
   unavailable: ReactNode | null;
+  /** The picked board's name, for the empty state's title (`No sessions on <board> …`). */
+  boardName: string;
+  /** The empty state's way back to the board. */
+  onOpenJiraPage: (p: JiraPage) => void;
 }) {
   const { data } = useJiraContext();
   const { data: payload } = useJiraSessionsContext();
@@ -100,39 +108,65 @@ export function JiraSessionList({
 
   const total = view.live.length + view.ended.length;
   const saveError = payload?.saveError ?? null;
+  // What FilterBar's badge counts: the popover's own four, never the chip (it has its own control) and never the search.
+  const nonDefaults = [filters.repo !== null, filters.run !== null, filters.window !== DEFAULT_LIST_WINDOW, filters.allTickets].filter(Boolean).length;
+  const plain = filters.chip === 'all' && search.trim() === '';
   return (
     <section className="jira-list" aria-label="Sessions">
       <div className="jira-list-bar">
-        <div className="jira-list-chips" role="group" aria-label="Show">
-          {LIST_CHIPS.map((c) => (
-            <Chip key={c} size={28} pressed={filters.chip === c} onClick={() => setFilters({ chip: c })}>
-              {CHIP_LABEL[c]} <span className="jira-list-count">{view.counts[c]}</span>
-            </Chip>
-          ))}
-        </div>
-        <div className="jira-list-picks">
-          <Select<string>
-            label="Repo"
-            value={filters.repo ?? ''}
-            options={[{ value: '', label: 'All repos' }, ...view.repos.map((r) => ({ value: r, label: r }))]}
-            onChange={(v) => setFilters({ repo: v === '' ? null : v })}
-          />
-          <Select<string>
-            label="Run"
-            value={filters.run ?? ''}
-            options={[{ value: '', label: 'Any run' }, ...view.runs]}
-            onChange={(v) => setFilters({ run: v === '' ? null : v })}
-          />
-          <Select<ListWindow>
-            label="Ended within"
-            value={filters.window}
-            options={LIST_WINDOWS.map((w) => ({ value: w.value, label: w.value === 'all' ? 'Ended: all time' : `Ended: ${w.label}` }))}
-            onChange={(v) => setFilters({ window: v })}
-          />
-          <Chip size={28} pressed={filters.allTickets} title="Include sessions on tickets that are not on this board" onClick={() => setFilters({ allTickets: !filters.allTickets })}>
-            All tickets
-          </Chip>
-        </div>
+        <Segmented<ListChip>
+          track
+          label="Show"
+          value={filters.chip}
+          options={LIST_CHIPS.map((c) => ({ value: c, label: CHIP_LABEL[c], count: view.counts[c] }))}
+          onChange={(c) => setFilters({ chip: c })}
+        />
+        <FilterBar
+          count={nonDefaults}
+          onClear={() => setFilters({ repo: null, run: null, window: DEFAULT_LIST_WINDOW, allTickets: false })}
+          showing={{ shown: total, total: rows.length }}
+        >
+          <FilterSection title="Repository">
+            <div className="filter-bar-picks" role="group" aria-label="Repository">
+              <Chip size={28} pressed={filters.repo === null} onClick={() => setFilters({ repo: null })}>
+                All repos
+              </Chip>
+              {view.repos.map((r) => (
+                <Chip key={r} size={28} pressed={filters.repo === r} onClick={() => setFilters({ repo: r })}>
+                  {r}
+                </Chip>
+              ))}
+            </div>
+          </FilterSection>
+          <FilterSection title="Run">
+            <div className="filter-bar-picks" role="group" aria-label="Run">
+              <Chip size={28} pressed={filters.run === null} onClick={() => setFilters({ run: null })}>
+                Any run
+              </Chip>
+              {view.runs.map((r) => (
+                <Chip key={r.value} size={28} pressed={filters.run === r.value} onClick={() => setFilters({ run: r.value })}>
+                  {r.label}
+                </Chip>
+              ))}
+            </div>
+          </FilterSection>
+          <FilterSection title="Ended within">
+            <div className="filter-bar-picks" role="group" aria-label="Ended within">
+              {LIST_WINDOWS.map((w) => (
+                <Chip key={w.value} size={28} pressed={filters.window === w.value} onClick={() => setFilters({ window: w.value })}>
+                  {w.value === 'all' ? 'All' : w.label}
+                </Chip>
+              ))}
+            </div>
+          </FilterSection>
+          <FilterSection title="Tickets">
+            <div className="filter-bar-picks" role="group" aria-label="Tickets">
+              <Chip size={28} pressed={filters.allTickets} title="Include sessions on tickets that are not on this board" onClick={() => setFilters({ allTickets: !filters.allTickets })}>
+                All tickets
+              </Chip>
+            </div>
+          </FilterSection>
+        </FilterBar>
       </div>
 
       {/* The link store's last save failed: every row here is memory only, and a restart drops them and every unlink with them. A save that throws costs
@@ -145,23 +179,39 @@ export function JiraSessionList({
 
       {unavailable !== null && !filters.allTickets ? (
         <div className="board-empty">{unavailable}</div>
+      ) : total === 0 && !plain ? (
+        <div className="board-empty">No sessions match</div>
       ) : total === 0 ? (
-        <div className="board-empty">No sessions{filters.chip === 'all' && search.trim() === '' ? '' : ' match'}</div>
+        <div className="jira-list-empty">
+          <h2 className="jira-list-empty-title">{sessionsEmptyTitle(boardName, filters.window, filters.allTickets)}</h2>
+          <p className="jira-list-empty-line">Sessions started from this board&apos;s tickets show here.</p>
+          <div className="jira-list-empty-ways">
+            <Chip size={28} onClick={() => onOpenJiraPage('board')}>
+              Go to the board
+            </Chip>
+            {filters.window !== '30d' && filters.window !== 'all' && (
+              <Chip size={28} onClick={() => setFilters({ window: '30d' })}>
+                Show 30 days
+              </Chip>
+            )}
+          </div>
+        </div>
       ) : (
-        <div className="jira-list-scroll">
+        <div className="jira-list-frame">
+          <div className="jira-list-scroll">
           <table className="jira-list-table">
             <thead>
               <tr>
-                <th scope="col">State</th>
                 <th scope="col">Ticket</th>
+                <th scope="col">State</th>
                 <th scope="col">Run</th>
-                <th scope="col">Repo · branch</th>
+                <th scope="col">Repository</th>
                 <th scope="col">Where</th>
                 <th scope="col">Model</th>
                 <th scope="col">Context</th>
                 <th scope="col">Started</th>
                 <th scope="col">For</th>
-                <th scope="col">Open</th>
+                <th scope="col" aria-label="Open" />
               </tr>
             </thead>
             {view.live.length > 0 && (
@@ -197,6 +247,7 @@ export function JiraSessionList({
               </ListGroup>
             )}
           </table>
+          </div>
         </div>
       )}
       {handover.error !== null && (
@@ -251,7 +302,7 @@ function ListRowView({
   const phone = useNarrow();
   const { issue, link, starting, state } = row;
   const sessionRow = link?.row ?? null;
-  const tone = listDotTone(state);
+  const tone = sessionTone(state);
   const age = row.ended ? null : pollAge(row.since, now);
   const pct = sessionRow?.contextPct;
   const model = sessionRow?.model ?? link?.model ?? null;
@@ -269,29 +320,24 @@ function ListRowView({
 
   return (
     <tr
-      className="jira-list-row"
+      className="jira-list-row ui-stripe"
+      data-tone={tone}
       data-state={state}
       data-key={row.key}
       data-ended={row.ended ? 'true' : undefined}
       aria-label={`Session on ${row.key}`}
       onClick={onRowClick}
     >
+      <td className="jira-list-ticket">
+        <span className="jira-list-key">{row.key}</span>
+        <button type="button" className="jira-list-title" title={issue.summary} onClick={open}>
+          {issue.summary}
+        </button>
+      </td>
       <td className="jira-list-state" title={stripTitle(state)}>
         <div className="jira-list-flex">
-          {tone !== null && <Dot tone={tone} breathe={tone === 'live'} />}
+          <span className="ui-stripe-dot" data-tone={tone} aria-hidden="true" />
           <span>{STATE_LABEL[state]}</span>
-          {age !== null && <span className="jira-list-mark">{age}</span>}
-        </div>
-      </td>
-      <td className="jira-list-ticket">
-        <div className="jira-list-flex">
-          <span className="jira-card-type" title={issue.type.name}>
-            <JiraTypeIcon type={issue.type} />
-          </span>
-          <span className="jira-card-key">{row.key}</span>
-          <button type="button" className="jira-list-title" onClick={open}>
-            {issue.summary}
-          </button>
         </div>
       </td>
       <td className="jira-list-run">{run}</td>
@@ -313,15 +359,15 @@ function ListRowView({
           </>
         )}
       </td>
-      <td>{startedLabel(row.startedAt, now, zone)}</td>
+      <td>
+        {startedLabel(row.startedAt, now, zone)}
+        {age !== null && <span className="jira-list-mark"> · {age}</span>}
+      </td>
       <td>{forLabel(row, now)}</td>
-      <td className="jira-list-open">
+      <td className="jira-list-open jira-list-act">
         <div className="jira-list-flex">
           {buttons !== null && sessionId !== null && (
-            <>
-              <OpenChip button={buttons.primary} sessionId={sessionId} row={sessionRow} launch={link?.surface ?? null} primary={!row.ended} onHandover={onHandover} />
-              {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={sessionRow} launch={link?.surface ?? null} primary={false} onHandover={onHandover} />}
-            </>
+            <SessionOpen issueKey={row.key} sessionId={sessionId} row={sessionRow} launch={link?.surface ?? null} state={state} buttons={buttons} onHandover={onHandover} />
           )}
           {canRun && <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />}
         </div>

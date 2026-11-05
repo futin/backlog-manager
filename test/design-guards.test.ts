@@ -463,11 +463,32 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
   it('the issue List keeps its Run menu visible: the action cell out-ranks the td rule and the scroll box scrolls only in the container query', () => {
     const act = styleRules.find((r) => r.selector.includes('.jira-issues-act') && /overflow:\s*visible/.test(r.body ?? ''));
     expect(act?.selector).toMatch(/\.jira-issues-row\s+td\.jira-issues-act/);
-    const at = styles.indexOf('@container (max-width');
+    const at = styles.indexOf('@container (max-width', styles.indexOf('.jira-issues-frame { container-type'));
     expect(at).toBeGreaterThan(-1);
     const hits = [...styles.matchAll(/\.jira-issues-scroll\s*\{[^}]*overflow-x:\s*auto/g)];
     expect(hits).toHaveLength(1);
     const block = styles.slice(at, styles.indexOf('\n}', at));
     expect(block).toContain('.jira-issues-scroll { overflow-x: auto }');
+  });
+
+  /**
+   * The Sessions table's twin of the guard above, plus the fit: its action cell holds `Session actions` and Run's panel, so it must out-rank
+   * `.jira-list-row td { overflow: hidden }`, its box may scroll only inside the `@container` block, and its columns must leave the table's `min-width`
+   * (1120) at or under the 1150 px a 1440 viewport gives it, so nothing scrolls sideways there.
+   */
+  it('the Sessions table keeps its menus visible and fits a 1440 px viewport', () => {
+    const act = styleRules.find((r) => r.selector.includes('.jira-list-act') && /overflow:\s*visible/.test(r.body ?? ''));
+    expect(act?.selector).toMatch(/\.jira-list-row\s+td\.jira-list-act/);
+    expect(styles).toMatch(/\.jira-list-frame\s*\{\s*container-type:\s*inline-size/);
+    const hits = [...styles.matchAll(/\.jira-list-scroll\s*\{[^}]*overflow-x:\s*auto/g)];
+    expect(hits).toHaveLength(1);
+    const at = styles.indexOf('.jira-list-scroll { overflow-x: auto }');
+    expect(styles.lastIndexOf('@container (max-width', at)).toBeGreaterThan(styles.indexOf('.jira-list-frame'));
+    const min = Number(/\.jira-list-table\s*\{[^}]*min-width:\s*(\d+)px/.exec(styles)?.[1]);
+    const widths = [...styles.matchAll(/\.jira-list-table thead th:nth-child\(\d+\)\s*\{\s*width:\s*(\d+)px/g)].map((m) => Number(m[1]));
+    expect(widths).toHaveLength(9);
+    expect(min).toBeLessThanOrEqual(1150);
+    // Ticket is the auto column: it must keep room for a key and a summary at the table's own minimum.
+    expect(min - widths.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(200);
   });
 });
