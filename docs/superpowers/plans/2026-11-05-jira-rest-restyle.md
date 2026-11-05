@@ -19,6 +19,8 @@ after plan 1 (`docs/superpowers/plans/2026-11-05-jira-restyle.md`) on the same b
 **How to read this plan (override of writing-plans' code-block rule).** This plan gives behaviour, names, signatures, exact values and exact test CASES —
 never literal code. Write the code and the test bodies yourself; if a case here looks wrong against the code, say so in your report rather than transcribe
 it. Line counts are soft. Where the plan and the spec differ, the spec wins; report the difference. Line numbers are pre-plan-1; plan 1 shifts some.
+#472 (b3c73fa5) also shifted test lines after this plan was written: `jira-board.test.tsx` List cases sit ~29 lower (:1330 → :1355, :1344 → :1373,
+:1345 → :1374, :1352 → :1381; :783-786 → :804-815, :802 → :830, :979 → :981) and `jira-lib.test.ts:1593-1615` → :1621-1644. Re-grep by case name.
 
 ## Global Constraints
 
@@ -80,7 +82,7 @@ it. Line counts are soft. Where the plan and the spec differ, the spec wins; rep
 **Files:** Modify `client/src/components/ui/Segmented.tsx:28` (option type), `client/src/styles.css` (block). Test: `test/ui-segmented.test.tsx`.
 
 Behaviour: options gain `count?: number`; when present a `<span class="ui-seg-count">` follows the label inside the button (11/600, `--ink3`,
-`font-variant-numeric: tabular-nums`; `--ink2` on the pressed option), so the accessible name is `Needs you 1`. Absent → no span, today's markup exactly.
+`font-variant-numeric: tabular-nums`; `--ink2` on the pressed option), so the accessible name is `Needs you 1` (a space precedes the span, as `JiraSessionList.tsx:109` does today). Absent → no span, today's markup exactly.
 
 - [ ] **Step 1: Failing tests:** an option `{ label: 'Needs you', count: 1 }` is a button named `Needs you 1` holding `.ui-seg-count` text `1`; `count: 0`
   still renders `0`; an option without `count` has no `.ui-seg-count` and the name is the bare label; `aria-pressed` unchanged.
@@ -112,13 +114,15 @@ popover is untouched. Escape closes and returns focus to the chip (today's `Popo
 **Files:**
 - Create: `client/src/components/jira/SessionOpen.tsx`, `test/jira-session-open.test.tsx`
 - Modify: `client/src/components/ui/SplitChip.tsx` (plan 1), `client/src/components/jira/JiraSessionCard.tsx:69-124,183-203`,
-  `client/src/components/jira/JiraAgentDeck.tsx:52-90`, `client/src/styles.css`, `client/src/hooks/useDialogEscape.ts:47`, `.claude/rules/board.md:20`,
+  `client/src/components/jira/JiraAgentDeck.tsx:52-90`, `client/src/components/ui/Meter.tsx:23-36` (`height?: 4`), `client/src/styles.css`, `client/src/hooks/useDialogEscape.ts:47`, `.claude/rules/board.md:20`,
   `docs/subsystems/invariants.md:2242`, `.claude/DESIGN.md:415` (§8.7)
-- Test: `test/ui-split.test.tsx`, `test/jira-detail.test.tsx`, `test/jira-board.test.tsx`, `test/dialog-count-docs.test.ts:94`
+- Test: `test/ui-split.test.tsx`, `test/jira-detail.test.tsx`, `test/jira-board.test.tsx`, `test/dialog-count-docs.test.ts:94`, the `Meter` suite
+  (`grep -l "ui/Meter" test/`: `height={4}` sets `data-height="4"`; absent → no attribute)
 
 **Interfaces:**
 - `SplitChip` gains `href?: string` (main half renders `<a target="_blank" rel="noreferrer">` named by `label`, role link) and `variant?: 'ink' | 'outline'`
-  (default `ink`; outline = `Chip`'s outline look). Additive; plan 1's props unchanged.
+  (default `ink`; outline = `Chip`'s outline look). Additive; plan 1's props unchanged. While `disabled`, an `href` main half renders as plan 1's
+  `<button disabled>` (no `href`), since an anchor has no `disabled`.
 - Factor `OpenChip`'s branch choice into `openTarget(button: OpenButton, sessionId: string, row: DashboardRow | null, launch, phone: boolean, linkBase): {
   kind: 'href'; href } | { kind: 'handover' } | { kind: 'disabled'; title: string | null } | null` in `client/src/lib/jira-sessions.ts` (null = not shown);
   `OpenChip` keeps rendering from it.
@@ -134,7 +138,8 @@ chevron). `Stop session` closes the menu and swaps the split for today's `Confir
 
 Deck card (`DeckCard`): `LiveStrip` goes; the card takes `.ui-stripe` with `data-tone={sessionTone(state)}`; first line `.ui-stripe-dot` + `STATE_LABEL[state]`
 ` · <pollAge(since)>` (no phase is served — spec §4.5's phase is not drawn); head `key` + a `↳ <top key>` pill only when the entry is folded (lifted out of
-`deckCrumb`'s lead); summary; today's `.jira-card-crumb` (`run · repo · surface · model`, :24); a 4 px `Meter` with `context N%` (red ≥ 90, amber ≥ 70, as
+`deckCrumb`'s lead); summary; today's `.jira-card-crumb` (`run · repo · surface · model`, :24); a 4 px `Meter` (`Meter` gains `height?: 4` → `data-height="4"` on `.ui-meter`, styled in the primitives block — guard 7 forbids a
+page-side `.jira-deck-ctx .ui-meter`; absent → today's 3.5 px track) with `context N%` (red ≥ 90, amber ≥ 70, as
 `JiraSessionCard`'s); then `SessionOpen` with no `onUnlink`/`onStop`. A starting entry keeps `Starting…` and no buttons; :786's crumb assertion stands. Detail's
 `JiraSessionCard` keeps its facts and replaces its OpenChips, Unlink and `StopSession` with one `SessionOpen` passing what it offers today.
 
@@ -179,7 +184,7 @@ stays in the DOM and tabbable). The FilterBar passes `showing={{ shown: rows.len
 
 - [ ] **Step 1: Failing tests.** `jira-lib.test.ts`: `topSessionCell` — a live `plan` on the top → `{ plan, since }`; a live child + older ended top → the
   live one; only an ended folded child (2 h ago) → `{ ended, since: endedAt }`; two ended links → the newer; nothing → no key. `jira-board.test.tsx`:
-  headers `['Session','Key','Summary','Type','Status','Priority','Assignee','Sprint','Updated','']`; :1344 expects `Working · 2m` (the link's age), :1352
+  headers `['Session','Key','Summary','Type','Status','Priority','Assignee','Sprint','Updated','']`; :1344 expects `Working · 2h` (the link's age: `linkOn`'s last argument is hours, `hoursAgo(h)` at :1294-1297), :1352
   `Waiting on your answer`; :1345 `sessionCell('PAY-180')` is `—` and :1330 scopes its `—` lookup to the Sprint cell; a row with priority `High` has a
   `priority High` pill; each row holds one `Run PAY-…` split; an ended-only top reads `Ended · 2h`; the summary cell's `title` is the full summary.
 - [ ] **Step 2: Run** `pnpm exec jest test/jira-board.test.tsx test/jira-lib.test.ts` — FAIL.
@@ -231,7 +236,8 @@ sub-line as `aria-describedby`): `End to end` (`GlyphTile` play, `plan, change, 
 sub-line the picked skill's name, else `N on this machine`; disabled with title `no skills on this machine` when there are none). Pressing `A skill`
 picks the first skill and reveals `Select label="Skill"` (the skills, plus today's stale-skill option when the action names a deleted one). Pressed tile:
 `--ink3` 1.5 px stroke on `--strip-hi`, its tile `ink`. `Open in` stays the pill `Segmented`. Repository: a `Segmented label="Repository"` of basenames
-(title = full path) for 2–4 paths with distinct basenames; a `Select` otherwise; static text for one path. The prompt sits in a mono code box
+(title = full path) for 2–4 paths with distinct basenames; a `Select` otherwise; static text for one path. The Segmented starts with NO option pressed (today's `choose…`,
+`JiraLaunchSheet.tsx:340`) until the person picks; the gate and `Start session` behave exactly as with the select's empty value (`jira-launch` :246 stays). The prompt sits in a mono code box
 (`--steel`, radius 10) with a `Copy` chip top-right (same clipboard handler as `Copy prompt`). `Assign to me` switch and the `Move to` select share a row;
 Model, Effort, Permissions share the next; Remote control keeps its switch and line. Foot: `launchFootLine` at 12 px `--ink3` left, `Copy prompt` (flat)
 and `Start session` (ink) right — the same gate, title and POST as today's `Start`.
@@ -261,10 +267,10 @@ Behaviour (spec §4.4): the Connection group becomes a banner card at the top: 4
 `detail` follows on a red line. Boards: one row each — name 13/600, the facts as 11 px `Pill`s, the age at 12 px `--ink3`, `Edit`, `Open` (visible text;
 `aria-label="Open board <name>"` kept); a failing board keeps its red failure line. `New board` stays the group's action.
 
-- [ ] **Step 1: Failing tests.** `boardRowLine` facts/age for an `off` board, a never-polled board and a three-root board. Setup: the :982-1019 cases read
+- [ ] **Step 1: Failing tests.** `boardRowLine` facts/age for an `off` board, a never-polled board and a three-root board. Setup: the :978-1019 cases read
   the banner — `Connected as Ada Lovelace`; `every 15 s` → `Every 15 s`; idle → `Every idle`; `no 429 since start` / `last 429 4m ago` under `Calls 12` / `3`;
   `no identity`; an `unauthorized` access → a `bad` pill reading `Jira rejected the credentials` plus the detail; `ok` → `Healthy`; `restart the server to
-  change it` still drawn. Board rows show `6 roots`, `every 1m` pills and `Open` named `Open board <name>`. `PINNED`: `.jira-setup-av` (`--magenta`, 14).
+  change it` still drawn; the scope loop at :985 is deleted (scopes are not served and not drawn, spec §4.4) — the token row is `<site> · <tokenKind>` only. Board rows show `6 roots`, `every 1m` pills and `Open` named `Open board <name>`. `PINNED`: `.jira-setup-av` (`--magenta`, 14).
 - [ ] **Step 2: Run** `pnpm exec jest test/jira-setup.test.tsx test/jira-lib.test.ts test/daylight-contrast.test.ts` — FAIL. **Step 3: Implement.**
 - [ ] **Step 4: Run** — PASS (plus `grep -l 'initialsOf\|sweepLine\|accessPhrase' test/` hits). **Step 5: Commit** `feat(jira): Setup connection banner and
   board rows`.
@@ -276,7 +282,9 @@ Behaviour (spec §4.4): the Connection group becomes a banner card at the top: 4
 (:776-819, :899-970), `test/settings-view.test.tsx`.
 
 Behaviour (spec §4.4). Repositories: one row per mapping — project key `Pill`, path mono, then a toggle `Chip` `N worktrees` (`1 worktree`; `aria-expanded`,
-collapsed by default; absent at zero trees), then fields `Base branch` and `Branch name`. Placeholders: base `<refs.defaultBase> (default)` when the refs
+collapsed by default; absent at zero trees), then fields `Base branch` and `Branch name`. The toggle, its worktree list and the two fields keep today's
+once-per-PATH rule (`shownDefaults`, `JiraReposGroup.tsx:71,144`): drawn under a path's first mapping in key order only — `jira-setup.test.tsx:899-926`
+(`/home/ada/pay` under PAY and OPS, ONE trees block) stays green. Placeholders: base `<refs.defaultBase> (default)` when the refs
 read lists one, else `(default)`; pattern `{key}-{slug} (default)`. Expanded: a sub-head `Open worktrees beside this checkout` and one `WorktreeRow` per
 tree. `WorktreeRow` gains `projectKey?: string`: branch 600, path mono `--ink3`, a state `Pill` (`session live` `live` when `liveKey`, else `idle`), a
 ticket `Pill` from `keysInBranch(tree.branch, [projectKey])[0]` when one, and `Remove` copying `removeCommand` as today. Skills: rows in the Run menu's shape —
@@ -285,7 +293,7 @@ ticket `Pill` from `keysInBranch(tree.branch, [projectKey])[0]` when one, and `R
 on the others; built-ins first under `Built in`, then `Skills on this machine · N` with each skill's `×` kept. Settings › Local `Jira default action`
 hint gains ` Saved in this browser.` at its end.
 
-- [ ] **Step 1: Failing tests.** :776 base placeholder `develop (default)` with the fixture refs (`(default)` without); :778 `{key}-{slug} (default)`;
+- [ ] **Step 1: Failing tests.** :776 base placeholder `main (default)` with the fixture refs (`refsAnswer.defaultBase` :167; `develop` is the stored value) (`(default)` without); :778 `{key}-{slug} (default)`;
   :899-970 click `2 worktrees` (or the fixture's count) before reading rows; the toggle is `aria-expanded="false"` then `"true"`; a tree on `PAY-131-x` with
   a live key shows `session live` and `PAY-131`; another shows `idle`; `Remove` still copies the command and posts nothing. Skills: `default` sits on the
   resolved row; `Make default` on a skill row sets `jiraDefaultAction` to its id (read back through `useSettings`); the `×` Confirm still deletes.
