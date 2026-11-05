@@ -47,7 +47,7 @@ export function SuggestCard({
   notice: ReactNode;
 }) {
   return (
-    <SettingsGroup title="Suggest" scope="Which machine a launch sheet starts on. You can still pick another there.">
+    <SettingsGroup title="Suggest" pill="this machine" scope="Which machine a launch sheet starts on. You can still pick another there.">
       <div className="set-row set-row-stacked">
         <div className="set-label">
           <span className="set-name">Strategy</span>

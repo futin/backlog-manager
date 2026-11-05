@@ -36,14 +36,25 @@ export type ListMachine = {
   usage: MachineUsage | null;
 };
 
-export function MachineIdentity({ machine }: { machine: Pick<ListMachine, 'label' | 'order' | 'home' | 'account' | 'tone'> }) {
+export function MachineIdentity({
+  machine,
+  account = true
+}: {
+  machine: Pick<ListMachine, 'label' | 'order' | 'home' | 'account' | 'tone'>;
+  /** The detail passes `false`: there the account is one of its facts (Task 10), so the head does not say it twice. */
+  account?: boolean;
+}) {
   return (
     <span className="dash-page-ident">
       <span className="dash-page-order">{machine.order}</span>
       <Dot tone={machine.tone} />
       <span className="dash-page-name">{machine.label}</span>
       {machine.home && <Pill>this machine</Pill>}
-      {machine.account ? <Pill>{machine.account}</Pill> : <span className="dash-page-muted">no account set</span>}
+      {account && (
+        <span className="dash-page-account">
+          {machine.account ? <Pill>{machine.account}</Pill> : <span className="dash-page-muted">no account set</span>}
+        </span>
+      )}
     </span>
   );
 }

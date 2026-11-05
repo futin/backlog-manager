@@ -221,6 +221,91 @@ async function renderSettled() {
 }
 
 describe('DashboardsPage', () => {
+  describe('the two-pane restyle (plan 4 Task 10)', () => {
+    it('draws a list row as order, status dot, name, the this-machine tag on Home only, account, and two toned meters', async () => {
+      stubFetch();
+      await renderSettled();
+      const home = rowOf('Home');
+      expect(home.querySelector('.ui-dot')).not.toBeNull();
+      expect(within(home).getByText('this machine')).toHaveClass('ui-pill');
+      expect(within(rowOf('Pro')).queryByText('this machine')).toBeNull();
+      expect(within(rowOf('Max')).queryByText('this machine')).toBeNull();
+      const meters = [...rowOf('Pro').querySelectorAll<HTMLElement>('.ui-meter')];
+      expect(meters.map((m) => m.dataset.tone)).toEqual(['green', 'amber']);
+      expect(within(rowOf('Pro')).getByText('Pro plan')).toHaveClass('ui-pill');
+    });
+
+    it('draws a 76 % week meter amber and a 91 % one red', async () => {
+      stubFetch({ machines: { machines: [machineOf('home', { usage: usageOf(12, 76) }), machineOf('Pro', { usage: usageOf(91, 30) }), machineOf('Max')] } });
+      await renderPage();
+      await waitFor(() => expect(metersOf(rowOf('Home'))).toEqual(['5 H 12%', 'WEEK 76%']));
+      expect([...rowOf('Home').querySelectorAll<HTMLElement>('.ui-meter')].map((m) => m.dataset.tone)).toEqual(['green', 'amber']);
+      expect([...rowOf('Pro').querySelectorAll<HTMLElement>('.ui-meter')].map((m) => m.dataset.tone)).toEqual(['red', 'green']);
+      expect(document.body.textContent).not.toMatch(/sessions in use/i);
+    });
+
+    it('draws two usage tiles in the detail, each a meter over its reset text', async () => {
+      const now = new Date(2026, 9, 24, 12, 0, 0).getTime();
+      jest.spyOn(Date, 'now').mockReturnValue(now);
+      const five = new Date(now + 2 * 3_600_000).toISOString();
+      const week = new Date(now + 3 * 86_400_000).toISOString();
+      stubFetch({ machines: { machines: [machineOf('home'), machineOf('Pro', { usage: usageOf(64, 81, { five, week }) }), machineOf('Max')] } });
+      await renderPage();
+      await select('Pro');
+      await within(detail()).findByText(resetClockText(five, now, ZONE) as string);
+      const tiles = [...detail().querySelectorAll<HTMLElement>('.dash-page-tile')];
+      expect(tiles).toHaveLength(2);
+      expect(tiles.map((t) => t.querySelector('.ui-meter')?.getAttribute('data-tone'))).toEqual(['green', 'amber']);
+      expect(tiles[0]).toHaveTextContent(resetClockText(five, now, ZONE) as string);
+      expect(tiles[1]).toHaveTextContent(resetClockText(week, now, ZONE) as string);
+    });
+
+    it('draws no tile while the machine has no figure', async () => {
+      stubFetch();
+      await renderPage();
+      await select('Max');
+      expect(detail().querySelectorAll('.dash-page-tile')).toHaveLength(0);
+    });
+
+    it('draws a Models and an Efforts pill row, the disallowed ones off and titled', async () => {
+      stubFetch();
+      await renderPage();
+      await select('Pro');
+      for (const label of ['Models', 'Efforts']) expect(factOf(label).querySelectorAll('.ui-pill').length).toBeGreaterThan(0);
+      const off = factOf('Models').querySelector('.ui-pill-off') as HTMLElement;
+      expect(off).toHaveAttribute('title', 'not run on Pro');
+    });
+
+    it('draws a remote’s four facts — dashboard URL, board URL, machine name, account — and Home’s two it has', async () => {
+      stubFetch();
+      await renderPage();
+      await select('Pro');
+      const labels = () => [...detail().querySelectorAll('dt')].map((d) => d.textContent);
+      expect(labels()).toEqual(expect.arrayContaining(['Dashboard', 'Board', 'Machine name', 'Account']));
+      expect(factOf('Account')).toHaveTextContent('Pro plan');
+      await select('Max');
+      expect(factOf('Account')).toHaveTextContent('—');
+      await select('Home');
+      expect(labels()).toEqual(expect.arrayContaining(['Dashboard', 'Account']));
+      expect(labels()).not.toContain('Board');
+    });
+
+    it('states the Suggest card’s scope as a pill, like Local and Shared', async () => {
+      stubFetch();
+      await renderPage();
+      const card = screen.getByText('Suggest').closest('section') as HTMLElement;
+      expect(within(card).getByText('this machine')).toHaveClass('ui-pill');
+    });
+
+    it('stacks the two panes below 1100 px in the page’s own selector', () => {
+      const css = require('fs').readFileSync(require('path').join(__dirname, '../client/src/styles.css'), 'utf8') as string;
+      const block = /@media \(max-width: 1100px\) \{([^}]*\{[^}]*\}[^}]*)\}/g;
+      const hits = [...css.matchAll(block)].map((m) => m[1]).filter((b) => b.includes('.dash-page-cols'));
+      expect(hits.length).toBeGreaterThan(0);
+      expect(hits[0]).toMatch(/grid-template-columns: minmax\(0, 1fr\)/);
+    });
+  });
+
   afterEach(() => {
     cleanup();
     jest.restoreAllMocks();
@@ -305,7 +390,9 @@ describe('DashboardsPage', () => {
       expect(factOf('Board')).toHaveTextContent(/^http:\/\/pro\.local:4322$/);
       expect(factOf('Machine name')).toHaveTextContent(/^pro-mac$/);
       expect(within(rowOf('Pro')).getByText('Pro plan')).toHaveClass('ui-pill');
-      expect(within(detail()).getByText('Pro plan')).toHaveClass('ui-pill');
+      // The account is a fact of the detail (Task 10), drawn once there as a pill, not repeated in the head beside the name.
+      expect(within(factOf('Account')).getByText('Pro plan')).toHaveClass('ui-pill');
+      expect(detail().querySelectorAll('.dash-page-ident .ui-pill')).toHaveLength(0);
       expect([...factOf('Models').querySelectorAll('.ui-pill:not(.ui-pill-off)')].map((p) => p.textContent)).toEqual(['sonnet', 'haiku']);
       expect(factOf('Token')).toHaveTextContent(
         /^BM_AGENTS_TOKEN_PRO not set — needed only if that dashboard does not trust this machine; then add it to \.env and restart$/
