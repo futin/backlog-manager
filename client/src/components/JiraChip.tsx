@@ -19,7 +19,7 @@ import type { JiraBoardStatus, JiraStatusPayload } from '../../../shared/types';
 
 /**
  * The Jira status pill (Shell mock, top right; spec §4.9) — `TrackerChip`'s sibling: a 28 px `StatusPill` (dot, `Jira`, the newest board's poll age) in a
- * button that names it `Jira: <on time|late|down>, <age>`, and a popover whose head is `ServiceHead` (the same head, so the two cannot disagree about
+ * button that names it `Jira: <on time|late|down>` (no age: it ticks every second under a minute, and a changing name is re-announced, #230), and a popover whose head is `ServiceHead` (the same head, so the two cannot disagree about
  * where focus lands or what `Sync now` does). It wears `TrackerChip`'s classes (`.tracker-chip*`, `.tracker-av`, `.tracker-pop-*`, `.tracker-row*`): the look
  * is one look. What differs is the testid, `.jira-setup-failure` for red copy (the Setup page's own class) and `.jira-chip-board`/`-line`, the board row.
  *
@@ -103,7 +103,7 @@ export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSet
         data-testid="jira-chip"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Jira: ${TONE_WORD[tone]}${age === null ? '' : `, ${age}`}`}
+        aria-label={`Jira: ${TONE_WORD[tone]}`}
         onClick={() => setOpen((o) => !o)}
       >
         <StatusPill tone={tone} word="Jira" age={age} />

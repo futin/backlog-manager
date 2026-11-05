@@ -23,8 +23,8 @@ import type { TrackerPlatform, TrackerProjectRow } from '../../../shared/types';
  * same whichever section is open, so `App` renders this once, in the strip (or the rail bar below 700 px), from the shell's one `useTrackers`.
  *
  * **The button names the pill.** `StatusPill` is a span with no name of its own (the dot and word would otherwise be read twice), so this button carries
- * `GitHub: <on time|late|down>, <age>`. The name changes only when the state or the age rung does — a one-second tick moves a seconds age, and a screen
- * reader re-announces a focused element whose name changes, so the age is rounded to `pollAge`'s own ladder and is the only part that ticks.
+ * `GitHub: <on time|late|down>` and NOT the age: `pollAge` prints whole seconds under a minute and `useNow` ticks at 1 s, and a screen reader
+ * re-announces a focused element whose name changes (#230 kept the old chip's name static for the same reason). The age stays visible; the popover has it.
  *
  * **The popover is `ui/Popover`'s, and so is its dismissal.** Escape and click-outside, and the phone shape, are there; what stays here is the section-change
  * close, which only this chip's host knows about, and the pill as `Popover`'s anchor, so a second click on it toggles the panel shut instead of racing the
@@ -67,7 +67,7 @@ export function TrackerChip({ section, onOpenSettings }: { section: Section; onO
         data-testid="tracker-chip"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`GitHub: ${TONE_WORD[tone]}${age === null ? '' : `, ${age}`}`}
+        aria-label={`GitHub: ${TONE_WORD[tone]}`}
         onClick={() => setOpen((o) => !o)}
       >
         <StatusPill tone={tone} word="GitHub" age={age} />

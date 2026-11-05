@@ -116,14 +116,14 @@ describe('the Jira pill', () => {
     renderChip(status({ boards: [board({ polledAt: ago(20_000) }), board({ id: 'b_00000002', name: 'Growth', polledAt: ago(5_000) })] }));
     expect(within(chip()).getByText('Jira')).toBeInTheDocument();
     expect(within(chip()).getByText('5 s')).toBeInTheDocument();
-    expect(chip()).toHaveAccessibleName('Jira: on time, 5 s');
+    expect(chip()).toHaveAccessibleName('Jira: on time');
     expect(dotTone()).toBe('green');
   });
 
   it('is red and named down while access is not ok or rate-limited', () => {
     const { update } = renderChip(status({ access: 'unauthorized' }));
     expect(dotTone()).toBe('red');
-    expect(chip()).toHaveAccessibleName('Jira: down, 5 s');
+    expect(chip()).toHaveAccessibleName('Jira: down');
     update(status({ access: 'ok' }));
     expect(dotTone()).toBe('green');
   });
@@ -216,7 +216,7 @@ describe('the popover', () => {
     expect(reloadMock).toHaveBeenCalledTimes(1);
     expect(syncNow()).toBeEnabled();
     update(status({ boards: [board({ polledAt: ago(1_000) })] }));
-    expect(chip()).toHaveAccessibleName('Jira: on time, 1 s');
+    expect(chip()).toHaveAccessibleName('Jira: on time');
   });
 
   it('a 429 reads `Jira asked to wait until HH:MM`', async () => {

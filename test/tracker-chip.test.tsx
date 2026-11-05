@@ -106,7 +106,7 @@ describe('the GitHub pill', () => {
     renderChip(payload([row({ polledAt: ago(20_000) }), beta({ polledAt: ago(12_000) })]));
     expect(within(chip()).getByText('GitHub')).toBeInTheDocument();
     expect(within(chip()).getByText('12 s')).toBeInTheDocument();
-    expect(chip()).toHaveAccessibleName('GitHub: on time, 12 s');
+    expect(chip()).toHaveAccessibleName('GitHub: on time');
     expect(dotTone()).toBe('green');
   });
 
@@ -115,13 +115,23 @@ describe('the GitHub pill', () => {
     act(() => {
       jest.advanceTimersByTime(1_000);
     });
-    expect(chip()).toHaveAccessibleName('GitHub: on time, 6 s');
+    expect(chip()).toHaveAccessibleName('GitHub: on time');
+    expect(within(chip()).getByText('6 s')).toBeInTheDocument();
+  });
+
+  it('keeps the button name identical across a one-second tick', () => {
+    renderChip(payload());
+    const before = chip().getAttribute('aria-label');
+    act(() => {
+      jest.advanceTimersByTime(1_000);
+    });
+    expect(chip().getAttribute('aria-label')).toBe(before);
   });
 
   it('is amber and named late past twice the repo’s own interval', () => {
     const { update } = renderChip(payload([row({ polledAt: ago(31_000) })]));
     expect(dotTone()).toBe('amber');
-    expect(chip()).toHaveAccessibleName('GitHub: late, 31 s');
+    expect(chip()).toHaveAccessibleName('GitHub: late');
     // A 5m repo four minutes old is on time.
     update(payload([row({ interval: '5m', polledAt: ago(4 * 60_000) })]));
     expect(dotTone()).toBe('green');
@@ -130,7 +140,7 @@ describe('the GitHub pill', () => {
   it('is red and named down with no token, or when every repo is refused, and not when only some are', () => {
     const { update } = renderChip(payload([row()], platform({ hasToken: false, login: null })));
     expect(dotTone()).toBe('red');
-    expect(chip()).toHaveAccessibleName('GitHub: down, 5 s');
+    expect(chip()).toHaveAccessibleName('GitHub: down');
     update(payload([row({ access: 'forbidden' }), beta({ access: 'not-found' })]));
     expect(dotTone()).toBe('red');
     update(payload([row(), beta({ access: 'forbidden' })]));
@@ -276,7 +286,7 @@ describe('Sync now and a row’s sync icon', () => {
     expect(syncNow()).toBeEnabled();
     // The reload the context performs lands as a fresher payload, and the pill reads it.
     update(payload([row({ polledAt: ago(1_000) })]));
-    expect(chip()).toHaveAccessibleName('GitHub: on time, 1 s');
+    expect(chip()).toHaveAccessibleName('GitHub: on time');
   });
 
   it('a row’s icon posts that repo and nothing else', async () => {
