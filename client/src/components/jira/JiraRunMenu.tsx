@@ -109,7 +109,7 @@ export function JiraRunMenu({ issue, onPick, home = 'card' }: { issue: JiraIssue
         </span>
         {isDefault && (
           <span className="jira-run-mark" aria-hidden="true">
-            <Glyph name="tick" size={10} />
+            <Glyph name="tick" size={14} />
             default
           </span>
         )}

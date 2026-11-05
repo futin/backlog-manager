@@ -1300,7 +1300,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .board-card:has(.jira-run-open) { overflow: visible }
 .board-card:has(.jira-run-open) > .board-card-live:first-child { border-radius: 12px 12px 0 0 }
 /* Menu: group headers (sentence case, 11 px floor), 40 px rows with a 28 px tile, label over a quiet sub-line, the preferred row marked at its right end. */
-.jira-run-head { padding: 6px 10px 2px; font-size: 11px; font-weight: 500; color: var(--ink3) }
+.jira-run-head { padding: 8px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ink3) }
 .jira-run-opt {
   display: flex; align-items: center; gap: 10px; width: 100%; height: 40px; padding: 0 10px;
   border: 0; border-radius: 8px; background: none; text-align: left;
@@ -1311,10 +1311,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-run-opt-default .jira-run-tile { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
 .jira-run-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px }
 .jira-run-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2 }
-.jira-run-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; line-height: 1.2; color: var(--ink3) }
+.jira-run-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 400; line-height: 1.2; color: var(--ink3) }
 .jira-run-mark { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 500; color: var(--green) }
 .jira-run-rule { margin: 6px 0; border: 0; border-top: 1px solid var(--hairline2) }
-.jira-run-note { padding: 2px 10px 4px; font-size: 12px; color: var(--ink2) }
+.jira-run-note { padding: 2px 8px 4px; font-size: 11px; color: var(--ink2) }
 /* A long session label ellipsises inside the strip; the elapsed mark keeps its width. This rule is global, so it applies to the Board's own live strip too
    (`ItemCard` draws the same `ui/LiveStrip`), not only to the Jira card's. */
 .board-card-live > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
