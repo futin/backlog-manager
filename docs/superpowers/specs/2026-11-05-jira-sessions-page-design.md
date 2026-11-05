@@ -59,9 +59,11 @@ live-session deck above an ended-only history; an issue List with sub-tasks inde
 - List view: the issue table of D2–D4. Every top that survives the filters is a row — including tops that have a live session (on the Board those are on the
   deck rather than a shelf) — with no `+ N more` cut. Order: the fold's `sortTops` order (newest `updated` across a top and everything under it), the same
   order the shelves use.
-- The Session cell: empty when nothing is live on the card. When a session is live on the top **or on any issue folded under it**, a dot and the state word
-  in the deck's vocabulary (`needs you` in the live fill, `working` in the progress fill; starting / lost as the deck names them). When several are live, the
-  most urgent wins, by `deckGroup`'s order. The cell is display only — not a link; the whole row opens the issue modal.
+- The Session cell: empty when nothing is live on the card. When a session is live on the top **or on any issue folded under it**, a dot and one word.
+  The dot's tone is `listDotTone` (`lib/jira-list.ts`), the session table's own. The words: any needs-you state (`plan`, `permission`, `reply`, `answer`) →
+  `needs you`; `working` → `working`; `quiet` → `quiet`; `lost` → `lost contact`; `starting` → `starting`. When several are live, the most urgent wins:
+  `deckGroup`'s order (needs, working, quiet, other), and inside `other`, `lost` before `starting`. The cell is display only — not a link; the whole row
+  opens the issue modal.
 - The Updated cell shows the **rolled-up** time — the newest `updated` across the top and everything folded under it — the same value `sortTops` sorts by,
   so the column reads sorted.
 - Loading, `board unavailable`, `jira.json cannot be read`, and `No boards yet` read exactly as the Board view's do.
@@ -76,13 +78,18 @@ live-session deck above an ended-only history; an issue List with sub-tasks inde
   30 d / All window — then the table with every column it has today, the link-store warning, row → Detail, `Run ▾` where it exists today.
 - The page needs the picked board's loaded `issues` and the fold's `childrenOf`, because `JiraSessionList` scopes and stubs rows from them — so it loads the
   picked board the way the Board page does.
-- Empty and failure states: with `All tickets` **off**, the page reads as the Board page does (`loading…`, `board unavailable`, `jira.json cannot be
+- **The List's bar is drawn in every state**, above whatever the body shows, so `All tickets` is always reachable; only the body below it swaps.
+- Empty and failure states: with `All tickets` **off**, the body reads as the Board page does (`loading…`, `board unavailable`, `jira.json cannot be
   read`, `No boards yet`) — the scope is the board, so without it there is nothing to scope to. With `All tickets` **on**, the table draws whatever state
   the board is in — scoped to every linked ticket, off-board rows stubbed from their link snapshot as today — because that is where the badge sends the user,
   and "what needs me" must not wait on a board read. The band still says what is wrong with the board; the picker is drawn only when there are boards.
 - The Detail modal and the launch sheet must open from the Sessions page as they do from today's List (`JiraView` hosts them beside the Board page only
   today).
-- Filters stay `useJiraListFilters`' module store, so they survive a page switch as they survive a view switch today.
+- The five list filters (`chip`, `repo`, `run`, `window`, `allTickets`) stay `useJiraListFilters`' module store, so they survive a page switch as they
+  survive a view switch today. The sessions search text is per-mount state on the new page component (today it is `JiraBoardView`'s `filters.search`, shared
+  with the issue search — the two now part ways).
+- The page takes `JiraView`'s `nudge` and hands it to its board load exactly as `JiraBoardView` does (`useJiraBoard`'s third argument), so a write in Detail
+  re-reads the list at once and a just-linked ticket does not stay stubbed until the next poll.
 
 ### The rail badge (C4)
 
@@ -99,12 +106,16 @@ badge and the rail are the routes to sessions now.
 
 - Repo rules apply: `.claude/rules/board.md` (client), `.claude/DESIGN.md` (§8.0 the rail is the only page switch; §8.9.1 Jira Board), CSP — no inline
   `<style>`/`style=` markup; the rail labels stay the one place a page is named.
-- `test/` source guards count callers of shared hooks (e.g. `useJiraSessionsContext`, poll hooks). A new caller must be added to the scoped run before push
-  (CLAUDE.md, "Touched includes the source guards").
-- **Peer work in flight:** branch `fix/jira-list-row-opens` (worktree `.worktrees/jira-list-row-opens`) changes `JiraSessionList.tsx`, `styles.css`,
-  `DESIGN.md` and `test/jira-list.test.tsx` — a click anywhere on a List row opens Detail. Whichever lands second rebases; the moved table keeps that behaviour.
-- Docs that describe the old shape must follow: `.claude/DESIGN.md` §8.9.1 (deck and view switch paragraph; List), `docs/subsystems/board.md` where it names
-  the Jira pages, and the rail labels' comments in `SideRail.tsx`.
+- Suites this touches, to run locally before push (CLAUDE.md, "Touched includes the source guards"): `test/rail.test.tsx` (the badge click asserts page,
+  view and filters), `test/jira-list.test.tsx`, `test/jira-board.test.tsx`, `test/jira-view-store.test.tsx`, `test/filter-bar.test.tsx`,
+  `test/use-jira.test.tsx` (`useJiraBoard`), plus `test/design-guards.test.ts` and `test/csp.test.ts` if markup or styles move — and `grep -l` in `test/`
+  for every shared hook the new page adds a caller of.
+- Row-click-opens-Detail (#458) is on `main`; the moved table keeps it.
+- Docs and comments that describe the old shape must follow: `.claude/rules/board.md` (the Jira section's "two pages … `JIRA_PAGES` (`board | setup`)"
+  mechanism, and the Jira picker `Popover` composer pinned to `JiraBoardView.tsx`), `docs/subsystems/invariants.md` (§ "The Jira section's two pages…"),
+  `docs/subsystems/jira.md` (the rail entry's pages, `backlog-manager.jira-page` values, `JIRA_PAGES`), `docs/subsystems/board.md`, `.claude/DESIGN.md` §8.0
+  (Jira's Board and Setup in the sub-nav list), §8.9 and §8.9.1 (deck and view switch paragraph; List), and the code comments in `lib/jira-view.ts`,
+  `hooks/useJiraListFilters.ts` and `SideRail.tsx` (the rail labels).
 
 ## Left to the builder
 
