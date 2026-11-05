@@ -61,9 +61,11 @@ live-session deck above an ended-only history; an issue List with sub-tasks inde
   order the shelves use.
 - The Session cell: empty when nothing is live on the card. When a session is live on the top **or on any issue folded under it**, a dot and one word.
   The dot's tone is `listDotTone` (`lib/jira-list.ts`), the session table's own. The words: any needs-you state (`plan`, `permission`, `reply`, `answer`) →
-  `needs you`; `working` → `working`; `quiet` → `quiet`; `lost` → `lost contact`; `starting` → `starting`. When several are live, the most urgent wins:
-  `deckGroup`'s order (needs, working, quiet, other), and inside `other`, `lost` before `starting`. The cell is display only — not a link; the whole row
-  opens the issue modal.
+  `needs you`; `working` → `working`; `quiet` → `quiet`; `lost` → `lost contact`; `starting` → `starting`. When several are live, the cell shows the
+  **first `boardAgents` entry for that top** — the deck's own roll-up and order (`deckOrder`: group needs, working, quiet, other; then newest start; then
+  id), so the cell and the deck never disagree about which session leads a card. The cell is display only — not a link; the whole row opens the issue modal.
+- `N under it` counts **everything folded under the top** — `fold.under.get(key).length`, sub-tasks' own children included, not just direct children
+  (`childrenOf`) — because that is what the row stands for. `1 under it` in the singular too; no suffix when N is 0.
 - The Updated cell shows the **rolled-up** time — the newest `updated` across the top and everything folded under it — the same value `sortTops` sorts by,
   so the column reads sorted.
 - Loading, `board unavailable`, `jira.json cannot be read`, and `No boards yet` read exactly as the Board view's do.
@@ -78,7 +80,10 @@ live-session deck above an ended-only history; an issue List with sub-tasks inde
   30 d / All window — then the table with every column it has today, the link-store warning, row → Detail, `Run ▾` where it exists today.
 - The page needs the picked board's loaded `issues` and the fold's `childrenOf`, because `JiraSessionList` scopes and stubs rows from them — so it loads the
   picked board the way the Board page does.
-- **The List's bar is drawn in every state**, above whatever the body shows, so `All tickets` is always reachable; only the body below it swaps.
+- **The List's bar is drawn in every state**, above whatever the body shows, so `All tickets` is always reachable; only the body below it swaps. Mechanism:
+  `JiraSessionList` stays the one component and gains one prop, `unavailable` (a line, or `null`). When it is set and `All tickets` is off, the bar and the
+  link-store warning draw as today and the table, the `No sessions` line and the foot give way to that line in the `board-empty` shape. With no board rows
+  in scope the bar's counts read zero (`All 0`, `Needs you 0`, …) — expected, not a bug: they count what the body would show.
 - Empty and failure states: with `All tickets` **off**, the body reads as the Board page does (`loading…`, `board unavailable`, `jira.json cannot be
   read`, `No boards yet`) — the scope is the board, so without it there is nothing to scope to. With `All tickets` **on**, the table draws whatever state
   the board is in — scoped to every linked ticket, off-board rows stubbed from their link snapshot as today — because that is where the badge sends the user,
@@ -108,8 +113,10 @@ badge and the rail are the routes to sessions now.
   `<style>`/`style=` markup; the rail labels stay the one place a page is named.
 - Suites this touches, to run locally before push (CLAUDE.md, "Touched includes the source guards"): `test/rail.test.tsx` (the badge click asserts page,
   view and filters), `test/jira-list.test.tsx`, `test/jira-board.test.tsx`, `test/jira-view-store.test.tsx`, `test/filter-bar.test.tsx`,
-  `test/use-jira.test.tsx` (`useJiraBoard`), plus `test/design-guards.test.ts` and `test/csp.test.ts` if markup or styles move — and `grep -l` in `test/`
-  for every shared hook the new page adds a caller of.
+  `test/use-jira.test.tsx` (`useJiraBoard`), `test/jira-lib.test.ts` (pins `JIRA_PAGES` to `['board', 'setup']` today, and `sortTops`),
+  `test/jira-setup.test.tsx`, `test/jira-detail.test.tsx`, `test/jira-launch.test.tsx` and `test/jira-sections.test.tsx` (page store), plus
+  `test/design-guards.test.ts` and `test/csp.test.ts` if markup or styles move — and `grep -l` in `test/` for every symbol the diff changes or adds a caller
+  of.
 - Row-click-opens-Detail (#458) is on `main`; the moved table keeps it.
 - Docs and comments that describe the old shape must follow: `.claude/rules/board.md` (the Jira section's "two pages … `JIRA_PAGES` (`board | setup`)"
   mechanism, and the Jira picker `Popover` composer pinned to `JiraBoardView.tsx`), `docs/subsystems/invariants.md` (§ "The Jira section's two pages…"),
