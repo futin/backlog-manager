@@ -36,6 +36,8 @@ Board › List:
 - `N under it` after the summary: **match** (`23 under it`, `2 under it`, `4 under it`).
 - Rows = the Board's cards: **match** — `My tasks` Board view shows the same seven keys in the same set.
 - Unassigned reads `unassigned`, not the mock's `—`: **deviation**, brief text (logged ruling).
+- Key is a link to Jira in `--ink2`, not the mock's plain 600-weight text: **deviation** — the session table's Ticket key is the same link, and a key that
+  opens Jira is the List's only way out to it without opening Detail.
 - Sub-task rows (TIMIFY-20939…20942) appear: **deviation from the user's wording, match to spec** — they are cards on the Board too, because their parent
   TIMIFY-20938 is not collected by Setup. The List shows exactly the Board's tops.
 
