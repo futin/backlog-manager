@@ -298,6 +298,34 @@ describe('which board the page draws', () => {
   });
 });
 
+describe('a newer sweep in the status (the chip’s `now`)', () => {
+  // An `off` board: no 15 s timer, so the only things that can read its list again are a nudge and the status's stamp moving — and this case sends no nudge.
+  const OFF = { ...ALPHA, interval: 'off' as const };
+  const alphaReads = (): number => boardRequests().filter((u) => u === `/api/jira/boards/${ALPHA.id}/issues`).length;
+
+  it('reads the list again when the status’s polledAt for the board on screen moves, and not when the status comes back unchanged', async () => {
+    statusAnswer = status({ boards: [OFF, BETA] });
+    await renderAlpha();
+    const before = alphaReads();
+
+    // The same stamp: a status re-read alone asks for no list.
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(requested.filter((u) => u === '/api/jira').length).toBeGreaterThanOrEqual(2));
+    expect(alphaReads()).toBe(before);
+
+    // A sweep landed: the next status carries a newer stamp, and the cards follow without a timer or a nudge.
+    statusAnswer = status({ boards: [{ ...OFF, polledAt: new Date().toISOString() }, BETA] });
+    lists = { ...lists, [ALPHA.id]: [...ALPHA_ISSUES, { ...ALPHA_ISSUES[0], key: 'PAY-999', summary: 'Swept in just now' }] };
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(await screen.findByText('Swept in just now')).toBeInTheDocument();
+    expect(alphaReads()).toBe(before + 1);
+  });
+});
+
 describe('the band', () => {
   it('reads bandSub’s text for the board under the title', async () => {
     await renderAlpha();

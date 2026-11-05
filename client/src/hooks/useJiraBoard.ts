@@ -27,6 +27,11 @@ import { useMountedRef } from './useMountedRef';
  * A 404 is the one failure that is a fact, not a dropped poll: the board was deleted in another browser. The shell's status is re-read at once, so the page
  * falls to the first board by name now and not at that board's next poll (up to its whole interval, and never for a page of `off` boards).
  *
+ * **A newer sweep in the status asks at once.** The shell's `GET /api/jira` carries each board's `polledAt`; when the one for the board on screen moves past
+ * the stamp of the list held, the list is read now rather than at the next 15 s tick — and, for an `off` board, rather than never. The chip popover's `now`
+ * (`POST /api/jira/boards/sweep`) re-reads the status when its sweep lands, so this is how a manual sweep reaches the cards without the chip knowing the
+ * Board page exists. The scheduled sweeps ride it too, for free: the status is already polled at the soonest board's next sweep.
+ *
  * **`nudge` is how a write elsewhere reaches this list** (Jira phase 3, plan ruling R7). The issue modal's landed write bumps a counter `JiraView` owns and
  * hands down; a CHANGE of that number asks at once, through the same coalesced `request` every other trigger uses, whatever the interval — `off` included,
  * because an `off` board is otherwise read only on mount and a write would never show on it (spec §6.1: every write reloads the board). The server spliced
@@ -57,9 +62,11 @@ export function useJiraBoard(id: string | null, interval: SyncInterval | null, n
   const mounted = useMountedRef();
   const idRef = useRef(id);
   idRef.current = id;
-  const { reload: reloadStatus } = useJiraContext();
+  const { data: status, reload: reloadStatus } = useJiraContext();
   const reloadStatusRef = useRef(reloadStatus);
   reloadStatusRef.current = reloadStatus;
+  // The shell status's stamp for this board — see "A newer sweep in the status asks at once" in the header.
+  const statusPolledAt = id === null ? null : (status?.boards.find((b) => b.id === id)?.polledAt ?? null);
 
   const load = useCallback(async (): Promise<void> => {
     const asked = idRef.current;
@@ -98,6 +105,16 @@ export function useJiraBoard(id: string | null, interval: SyncInterval | null, n
     nudgeRef.current = nudge;
     if (id !== null) void request();
   }, [nudge, id, request]);
+
+  // A newer sweep in the status: ask at once when the status's stamp for the board on screen differs from the stamp of the list held for it. Only once a
+  // list for THIS id is held — before that the id effect's read is already out, and a second trigger would fold into a follow-up nobody needs. The deps
+  // are the two strings, not `held`, so a read that comes back with the same stamp (the two caches can only disagree for one poll) asks nothing again.
+  const heldId = held?.id ?? null;
+  const heldPolledAt = held?.polledAt ?? null;
+  useEffect(() => {
+    if (id === null || heldId !== id || statusPolledAt === null || statusPolledAt === heldPolledAt) return;
+    void request();
+  }, [id, heldId, heldPolledAt, statusPolledAt, request]);
 
   if (id === null) return { issues: NO_ISSUES, polledAt: null, loading: false, error: false, reload: request };
   if (held === null || held.id !== id) return { issues: NO_ISSUES, polledAt: null, loading: true, error: false, reload: request };

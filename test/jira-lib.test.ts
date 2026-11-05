@@ -8,6 +8,7 @@ import {
   JIRA_429_RED_MS,
   failureOf,
   jiraPollReading,
+  boardPollReading,
   JIRA_BOARD_FILTER_FROM,
   JIRA_COLUMNS,
   JIRA_CUSTOM_QUERY,
@@ -456,6 +457,33 @@ describe('soonestBoard', () => {
 });
 
 // #376: the Jira chip's POLL reading, moved here out of JiraChip.tsx; its last three rungs are `countdownReading` (lib/tracker.ts).
+describe('boardPollReading', () => {
+  const NOW = Date.parse('2026-09-18T12:00:00Z');
+  const one = (over: Partial<JiraBoardStatus>): JiraBoardStatus =>
+    ({ id: 'b_00000001', name: 'Platform', roots: [], queries: [], interval: '1m', polledAt: null, count: 0, truncated: false, failures: [], ...over }) as JiraBoardStatus;
+
+  it('reads syncing… on a full green bar while its `now` is out, whatever the interval', () => {
+    expect(boardPollReading(one({ interval: 'off' }), NOW, true)).toEqual({ value: 'syncing…', fraction: 1, tone: 'green' });
+    expect(boardPollReading(one({ polledAt: new Date(NOW).toISOString() }), NOW, true)).toEqual({ value: 'syncing…', fraction: 1, tone: 'green' });
+  });
+
+  it('reads sync off, amber and empty, for an off board', () => {
+    expect(boardPollReading(one({ interval: 'off', polledAt: new Date(NOW - 5_000).toISOString() }), NOW, false)).toEqual({ value: 'sync off', fraction: null, tone: 'amber' });
+  });
+
+  it('counts down on the board’s own interval, … before its first poll, overdue after two silent intervals', () => {
+    expect(boardPollReading(one({ polledAt: new Date(NOW - 15_000).toISOString() }), NOW, false)).toEqual({ value: '45s', fraction: 0.25, tone: 'green' });
+    expect(boardPollReading(one({ polledAt: null }), NOW, false)).toEqual({ value: '…', fraction: null, tone: 'green' });
+    expect(boardPollReading(one({ polledAt: new Date(NOW - 121_000).toISOString() }), NOW, false)).toEqual({ value: 'overdue', fraction: 1, tone: 'amber' });
+  });
+
+  it('is what the chip’s POLL meter reads for the soonest board', () => {
+    const a = one({ id: 'b_a', polledAt: new Date(NOW - 50_000).toISOString() });
+    const b = one({ id: 'b_b', polledAt: new Date(NOW - 10_000).toISOString() });
+    expect(jiraPollReading([b, a], NOW)).toEqual(boardPollReading(a, NOW, false));
+  });
+});
+
 describe('jiraPollReading', () => {
   it('reads — on an empty green bar with no boards', () => {
     expect(jiraPollReading([], Date.now())).toEqual({ value: '—', fraction: null, tone: 'green' });
