@@ -66,12 +66,16 @@ import {
   pickBoard,
   soonestBoard,
   sortForBoard,
-  unmappedProjects
+  unmappedProjects,
+  priorityTone,
+  typeTone,
+  statusTone
 } from '../client/src/lib/jira';
 import type { JiraFold } from '../client/src/lib/jira';
+import { launchFootLine } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
-import { SHELF_LIMIT, boardAgents, boardShelves, deckCrumb, deckGroup, deckTally, endedLine, issueCellWord, topSessionState } from '../client/src/lib/jira-deck';
+import { SHELF_LIMIT, boardAgents, boardShelves, deckCrumb, deckGroup, deckTally, endedLine, topSessionCell } from '../client/src/lib/jira-deck';
 import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
 import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraRepoRefs, JiraSessionsPayload, JiraSkill, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
@@ -360,6 +364,8 @@ describe('boardRowLine', () => {
     const now = Date.now();
     expect(boardRowLine(board({ polledAt: ago(now, 12 * SECOND) }), now)).toEqual({
       text: '2 roots · 1 query · 14 issues · every 1m · polled 12 s ago',
+      facts: ['2 roots', '1 query', '14 issues', 'every 1m'],
+      age: 'polled 12 s ago',
       failing: false,
       failure: null
     });
@@ -402,6 +408,26 @@ describe('boardRowLine', () => {
 
   it('carries no failure for a clean board', () => {
     expect(boardRowLine(board({ polledAt: ago(Date.now(), SECOND) }), Date.now()).failure).toBeNull();
+  });
+
+  it('splits the line into facts and an age: an off board says sync off and last polled', () => {
+    const now = Date.now();
+    const row = boardRowLine(board({ interval: 'off', polledAt: ago(now, 12 * SECOND) }), now);
+    expect(row.facts).toEqual(['2 roots', '1 query', '14 issues', 'sync off']);
+    expect(row.age).toBe('last polled 12 s ago');
+  });
+
+  it('has no age for a never-polled board, and its facts still end on the interval', () => {
+    const row = boardRowLine(board({ polledAt: null }), Date.now());
+    expect(row.facts).toEqual(['2 roots', '1 query', '14 issues', 'every 1m']);
+    expect(row.age).toBeNull();
+  });
+
+  it('counts a three-root board in its facts and leaves the zero counts out', () => {
+    const now = Date.now();
+    const row = boardRowLine(board({ roots: ['A-1', 'A-2', 'A-3'], queries: [], count: 0, polledAt: ago(now, 12 * SECOND) }), now);
+    expect(row.facts).toEqual(['3 roots', 'every 1m']);
+    expect(row.age).toBe('polled 12 s ago');
   });
 });
 
@@ -1618,29 +1644,42 @@ describe('lib/jira-deck', () => {
     expect(deckCrumb(own, [])).not.toContain('↳');
   });
 
-  describe('topSessionState and issueCellWord (the List\u2019s Session cell)', () => {
+  describe('topSessionCell (the List\u2019s Session cell)', () => {
     const tree = foldBoard([top, child, other]);
+    const cellOf = (links: Link[], live: Record<string, JiraLiveSession> = {}) => topSessionCell(boardAgents(tree, answer(links), live), links, tree);
 
-    it('names the deck\u2019s lead session per top: needs you on a child beats working on the top', () => {
-      const entries = boardAgents(tree, answer([link('PAY-1', 'a', 'working', 3), link('PAY-2', 'b', 'plan', 2)]), {});
-      expect(topSessionState(entries).get('PAY-1')).toBe('plan');
+    it('names the deck\u2019s lead session per top with its own `since`: needs you on a child beats working on the top', () => {
+      expect(cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-2', 'b', 'plan', 2)]).get('PAY-1')).toEqual({ state: 'plan', since: hoursAgo(2) });
+    });
+
+    it('a live plan on the top gives { plan, since }', () => {
+      const links = [link('PAY-1', 'a', 'plan', 4)];
+      expect(cellOf(links).get('PAY-1')).toEqual({ state: 'plan', since: links[0].stateSince });
     });
 
     it('lets the newest start lead inside one group: a reservation on a child outranks an older lost session on the top', () => {
-      const entries = boardAgents(tree, answer([link('PAY-1', 'a', 'lost', 2)]), { 'PAY-2': { ...reservation(1), starting: true } });
-      expect(topSessionState(entries).get('PAY-1')).toBe('starting');
+      expect(cellOf([link('PAY-1', 'a', 'lost', 2)], { 'PAY-2': { ...reservation(1), starting: true } }).get('PAY-1')?.state).toBe('starting');
     });
 
-    it('is empty with no live links, and keeps two tops apart', () => {
-      expect(topSessionState(boardAgents(tree, answer([]), {})).size).toBe(0);
-      const both = topSessionState(boardAgents(tree, answer([link('PAY-1', 'a', 'working', 3), link('PAY-3', 'b', 'quiet', 2)]), {}));
-      expect([...both]).toEqual([['PAY-1', 'working'], ['PAY-3', 'quiet']]);
+    it('prefers a live child over an older ended top', () => {
+      const cell = cellOf([link('PAY-2', 'b', 'working', 2), link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) })]);
+      expect(cell.get('PAY-1')?.state).toBe('working');
     });
 
-    it('words each live state, and never an ended one', () => {
-      const words = (['plan', 'permission', 'reply', 'answer', 'working', 'quiet', 'lost', 'starting'] as const).map((s) => issueCellWord(s));
-      expect(words).toEqual(['needs you', 'needs you', 'needs you', 'needs you', 'working', 'quiet', 'lost contact', 'starting']);
-      expect(issueCellWord('ended')).toBe('');
+    it('reads an ended session on a folded child as { ended, since: endedAt }', () => {
+      const cell = cellOf([link('PAY-2', 'b', 'ended', 5, { endedAt: hoursAgo(2) })]);
+      expect(cell.get('PAY-1')).toEqual({ state: 'ended', since: hoursAgo(2) });
+    });
+
+    it('takes the newer of two ended links', () => {
+      const cell = cellOf([link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) }), link('PAY-2', 'b', 'ended', 6, { endedAt: hoursAgo(3) })]);
+      expect(cell.get('PAY-1')?.since).toBe(hoursAgo(3));
+    });
+
+    it('has no key with nothing live or ended, and keeps two tops apart', () => {
+      expect(cellOf([]).size).toBe(0);
+      const both = cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-3', 'b', 'quiet', 2)]);
+      expect([...both].map(([k, v]) => [k, v.state])).toEqual([['PAY-1', 'working'], ['PAY-3', 'quiet']]);
     });
   });
 
@@ -1685,5 +1724,37 @@ describe('lib/jira-deck', () => {
     // A detected or hand-made link reads `run` too: §7.1 words the row, and `branch ended` would read as a branch that ended.
     const branch = link('PAY-3', 'b', 'ended', 5, { endedAt: hoursAgo(2), how: 'branch' });
     expect(endedLine([branch], NOW)?.text).toBe('run ended 2h ago');
+  });
+});
+
+describe('card tone helpers', () => {
+  it('priorityTone reads Jira names case-insensitively and sends any other string to `other`', () => {
+    expect(['Highest', 'high', 'MEDIUM', 'Low', 'lowest', 'P1', '', null].map(priorityTone)).toEqual(['high', 'high', 'med', 'low', 'low', 'other', 'other', null]);
+  });
+
+  it('typeTone: a sub-task or a level >= 1 type is neutral whatever its name, then bug, story, and the rest neutral', () => {
+    expect(typeTone({ name: 'Bug', level: 0, subtask: false })).toBe('bug');
+    expect(typeTone({ name: 'Story', level: 0, subtask: false })).toBe('story');
+    expect(typeTone({ name: 'Task', level: 0, subtask: false })).toBe('neutral');
+    expect(typeTone({ name: 'Bug', level: -1, subtask: true })).toBe('neutral');
+    expect(typeTone({ name: 'Story', level: 1, subtask: false })).toBe('neutral');
+  });
+
+  it('statusTone maps the three categories to the three column slugs', () => {
+    expect([statusTone('new'), statusTone('indeterminate'), statusTone('done')]).toEqual(['todo', 'doing', 'done']);
+  });
+});
+
+describe('launchFootLine', () => {
+  it('names the checkout itself for none, a new worktree for new, and the branch for continue', () => {
+    expect(launchFootLine('/Users/ada/microservice', { mode: 'none' })).toBe('Starts in microservice on the checkout itself');
+    expect(launchFootLine('/Users/ada/microservice', { mode: 'new', branch: 'b', base: 'main', openMr: false })).toBe('Starts in microservice on a new worktree');
+    expect(launchFootLine('/Users/ada/microservice', { mode: 'continue', branch: 'pay-131-a', openMr: false, target: null })).toBe(
+      'Starts in microservice on pay-131-a'
+    );
+  });
+  it('is null without a repository and ends after the basename without a choice', () => {
+    expect(launchFootLine(null, { mode: 'none' })).toBeNull();
+    expect(launchFootLine('/Users/ada/microservice', null)).toBe('Starts in microservice');
   });
 });

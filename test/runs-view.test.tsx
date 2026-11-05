@@ -43,6 +43,7 @@ import type {
   WatchdogStatus
 } from '../shared/types';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 /**
  * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
@@ -477,7 +478,7 @@ async function renderRunsView(
 ): Promise<RenderResult> {
   mockArchive.mockResolvedValue({ runs: archiveRuns } satisfies OrchestratorArchivePayload);
   mockRuns.mockResolvedValue({ runs: liveRuns, starting, remote, remoteStarting } satisfies OrchestratorRunsPayload);
-  const result = render(<RunsView />);
+  const result = render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
   if (archiveRuns.length === 0 && liveRuns.length === 0 && starting.length === 0 && remote.length === 0 && remoteStarting.length === 0) {
     await screen.findByText('no runs yet');
   } else {
@@ -616,6 +617,21 @@ describe('RunsView', () => {
       expect(isLiveRow(finished.runId)).toBe(false);
       expect(historyRowIds(container)).toContain(`runs-row-${finished.runId}`);
     }
+  });
+
+  /* The Runs tile's status bar: one segment per status that has runs, in STATUS_ORDER, width proportional to the count, toned by `runTone`. Three done and one
+     failed is 75 / 25, and the glyph line under it still states the same counts in words. */
+  it('draws the Runs tile status bar, one toned segment per status with a count', async () => {
+    const doneAgain = { ...RUN_DONE_ALPHA, runId: 'run-20260830-100000' };
+    const doneThird = { ...RUN_DONE_BETA, runId: 'run-20260827-120000' };
+    await renderRunsView([RUN_DONE_ALPHA, doneAgain, doneThird, RUN_FAILED_BETA], []);
+
+    const bar = screen.getByTestId('runs-tile-runs').querySelector('.runs-status-bar') as HTMLElement;
+    const segs = Array.from(bar.children) as HTMLElement[];
+    expect(segs.map((seg) => seg.getAttribute('data-tone'))).toEqual(['grey', 'red']);
+    expect(segs.map((seg) => seg.style.width)).toEqual(['75.0%', '25.0%']);
+    expect(screen.getByTestId('runs-figure-runs-line')).toHaveTextContent('3 done');
+    expect(screen.getByTestId('runs-figure-runs-line')).toHaveTextContent('1 failed');
   });
 
   it('narrows both the row list and the tiles to the selected project', async () => {
@@ -1065,7 +1081,7 @@ describe('RunsView', () => {
       mockArchive.mockResolvedValue({ runs: [archiveAlpha] } satisfies OrchestratorArchivePayload);
       mockRuns.mockResolvedValue({ runs: [liveAlpha], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
 
-      render(<RunsView />);
+      render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
       // Flushes the mount-time fetches (both hooks') and whatever effects
       // their landed state triggers — `advanceTimersByTimeAsync(0)` reaches
       // a real microtask-queue drain without any fake time actually
@@ -1871,7 +1887,7 @@ describe('RunsView history paging (task-16)', () => {
     // exactly what this page does not render.
     mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
     mockRuns.mockResolvedValue({ runs: LIVE_RUNS, starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
-    render(<RunsView />);
+    render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
 
     // `watchdog-phase`, not `watchdog-state`: the page renders a
     // `watchdog-state` box in BOTH of its states — the could-not-reach notice
@@ -1972,10 +1988,8 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
 
     // 2/2 is the LIVE queue (a-1 and a-2 both merged); the archive snapshot
     // beside it still says 1/2. Pre-fix this row read the archive.
-    // task-38: the count is §7's two-tone amount (`.runs-count`, the
-    // completed figure over the queue length), drawn by the row shape the
-    // redraw introduced. The claim is the number, which is unchanged.
-    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`).querySelector('.runs-count')?.textContent).toBe('2 / 2');
+    // The Live card reads `N of M items` over its meter (spec §4.6); the claim is still the number.
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveTextContent('2 of 2 items');
   });
 
   it("freezes the row wall time at the stale live entry's own last heartbeat", async () => {
@@ -2069,7 +2083,7 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
       mockArchive.mockResolvedValue({ runs: [archiveEntry] } satisfies OrchestratorArchivePayload);
       mockRuns.mockResolvedValue(staleAt('inspecting'));
 
-      render(<RunsView />);
+      render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
       await act(async () => {
         await jest.advanceTimersByTimeAsync(0);
       });
@@ -2372,7 +2386,7 @@ describe('RunsView · a starting run (task-21)', () => {
     mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
     mockRuns.mockResolvedValue({ runs: LIVE_RUNS } as unknown as OrchestratorRunsPayload);
 
-    render(<RunsView />);
+    render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
     await screen.findByTestId('runs-list');
 
     expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toBeInTheDocument();
@@ -2750,7 +2764,7 @@ describe('RunsView · a remote run (task-48)', () => {
     expect(screen.getByTestId(`runs-row-remote-${remote.runId}`)).toHaveTextContent('remote');
 
     await userEvent.click(screen.getByTestId(`runs-row-${remote.runId}`));
-    expect(await screen.findByTestId('run-detail-remote')).toHaveTextContent('Remote run: its controls are on the machine that ran it.');
+    expect(await screen.findByTestId('run-detail-remote')).toHaveTextContent('controls live on the machine that ran it');
     expect(screen.getByTestId('run-detail-remote-queue')).toHaveTextContent('Items this run has not claimed yet are not visible from here.');
     expect(document.querySelector('[data-testid^="run-controls-"]')).toBeNull();
     expect(mockFetchArchivedRun).not.toHaveBeenCalled();
@@ -2926,7 +2940,7 @@ describe('RunsView · the shared time zone (#241)', () => {
     mockRuns.mockResolvedValue({ runs: [], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
     const result = render(
       <TimeZoneProvider>
-        <RunsView />
+        <OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>
       </TimeZoneProvider>
     );
     await screen.findByTestId('runs-list');
@@ -2945,5 +2959,50 @@ describe('RunsView · the shared time zone (#241)', () => {
     const { startedAt, utcDay } = lateRun();
     const { container } = await renderInZone('America/New_York', startedAt);
     await waitFor(() => expect(kickers(container)).toEqual([label(utcDay)]));
+  });
+});
+
+/*
+  Plan 3 task 6 (spec §4.6): a Live run is a card — a `ui-stripe` edge in the run's tone, the state pill, `N of M items` over a 4 px progress fill — and
+  a crashed one keeps its second line. Selecting a card still opens the detail beside it.
+*/
+describe('RunsView — live run cards', () => {
+  const threeItems = [liveQueueItem('a-1', 'merged'), liveQueueItem('a-2', 'reviewing'), liveQueueItem('a-3', 'pending')];
+
+  it('draws a paused run as an amber-edged card with a paused pill and its progress', async () => {
+    await renderRunsView(ARCHIVE_RUNS, [{ ...LIVE_RUNS[0], status: 'paused', queue: threeItems }]);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card).toHaveClass('ui-stripe');
+    expect(card).toHaveAttribute('data-tone', 'amber');
+    expect(card.querySelector('.ui-pill')).toHaveTextContent('paused');
+    expect(card).toHaveTextContent('1 of 3 items');
+    expect(card.querySelector('.ui-meter[data-height="4"]')).not.toBeNull();
+    expect(card).toHaveTextContent(RUN_LIVE.runId);
+  });
+
+  it('draws a fresh running run green with a live pill', async () => {
+    await renderRunsView(ARCHIVE_RUNS, [{ ...LIVE_RUNS[0], queue: threeItems }]);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card).toHaveAttribute('data-tone', 'green');
+    expect(card.querySelector('.ui-pill-live')).toHaveTextContent('running');
+    expect(screen.queryByTestId(`runs-live-crashed-${RUN_LIVE.runId}`)).toBeNull();
+  });
+
+  it('draws a crashed run red, with the crashed pill and its second line', async () => {
+    await renderRunsView(ARCHIVE_RUNS, [{ ...LIVE_RUNS[0], fresh: false, queue: threeItems }]);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card).toHaveAttribute('data-tone', 'red');
+    expect(card.querySelector('.ui-pill')).toHaveTextContent('crashed');
+    expect(screen.getByTestId(`runs-live-crashed-${RUN_LIVE.runId}`)).toHaveTextContent('no heartbeat for');
+  });
+
+  it('puts no stripe inside another stripe', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card.querySelector('.ui-stripe')).toBeNull();
   });
 });

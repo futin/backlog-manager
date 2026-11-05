@@ -11,6 +11,7 @@ import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { RunChip, runChipReading } from '../client/src/components/board/RunChip';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, StartingRun } from '../shared/types';
+import { OrchestratorRunsProvider, useOrchestratorRunsContext } from '../client/src/hooks/OrchestratorRunsContext';
 
 /**
  * `RunChip` — everything the Board still says about orchestrator runs
@@ -322,7 +323,7 @@ describe('BoardView: the run chip', () => {
   }
 
   async function renderBoard(): Promise<void> {
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
   }
 
@@ -363,25 +364,36 @@ describe('BoardView: the run chip', () => {
   });
 
   /*
-    The rail's cursor (dashboard-redesign-ports task 4) learns about runs from this view's own poll, reported up through `onWorking` — the shell holds
-    no `useOrchestratorRuns()` of its own. Driven through the real payload rather than a stubbed hook, so the crashed half proves the report is
-    `runsWorking`'s answer and not "the payload has a running run in it": the chip has already said `crashed` by the time it is checked.
+    The rail's cursor (dashboard-redesign-ports task 4) reads `working` from the shell's one runs poll (spec §4.9a), `OrchestratorRunsProvider`. Driven
+    through the real payload rather than a stubbed hook, so the crashed half proves the reading is `runsWorking`'s answer and not "the payload has a
+    running run in it": the chip has already said `crashed` by the time it is checked.
   */
-  it('reports working up to the shell for a live run', async () => {
+  function WorkingProbe() {
+    return <span data-testid="working">{String(useOrchestratorRunsContext().working)}</span>;
+  }
+
+  it('reads working from the provider for a live run', async () => {
     stub([run({ status: 'running', fresh: true })]);
-    const onWorking = jest.fn();
-    render(<BoardView source="files" onWorking={onWorking} />);
+    render(
+      <OrchestratorRunsProvider>
+        <BoardView source="files" />
+        <WorkingProbe />
+      </OrchestratorRunsProvider>
+    );
     await waitFor(() => expect(screen.getByTestId('run-chip')).toHaveTextContent('live'));
-    expect(onWorking).toHaveBeenLastCalledWith(true);
+    expect(screen.getByTestId('working').textContent).toBe('true');
   });
 
-  it('reports not working for a crashed run — the cursor must not blink for it', async () => {
+  it('reads not working for a crashed run — the cursor must not blink for it', async () => {
     stub([run({ status: 'running', fresh: false })]);
-    const onWorking = jest.fn();
-    render(<BoardView source="files" onWorking={onWorking} />);
+    render(
+      <OrchestratorRunsProvider>
+        <BoardView source="files" />
+        <WorkingProbe />
+      </OrchestratorRunsProvider>
+    );
     await waitFor(() => expect(screen.getByTestId('run-chip')).toHaveTextContent('crashed'));
-    expect(onWorking).toHaveBeenLastCalledWith(false);
-    expect(onWorking).not.toHaveBeenCalledWith(true);
+    expect(screen.getByTestId('working').textContent).toBe('false');
   });
 
   /**

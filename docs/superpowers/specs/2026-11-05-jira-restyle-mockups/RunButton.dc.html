@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Run button and menu, now versus proposed</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:#131313;-webkit-font-smoothing:antialiased}
+a{color:#525252}a:hover{color:#131313}
+</style>
+</helmet>
+<div style="width: 1280px; height: 760px; box-sizing: border-box; padding: 40px 48px; background: #ffffff; display: flex; flex-direction: column; gap: 24px; font-family: 'Hanken Grotesk', system-ui, sans-serif; color: #131313;">
+
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <div style="font-size: 20px; font-weight: 600; letter-spacing: -0.01em;">The <code style="font-family: ui-monospace, Menlo, monospace; font-size: 17px; background: #f2f2f1; padding: 1px 6px; border-radius: 6px;">Run ▾</code> chip and its menu</div>
+    <div style="font-size: 13px; color: #6b6b6b;">Same content in every column. Only the trigger and the menu's hierarchy change.</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; flex-grow: 1;">
+
+    <!-- ===== NOW ===== -->
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6b6b;">Now</span>
+        <span style="font-size: 12px; color: #6b6b6b;">outlined chip, flat list, truncated labels</span>
+      </div>
+      <div style="flex-grow: 1; background: #f4f4f3; border-radius: 16px; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px;">
+
+        <!-- card foot, as today -->
+        <div style="background: #ffffff; border: 1px solid #eaeae8; border-radius: 12px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between;">
+          <span style="font-size: 12px; color: #6b6b6b;">Medium</span>
+          <button type="button" aria-label="Run, open menu" style="height: 32px; padding: 0 12px; border-radius: 12px; border: 1px solid #dcdcda; background: #ffffff; font: 500 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">Run <span style="font-size: 10px;">▾</span></button>
+        </div>
+
+        <!-- menu, as today -->
+        <div role="menu" aria-label="Run with" style="align-self: flex-end; width: 236px; background: #ffffff; border: 1px solid #dcdcda; border-radius: 12px; padding: 6px; box-sizing: border-box; box-shadow: 0 8px 24px rgba(19,19,19,0.08); display: flex; flex-direction: column;">
+          <button type="button" role="menuitem" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border: 0; background: transparent; border-radius: 8px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;"><span>Work it end to end</span><span style="font-size: 11px; color: #6b6b6b;">default</span></button>
+          <button type="button" role="menuitem" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border: 0; background: transparent; border-radius: 8px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;"><span>Open with the ticket loaded</span><span style="font-size: 11px; color: #6b6b6b;">built-in</span></button>
+          <div style="height: 1px; background: #eaeae8; margin: 4px 0;"></div>
+          <button type="button" role="menuitem" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border: 0; background: transparent; border-radius: 8px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;"><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px;">/timify-jira:investigate-jira-ticket</span><span style="font-size: 11px; color: #6b6b6b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80px;">/timify-jira:investigate</span></button>
+          <button type="button" role="menuitem" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border: 0; background: transparent; border-radius: 8px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;"><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px;">/timify-core:validate-jira-ticket-acceptance-criteria</span><span style="font-size: 11px; color: #6b6b6b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80px;">/timify-core:validate-jira-ticket-acceptance-criteria</span></button>
+          <div style="height: 1px; background: #eaeae8; margin: 4px 0;"></div>
+          <div style="padding: 6px 10px; font-size: 11px; color: #6b6b6b;">opens the launch sheet</div>
+        </div>
+
+        <div style="margin-top: auto; font-size: 12px; color: #6b6b6b; line-height: 1.5;">What hurts: the chip reads like every other filter chip; rows have no icons or groups; the slash command is cut twice; <em>default</em> and <em>built-in</em> are grey words, not a mark.</div>
+      </div>
+    </div>
+
+    <!-- ===== A · SPLIT BUTTON ===== -->
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #38631a;">A · Split button</span>
+        <span style="font-size: 12px; color: #6b6b6b;">one click runs the default, the chevron opens the rest</span>
+      </div>
+      <div style="flex-grow: 1; background: #f4f4f3; border-radius: 16px; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px;">
+
+        <!-- card foot with split button -->
+        <div style="background: #ffffff; border: 1px solid #eaeae8; border-radius: 12px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between;">
+          <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: #8a5214; background: #fbf1e4; border-radius: 999px; padding: 3px 8px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4l8 14H4z"/></svg>Medium</span>
+          <div style="display: inline-flex; height: 32px; border-radius: 10px; overflow: hidden; background: #131313; color: #ffffff; box-shadow: 0 1px 2px rgba(19,19,19,0.18);">
+            <button type="button" style="height: 32px; padding: 0 12px 0 11px; border: 0; background: transparent; color: #ffffff; font: 600 13px 'Hanken Grotesk', system-ui, sans-serif; display: inline-flex; align-items: center; gap: 7px; cursor: pointer;"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>Run</button>
+            <button type="button" aria-label="More ways to run" style="height: 32px; width: 28px; border: 0; border-left: 1px solid rgba(255,255,255,0.18); background: transparent; color: #ffffff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+          </div>
+        </div>
+
+        <!-- grouped menu -->
+        <div role="menu" aria-label="Run with" style="align-self: flex-end; width: 300px; background: #ffffff; border: 1px solid #dcdcda; border-radius: 14px; padding: 6px; box-sizing: border-box; box-shadow: 0 12px 32px rgba(19,19,19,0.10), 0 1px 2px rgba(19,19,19,0.06); display: flex; flex-direction: column;">
+          <div style="padding: 8px 10px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6b6b;">Built in</div>
+          <button type="button" role="menuitem" aria-checked="true" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; background: #f2f2f1; border-radius: 9px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;">
+            <span style="width: 28px; height: 28px; border-radius: 8px; background: #eef6e6; color: #38631a; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></span>
+            <span style="display: flex; flex-direction: column; gap: 1px; flex-grow: 1; min-width: 0;"><span style="font-weight: 500;">Work it end to end</span><span style="font-size: 11.5px; color: #6b6b6b;">branch, fix, PR, hand back</span></span>
+            <span style="display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #38631a;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L19 7"/></svg>default</span>
+          </button>
+          <button type="button" role="menuitem" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; background: transparent; border-radius: 9px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;">
+            <span style="width: 28px; height: 28px; border-radius: 8px; background: #f2f2f1; color: #525252; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg></span>
+            <span style="display: flex; flex-direction: column; gap: 1px; flex-grow: 1; min-width: 0;"><span style="font-weight: 500;">Open with the ticket loaded</span><span style="font-size: 11.5px; color: #6b6b6b;">a session, you drive</span></span>
+          </button>
+          <div style="height: 1px; background: #eaeae8; margin: 6px 4px;"></div>
+          <div style="padding: 4px 10px 4px; display: flex; justify-content: space-between; align-items: baseline;"><span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6b6b;">Skills on this machine</span><span style="font-size: 10.5px; color: #6b6b6b;">2</span></div>
+          <button type="button" role="menuitem" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; background: transparent; border-radius: 9px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;">
+            <span style="width: 28px; height: 28px; border-radius: 8px; background: #f2f2f1; color: #525252; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span>
+            <span style="display: flex; flex-direction: column; gap: 1px; flex-grow: 1; min-width: 0;"><span style="font-weight: 500;">Investigate the ticket</span><span style="font-size: 11px; color: #6b6b6b; font-family: ui-monospace, Menlo, monospace;">/timify-jira:investigate-jira-ticket</span></span>
+          </button>
+          <button type="button" role="menuitem" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; background: transparent; border-radius: 9px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;">
+            <span style="width: 28px; height: 28px; border-radius: 8px; background: #f2f2f1; color: #525252; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 13l2 2 4-4"/></svg></span>
+            <span style="display: flex; flex-direction: column; gap: 1px; flex-grow: 1; min-width: 0;"><span style="font-weight: 500;">Validate acceptance criteria</span><span style="font-size: 11px; color: #6b6b6b; font-family: ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">/timify-core:validate-jira-ticket-acceptance-criteria</span></span>
+          </button>
+          <div style="height: 1px; background: #eaeae8; margin: 6px 4px 2px;"></div>
+          <div style="padding: 6px 10px 4px; display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: #6b6b6b;"><span>Every choice opens the launch sheet first</span><kbd style="font: 500 10.5px 'Hanken Grotesk', system-ui, sans-serif; color: #525252; background: #f2f2f1; border: 1px solid #dcdcda; border-radius: 5px; padding: 1px 5px;">↵</kbd></div>
+        </div>
+
+        <!-- states -->
+        <div style="margin-top: auto; display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6b6b;">Same button, other states</div>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <span style="display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 10px; border: 1px dashed #c9c9c6; color: #6b6b6b; font-size: 12.5px; font-weight: 500;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>Map a repo</span>
+            <span style="display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 10px; background: #eef6e6; color: #38631a; font-size: 12.5px; font-weight: 600;"><span style="width: 7px; height: 7px; border-radius: 999px; background: #7dc242; box-shadow: 0 0 0 3px rgba(125,194,66,0.28);"></span>Running · 12m</span>
+            <span style="font-size: 11.5px; color: #6b6b6b;">no repo mapped · a session is live</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== B · TINTED CHIP + SEARCH ===== -->
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b52a8;">B · Tinted chip + find</span>
+        <span style="font-size: 12px; color: #6b6b6b;">quieter trigger, search when skills grow</span>
+      </div>
+      <div style="flex-grow: 1; background: #f4f4f3; border-radius: 16px; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px;">
+
+        <div style="background: #ffffff; border: 1px solid #eaeae8; border-radius: 12px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between;">
+          <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: #8a5214; background: #fbf1e4; border-radius: 999px; padding: 3px 8px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4l8 14H4z"/></svg>Medium</span>
+          <button type="button" aria-label="Run, open menu" style="height: 32px; padding: 0 10px 0 11px; border-radius: 10px; border: 1px solid #cfe5b8; background: #eef6e6; color: #38631a; font: 600 13px 'Hanken Grotesk', system-ui, sans-serif; display: inline-flex; align-items: center; gap: 7px; cursor: pointer;"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>Run<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left: 2px; opacity: 0.8;"><path d="M6 9l6 6 6-6"/></svg></button>
+        </div>
+
+        <div role="menu" aria-label="Run with" style="align-self: flex-end; width: 300px; background: #ffffff; border: 1px solid #dcdcda; border-radius: 14px; padding: 6px; box-sizing: border-box; box-shadow: 0 12px 32px rgba(19,19,19,0.10), 0 1px 2px rgba(19,19,19,0.06); display: flex; flex-direction: column;">
+          <label style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 9px; background: #f4f4f3; color: #6b6b6b; margin: 2px 2px 6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" placeholder="Find a skill…" aria-label="Find a skill" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; outline: none;"><kbd style="font: 500 10.5px 'Hanken Grotesk', system-ui, sans-serif; color: #525252; background: #ffffff; border: 1px solid #dcdcda; border-radius: 5px; padding: 1px 5px;">/</kbd></label>
+          <button type="button" role="menuitem" aria-checked="true" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; background: transparent; border-radius: 9px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;">
+            <span style="color: #38631a; display: inline-flex; width: 18px; justify-content: center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></span>
+            <span style="flex-grow: 1; font-weight: 500;">Work it end to end</span>
+            <span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #38631a; background: #eef6e6; border-radius: 999px; padding: 2px 7px;">default</span>
+          </button>
+          <button type="button" role="menuitem" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; background: transparent; border-radius: 9px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;">
+            <span style="color: #525252; display: inline-flex; width: 18px; justify-content: center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg></span>
+            <span style="flex-grow: 1; font-weight: 500;">Open with the ticket loaded</span>
+            <kbd style="font: 500 10.5px 'Hanken Grotesk', system-ui, sans-serif; color: #6b6b6b; background: #f2f2f1; border: 1px solid #dcdcda; border-radius: 5px; padding: 1px 5px;">O</kbd>
+          </button>
+          <div style="padding: 10px 10px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6b6b;">Skills · timify-jira</div>
+          <button type="button" role="menuitem" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; background: #f2f2f1; border-radius: 9px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;">
+            <span style="color: #525252; display: inline-flex; width: 18px; justify-content: center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7l5 5-5 5"/><path d="M12 19h7"/></svg></span>
+            <span style="flex-grow: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0;"><span style="font-weight: 500;">investigate-jira-ticket</span><span style="font-size: 11.5px; color: #6b6b6b;">root cause, posted as a comment</span></span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+          <div style="padding: 10px 10px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6b6b;">Skills · timify-core</div>
+          <button type="button" role="menuitem" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; background: transparent; border-radius: 9px; font: 400 13px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; text-align: left; cursor: pointer;">
+            <span style="color: #525252; display: inline-flex; width: 18px; justify-content: center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7l5 5-5 5"/><path d="M12 19h7"/></svg></span>
+            <span style="flex-grow: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0;"><span style="font-weight: 500;">validate-jira-ticket-acceptance-criteria</span><span style="font-size: 11.5px; color: #6b6b6b;">checks the AC against the branch</span></span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+          <div style="height: 1px; background: #eaeae8; margin: 6px 4px 2px;"></div>
+          <div style="padding: 6px 10px 4px; font-size: 11.5px; color: #6b6b6b;">Opens the launch sheet · <a href="#settings" style="color: #525252; text-decoration: underline; text-underline-offset: 2px;">change the default</a></div>
+        </div>
+
+        <div style="margin-top: auto; font-size: 12px; color: #6b6b6b; line-height: 1.5;">Plugin name becomes the group header, so the slash command never needs to fit on one line. Chevron on a skill row = the launch sheet follows.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,7 +1,10 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
+
+import { SameOriginPostGuard } from '../agents/origin.guard';
 
 import { originRepo } from './origin.util';
 import { TrackerPollerService } from './poller.service';
+import { PullRequestsService } from './pulls.service';
 import { isRepo } from './github.client';
 import { resolveSource } from '../items/sources/resolve.util';
 import { RegistryService, registryProjectsOr503 } from '../registry/registry.service';
@@ -33,8 +36,32 @@ import type { TrackerProjectRow, TrackersPayload } from '../../../shared/types';
 export class TrackerController {
   constructor(
     private readonly registry: RegistryService,
-    private readonly poller: TrackerPollerService
+    private readonly poller: TrackerPollerService,
+    private readonly prs: PullRequestsService
   ) {}
+
+  /**
+   * `POST /api/github/sweep` — the popover head's `Sync now`, or one repo's with `{ repo }`. It writes nothing and runs no git: it asks the poller for one
+   * sweep now and then the PR cache for one re-read of the swept repos (past its TTL), and answers the `trackers()` payload so the client replaces its
+   * cache with the new ages. Guard → validate (400: a `repo` that is not an `owner/name` string) → `sweepNow`: `not-armed` is a 409 (no token, or nothing
+   * connected), `unknown` the 404 `GET /api/prs`'s writes use, `wait` a 429 with the later sleep end as `retryAt`. A 401, a 5xx or a transport failure
+   * inside the sweep is the poller's to record (`access`, `detail`) and is a 200 here: the request itself worked. The token is never in a body.
+   */
+  @Post('github/sweep')
+  @HttpCode(200)
+  @UseGuards(SameOriginPostGuard)
+  async sweep(@Body() body: unknown): Promise<TrackersPayload> {
+    const fields = typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+    const raw = fields.repo;
+    if (raw !== undefined && !isRepo(raw)) throw new HttpException({ error: 'repo must be an owner/name repository' }, 400);
+    const repo = raw as string | undefined;
+    const result = await this.poller.sweepNow(repo);
+    if (result.kind === 'not-armed') throw new HttpException({ message: 'GitHub is not being polled' }, 409);
+    if (result.kind === 'unknown') throw new HttpException({ error: `${repo} is not the repo of a registered GitHub project` }, 404);
+    if (result.kind === 'wait') throw new HttpException({ message: 'rate limited', retryAt: new Date(result.retryAt).toISOString() }, 429);
+    await this.prs.refreshNow(this.poller.sweepTargets(repo));
+    return this.trackers();
+  }
 
   @Get('trackers')
   async trackers(): Promise<TrackersPayload> {

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings page</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--board:#f4f4f3;--steel:#ededec;--strip:#fff;--strip-hi:#f2f2f1;--tile-hover:#e8e8e6;--hairline:#eaeae8;--hairline2:#dcdcda;--ink:#131313;--ink2:#525252;--ink3:#6b6b6b;--green:#38631a;--green-solid:#7dc242;--amber:#c4761f;--amber-ink:#8a5214;--red:#b03b28;--magenta:#6b52a8;--cyan:#306c0f;--live:#F5A15C;
+--t-green:#eef6e6;--t-amber:#fbf1e4;--t-red:#fbe9e5;--t-mag:#efecf7}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.ab{background:#fff;padding:36px 44px;display:flex;flex-direction:column;gap:22px;overflow:hidden}
+.ab-h{display:flex;flex-direction:column;gap:4px}
+.ab-t{font-size:20px;font-weight:600;letter-spacing:-.01em}
+.ab-s{font-size:13px;color:var(--ink3);max-width:1100px;line-height:1.45}
+.tag{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3)}
+.tag.g{color:var(--green)}
+.note{font-size:12px;color:var(--ink3);line-height:1.45}
+.note b{color:var(--ink2);font-weight:600}
+.page{background:var(--board);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.ph{display:flex;align-items:flex-end;gap:12px}
+.ph-t{font-size:22px;font-weight:600;letter-spacing:-.01em}
+.ph-s{font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:6px;margin-top:2px}
+.sp{flex:1}
+.row{display:flex;align-items:center;gap:8px}
+.col{display:flex;flex-direction:column;gap:8px}
+.pane{background:var(--strip);border:1px solid var(--hairline);border-radius:14px;padding:16px;min-width:0}
+.pane-h{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.pane-t{font-size:15px;font-weight:600}
+.pane-s{font-size:12px;color:var(--ink3)}
+.chip{height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);font:500 13px 'Hanken Grotesk',sans-serif;color:var(--ink);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip.s{height:28px;padding:0 10px;font-size:12.5px}
+.chip.ghost{border-color:transparent;background:transparent;color:var(--ink2)}
+.chip.ink{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip.ic{width:32px;padding:0;justify-content:center}
+.chip.s.ic{width:28px}
+.split{display:inline-flex;height:32px;border-radius:10px;background:var(--ink);color:#fff;font:500 13px 'Hanken Grotesk',sans-serif;overflow:hidden}
+.split>span{display:inline-flex;align-items:center;gap:6px;padding:0 12px}
+.split>span+span{padding:0 9px;border-left:1px solid rgba(255,255,255,.18)}
+.split.s{height:28px;font-size:12.5px}.split.s>span{padding:0 10px}.split.s>span+span{padding:0 7px}
+.seg{display:inline-flex;background:var(--steel);border-radius:10px;padding:3px;gap:2px}
+.seg>span{height:26px;padding:0 10px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:var(--ink2)}
+.seg>span.on{background:var(--strip);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg .n{font-size:11px;color:var(--ink3);font-weight:600}
+.search{height:32px;width:220px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);display:inline-flex;align-items:center;gap:8px;padding:0 10px;font-size:12.5px;color:var(--ink3)}
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;background:var(--strip-hi);color:var(--ink2);white-space:nowrap}
+.pill.g{background:var(--t-green);color:var(--green)}
+.pill.a{background:var(--t-amber);color:var(--amber-ink)}
+.pill.r{background:var(--t-red);color:var(--red)}
+.pill.m{background:var(--t-mag);color:var(--magenta)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ink3);display:inline-block;flex:none}
+.dot.g{background:var(--green-solid)}.dot.a{background:var(--amber)}.dot.r{background:var(--red)}.dot.l{background:var(--live)}.dot.m{background:var(--magenta)}
+.tile{width:28px;height:28px;border-radius:8px;background:var(--strip-hi);color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.tile.g{background:var(--t-green);color:var(--green)}.tile.a{background:var(--t-amber);color:var(--amber-ink)}.tile.r{background:var(--t-red);color:var(--red)}.tile.m{background:var(--t-mag);color:var(--magenta)}
+.tile.xs{width:18px;height:18px;border-radius:5px}
+.tile.lg{width:40px;height:40px;border-radius:12px}
+.av{width:22px;height:22px;border-radius:50%;background:var(--t-mag);color:var(--magenta);font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.key{font-size:12px;font-weight:600;color:var(--ink)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+.muted{color:var(--ink3)}.ink2{color:var(--ink2)}
+.sm{font-size:12px}.xs{font-size:11px}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.tbl th{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--hairline);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr.hov td{background:var(--strip-hi)}
+.menu{position:absolute;background:var(--strip);border:1px solid var(--hairline);border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.12);padding:8px;z-index:5}
+.mi{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;font-size:13px;font-weight:500}
+.mi.on{background:var(--strip-hi)}
+.mi .sub{font-size:11px;color:var(--ink3);font-weight:400}
+.mh{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3);padding:8px 8px 4px}
+.hr{height:1px;background:var(--hairline);margin:6px 0}
+.bar{height:6px;border-radius:999px;background:var(--steel);overflow:hidden;display:flex}
+.bar>i{display:block;height:100%}
+.kpi{background:var(--strip);border:1px solid var(--hairline);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.kpi-l{font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:6px}
+.kpi-v{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.kpi-s{font-size:11.5px;color:var(--ink3)}
+.toggle{width:32px;height:18px;border-radius:999px;background:var(--hairline2);position:relative;flex:none}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.toggle.on{background:var(--ink)}.toggle.on::after{left:16px}
+.sel{height:32px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);display:inline-flex;align-items:center;gap:8px;padding:0 10px;font-size:13px;font-weight:500;min-width:0}
+.sel .chev{margin-left:auto;color:var(--ink3)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>label{font-size:12px;font-weight:600;color:var(--ink2)}
+.cap{font-size:11px;color:var(--ink3)}
+.strip{height:3px;border-radius:3px 3px 0 0}
+svg.i{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+svg.i16{width:16px;height:16px}
+svg.i18{width:18px;height:18px}
+.cmp{display:grid;gap:28px;align-items:start}
+.now{opacity:1;border:1px dashed var(--hairline2);border-radius:14px;padding:14px;background:#fff}
+</style>
+</helmet>
+<div class="ab" style="width:1280px;height:900px">
+<div class="ab-h">
+  <div class="ab-t">Settings</div>
+  <div class="ab-s">Today Settings is two columns of cards whose rows carry paragraph-long descriptions, with a native select on the right. Proposed: one readable column per group, a one-line description under each label, and the long text behind an info toggle. Choices that change behaviour become picture cards: the theme as mini board previews, and merge mode as three cards with an icon each.</div>
+</div>
+<div class="page" style="gap:14px">
+  <div class="ph"><div><div class="ph-t">Settings</div><div class="ph-s">How this board looks and behaves · Local saves in this browser only</div></div><span class="sp"></span><span class="seg"><span class="on">Local</span><span>Shared</span><span>Dashboards</span></span></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
+    <div class="pane">
+      <div class="pane-h"><span class="tile"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1"/></svg></span><span class="pane-t">Display</span></div>
+      <div class="field" style="margin-bottom:14px"><label>Theme</label>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
+          <div style="border:2px solid var(--ink);border-radius:10px;padding:4px"><div style="height:44px;border-radius:6px;background:#f4f4f3;display:flex;gap:3px;padding:5px"><i style="flex:1;background:#fff;border-radius:3px"></i><i style="flex:1;background:#fff;border-radius:3px"></i><i style="flex:1;background:#7dc242;border-radius:3px;max-height:10px"></i></div><div class="xs row" style="margin-top:5px;font-weight:600;justify-content:center">Daylight</div></div>
+          <div style="border:1px solid var(--hairline2);border-radius:10px;padding:5px"><div style="height:44px;border-radius:6px;background:#0e1420;display:flex;gap:3px;padding:5px"><i style="flex:1;background:#1a2333;border-radius:3px"></i><i style="flex:1;background:#1a2333;border-radius:3px"></i><i style="flex:1;background:#3fd0c9;border-radius:3px;max-height:10px"></i></div><div class="xs" style="margin-top:5px;text-align:center">Midnight Radar</div></div>
+          <div style="border:1px solid var(--hairline2);border-radius:10px;padding:5px"><div style="height:44px;border-radius:6px;background:#1f1f1f;display:flex;gap:3px;padding:5px"><i style="flex:1;background:#2c2c2c;border-radius:3px"></i><i style="flex:1;background:#2c2c2c;border-radius:3px"></i><i style="flex:1;background:#a3a3a3;border-radius:3px;max-height:10px"></i></div><div class="xs" style="margin-top:5px;text-align:center">Graphite</div></div>
+          <div style="border:1px solid var(--hairline2);border-radius:10px;padding:5px"><div style="height:44px;border-radius:6px;background:#150f05;display:flex;gap:3px;padding:5px"><i style="flex:1;background:#22180a;border-radius:3px"></i><i style="flex:1;background:#22180a;border-radius:3px"></i><i style="flex:1;background:#f0a020;border-radius:3px;max-height:10px"></i></div><div class="xs" style="margin-top:5px;text-align:center">Amber CRT</div></div>
+          <div style="border:1px solid var(--hairline2);border-radius:10px;padding:5px"><div style="height:44px;border-radius:6px;background:#1b1626;display:flex;gap:3px;padding:5px"><i style="flex:1;background:#272036;border-radius:3px"></i><i style="flex:1;background:#272036;border-radius:3px"></i><i style="flex:1;background:#b48cf0;border-radius:3px;max-height:10px"></i></div><div class="xs" style="margin-top:5px;text-align:center">Nightshift</div></div>
+        </div>
+      </div>
+      <div class="row" style="padding:12px 0;border-top:1px solid var(--hairline)"><div style="flex:1"><div class="sm" style="font-weight:600">Density</div><div class="xs muted">tighter padding, more cards per screen</div></div><span class="seg"><span class="on">Comfortable</span><span>Compact</span></span></div>
+      <div class="row" style="padding:12px 0;border-top:1px solid var(--hairline)"><div style="flex:1"><div class="sm" style="font-weight:600">Text size</div><div class="xs muted">scales the whole board</div></div><span class="seg"><span>90%</span><span class="on">100%</span><span>110%</span><span>120%</span></span></div>
+      <div class="row" style="padding:12px 0;border-top:1px solid var(--hairline)"><div style="flex:1"><div class="sm" style="font-weight:600">Content width</div><div class="xs muted">fixed keeps the measure the board was drawn at</div></div><span class="seg"><span class="on">Fixed</span><span>Full</span></span></div>
+      <div class="row" style="padding:12px 0 0;border-top:1px solid var(--hairline)"><div style="flex:1"><div class="sm" style="font-weight:600">Opens on</div><div class="xs muted">the section this device lands on</div></div><span class="sel" style="width:160px">Last used<span class="chev"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+    </div>
+    <div class="col" style="gap:14px">
+      <div class="pane">
+        <div class="pane-h"><span class="tile"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M7 5.8v4.4L10.3 8z"/></svg></span><span class="pane-t">Orchestrator</span><span class="sp"></span><span class="xs muted">overridable per launch</span></div>
+        <div class="field"><label class="row">Default merge mode<span class="sp"></span><span class="muted xs" style="font-weight:500">ⓘ more</span></label>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <div style="border:1.5px solid var(--ink);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px"><div class="row"><span class="tile g"><svg class="i" viewBox="0 0 16 16"><circle cx="5" cy="4" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="11" cy="10" r="1.6"/><path d="M5 5.6v4.8M5 6c0 2.5 2 4 4.4 4"/></svg></span><span class="sp"></span><span style="color:var(--green)"><svg class="i" viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg></span></div><div class="sm" style="font-weight:600">Merge into base</div><div class="xs muted">each item lands on the run's base</div></div>
+            <div style="border:1px solid var(--hairline2);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px"><span class="tile"><svg class="i" viewBox="0 0 16 16"><circle cx="5" cy="4" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="11" cy="6" r="1.6"/><path d="M5 5.6v4.8M11 7.6c0 2.4-6 1.6-6 2.8"/></svg></span><div class="sm" style="font-weight:600">Leave branches</div><div class="xs muted">stop at a reviewed branch per item</div></div>
+            <div style="border:1px solid var(--hairline2);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px"><span class="tile"><svg class="i" viewBox="0 0 16 16"><circle cx="5" cy="4" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="11" cy="12" r="1.6"/><path d="M5 5.6v4.8M11 10.4V7a2 2 0 0 0-2-2H7"/></svg></span><div class="sm" style="font-weight:600">Open a PR</div><div class="xs muted">one PR per run, tracker projects</div></div>
+          </div>
+        </div>
+        <div class="row" style="padding:14px 0 0;margin-top:14px;border-top:1px solid var(--hairline)"><div style="flex:1"><div class="sm" style="font-weight:600">When nobody answers a question</div><div class="xs muted">headless runs only</div></div><span class="sel" style="width:190px">Skip the item for me<span class="chev"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+      </div>
+      <div class="pane">
+        <div class="pane-h"><span class="tile"><svg class="i" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5z"/></svg></span><span class="pane-t">Dispatch</span><span class="sp"></span><span class="xs muted">a card's launch sheet starts from these</span></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          <div class="field"><label>Model</label><span class="sel"><svg class="i" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6 2v2M10 2v2M6 12v2M10 12v2M2 6h2M2 10h2M12 6h2M12 10h2"/></svg> CLI default<span class="chev"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+          <div class="field"><label>Effort</label><span class="sel">CLI default<span class="chev"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+          <div class="field"><label>Permissions</label><span class="sel"><svg class="i" viewBox="0 0 16 16"><path d="M8 2 3 4v4c0 3 2.2 5 5 6 2.8-1 5-3 5-6V4z"/></svg> Auto<span class="chev"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+</x-dc>
+</body>
+</html>

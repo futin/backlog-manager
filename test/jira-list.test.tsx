@@ -11,6 +11,7 @@ import { JiraProvider } from '../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { resetJiraListFilters, setJiraListFilters } from '../client/src/hooks/useJiraListFilters';
+import { sessionsEmptyTitle } from '../client/src/lib/jira-list';
 import { daysAgoStamp } from './helpers/dates';
 import type { JiraBoardStatus, JiraEndReason, JiraIssue, JiraLiveSession, JiraStatusPayload } from '../shared/types';
 
@@ -156,13 +157,13 @@ beforeEach(() => {
   }) as unknown as typeof fetch;
 });
 
-async function renderList(): Promise<void> {
+async function renderList(onOpenJiraPage: (p: string) => void = jest.fn()): Promise<void> {
   setJiraPage('sessions');
   render(
     <SettingsProvider>
       <JiraProvider>
         <JiraSessionsProvider open>
-          <JiraView onOpenJiraPage={jest.fn()} />
+          <JiraView onOpenJiraPage={onOpenJiraPage} />
         </JiraSessionsProvider>
       </JiraProvider>
     </SettingsProvider>
@@ -177,7 +178,13 @@ const group = (label: 'Live' | 'Ended'): HTMLElement => screen.getByRole('rowgro
 const groupTags = (label: 'Live' | 'Ended'): string[] =>
   Array.from(group(label).querySelectorAll('tr.jira-list-row')).map((r) => `${r.getAttribute('data-key')}:${r.getAttribute('data-state')}`);
 const chip = (label: string): HTMLElement => within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: new RegExp(`^${label}\\b`) });
-const chipCount = (label: string): string => chip(label).querySelector('.jira-list-count')?.textContent ?? '';
+const chipCount = (label: string): string => chip(label).querySelector('.ui-seg-count')?.textContent ?? '';
+
+/** Opens the Filters popover and returns its dialog; a second call finds it already open. */
+async function filters(): Promise<HTMLElement> {
+  if (screen.queryByRole('dialog', { name: 'Filters' }) === null) await userEvent.click(screen.getByRole('button', { name: /^Filters/ }));
+  return screen.findByRole('dialog', { name: 'Filters' });
+}
 
 /** The fixture most cases share: five live sessions across the board's tickets (one started 10 d ago) and three ended ones (one 10 d ago). */
 function standardLinks(): void {
@@ -268,7 +275,7 @@ describe('the Sessions page', () => {
     expect(screen.queryByText('Off board thing')).toBeNull();
     expect(screen.getByText(/this board only/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'All tickets' }));
+    await userEvent.click(within(await filters()).getByRole('button', { name: 'All tickets' }));
     expect(await screen.findByText('Off board thing')).toBeInTheDocument();
     expect(rowTags()).toEqual(['ZZ-9:working', 'PAY-131:working']);
     expect(screen.queryByText(/this board only/)).toBeNull();
@@ -305,7 +312,7 @@ describe('the Sessions page', () => {
     const ended = (): HTMLElement => within(group('Ended')).getByRole('row', { name: 'Session on PAY-131' });
 
     // Run ▾ is the button's, and so is a click on the panel it opens inside the cell: neither opens Detail.
-    await userEvent.click(within(ended()).getByRole('button', { name: 'Run PAY-131' }));
+    await userEvent.click(within(ended()).getByRole('button', { name: 'Run options for PAY-131' }));
     const panel = ended().querySelector('[role="dialog"]');
     expect(panel).not.toBeNull();
     await userEvent.click(panel as HTMLElement);
@@ -321,6 +328,17 @@ describe('the Sessions page', () => {
     // A plain cell — the branch, nowhere near the summary — opens Detail for that row's ticket.
     await userEvent.click(within(group('Live')).getByText('feat/refund-partial'));
     expect(await screen.findByRole('dialog', { name: /^PAY-131 / })).toHaveAttribute('aria-modal', 'true');
+  });
+
+  it('the Repository and Run cells carry their full text as a title, since both ellipsise (ui-verify D14, D15)', async () => {
+    links = [link({ key: 'PAY-131', id: 'b1', state: 'working', startedAt: hoursAgo(2), how: 'branch', branch: 'feat/refund-partial', repo: '/home/ada/dev-api-gateway' })];
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBe(1));
+    const row = within(group('Live')).getByRole('row', { name: 'Session on PAY-131' });
+    expect(row.querySelector('td.jira-list-repo')).toHaveAttribute('title', 'dev-api-gateway · feat/refund-partial');
+    const run = row.querySelector('td.jira-list-run') as HTMLElement;
+    expect(run.textContent).not.toBe('');
+    expect(run).toHaveAttribute('title', run.textContent as string);
   });
 
   it('draws a Starting row from the status reservation, with no buttons', async () => {
@@ -358,7 +376,7 @@ describe('the Sessions page', () => {
     links = [link({ key: 'PAY-131', id: 'only', state: 'working', startedAt: hoursAgo(2) })];
     await renderList();
     await waitFor(() => expect(rowTags().length).toBe(1));
-    await userEvent.click(screen.getByRole('button', { name: 'All tickets' }));
+    await userEvent.click(within(await filters()).getByRole('button', { name: 'All tickets' }));
     expect(rowTags()).toEqual(['PAY-131:working']);
     expect(document.querySelectorAll('tr.jira-list-row')).toHaveLength(1);
   });
@@ -370,8 +388,53 @@ describe('the Sessions page', () => {
     ];
     await renderList();
     await waitFor(() => expect(rowTags().length).toBe(2));
-    act(() => setJiraListFilters({ repo: 'ledger' }));
+    await userEvent.click(within(await filters()).getByRole('button', { name: 'ledger' }));
     await waitFor(() => expect(rowTags()).toEqual(['PAY-120:working']));
+  });
+
+  it('Ended within 30 d widens to the 10-day-old ended row, and Clear resets the popover filters but not the Show pick', async () => {
+    standardLinks();
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBeGreaterThan(0));
+    expect(rowTags()).not.toContain('PAY-151:ended');
+    await userEvent.click(chip('Ended'));
+    const dialog = await filters();
+    await userEvent.click(within(dialog).getByRole('button', { name: '30 d' }));
+    await waitFor(() => expect(rowTags()).toContain('PAY-151:ended'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'All tickets' }));
+    expect(screen.getByRole('button', { name: 'Filters, 2 set' })).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Clear all' }));
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: '7 d' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dialog).getByRole('button', { name: 'All tickets' })).toHaveAttribute('aria-pressed', 'false');
+    expect(chip('Ended')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('rows carry the stripe in their state tone and the State cell reads the long word', async () => {
+    standardLinks();
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBeGreaterThan(0));
+    const plan = document.querySelector('tr[data-key="PAY-131"][data-state="plan"]') as HTMLElement;
+    expect(plan).toHaveClass('ui-stripe');
+    expect(plan).toHaveAttribute('data-tone', 'amber');
+    expect(plan.querySelector('.jira-list-state')).toHaveTextContent('Waiting for plan approval');
+    expect(document.querySelector('tr[data-state="ended"]')).toHaveAttribute('data-tone', 'grey');
+  });
+
+  it('an empty page names the board and the window, and offers the board and 30 days', async () => {
+    links = [];
+    const go = jest.fn();
+    await renderList(go);
+    act(() => setJiraListFilters({ window: '24h' }));
+    expect(await screen.findByText('No sessions on Alpha board in the last 24 hours')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Show 30 days' }));
+    expect(await screen.findByText('No sessions on Alpha board in the last 30 days')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show 30 days' })).toBeNull();
+    act(() => setJiraListFilters({ window: 'all' }));
+    expect(await screen.findByText('No sessions on Alpha board')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show 30 days' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Go to the board' }));
+    expect(go).toHaveBeenCalledWith('board');
   });
 
   it('keys no two rows alike: no React key warning across the whole fixture', async () => {
@@ -409,7 +472,8 @@ describe('the Sessions page', () => {
     expect(screen.getByRole('button', { name: /^Pick a Jira board/ })).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: 'Search sessions' })).toHaveAttribute('placeholder', 'search key, summary, repo, branch');
     expect(screen.queryByRole('group', { name: 'View' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /^Filters/ })).toBeNull();
+    // The filters live in the list's own bar, not the band.
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
   });
 
   it('with All tickets off and no boards, draws the bar and `No boards yet` with an Open Setup chip — and All tickets on draws the off-board rows', async () => {
@@ -417,10 +481,10 @@ describe('the Sessions page', () => {
     links = [link({ key: 'OFFBOARD-9', id: 'o1', state: 'working', startedAt: hoursAgo(1), summary: 'Off board thing' })];
     await renderList();
     expect(screen.getByRole('group', { name: 'Show' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'All tickets' })).toBeInTheDocument();
+    expect(within(await filters()).getByRole('button', { name: 'All tickets' })).toBeInTheDocument();
     expect(screen.getByText(/No boards yet/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Setup' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'All tickets' }));
+    await userEvent.click(within(await filters()).getByRole('button', { name: 'All tickets' }));
     expect(await screen.findByRole('row', { name: 'Session on OFFBOARD-9' })).toBeInTheDocument();
   });
 
@@ -497,9 +561,31 @@ describe('the Sessions page', () => {
     links = [link({ key: 'PAY-131', id: 'e1', state: 'ended', startedAt: daysAgo(2), endedAt: daysAgo(1) })];
     await renderList();
     await waitFor(() => expect(rowTags().length).toBe(1));
-    await userEvent.click(screen.getByRole('button', { name: 'Run PAY-131' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Run options for PAY-131' }));
     await userEvent.click(await within(await screen.findByRole('dialog', { name: 'Run menu' })).findByRole('button', { name: /Work it end to end/ }));
     expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: /^PAY-131 / })).toBeNull();
+  });
+
+  it("a Sessions row's `Run` opens the launch sheet directly, with no menu", async () => {
+    links = [link({ key: 'PAY-131', id: 'e1', state: 'ended', startedAt: daysAgo(2), endedAt: daysAgo(1) })];
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBe(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Run PAY-131' }));
+    expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Run menu' })).toBeNull();
+  });
+});
+
+describe('sessionsEmptyTitle', () => {
+  it('names the board and the window, and drops the board when All tickets is on', () => {
+    expect(sessionsEmptyTitle('Alpha', '24h', false)).toBe('No sessions on Alpha in the last 24 hours');
+    expect(sessionsEmptyTitle('Alpha', '7d', false)).toBe('No sessions on Alpha in the last 7 days');
+    expect(sessionsEmptyTitle('Alpha', '30d', false)).toBe('No sessions on Alpha in the last 30 days');
+    expect(sessionsEmptyTitle('Alpha', 'all', false)).toBe('No sessions on Alpha');
+    expect(sessionsEmptyTitle('Alpha', '24h', true)).toBe('No linked sessions in the last 24 hours');
+    expect(sessionsEmptyTitle('Alpha', '7d', true)).toBe('No linked sessions in the last 7 days');
+    expect(sessionsEmptyTitle('Alpha', '30d', true)).toBe('No linked sessions in the last 30 days');
+    expect(sessionsEmptyTitle('Alpha', 'all', true)).toBe('No linked sessions');
   });
 });

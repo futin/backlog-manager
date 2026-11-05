@@ -14,7 +14,7 @@ import { Pill } from '../ui/Pill';
  * card — the token, the login, the rate limit and each repo's reach — is a report about what this machine has connected, so it went to Settings › Shared's
  * Sources card instead. `Access` (`GithubAccessGroup`), in the second: the repos GitHub › PRs hides because the token cannot read them, drawn only while
  * there are any, so with every repo readable the second column is empty and the page looks as it did with one card. It is the one card here that reads
- * pull requests (`usePullRequests`'s second mount).
+ * pull requests (`usePullRequestsContext`, the shell's read).
  * Like every source page it draws no page switch: the rail's GitHub tree, or the Sources card's link through `App`'s `onOpenGithubPage`, opens it.
  *
  * Default export, because `App` loads it lazily like every other page: a section's chunk loads only when it is opened.

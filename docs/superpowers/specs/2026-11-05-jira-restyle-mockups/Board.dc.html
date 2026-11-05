@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jira board, proposed</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:#131313;-webkit-font-smoothing:antialiased}
+a{color:#525252}a:hover{color:#131313}
+</style>
+</helmet>
+<div style="width: 1280px; height: 760px; box-sizing: border-box; background: #f4f4f3; display: flex; font-family: 'Hanken Grotesk', system-ui, sans-serif; color: #131313;">
+
+  <!-- side rail, as today -->
+  <nav aria-label="Sections" style="width: 56px; flex-shrink: 0; border-right: 1px solid #eaeae8; background: #ffffff; display: flex; flex-direction: column; align-items: center; padding: 16px 0; gap: 6px;">
+    <a href="#files" aria-label="Files" style="width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; color: #6b6b6b;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></a>
+    <a href="#github" aria-label="GitHub" style="width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; color: #6b6b6b;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7"/><path d="M18 11.5a6 6 0 0 1-6 6H8.5"/></svg></a>
+    <a href="#jira" aria-label="Jira" aria-current="page" style="width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; color: #131313; background: #f2f2f1;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 4v16"/><path d="M15 4v16"/></svg></a>
+    <a href="#runs" aria-label="Runs" style="width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; color: #6b6b6b;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></a>
+    <a href="#settings" aria-label="Settings" style="margin-top: auto; width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; color: #6b6b6b;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
+  </nav>
+
+  <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; padding: 28px 32px 24px; gap: 20px;">
+
+    <!-- header -->
+    <header style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: flex-start; gap: 16px;">
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h1 style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.015em;">Globals</h1>
+            <button type="button" aria-label="Pick another board" style="height: 28px; padding: 0 8px 0 10px; border-radius: 9px; border: 1px solid #dcdcda; background: #ffffff; font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #525252; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">TMF · Globals<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #6b6b6b;">
+            <span>timify.atlassian.net</span><span style="color: #c9c9c6;">·</span><span>6 issues from 6 roots</span><span style="color: #c9c9c6;">·</span>
+            <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width: 6px; height: 6px; border-radius: 999px; background: #7dc242;"></span>polled 40 s ago</span>
+          </div>
+        </div>
+
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+          <div role="tablist" aria-label="View" style="box-sizing: border-box; display: inline-flex; height: 32px; padding: 3px; border-radius: 10px; background: #ededec; gap: 2px;">
+            <button type="button" role="tab" aria-selected="true" style="height: 26px; padding: 0 12px; border: 0; border-radius: 8px; background: #ffffff; box-shadow: 0 1px 2px rgba(19,19,19,0.08); font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="4" height="13" rx="1.5"/></svg>Board</button>
+            <button type="button" role="tab" aria-selected="false" style="height: 26px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #525252; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>List</button>
+          </div>
+          <label style="display: inline-flex; align-items: center; gap: 8px; height: 32px; width: 220px; padding: 0 10px; border-radius: 10px; border: 1px solid #dcdcda; background: #ffffff; color: #6b6b6b; box-sizing: border-box;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" placeholder="Search summaries" aria-label="Search summaries" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font: 400 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; outline: none;"></label>
+          <button type="button" style="height: 32px; padding: 0 10px; border-radius: 10px; border: 1px solid #dcdcda; background: #ffffff; font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #525252; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16l-6 8v5l-4 2v-7z"/></svg>Filter<span style="min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: #131313; color: #ffffff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">1</span></button>
+          <button type="button" style="height: 32px; padding: 0 10px; border-radius: 10px; border: 1px solid #dcdcda; background: #ffffff; font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #525252; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10"/><path d="M4 12h7"/><path d="M4 17h4"/><path d="M17 5v14"/><path d="M14 16l3 3 3-3"/></svg>Sort<span style="color: #6b6b6b;">· updated</span></button>
+        </div>
+      </div>
+
+      <!-- active filter row -->
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b6b6b;">
+        <span style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px 0 9px; border-radius: 999px; background: #ffffff; border: 1px solid #dcdcda; color: #131313; font-weight: 500;">Assignee · me<button type="button" aria-label="Remove filter" style="width: 16px; height: 16px; border: 0; border-radius: 999px; background: #f2f2f1; color: #525252; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg></button></span>
+        <span>Showing 3 of 6</span>
+      </div>
+    </header>
+
+    <!-- columns -->
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; flex-grow: 1; min-height: 0;">
+
+      <!-- TO DO -->
+      <section aria-label="To Do" style="background: #ededec; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0;">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 2px 4px;">
+          <span style="width: 8px; height: 8px; border-radius: 999px; background: #a3a3a0;"></span>
+          <span style="font-size: 13px; font-weight: 600;">To Do</span>
+          <span style="min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: #ffffff; color: #525252; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center;">2</span>
+          <button type="button" aria-label="Column options" style="margin-left: auto; width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent; color: #6b6b6b; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18" cy="12" r="1.8"/></svg></button>
+        </div>
+
+        <article style="background: #ffffff; border: 1px solid #eaeae8; border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 1px 2px rgba(19,19,19,0.04);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span title="Bug" style="width: 18px; height: 18px; border-radius: 5px; background: #fbe9e5; color: #b03b28; display: inline-flex; align-items: center; justify-content: center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg></span>
+            <span style="font-size: 12px; font-weight: 600; color: #525252;">TMF-412</span>
+            <span style="font-size: 11px; color: #6b6b6b; background: #f2f2f1; border-radius: 999px; padding: 1px 7px;">root</span>
+            <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: #8a5214; background: #fbf1e4; border-radius: 999px; padding: 2px 7px;"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4l8 14H4z"/></svg>Medium</span>
+          </div>
+          <div style="font-size: 14px; font-weight: 500; line-height: 1.35;">Booking widget drops the selected resource when the page is refreshed</div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b6b6b;">
+            <span aria-label="Andreja Jevtic" style="width: 22px; height: 22px; border-radius: 999px; background: #e3e0f3; color: #6b52a8; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">AJ</span>
+            <span>3d</span>
+            <span style="display: inline-flex; align-items: center; gap: 4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>4</span>
+            <a href="#jira" aria-label="Open in Jira" style="margin-left: auto; color: #6b6b6b; display: inline-flex;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></a>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 10px; border-top: 1px solid #eaeae8;">
+            <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: #6b6b6b;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>timify-web</span>
+            <div style="display: inline-flex; height: 28px; border-radius: 9px; overflow: hidden; background: #131313; color: #ffffff;">
+              <button type="button" style="height: 28px; padding: 0 10px; border: 0; background: transparent; color: #ffffff; font: 600 12.5px 'Hanken Grotesk', system-ui, sans-serif; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg>Run</button>
+              <button type="button" aria-label="More ways to run" style="height: 28px; width: 24px; border: 0; border-left: 1px solid rgba(255,255,255,0.18); background: transparent; color: #ffffff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+            </div>
+          </div>
+        </article>
+
+        <article style="background: #ffffff; border: 1px solid #eaeae8; border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 1px 2px rgba(19,19,19,0.04);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span title="Task" style="width: 18px; height: 18px; border-radius: 5px; background: #e4eef9; color: #2f5f9e; display: inline-flex; align-items: center; justify-content: center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L19 7"/></svg></span>
+            <span style="font-size: 12px; font-weight: 600; color: #525252;">TMF-420</span>
+            <span style="font-size: 11px; color: #6b6b6b; background: #f2f2f1; border-radius: 999px; padding: 1px 7px;">root</span>
+            <span style="margin-left: auto; font-size: 11px; font-weight: 500; color: #6b6b6b; background: #f2f2f1; border-radius: 999px; padding: 2px 7px;">Not prioritized</span>
+          </div>
+          <div style="font-size: 14px; font-weight: 500; line-height: 1.35;">Translate the new cancellation email into DE and FR</div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b6b6b;">
+            <span aria-label="Unassigned" style="width: 22px; height: 22px; border-radius: 999px; border: 1px dashed #c9c9c6; display: inline-flex;"></span>
+            <span>6d</span>
+            <a href="#jira" aria-label="Open in Jira" style="margin-left: auto; color: #6b6b6b; display: inline-flex;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></a>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 10px; border-top: 1px solid #eaeae8;">
+            <span style="font-size: 11.5px; color: #6b6b6b;">no repo mapped</span>
+            <span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; border: 1px dashed #c9c9c6; color: #6b6b6b; font-size: 12.5px; font-weight: 500;">Map a repo</span>
+          </div>
+        </article>
+      </section>
+
+      <!-- IN PROGRESS -->
+      <section aria-label="In Progress" style="background: #ededec; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0;">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 2px 4px;">
+          <span style="width: 8px; height: 8px; border-radius: 999px; background: #f5a15c;"></span>
+          <span style="font-size: 13px; font-weight: 600;">In Progress</span>
+          <span style="min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: #ffffff; color: #525252; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center;">1</span>
+          <button type="button" aria-label="Column options" style="margin-left: auto; width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent; color: #6b6b6b; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18" cy="12" r="1.8"/></svg></button>
+        </div>
+
+        <article style="background: #ffffff; border: 1px solid #cfe5b8; border-radius: 14px; padding: 0 0 12px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 1px 2px rgba(19,19,19,0.04); overflow: hidden;">
+          <div style="height: 3px; background: linear-gradient(90deg, #7dc242 0 62%, #eef6e6 62% 100%);"></div>
+          <div style="display: flex; align-items: center; gap: 8px; padding: 0 14px;">
+            <span title="Story" style="width: 18px; height: 18px; border-radius: 5px; background: #eef6e6; color: #38631a; display: inline-flex; align-items: center; justify-content: center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v16l-6-4-6 4z"/></svg></span>
+            <span style="font-size: 12px; font-weight: 600; color: #525252;">TMF-398</span>
+            <span style="font-size: 11px; color: #6b6b6b; background: #f2f2f1; border-radius: 999px; padding: 1px 7px;">root</span>
+            <span style="margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: #b03b28; background: #fbe9e5; border-radius: 999px; padding: 2px 7px;"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4l8 14H4z"/></svg>High</span>
+          </div>
+          <div style="font-size: 14px; font-weight: 500; line-height: 1.35; padding: 0 14px;">Show the resource's working hours in the booking widget calendar</div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b6b6b; padding: 0 14px;">
+            <span aria-label="Andreja Jevtic" style="width: 22px; height: 22px; border-radius: 999px; background: #e3e0f3; color: #6b52a8; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">AJ</span>
+            <span>1d</span>
+            <span style="display: inline-flex; align-items: center; gap: 4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>tmf-398</span>
+            <a href="#jira" aria-label="Open in Jira" style="margin-left: auto; color: #6b6b6b; display: inline-flex;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></a>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin: 0 14px; padding-top: 10px; border-top: 1px solid #eaeae8;">
+            <span style="display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 600; color: #38631a;"><span style="width: 7px; height: 7px; border-radius: 999px; background: #7dc242; box-shadow: 0 0 0 3px rgba(125,194,66,0.28);"></span>Working · 12m · tests</span>
+            <a href="#session" style="height: 28px; padding: 0 10px; border-radius: 9px; border: 1px solid #dcdcda; background: #ffffff; font: 500 12.5px 'Hanken Grotesk', system-ui, sans-serif; color: #131313; display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">Open session<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>
+          </div>
+        </article>
+      </section>
+
+      <!-- DONE -->
+      <section aria-label="Done" style="background: #ededec; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0;">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 2px 4px;">
+          <span style="width: 8px; height: 8px; border-radius: 999px; background: #7dc242;"></span>
+          <span style="font-size: 13px; font-weight: 600;">Done</span>
+          <span style="min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: #ffffff; color: #525252; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center;">1</span>
+          <button type="button" aria-label="Column options" style="margin-left: auto; width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent; color: #6b6b6b; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18" cy="12" r="1.8"/></svg></button>
+        </div>
+
+        <article style="background: #ffffff; border: 1px solid #eaeae8; border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; opacity: 0.82;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span title="Bug" style="width: 18px; height: 18px; border-radius: 5px; background: #fbe9e5; color: #b03b28; display: inline-flex; align-items: center; justify-content: center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg></span>
+            <span style="font-size: 12px; font-weight: 600; color: #525252;">TMF-377</span>
+            <span style="font-size: 11px; color: #6b6b6b; background: #f2f2f1; border-radius: 999px; padding: 1px 7px;">root</span>
+            <span style="margin-left: auto; font-size: 11px; font-weight: 500; color: #6b6b6b; background: #f2f2f1; border-radius: 999px; padding: 2px 7px;">Low</span>
+          </div>
+          <div style="font-size: 14px; font-weight: 500; line-height: 1.35; color: #525252;">Time zone label overlaps the date on narrow screens</div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b6b6b;">
+            <span aria-label="Andreja Jevtic" style="width: 22px; height: 22px; border-radius: 999px; background: #e3e0f3; color: #6b52a8; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">AJ</span>
+            <span>9d</span>
+            <a href="#jira" aria-label="Open in Jira" style="margin-left: auto; color: #6b6b6b; display: inline-flex;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></svg></a>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 10px; border-top: 1px solid #eaeae8;">
+            <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: #38631a; font-weight: 500;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L19 7"/></svg>PR #1182 merged</span>
+            <a href="#pr" style="font-size: 12px; color: #525252; text-decoration: underline; text-underline-offset: 2px;">View PR</a>
+          </div>
+        </article>
+      </section>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

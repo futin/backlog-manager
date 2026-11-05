@@ -1,12 +1,12 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
 import { useNow } from '../../hooks/useNow';
+import { useSettings } from '../../hooks/useSettings';
 import {
-  JIRA_COLUMNS,
   displayPath,
   failureOf,
   fetchJiraDetail,
@@ -14,24 +14,32 @@ import {
   initialsOf,
   issueDatesLine,
   modalTree,
+  priorityTone,
   progressLine,
   repoBasename,
+  resolveJiraAction,
   stopJira,
   ticketWorktrees,
+  statusTone,
   transitionOptions,
+  typeTone,
   unlinkJira,
   type JiraChildrenIndex
 } from '../../lib/jira';
 import { ticketSessions } from '../../lib/jira-sessions';
+import { pollAge } from '../../lib/tracker';
 import { elapsedSince } from '../../lib/item-age';
 import { renderMarkdown } from '../../lib/markdown';
-import type { JiraAction, JiraIssue, JiraIssueDetail, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
+import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
+import type { JiraAction, JiraIssue, JiraTransition, JiraIssueDetail, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Fact } from '../ui/Fact';
+import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
+import { Chevron } from '../ui/Chevron';
 import { Pill } from '../ui/Pill';
-import { Select } from '../ui/Select';
+import { Popover } from '../ui/Popover';
 import { SpreadBar } from '../ui/SpreadBar';
 import { JiraRunMenu } from './JiraRunMenu';
 import { JiraHistoryLine, JiraSessionCard, JiraStartingCard } from './JiraSessionCard';
@@ -58,7 +66,7 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * hold several, and the server ends only the one it is told.
  *
  * **`Run ▾`** (`JiraRunMenu`, the card's own chip) → `onRun(issue, action)`; the launch sheet is hosted by `JiraView`, ABOVE this dialog, so Escape closes the
- * sheet alone and the dialog under it on the next press. It sits LAST in the left column — the next session takes over once these end — and `runChipState`
+ * sheet alone and the dialog under it on the next press. It sits in the Agent band at the column's top (restyle §4.4) — on the empty state's row, or on the label row with `Next session takes over once this one ends.` beside it — and `runChipState`
  * disables it only while a `run` link is live (the one-run gate, §5) or a reservation is `starting`; a live `branch` or `manual` link does not. It is never hidden.
  *
  * **The write controls** (Jira phase 3; spec §6.3, §8; DESIGN.md §8.9.2) sit beside the fact each one changes, as the mock draws them — `Move to…` after the
@@ -67,11 +75,11 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * - **`Assign to me`**, a 28 px `Chip` → `POST /api/jira/issue/assign` `{ key }`. Disabled, with the reason as its title, while the shell's status knows
  *   no identity (`data.me` null — which also covers a boot `myself` that has not answered: the server would refuse with 503 `no identity` anyway, and
  *   §8's reason it must is that Jira reads `{ accountId: null }` as UNASSIGN) and while the issue is already the reader's own (`already assigned to you`).
- * - **`Move to…`**, the `Select` primitive → `POST /api/jira/issue/transition` `{ key, transitionId }`. Its first option is the placeholder `''`; then one
- *   per transition the detail offers, named by the status it lands in (`transitionOptions`: `to.name`, or the transition's own name only when two land
- *   in one status). A pick posts AT ONCE — a native select has no confirm step, and the select is controlled at `''`, so it reads `Move to…` again on the
- *   very next render. Disabled until the detail lands (the transitions are the detail's, and the card carries none), with `transitions unavailable` as the
- *   title once that read failed, and `no transitions offered` when Jira offers none.
+ * - **`Move to`**, the Status chip (28 px `Chip`: a toned dot, the raw status name, a chevron) → a 240 px `Popover` of one row per transition → `POST
+ *   /api/jira/issue/transition` `{ key, transitionId }`. Rows are named by the status they land in (`transitionOptions`: `to.name`, or the transition's own
+ *   name only when two land in one status); every row landing on the CURRENT status is pinned first and `aria-disabled`. A pick posts AT ONCE and closes the
+ *   panel — there is no confirm step. Disabled until the detail lands (the transitions are the detail's, and the card carries none), with `transitions
+ *   unavailable` as the title once that read failed, and `no transitions offered` when Jira offers none. The eighth `Popover` composer.
  *
  * **The Worktrees list** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.2) sits under the body and above the comments note, independent of the detail read: the
  * trees come from `GET /api/jira/worktrees`, which this dialog asks for itself — on open, and again when the key changes or a session on it starts or ends
@@ -138,11 +146,6 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 type Held = { detail: JiraIssueDetail } | { failure: string };
 
-/** What a status category reads as in a fact — `JIRA_COLUMNS`' own labels, lower-cased, so the column and the dialog never name one category two ways. */
-function categoryWord(category: JiraIssue['status']['category']): string {
-  return (JIRA_COLUMNS.find((c) => c.category === category)?.label ?? 'To Do').toLowerCase();
-}
-
 /**
  * POSTs one issue write and resolves when it LANDED. A non-OK answer rejects with `failureOf`'s sentence, and a dropped request rejects with the
  * network's own error, so `useAction`'s `errorMessage` renders exactly the three readings the header names. The 200's body (`JiraIssueWriteResult`) is
@@ -172,6 +175,7 @@ export function JiraDetail({
   const { zone } = useTimeZone();
   const { data, reload } = useJiraContext();
   const { data: sessions, reload: reloadSessions } = useJiraSessionsContext();
+  const { settings } = useSettings();
   const { busy, error: writeError, run, clearError } = useAction();
   // The key the dialog shows NOW, read by a write's settle (see the header) — a ref, because the settle closure was made on the render that sent it.
   const keyRef = useRef(issue.key);
@@ -235,6 +239,8 @@ export function JiraDetail({
   const assignBlock = me === null ? 'no identity' : src.assignee?.accountId === me.accountId ? 'already assigned to you' : null;
   const moveBlock = failure !== null ? 'transitions unavailable' : detail !== null && detail.transitions.length === 0 ? 'no transitions offered' : null;
   const moveReady = detail !== null && detail.transitions.length > 0;
+  const [moveOpen, setMoveOpen] = useState(false);
+  const moveChip = useRef<HTMLButtonElement>(null);
 
   /** The one write path the two Jira controls take (see the header): one guard, one error line, one key stamp. */
   const write = (path: 'assign' | 'transition', body: Record<string, string>): void => {
@@ -277,30 +283,60 @@ export function JiraDetail({
           ? [reserved.name, repoBasename(reserved.repo), elapsedSince(reserved.startedAt, now)].filter((p) => p !== null).join(' · ')
           : '—';
   const liveCount = liveLinks.length + (starting !== null ? 1 : 0);
+  // The empty band's sub-line: the default action's label (the Run menu's own resolution) and, when the ticket was ever run, how long ago the newest end was —
+  // `ended` is newest-`endedAt` first, the same list History draws. No repository here: the Ticket pane's `Repository` row is the one place paths are written.
+  const defaultAction = resolveJiraAction(settings.jiraDefaultAction, data?.skills ?? []);
+  const defaultLabel = typeof defaultAction === 'string' ? JIRA_BUILTIN_LABELS[defaultAction] : (data?.skills.find((k) => k.id === defaultAction.skill)?.name ?? '');
+  const lastRun = ended.length > 0 ? pollAge(ended[0].endedAt, now) : null;
+  const bandSub = `default: ${defaultLabel}${lastRun === null ? '' : ` · last run ${lastRun}`}`;
+  const runControl = <JiraRunMenu issue={issue} home="modal" onPick={(action) => onRun(issue, action)} />;
 
   // The agent column — `Modal`'s facts slot. Cards newest first; the reservation, being newest of all, leads.
   const agent = (
     <div className="jira-detail-agent">
-      <div className="jira-detail-lbl">
-        Agent
-        <span>{`${liveCount} live · ${ended.length} ended`}</span>
+      <div className="jira-detail-agent-band">
+        {liveCount > 0 ? (
+          <>
+            {/* The Run's wrapper is the menu's positioning parent (`.jira-detail-agent-row`), so the panel hangs under the row and not under the whole band. */}
+            <div className="jira-detail-agent-row">
+              <div className="jira-detail-lbl">
+                Agent
+                <span>{`${liveCount} live · ${ended.length} ended`}</span>
+              </div>
+              <span className="jira-detail-next">Next session takes over once this one ends.</span>
+              {runControl}
+            </div>
+            {starting !== null && <JiraStartingCard session={starting} now={now} />}
+            {liveLinks.map((link) => (
+              <JiraSessionCard
+                key={link.sessionId ?? link.startedAt}
+                link={link}
+                now={now}
+                busy={busy}
+                onUnlink={(sessionId) => sessionWrite((key) => unlinkJira(key, sessionId))}
+                onStop={(sessionId) => sessionWrite((key) => stopJira(key, sessionId))}
+              />
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="jira-detail-lbl">
+              Agent
+              <span>{`0 live · ${ended.length} ended`}</span>
+            </div>
+            <div className="jira-detail-agent-row">
+              <span className="jira-detail-agent-tile" aria-hidden="true">
+                <Glyph name="robot" size={16} />
+              </span>
+              <div className="jira-detail-agent-text">
+                <span className="jira-detail-agent-none">No session on this ticket</span>
+                <span className="jira-detail-agent-sub">{bandSub}</span>
+              </div>
+              {runControl}
+            </div>
+          </>
+        )}
       </div>
-      {starting !== null && <JiraStartingCard session={starting} now={now} />}
-      {liveLinks.map((link) => (
-        <JiraSessionCard
-          key={link.sessionId ?? link.startedAt}
-          link={link}
-          now={now}
-          busy={busy}
-          onUnlink={(sessionId) => sessionWrite((key) => unlinkJira(key, sessionId))}
-          onStop={(sessionId) => sessionWrite((key) => stopJira(key, sessionId))}
-        />
-      ))}
-      {liveCount === 0 && (
-        <div className="jira-detail-pane">
-          <p className="jira-detail-none">no session is running on this ticket</p>
-        </div>
-      )}
       {ended.length > 0 && (
         <>
           <div className="jira-detail-lbl">History</div>
@@ -311,10 +347,6 @@ export function JiraDetail({
           </ol>
         </>
       )}
-      <div className="jira-modal-controls jira-detail-run">
-        <JiraRunMenu issue={issue} home="modal" onPick={(action) => onRun(issue, action)} />
-        {liveCount > 0 && <span>Next session takes over once this one ends.</span>}
-      </div>
     </div>
   );
 
@@ -322,7 +354,9 @@ export function JiraDetail({
   const head = (
     <div className="jira-detail-head">
       <div className="jira-detail-crumbs">
-        <JiraTypeIcon type={src.type} />
+        <span className="jira-card-type" data-tone={typeTone(src.type)} title={src.type.name}>
+          <JiraTypeIcon type={src.type} />
+        </span>
         <span className="jira-detail-key">{src.key}</span>
         {crumbs.map((c) => (
           <span key={c}>{`· ${c}`}</span>
@@ -342,39 +376,75 @@ export function JiraDetail({
         <div className="jira-detail-lbl">Ticket</div>
         <div className="jira-detail-pane">
           <dl className="jira-detail-facts">
-            <Fact label="Status">
-              <Pill tone="neutral">{src.status.name}</Pill>
-              <span className="jira-detail-cat">{` · ${categoryWord(src.status.category)}`}</span>
-              <Select
-                label="Move to"
-                title={moveBlock ?? undefined}
-                value=""
-                disabled={busy || !moveReady}
-                options={[{ value: '', label: 'Move to…' }, ...transitionOptions(detail?.transitions ?? [])]}
-                onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
-              />
+            <Fact label="Status" icon={<Glyph name="ring" />}>
+              <span className="jira-detail-status">
+                <Chip
+                  ref={moveChip}
+                  size={28}
+                  disabled={busy || !moveReady}
+                  title={moveBlock ?? undefined}
+                  aria-label="Move to"
+                  aria-haspopup="dialog"
+                  aria-expanded={moveOpen}
+                  onClick={() => setMoveOpen((o) => !o)}
+                >
+                  <span className="jira-status-dot" data-tone={statusTone(src.status.category)} aria-hidden="true" />
+                  {src.status.name}
+                  <Chevron dir={moveOpen ? 'up' : 'down'} />
+                </Chip>
+                {moveOpen && moveReady && (
+                  <Popover label="Move to" width={240} anchor={moveChip} onClose={() => setMoveOpen(false)}>
+                    <JiraMoveRows
+                      transitions={detail.transitions}
+                      current={src.status.name}
+                      onPick={(id) => {
+                        setMoveOpen(false);
+                        write('transition', { key: issue.key, transitionId: id });
+                      }}
+                    />
+                  </Popover>
+                )}
+              </span>
             </Fact>
-            <Fact label="Assignee">
-              <span>{src.assignee === null ? 'unassigned' : src.assignee.name}</span>
+            <Fact label="Assignee" icon={<Glyph name="person" />}>
+              <span className="jira-detail-assignee">
+                {src.assignee !== null && (
+                  <span className="jira-card-av" aria-hidden="true">
+                    {initialsOf(src.assignee.name)}
+                  </span>
+                )}
+                {src.assignee === null ? 'unassigned' : src.assignee.name}
+              </span>
               <Chip size={28} disabled={busy || assignBlock !== null} title={assignBlock ?? undefined} onClick={() => write('assign', { key: issue.key })}>
                 Assign to me
               </Chip>
             </Fact>
-            {src.reporter !== null && <Fact label="Reporter">{src.reporter}</Fact>}
-            {src.priority !== null && src.priority !== '' && <Fact label="Priority">{src.priority}</Fact>}
-            {src.sprint !== null && src.sprint !== '' && <Fact label="Sprint">{src.sprint}</Fact>}
-            {src.parent !== null && <Fact label="Parent">{`${src.parent.key} ${src.parent.summary}`}</Fact>}
-            {src.labels.length > 0 && <Fact label="Labels">{src.labels.join(', ')}</Fact>}
-            <Fact label="Created · updated">{issueDatesLine(src, now, zone)}</Fact>
-            {boardNames.length > 0 && <Fact label="On boards">{boardNames.join(', ')}</Fact>}
-            <Fact label="Repository">
+            {src.reporter !== null && <Fact label="Reporter" icon={<Glyph name="person" />}>{src.reporter}</Fact>}
+            {src.priority !== null && src.priority !== '' && <Fact label="Priority" icon={<Glyph name="flag" />}>
+                <span className="jira-card-prio" data-tone={priorityTone(src.priority)} title={`priority ${src.priority}`}>
+                  {priorityTone(src.priority) !== 'other' && <Glyph name={priorityTone(src.priority) === 'high' ? 'up' : priorityTone(src.priority) === 'med' ? 'equals' : 'down'} size={10} />}
+                  {src.priority}
+                </span>
+              </Fact>}
+            {src.sprint !== null && src.sprint !== '' && <Fact label="Sprint" icon={<Glyph name="calendar" />}>{src.sprint}</Fact>}
+            {src.parent !== null && <Fact label="Parent" icon={<Glyph name="branch" />}>{`${src.parent.key} ${src.parent.summary}`}</Fact>}
+            {src.labels.length > 0 && <Fact label="Labels" icon={<Glyph name="tag" />}>
+                {src.labels.map((l) => (
+                  <span key={l} className="jira-detail-label">
+                    {l}
+                  </span>
+                ))}
+              </Fact>}
+            <Fact label="Created · updated" icon={<Glyph name="calendar" />}>{issueDatesLine(src, now, zone)}</Fact>
+            {boardNames.length > 0 && <Fact label="On boards" icon={<Glyph name="grid" />}>{boardNames.join(', ')}</Fact>}
+            <Fact label="Repository" icon={<Glyph name="branch" />}>
               {data === null || paths.length === 0 ? (
                 `no repository mapped for ${src.project.key} — Jira › Setup › Repositories`
               ) : (
                 <span className="item-facts-path">{paths.map((p) => displayPath(p, data.home)).join(', ')}</span>
               )}
             </Fact>
-            <Fact label="Session">{sessionLine}</Fact>
+            <Fact label="Session" icon={<Glyph name="play" />}>{sessionLine}</Fact>
           </dl>
           {writeError !== null && (
             <p className="jira-modal-error" role="alert">
@@ -521,6 +591,42 @@ function ChildrenTree({
           </li>
         ))}
       </ul>
+    </>
+  );
+}
+
+/**
+ * The Move-to popover's rows (`Modal.dc.html`, spec §4.4): one per offered transition in Jira's order, labelled by `transitionOptions` (the landing status, or the
+ * transition's own name when two land together), each with a dot in the landing status's tone. Every row that lands on the CURRENT status is pinned first, in
+ * Jira's order, with a tick and `aria-disabled` — a move to where the ticket already is would post a no-op — and the rest follow in Jira's order. The disabled rows
+ * stay buttons, not `disabled` ones, so a screen reader still reads them; they just do nothing. Focus lands on the first row that DOES something when the panel
+ * mounts, since it mounts only while open.
+ */
+function JiraMoveRows({ transitions, current, onPick }: { transitions: readonly JiraTransition[]; current: string; onPick: (id: string) => void }) {
+  const labels = transitionOptions(transitions);
+  const rows = transitions.map((t, i) => ({ t, label: labels[i].label, here: t.to.name === current }));
+  const ordered = [...rows.filter((r) => r.here), ...rows.filter((r) => !r.here)];
+  const first = useRef<HTMLButtonElement>(null);
+  useEffect(() => first.current?.focus(), []);
+  const firstEnabled = ordered.findIndex((r) => !r.here);
+  return (
+    <>
+      <div className="jira-move-head">Move to</div>
+      {ordered.map((r, i) => (
+        <button
+          key={r.t.id}
+          ref={i === firstEnabled ? first : undefined}
+          type="button"
+          className="jira-move-row"
+          aria-disabled={r.here ? true : undefined}
+          onClick={() => !r.here && onPick(r.t.id)}
+        >
+          <span className="jira-status-dot" data-tone={statusTone(r.t.to.category)} aria-hidden="true" />
+          <span className="jira-move-label">{r.label}</span>
+          {r.here && <Glyph name="tick" size={14} />}
+        </button>
+      ))}
+      <div className="jira-move-note">Jira transitions, applied on click</div>
     </>
   );
 }

@@ -102,7 +102,7 @@ export function DashboardsPage() {
   if (view === null) {
     return (
       <div className="dash-page">
-        <SettingsGroup title="Dashboards" scope="this machine">
+        <SettingsGroup title="Dashboards" pill="this machine">
           <SettingsRow
             name="Dispatch"
             hint={

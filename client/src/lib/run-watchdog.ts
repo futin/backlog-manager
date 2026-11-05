@@ -1,3 +1,4 @@
+import type { PillTone } from '../components/ui/Pill';
 import { formatClock } from './run-time';
 import type { OrchestratorRun, RunWatchdog, WatchdogConfig, WatchdogEventKind, WatchdogStatus } from '../../../shared/types';
 
@@ -183,6 +184,17 @@ export function stateLine(status: WatchdogStatus, now: number = Date.now()): str
 }
 
 /**
+ * The phase as the status band's word (spec §4.7): `Off · <reason>`, `Idle · nothing to watch`, `Watching N`. It sits BESIDE `stateLine` rather than replacing
+ * it — the band prints this as the headline and `stateLine` as its sub, and only `stateLine` carries the countdown, so `next check in` is drawn once. `N` is
+ * the sweeper's own watched set (`status.watching`), the same list `stateLine` names, so the two cannot count differently.
+ */
+export function stateWord(status: WatchdogStatus): string {
+  if (status.phase === 'off') return `Off · ${status.reason ?? 'unknown'}`;
+  if (status.phase === 'idle') return 'Idle · nothing to watch';
+  return `Watching ${status.watching.length}`;
+}
+
+/**
  * How much of the sweeper's current tick is still to come — `1` just after a
  * tick, `0` when the next is due (task-26). The bar drawn from it is the
  * same countdown `stateLine`'s armed reading already prints in words; a
@@ -295,3 +307,6 @@ export const WATCHDOG_KIND_TONE: Record<WatchdogEventKind, WatchdogKindTone> = {
   armed: 'muted',
   idle: 'muted'
 };
+
+/** The feed's kind cell is a `Pill` (§4.7); its five readings map one to one onto the pill's tones, `muted` being the pill's `neutral`. */
+export const WATCHDOG_KIND_PILL: Record<WatchdogKindTone, PillTone> = { live: 'live', done: 'done', bad: 'bad', warn: 'warn', muted: 'neutral' };

@@ -12,6 +12,7 @@ import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { clearFilters, pickDirection, pickProject, pickSort, pickStatus } from './helpers/filter-bar';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 // `path` is derived after the spread rather than hard-coded: every other field
 // here is a shared default that `over` may or may not touch, but `path` must be
@@ -198,7 +199,7 @@ beforeEach(() => {
 });
 
 async function renderBoard() {
-  render(<BoardView source="files" />);
+  render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 
@@ -218,7 +219,7 @@ async function renderBoard() {
 async function renderBoardWithSettings() {
   render(
     <SettingsProvider>
-      <BoardView source="files" />
+      <OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>
     </SettingsProvider>
   );
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
@@ -675,7 +676,7 @@ describe('BoardView', () => {
      back. The board has no columns to wait on here — it renders the no-matches state — so the render waits on that instead of `renderBoard`. */
   it('a stored unrecognised status lights no Status option, counts as one set, and Clear all recovers', async () => {
     localStorage.setItem('backlog-manager.status', JSON.stringify('stale'));
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     expect(await screen.findByText('no matches')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Filters, 1 set' })).toBeInTheDocument();
 
@@ -1173,7 +1174,7 @@ describe('BoardView', () => {
         json: () => Promise.resolve({ statusCode: 500, message: 'Internal Server Error' })
       } as Response)
     );
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('board unavailable')).toBeInTheDocument());
     expect(screen.queryByText('nothing registered yet')).not.toBeInTheDocument();
   });
@@ -1184,14 +1185,14 @@ describe('BoardView', () => {
       const payload = url.includes('/api/projects') ? [] : { items: [], errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('nothing registered yet')).toBeInTheDocument());
   });
 
   it('says `no items yet`, not `nothing registered yet`, when the source has registered projects and no items (final review I2)', async () => {
     // The rail draws this page only because a project of this source is registered, so telling the reader to register one would contradict it.
     stubItems([]);
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('no items yet')).toBeInTheDocument());
     expect(screen.queryByText('nothing registered yet')).not.toBeInTheDocument();
   });
@@ -1244,7 +1245,7 @@ describe('BoardView source filter', () => {
 
   it('github draws only the github project: its items and its one project pick', async () => {
     stubSources();
-    render(<BoardView source="github" />);
+    render(<OrchestratorRunsProvider><BoardView source="github" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('github item')).toBeInTheDocument());
     expect(screen.queryByText('files item')).not.toBeInTheDocument();
     expect(screen.queryByText('odd item')).not.toBeInTheDocument();
@@ -1256,7 +1257,7 @@ describe('BoardView source filter', () => {
 
   it('files draws the files and unsupported projects, and lists exactly those two picks', async () => {
     stubSources();
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('files item')).toBeInTheDocument());
     expect(screen.getByText('odd item')).toBeInTheDocument();
     expect(screen.queryByText('github item')).not.toBeInTheDocument();
@@ -1268,13 +1269,13 @@ describe('BoardView source filter', () => {
 
   it('unreachable and index errors only on files', async () => {
     stubSources();
-    const { unmount } = render(<BoardView source="files" />);
+    const { unmount } = render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByTestId('board-warn')).toBeInTheDocument());
     expect(screen.getByTestId('board-warn')).toHaveTextContent('unreachable: oddproj');
     expect(screen.getByTestId('board-warn')).toHaveTextContent('frontmatter has no closing');
     unmount();
 
-    render(<BoardView source="github" />);
+    render(<OrchestratorRunsProvider><BoardView source="github" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('github item')).toBeInTheDocument());
     expect(screen.queryByTestId('board-warn')).not.toBeInTheDocument();
   });
@@ -1295,14 +1296,14 @@ describe('BoardView source filter', () => {
             : { items: SRC_ITEMS, errors: [...SRC_ERRORS, urn, badRepo] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
-    const { unmount } = render(<BoardView source="github" />);
+    const { unmount } = render(<OrchestratorRunsProvider><BoardView source="github" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByTestId('board-warn')).toBeInTheDocument());
     expect(screen.getByTestId('board-warn')).toHaveTextContent('2 type labels');
     expect(screen.getByTestId('board-warn')).toHaveTextContent('names no valid "repo"');
     expect(screen.getByTestId('board-warn')).not.toHaveTextContent('frontmatter has no closing');
     unmount();
 
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByTestId('board-warn')).toBeInTheDocument());
     expect(screen.getByTestId('board-warn')).toHaveTextContent('frontmatter has no closing');
     expect(screen.getByTestId('board-warn')).not.toHaveTextContent('2 type labels');
@@ -1312,7 +1313,7 @@ describe('BoardView source filter', () => {
   it('a stored project pick that belongs to the other source falls open to All projects on this page', async () => {
     localStorage.setItem('backlog-manager.project.github', JSON.stringify('/abs/fileproj'));
     stubSources();
-    render(<BoardView source="github" />);
+    render(<OrchestratorRunsProvider><BoardView source="github" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('github item')).toBeInTheDocument());
     expect(bandTitle()).toBe('All projects');
   });
@@ -1320,11 +1321,11 @@ describe('BoardView source filter', () => {
   it('each source keeps its own project pick: one board does not read the other one`s key', async () => {
     localStorage.setItem('backlog-manager.project.files', JSON.stringify('/abs/oddproj'));
     stubSources();
-    render(<BoardView source="github" />);
+    render(<OrchestratorRunsProvider><BoardView source="github" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('github item')).toBeInTheDocument());
     expect(bandTitle()).toBe('All projects');
     cleanup();
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('odd item')).toBeInTheDocument());
     expect(bandTitle()).toBe('oddproj');
     expect(screen.queryByText('files item')).not.toBeInTheDocument();

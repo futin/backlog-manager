@@ -114,6 +114,52 @@ describe('FilterBar — the track', () => {
     expect(screen.getByRole('dialog', { name: 'Filters' })).toBeInTheDocument();
   });
 
+  it('draws no head row in the Filters dialog, and the foot reads Clear with the name Clear all', async () => {
+    const user = userEvent.setup();
+    render(
+      <FilterBar count={1} onClear={() => {}}>
+        <p>body</p>
+      </FilterBar>
+    );
+    await user.click(filterButton());
+    const dialog = screen.getByRole('dialog', { name: 'Filters' });
+    expect(dialog.querySelector('.filter-bar-head')).toBeNull();
+    const clear = within(dialog).getByRole('button', { name: 'Clear all' });
+    expect(clear).toHaveTextContent(/^Clear$/);
+  });
+
+  it('shows Showing N of M, with the note after a middle dot, only when `showing` is passed', async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <FilterBar count={0} onClear={() => {}} showing={{ shown: 3, total: 6, note: 'options come from the loaded issues' }}>
+        <p>body</p>
+      </FilterBar>
+    );
+    await user.click(filterButton());
+    expect(screen.getByText('Showing 3 of 6 · options come from the loaded issues')).toBeInTheDocument();
+    unmount();
+
+    render(
+      <FilterBar count={0} onClear={() => {}}>
+        <p>body</p>
+      </FilterBar>
+    );
+    await user.click(filterButton());
+    expect(screen.queryByText(/Showing/)).toBeNull();
+  });
+
+  it('Escape in the Filters dialog returns focus to the funnel chip', async () => {
+    const user = userEvent.setup();
+    render(
+      <FilterBar count={0} onClear={() => {}}>
+        <p>body</p>
+      </FilterBar>
+    );
+    await user.click(filterButton());
+    await user.keyboard('{Escape}');
+    expect(filterButton()).toHaveFocus();
+  });
+
   it('closes on Escape and on a press outside the track, through Popover', async () => {
     const user = userEvent.setup();
     render(

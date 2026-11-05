@@ -141,19 +141,22 @@ function mount(
   reload = jest.fn();
   onWrote = jest.fn();
   onRun = jest.fn();
+  // The settings provider is what the Agent band's `default: <label>` reads `jiraDefaultAction` from, the way the Run menu does.
   return render(
-    <JiraContext.Provider value={{ data: status(opts.status), loading: false, error: false, reload }}>
-      <JiraSessionsContext.Provider value={{ data: opts.sessions ?? null, reload: reloadSessions }}>
-        <JiraDetail
-          issue={opts.issue ?? CARD}
-          childrenOf={opts.childrenOf ?? null}
-          onOpenIssue={onOpenIssue}
-          onWrote={onWrote}
-          onRun={onRun}
-          onClose={opts.onClose ?? (() => {})}
-        />
-      </JiraSessionsContext.Provider>
-    </JiraContext.Provider>
+    <SettingsProvider>
+      <JiraContext.Provider value={{ data: status(opts.status), loading: false, error: false, reload }}>
+        <JiraSessionsContext.Provider value={{ data: opts.sessions ?? null, reload: reloadSessions }}>
+          <JiraDetail
+            issue={opts.issue ?? CARD}
+            childrenOf={opts.childrenOf ?? null}
+            onOpenIssue={onOpenIssue}
+            onWrote={onWrote}
+            onRun={onRun}
+            onClose={opts.onClose ?? (() => {})}
+          />
+        </JiraSessionsContext.Provider>
+      </JiraContext.Provider>
+    </SettingsProvider>
   );
 }
 
@@ -162,7 +165,11 @@ const posts = (): { url: string; init?: RequestInit }[] => calls.filter((c) => c
 /** How many times one issue's detail was read. */
 const reads = (key: string, from: readonly string[] = urls): number => from.filter((u) => u === `/api/jira/issue/${key}`).length;
 const assignChip = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Assign to me' });
-const moveSelect = (): HTMLSelectElement => within(screen.getByRole('dialog')).getByRole('combobox', { name: 'Move to' });
+/** The Status chip — `Move to` is its accessible name and the popover's too, so the chip is looked up inside the Modal's own dialog, by role button. */
+const moveSelect = (): HTMLElement => within(screen.getByRole('dialog', { name: /PAY-131/ })).getByRole('button', { name: 'Move to' });
+/** The open Move-to popover's rows, in document order. */
+const moveRows = (): HTMLElement[] => within(screen.getByRole('dialog', { name: 'Move to' })).getAllByRole('button');
+const rowNames = (): string[] => moveRows().map((r) => r.textContent ?? '');
 /** Neither assigned to `me` (ADA) nor anyone: the case every Assign click mounts, since the default CARD is ADA's own. */
 const UNASSIGNED: JiraIssue = { ...CARD, assignee: null };
 const TRANSITIONS: JiraIssueDetail['transitions'] = [
@@ -232,12 +239,12 @@ describe('JiraDetail — the read', () => {
     // are facts in the ticket pane too.
     expect(document.querySelector('.jira-detail-crumbs')).toHaveTextContent('PAY-131· Story· in PAY-120 Refund flows· Sprint 42');
     expect(fact('Parent')).toHaveTextContent('PAY-120 Refund flows');
-    expect(fact('Status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Status')).toHaveTextContent('In Review');
     expect(fact('Priority')).toHaveTextContent('High');
     expect(fact('Sprint')).toHaveTextContent('Sprint 42');
     expect(fact('Assignee')).toHaveTextContent('Ada Lovelace');
     expect(fact('Reporter')).toHaveTextContent('Grace Hopper');
-    expect(fact('Labels')).toHaveTextContent('payments, refunds');
+    expect(Array.from(fact('Labels')?.querySelectorAll('.jira-detail-label') ?? []).map((n) => n.textContent)).toEqual(['payments', 'refunds']);
     // created is a short date, updated the board's relative age (`1d`): the fixture is 10 days old and updated 1 day ago.
     expect(fact('Created · updated')).toHaveTextContent(`${formatCreated(CARD.created, Date.now(), ZONE)} · 1d`);
     // Only the board whose id the detail names, by NAME — `Platform` is a board the issue is not on.
@@ -418,8 +425,8 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     answer = () => new Promise<Response>((resolve) => (release = resolve));
     mount();
 
-    expect(fact('Status')).toHaveTextContent('In Review · in progress');
-    expect(fact('Labels')).toHaveTextContent('payments, refunds');
+    expect(fact('Status')).toHaveTextContent('In Review');
+    expect(Array.from(fact('Labels')?.querySelectorAll('.jira-detail-label') ?? []).map((n) => n.textContent)).toEqual(['payments', 'refunds']);
     expect(screen.getByText('loading…')).toBeInTheDocument();
     // `on boards` comes from the detail, so it is not guessed at while that is in flight.
     expect(fact('On boards')).toBeNull();
@@ -434,7 +441,7 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     mount();
 
     expect(await screen.findByText('could not read the ticket — Jira unreachable: timeout')).toBeInTheDocument();
-    expect(fact('Status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Status')).toHaveTextContent('In Review');
     expect(fact('Assignee')).toHaveTextContent('Ada Lovelace');
     expect(screen.queryByText('loading…')).toBeNull();
   });
@@ -443,7 +450,7 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     answer = () => json({});
     mount();
     expect(await screen.findByText('could not read the ticket — malformed response')).toBeInTheDocument();
-    expect(fact('Status')).toHaveTextContent('In Review · in progress');
+    expect(fact('Status')).toHaveTextContent('In Review');
   });
 
   it('does not paint a late answer for the issue the modal has since been reopened on', async () => {
@@ -470,7 +477,23 @@ const SESSION = (over: Partial<{ starting: boolean }> = {}) => ({
   'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false, ...over }
 });
 const modalRun = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Run PAY-131' });
-const stopChip = (): HTMLElement | null => within(screen.getByRole('dialog')).queryByRole('button', { name: 'Stop session' });
+const modalMore = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Run options for PAY-131' });
+/** The card's one control now: the split Open's chevron, which is there exactly when its menu would hold a row (Unlink, Stop, or an offered secondary Open). */
+const moreChip = (scope: HTMLElement = document.body): HTMLElement | null => within(scope).queryByRole('button', { name: 'More for PAY-131' });
+/** Whether the card's `Session actions` menu holds a row: opens it (a card whose menu has no rows has no chevron) and closes it again. */
+async function menuHas(name: string, scope: HTMLElement = document.body): Promise<boolean> {
+  const chev = moreChip(scope);
+  if (chev === null) return false;
+  await userEvent.click(chev);
+  const has = within(screen.getByRole('dialog', { name: 'Session actions' })).queryByRole('button', { name }) !== null;
+  await userEvent.click(chev);
+  return has;
+}
+/** Opens the card's `Session actions` menu and presses one row of it. */
+async function pressRow(name: string, scope: HTMLElement = document.body): Promise<void> {
+  await userEvent.click(within(scope).getByRole('button', { name: 'More for PAY-131' }));
+  await userEvent.click(within(screen.getByRole('dialog', { name: 'Session actions' })).getByRole('button', { name }));
+}
 /** Agents-status reads, which the modal mounts only for a confirmed session and which are kept out of `urls`. */
 const agentsReads = (): number => calls.filter((c) => c.url === '/api/agents/status').length;
 
@@ -545,16 +568,24 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
     mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' }] } });
     await screen.findByText('not');
     const dialog = screen.getByRole('dialog');
-    expect(dialog.querySelector('.jira-modal-controls')).toContainElement(modalRun());
+    expect(dialog.querySelector('.jira-detail-agent-band')).toContainElement(modalRun());
 
-    await userEvent.click(modalRun());
+    await userEvent.click(modalMore());
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: new RegExp(JIRA_BUILTIN_LABELS.context) }));
     expect(onRun).toHaveBeenCalledTimes(1);
     expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-131' }), 'context' satisfies JiraAction);
 
-    await userEvent.click(modalRun());
+    await userEvent.click(modalMore());
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: /Groom ticket/ }));
     expect(onRun).toHaveBeenLastCalledWith(expect.objectContaining({ key: 'PAY-131' }), { skill: 's_0a1b2c3d' });
+  });
+
+  it('the left half hands the default action up with no menu', async () => {
+    mount();
+    await screen.findByText('not');
+    await userEvent.click(modalRun());
+    expect(screen.queryByRole('dialog', { name: 'Run menu' })).toBeNull();
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-131' }), 'execute' satisfies JiraAction);
   });
 
   it('opens its panel inside the facts column: the row-wide width, every label as a title, and scrolled into view', async () => {
@@ -565,9 +596,9 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
     try {
       mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'A very long skill name that the narrow panel ellipsises', prompt: '/x {key}' }] } });
       await screen.findByText('not');
-      await userEvent.click(modalRun());
+      await userEvent.click(modalMore());
       const menu = screen.getByRole('dialog', { name: 'Run menu' });
-      expect(menu.style.getPropertyValue('--ui-popover-width')).toBe('234px');
+      expect(menu.style.getPropertyValue('--ui-popover-width')).toBe('300px');
       expect(within(menu).getByRole('button', { name: /A very long skill name/ })).toHaveAttribute('title', 'A very long skill name that the narrow panel ellipsises');
       expect(scrolled).toHaveBeenCalledWith({ block: 'nearest' });
       expect(scrolled.mock.contexts[0]).toBe(menu);
@@ -580,15 +611,29 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
     const view = mount({ status: { live: SESSION() } });
     await screen.findByText('not');
     expect(modalRun()).toBeDisabled();
+    expect(modalMore()).toBeDisabled();
     expect(modalRun()).toHaveAttribute('title', 'a session is running on PAY-131');
+    expect(modalMore()).toHaveAttribute('title', 'a session is running on PAY-131');
+    expect(modalRun()).toHaveTextContent('Running · 3h');
     view.unmount();
 
     mount({ status: { repos: {} } });
     await screen.findByText('not');
-    expect(modalRun()).toHaveAttribute('title', 'no repository mapped for PAY — Jira › Setup › Repositories');
+    const noRepo = 'no repository mapped for PAY — Jira › Setup › Repositories';
+    expect(modalRun()).toHaveAttribute('title', noRepo);
+    expect(modalMore()).toHaveAttribute('title', noRepo);
+    expect(modalRun()).toBeDisabled();
+    expect(modalMore()).toBeDisabled();
     await userEvent.click(modalRun());
     expect(screen.queryByRole('dialog', { name: 'Run menu' })).toBeNull();
     expect(onRun).not.toHaveBeenCalled();
+  });
+
+  it('with only a live run link on the sessions payload, the left half reads Running with that link\'s age', async () => {
+    mount({ sessions: payload(link({ startedAt: hoursAgo(2) })) });
+    await screen.findByText('not');
+    expect(modalRun()).toBeDisabled();
+    expect(modalRun()).toHaveTextContent('Running · 2h');
   });
 });
 
@@ -596,24 +641,24 @@ describe('JiraDetail — Stop session (Jira phase 5)', () => {
   it('is drawn for a session whose row says it can be stopped, with agents on, and asks before it posts', async () => {
     mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
     await screen.findByText('not');
-    await waitFor(() => expect(stopChip()).not.toBeNull());
+    await waitFor(() => expect(moreChip()).not.toBeNull());
 
-    await userEvent.click(stopChip() as HTMLElement);
+    await pressRow('Stop session');
     expect(screen.getByTestId('jira-stop-confirm')).toBeInTheDocument();
     expect(posts()).toHaveLength(0);
 
     await userEvent.click(screen.getByTestId('jira-stop-confirm-dismiss'));
     expect(screen.queryByTestId('jira-stop-confirm')).toBeNull();
-    expect(stopChip()).not.toBeNull();
+    expect(moreChip()).not.toBeNull();
     expect(posts()).toHaveLength(0);
   });
 
   it('posts `{ key, sessionId }` to /api/agents/jira-stop on accept, then reloads the status and nudges the board', async () => {
     mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
     await screen.findByText('not');
-    await waitFor(() => expect(stopChip()).not.toBeNull());
+    await waitFor(() => expect(moreChip()).not.toBeNull());
 
-    await userEvent.click(stopChip() as HTMLElement);
+    await pressRow('Stop session');
     await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
     await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
     expect(posts()).toHaveLength(1);
@@ -629,9 +674,9 @@ describe('JiraDetail — Stop session (Jira phase 5)', () => {
     post = () => json({ error: 'no live session on PAY-131' }, { status: 409 });
     mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
     await screen.findByText('not');
-    await waitFor(() => expect(stopChip()).not.toBeNull());
+    await waitFor(() => expect(moreChip()).not.toBeNull());
 
-    await userEvent.click(stopChip() as HTMLElement);
+    await pressRow('Stop session');
     await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
     expect(await screen.findByRole('alert')).toHaveTextContent('no live session on PAY-131');
     expect(reload).not.toHaveBeenCalled();
@@ -643,20 +688,21 @@ describe('JiraDetail — Stop session (Jira phase 5)', () => {
     const off = mount({ status: { live: SESSION() }, sessions: STOPPABLE() });
     await screen.findByText('not');
     await waitFor(() => expect(agentsReads()).toBeGreaterThan(0));
-    expect(stopChip()).toBeNull();
+    // The card's menu still holds its secondary Open (a disabled Desktop), so the chevron stays; Stop is the row that is not there.
+    expect(await menuHas('Stop session')).toBe(false);
     off.unmount();
 
     agentsStatus = AGENTS_ON;
     calls = [];
     const starting = mount({ status: { live: SESSION({ starting: true }) }, sessions: payload() });
     await screen.findByText('not');
-    expect(stopChip()).toBeNull();
+    expect(moreChip()).toBeNull();
     expect(agentsReads()).toBe(0);
     starting.unmount();
 
     mount();
     await screen.findByText('not');
-    expect(stopChip()).toBeNull();
+    expect(moreChip()).toBeNull();
     expect(agentsReads()).toBe(0);
   });
 });
@@ -700,8 +746,9 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     });
     await screen.findByText('not');
     const [runCard, branchCard] = cards();
-    expect(within(runCard).queryByRole('button', { name: 'Unlink' })).toBeNull();
-    await userEvent.click(within(branchCard).getByRole('button', { name: 'Unlink' }));
+    // A run link offers neither row, so its card has no menu at all; a branch link's menu holds Unlink.
+    expect(moreChip(runCard)).toBeNull();
+    await pressRow('Unlink', branchCard);
     await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
     const [{ url, init }] = posts();
     expect(url).toBe('/api/agents/jira-unlink');
@@ -720,11 +767,11 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
       )
     });
     await screen.findByText('not');
-    await waitFor(() => expect(within(cards()[0]).queryByRole('button', { name: 'Stop session' })).not.toBeNull());
-    expect(within(cards()[1]).queryByRole('button', { name: 'Stop session' })).toBeNull();
-    expect(within(cards()[2]).queryByRole('button', { name: 'Stop session' })).toBeNull();
+    await waitFor(() => expect(moreChip(cards()[0])).not.toBeNull());
+    expect(await menuHas('Stop session', cards()[1])).toBe(false);
+    expect(await menuHas('Stop session', cards()[2])).toBe(false);
 
-    await userEvent.click(within(cards()[0]).getByRole('button', { name: 'Stop session' }));
+    await pressRow('Stop session', cards()[0]);
     await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0].url).toBe('/api/agents/jira-stop');
@@ -745,7 +792,8 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
   it('says so when no session is running, and reads from the shell\'s live entry until the sessions payload lands', async () => {
     const none = mount({ sessions: payload() });
     await screen.findByText('not');
-    expect(within(screen.getByRole('dialog')).getByText('no session is running on this ticket')).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).queryByText('no session is running on this ticket')).toBeNull();
+    expect(within(screen.getByRole('dialog')).getByText('No session on this ticket')).toBeInTheDocument();
     none.unmount();
 
     // `sessions: null` is "not landed yet": no card can be drawn, but the fact and the Run gate still read the shell's entry (the old behaviour).
@@ -805,12 +853,54 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     expect(modalRun()).toBeDisabled();
   });
 
-  it('draws Run ▾ after the cards and the history — last in the agent column', async () => {
+  it('draws Run ▾ in the Agent band, which precedes the history', async () => {
     mount({ sessions: payload(link({ how: 'branch', action: null }), link({ sessionId: 'e1', endedAt: hoursAgo(1), state: 'ended', endReason: 'idle' })) });
     await screen.findByText('not');
-    const column = document.querySelector('.jira-detail-agent') as HTMLElement;
-    expect(column.lastElementChild).toContainElement(modalRun());
-    expect(column.querySelector('.jira-hist-list')?.compareDocumentPosition(modalRun())).toBe(Node.DOCUMENT_POSITION_FOLLOWING | 0);
+    const band = document.querySelector('.jira-detail-agent-band') as HTMLElement;
+    expect(band).toContainElement(modalRun());
+    expect(band.compareDocumentPosition(document.querySelector('.jira-hist-list') as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('draws the empty band with the default action and the last run, and a live card inside the band', async () => {
+    const none = mount({ sessions: payload() });
+    await screen.findByText('not');
+    const band = document.querySelector('.jira-detail-agent-band') as HTMLElement;
+    expect(within(band).getByText('No session on this ticket')).toBeInTheDocument();
+    expect(band).toHaveTextContent('default: Work it end to end');
+    expect(band).not.toHaveTextContent('last run');
+    none.unmount();
+
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction: 's_0a1b2c3d' }));
+    const skilled = mount({
+      status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' }] },
+      sessions: payload(link({ sessionId: 'e1', startedAt: hoursAgo(2), endedAt: hoursAgo(1), state: 'ended', endReason: 'idle' }))
+    });
+    await screen.findByText('not');
+    const again = document.querySelector('.jira-detail-agent-band') as HTMLElement;
+    expect(again).toHaveTextContent('default: Groom ticket');
+    expect(again.querySelector('.jira-detail-agent-sub')?.textContent).toMatch(/· last run 1h$/);
+    localStorage.removeItem('backlog-manager.settings');
+    skilled.unmount();
+
+    mount({ sessions: payload(link()) });
+    await screen.findByText('not');
+    const live = document.querySelector('.jira-detail-agent-band') as HTMLElement;
+    expect(live.querySelector('.jira-sess')).not.toBeNull();
+    expect(within(live).queryByText('No session on this ticket')).toBeNull();
+    expect(within(live).getByText('Next session takes over once this one ends.')).toBeInTheDocument();
+  });
+
+  it('draws the priority as a toned pill, each label as a chip, and every fact label behind an aria-hidden glyph', async () => {
+    mount();
+    await screen.findByText('not');
+    expect(fact('Priority')?.querySelector('[data-tone]')).toHaveAttribute('data-tone', 'high');
+    const labels = document.querySelectorAll('.jira-detail-label');
+    expect(Array.from(labels).map((n) => n.textContent)).toEqual(['payments', 'refunds']);
+    const dts = Array.from(document.querySelectorAll('.jira-detail-facts dt'));
+    expect(dts.map((d) => Array.from(d.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join(''))).toEqual(
+      expect.arrayContaining(['Status', 'Assignee', 'Reporter', 'Priority', 'Sprint', 'Parent', 'Labels', 'Created · updated', 'Repository', 'Session'])
+    );
+    for (const d of dts) expect(d.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
   });
 });
 
@@ -848,21 +938,38 @@ describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
     expect(assignChip()).toHaveAttribute('title', 'already assigned to you');
   });
 
-  it('lists the offered transitions by the status each lands in, and a pick posts at once and returns to Move to…', async () => {
+  it('lists the offered transitions by the status each lands in, and a pick posts once and closes the popover', async () => {
     answer = () => json(detail({ transitions: TRANSITIONS }));
     mount();
     await screen.findByText('not');
-    const select = moveSelect();
-    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Move to…', 'In Progress', 'Done']);
+    expect(screen.queryByRole('dialog', { name: 'Move to' })).toBeNull();
+    expect(moveSelect()).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(moveSelect()).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(moveSelect());
+    expect(moveSelect()).toHaveAttribute('aria-expanded', 'true');
+    expect(rowNames()).toEqual(['In Progress', 'Done']);
+    expect(screen.getByText('Jira transitions, applied on click')).toBeInTheDocument();
+    // The dot on a row is the landing status's own tone, like the chip's.
+    expect(moveRows().map((r) => r.querySelector('.jira-status-dot')?.getAttribute('data-tone'))).toEqual(['doing', 'done']);
 
-    await userEvent.selectOptions(select, '41');
+    await userEvent.click(moveRows()[0]);
     await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
-    expect(posts().map((c) => [c.url, c.init?.body])).toEqual([['/api/jira/issue/transition', '{"key":"PAY-131","transitionId":"41"}']]);
-    expect(moveSelect()).toHaveDisplayValue('Move to…');
+    expect(posts().map((c) => [c.url, c.init?.body])).toEqual([['/api/jira/issue/transition', '{"key":"PAY-131","transitionId":"31"}']]);
+    expect(screen.queryByRole('dialog', { name: 'Move to' })).toBeNull();
   });
 
-  // Two transitions landing in one status would read as two identical options, so only those two bring their own name back.
-  it('names a transition only when another offered one lands in the same status', async () => {
+  it('draws the status as a toned dot and the raw name, with no category word', async () => {
+    answer = () => json(detail());
+    mount();
+    await screen.findByText('not');
+    const chip = moveSelect();
+    expect(chip).toHaveTextContent('In Review');
+    expect(chip.querySelector('.jira-status-dot')).toHaveAttribute('data-tone', 'doing');
+    expect(fact('Status')).not.toHaveTextContent('in progress');
+  });
+
+  // Two transitions landing in one status would read as two identical rows, so only those two bring their own name back.
+  it('names a transition only when another offered one lands in the same status, and pins every current-status row first', async () => {
     answer = () =>
       json(
         detail({
@@ -875,7 +982,44 @@ describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
       );
     mount();
     await screen.findByText('not');
-    expect(Array.from(moveSelect().options).map((o) => o.textContent)).toEqual(['Move to…', 'In Testing', 'In Review', 'In Review (2)']);
+    await userEvent.click(moveSelect());
+    expect(rowNames()).toEqual(['In Review', 'In Review (2)', 'In Testing']);
+    expect(moveRows().map((r) => r.getAttribute('aria-disabled'))).toEqual(['true', 'true', null]);
+  });
+
+  it('pins the current status first and disabled, leaves Jira order for the rest, and focuses the first enabled row', async () => {
+    answer = () =>
+      json(
+        detail({
+          transitions: [
+            { id: '1', name: 'Start', to: { name: 'In Progress', category: 'indeterminate' } },
+            { id: '2', name: 'Back to review', to: { name: 'In Review', category: 'indeterminate' } },
+            { id: '3', name: 'Done', to: { name: 'Done', category: 'done' } }
+          ]
+        })
+      );
+    mount();
+    await screen.findByText('not');
+    await userEvent.click(moveSelect());
+    expect(rowNames()).toEqual(['In Review', 'In Progress', 'Done']);
+    expect(moveRows()[0]).toHaveAttribute('aria-disabled', 'true');
+    expect(document.activeElement).toBe(moveRows()[1]);
+    // Clicking the current-status row does nothing: no post, popover still open.
+    await userEvent.click(moveRows()[0]);
+    expect(posts()).toHaveLength(0);
+    expect(screen.getByRole('dialog', { name: 'Move to' })).toBeInTheDocument();
+  });
+
+  it('closes on Escape and hands focus back to the Move to chip', async () => {
+    answer = () => json(detail({ transitions: TRANSITIONS }));
+    mount();
+    await screen.findByText('not');
+    await userEvent.click(moveSelect());
+    expect(document.activeElement).toBe(moveRows()[0]);
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Move to' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: /PAY-131/ })).toBeInTheDocument();
+    expect(document.activeElement).toBe(moveSelect());
   });
 
   it('disables Move while the detail is in flight, and with transitions unavailable once it failed — Assign stays usable', async () => {
@@ -938,7 +1082,7 @@ describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
 
   // Review Focus 1: the guard is a ref, so two clicks dispatched before React re-renders — both inside one act — cannot both pass a `disabled` that has
   // not been painted yet. A state-only guard sends three POSTs here.
-  it('sends exactly one POST for a double click and a Move pick while that write is out', async () => {
+  it('sends exactly one POST for a double click while that write is out, and the Move chip is disabled meanwhile', async () => {
     answer = () => json(detail({ assignee: null, transitions: TRANSITIONS }));
     const out = held();
     post = () => out.promise;
@@ -948,13 +1092,10 @@ describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
     act(() => {
       assignChip().click();
       assignChip().click();
-      fireEvent.change(moveSelect(), { target: { value: '41' } });
     });
     expect(posts()).toHaveLength(1);
     expect(assignChip()).toBeDisabled();
     expect(moveSelect()).toBeDisabled();
-    fireEvent.change(moveSelect(), { target: { value: '31' } });
-    expect(posts()).toHaveLength(1);
 
     await act(async () => out.release(json({ ok: true, reread: true })));
     await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
@@ -1058,7 +1199,7 @@ describe('JiraView — the open-issue slot draws the modal', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
     const modal = await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' });
-    await userEvent.click(within(modal).getByRole('button', { name: 'Run PAY-131' }));
+    await userEvent.click(within(modal).getByRole('button', { name: 'Run options for PAY-131' }));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: new RegExp(JIRA_BUILTIN_LABELS.execute) }));
     expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
 
@@ -1112,7 +1253,9 @@ describe('JiraView — the open-issue slot draws the modal', () => {
         const own = GROUP.find((g) => g.key === key) ?? { key };
         return json(detail({ ...own, children: [], ...details[key] }));
       }
-      if (url.includes('/issues')) return json({ issues: GROUP, polledAt: daysAgoStamp(0) });
+      // The board's own stamp, not a fresh one: `useJiraBoard` re-reads once whenever the list's stamp differs from the status's, so a stamp minted at fetch time
+      // (second precision, a different second under load) adds a list read at an arbitrary moment — which the swap test below counts.
+      if (url.includes('/issues')) return json({ issues: GROUP, polledAt: board.boards[0]!.polledAt });
       return json(board);
     }) as unknown as typeof fetch;
     render(

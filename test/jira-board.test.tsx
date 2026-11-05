@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -345,6 +345,18 @@ describe('the band', () => {
 });
 
 describe('the columns', () => {
+  it('gives each shelf a tone, a page-local dot and a page-local count in place of the Dot and Pill', async () => {
+    await renderAlpha();
+    const cols = screen.getAllByTestId('board-col');
+    expect(cols.map((c) => c.getAttribute('data-tone'))).toEqual(['todo', 'doing', 'done']);
+    for (const c of cols) {
+      expect(c.querySelectorAll('.board-col-head .board-col-dot')).toHaveLength(1);
+      expect(c.querySelector('.board-col-head .ui-dot')).toBeNull();
+      expect(c.querySelector('.board-col-head .ui-pill')).toBeNull();
+    }
+    expect(cols.map((c) => c.querySelector('.board-col-count')?.textContent)).toEqual(['2', '1', '1']);
+  });
+
   it('draws To Do, In Progress and Done with their counts, Done holding the done issue, newest first', async () => {
     await renderAlpha();
     expect(screen.getAllByTestId('col-name').map((n) => n.textContent)).toEqual(['To Do', 'In Progress', 'Done']);
@@ -373,6 +385,55 @@ describe('the card', () => {
     expect(within(c).getByText('In Review')).toBeInTheDocument();
     expect(within(c).getByText('High')).toBeInTheDocument();
     expect(within(c).getByTitle('Story')).toBeInTheDocument();
+  });
+
+  it('the priority pill: tone and glyph by name, grey and glyphless for a custom name, nothing for null', async () => {
+    const cases: [string | null, string | null, boolean][] = [
+      ['High', 'high', true],
+      ['Medium', 'med', true],
+      ['Lowest', 'low', true],
+      ['P1', 'other', false],
+      [null, null, false]
+    ];
+    for (const [name, tone, glyph] of cases) {
+      statusAnswer = status();
+      lists[ALPHA.id] = [issue({ key: 'PAY-7', summary: 'Pill case', priority: name })];
+      renderPage();
+      await screen.findByText('Pill case');
+      const pill = name === null ? null : within(card('Pill case')).getByTitle(`priority ${name}`);
+      if (tone === null) expect(card('Pill case').querySelector('[title^="priority "]')).toBeNull();
+      else {
+        expect(pill).toHaveAttribute('data-tone', tone);
+        expect(pill?.querySelector('svg') !== null).toBe(glyph);
+      }
+      cleanup();
+    }
+  });
+
+  it('the status is the raw name beside a tone dot, and the type tile carries a tone per type', async () => {
+    await renderAlpha();
+    const c = card('Refund partial captures');
+    expect(within(c).getByText('In Review')).toBeInTheDocument();
+    expect(c.textContent).not.toMatch(/in progress/);
+    expect(c.querySelector('.jira-status-dot')).toHaveAttribute('data-tone', 'doing');
+    expect(within(c).getByTitle('Story')).toHaveAttribute('data-tone', 'story');
+    expect(within(card('Currency symbol missing on receipts')).getByTitle('Bug')).toHaveAttribute('data-tone', 'bug');
+    expect(within(card('Refund flows')).getByTitle('Epic')).toHaveAttribute('data-tone', 'neutral');
+  });
+
+  it('the foot names the one mapped repository by basename, `N repos` for several with every path in the title, and nothing for none', async () => {
+    statusAnswer = status({ repos: { PAY: ['/x/microservice'] } });
+    await renderAlpha();
+    expect(within(card('Refund flows')).getByText('microservice')).toBeInTheDocument();
+    cleanup();
+    statusAnswer = status({ repos: { PAY: ['/x/microservice', '/y/other'] } });
+    await renderAlpha();
+    const many = within(card('Refund flows')).getByText('2 repos').closest('.jira-card-repo') as HTMLElement;
+    expect(many.getAttribute('title')).toBe('/x/microservice\n/y/other');
+    cleanup();
+    statusAnswer = status();
+    await renderAlpha();
+    expect(card('Refund flows').querySelector('.jira-card-repo')).toBeNull();
   });
 
   it('reads `root` for a root, `Assigned to me` for my own, and `unassigned`', async () => {
@@ -609,6 +670,19 @@ describe('the fold', () => {
     await screen.findByText('Standalone task');
   }
 
+  it('the marker row reads repo, match, worktree (spec §4.2), and the repo glyph is 14 px', async () => {
+    statusAnswer = status({ repos: { PAY: ['/x/microservice'] } });
+    await renderGroup();
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'ledger');
+    const row = within(card('Payments epic')).getByTestId('marker-row');
+    const repo = row.querySelector('.jira-card-repo') as HTMLElement;
+    const match = within(row).getByText('1 match: PAY-162');
+    expect(repo).not.toBeNull();
+    // Document order: the repo precedes the match marker.
+    expect(repo.compareDocumentPosition(match) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(repo.querySelector('svg')).toHaveAttribute('width', '14');
+  });
+
   it('draws tops only: column counts count cards, and no folded issue is drawn anywhere', async () => {
     await renderGroup();
     expect(screen.getAllByTestId('col-count').map((n) => n.textContent)).toEqual(['2', '1', '0']);
@@ -782,6 +856,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
   }
 
   const runChip = (summary: string): HTMLElement => within(card(summary)).getByRole('button', { name: /^Run PAY-/ });
+  /** The chevron half: the one that opens the menu. The left half starts the default action and never opens it. */
+  const runMore = (summary: string): HTMLElement => within(card(summary)).getByRole('button', { name: /^Run options for PAY-/ });
   /** A live top has no shelf row any more (spec §7.1); its session is a deck card, found by the session's own key. */
   const deckCards = (key: string): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>(`.jira-deck-card[data-key="${key}"]`));
   const onShelves = (summary: string): boolean => screen.queryAllByText(summary).some((n) => n.closest('.board-card') !== null);
@@ -789,7 +865,11 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
   it('an unmapped project draws a dashed chip whose title names Setup, and a click opens no menu and no modal', async () => {
     await renderRun({ repos: {} });
     const chip = runChip('Refund partial captures');
-    expect(chip).toHaveAttribute('title', 'no repository mapped for PAY — Jira › Setup › Repositories');
+    const title = 'no repository mapped for PAY — Jira › Setup › Repositories';
+    expect(chip).toHaveAttribute('title', title);
+    expect(runMore('Refund partial captures')).toHaveAttribute('title', title);
+    expect(chip).toBeDisabled();
+    expect(runMore('Refund partial captures')).toBeDisabled();
     expect(chip.closest('.jira-run')).toHaveAttribute('data-state', 'no-repo');
     await userEvent.click(chip);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -808,10 +888,11 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       expect(found).toHaveLength(1);
       return found;
     });
-    const strip = deck.querySelector('.board-card-live') as HTMLElement;
-    expect(strip).toHaveClass('hatch');
-    expect(strip).toHaveTextContent('Working');
-    expect(strip).toHaveTextContent('3h');
+    // The card is a stripe now: its tone is the state's mark, and the first line says the state and how long it has held.
+    expect(deck).toHaveClass('ui-stripe');
+    expect(deck).toHaveAttribute('data-tone', 'green');
+    expect(deck.querySelector('.ui-stripe-dot')).toHaveAttribute('data-tone', 'green');
+    expect(deck.querySelector('.jira-deck-state')).toHaveTextContent('Working · 3h');
     expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
     expect(onShelves('Refund partial captures')).toBe(false);
     // Another card is not the one with a session.
@@ -827,7 +908,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       return found;
     });
     expect(deck).toHaveAttribute('data-state', 'starting');
-    expect(deck.querySelector('.board-card-live')).toHaveTextContent('Starting…');
+    expect(deck).toHaveAttribute('data-tone', 'green');
+    expect(deck.querySelector('.jira-deck-state')).toHaveTextContent('Starting…');
     expect(within(deck).queryByRole('link')).toBeNull();
     expect(onShelves('Refund partial captures')).toBe(false);
   });
@@ -844,28 +926,79 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       expect(found).toHaveLength(1);
       return found;
     });
-    expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('↳ PAY-160');
+    // The fold is a pill beside the key now, not the crumb's lead.
+    expect(deck.querySelector('.jira-deck-fold')).toHaveTextContent('↳ PAY-160');
+    expect(deck.querySelector('.jira-card-crumb')).not.toHaveTextContent('↳');
     expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
     expect(onShelves('Top story')).toBe(false);
   });
 
+  it('a deck card shows the session\'s context as a 4 px meter reading `context 42%`', async () => {
+    const live = { 'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } };
+    sessionsAnswer = () => ({ links: [runLink('PAY-131', live['PAY-131'], { id: 's1', status: 'busy', contextPct: 42 })], reachable: true, rowsAt: null });
+    await renderRun({ live });
+    const [deck] = await waitFor(() => {
+      const found = deckCards('PAY-131');
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    expect(deck.querySelector('.ui-meter')).toHaveAttribute('data-height', '4');
+    expect(deck.querySelector('.ui-meter')).toHaveTextContent('context 42%');
+  });
+
   it('a ready chip opens a menu: both built-ins, a rule, the skills by name, and the note', async () => {
     await renderRun();
-    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(runMore('Refund partial captures'));
     const menu = screen.getByRole('dialog', { name: 'Run menu' });
     expect(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute })).toBeInTheDocument();
     expect(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.context })).toBeInTheDocument();
     expect(within(menu).getByRole('button', { name: /Groom ticket/ })).toBeInTheDocument();
-    expect(within(menu).getByText('opens the launch sheet')).toBeInTheDocument();
-    expect(menu.querySelectorAll('hr')).toHaveLength(2);
+    expect(within(menu).getByText('Every choice opens the launch sheet first')).toBeInTheDocument();
+    expect(within(menu).getByText('Built in')).toBeInTheDocument();
+    expect(within(menu).getByText('Skills on this machine · 1')).toBeInTheDocument();
+  });
+
+  it('the foot holds both halves; the left one opens the sheet on the default action and no menu', async () => {
+    await renderRun();
+    const foot = card('Refund partial captures');
+    expect(within(foot).getByRole('button', { name: /^Run PAY-/ })).toBeInTheDocument();
+    expect(within(foot).getByRole('button', { name: /^Run options for PAY-/ })).toBeInTheDocument();
+    await userEvent.click(runChip('Refund partial captures'));
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'End to end' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('dialog', { name: 'Run menu' })).not.toBeInTheDocument();
+  });
+
+  it('the left half runs the configured default, not always execute', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction: SKILL.id }));
+    await renderRun();
+    await userEvent.click(runChip('Refund partial captures'));
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'A skill' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(sheet).getByRole('combobox', { name: 'Skill' })).toHaveValue(`skill:${SKILL.id}`);
+  });
+
+  it('with no skills on the machine the menu has no Skills header', async () => {
+    await renderRun({ skills: [] });
+    await userEvent.click(runMore('Refund partial captures'));
+    const menu = screen.getByRole('dialog', { name: 'Run menu' });
+    expect(within(menu).queryByText(/Skills on this machine/)).toBeNull();
+    expect(within(menu).getByText('Built in')).toBeInTheDocument();
+  });
+
+  it('after a pick, focus returns to the chevron', async () => {
+    await renderRun();
+    await userEvent.click(runMore('Refund partial captures'));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.context }));
+    expect(document.activeElement).toBe(runMore('Refund partial captures'));
   });
 
   it('a pick opens the launch sheet on that action, and not the issue modal', async () => {
     await renderRun();
-    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(runMore('Refund partial captures'));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.context }));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
-    expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('context');
+    expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'Ticket loaded' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
     // The menu closed behind the pick.
     expect(screen.queryByRole('dialog', { name: 'Run menu' })).not.toBeInTheDocument();
@@ -873,10 +1006,11 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
 
   it('a skill pick opens the sheet on that skill', async () => {
     await renderRun();
-    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(runMore('Refund partial captures'));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: /Groom ticket/ }));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
-    expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue(`skill:${SKILL.id}`);
+    expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'A skill' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(sheet).getByRole('combobox', { name: 'Skill' })).toHaveValue(`skill:${SKILL.id}`);
   });
 
   // I1 (final review): `Jira default action` is read HERE — the menu lists the resolved default first and marks it `default` — because every way into the launch
@@ -886,59 +1020,67 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction }));
     const openMenu = async (): Promise<HTMLElement> => {
       await renderRun();
-      await userEvent.click(runChip('Refund partial captures'));
+      await userEvent.click(runMore('Refund partial captures'));
       return screen.getByRole('dialog', { name: 'Run menu' });
     };
-    const rows = (menu: HTMLElement): [string, string][] =>
-      Array.from(menu.querySelectorAll<HTMLElement>('.jira-run-opt')).map((b) => {
-        const [label, hint] = Array.from(b.querySelectorAll('span')).map((n) => n.textContent ?? '');
-        return [label, hint];
-      });
+    /** Every row as [label, sub-line, carries the `default` mark], in menu order. */
+    const rows = (menu: HTMLElement): [string, string, boolean][] =>
+      Array.from(menu.querySelectorAll<HTMLElement>('.jira-run-opt')).map((b) => [
+        b.querySelector('.jira-run-label')?.textContent ?? '',
+        b.querySelector('.jira-run-sub')?.textContent ?? '',
+        b.querySelector('.jira-run-mark')?.textContent === 'default'
+      ]);
 
-    it('lists Work it end to end first, marked default, when that is the setting', async () => {
+    it('marks Work it end to end default, in place, when that is the setting', async () => {
       setDefault('execute');
       const menu = await openMenu();
       expect(rows(menu)).toEqual([
-        [JIRA_BUILTIN_LABELS.execute, 'default'],
-        [JIRA_BUILTIN_LABELS.context, 'built-in'],
-        ['Groom ticket', '/jira-groom']
+        [JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', true],
+        [JIRA_BUILTIN_LABELS.context, 'A session, you drive', false],
+        ['Groom ticket', '/jira-groom', false]
       ]);
     });
 
-    it('lists Open with the ticket loaded first when that is the setting, Work it end to end following as built-in', async () => {
+    it('marks Open with the ticket loaded default and leaves it second', async () => {
       setDefault('context');
       const menu = await openMenu();
       expect(rows(menu)).toEqual([
-        [JIRA_BUILTIN_LABELS.context, 'default'],
-        [JIRA_BUILTIN_LABELS.execute, 'built-in'],
-        ['Groom ticket', '/jira-groom']
+        [JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', false],
+        [JIRA_BUILTIN_LABELS.context, 'A session, you drive', true],
+        ['Groom ticket', '/jira-groom', false]
       ]);
     });
 
-    it('lists an existing skill first, marked default, and does not repeat it lower down', async () => {
+    it('marks an existing skill default without pulling it first, and does not repeat it', async () => {
       setDefault(SKILL.id);
       const menu = await openMenu();
       expect(rows(menu)).toEqual([
-        ['Groom ticket', 'default'],
-        [JIRA_BUILTIN_LABELS.execute, 'built-in'],
-        [JIRA_BUILTIN_LABELS.context, 'built-in']
+        [JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', false],
+        [JIRA_BUILTIN_LABELS.context, 'A session, you drive', false],
+        ['Groom ticket', '/jira-groom', true]
       ]);
       expect(within(menu).getAllByRole('button', { name: /Groom ticket/ })).toHaveLength(1);
     });
 
-    it('reads a deleted skill id as Work it end to end', async () => {
+    it('puts default on the row resolveJiraAction returns for a deleted skill id', async () => {
       setDefault('s_gone0000');
       const menu = await openMenu();
-      expect(rows(menu)[0]).toEqual([JIRA_BUILTIN_LABELS.execute, 'default']);
+      expect(rows(menu)[0]).toEqual([JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', true]);
       expect(rows(menu)).toHaveLength(3);
     });
 
-    it('opens the sheet on the promoted row\'s action', async () => {
-      setDefault('context');
+    it('a row\'s accessible name is its label only', async () => {
+      setDefault('execute');
       const menu = await openMenu();
-      await userEvent.click(within(menu).getAllByRole('button')[0]);
+      expect(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute })).toBeInTheDocument();
+    });
+
+    it('opens the sheet on a row\'s own action', async () => {
+      setDefault('execute');
+      const menu = await openMenu();
+      await userEvent.click(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.context }));
       const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
-      expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('context');
+      expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'Ticket loaded' })).toHaveAttribute('aria-pressed', 'true');
     });
   });
 
@@ -955,10 +1097,10 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       return (dispatched as jest.Mock)(input, init);
     }) as unknown as typeof fetch;
     const statusReads = (): number => requested.filter((u) => u === '/api/jira').length;
-    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(runMore('Refund partial captures'));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute }));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
-    const start = await within(sheet).findByRole('button', { name: 'Start' });
+    const start = await within(sheet).findByRole('button', { name: 'Start session' });
     await waitFor(() => expect(start).toBeEnabled());
     // The sessions payload is the second thing a landed Start must re-read (Detail's Start gate and the List's `canRun` read it, not the status).
     const sessionsReads = (): number => requested.filter((u) => u.startsWith('/api/jira/sessions')).length;
@@ -1004,7 +1146,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     // The deck card's summary opens Detail on the ticket.
     await userEvent.click(within(deckCards('PAY-131')[0]).getByRole('button', { name: 'Refund partial captures' }));
     const modal = await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
-    await userEvent.click(await within(modal).findByRole('button', { name: 'Stop session' }));
+    await userEvent.click(await within(modal).findByRole('button', { name: 'More for PAY-131' }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Session actions' })).getByRole('button', { name: 'Stop session' }));
     const statusBefore = statusReads();
     const boardBefore = boardRequests().length;
     await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
@@ -1021,7 +1164,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
 
   it('the chip stops the card: a click or Enter on it opens no modal', async () => {
     await renderRun();
-    const chip = runChip('Refund partial captures');
+    const chip = runMore('Refund partial captures');
     await userEvent.click(chip);
     expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
     await userEvent.click(chip);
@@ -1346,7 +1489,7 @@ describe('the issue List', () => {
 
   it('draws the columns of the mock: key, summary, type, raw status, assignee, sprint and the rolled-up age', async () => {
     await renderList();
-    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Assignee', 'Sprint', 'Updated']);
+    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Priority', 'Assignee', 'Sprint', 'Updated', '']);
     const r = row('PAY-190');
     expect(within(r).getByText('PAY-190')).toBeInTheDocument();
     expect(within(r).getByText('Payout retries')).toBeInTheDocument();
@@ -1355,7 +1498,29 @@ describe('the issue List', () => {
     expect(within(r).getByText('Ada Lovelace')).toBeInTheDocument();
     expect(within(r).getByText('Sprint 44')).toBeInTheDocument();
     expect(within(row('PAY-180')).getByText('unassigned')).toBeInTheDocument();
-    expect(within(row('PAY-180')).getByText('—')).toBeInTheDocument();
+    // The Sprint cell is the 8th; the Session cell reads `—` too when nothing ran, so the lookup is scoped.
+    expect(within((row('PAY-180') as HTMLTableRowElement).cells[7]).getByText('—')).toBeInTheDocument();
+  });
+
+  it('draws a priority pill per row, `Not prioritised` for null, a Run split per row, and the full summary as the cell title', async () => {
+    await renderList([issue({ key: 'PAY-1', summary: 'A very long summary that the cell will cut', priority: 'High' }), issue({ key: 'PAY-2', summary: 'Plain', priority: null })]);
+    expect(within(row('PAY-1')).getByTitle('priority High')).toHaveClass('jira-card-prio');
+    expect(within(row('PAY-2')).getByText('Not prioritised')).toHaveAttribute('data-tone', 'low');
+    for (const key of ['PAY-1', 'PAY-2']) expect(within(row(key)).getAllByRole('button', { name: `Run ${key}` })).toHaveLength(1);
+    expect(row('PAY-1').querySelector('.jira-issues-summary')).toHaveAttribute('title', 'A very long summary that the cell will cut');
+  });
+
+  it('the Summary cell is a flex row (title ellipsises, count never cut) and the Session cell keeps its age out of the ellipsis (ui-verify D3, D4)', async () => {
+    sessionsAnswer = () => ({ links: [linkOn('PAY-120', 's1', 'plan', 3)], reachable: true, rowsAt: null });
+    await renderList();
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Waiting for plan approval'));
+    const summary = row('PAY-120').querySelector('.jira-issues-summary') as HTMLElement;
+    const flex = summary.querySelector('.jira-issues-flex') as HTMLElement;
+    expect(flex.querySelector('.jira-issues-title')).not.toBeNull();
+    expect(flex.querySelector('.jira-issues-under')?.textContent).toBe('3 under it');
+    const session = row('PAY-120').querySelector('.jira-issues-session') as HTMLElement;
+    expect(session.querySelector('.jira-issues-cut')?.textContent).toBe('Waiting for plan approval');
+    expect(session.querySelector('.jira-issues-age')?.textContent).toMatch(/^ · \d/);
   });
 
   it('names how many issues fold under a top: the whole fold, one for a single, nothing for none', async () => {
@@ -1369,19 +1534,25 @@ describe('the issue List', () => {
   it('marks a top for a session live only on a folded child, and never draws the child', async () => {
     sessionsAnswer = () => ({ links: [linkOn('PAY-162', 's162', 'working', 2)], reachable: true, rowsAt: null });
     await renderList();
-    await waitFor(() => expect(sessionCell('PAY-120')).toContain('working'));
-    expect(sessionCell('PAY-180')).toBe('');
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Working · 2h'));
+    expect(sessionCell('PAY-180')).toBe('—');
     expect(row('PAY-162')).toBeNull();
   });
 
   it('names the deck’s lead session on a card with two: needs you beats working, and the deck leads with the same one', async () => {
     sessionsAnswer = () => ({ links: [linkOn('PAY-120', 'a', 'working', 3), linkOn('PAY-162', 'b', 'answer', 2)], reachable: true, rowsAt: null });
     await renderList();
-    await waitFor(() => expect(sessionCell('PAY-120')).toContain('needs you'));
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Waiting on your answer'));
     await userEvent.click(screen.getByRole('button', { name: 'Board' }));
     const first = document.querySelector('.jira-deck-card');
     expect(first?.getAttribute('data-state')).toBe('answer');
     expect(first?.getAttribute('data-key')).toBe('PAY-162');
+  });
+
+  it('reads `Ended · 2h` for a top whose only session ended on a folded child', async () => {
+    sessionsAnswer = () => ({ links: [{ ...linkOn('PAY-162', 'e', 'ended', 5), endedAt: hoursAgo(2.05) /* a margin: the row's `now` is read at mount, before this stamp is minted, and exactly 2 h reads `1h` by a few ms */, endReason: 'finished' }], reachable: true, rowsAt: null });
+    await renderList();
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Ended · 2h'));
   });
 
   it('keeps a top whose folded issue matches the search', async () => {

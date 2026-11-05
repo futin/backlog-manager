@@ -12,6 +12,7 @@ import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { pickProject } from './helpers/filter-bar';
 import { CLAIM_STALE_MS } from '../shared/types';
 import type { AgentsStatus, BacklogItem, DashboardsView, ItemHolder, OrchestratorRunsPayload, ProjectSummary, RemoteStarting } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 /**
  * Multi-dashboard task 10 — which machine a card or a run is on, driven through the real `BoardView` (the board's own wiring is what is under test: the
@@ -115,7 +116,7 @@ function stub(items: BacklogItem[], remoteStarting: RemoteStarting[] = []): void
 }
 
 async function renderBoard(): Promise<void> {
-  render(<BoardView source="github" />);
+  render(<OrchestratorRunsProvider><BoardView source="github" /></OrchestratorRunsProvider>);
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 

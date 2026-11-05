@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shell rail and chips</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--board:#f4f4f3;--steel:#ededec;--strip:#fff;--strip-hi:#f2f2f1;--tile-hover:#e8e8e6;--hairline:#eaeae8;--hairline2:#dcdcda;--ink:#131313;--ink2:#525252;--ink3:#6b6b6b;--green:#38631a;--green-solid:#7dc242;--amber:#c4761f;--amber-ink:#8a5214;--red:#b03b28;--magenta:#6b52a8;--cyan:#306c0f;--live:#F5A15C;
+--t-green:#eef6e6;--t-amber:#fbf1e4;--t-red:#fbe9e5;--t-mag:#efecf7}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.ab{background:#fff;padding:36px 44px;display:flex;flex-direction:column;gap:22px;overflow:hidden}
+.ab-h{display:flex;flex-direction:column;gap:4px}
+.ab-t{font-size:20px;font-weight:600;letter-spacing:-.01em}
+.ab-s{font-size:13px;color:var(--ink3);max-width:1100px;line-height:1.45}
+.tag{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3)}
+.tag.g{color:var(--green)}
+.note{font-size:12px;color:var(--ink3);line-height:1.45}
+.note b{color:var(--ink2);font-weight:600}
+.page{background:var(--board);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.ph{display:flex;align-items:flex-end;gap:12px}
+.ph-t{font-size:22px;font-weight:600;letter-spacing:-.01em}
+.ph-s{font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:6px;margin-top:2px}
+.sp{flex:1}
+.row{display:flex;align-items:center;gap:8px}
+.col{display:flex;flex-direction:column;gap:8px}
+.pane{background:var(--strip);border:1px solid var(--hairline);border-radius:14px;padding:16px;min-width:0}
+.pane-h{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.pane-t{font-size:15px;font-weight:600}
+.pane-s{font-size:12px;color:var(--ink3)}
+.chip{height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);font:500 13px 'Hanken Grotesk',sans-serif;color:var(--ink);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip.s{height:28px;padding:0 10px;font-size:12.5px}
+.chip.ghost{border-color:transparent;background:transparent;color:var(--ink2)}
+.chip.ink{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip.ic{width:32px;padding:0;justify-content:center}
+.chip.s.ic{width:28px}
+.split{display:inline-flex;height:32px;border-radius:10px;background:var(--ink);color:#fff;font:500 13px 'Hanken Grotesk',sans-serif;overflow:hidden}
+.split>span{display:inline-flex;align-items:center;gap:6px;padding:0 12px}
+.split>span+span{padding:0 9px;border-left:1px solid rgba(255,255,255,.18)}
+.split.s{height:28px;font-size:12.5px}.split.s>span{padding:0 10px}.split.s>span+span{padding:0 7px}
+.seg{display:inline-flex;background:var(--steel);border-radius:10px;padding:3px;gap:2px}
+.seg>span{height:26px;padding:0 10px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:var(--ink2)}
+.seg>span.on{background:var(--strip);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg .n{font-size:11px;color:var(--ink3);font-weight:600}
+.search{height:32px;width:220px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);display:inline-flex;align-items:center;gap:8px;padding:0 10px;font-size:12.5px;color:var(--ink3)}
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;background:var(--strip-hi);color:var(--ink2);white-space:nowrap}
+.pill.g{background:var(--t-green);color:var(--green)}
+.pill.a{background:var(--t-amber);color:var(--amber-ink)}
+.pill.r{background:var(--t-red);color:var(--red)}
+.pill.m{background:var(--t-mag);color:var(--magenta)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ink3);display:inline-block;flex:none}
+.dot.g{background:var(--green-solid)}.dot.a{background:var(--amber)}.dot.r{background:var(--red)}.dot.l{background:var(--live)}.dot.m{background:var(--magenta)}
+.tile{width:28px;height:28px;border-radius:8px;background:var(--strip-hi);color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.tile.g{background:var(--t-green);color:var(--green)}.tile.a{background:var(--t-amber);color:var(--amber-ink)}.tile.r{background:var(--t-red);color:var(--red)}.tile.m{background:var(--t-mag);color:var(--magenta)}
+.tile.xs{width:18px;height:18px;border-radius:5px}
+.tile.lg{width:40px;height:40px;border-radius:12px}
+.av{width:22px;height:22px;border-radius:50%;background:var(--t-mag);color:var(--magenta);font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.key{font-size:12px;font-weight:600;color:var(--ink)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+.muted{color:var(--ink3)}.ink2{color:var(--ink2)}
+.sm{font-size:12px}.xs{font-size:11px}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.tbl th{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--hairline);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr.hov td{background:var(--strip-hi)}
+.menu{position:absolute;background:var(--strip);border:1px solid var(--hairline);border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.12);padding:8px;z-index:5}
+.mi{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;font-size:13px;font-weight:500}
+.mi.on{background:var(--strip-hi)}
+.mi .sub{font-size:11px;color:var(--ink3);font-weight:400}
+.mh{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3);padding:8px 8px 4px}
+.hr{height:1px;background:var(--hairline);margin:6px 0}
+.bar{height:6px;border-radius:999px;background:var(--steel);overflow:hidden;display:flex}
+.bar>i{display:block;height:100%}
+.kpi{background:var(--strip);border:1px solid var(--hairline);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.kpi-l{font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:6px}
+.kpi-v{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.kpi-s{font-size:11.5px;color:var(--ink3)}
+.toggle{width:32px;height:18px;border-radius:999px;background:var(--hairline2);position:relative;flex:none}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.toggle.on{background:var(--ink)}.toggle.on::after{left:16px}
+.sel{height:32px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);display:inline-flex;align-items:center;gap:8px;padding:0 10px;font-size:13px;font-weight:500;min-width:0}
+.sel .chev{margin-left:auto;color:var(--ink3)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>label{font-size:12px;font-weight:600;color:var(--ink2)}
+.cap{font-size:11px;color:var(--ink3)}
+.strip{height:3px;border-radius:3px 3px 0 0}
+svg.i{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+svg.i16{width:16px;height:16px}
+svg.i18{width:18px;height:18px}
+.cmp{display:grid;gap:28px;align-items:start}
+.now{opacity:1;border:1px dashed var(--hairline2);border-radius:14px;padding:14px;background:#fff}
+</style>
+</helmet>
+<div class="ab" style="width:1280px;height:780px">
+<div class="ab-h">
+  <div class="ab-t">The shell: side rail and status chips</div>
+  <div class="ab-s">Today the rail is a text list with a tree drawn under the open section. The two chips in the top right squeeze four tiny meters into 28 px. Proposed: each rail row gets an icon tile and a live count, and the open section's pages become a quiet sub-list with the current one on a white row. The chips become one status pill per service, and their detail moves into the popover.</div>
+</div>
+<div class="cmp" style="grid-template-columns:250px 250px 1fr">
+  <div class="col" style="gap:10px">
+    <span class="tag">Now</span>
+    <div class="now" style="height:470px;display:flex;flex-direction:column;gap:6px;font-size:13px">
+      <div style="font-size:9.5px;letter-spacing:.12em;color:var(--ink3)">BACKLOG</div>
+      <div style="font-weight:700;font-size:17px;margin-bottom:14px">› manager <span style="display:inline-block;width:7px;height:17px;background:var(--green-solid);vertical-align:-3px"></span></div>
+      <div class="row" style="padding:6px 8px;background:var(--steel);border-radius:999px;border-left:3px solid var(--ink)"><svg class="i" viewBox="0 0 16 16"><circle cx="5" cy="4" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="11" cy="12" r="1.6"/><path d="M5 5.6v4.8M11 10.4V7a2 2 0 0 0-2-2H7"/></svg> GitHub</div>
+      <div style="padding-left:26px;display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--ink2);border-left:1px solid var(--hairline2);margin-left:14px"><b style="color:var(--ink)">Board</b><span>PRs</span><span>Archive</span><span>Settings</span></div>
+      <div class="row" style="padding:6px 8px"><svg class="i" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11M6 3v10"/></svg> Jira</div>
+      <div class="row" style="padding:6px 8px"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M7 5.8v4.4L10.3 8z"/></svg> Runs</div>
+      <div class="hr" style="margin:10px 0"></div>
+      <div class="row" style="padding:6px 8px"><svg class="i" viewBox="0 0 16 16"><path d="M3 5h6M12 5h1M3 11h1M7 11h6"/><circle cx="10.5" cy="5" r="1.5"/><circle cx="5.5" cy="11" r="1.5"/></svg> Settings</div>
+      <div class="sp"></div>
+      <span class="pill" style="align-self:flex-start">v0.35.0 ●</span>
+    </div>
+  </div>
+  <div class="col" style="gap:10px">
+    <span class="tag g">Proposed</span>
+    <div style="height:470px;background:var(--board);border-radius:14px;padding:16px 12px;display:flex;flex-direction:column;gap:4px">
+      <div class="row" style="gap:10px;padding:0 6px 16px">
+        <span class="tile" style="background:var(--ink);color:var(--green-solid);border-radius:9px"><svg class="i" viewBox="0 0 16 16"><rect x="2.5" y="3" width="3" height="10" rx="1"/><rect x="6.5" y="3" width="3" height="7" rx="1"/><rect x="10.5" y="3" width="3" height="5" rx="1"/></svg></span>
+        <div style="line-height:1.15"><div style="font-weight:700;font-size:14px">backlog manager</div><div class="xs muted">this machine</div></div>
+      </div>
+      <div class="row" style="gap:10px;padding:6px;border-radius:10px;background:var(--strip);box-shadow:0 1px 2px rgba(0,0,0,.06)">
+        <span class="tile" style="background:var(--ink);color:#fff"><svg class="i" viewBox="0 0 16 16"><circle cx="5" cy="4" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="11" cy="12" r="1.6"/><path d="M5 5.6v4.8M11 10.4V7a2 2 0 0 0-2-2H7"/></svg></span><span style="font-weight:600;font-size:13px">GitHub</span><span class="sp"></span><span class="pill a">2</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:1px;padding:4px 0 6px 44px;font-size:12.5px;color:var(--ink2)">
+        <div class="row" style="height:28px;margin-left:-8px;border-radius:8px;background:var(--strip);color:var(--ink);font-weight:600;padding-left:23px">Board</div>
+        <div class="row" style="height:28px;padding-left:15px">PRs<span class="sp"></span><span class="xs muted" style="padding-right:8px">2 need you</span></div>
+        <div class="row" style="height:28px;padding-left:15px">Archive</div>
+        <div class="row" style="height:28px;padding-left:15px">Settings</div>
+      </div>
+      <div class="row" style="gap:10px;padding:6px;border-radius:10px">
+        <span class="tile"><svg class="i" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11M6 3v10"/></svg></span><span style="font-weight:500;font-size:13px">Jira</span><span class="sp"></span><span class="pill">1</span>
+      </div>
+      <div class="row" style="gap:10px;padding:6px;border-radius:10px">
+        <span class="tile"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M7 5.8v4.4L10.3 8z"/></svg></span><span style="font-weight:500;font-size:13px">Runs</span><span class="sp"></span><span class="pill">3</span>
+      </div>
+      <div class="hr" style="margin:10px 6px"></div>
+      <div class="row" style="gap:10px;padding:6px;border-radius:10px">
+        <span class="tile"><svg class="i" viewBox="0 0 16 16"><path d="M3 5h6M12 5h1M3 11h1M7 11h6"/><circle cx="10.5" cy="5" r="1.5"/><circle cx="5.5" cy="11" r="1.5"/></svg></span><span style="font-weight:500;font-size:13px">Settings</span>
+      </div>
+      <div class="sp"></div>
+      <div class="row" style="gap:8px;padding:10px;border-radius:12px;background:var(--strip);border:1px solid var(--hairline)">
+        <span class="dot g"></span><span class="sm" style="font-weight:600">v0.35.0</span><span class="sp"></span><span class="xs muted">API connected · 4322</span>
+      </div>
+    </div>
+  </div>
+  <div class="col" style="gap:14px">
+    <span class="tag">Now · top right</span>
+    <div class="now row" style="gap:14px;font-size:10px;color:var(--ink3)">
+      <span class="row" style="gap:5px;border:1px solid var(--hairline2);border-radius:999px;padding:3px 8px"><span class="av" style="width:16px;height:16px;font-size:8px;background:var(--steel);color:var(--ink2)">F</span><b style="color:var(--ink)">futin</b> POLL <b style="color:var(--ink)">171s</b> API <b style="color:var(--ink)">&lt;1%</b> ⌄</span>
+      <span class="row" style="gap:5px;border:1px solid var(--hairline2);border-radius:999px;padding:3px 8px"><span class="av" style="width:16px;height:16px;font-size:8px;background:var(--steel);color:var(--ink2)">A</span><b style="color:var(--ink)">Jira · Andreja</b> POLL <b style="color:var(--ink)">9s</b> CALLS <b style="color:var(--ink)">11</b> ⌄</span>
+    </div>
+    <span class="tag g" style="margin-top:6px">Proposed · top right</span>
+    <div class="row" style="gap:8px">
+      <span class="chip s" style="border-radius:999px;padding:0 10px 0 6px"><span class="tile xs" style="background:var(--ink);color:#fff;border-radius:50%"><svg class="i" viewBox="0 0 16 16"><circle cx="5" cy="4" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="11" cy="12" r="1.6"/><path d="M5 5.6v4.8M11 10.4V7a2 2 0 0 0-2-2H7"/></svg></span>GitHub<span class="dot g"></span><span class="muted xs">2m ago</span></span>
+      <span class="chip s" style="border-radius:999px;padding:0 10px 0 6px;border-color:var(--ink)"><span class="tile xs" style="background:#2563eb10;color:var(--ink);border-radius:50%"><svg class="i" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11M6 3v10"/></svg></span>Jira<span class="dot g"></span><span class="muted xs">9s ago</span><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span>
+    </div>
+    <div style="position:relative;height:330px">
+      <div class="menu" style="left:96px;top:0;width:330px;padding:12px">
+        <div class="row" style="gap:10px;padding:4px 4px 12px">
+          <span class="av" style="width:32px;height:32px;font-size:12px">AJ</span>
+          <div style="line-height:1.25"><div style="font-weight:600;font-size:13px">Andreja Jevtic</div><div class="row xs muted" style="gap:5px"><span class="dot g"></span>connected · timify.atlassian.net</div></div>
+          <span class="sp"></span><span class="chip s" style="height:26px;padding:0 9px;font-size:12px"><svg class="i" viewBox="0 0 16 16"><path d="M13 7.5A5 5 0 0 0 4.2 4.2L3 5.5"/><path d="M3 2.5v3h3"/><path d="M3 8.5a5 5 0 0 0 8.8 3.3L13 10.5"/><path d="M13 13.5v-3h-3"/></svg> Sync now</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 4px 10px">
+          <div style="background:var(--strip-hi);border-radius:10px;padding:8px 10px"><div class="xs muted">Last sweep</div><div style="font-weight:600;font-size:15px">9 s ago</div><div class="xs muted">every 15 s</div></div>
+          <div style="background:var(--strip-hi);border-radius:10px;padding:8px 10px"><div class="xs muted">Calls since start</div><div style="font-weight:600;font-size:15px">11</div><div class="xs muted">no 429</div></div>
+        </div>
+        <div class="mh">Boards</div>
+        <div class="mi"><span class="dot g"></span>Globals<span class="sp"></span><span class="sub">polled 1m ago</span><span class="muted" title="Sync this board now" style="display:inline-flex"><svg class="i" viewBox="0 0 16 16"><path d="M13 7.5A5 5 0 0 0 4.2 4.2L3 5.5"/><path d="M3 2.5v3h3"/><path d="M3 8.5a5 5 0 0 0 8.8 3.3L13 10.5"/><path d="M13 13.5v-3h-3"/></svg></span></div>
+        <div class="mi"><span class="dot g"></span>My sprint bugs<span class="sp"></span><span class="sub">polled 44s ago</span><span class="muted" title="Sync this board now" style="display:inline-flex"><svg class="i" viewBox="0 0 16 16"><path d="M13 7.5A5 5 0 0 0 4.2 4.2L3 5.5"/><path d="M3 2.5v3h3"/><path d="M3 8.5a5 5 0 0 0 8.8 3.3L13 10.5"/><path d="M13 13.5v-3h-3"/></svg></span></div>
+        <div class="mi"><span class="dot g"></span>My tasks<span class="sp"></span><span class="sub">polled 44s ago</span><span class="muted" title="Sync this board now" style="display:inline-flex"><svg class="i" viewBox="0 0 16 16"><path d="M13 7.5A5 5 0 0 0 4.2 4.2L3 5.5"/><path d="M3 2.5v3h3"/><path d="M3 8.5a5 5 0 0 0 8.8 3.3L13 10.5"/><path d="M13 13.5v-3h-3"/></svg></span></div>
+        <div class="hr"></div>
+        <div class="mi ink2" style="font-size:12.5px"><svg class="i" viewBox="0 0 16 16"><path d="M3 5h6M12 5h1M3 11h1M7 11h6"/><circle cx="10.5" cy="5" r="1.5"/><circle cx="5.5" cy="11" r="1.5"/></svg> Jira setup<span class="sp"></span><svg class="i" viewBox="0 0 16 16"><path d="M6 3.5H3.5v9h9V10M9 3h4v4M13 3 7.5 8.5"/></svg></div>
+      </div>
+    </div>
+    <div class="note"><b>Rail counts</b> share one shape: a plain pill with a number, amber only when something waits on you (2 PRs need you), grey otherwise (1 live Jira session, 3 live runs). The current page is a white row, not a dot. <b>Sync now</b> asks the poller for one sweep at once, for every board or one; it needs a new server route, since today the poller only runs on its 15 s timer.<br><br><b>Why one pill:</b> the poll age and the API budget are numbers you look up, not glance at. The pill keeps the one glanceable fact, connected or not, and how fresh. It turns amber when the poll is late and red when the service is down.</div>
+  </div>
+</div>
+
+</div>
+</x-dc>
+</body>
+</html>

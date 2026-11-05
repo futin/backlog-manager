@@ -13,6 +13,7 @@ import { pickProject, pickStatus } from './helpers/filter-bar';
 import { BOARD_TRACKER_POLL_MS } from '../client/src/hooks/useBoard';
 import { TRACKER_POLL_MS } from '../server/src/tracker/poller.service';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 /**
  * What a tracker project looks like ON THE BOARD (task-45, spec §5.5): the
@@ -161,7 +162,7 @@ async function renderBoard(
   source: SourceSection = 'github'
 ): Promise<void> {
   stubFetch(items, summaries, runs);
-  render(<BoardView source={source} />);
+  render(<OrchestratorRunsProvider><BoardView source={source} /></OrchestratorRunsProvider>);
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 
@@ -450,7 +451,7 @@ describe('the board’s own poll', () => {
     jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
     try {
       stubFetch([item({})], [projects()[0]]);
-      render(<BoardView source="files" />);
+      render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
       await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
       const filesOnly = (global.fetch as jest.Mock).mock.calls.length;
       jest.advanceTimersByTime(BOARD_TRACKER_POLL_MS * 2);
@@ -508,7 +509,7 @@ describe('a tracker project whose sync is off (#17)', () => {
     jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
     try {
       stubFetch([item({})], projects({ interval }));
-      render(<BoardView source="files" />);
+      render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
       await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
       const before = (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('/api/projects')).length;
       jest.advanceTimersByTime(BOARD_TRACKER_POLL_MS * 2);

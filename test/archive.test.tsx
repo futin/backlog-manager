@@ -25,6 +25,7 @@ import type {
 } from '../shared/types';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { clearFilters, pickProject } from './helpers/filter-bar';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 /*
  * Every clock-dependent fixture here is RELATIVE to the moment the suite runs,
@@ -179,7 +180,7 @@ const ITEMS: BacklogItem[] = [
  */
 async function renderArchive(items: BacklogItem[] = ITEMS, errors: string[] = [], runs: RunPayload[] = [], starting: StartingRun[] = []) {
   stubItems(items, errors, runs, starting);
-  render(<ArchiveView source="files" />);
+  render(<OrchestratorRunsProvider><ArchiveView source="files" /></OrchestratorRunsProvider>);
   await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
 }
 
@@ -318,6 +319,11 @@ describe('ArchiveView', () => {
   it('renders no fresh item', async () => {
     await renderArchive();
     expect(within(column('Bugs')).queryByText('fresh bug')).not.toBeInTheDocument();
+  });
+
+  it('draws no tone on its columns: only the Jira shelves carry data-tone', async () => {
+    await renderArchive();
+    for (const c of screen.getAllByTestId('board-col')) expect(c).not.toHaveAttribute('data-tone');
   });
 
   it('counts what each column actually holds', async () => {
@@ -542,7 +548,7 @@ describe('ArchiveView', () => {
             : ({ items: [], errors: [] } satisfies ItemsIndex);
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
-    render(<ArchiveView source="files" />);
+    render(<OrchestratorRunsProvider><ArchiveView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('nothing registered yet')).toBeInTheDocument());
   });
 
@@ -684,7 +690,7 @@ describe('ArchiveView source filter', () => {
 
   it('files lists the files and unsupported projects archived items, and the count line names that set', async () => {
     stubSources();
-    render(<ArchiveView source="files" />);
+    render(<OrchestratorRunsProvider><ArchiveView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('files stale')).toBeInTheDocument());
     expect(screen.getByText('odd stale')).toBeInTheDocument();
     expect(screen.queryByText('github stale')).not.toBeInTheDocument();
@@ -694,7 +700,7 @@ describe('ArchiveView source filter', () => {
 
   it('github lists only the github archived items, with no files warnings', async () => {
     stubSources();
-    render(<ArchiveView source="github" />);
+    render(<OrchestratorRunsProvider><ArchiveView source="github" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('github stale')).toBeInTheDocument());
     expect(screen.queryByText('files stale')).not.toBeInTheDocument();
     expect(screen.queryByText('odd stale')).not.toBeInTheDocument();
@@ -705,7 +711,7 @@ describe('ArchiveView source filter', () => {
   it('a stored project pick that belongs to the other source falls open to all on this page', async () => {
     localStorage.setItem('backlog-manager.project.github', JSON.stringify('/abs/fileproj'));
     stubSources();
-    render(<ArchiveView source="github" />);
+    render(<OrchestratorRunsProvider><ArchiveView source="github" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('github stale')).toBeInTheDocument());
     expect(screen.getByText('1 archived across 1 project')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Filters' }).querySelector('.filter-bar-badge')).toBeNull();

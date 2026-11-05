@@ -12,6 +12,7 @@ import BoardView from '../client/src/components/board/BoardView';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { readStyles, ruleBlock } from './helpers/css-rule';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 /**
  * `BoardColumn` and the card's marker row — the two pieces of §8.3 that are
@@ -110,7 +111,7 @@ function stub(items: ItemsIndex = ITEMS, agents: AgentsStatus | null = AGENTS_ST
 }
 
 async function renderBoard(): Promise<void> {
-  render(<BoardView source="files" />);
+  render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 
@@ -153,6 +154,27 @@ describe('BoardColumn', () => {
     expect(screen.getByTestId('col-count')).toHaveTextContent('3');
     expect(col.querySelectorAll('.board-col-head .ui-dot')).toHaveLength(1);
     expect(col.innerHTML).not.toContain('ui-dot-ramp-');
+  });
+
+  it('writes data-tone and swaps Dot/Pill for the page-local spans only when a tone is passed', () => {
+    const { container, rerender } = render(
+      <BoardColumn slug="todo" label="Plain" count={4}>
+        <i />
+      </BoardColumn>,
+    );
+    expect(container.querySelector('[data-tone]')).toBeNull();
+    expect(container.querySelector('.ui-dot')).not.toBeNull();
+    expect(container.querySelector('.ui-pill')).not.toBeNull();
+    rerender(
+      <BoardColumn slug="doing" tone="doing" label="Toned" count={4}>
+        <i />
+      </BoardColumn>,
+    );
+    const col = container.querySelector('.board-col') as HTMLElement;
+    expect(col).toHaveAttribute('data-tone', 'doing');
+    expect(col.querySelector('.board-col-dot')).not.toBeNull();
+    expect(col.querySelector('.ui-dot, .ui-pill')).toBeNull();
+    expect(col.querySelector('[data-testid="col-count"].board-col-pill .board-col-count')?.textContent).toBe('4');
   });
 
   /** The count is a `Pill` — the primitive — inside the span that lays it out.

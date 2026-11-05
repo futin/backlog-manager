@@ -62,6 +62,7 @@ export function JiraSetupView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage
       <Band title="Setup" sub="the boards this machine follows, and where each Jira project's code lives · ~/.backlog-manager/settings/jira.json">
         <Pill tone="neutral">this machine</Pill>
       </Band>
+      <JiraConnectionGroup />
       <div className="set-cols">
         <div className="set-col">
           <BoardsGroup
@@ -74,7 +75,6 @@ export function JiraSetupView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage
           <JiraReposGroup projects={projects} />
         </div>
         <div className="set-col">
-          <JiraConnectionGroup />
           <JiraSkillsGroup />
         </div>
       </div>
@@ -165,28 +165,24 @@ function BoardsGroup({
           {shown.map((b) => {
             const line = boardRowLine(b, now);
             return (
-              <SettingsRow
-                key={b.id}
-                name={b.name}
-                hint={
-                  <>
-                    {line.text}
-                    {line.failure !== null && (
-                      <>
-                        {' · '}
-                        <span className="jira-setup-failure">{line.failure}</span>
-                      </>
-                    )}
-                  </>
-                }
-              >
-                <Chip size={28} aria-label={`Open board ${b.name}`} onClick={() => onOpen(b)}>
-                  Open board
-                </Chip>
+              <div className="set-row jira-setup-board" key={b.id}>
+                <div className="jira-setup-board-main">
+                  <span className="set-name">{b.name}</span>
+                  <div className="jira-setup-board-facts">
+                    {line.facts.map((f) => (
+                      <Pill key={f}>{f}</Pill>
+                    ))}
+                  </div>
+                  {line.failure !== null && <span className="jira-setup-failure">{line.failure}</span>}
+                </div>
+                <span className="jira-setup-board-age">{line.age ?? 'not polled yet'}</span>
                 <Chip size={28} aria-label={`Edit ${b.name}`} onClick={() => onEdit(b)}>
                   Edit
                 </Chip>
-              </SettingsRow>
+                <Chip size={28} aria-label={`Open board ${b.name}`} onClick={() => onOpen(b)}>
+                  Open
+                </Chip>
+              </div>
             );
           })}
         </>

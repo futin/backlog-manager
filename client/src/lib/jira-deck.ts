@@ -110,24 +110,34 @@ export function boardAgents(fold: JiraFold, payload: JiraSessionsPayload | null,
 }
 
 /**
- * The List's Session cell: per top, the state of the FIRST entry `boardAgents` returned for it. Those entries are already in `deckOrder` (group, newest
- * start, id), so the cell names the session the deck leads that card with and this adds no ordering of its own — a card with `needs you` on a child and
- * `working` on itself reads `needs you` in both places. A top with no live session has no key.
+ * The List's Session cell: per top, the session the deck leads that card with, else the newest one that ENDED on it. A live entry is the FIRST one
+ * `boardAgents` returned for the top — those are already in `deckOrder` (group, newest start, id), so this adds no ordering of its own: a card with `needs you`
+ * on a child and `working` on itself reads `needs you` in both places — and its `since` is the entry's own. With none live, the newest ended link (`endedAt`)
+ * on the top or on any issue folded under it reads `ended`, `since` = that `endedAt`; a live session always wins, so a cell never says both. A top with
+ * neither has no key.
  */
-export function topSessionState(agents: readonly DeckEntry[]): Map<string, JiraSessionState> {
-  const out = new Map<string, JiraSessionState>();
-  for (const e of agents) if (!out.has(e.top.key)) out.set(e.top.key, e.state);
+export function topSessionCell(
+  agents: readonly DeckEntry[],
+  links: readonly SessionLink[],
+  fold: JiraFold
+): Map<string, { state: JiraSessionState; since: string }> {
+  const out = new Map<string, { state: JiraSessionState; since: string }>();
+  for (const e of agents) if (!out.has(e.top.key)) out.set(e.top.key, { state: e.state, since: e.since });
+  const topOf = new Map<string, string>();
+  for (const top of fold.tops) {
+    topOf.set(top.key, top.key);
+    for (const under of fold.under.get(top.key) ?? []) topOf.set(under.key, top.key);
+  }
+  const newest = new Map<string, string>();
+  for (const l of links) {
+    if (l.endedAt === null) continue;
+    const top = topOf.get(l.key);
+    if (top === undefined || out.has(top)) continue;
+    const cur = newest.get(top);
+    if (cur === undefined || ms(l.endedAt) > ms(cur)) newest.set(top, l.endedAt);
+  }
+  for (const [top, since] of newest) out.set(top, { state: 'ended', since });
   return out;
-}
-
-/** The word beside the dot in the List's Session cell. `ended` is never reached — `boardAgents` drops ended links — and reads as nothing if it were. */
-export function issueCellWord(state: JiraSessionState): string {
-  if (needsYou(state)) return 'needs you';
-  if (state === 'working') return 'working';
-  if (state === 'quiet') return 'quiet';
-  if (state === 'lost') return 'lost contact';
-  if (state === 'starting') return 'starting';
-  return '';
 }
 
 /** The header's tally: how many cards want a person and how many are working — the two numbers a glance at the deck is for. */
@@ -140,8 +150,9 @@ export function deckTally(entries: readonly DeckEntry[]): { needs: number; worki
  * `↳ <top key>` — the card shows the session's own key, and this is what says which card of the board it hangs under. A reservation knows only its name and
  * repo, so the surface and the model are absent rather than guessed.
  */
-export function deckCrumb(entry: DeckEntry, skills: readonly { id: string; name: string }[]): string {
-  const parts: (string | null)[] = [entry.issue.key === entry.top.key ? null : `↳ ${entry.top.key}`];
+export function deckCrumb(entry: DeckEntry, skills: readonly { id: string; name: string }[], opts: { lead?: boolean } = {}): string {
+  // `lead: false` leaves the `↳ top` out: the deck card draws it as a pill beside the key and keeps the crumb to the run's own words.
+  const parts: (string | null)[] = [opts.lead === false || entry.issue.key === entry.top.key ? null : `↳ ${entry.top.key}`];
   const { link, starting } = entry;
   if (link !== null) {
     const row = link.row;

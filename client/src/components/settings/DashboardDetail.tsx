@@ -46,7 +46,7 @@ function TokenLine({ tokenVar, set }: { tokenVar: string; set: boolean }) {
 }
 
 /**
- * Both windows full width, each with its reset as a clock time in the shared zone (#241) under it (`resetClockText` — absolute, unlike the launch sheet's
+ * Both windows as side-by-side tiles (stacked on a phone), each a meter with its reset as a clock time in the shared zone (#241) under it (`resetClockText` — absolute, unlike the launch sheet's
  * relative `fiveHourResetText`). No figure: one muted line, `noUsageText`'s — specific only where the server already knows (unreachable, stale).
  */
 function Usage({ status, now }: { status: MachineStatus | null; now: number }) {
@@ -63,7 +63,7 @@ function Usage({ status, now }: { status: MachineStatus | null; now: number }) {
       {windows.map(({ label, w }) => {
         const reset = resetClockText(w.resetsAt, now, zone);
         return (
-          <span key={label} className="dash-page-window">
+          <span key={label} className="dash-page-tile">
             <Meter label={label} value={`${usagePercent(w.pct)}%`} fraction={w.pct / 100} tone={usageTone(w.pct)} width="fill" />
             {reset !== null && <span className="dash-page-muted">{reset}</span>}
           </span>
@@ -118,7 +118,7 @@ export function DashboardDetail({
   return (
     <Sheet as="section" className="dash-page-detail">
       <div className="dash-page-head">
-        <MachineIdentity machine={machine} />
+        <MachineIdentity machine={machine} account={false} />
         <span className="dash-page-controls">{controls}</span>
       </div>
       {notice}
@@ -169,6 +169,8 @@ export function DashboardDetail({
             <dd>{remote.host ? <code>{remote.host}</code> : '—'}</dd>
           </>
         )}
+        <dt>Account</dt>
+        <dd>{machine.account ? <Pill>{machine.account}</Pill> : '—'}</dd>
         <dt>Token</dt>
         <dd>{remote === null ? <TokenLine tokenVar={home.tokenVar} set={home.tokenSet} /> : <TokenLine tokenVar={remote.tokenVar} set={remote.tokenSet} />}</dd>
       </dl>

@@ -1,4 +1,5 @@
 import { Fragment } from 'react';
+import type { ReactNode } from 'react';
 
 import { useFetched } from '../../hooks/useFetched';
 import { useNow } from '../../hooks/useNow';
@@ -6,12 +7,14 @@ import { fetchArchivedRun } from '../../lib/agents';
 import { projectLabel } from '../../lib/project-label';
 import { runDetailModel } from '../../lib/run-detail';
 import type { RunDetailLive } from '../../lib/run-detail';
-import { stageChipClass, stageGlyph } from '../../lib/run-stage';
+import { stagePillTone } from '../../lib/run-stage';
 import { formatTurns, formatUsd, itemStageSpans, itemUsageTotals, runStageTotals } from '../../lib/run-stats';
 import { formatSpan, formatSpanCompact, itemQueueWaitMs } from '../../lib/run-time';
 import { RunControls } from '../RunControls';
 import type { RunControlsChange } from '../RunControls';
 import { Dot } from '../ui/Dot';
+import { Glyph } from '../ui/Glyphs';
+import type { GlyphName } from '../ui/Glyphs';
 import { Pill } from '../ui/Pill';
 import { SheetHead } from '../ui/Sheet';
 import { RowTime } from '../board/RunRowTime';
@@ -30,7 +33,7 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * pane is built at that scale instead.
  *
  * REUSE, not reinvention, is the organizing rule below: `.runs-status`
- * (RunsView's own run-level status chip), `.run-drawer-chip`/`.run-drawer-
+ * (RunsView's own run-level status chip), `.run-drawer-
  * item`/`.run-drawer-item-verify*` (RunDrawer's per-item chrome), and now
  * `RowTime` itself (`board/RunRowTime.tsx`) are all worn verbatim rather
  * than reimplemented here. `RowTime` moved out of RunDrawer.tsx specifically
@@ -214,7 +217,7 @@ export function RunDetail({
     questionMode,
     noteLine,
     usageLine,
-    sub,
+    itemCount,
     dotTone,
     controlsRun
   } = runDetailModel({ summary, live, fetchedRun }, now, zone);
@@ -243,46 +246,43 @@ export function RunDetail({
           </span>
         }
         sub={
+          /* The run id is a code span (the sub is where the id lives, spec §4.6), then the item count once the run is over — `runDetailModel` decides when. */
           <>
-            {sub}
-            {prNumber !== null && (
-              <>
-                {' · '}
-                {/* spec §5: the run's one outbound link. `rel` carries both tokens because the href is a URL a run file supplied; the pattern guard above is
-                    the second half of its safety (the server's `sanitizeMergeFields` is the first), the same reasoning `linkBase` is clamped by. */}
-                <a className="sheet-link" data-testid="run-detail-pr-link" href={source.prUrl ?? undefined} target="_blank" rel="noopener noreferrer">
-                  {`PR #${prNumber}`}
-                </a>
-              </>
-            )}
+            <code className="run-detail-id">{summary.runId}</code>
+            {itemCount !== null && ` · ${itemCount}`}
           </>
         }
         right={
-          /* task-17. `controlsRun` is `live` when there is one and a
-             synthesised entry otherwise — why that synthesis is honest is
-             written beside it, in `runDetailModel` (lib/run-detail.ts). */
-          /* The slot §8.8's fade arrives into, reserved whether or not there
-             is a control to put in it: `RunControls` renders `null` for most
-             run states, and a head that grew by a chip's height the instant
-             the sweeper stood down would move every reading under it while
-             someone was reading them. */
-          <span className="run-detail-controls">
-            {/* task-48: a remote run gets the SENTENCE in the controls' slot,
-                never the controls. Every one of them would act on this
-                machine's run-state directory, which holds nothing for this
-                run, so a Pause here would write a request no driver reads. */}
-            {remote ? (
-              <span className="run-detail-remote" data-testid="run-detail-remote">
-                Remote run: its controls are on the machine that ran it.
+          /* The status pill and its note lead the head's right column, then the controls under them (spec §4.6). They were the facts strip's `status` cell
+             until the head took them: the state is what a person came to read, and `RunControls` sits beside the word it acts on. Same element, same
+             classes — `runStatusChip` is still the one place `running` + a dead heartbeat becomes `crashed`, derived from `live` and never from `authority`. */
+          <span className="run-detail-head-right">
+            <span className="run-detail-state">
+              <span className={`runs-status ${statusChip.className}`}>
+                <span aria-hidden="true">{statusChip.glyph}</span>
+                {statusChip.label}
               </span>
-            ) : (
-              <RunControls
-                run={controlsRun}
-                gate={gate}
-                resuming={resuming}
-                onChanged={onChanged}
-              />
-            )}
+              {statusNote !== null && (
+                <span className="run-fact-note" data-testid="run-detail-status-note">
+                  {statusNote}
+                </span>
+              )}
+            </span>
+            {/* task-17. `controlsRun` is `live` when there is one and a synthesised entry otherwise — why that synthesis is honest is written beside it, in
+                `runDetailModel` (lib/run-detail.ts). The slot is reserved whether or not there is a control to put in it: `RunControls` renders `null` for
+                most run states, and a head that grew by a chip's height the instant the sweeper stood down would move every reading under it while someone
+                was reading them. `RunControls` and its gate are untouched by this restyle; only the slot's place moved. */}
+            <span className="run-detail-controls">
+              {/* task-48: a remote run gets the SENTENCE in the controls' slot, never the controls. Every one of them would act on this machine's run-state
+                  directory, which holds nothing for this run, so a Pause here would write a request no driver reads. */}
+              {remote ? (
+                <span className="run-detail-remote" data-testid="run-detail-remote">
+                  controls live on the machine that ran it
+                </span>
+              ) : (
+                <RunControls run={controlsRun} gate={gate} resuming={resuming} onChanged={onChanged} />
+              )}
+            </span>
           </span>
         }
       />
@@ -295,120 +295,64 @@ export function RunDetail({
           for one), and every run archived before task-27 carries no usage at
           all — the reading that must never become a `$0.00`. */}
       <div className="run-facts" data-testid="run-detail-facts">
-        {startedClock !== null && (
-          <div className="run-fact">
-            <span className="run-fact-label">started</span>
-            <span className="run-fact-value" data-testid="run-detail-started">
-              {startedClock}
+        {(startedClock !== null || finishedClock !== null || wall !== null) && (
+          <FactCell glyph="calendar" label="Started">
+            <span className="run-fact-value">
+              {startedClock !== null && <span data-testid="run-detail-started">{startedClock}</span>}
+              {/* `wall` while the run is over, `elapsed` while it is not — one reading from `runWallMs`, which freezes itself on a dead heartbeat (bug-14),
+                  under whichever of the two words is true. The testid is the one this reading has always carried, so the case that pins it follows the
+                  number rather than the markup. */}
+              {wall !== null && (
+                <span className="run-fact-wall">
+                  {wallLabel} <span data-testid="run-detail-time">{formatSpanCompact(wall)}</span>
+                </span>
+              )}
             </span>
-          </div>
-        )}
-        {finishedClock !== null && (
-          <div className="run-fact">
-            <span className="run-fact-label">finished</span>
-            <span className="run-fact-value" data-testid="run-detail-finished">
-              {finishedClock}
-            </span>
-          </div>
-        )}
-        {/* `wall` while the run is over, `elapsed` while it is not — one
-            reading from `runWallMs`, which freezes itself on a dead heartbeat
-            (bug-14), under whichever of the two words is true. The testid is
-            the one this reading has always carried, so the case that pins it
-            follows the number rather than the markup. */}
-        {wall !== null && (
-          <div className="run-fact">
-            <span className="run-fact-label">{wallLabel}</span>
-            <span className="run-fact-value" data-testid="run-detail-time">
-              {formatSpanCompact(wall)}
-            </span>
-          </div>
+            {finishedClock !== null && (
+              <span className="run-fact-note">
+                finished <span data-testid="run-detail-finished">{finishedClock}</span>
+              </span>
+            )}
+          </FactCell>
         )}
         {remote && machine !== null && machine !== '' && (
-          <div className="run-fact">
-            <span className="run-fact-label">machine</span>
+          <FactCell glyph="cpu" label="Machine">
             <span className="run-fact-value" data-testid="run-detail-on-machine">
               {machine}
             </span>
-          </div>
+          </FactCell>
         )}
-        <div className="run-fact">
-          <span className="run-fact-label">status</span>
+        {/* Which branch this run gated at, cut its worktrees from and merged into (task-44) — **rendered for every run, `main` ones included**, unlike the
+            mode pill beside it, which hides itself for a plain merge-mode run. The two are different kinds of fact: a mode pill marks a run that DEVIATED,
+            so its absence is itself a reading ("this run merged, as asked"). A base is where the work went, and a field that appeared only sometimes would
+            read as an anomaly on the runs that had it rather than as ordinary metadata. Unrecoverable from anything else after the fact — the merge commits
+            are on the base, not in any file this app keeps. `source.base` is total for every run: the server's reader resolves an older run file's absent
+            `base` to `'main'` once (`sanitizeMergeFields`), so there is no `?? 'main'` to re-implement here. The question mode sits under it as the run's
+            other configuration reading. */}
+        <FactCell glyph="branch" label="Base · mode">
           <span className="run-fact-value">
-            {/* bug-29: `runStatusChip` (lib/run-stage.ts), the one place the
-                `running` + dead-heartbeat -> `crashed` substitution is
-                decided, shared with the Live and History rows so no two
-                badges on one screen can disagree. Derived from `live`, never
-                from `authority` — `authority` may be an archive record, which
-                carries no `fresh` field, and a run with no heartbeat to judge
-                must keep printing its recorded status. */}
-            <span className={`runs-status ${statusChip.className}`}>
-              <span aria-hidden="true">{statusChip.glyph}</span>
-              {statusChip.label}
+            <span data-testid="run-detail-base">
+              <code>{source.base}</code>
             </span>
-            {statusNote !== null && (
-              <span className="run-fact-note" data-testid="run-detail-status-note">
-                {statusNote}
-              </span>
-            )}
-          </span>
-        </div>
-        {modeLabel !== null && (
-          <div className="run-fact">
-            <span className="run-fact-label">mode</span>
-            <span className="run-fact-value">
+            {modeLabel !== null && (
               <Pill tone="warn">
                 <span data-testid="run-detail-mode">{modeLabel}</span>
               </Pill>
-            </span>
-          </div>
-        )}
-        <div className="run-fact">
-          <span className="run-fact-label">questions</span>
-          <span className="run-fact-value" data-testid="run-detail-questions">
-            {questionMode}
+            )}
           </span>
-        </div>
-        {/* task-44: which branch this run gated at, cut its worktrees from and
-            merged into.
-
-            **Rendered for every run, `main` ones included**, deliberately
-            unlike the `mode` fact directly above, which hides itself for a
-            plain merge-mode run. The two are different kinds of fact: a mode
-            pill marks a run that DEVIATED, so its absence is itself a reading
-            ("this run merged, as asked"). A base is where the work went, and a
-            field that appeared only sometimes would read as an anomaly on the
-            runs that had it rather than as ordinary metadata — and would leave
-            the reader of a `main` run unsure whether the field was missing or
-            the run predated it.
-
-            Unrecoverable from anything else after the fact, which is the whole
-            reason it is drawn: the merge commits are on the base, not in any
-            file this app keeps, so a runs history that omitted it would lie by
-            omission. `source.base` is total for every run — the server's
-            reader resolves an older run file's absent `base` to `'main'` once
-            (`sanitizeMergeFields`), so there is no `?? 'main'` to re-implement
-            here. */}
-        <div className="run-fact">
-          <span className="run-fact-label">base</span>
-          <span className="run-fact-value" data-testid="run-detail-base">
-            <code>{source.base}</code>
+          <span className="run-fact-note">
+            questions <span data-testid="run-detail-questions">{questionMode}</span>
           </span>
-        </div>
-        {/* task-27: what the whole run cost, summed off the per-transcript
-            entries `orchestrate.mjs usage` wrote. `runUsageTotals` returns
-            `null` for every run archived before that command existed, so this
-            fact does not render at all for them — never a `$0.00`, which is
-            the one reading that feature must not produce. The `sessions`
-            count rides along because it is what explains a total that looks
-            high for the queue length. */}
+        </FactCell>
+        {/* task-27: what the whole run cost, summed off the per-transcript entries `orchestrate.mjs usage` wrote. `runUsageTotals` returns `null` for every
+            run archived before that command existed, so this cell does not render at all for them — never a `$0.00`, which is the one reading that feature
+            must not produce. The `sessions` count rides along because it is what explains a total that looks high for the queue length. */}
         {usageLine !== null && (
-          <div className="run-fact">
-            <span className="run-fact-label">cost</span>
+          <FactCell glyph="coin" label="Cost">
             <span className="run-fact-value" data-testid="run-detail-usage">
               {usageLine}
             </span>
-          </div>
+          </FactCell>
         )}
       </div>
 
@@ -476,43 +420,54 @@ export function RunDetail({
         </div>
       )}
 
+      {/* The counts as pills (spec §4.6), the same testids and words as the chips they replace. Tone says only what is worth a glance: merged is `done`
+          once anything merged, attention is `warn` once anything needs a look, active is `live`, and every other count — and any count at zero — stays
+          quiet. */}
       <div className="run-drawer-chips" data-testid="run-detail-chips">
-        <span className="run-drawer-chip" data-testid="run-detail-chip-merged">
-          <span className="run-drawer-chip-num">{merged}</span> merged
-        </span>
-        {/* Rendered only once this run has an actual branched item to
-            report — see `branched`'s own comment above for why zero of them
-            means this chip must not appear at all: a plain merge-mode run's
-            chip row is exactly the three-then-fourth set it printed before
-            this feature existed, unchanged. */}
-        {branched.length > 0 && (
-          <span className="run-drawer-chip" data-testid="run-detail-chip-branched">
-            <span className="run-drawer-chip-num">{branched.length}</span> branched
+        <Pill tone={merged > 0 ? 'done' : 'neutral'}>
+          <span data-testid="run-detail-chip-merged">
+            <span className="run-drawer-chip-num">{merged}</span> merged
           </span>
+        </Pill>
+        {/* Rendered only once this run has an actual branched item to report — see `branched`'s own comment above for why zero of them means this pill must
+            not appear at all: a plain merge-mode run's row is exactly the set it printed before this feature existed, unchanged. */}
+        {branched.length > 0 && (
+          <Pill tone="done">
+            <span data-testid="run-detail-chip-branched">
+              <span className="run-drawer-chip-num">{branched.length}</span> branched
+            </span>
+          </Pill>
         )}
-        <span className="run-drawer-chip" data-testid="run-detail-chip-skipped">
-          <span className="run-drawer-chip-num">{skipped}</span> skipped
-        </span>
-        <span className="run-drawer-chip" data-testid="run-detail-chip-attention">
-          <span className="run-drawer-chip-num">{attention.length}</span> attention
-        </span>
-        <span className="run-drawer-chip" data-testid="run-detail-chip-fixloops">
-          <span className="run-drawer-chip-num">{fixLoopsTotal}</span> fix loops
-        </span>
-        {/* Active/queued only ever mean something for a run this board is
-            still hearing from — a finished run is zero of both "by
-            construction" (design doc's own wording), and printing two more
-            zero chips on every archived row would be noise, not information.
-            A CRASHED run is the same case (bug-29): its heartbeat is gone, so
-            "active right now" is a claim this sheet cannot make for it. */}
+        <Pill>
+          <span data-testid="run-detail-chip-skipped">
+            <span className="run-drawer-chip-num">{skipped}</span> skipped
+          </span>
+        </Pill>
+        <Pill tone={attention.length > 0 ? 'warn' : 'neutral'}>
+          <span data-testid="run-detail-chip-attention">
+            <span className="run-drawer-chip-num">{attention.length}</span> attention
+          </span>
+        </Pill>
+        <Pill>
+          <span data-testid="run-detail-chip-fixloops">
+            <span className="run-drawer-chip-num">{fixLoopsTotal}</span> fix loops
+          </span>
+        </Pill>
+        {/* Active/queued only ever mean something for a run this board is still hearing from — a finished run is zero of both "by construction" (design doc's
+            own wording), and printing two more zero pills on every archived row would be noise, not information. A CRASHED run is the same case (bug-29):
+            its heartbeat is gone, so "active right now" is a claim this sheet cannot make for it. */}
         {liveFresh && (
           <>
-            <span className="run-drawer-chip" data-testid="run-detail-chip-active">
-              <span className="run-drawer-chip-num">{active}</span> active
-            </span>
-            <span className="run-drawer-chip" data-testid="run-detail-chip-queued">
-              <span className="run-drawer-chip-num">{queued}</span> queued
-            </span>
+            <Pill tone={active > 0 ? 'live' : 'neutral'}>
+              <span data-testid="run-detail-chip-active">
+                <span className="run-drawer-chip-num">{active}</span> active
+              </span>
+            </Pill>
+            <Pill>
+              <span data-testid="run-detail-chip-queued">
+                <span className="run-drawer-chip-num">{queued}</span> queued
+              </span>
+            </Pill>
           </>
         )}
       </div>
@@ -566,26 +521,33 @@ export function RunDetail({
           const spans = itemStageSpans(row);
           const queueWait = itemQueueWaitMs(row);
           const preflightSpan = spans.find((span) => span.stage === 'preflight');
+          const stageSplit = spans
+            .filter((span) => span.stage !== 'pending' && span.stage !== 'preflight')
+            .map((span) => `${span.stage} ${formatSpan(span.ms)}`)
+            .join(' · ');
           return (
             <div key={row.id} className="run-drawer-item" data-testid={`run-detail-item-${row.id}`}>
               <div className="run-drawer-item-head">
                 <span className="run-drawer-item-id">{row.id}</span>
                 <span className="run-drawer-item-title">{row.title}</span>
-                {/* Tone/glyph from lib/run-stage.ts, shared with the card,
-                    the strip, and the drawer — an item's stage reads the
-                    same everywhere in this app. */}
-                <span className={stageChipClass(row.stage)}>
-                  <span className="board-card-stage-glyph" aria-hidden="true">
-                    {stageGlyph(row.stage)}
-                  </span>
-                  {row.stage}
-                </span>
+                {/* The outcome pill (spec §4.6): the item's REAL stage word, toned by `stagePillTone` over the same `STAGE_TONE` the board cards read, so a
+                    stage keeps one colour meaning everywhere. The old chip's glyph went with it — the word and the tone carry the reading. */}
+                <Pill tone={stagePillTone(row.stage)}>{row.stage}</Pill>
                 {/* The shared `RowTime` (board/RunRowTime.tsx), not a
                     second inline reading — see this file's own header for
                     why growing a second "how long" implementation here is
                     exactly the mistake this move exists to foreclose. */}
                 <RowTime item={row} now={clock} testIdPrefix="run-detail-item-time" />
               </div>
+
+              {/* One line of the item's own stage splits, `stage span · stage span`, from `itemStageSpans` (spec §4.6). `pending` and `preflight` are left
+                  out because the lead line below already prints exactly those two (queue wait and the preflight breakdown), and a figure printed twice on
+                  one item reads as two measurements. Omitted when nothing else is left to say. */}
+              {stageSplit !== '' && (
+                <div className="run-detail-lead" data-testid={`run-detail-spans-${row.id}`}>
+                  {stageSplit}
+                </div>
+              )}
 
               {/* The queue-wait / preflight lead line (Task 6). Only
                   `queueWait` is something `RowTime`'s `itemDurationMs`
@@ -767,6 +729,32 @@ export function RunDetail({
           );
         })
       )}
+
+      {/* The run's outcome line closes the sheet (spec §4.6): drawn only when `prNumber` is not null, which `runDetailModel` derives from a `prUrl` that passes
+          the same pattern the tool and the server hold, so a failed or denied `gh pr create` (`prUrl` stays `null`, spec §6) draws nothing. Moved here from the
+          head, where it was the sub line's one link. The `#<n>` is the link, `rel` carries both tokens because the href is a URL a run file supplied, and the
+          pattern guard is the second half of its safety (the server's `sanitizeMergeFields` is the first), the same reasoning `linkBase` is clamped by. */}
+      {prNumber !== null && (
+        <div className="run-detail-outcome" data-testid="run-detail-pr-outcome">
+          {`PR opened · ${source.base} → ${source.prTarget ?? source.base} · `}
+          <a className="sheet-link" data-testid="run-detail-pr-link" href={source.prUrl ?? undefined} target="_blank" rel="noopener noreferrer">
+            {`#${prNumber}`}
+          </a>
+        </div>
+      )}
     </>
+  );
+}
+
+/** One cell of the facts grid: a glyph and a label over the reading (spec §4.6). The glyph is decoration — `Glyph` is `aria-hidden` — and the label carries the name. */
+function FactCell({ glyph, label, children }: { glyph: GlyphName; label: string; children: ReactNode }): JSX.Element {
+  return (
+    <div className="run-fact">
+      <span className="run-fact-label">
+        <Glyph name={glyph} size={14} />
+        {label}
+      </span>
+      {children}
+    </div>
   );
 }

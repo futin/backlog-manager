@@ -113,6 +113,12 @@ import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapC
  * read-modify-write on a body, two browsers racing are Jira's last-write-wins, and R5 keeps the caches on the newest answer.
  */
 
+/** Two "Sync now" presses closer than this share one sweep's answer: the second spends no call (spec §5; the GitHub poller exports its own, same value). */
+export const SWEEP_FLOOR_MS = 5_000;
+
+/** What `sweepNow` answers; the route maps `not-armed` to a 409 and `wait` to a 429 carrying `retryAt`. */
+export type SweepNowResult = { kind: 'done' } | { kind: 'not-armed' } | { kind: 'wait'; retryAt: number };
+
 /** The base tick, the GitHub poller's. Every `SyncInterval` is a whole number of these, so the tick is the resolution and no board needs its own timer. */
 export const JIRA_POLL_MS = 15_000;
 /** The longest a board save waits for its own sweep; past it the route answers and the sweep finishes on its own. */
@@ -216,6 +222,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private forceSeq = 0;
   /** The calls the last sweep made, for the chip's CALLS meter (§6). */
   private sweepCalls = 0;
+  /** When the last sweep finished, for `SWEEP_FLOOR_MS`. `null` until one has. */
+  private lastSweepEndAt: number | null = null;
   private last429At: string | null = null;
   /** The verdict a 429 window covered, restored when the window ends with the boot still unanswered (header). `null` while no window is open. */
   private beforeWindow: { access: JiraAccess; detail: string | null } | null = null;
@@ -259,6 +267,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     if (this.inFlight !== null) return this.inFlight;
     const running = this.sweep().finally(() => {
       this.inFlight = null;
+      this.lastSweepEndAt = Date.now();
     });
     this.inFlight = running;
     return running;
@@ -289,6 +298,29 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     } finally {
       clearTimeout(cap);
     }
+  }
+
+  /**
+   * `POST /api/jira/sweep`, the popover head's site-wide `Sync now`. Everything is decided synchronously before the first await, so two presses in one tick
+   * see the same `inFlight` and join it rather than each forcing a sweep. Order: nothing armed and nothing running → `not-armed` (a site with only swept
+   * `off` boards has no chain, and a button that did something there would be a second polling path); a 429 window → `wait` with the STORED end, no call
+   * (the per-board `boards/sweep` is not refused in one — this button alone is); a sweep running → join it; one finished under `SWEEP_FLOOR_MS` ago → `done`,
+   * no call; else force every non-`off` board (the `boardSaved` mechanism, so a 401 or a window opening mid-sweep leaves them owed) and sweep once.
+   * An `off` board is left to its own per-row icon.
+   */
+  async sweepNow(): Promise<SweepNowResult> {
+    const now = Date.now();
+    if (this.stopped || (this.timer === null && this.inFlight === null)) return { kind: 'not-armed' };
+    this.expireWindow(now);
+    if (this.inWindow(now)) return { kind: 'wait', retryAt: this.boot.retryAt! };
+    if (this.inFlight !== null) {
+      await this.inFlight.catch(() => undefined);
+      return { kind: 'done' };
+    }
+    if (this.lastSweepEndAt !== null && now - this.lastSweepEndAt < SWEEP_FLOOR_MS) return { kind: 'done' };
+    for (const board of readJiraConfig().boards) if (board.interval !== 'off') this.forced.set(board.id, ++this.forceSeq);
+    await this.tick().catch(() => undefined);
+    return { kind: 'done' };
   }
 
   /** A board was deleted: its cache goes now, not at the next sweep's hygiene pass — a board re-created under the same id must start cold. */

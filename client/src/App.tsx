@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useWhatsNew } from 'ui-kit';
 
 import { SectionBoundary } from './components/SectionBoundary';
@@ -17,8 +17,11 @@ import { JiraSessionsProvider } from './hooks/JiraSessionsContext';
 import { setJiraPage } from './hooks/useJiraPage';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { ProjectsProvider, useProjectsContext } from './hooks/ProjectsContext';
+import { OrchestratorRunsProvider, useOrchestratorRunsContext } from './hooks/OrchestratorRunsContext';
 import { setFilesPage, setGithubPage, useFilesPage, useGithubPage } from './hooks/useSourcePage';
-import { TrackersProvider } from './hooks/TrackersContext';
+import { PullRequestsProvider, usePullRequestsContext } from './hooks/PullRequestsContext';
+import { needsYouCount } from './lib/pr-layouts';
+import { TrackersProvider, useTrackersContext } from './hooks/TrackersContext';
 import { TimeZoneProvider } from './hooks/TimeZoneContext';
 import { useNarrow } from './hooks/useNarrow';
 import { setRunsMode } from './hooks/useRunsMode';
@@ -87,7 +90,14 @@ export function App() {
             {/* The shell's one projects answer (source-sections spec): the rail's Files and GitHub rows are drawn from it, and the shell settles a section
                 whose row has vanished. Inside `JiraProvider` only so the three shell-level answers nest in one place; it reads neither. */}
             <ProjectsProvider>
-              <AppShell />
+              {/* The shell's one runs poll (spec §4.9a): the rail's cursor and every view that reads the run payload share this answer and this clock. */}
+              <OrchestratorRunsProvider>
+                {/* The shell's one `GET /api/prs` read (spec §4.9a), beside the runs poll: the rail's GitHub count is drawn on every page, so the read no
+                    longer belongs to the pages that draw PRs. Inside `TrackersProvider` because it is enabled by a registered GitHub project. */}
+                <PullRequestsProvider>
+                  <AppShell />
+                </PullRequestsProvider>
+              </OrchestratorRunsProvider>
             </ProjectsProvider>
           </JiraProvider>
         </TimeZoneProvider>
@@ -102,6 +112,11 @@ export function App() {
  */
 function AppShell() {
   const { settings, update, legacyLanding } = useSettings();
+  const { working, liveCount } = useOrchestratorRunsContext();
+  const prs = usePullRequestsContext();
+  const trackers = useTrackersContext();
+  // The rail footer's reading follows the shell's existing tracker read — no poller of its own: an error is `down`, an answer `ok`, and until either, nothing.
+  const api = trackers.error ? 'down' : trackers.data ? 'ok' : null;
   /*
     The section is remembered across loads (`writeSection`): reopening on the section you left is what you want from a board you come back to.
 
@@ -181,49 +196,9 @@ function AppShell() {
     window.history.replaceState(window.history.state, '', withoutDeepLink(pathname, search, hash));
   }, []);
 
-  /*
-    Whether a run on this machine is working, for the rail's wordmark cursor (§8.0). Reported up by whichever of Board, Runs and Archive is mounted
-    (`useReportWorking`) — and GitHub › PRs, which runs one for its run-in-progress warning (§8.11) — rather than polled here: each of the three already
-    runs a `useOrchestratorRuns()`, every call is its own 5 s poller, and a fourth
-    in the shell would double the requests on all three pages to learn what the page on screen already knows. `undefined` is "nobody has said" — Settings,
-    which polls nothing, and any view before its first report — and the rail reads it as not working.
-
-    A view that unmounts reports nothing on its way out, so a report has to be dropped for it. The effect below does that on a VIEW change, so a Board that
-    said `true` neither blinks the cursor over Settings nor comes back with the Board before the new mount has said anything — and only on a change: a
-    click on the view already open (the rail's own row, a Runs tree pick) leaves it mounted, its report effect has no reason to run again, and resetting
-    there would stand the cursor solid over a run that is still working. Every report also carries the view that made it, read back only while that view
-    is open, so an old view's report never shows on the one commit between the switch and the reset.
-  */
-  /*
-    A report is tagged by VIEW — the section, and for a source section its page — not by section alone: GitHub › Board and GitHub › Archive are one
-    section, and a pick in the GitHub tree swaps the view without a section change. The tag alone was not enough: it hides the Board's last `true` while a
-    page that reports nothing is open, but that `true` is still there, under the Board's own tag, when the tree brings a new Board back (#401).
-  */
+  // The view on screen — the section, and for a source section its page. GitHub › Board and GitHub › Archive are one section, and a pick in the GitHub
+  // tree swaps the view without a section change, so the boundary below keys on this rather than on the section alone.
   const view = section === 'files' ? `files:${filesPage}` : section === 'github' ? `github:${githubPage}` : section;
-  const [pulse, setPulse] = useState<{ view: string; working: boolean } | null>(null);
-  const working = pulse !== null && pulse.view === view ? pulse.working : undefined;
-  /*
-    Conditional, because a view's report effect runs BEFORE this one, the parent's, in the same commit: an unconditional `setPulse(null)` would wipe the new
-    view's own first report, and `useReportWorking` keys on the boolean, so it would never say it again. Being an effect also settles the race with the OLD
-    view: a poll that landed just before the switch leaves that view's report effect pending, React flushes it ahead of the switch's render, and it lands
-    before this runs.
-  */
-  useEffect(() => {
-    setPulse((p) => (p !== null && p.view !== view ? null : p));
-  }, [view]);
-  // One stable callback per reporting view: the views' report effect lists `onWorking` as a dependency, and an inline arrow would re-run it on
-  // every render of this shell.
-  const report = useMemo(() => {
-    const reportFor = (from: string) => (w: boolean) => setPulse({ view: from, working: w });
-    return {
-      filesBoard: reportFor('files:board'),
-      filesArchive: reportFor('files:archive'),
-      githubBoard: reportFor('github:board'),
-      githubPrs: reportFor('github:prs'),
-      githubArchive: reportFor('github:archive'),
-      runs: reportFor('runs')
-    };
-  }, []);
 
   // A section the reader (or a link, or the shell's own fall) moved to is never provisional: clearing `pending` here is what keeps a click made before the
   // first projects answer from being yanked back to wherever the settle below would have put the guess.
@@ -315,6 +290,12 @@ function AppShell() {
     change('jira');
   };
 
+  /* The Files section's pair, for the Sources card's `Open`: the Files board, page store first like its two siblings. */
+  const onOpenFilesPage = (): void => {
+    setFilesPage('board');
+    change('files');
+  };
+
   /*
     The GitHub section's pair, the same shape for the same reason: the Sources card's `GitHub › Settings` link (Settings › Shared) is this, never a
     `change('github')` of its own — a section set without its page would open whichever GitHub page was last stored, not the one the link names.
@@ -346,8 +327,8 @@ function AppShell() {
   // renders `null` otherwise — so the strip (always in the tree) and the rail bar hold zero, one or two chips, never a hidden one.
   const chip = (
     <>
-      <TrackerChip section={section} />
-      <JiraChip section={section} />
+      <TrackerChip section={section} onOpenSettings={() => onOpenGithubPage('settings')} />
+      <JiraChip section={section} onOpenSetup={onOpenJiraPage} />
     </>
   );
 
@@ -375,9 +356,11 @@ function AppShell() {
           working={working}
           releases={releaseChip}
           provisional={pending !== null}
+          counts={{ github: needsYouCount(prs.data), runs: liveCount }}
+          api={api}
         />
         {whatsNew.open && whatsNew.data && <ReleasesDrawer data={whatsNew.data} onClose={whatsNew.close} />}
-        {/* The strip over the well (§8.0). `.maincol` is the rail's paper, so the rail and the strip are one white L and the well's 24 px top-left
+        {/* The strip over the well (§8.0). `.maincol` is `--strip` (white) while the rail is `--board`, so the well's 24 px top-left
             curve is drawn against white — it was grey on grey while `.main` made its own gap with a margin, because `body` is --board and stays so.
             The strip is always in the tree, empty without a tracker, so its height (`--main-gap`, which `.runs-board` subtracts) never depends on
             whether one is connected; CSS hides it below 700 px. */}
@@ -413,17 +396,17 @@ function AppShell() {
                     <SectionLoading />
                   ) : (
                     <>
-                      {section === 'files' && filesPage === 'board' && <BoardView source="files" onOpenRuns={() => change('runs')} onWorking={report.filesBoard} />}
-                      {section === 'files' && filesPage === 'archive' && <ArchiveView source="files" onWorking={report.filesArchive} />}
-                      {section === 'github' && githubPage === 'board' && <BoardView source="github" onOpenRuns={() => change('runs')} onWorking={report.githubBoard} />}
+                      {section === 'files' && filesPage === 'board' && <BoardView source="files" onOpenRuns={() => change('runs')} />}
+                      {section === 'files' && filesPage === 'archive' && <ArchiveView source="files" />}
+                      {section === 'github' && githubPage === 'board' && <BoardView source="github" onOpenRuns={() => change('runs')} />}
                       {section === 'github' && githubPage === 'prs' && (
-                        <PullRequestsView onWorking={report.githubPrs} onOpenSettings={() => onOpenGithubPage('settings')} />
+                        <PullRequestsView onOpenSettings={() => onOpenGithubPage('settings')} />
                       )}
-                      {section === 'github' && githubPage === 'archive' && <ArchiveView source="github" onWorking={report.githubArchive} />}
+                      {section === 'github' && githubPage === 'archive' && <ArchiveView source="github" />}
                       {section === 'github' && githubPage === 'settings' && <GithubSettingsView />}
                     </>
                   )}
-                  {section === 'runs' && <RunsView onWorking={report.runs} />}
+                  {section === 'runs' && <RunsView />}
                   {section === 'jira' && <JiraView onOpenJiraPage={onOpenJiraPage} />}
                   {/* Settings' watchdog card carries a `Live view` link to Runs ›
                     Watchdog (DESIGN.md §8.6), and this is what it opens with — the
@@ -440,6 +423,7 @@ function AppShell() {
                         setRunsMode('watchdog');
                         change('runs');
                       }}
+                      onOpenFilesPage={onOpenFilesPage}
                       onOpenGithubPage={onOpenGithubPage}
                       onOpenJiraPage={onOpenJiraPage}
                     />

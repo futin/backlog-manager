@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { useNow } from '../../hooks/useNow';
 import { useTicks } from '../../hooks/useTicks';
 import { formatClock } from '../../lib/run-time';
-import { sortTickProjects, tickActivity, ticksLast24h } from '../../lib/ticks';
+import { sortTickProjects, tickActivity, tickStrip, ticksLast24h } from '../../lib/ticks';
 import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
 import { Figure, FigureStrip } from '../ui/Figure';
@@ -164,14 +164,8 @@ export function TickMonitor() {
                         <time dateTime={e.at}>{formatClock(e.at, zone) ?? '—:—'}</time>
                       </td>
                       <td>
-                        {/* Glyph AND word, so the tone is never the only carrier; an outcome this build has no name for prints as it came. */}
-                        {e.outcome === 'ok' ? (
-                          <span className="watchdog-kind watchdog-kind-done">✓ ok</span>
-                        ) : e.outcome === 'failed' ? (
-                          <span className="watchdog-kind watchdog-kind-bad">✕ failed</span>
-                        ) : (
-                          <span className="watchdog-kind watchdog-kind-muted">{e.outcome}</span>
-                        )}
+                        {/* Pill carries the word, so the tone is never the only carrier; an outcome this build has no name for prints as it came. */}
+                        <Pill tone={e.outcome === 'ok' ? 'done' : e.outcome === 'failed' ? 'bad' : 'neutral'}>{e.outcome}</Pill>
                       </td>
                       <td>{e.project}</td>
                       <td>{e.kind}</td>
@@ -208,35 +202,53 @@ function TickRow({ project: p, pending, failure, onReset }: { project: TickProje
 
   const last = p.recent[0];
   const isHalted = p.halted === true;
+  const streak = p.streak ?? 0;
+  const cells = tickStrip(p, zone);
+  const ok = cells.filter((c) => c.tone === 'ok').length;
+  const failed = cells.filter((c) => c.tone === 'failed').length;
   return (
-    <div className={isHalted ? 'watchdog-row tick-row-halted' : 'watchdog-row'} data-testid="tick-row">
+    <div className="watchdog-row" data-testid="tick-row">
       <div className="tick-row-body">
         <span className="watchdog-card-head">
           <span className="watchdog-row-project" data-testid="tick-row-name">
             {p.name}
           </span>
+          {/* The streak is the verdict: red once the breaker halted the project, amber while it is merely running toward the limit. The row itself is no
+              longer tinted — the strip below shows the failing run. */}
           {isHalted ? (
-            <Pill tone="bad">halted</Pill>
+            <Pill tone="bad">{`${streak} failures in a row`}</Pill>
           ) : (
-            // Only while a lock is held: "a tick is running now". Whether that lock is stale is the reader's call and not this page's.
-            p.lock !== null && (
-              <Pill tone="live" title={`${p.lock.kind} ${p.lock.id} on ${p.lock.host}`}>
-                ticking
-              </Pill>
-            )
+            streak > 0 && <Pill tone="warn">{`${streak} failures in a row`}</Pill>
+          )}
+          {/* Only while a lock is held: "a tick is running now". Whether that lock is stale is the reader's call and not this page's. */}
+          {p.lock !== null && (
+            <Pill tone="live" title={`${p.lock.kind} ${p.lock.id} on ${p.lock.host}`}>
+              ticking
+            </Pill>
           )}
         </span>
-        {isHalted ? (
+        {isHalted && (
           <span className="watchdog-card-item">
-            {`${p.streak ?? 0} failures in a row since ${formatClock(p.haltedSince, zone) ?? '—:—'}`}
+            {`since ${formatClock(p.haltedSince, zone) ?? '—:—'}`}
             {last !== undefined && ` · last: ${last.reason} on ${last.id}`}
           </span>
-        ) : last === undefined ? (
+        )}
+        {cells.length > 0 && (
+          <>
+            {/* Marks, not text: the cells are hidden from the accessibility tree and one summary stands in for them, so a screen reader hears counts
+                rather than twelve unlabeled boxes. The titles are the sighted reader's hover. */}
+            <span className="tick-strip" aria-hidden="true" data-testid="tick-strip">
+              {cells.map((c, i) => (
+                <span key={i} className="tick-strip-cell" data-tone={c.tone} title={c.title} />
+              ))}
+            </span>
+            <span className="sr-only">{`last ${cells.length} ticks: ${ok} ok, ${failed} failed`}</span>
+          </>
+        )}
+        {last === undefined ? (
           <span className="watchdog-card-beat">no tick yet</span>
         ) : (
-          <span className="watchdog-card-item">
-            {`last tick ${formatClock(last.at, zone) ?? '—:—'} · ${last.kind} ${last.id} → ${last.outcome} · ${p.streak ?? 0} failures in a row`}
-          </span>
+          <span className="watchdog-card-item">{`last tick ${formatClock(last.at, zone) ?? '—:—'} · ${last.kind} ${last.id} → ${last.outcome}`}</span>
         )}
         {/* #367 — the caps the last `decide` saw, which is the one place a tick that keeps answering `idle` says why: grooming waits while the plans
             awaiting review fill `--max-plans`. Absent until a tick has recorded them (`last-decide.json` is written by `decide`, not `record`). */}

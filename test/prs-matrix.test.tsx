@@ -9,6 +9,7 @@ import '@testing-library/jest-dom';
 import { PrMatrix } from '../client/src/components/github/PrMatrix';
 import type { PrLayoutProps } from '../client/src/components/github/pr-layout-props';
 import { prRunWarning } from '../client/src/lib/pr-run';
+import { mainOf, moreOf, openOf, menuRow } from './helpers/pr-keys';
 import type { OrchestratorRun, ProjectSummary, PrRepoView, PullRequestRow, RunQueueItem } from '../shared/types';
 
 /**
@@ -107,9 +108,8 @@ function hp(repos: PrRepoView[], over: Partial<PrLayoutProps> = {}) {
   return rest;
 }
 
-/** The `Merge` key of an open expansion — the Confirm's accept is also named `Merge`, so the key is found in the strip. */
-const mergeKey = (key: string) =>
-  within(screen.getByTestId(`pr-expand-${key}`).querySelector('.prs-keys-side') as HTMLElement).getByRole('button', { name: 'Merge' });
+/** The main half of the split Merge in an open expansion — the Confirm's accept is also named `Merge`, so the key is found in the strip. */
+const mergeKey = (key: string) => mainOf(screen.getByTestId(`pr-expand-${key}`).querySelector('.prs-keys-side') as HTMLElement);
 
 const row = (key: string) => screen.getByTestId(`pr-mrow-${key}`);
 const rowIds = () => screen.getAllByTestId(/^pr-mrow-/).map((el) => el.getAttribute('data-testid'));
@@ -145,8 +145,24 @@ describe('PrMatrix — header, cells and order', () => {
     render(<PrMatrix {...props([repo('a/x', [draft, clean, behind])])} />);
     // The draft is the newest PR, but a draft is Quiet: it ranks after the behind PR, with the clean one.
     expect(rowIds()).toEqual(['pr-mrow-a/x#2', 'pr-mrow-a/x#4', 'pr-mrow-a/x#3']);
-    expect(within(row('a/x#4')).getByText('failing')).toHaveClass('prs-cell-bad');
+    expect(within(row('a/x#4')).getByText('failing')).toHaveClass('ui-pill-bad');
     expect(screen.getByRole('columnheader', { name: 'Checks 1' })).toBeInTheDocument();
+  });
+
+  it('counts a problem column in a pill on its header, red under Checks and amber elsewhere, and draws none at zero', () => {
+    render(<PrMatrix {...props([trio()])} />);
+    const checks = screen.getByRole('columnheader', { name: 'Checks 1' });
+    expect(within(checks).getByText('1')).toHaveClass('ui-pill', 'ui-pill-bad');
+    expect(within(screen.getByRole('columnheader', { name: 'Base 1' })).getByText('1')).toHaveClass('ui-pill-warn');
+    expect(screen.getByRole('columnheader', { name: 'Review' }).querySelector('.ui-pill')).toBeNull();
+  });
+
+  it('draws a failing cell as a red pill and a behind cell as an amber one, and a passing cell as plain text', () => {
+    render(<PrMatrix {...props([trio()])} />);
+    expect(within(row('a/x#1')).getByText('failing')).toHaveClass('ui-pill', 'ui-pill-bad');
+    expect(within(row('a/x#2')).getByText('behind')).toHaveClass('ui-pill', 'ui-pill-warn');
+    expect(within(row('a/x#3')).getByText('passing')).not.toHaveClass('ui-pill');
+    expect(within(row('a/x#3')).getByText('passing').closest('.ui-pill')).toBeNull();
   });
 
   it('puts each fact in its own tone class', () => {
@@ -154,6 +170,8 @@ describe('PrMatrix — header, cells and order', () => {
     const r = row('a/x#6');
     expect(within(r).getByText('passing')).toHaveClass('prs-cell-ok');
     expect(within(r).getByText('approved')).toHaveClass('prs-cell-ok');
+    // Colour marks problems only: a healthy row draws no pill in its cells.
+    expect(r.querySelectorAll('.ui-pill')).toHaveLength(0);
     expect(within(r).getByText('squash')).toHaveClass('prs-cell-live');
     expect(within(r).queryAllByText('—')).toHaveLength(0);
   });
@@ -200,7 +218,7 @@ describe('PrMatrix — header, cells and order', () => {
 });
 
 describe('PrMatrix — the expansion', () => {
-  it('opens the four keys under a row on click and reaches the merge confirm through Merge', async () => {
+  it('opens the split Merge and Open link under a row on click and reaches the merge confirm through Merge', async () => {
     const user = userEvent.setup();
     render(<Harness {...hp([repo('a/x', [clean])])} />);
     expect(screen.queryByTestId('pr-expand-a/x#3')).not.toBeInTheDocument();
@@ -208,8 +226,8 @@ describe('PrMatrix — the expansion', () => {
     expect(row('a/x#3')).toHaveAttribute('aria-expanded', 'true');
     const expansion = screen.getByTestId('pr-expand-a/x#3');
     const keys = within(expansion.querySelector('.prs-keys') as HTMLElement);
-    expect(keys.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Merge', 'Auto-merge', 'Update']);
-    expect(keys.getByRole('link', { name: 'Open ↗' })).toHaveAttribute('href', 'https://github.com/a/x/pull/3');
+    expect(keys.getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Merge #3', 'Merge options for #3']);
+    expect(keys.getByRole('link', { name: 'Open #3 on GitHub' })).toHaveAttribute('href', 'https://github.com/a/x/pull/3');
     await user.click(mergeKey('a/x#3'));
     expect(within(expansion).getByTestId('pr-merge-confirm')).toBeInTheDocument();
   });
@@ -221,12 +239,50 @@ describe('PrMatrix — the expansion', () => {
     expect(screen.getByTestId('pr-expand-a/x#3').querySelector('.prs-why')).toHaveTextContent('auto-merge not enabled on the repo');
   });
 
-  it('pins the expansion block to the visible width', async () => {
+  it('draws the expansion after the Ledger, outside the scroll box and the Ledger group, and ties it to its row', async () => {
     const user = userEvent.setup();
     render(<PrMatrix {...props([repo('a/x', [clean])])} />);
     await user.click(row('a/x#3'));
-    const cell = screen.getByTestId('pr-expand-a/x#3').querySelector('td') as HTMLElement;
-    expect(cell.firstElementChild).toHaveClass('prs-matrix-pinned');
+    const panel = screen.getByTestId('pr-expand-a/x#3');
+    expect(panel.closest('.prs-matrix-scroll')).toBeNull();
+    expect(panel.closest('[role="group"]')).toBeNull();
+    expect(screen.getByRole('group', { name: 'Pull requests' }).nextElementSibling).toBe(panel);
+    expect(panel.closest('table')).toBeNull();
+    expect(panel.id).not.toBe('');
+    expect(row('a/x#3')).toHaveAttribute('aria-expanded', 'true');
+    expect(row('a/x#3')).toHaveAttribute('aria-controls', panel.id);
+    expect(document.querySelector('.prs-matrix-expand')).toBeNull();
+  });
+
+  it('keeps the Merge menu out of the scroll box, so its overflow cannot clip it', async () => {
+    const user = userEvent.setup();
+    render(<PrMatrix {...props([repo('a/x', [clean])])} />);
+    await user.click(row('a/x#3'));
+    await user.click(moreOf(screen.getByTestId('pr-expand-a/x#3')));
+    const menu = screen.getByRole('dialog', { name: 'Merge menu' });
+    expect(menu.closest('.prs-matrix-scroll')).toBeNull();
+    expect(menu.closest('[role="group"]')).toBeNull();
+    expect(screen.getByTestId('pr-expand-a/x#3')).toContainElement(menu);
+  });
+
+  it('collapses row A when row B opens', async () => {
+    const user = userEvent.setup();
+    render(<PrMatrix {...props([repo('a/x', [clean, behind])])} />);
+    await user.click(row('a/x#3'));
+    await user.click(row('a/x#2'));
+    expect(row('a/x#3')).toHaveAttribute('aria-expanded', 'false');
+    expect(row('a/x#3')).not.toHaveAttribute('aria-controls');
+    expect(screen.queryByTestId('pr-expand-a/x#3')).toBeNull();
+    expect(screen.getByTestId('pr-expand-a/x#2')).toBeInTheDocument();
+  });
+
+  it('reads the reason on a blocked Merge in the expansion, and leaves it aria-disabled', async () => {
+    const user = userEvent.setup();
+    render(<PrMatrix {...props([repo('a/x', [failing])])} />);
+    await user.click(row('a/x#1'));
+    const blocked = mainOf(screen.getByTestId('pr-expand-a/x#1'));
+    expect(blocked).toHaveTextContent('checks failing');
+    expect(blocked).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('closes the Confirm when its row collapses', async () => {
@@ -321,7 +377,7 @@ describe('PrMatrix — the expansion', () => {
     const write = jest.fn(() => Promise.resolve());
     render(<PrMatrix {...props([repo('a/x', [behind])], { write })} />);
     await user.click(row('a/x#2'));
-    await user.click(within(screen.getByTestId('pr-expand-a/x#2')).getByRole('button', { name: 'Update' }));
+    await user.click(menuRow(screen.getByTestId('pr-expand-a/x#2'), 'Update branch'));
     expect(write).toHaveBeenCalledWith('a/x#2', SHA, expect.any(Function));
   });
 });
@@ -380,9 +436,9 @@ describe('PrMatrix — outcomes, run warning and failing repos', () => {
     await user.click(row('a/x#2'));
     const expansion = screen.getByTestId('pr-expand-a/x#2');
     expect(screen.queryByTestId('pr-outcome')).not.toBeInTheDocument();
-    const update = within(expansion).getByRole('button', { name: 'Update' });
+    const update = menuRow(expansion, 'Update branch');
     expect(update).toHaveAttribute('aria-disabled', 'true');
-    expect(update).toHaveAttribute('title', 'updating…');
+    expect(update).toHaveAccessibleDescription('updating…');
     expect(expansion.querySelector('.prs-why')?.textContent ?? '').not.toContain('updating…');
   });
 

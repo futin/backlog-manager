@@ -21,6 +21,7 @@ import type {
   RunStage,
   RunWatchdog
 } from '../shared/types';
+import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
 /**
  * The card's live strip, driven through the real `BoardView` against the
@@ -148,7 +149,7 @@ describe('BoardView: card live strips', () => {
   }
 
   async function renderBoard(): Promise<void> {
-    render(<BoardView source="files" />);
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
     await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
   }
 

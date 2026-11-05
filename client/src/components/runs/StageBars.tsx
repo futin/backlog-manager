@@ -3,79 +3,48 @@ import { formatSpanCompact } from '../../lib/run-time';
 import type { StageTotals } from '../../lib/run-stats';
 
 /**
- * `StageBars`: seven horizontal bars, one per `MACHINE_STAGES` entry,
- * answering "where did the time actually go" over an already-computed
- * `StageTotals` record. `runStageTotals`/`sumStageTotals` (lib/run-stats.ts)
- * have produced this number since an earlier task — exported, tested, and
- * until this file, never rendered anywhere.
+ * `StageBars`: one stacked 10 px bar of machine time over a legend of all seven `MACHINE_STAGES`, answering "where did the time actually go" over an
+ * already-computed `StageTotals`. Rendered twice and knows nothing about either caller: inside the per-run detail pane over `runStageTotals`, and as the
+ * wide Runs tile over `sumStageTotals` folded across the visible range. It takes the derived totals plus a `testId` to namespace its legend entries under —
+ * no fetching, no arithmetic beyond the one share below.
  *
- * Rendered twice, and knows nothing about either caller: once inside the
- * per-run detail pane over a single run's own `runStageTotals(source, now)`
- * (Task 6), and once as a wide toolbar tile over `sumStageTotals`
- * folded across every run in the visible range (Task 7). This component only
- * ever takes the already-derived totals plus a `testId` to namespace its
- * rows under — no fetching, no arithmetic beyond the one `pct` below —
- * matching the "derive in lib/, render in components/" split the rest of
- * this feature keeps.
+ * The bar carries a segment ONLY for a stage that recorded time, width = its share of the total, so the widths sum to 100 %. The legend carries ALL seven,
+ * always in pipeline order, a stage with nothing reading `—`: dropping the empty ones would misreport "no time recorded" as "this stage does not exist for
+ * this run", and — since the widget sits twice on one screen — would put `fixing` at a different position in each, defeating the side-by-side comparison.
+ * An empty total still draws the (empty) bar for the same reason: the widget never hides.
  *
- * NOT the per-item stage bar. The `.run-detail-stagebar`
- * (RunDetail.tsx, predating this redesign, deleted in Task 6 once
- * `StageTrack.tsx` — Task 5 — replaced it) answered a different question: how
- * ONE item's own time split across the stages it personally visited, drawn
- * as one bar per ITEM with a segment per stage. This widget answers "across
- * this whole run (or range), how much did each stage category cost in
- * total" — one bar per STAGE, summed over every item — which is why the two
- * do not share a colour model: no per-stage tone here at all (see
- * styles.css's `.run-bars*` block for that reasoning in full), just a fixed
- * seven rows in one hue.
+ * Segment width goes through React's `style` prop, which is CSSOM and so allowed under `style-src 'self'`; the colour is a flat token chosen by `data-stage`
+ * in styles.css, never a tint. Segments and swatches are `aria-hidden`: the legend's text is the reading, and the bar only repeats it.
  *
- * ALWAYS SEVEN ROWS, ALWAYS IN PIPELINE ORDER — the `MACHINE_STAGES.map`
- * below never filters, so a stage this run/range never recorded still gets
- * its row, reading `—` rather than disappearing (see this file's own test
- * suite's empty-totals case). Dropping empty rows would misreport "no time
- * recorded" as "this stage does not exist for this run," and — since this
- * component is deliberately rendered twice on the same screen, a run's own
- * card beside the range-wide tile — a variable row count would also mean
- * `fixing` sits at a different vertical position in each, defeating the
- * side-by-side comparison both instances exist to support.
+ * NOT the per-item stage bar: `StageTrack` answers how ONE item's time split across the stages it visited; this answers how a whole run (or range) split.
  */
 export function StageBars({ totals, testId }: { totals: StageTotals; testId: string }): JSX.Element {
-  // Floored at 1, never 0: every entry could legitimately be absent (a run
-  // that aborts before ever leaving `pending` records nothing in any of the
-  // seven), and dividing by an all-zero max would put `NaN%` into every
-  // bar's width.
-  // The floor only ever changes the DIVISOR, never which bars end up drawn —
-  // the `ms > 0` guard below still hides a bar for every stage the floor was
-  // needed for, so a run with genuinely nothing recorded still renders seven
-  // dashes and zero fills rather than seven bars of NaN width.
-  const max = Math.max(1, ...MACHINE_STAGES.map((stage) => totals[stage] ?? 0));
+  // Floored at 1, never 0: every entry could be absent (a run that aborts before leaving `pending` records nothing) and an all-zero divisor would put
+  // `NaN%` into a width. The floor only changes the divisor — the `ms > 0` guard still keeps every empty stage out of the bar.
+  const total = Math.max(1, MACHINE_STAGES.reduce((sum, stage) => sum + (totals[stage] ?? 0), 0));
 
   return (
     <div className="run-bars" data-testid={testId}>
-      {MACHINE_STAGES.map((stage) => {
-        const ms = totals[stage] ?? 0;
-        // One decimal place, matching `.run-bars-value`'s own tabular-nums
-        // precision (styles.css) — so two stages whose totals are close but
-        // not equal still draw two visibly different bar lengths instead of
-        // both rounding to the same whole percent.
-        const pct = ((ms / max) * 100).toFixed(1);
-        return (
-          <div key={stage} className="run-bars-row" data-testid={`${testId}-${stage}`}>
-            <span className="run-bars-label">{stage}</span>
-            <span className="run-bars-track">
-              {/* No bar at all — not a zero-width one — for an absent or
-                  literally-zero stage, so "never recorded" reads as the same
-                  honest blank the `—` value beside it names (styles.css's
-                  `.run-bars*` header comment has the reasoning in full).
-                  `aria-hidden`: the value span already carries this same
-                  reading as text, so the fill would only ever be a
-                  redundant announcement to assistive tech. */}
-              {ms > 0 && <span className="run-bars-fill" style={{ width: `${pct}%` }} aria-hidden="true" />}
-            </span>
-            <span className={`run-bars-value${ms > 0 ? '' : ' run-bars-value-none'}`}>{ms > 0 ? formatSpanCompact(ms) : '—'}</span>
-          </div>
-        );
-      })}
+      <div className="run-bars-bar" aria-hidden="true">
+        {MACHINE_STAGES.map((stage) => {
+          const ms = totals[stage] ?? 0;
+          if (ms <= 0) return null;
+          // One decimal place, so two close stages still draw visibly different lengths.
+          return <span key={stage} className="run-bars-seg" data-stage={stage} style={{ width: `${((ms / total) * 100).toFixed(1)}%` }} />;
+        })}
+      </div>
+      <div className="run-bars-legend">
+        {MACHINE_STAGES.map((stage) => {
+          const ms = totals[stage] ?? 0;
+          return (
+            <div key={stage} className="run-bars-item" data-testid={`${testId}-${stage}`}>
+              <span className="run-bars-swatch" data-stage={stage} aria-hidden="true" />
+              <span className="run-bars-label">{stage}</span>
+              <span className={`run-bars-value${ms > 0 ? '' : ' run-bars-value-none'}`}>{ms > 0 ? formatSpanCompact(ms) : '—'}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -239,10 +239,14 @@ describe('Popover stylesheet rules', () => {
     expect(base['max-width']).toBe('calc(100vw / var(--font-scale, 1) - 48px)');
   });
 
-  it('.ui-popover-narrow is fixed, drops the base top, spans the viewport less 12 px a side and lets the cap go', () => {
-    expect(declarations('.ui-popover-narrow')).toMatchObject({
+  it('.ui-popover-narrow is a bottom sheet: fixed, pinned 12 px off the viewport foot, spanning it less 12 px a side, scrolling inside its 70vh cap', () => {
+    const narrow = declarations('.ui-popover-narrow');
+    // Glued to the viewport, not left at the anchor's static position: that one stayed put while the page scrolled and ran off the screen on a tall row (D10, D11).
+    expect(narrow).not.toHaveProperty('margin-top');
+    expect(narrow).toMatchObject({
       position: 'fixed',
       top: 'auto',
+      bottom: '12px',
       left: '12px',
       right: '12px',
       width: 'auto',
