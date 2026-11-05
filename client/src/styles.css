@@ -2506,7 +2506,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    `runTone` — green running, amber paused, red failed, grey for done and aborted — the same four the stripe and dot use. The 2 px floor keeps a one-in-
    many status visible. Block-level so the glyph line sits under it rather than beside it. */
 .runs-status-bar { display: flex; gap: 2px; height: 6px; margin: 2px 0 6px; border-radius: 3px; overflow: hidden; background: var(--steel) }
-.runs-status-bar > span { display: block; height: 100%; min-width: 2px; flex: none; background: var(--hairline2) }
+/* Percent widths plus the 2 px gaps add up to more than 100 %, so the segments shrink (`flex: 0 1 auto`) in proportion to their width rather than letting
+   `overflow: hidden` cut the last one off; `min-width` keeps a status with one run in a big list visible. */
+.runs-status-bar > span { display: block; height: 100%; min-width: 2px; flex: 0 1 auto; background: var(--hairline2) }
 .runs-status-bar > [data-tone='green'] { background: var(--green-solid) }
 .runs-status-bar > [data-tone='amber'] { background: var(--amber-solid) }
 .runs-status-bar > [data-tone='red'] { background: var(--red) }
