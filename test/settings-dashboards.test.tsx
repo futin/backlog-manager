@@ -355,6 +355,8 @@ describe('DashboardsPage', () => {
       render(<DashboardsPage />);
       expect(await screen.findByText(/connected · spawn on/)).toBeInTheDocument();
       expect(await screen.findByText('Unavailable')).toBeInTheDocument();
+      // The card states where it saves with the same neutral pill every other Shared card wears, not a sub-line.
+      expect(screen.getByText('this machine')).toHaveClass('ui-pill');
     });
   });
 
