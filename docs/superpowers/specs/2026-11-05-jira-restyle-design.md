@@ -131,10 +131,13 @@ Still §8.3's card composed, not a second card: `.board-card`'s ground, radius, 
    raw status name** at 12/500 `--ink2` — the dot `--ink3` for the `todo` category, `--amber-solid` for `doing`, `--green-solid` for `done` — replacing
    the neutral `Pill`; then the age at 12 `--ink3` and the `↗` link, unchanged.
 4. **Fold block**, unchanged.
-5. **Foot**: on the left, the **mapped repository** — a 14 px branch glyph and the repo's name at 12 px `--ink3`, drawn only when `runChipState` finds a
-   mapping (the `no-repo` state's dashed button says the rest; nothing is drawn twice) — then the existing markers in their order: F1's `match` marker
-   in `--amber-text`, the worktree chip `.jira-card-tree`; on the right, pushed, the **28 px split Run** of §4.1. The marker row is this foot now; it is
-   always drawn (the Run control is always in it).
+5. **Foot**: on the left, the **mapped repository** — a 14 px branch glyph and, for ONE mapped path, that path's basename at 12 px `--ink3`; for more,
+   `N repos` — with every mapped path in the `title`, the worktree chip's precedent; drawn only when the project maps at least one path (the `no-repo`
+   state's dashed button says the rest; nothing is drawn twice) — then the existing markers in their order: F1's `match` marker in `--amber-text`, the
+   worktree chip `.jira-card-tree`; on the right, pushed, the **28 px split Run** of §4.1. The marker row is this foot now; it is always drawn (the Run
+   control is always in it).
+6. **The ended line** (`.jira-card-ended`, `run ended 2h ago · Reopen`, `data-testid="ended-line"`): unchanged, after the foot, as it follows the
+   marker row today. Its existing assertions stand.
 
 **The priority pill** (`.jira-card-prio`, 18 px, radius 999, 11/500, 8 px inset, a 10 px glyph then the name): three tones by the priority's NAME,
 case-insensitive — `Highest` and `High`: `color-mix(in srgb, var(--red) 12%, var(--strip))` with `--red` text and an up-triangle glyph; `Medium`:
@@ -161,17 +164,23 @@ overridden only in the dot's colour, and only for Jira, where a status category 
 **Head.** The type tile of §4.2 replaces the bare glyph in the crumbs; the key at 600 `--ink`, `· <type>`, `· in <parent>`, `· <sprint>` as today;
 `Open in Jira ↗` as today; the 22/600 title stays (the mock's 19 px is the mock's).
 
-**Agent column** → a **band** (`.jira-detail-agent-band`: `--board` ground, radius 12, 16 px padding) at the top of the column, holding the `Agent`
-label row as today and, when no session is live, the empty state: a 36 px dashed-outline tile with a 16 px robot glyph in `--ink3`, `No session on this
-ticket` at 13/500 `--ink`, a sub-line at 12 `--ink3` reading `<repo name> · default: <default action's label> · last run <age>` with each part omitted
-when unknown (no repo mapped → `no repository mapped`; never run → part omitted), and the **32 px split Run** pushed right on the same row. When
+**Agent column** → a **band** (`.jira-detail-agent-band`: `--strip` ground like `.jira-detail-pane`, radius 12, 16 px padding — NOT `--board`, which
+is the shell split's own ground and would make the band vanish) at the top of the column, holding the `Agent` label row as today and, when no session
+is live, the empty state: a 36 px dashed-outline tile with a 16 px robot glyph in `--ink3`, `No session on this ticket` at 13/500 `--ink`, a sub-line
+at 12 `--ink3` reading `default: <default action's label> · last run <age>` (the `last run` part omitted when the ticket was never run; the repository
+is the Ticket column's `Repository` row, not repeated here), and the **32 px split Run** pushed right on the same row. When
 sessions are live, the live cards (`.jira-sess`, unchanged, Jira sessions spec) follow inside the band and the Run control sits on the label row. The
 `History` list is unchanged and sits under the band. `.jira-modal-controls jira-detail-run` goes — the control has a home now.
 
-**Ticket column.** The `dl.jira-detail-facts` stays a dl on a pane of `--board` ground, radius 12, 16 px padding; the label column narrows to 96 px and
-every `dt` is a 14 px glyph then the word: `Status` (a ring), `Assignee` (person), `Reporter` (person), `Priority` (flag), `Sprint` (calendar),
-`Parent` (branch), `Labels` (tag), `Created · updated` (calendar). Values as today, except: the priority value is §4.2's pill; the assignee value gets
-the 22 px tinted disc before the name; labels draw as 24 px `--strip-hi` chips at 11/500 `--ink2` (`.jira-detail-label`), wrapping.
+**Ticket column.** The `dl.jira-detail-facts` stays a dl on today's `.jira-detail-pane` (`--strip` ground, radius 12, 16 px padding — the shell's
+split is `--board`, so the panes stay white on grey; the mock's `#fafaf9` was the mock's); the label column narrows to 96 px and every `dt` is a 14 px
+glyph then the word: `Status` (a ring), `Assignee` (person), `Reporter` (person), `Priority` (flag), `Sprint` (calendar), `Parent` (branch), `Labels`
+(tag), `Created · updated` (calendar), `On boards` (a grid), `Repository` (branch), `Session` (play). All eleven rows the dl draws today stay, in
+today's order and with today's conditions (`On boards` only when the issue is on a board, `Repository` with the joined paths or the
+`no repository mapped for <project> — Jira › Setup › Repositories` sentence, `Session` with `sessionLine`), so the tests that pin them stand. Values as
+today, except: the priority value is §4.2's pill; the assignee value gets the 22 px tinted disc before the name; labels draw as 24 px `--strip-hi` chips
+at 11/500 `--ink2` (`.jira-detail-label`), wrapping. The Agent band's sub-line (above) therefore carries no repository — the dl's `Repository` row is
+the one place the paths are written — and reads `default: <label> · last run <age>` only.
 
 **Status and Move to.** The status `Pill` and the `Move to…` `Select` become ONE control: a 28 px `Chip` (`.jira-detail-status`) reading a 6 px category
 dot, the raw status name and the `Chevron` — `aria-label="Move to"`, `aria-haspopup="dialog"`, `aria-expanded` — opening a 240 px `Popover` named
@@ -188,8 +197,13 @@ with no title, as the select was. The category word that followed the pill (`· 
 ### 4.5 What does not change
 
 The `Select` primitive stays (Settings uses it). `Pill` keeps `neutral` (the deck, Sessions, Children use it). `Marker` keeps `kind` (the Board card's
-markers). `JiraTypeIcon`'s paths are unchanged — it gains a wrapper tile, not new glyphs. The launch sheet, the deck card, the List, Sessions and Setup
-are not touched by this work.
+markers). `JiraTypeIcon`'s paths are unchanged — it gains a wrapper tile, not new glyphs. The card's ended line and the dialog's `On boards`,
+`Repository` and `Session` rows stay as they are. `Modal`'s shell (`.ui-modal-split`'s `--board` ground, the 700 px fold, the Escape stack) is not
+touched. The launch sheet, the deck card, the List, Sessions and Setup are not touched by this work.
+
+**Calls made after the builder check** (a fresh reader's four questions, all settled here rather than asked): the dialog's three extra fact rows stay
+(§4.4); the band and the Ticket pane are `--strip`, not `--board` (§4.4); a project with several mapped paths reads `N repos` on the card (§4.2); the
+ended line stays after the foot (§4.2).
 
 ## 5. Left to the builder
 
@@ -216,7 +230,8 @@ are not touched by this work.
   machine · N` header is absent when `data.skills` is empty; the repository name is drawn in the foot only when mapped.
 - `test/jira-board.test.tsx` (card marks): priority `High` draws a pill titled `priority High` with the red tone class; `Medium` the amber tone;
   `Lowest` the grey tone; an unknown name the grey tone with no glyph; `null` draws no pill. Status text keeps the RAW name (`In Review`), with a dot
-  element carrying the category's tone class. The type tile carries `bug` / `story` / neutral tone classes by `type.name` and `subtask`.
+  element carrying the category's tone class. The type tile carries `bug` / `story` / neutral tone classes by `type.name` and `subtask`. The foot's
+  repository reads the one path's basename, `2 repos` for two (both paths in its title), nothing when none is mapped; the ended line still follows.
 - `test/dialog-count-docs.test.ts`, `.claude/rules/board.md`, `useDialogEscape`'s comment: `seven composers` → `eight composers`, naming `JiraDetail`'s
   Move-to popover; the eight-DIALOG assertions do not move.
 - `test/daylight-contrast.test.ts` `PINNED`: add every new tint site with its hue, percentage and surface — `.jira-card-type[data-tone="bug"]`
