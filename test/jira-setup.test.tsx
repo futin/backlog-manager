@@ -1147,6 +1147,8 @@ describe('the Skills card', () => {
 
     expect(skillNames()).toEqual(['Work it end to end', 'Open with the ticket loaded', 'Groom ticket', 'Summarise changes']);
     expect(within(skillsCard()).getByText('Built in')).toBeInTheDocument();
+    // The context row's sub-line differs from its label (ui-verify D12), as in the Run menu.
+    expect(within(labelIn('Open with the ticket loaded') as HTMLElement).getByText('A session, you drive')).toBeInTheDocument();
     expect(within(skillsCard()).getByText('Skills on this machine · 2')).toBeInTheDocument();
     // A built-in is code, not a stored row: no ×.
     for (const name of ['Work it end to end', 'Open with the ticket loaded']) {

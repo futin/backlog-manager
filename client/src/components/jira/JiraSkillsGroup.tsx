@@ -23,7 +23,7 @@ const PLACEHOLDERS = ['{key}', '{url}', '{repo}', '{branch}', '{base}', '{worktr
 /** The two built-ins, as the Run menu words them (`JiraRunMenu`'s `builtIns`): label, sub-line, glyph. */
 const BUILT_INS: { id: 'execute' | 'context'; label: string; sub: string; glyph: GlyphName }[] = [
   { id: 'execute', label: JIRA_BUILTIN_LABELS.execute, sub: 'Work the ticket end to end', glyph: 'play' },
-  { id: 'context', label: JIRA_BUILTIN_LABELS.context, sub: 'Open with the ticket loaded', glyph: 'document' }
+  { id: 'context', label: JIRA_BUILTIN_LABELS.context, sub: 'A session, you drive', glyph: 'document' }
 ];
 
 /**

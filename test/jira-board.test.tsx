@@ -670,6 +670,19 @@ describe('the fold', () => {
     await screen.findByText('Standalone task');
   }
 
+  it('the marker row reads repo, match, worktree (spec §4.2), and the repo glyph is 14 px', async () => {
+    statusAnswer = status({ repos: { PAY: ['/x/microservice'] } });
+    await renderGroup();
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'ledger');
+    const row = within(card('Payments epic')).getByTestId('marker-row');
+    const repo = row.querySelector('.jira-card-repo') as HTMLElement;
+    const match = within(row).getByText('1 match: PAY-162');
+    expect(repo).not.toBeNull();
+    // Document order: the repo precedes the match marker.
+    expect(repo.compareDocumentPosition(match) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(repo.querySelector('svg')).toHaveAttribute('width', '14');
+  });
+
   it('draws tops only: column counts count cards, and no folded issue is drawn anywhere', async () => {
     await renderGroup();
     expect(screen.getAllByTestId('col-count').map((n) => n.textContent)).toEqual(['2', '1', '0']);
@@ -1023,7 +1036,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       const menu = await openMenu();
       expect(rows(menu)).toEqual([
         [JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', true],
-        [JIRA_BUILTIN_LABELS.context, 'Open with the ticket loaded', false],
+        [JIRA_BUILTIN_LABELS.context, 'A session, you drive', false],
         ['Groom ticket', '/jira-groom', false]
       ]);
     });
@@ -1033,7 +1046,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       const menu = await openMenu();
       expect(rows(menu)).toEqual([
         [JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', false],
-        [JIRA_BUILTIN_LABELS.context, 'Open with the ticket loaded', true],
+        [JIRA_BUILTIN_LABELS.context, 'A session, you drive', true],
         ['Groom ticket', '/jira-groom', false]
       ]);
     });
@@ -1043,7 +1056,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       const menu = await openMenu();
       expect(rows(menu)).toEqual([
         [JIRA_BUILTIN_LABELS.execute, 'Work the ticket end to end', false],
-        [JIRA_BUILTIN_LABELS.context, 'Open with the ticket loaded', false],
+        [JIRA_BUILTIN_LABELS.context, 'A session, you drive', false],
         ['Groom ticket', '/jira-groom', true]
       ]);
       expect(within(menu).getAllByRole('button', { name: /Groom ticket/ })).toHaveLength(1);
@@ -1495,6 +1508,19 @@ describe('the issue List', () => {
     expect(within(row('PAY-2')).getByText('Not prioritised')).toHaveAttribute('data-tone', 'low');
     for (const key of ['PAY-1', 'PAY-2']) expect(within(row(key)).getAllByRole('button', { name: `Run ${key}` })).toHaveLength(1);
     expect(row('PAY-1').querySelector('.jira-issues-summary')).toHaveAttribute('title', 'A very long summary that the cell will cut');
+  });
+
+  it('the Summary cell is a flex row (title ellipsises, count never cut) and the Session cell keeps its age out of the ellipsis (ui-verify D3, D4)', async () => {
+    sessionsAnswer = () => ({ links: [linkOn('PAY-120', 's1', 'plan', 3)], reachable: true, rowsAt: null });
+    await renderList();
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Waiting for plan approval'));
+    const summary = row('PAY-120').querySelector('.jira-issues-summary') as HTMLElement;
+    const flex = summary.querySelector('.jira-issues-flex') as HTMLElement;
+    expect(flex.querySelector('.jira-issues-title')).not.toBeNull();
+    expect(flex.querySelector('.jira-issues-under')?.textContent).toBe('3 under it');
+    const session = row('PAY-120').querySelector('.jira-issues-session') as HTMLElement;
+    expect(session.querySelector('.jira-issues-cut')?.textContent).toBe('Waiting for plan approval');
+    expect(session.querySelector('.jira-issues-age')?.textContent).toMatch(/^ · \d/);
   });
 
   it('names how many issues fold under a top: the whole fold, one for a single, nothing for none', async () => {

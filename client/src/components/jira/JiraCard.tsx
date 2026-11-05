@@ -160,16 +160,16 @@ export function JiraCard({
           </div>
         )}
         <div className="board-card-markers" data-testid="marker-row">
+          {paths.length > 0 && (
+            <span className="jira-card-repo" title={paths.join('\n')}>
+              <Glyph name="branch" size={14} />
+              <span>{paths.length === 1 ? (paths[0].replace(/\/+$/, '').split('/').pop() ?? paths[0]) : `${paths.length} repos`}</span>
+            </span>
+          )}
           {match !== null && (
             <Marker tone="match" title={match.title}>
               {match.word}
             </Marker>
-          )}
-          {paths.length > 0 && (
-            <span className="jira-card-repo" title={paths.join('\n')}>
-              <Glyph name="branch" size={10} />
-              <span>{paths.length === 1 ? (paths[0].replace(/\/+$/, '').split('/').pop() ?? paths[0]) : `${paths.length} repos`}</span>
-            </span>
           )}
           {trees.length > 0 && (
             <span className="jira-card-tree" title={trees.map((t) => t.path).join('\n')}>

@@ -70,7 +70,7 @@ export function SessionOpen({
 
   if (primary === null && !hasRows) return null;
   if (primary === null) return <PlainActions sessionId={sessionId} busy={busy} onUnlink={onUnlink} onStop={onStop} />;
-  if (!hasRows) return <OpenChip button={buttons.primary} sessionId={sessionId} row={row} launch={launch} primary onHandover={onHandover} />;
+  if (!hasRows) return <OpenChip button={buttons.primary} sessionId={sessionId} row={row} launch={launch} primary={needsYou(state)} onHandover={onHandover} />;
 
   if (asking)
     return (

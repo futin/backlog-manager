@@ -465,8 +465,11 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
     expect(act?.selector).toMatch(/\.jira-issues-row\s+td\.jira-issues-act/);
     const at = styles.indexOf('@container (max-width', styles.indexOf('.jira-issues-frame { container-type'));
     expect(at).toBeGreaterThan(-1);
+    // Two homes: the container query, and the phone fold, where the frame is not a container (its `container-type` would be the containing block of the
+    // Run menu's fixed bottom sheet) and the box scrolls unconditionally — a fixed panel is not clipped by a scroll box.
     const hits = [...styles.matchAll(/\.jira-issues-scroll\s*\{[^}]*overflow-x:\s*auto/g)];
-    expect(hits).toHaveLength(1);
+    expect(hits).toHaveLength(2);
+    expect(styles).toMatch(/@media \(max-width: 700px\) \{\s*\.jira-issues-frame \{ container-type: normal \}\s*\.jira-issues-scroll \{ overflow-x: auto \}/);
     const block = styles.slice(at, styles.indexOf('\n}', at));
     expect(block).toContain('.jira-issues-scroll { overflow-x: auto }');
   });
@@ -481,16 +484,36 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
     expect(act?.selector).toMatch(/\.jira-list-row\s+td\.jira-list-act/);
     expect(styles).toMatch(/\.jira-list-frame\s*\{\s*container-type:\s*inline-size/);
     const hits = [...styles.matchAll(/\.jira-list-scroll\s*\{[^}]*overflow-x:\s*auto/g)];
-    expect(hits).toHaveLength(1);
+    expect(hits).toHaveLength(2);
+    expect(styles).toMatch(/@media \(max-width: 700px\) \{\s*\.jira-list-frame \{ container-type: normal \}\s*\.jira-list-scroll \{ overflow-x: auto \}/);
     const at = styles.indexOf('.jira-list-scroll { overflow-x: auto }');
     expect(styles.lastIndexOf('@container (max-width', at)).toBeGreaterThan(styles.indexOf('.jira-list-frame'));
     const min = Number(/\.jira-list-table\s*\{[^}]*min-width:\s*(\d+)px/.exec(styles)?.[1]);
     const widths = [...styles.matchAll(/\.jira-list-table thead th:nth-child\(\d+\)\s*\{\s*width:\s*(\d+)px/g)].map((m) => Number(m[1]));
     expect(widths).toHaveLength(9);
     expect(min).toBeLessThanOrEqual(1150);
-    // Ticket is the auto column: it must keep room for a key and a summary at the table's own minimum.
-    expect(min - widths.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(210);
+    // Ticket is the auto column: it must keep room for a key and a summary at the table's own minimum. 170, not the 210 it was: Open grew 124 → 172 so the split
+    // `Open in Desktop` stops overlapping For (ui-verify D13), and Ticket pays the difference — 204 px at the 1150 a 1440 viewport gives it.
+    expect(min - widths.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(170);
     // State (column 2) must hold `Waiting for plan approval` whole, or wrap it: never hard-clip.
     expect(widths[0]).toBeGreaterThanOrEqual(190);
+  });
+
+  /**
+   * The Jira ui-verify fixes that are pure geometry, pinned as the rule text that carries them (jsdom measures nothing; the browser re-measure is the proof):
+   * D9 the Detail fact's pill is not pushed right, D16 the deck's crumb is the 12 px ink3 line, D19 the setup tree list and its branch can shrink, D20 a skill row
+   * stays a row under the phone fold, D21 the add-path field sizes by content there, D18 the launch tiles are one column there.
+   */
+  it('keeps the Jira ui-verify geometry fixes', () => {
+    const body = (selector: string): string => styleRules.find((r) => r.selector === selector)?.body ?? '';
+    expect(body('.jira-detail-facts .jira-card-prio')).toMatch(/margin-left:\s*0/);
+    expect(body('.jira-deck-face .jira-card-crumb')).toMatch(/font-size:\s*12px[^}]*color:\s*var\(--ink3\)/);
+    expect(body('.jira-setup-trees')).toMatch(/min-width:\s*0/);
+    expect(body('.jira-wt-branch')).toMatch(/min-width:\s*0[^}]*text-overflow:\s*ellipsis/);
+    expect(body('.jira-setup-skill')).toMatch(/flex-direction:\s*row/);
+    expect(styles).toMatch(/@media \(max-width: 700px\) \{ \.jira-setup-add-path \{ flex: 1 1 auto; align-self: stretch \} \}/);
+    expect(styles).toMatch(/@media \(max-width: 700px\) \{ \.launch-tiles \{ grid-template-columns: minmax\(0, 1fr\) \} \}/);
+    expect(body('.jira-issues-under')).toMatch(/flex:\s*none/);
+    expect(body('.jira-issues-age')).toMatch(/flex:\s*none/);
   });
 });

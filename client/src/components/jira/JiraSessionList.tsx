@@ -340,8 +340,8 @@ function ListRowView({
           <span>{STATE_LABEL[state]}</span>
         </div>
       </td>
-      <td className="jira-list-run">{run}</td>
-      <td className="jira-list-repo">
+      <td className="jira-list-run" title={run === '' ? undefined : run}>{run}</td>
+      <td className="jira-list-repo" title={row.branch !== null && row.branch !== '' ? `${repoBasename(row.repo)} · ${row.branch}` : repoBasename(row.repo)}>
         <span>{repoBasename(row.repo)}</span>
         {row.branch !== null && row.branch !== '' && <span className="jira-list-branch">{row.branch}</span>}
       </td>

@@ -330,6 +330,17 @@ describe('the Sessions page', () => {
     expect(await screen.findByRole('dialog', { name: /^PAY-131 / })).toHaveAttribute('aria-modal', 'true');
   });
 
+  it('the Repository and Run cells carry their full text as a title, since both ellipsise (ui-verify D14, D15)', async () => {
+    links = [link({ key: 'PAY-131', id: 'b1', state: 'working', startedAt: hoursAgo(2), how: 'branch', branch: 'feat/refund-partial', repo: '/home/ada/dev-api-gateway' })];
+    await renderList();
+    await waitFor(() => expect(rowTags().length).toBe(1));
+    const row = within(group('Live')).getByRole('row', { name: 'Session on PAY-131' });
+    expect(row.querySelector('td.jira-list-repo')).toHaveAttribute('title', 'dev-api-gateway · feat/refund-partial');
+    const run = row.querySelector('td.jira-list-run') as HTMLElement;
+    expect(run.textContent).not.toBe('');
+    expect(run).toHaveAttribute('title', run.textContent as string);
+  });
+
   it('draws a Starting row from the status reservation, with no buttons', async () => {
     statusAnswer = status({ live: { 'PAY-151': { name: 'jira run', sessionId: null, startedAt: hoursAgo(0.01), repo: '/home/ada/pay', starting: true } } });
     await renderList();

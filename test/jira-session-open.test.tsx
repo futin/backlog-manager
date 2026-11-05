@@ -66,6 +66,14 @@ describe('SessionOpen', () => {
     expect(screen.getByRole('group')).toHaveClass('ui-split-outline');
   });
 
+  it('a lone Open (no menu behind it) is ink only while a person is wanted, never because it is alone', () => {
+    const lone = mount({ buttons: ALONE }, 'working');
+    expect(screen.getByRole('link', { name: 'Open in Dashboard' })).toHaveClass('ui-chip-outline');
+    lone.unmount();
+    mount({ buttons: ALONE }, 'plan');
+    expect(screen.getByRole('link', { name: 'Open in Dashboard' })).toHaveClass('ui-chip-ink');
+  });
+
   it('Unlink calls onUnlink once with the session id, and closes the menu', async () => {
     const onUnlink = jest.fn();
     mount({ buttons: ALONE, onUnlink });

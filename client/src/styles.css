@@ -671,12 +671,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-card-type[data-tone="story"] { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
 /* The priority pill, pushed right on the head: 18 px, 11/500. Jira's five names fold to three tones; a custom name is the low look with no glyph. */
 .jira-card-prio {
-  display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: auto; height: 18px; padding: 0 7px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: auto; height: 18px; padding: 0 8px; border-radius: 999px;
   font-size: 11px; font-weight: 500; white-space: nowrap;
 }
 .jira-card-prio[data-tone="high"] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
 .jira-card-prio[data-tone="med"] { background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)); color: var(--amber-ink) }
 .jira-card-prio[data-tone="low"], .jira-card-prio[data-tone="other"] { background: var(--strip-hi); color: var(--ink3) }
+/* In Detail's facts the pill is a value in `dd`, which sits at the start of its column like every other value; the head's push-right is the card's alone. */
+.jira-detail-facts .jira-card-prio { margin-left: 0 }
 /* The fold block (grouped-board spec §4, DESIGN.md §8.9.1): after the foot and before the marker row — the line, then the spread bar and its caption,
    which are `SpreadBar`'s own look. The line is 12/500 --ink2: a sub-line of the card, a step quieter than the title and a step louder than the caption. */
 .jira-card-fold { display: flex; flex-direction: column; gap: 6px }
@@ -686,6 +688,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-card-match { box-shadow: inset 0 0 0 2px var(--amber-solid) }
 .jira-card-key { flex: none; font-weight: 600; color: var(--ink); white-space: nowrap }
 .jira-card-crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* The deck face is a 14 px title column, not `.jira-card-head` (12 px, `--ink3`), so the crumb that moved down into it inherited 16 px `--ink` and out-sized the title. */
+.jira-deck-face .jira-card-crumb { font-size: 12px; color: var(--ink3) }
 /* The foot's person: a 22 px initials disc tinted magenta (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
    the Board card's project name. An unassigned issue draws the disc empty and dashed, so the row keeps its shape. */
 .jira-card-who { display: flex; align-items: center; gap: 6px; min-width: 0 }
@@ -1378,7 +1382,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    branch never — then `Remove`. The copied command, when the clipboard refused, takes a row of its own under them. */
 .jira-wt-list { list-style: none; padding-left: 0; margin: 8px 0 0 }
 .jira-wt-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 5px 6px; font-size: 13px }
-.jira-wt-branch { font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-wt-branch { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-weight: 500; color: var(--ink2); white-space: nowrap }
 .jira-wt-path { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink3) }
 .jira-wt-repo { font-size: 12px; color: var(--ink3); white-space: nowrap }
 .jira-wt-cmd { flex: 1 0 100%; font-size: 12px; color: var(--ink2); user-select: all; overflow-wrap: anywhere }
@@ -1531,7 +1535,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-list { display: flex; flex-direction: column; gap: 12px }
 .jira-list-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px }
 /* Overflow is a container query, as the issue List's (`.jira-issues-frame`, below): a scroll box (`overflow-x: auto`) makes overflow-y auto too and clips the
-   `Session actions` menu and the Run menu, which hang below their cell. The table's fixed columns are 908 px and its `min-width` is 1120, so at 1440 px with the
+   `Session actions` menu and the Run menu, which hang below their cell. The table's fixed columns are 946 px and its `min-width` is 1120, so at 1440 px with the
    rail open (1150 px inside the box border) nothing scrolls; below 1122 px of frame the box scrolls sideways and the page never does. The frame holds nothing but
    the box, because `container-type` also becomes the containing block of `position: fixed` descendants (the phone shape of a menu panel). */
 .jira-list-frame { container-type: inline-size }
@@ -1539,19 +1543,24 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 @container (max-width: 1121px) {
   .jira-list-scroll { overflow-x: auto }
 }
+/* The same fold as the issue table's, for the same reason: no containing block for the Run and `Session actions` bottom sheets but the viewport. */
+@media (max-width: 700px) {
+  .jira-list-frame { container-type: normal }
+  .jira-list-scroll { overflow-x: auto }
+}
 /* `table-layout: fixed` with every column but Ticket given its width in the head: under `auto`, each column sized to its widest cell and the table came to
-   1544 px in a 1150 px well. Ticket is the one auto column and takes what the px columns leave (~212 px at 1120, ~242 at 1150): the key over a one-line summary
+   1544 px in a 1150 px well. Ticket is the one auto column and takes what the px columns leave (~174 px at 1120, ~204 at 1150): the key over a one-line summary
    that ellipsises. Do not mix px and % or `calc()` here: a fixed-layout table reads those as `auto`. */
 .jira-list-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
-.jira-list-table thead th:nth-child(2) { width: 200px }
+.jira-list-table thead th:nth-child(2) { width: 190px }
 .jira-list-table thead th:nth-child(3) { width: 88px }
 .jira-list-table thead th:nth-child(4) { width: 104px }
-.jira-list-table thead th:nth-child(5) { width: 68px }
+.jira-list-table thead th:nth-child(5) { width: 80px }
 .jira-list-table thead th:nth-child(6) { width: 68px }
-.jira-list-table thead th:nth-child(7) { width: 84px }
-.jira-list-table thead th:nth-child(8) { width: 120px }
+.jira-list-table thead th:nth-child(7) { width: 96px }
+.jira-list-table thead th:nth-child(8) { width: 96px }
 .jira-list-table thead th:nth-child(9) { width: 52px }
-.jira-list-table thead th:nth-child(10) { width: 124px }
+.jira-list-table thead th:nth-child(10) { width: 172px } /* Open: the split `Open in Desktop` is 148 px plus the cell's 24 px of padding; 124 overlapped For and wrapped an ended row's Reopen + Run. */
 .jira-list-table thead th {
   padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
   color: var(--ink3); border-bottom: 1px solid var(--hairline); white-space: nowrap;
@@ -1565,6 +1574,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The whole row opens Detail (`rowOpens` in `lib/jira-list.ts`, used by both tables), so it wears the pointer and a hover fill on the cells. */
 .jira-list-row { cursor: pointer }
 .jira-list-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }
+/* The box rounds at 12 px and clips nothing at wide widths, so the last row's hover fill would paint square past it: its corner cells round to the 11 px inside the 1 px border. Last GROUP only — each group is its own `tbody`. */
+.jira-list-table tbody:last-of-type .jira-list-row:last-child td:first-child { border-bottom-left-radius: 11px }
+.jira-list-table tbody:last-of-type .jira-list-row:last-child td:last-child { border-bottom-right-radius: 11px }
 .jira-list-flex { display: flex; align-items: center; gap: 8px; min-width: 0 }
 .jira-list-state { font-weight: 500 }
 /* State is 200 px so `Waiting for plan approval` (~160 px beside the dot) shows whole; the word still ellipsises as a last resort rather than hard-clipping,
@@ -1613,16 +1625,22 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 @container (max-width: 1121px) {
   .jira-issues-scroll { overflow-x: auto }
 }
+/* Under the fold the box always scrolls (the table is 1120 px) and the frame stops being a container: `container-type` makes it the containing block of the Run
+   menu's FIXED bottom sheet, which would then sit at the foot of the whole table instead of the viewport's. A fixed panel is not clipped by a scroll box. */
+@media (max-width: 700px) {
+  .jira-issues-frame { container-type: normal }
+  .jira-issues-scroll { overflow-x: auto }
+}
 .jira-issues-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
-.jira-issues-table thead th:nth-child(1) { width: 150px } /* Session: the word ellipsises (`Waiting on your answer · 2h` is longer); the dot and age are the reading. */
+.jira-issues-table thead th:nth-child(1) { width: 110px } /* Session: the word ellipsises (`Waiting on your answer` is longer); the dot and the age are the reading and never cut. */
 .jira-issues-table thead th:nth-child(2) { width: 108px } /* Key: fits a twelve-character key (TIMIFY-28086) at 13 px. */
 .jira-issues-table thead th:nth-child(4) { width: 100px }
 .jira-issues-table thead th:nth-child(5) { width: 116px }
-.jira-issues-table thead th:nth-child(6) { width: 108px } /* Priority: the pill ellipsises at `Not prioritised`. */
+.jira-issues-table thead th:nth-child(6) { width: 116px } /* Priority: `Not prioritised` is a 85 px pill and needs 84+ of content. */
 .jira-issues-table thead th:nth-child(7) { width: 124px }
 .jira-issues-table thead th:nth-child(8) { width: 76px }
 .jira-issues-table thead th:nth-child(9) { width: 60px }
-.jira-issues-table thead th:nth-child(10) { width: 80px } /* The unlabelled Run cell. */
+.jira-issues-table thead th:nth-child(10) { width: 112px } /* The unlabelled Run cell: the split Run is 93 px, which 80 px less its padding spilled past the box. */
 .jira-issues-table thead th {
   padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
   color: var(--ink3); border-bottom: 1px solid var(--hairline); white-space: nowrap;
@@ -1634,17 +1652,26 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The whole row opens the modal (`rowOpens`), so it wears the pointer and the session table's half-transparent hover fill. */
 .jira-issues-row { cursor: pointer }
 .jira-issues-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }
+/* The box rounds at 12 px and clips nothing at wide widths, so the last row's hover fill would paint square past it: its corner cells round to the 11 px inside
+   the 1 px border. The head's corners too, for a head that ever wears a fill. */
+.jira-issues-row:last-child td:first-child { border-bottom-left-radius: 11px }
+.jira-issues-row:last-child td:last-child { border-bottom-right-radius: 11px }
+.jira-issues-table thead th:first-child { border-top-left-radius: 11px }
+.jira-issues-table thead th:last-child { border-top-right-radius: 11px }
 .jira-issues-flex { display: flex; align-items: center; gap: 8px; min-width: 0 }
 .jira-issues-session { font-weight: 500 }
+/* The session's reading is the word AND its age: the age is `flex: none` and only the word ellipsises. `white-space: pre` keeps the space before ` · ` that a flex item would otherwise drop at its line start. */
+.jira-issues-sess { display: flex; min-width: 0 }
+.jira-issues-age { flex: none; white-space: pre }
 .jira-issues-key a { color: var(--ink2); text-decoration: none }
 .jira-issues-key a:hover { text-decoration: underline }
 .jira-issues-title {
-  min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit;
+  flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
 }
 .jira-issues-title:hover { text-decoration: underline }
 .jira-issues-under, .jira-issues-muted { color: var(--ink3) }
-.jira-issues-under { font-size: 12px }
+.jira-issues-under { flex: none; font-size: 12px } /* The count is never cut: the title takes the ellipsis, in the flex row that holds both. */
 .jira-issues-updated { color: var(--ink3) }
 /* A cell's text beside a mark ellipsises on its own, so the mark keeps its size (the flex row is `min-width: 0`). */
 .jira-issues-cut { min-width: 0; overflow: hidden; text-overflow: ellipsis }
@@ -1670,6 +1697,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The add row: the project Select and `Add` keep their size, the path field takes what is left (the row wraps at Settings' own narrow widths). */
 .jira-setup-add { justify-content: flex-start; gap: 8px }
 .jira-setup-add-path { flex: 1 1 160px; width: auto; min-width: 0 }
+/* Under the fold `.set-row` is a column and a flex-basis becomes a HEIGHT (the hazard Settings' phone block describes): size by content and span the card. */
+@media (max-width: 700px) { .jira-setup-add-path { flex: 1 1 auto; align-self: stretch } }
 /* A mapping's row (spec §4.4): a head line — key pill, the path (the code-span treatment `.set-hint code` has uses; §8.1 has one face, so "mono" is the span),
    the worktree toggle, the × pushed right — then, under the path's first row only, the two labelled fields and Save, then the expanded tree list. */
 .jira-setup-repo { gap: 10px }
@@ -1687,12 +1716,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-setup-defaults-pattern { flex: 2 1 200px }
 .jira-setup-defaults-hint { flex: 1 0 100% }
 /* A path's open trees: a sub-head, then the modal's own `.jira-wt-row`s, here with the branch at 600 and the path in `--ink3`. */
-.jira-setup-trees { display: flex; flex-direction: column; gap: 4px }
+.jira-setup-trees { display: flex; flex-direction: column; gap: 4px; min-width: 0 } /* A flex child of a card: `min-width: auto` let a long branch widen it past the card. */
 .jira-setup-trees-head { font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ink3) }
 .jira-setup-trees .jira-wt-list { margin-top: 0 }
 .jira-setup-trees .jira-wt-branch { font-weight: 600; color: var(--ink) }
 /* A skills row (spec §4.4) in the Run menu's shape — tile, text (`.jira-run-text`'s label over sub-line), then `default` or `Make default`, then the ×. */
-.jira-setup-skill { justify-content: flex-start; flex-wrap: nowrap; gap: 10px; padding: 8px 0 }
+.jira-setup-skill { flex-direction: row; align-items: center; justify-content: flex-start; flex-wrap: nowrap; gap: 10px; padding: 8px 0 } /* Row at every width: it is later than Settings' phone `.set-row` column reset, and the same specificity, so it wins. */
 .jira-setup-skill .jira-run-text { flex: 1 1 auto }
 .jira-setup-skill .jira-run-label { font-size: 13px; font-weight: 500; color: var(--ink) }
 .jira-setup-default { flex: none; font-size: 11px; color: var(--ink3) }
@@ -2215,6 +2244,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    changes only its colour and nothing under it moves; the pressed tile is `--ink3` on `--strip-hi` and its GlyphTile goes `ink` (set by the component, not here).
    Text truncates rather than wraps: a skill's name is the only free-length line. 11 px sub-line, the family's floor. */
 .launch-tiles { align-self: stretch; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px }
+/* Under the fold three tiles leave a 35 px text box (`End to …`); one column gives each its width. */
+@media (max-width: 700px) { .launch-tiles { grid-template-columns: minmax(0, 1fr) } }
 .launch-tile {
   display: flex; align-items: center; gap: 10px; min-height: 64px; min-width: 0; padding: 8px 10px; text-align: left;
   border: 1.5px solid var(--hairline2); border-radius: 12px; background: var(--strip); color: var(--ink); cursor: pointer; font: inherit
@@ -3931,8 +3962,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 /* On a phone the control lives in the rail bar, and the narrow `.rail` is a scroll container (`overflow-x: hidden` computes `overflow-y` to auto), so an
    absolute panel is clipped to the 53 px bar and paints nothing — and right-anchored under a control beside ☰ it would start off-screen besides. Fixed
-   escapes the clip. `top` goes back to auto — the base rule's `100% + 8px` would now resolve against the viewport's height — so the panel keeps its static
-   position just under the control, `margin-top` supplying the 8 px that `top` no longer does, and it spans the viewport less the rail's own 12 px side padding.
+   escapes the clip. It is a BOTTOM SHEET, `bottom: 12px`: a fixed box left at its static position under the control stayed glued to the viewport while the page
+   scrolled (the anchor moved 300 px, the panel did not), covered the anchor when the control sat at a flex start, and on a tall row ran off the screen so the
+   last rows were unreachable. Pinned to the viewport's foot with `top: auto` (the base rule's `100% + 8px` would resolve against the viewport's height) it is
+   the same place wherever the control scrolls to, and it spans the viewport less the rail's own 12 px side padding.
    Its height is capped so a long panel scrolls inside itself.
 
    Nine declarations, one more than the design spec's eight, on purpose: `max-width: none` releases the base rule's viewport cap (viewport less 48 px), which
@@ -3940,7 +3973,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    flush left. The class comes from `useNarrow`, never from an `@media` rule of this family's own: a second copy of the breakpoint, and guard 7 counts the
    bare family selector across the whole sheet. */
 .ui-popover-narrow {
-  position: fixed; top: auto; margin-top: 8px; left: 12px; right: 12px;
+  position: fixed; top: auto; bottom: 12px; left: 12px; right: 12px;
   width: auto; max-width: none; max-height: 70vh; overflow-y: auto;
 }
 

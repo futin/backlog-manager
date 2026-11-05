@@ -108,7 +108,7 @@ its Agent column is wide enough; `MODAL_PANEL_WIDTH` goes). Radius 14, padding 8
 
 A **row** (`.jira-run-opt`, a `<button>` titled with its label) is 40 px: a 28 px radius-8 icon tile — `--strip-hi` ground, 14 px outline glyph in
 `--ink2` — then a column of the label at 13/500 `--ink` and a sub-line at 11 px `--ink3`; for `execute` the sub-line is `Work the ticket end to end`, for
-`context` `Open with the ticket loaded`, for a skill its slash command (`skillCommand(k.prompt)`) in the monospace stack. Hover `--strip-hi`. The row
+`context` `A session, you drive` (the label is `Open with the ticket loaded`, so the sub-line may not repeat it), for a skill its slash command (`skillCommand(k.prompt)`) in the monospace stack. Hover `--strip-hi`. The row
 that is the preferred action is marked in place — it does NOT move to the top of the menu any more (grouping beats "default first"; the mark says which):
 its tile is `color-mix(in srgb, var(--green-solid) 14%, var(--strip))` with the glyph in `--green`, and the row's right end carries a 14 px stroked tick
 and the word `default` at 11/500 `--green`. The ARIA name of every row is its label alone (the sub-line and the mark are `aria-hidden`), so

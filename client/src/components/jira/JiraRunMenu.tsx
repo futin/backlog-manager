@@ -83,7 +83,7 @@ export function JiraRunMenu({ issue, onPick, home = 'card' }: { issue: JiraIssue
   const preferred = jiraSettingOf(defaultAction);
   const builtIns: MenuRow[] = [
     { id: 'execute', action: 'execute', label: JIRA_BUILTIN_LABELS.execute, sub: 'Work the ticket end to end', glyph: 'play' },
-    { id: 'context', action: 'context', label: JIRA_BUILTIN_LABELS.context, sub: 'Open with the ticket loaded', glyph: 'document' }
+    { id: 'context', action: 'context', label: JIRA_BUILTIN_LABELS.context, sub: 'A session, you drive', glyph: 'document' }
   ];
   const skills: MenuRow[] = data.skills.map((k) => ({ id: k.id, action: { skill: k.id }, label: k.name, sub: skillCommand(k.prompt) ?? '', glyph: 'sparkle' }));
   const pick = (action: JiraAction): void => {

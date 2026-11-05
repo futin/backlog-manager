@@ -107,7 +107,10 @@ function IssueRow({
         ) : (
           <span className="jira-issues-flex">
             <span className="ui-stripe-dot" data-tone={sessionTone(cell.state)} aria-hidden="true" />
-            <span className="jira-issues-cut">{age === null ? STATE_LABEL[cell.state] : `${STATE_LABEL[cell.state]} · ${age}`}</span>
+            <span className="jira-issues-sess">
+              <span className="jira-issues-cut">{STATE_LABEL[cell.state]}</span>
+              {age !== null && <span className="jira-issues-age"> · {age}</span>}
+            </span>
           </span>
         )}
       </td>
@@ -117,10 +120,12 @@ function IssueRow({
         </a>
       </td>
       <td className="jira-issues-summary" title={top.summary}>
-        <button type="button" className="jira-issues-title" onClick={open}>
-          {top.summary}
-        </button>
-        {under > 0 && <span className="jira-issues-under"> {under} under it</span>}
+        <span className="jira-issues-flex">
+          <button type="button" className="jira-issues-title" onClick={open}>
+            {top.summary}
+          </button>
+          {under > 0 && <span className="jira-issues-under">{under} under it</span>}
+        </span>
       </td>
       <td>
         <span className="jira-issues-flex">
