@@ -148,75 +148,59 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   flex: 0 0 240px; display: flex; flex-direction: column; gap: 4px;
   align-self: flex-start; position: sticky; top: 0; z-index: 5;
   height: calc(100vh / var(--font-scale, 1)); overflow-y: auto;
-  padding: 24px;
-  background: var(--strip);
+  padding: 24px 12px;
+  background: var(--board);
 }
 /* The app's only wordmark, in the rail rather than the page: a terminal prompt — the 11/400 kicker stacked 4 px over `› manager▌` at 22/600 (§8.0;
    the dashboard's own, from its design handoff "1h"). One face, not a mono (§1 allows exactly one). Left-aligned in a column, because the prompt is a
    line of text and the kicker labels it from above. The 24 px under it is padding rather than a margin so the phone block's `padding: 0` takes it away
    in the same breath. */
 .rail-brand {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
-  line-height: 1; color: var(--ink); padding: 0 12px 24px;
+  display: flex; align-items: center; gap: 10px;
+  line-height: 1; color: var(--ink); padding: 0 6px 16px;
 }
-/* The one rule in this stylesheet allowed to uppercase anything (§8.1). */
+.rail-brand-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; line-height: 1.15 }
+/* The one rule in this stylesheet allowed to uppercase anything (§8.1): the sub-line under the wordmark, `this machine`. */
 .rail-kicker {
   display: block;
   font-size: 11px; font-weight: 400;
   text-transform: uppercase; letter-spacing: .16em; color: var(--ink3);
 }
-.rail-prompt { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 600; letter-spacing: -.03em }
-/* The caret and the cursor share `--green-solid`, the mark colour of a live thing (theme.css): a prompt's two marks, never text, so the AA split between
-   a hue's mark and its text (dashboard-redesign-ports task 1) puts them on the mark side. */
-.rail-caret { color: var(--green-solid) }
+.rail-prompt { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; letter-spacing: -.01em }
 /* Solid by default. It blinks — 530 ms on, 530 ms off, a terminal's own rate — while a run on this machine is working; `SideRail` picks the class from
    `working`, and nothing else about the wordmark moves. A hint, never the record: RunChip and the Runs page say it in words. */
-.rail-cursor { flex: none; width: 10px; height: 22px; border-radius: 1px; background: var(--green-solid) }
+.rail-cursor { flex: none; width: 7px; height: 14px; border-radius: 1px; background: var(--green-solid) }
 .rail-cursor.blink { animation: cursor-blink 1.06s steps(1) infinite }
 @keyframes cursor-blink { 0% { opacity: 1 } 50% { opacity: 0 } }
 /* §8.8: cancelled outright rather than left to the blanket rule, which runs an animation once, instantly, and so parks it on whichever frame it ends
    on — a cursor frozen at `opacity: 0` would read as no wordmark at all. Same selector as the rule above and after it, so no `!important`. */
 @media (prefers-reduced-motion: reduce) { .rail-cursor.blink { animation: none } }
 
+/* A row: 28 px tile, label, and (as a sibling `.rail-count`) the count pill. The open row is `--strip` paper on the `--board` rail with the tile gone ink —
+   a white row, never a colour change in the label (§5). Hover darkens the LABEL only, so a hovered row and a selected one never read as one fill. */
 .rail-link {
-  position: relative; display: flex; align-items: center; gap: 12px;
-  min-height: 36px; padding: 0 16px; border-radius: 16px;
-  font-size: 14px; font-weight: 500; text-align: left;
+  position: relative; display: flex; align-items: center; gap: 10px;
+  min-height: 40px; padding: 6px; border-radius: 10px;
+  font-size: 13px; font-weight: 500; text-align: left;
   color: var(--ink2); background: none; border: 0;
   cursor: pointer; transition: color .15s, background .15s;
 }
-/* Hover darkens the LABEL and nothing else. The fill stays reserved for the
-   active row, so a hovered row and a selected row read as two different things
-   rather than as one row filled twice (§8.0). */
 .rail-link:hover { color: var(--ink) }
-/* The Jira row's wrapper is the badge's positioning parent (§8.0): the badge is a sibling of the row's button, so it is placed over the button's right end. */
+.rail-link.on { color: var(--ink); font-weight: 600; background: var(--strip); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 8%, transparent) }
+.rail-label { flex: 1; min-width: 0 }
+/* The Jira row's wrapper is the count's positioning parent: the count is a sibling of the row's button (a button in a button is invalid), placed over the
+   row's right end. Pills keep their primitive look; only the placement is the rail's. */
 .rail-group { position: relative }
-/* The Needs-you count (Jira sessions spec §7.4): the FilterBar funnel's disc — `--ink` fill on `--strip` text, 11/500, tabular, a 16 px circle that widens into a
-   pill for two digits — set on the row's right edge instead of a corner. A real button (it opens the Sessions page, Needs you chip on), so it resets the UA chrome the way `.rail-link`
-   does and keeps the board's focus ring. Vertically centred on the 36 px row; the phone's 44 px row re-centres it below. */
-.rail-badge {
-  position: absolute; top: 10px; right: 12px;
-  display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border: 0; border-radius: 999px;
-  background: var(--ink); color: var(--strip);
-  font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1;
-  cursor: pointer;
+.rail-count {
+  position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+  display: inline-flex; padding: 0; border: 0; background: none; cursor: default;
 }
-/* Active is a 3 px ink bar 16 px tall at the left edge plus the --strip-hi
-   fill — never a colour change in the label (§5). ::before rather than an inset
-   shadow because the bar is 16 px of a 36 px row, not its whole height. */
-.rail-link.on { color: var(--ink); background: var(--strip-hi) }
-.rail-link.on::before {
-  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 16px; border-radius: 999px; background: var(--ink);
-}
-/* Icons name the section, never its state (§6): --ink at every row weight, a
-   16 px box, ~1.5 px outline stroke. */
-.rail-ic { width: 16px; height: 16px; flex: none; color: var(--ink) }
+button.rail-count { cursor: pointer }
 
 /* The sub-nav tree, drawn only for the open section (§8.0). Hung 24 px in — the
    icon's centreline, 16 px of row padding plus half a 16 px icon — so the stem
    falls straight down through the icons above it. */
-.rail-sub { display: flex; flex-direction: column; margin: 2px 0 2px 24px }
+.rail-sub { display: flex; flex-direction: column; gap: 1px; padding: 4px 0 6px 38px }
 /* Stem and tick as two background layers on the row itself rather than a
    border on a wrapper: it is what lets the LAST row stop its stem at its own
    centre, which is the whole shape of an L-tree. A wrapper border would run
@@ -229,31 +213,31 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    vertical padding rather than a min-height, the dashboard's own measure — a
    ~32 px row, since a button's line-height is the UA's `normal` rather than
    body's 1.4, in both apps; the phone block still adds its 40 px floor. */
+/* A quiet sub-list: 28 px rows at 12.5 px, the current page a white row at 600 (the white row replaces the old stem-and-tick dot). */
 .rail-sublink {
   display: flex; align-items: center;
-  padding: 7px 0 7px 20px; border: 0; background: none;
-  font-size: 14px; font-weight: 400; text-align: left;
-  color: var(--ink2); cursor: pointer; transition: color .15s;
-  background-image:
-    linear-gradient(var(--hairline2), var(--hairline2)),
-    linear-gradient(var(--hairline2), var(--hairline2));
-  background-repeat: no-repeat;
-  background-size: 1px 100%, 12px 1px;
-  background-position: 0 0, 0 50%;
+  height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: none;
+  font-size: 12.5px; font-weight: 400; text-align: left;
+  color: var(--ink2); cursor: pointer; transition: color .15s, background .15s;
 }
-.rail-sublink:last-child { background-size: 1px 50%, 12px 1px }
 .rail-sublink:hover { color: var(--ink) }
-.rail-sublink.on { color: var(--ink); font-weight: 500 }
+.rail-sublink.on { color: var(--ink); font-weight: 600; background: var(--strip) }
 
 /* Settings sits under a 1 px rule with 24 px of air either side: it is about
    the board, the rows above it are about the work (§8.0). Inset 4 px at each
    end, as the dashboard's is, so the rule stops short of the rows' fills. */
-.rail-rule { border-top: 1px solid var(--hairline); margin: 24px 4px }
+.rail-rule { border-top: 1px solid var(--hairline2); margin: 10px 6px }
 
 /* The version chip's placement (DESIGN.md §8.10): the wrapper around ui-kit's `VersionChip`, which draws the pill itself (28 px, `--uk-chip-bg` well, hairline,
    cyan dot for an unopened release) — an app may only map its tokens, never restyle it. The wrapper is the rail's last element, sunk to its foot by
    `margin-top: auto` in the rail's column, and in the phone menu its last row. `display: flex` makes the chip a flex item, so no line box adds height under it. */
-.rail-release { display: flex; align-self: flex-start; margin: auto 0 0 8px }
+.rail-foot {
+  display: flex; align-items: center; gap: 8px; margin: auto 0 0;
+  padding: 10px; border-radius: 12px; background: var(--strip); border: 1px solid var(--hairline);
+}
+.rail-api { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 11px; color: var(--ink3) }
+.rail-api-dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--green-solid) }
+.rail-api-dot[data-state='down'] { background: var(--red) }
 
 /* The phone's ☰, and the wordmark row it sits in — both render only under
    useNarrow, so neither is ever in the desktop tree. */
@@ -266,7 +250,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The column right of the rail: the shell strip over the well. Painted --strip — the rail's paper — so the rail and the strip read as one white L
    around the well, and so the well's 24 px top-left radius is drawn against white. Before the strip, `.main` carried a 24 px top margin for that
    curve, but `body` paints --board too, so the margin was grey on grey and the corner never showed (the tracker strip spec, §1). */
-.maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--strip) }
+.maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--board) }
 /* The shell strip (§8.0): what is true of the machine wherever you stand — the tracker chip and the Jira chip, right-aligned, 8 px apart. Its height is `--main-gap`, and it
    keeps that height when empty, so the well's top edge never moves with whether a tracker is connected. */
 .topstrip {
@@ -327,18 +311,15 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   .rail-bar .tracker-chip-root + .tracker-chip-root .tracker-meters { display: none }
   /* In a bar the wordmark is a label rather than a page heading: the prompt drops to 17 px and the cursor scales with it (8 × 17, 6 px from the
      word). The kicker stays at 11 px where the dashboard's bar draws 10 — guard 3's floor (test/design-guards.test.ts), which this board keeps. */
-  .rail-brand { padding: 0; gap: 3px }
-  .rail-prompt { font-size: 17px; gap: 6px }
-  .rail-cursor { width: 8px; height: 17px }
+  .rail-brand { padding: 0 }
   /* The mock's full 44 px row, kept for the phone alone: here the row is a
      thumb target rather than a pointer one (§8.0's table). */
-  .rail-link { min-height: 44px; border-radius: 12px }
-  .rail-badge { top: 14px }
+  .rail-link { min-height: 44px }
   /* The phone menu's last row: no foot to sink to, so a fixed gap under the rows instead, and the menu's own bottom padding beneath it. The narrow chip's 44 px
      hit area overhangs its pill by 8 px each way, and `.rail` is `overflow-x: hidden` (which makes its y-axis clip too): 12 px above and 8 px + the rail's 8 px
      of padding below keep the overhang inside it. */
-  .rail-release { margin: 12px 0 8px 8px }
-  .rail-sublink { min-height: 40px }
+  .rail-foot { margin: 12px 0 8px }
+  .rail-sublink { min-height: 40px; height: auto }
   .main { border-top-left-radius: 0 }
 }
 

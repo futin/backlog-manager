@@ -242,14 +242,12 @@ describe('daylight status tokens hold AA', () => {
    *   would read 4.34:1 — a judgement about that set, not about whether a status word is legible, so it is left to whoever next retunes it.
    */
   it('every token client/src/styles.css sets text in clears 4.5:1 on each surface, unless it paints its own ground, is a mark glyph or a project hue', () => {
-    const MARK_GLYPHS: Record<string, string> = {
-      '.rail-caret': '--green-solid'
-    };
+    const MARK_GLYPHS: Record<string, string> = {};
     const sites = textSites();
     // Guards the parser, not the palette: these must be found, or the loop below passes on nothing. `.rail-link` declares `background: none` and must be
     // measured — the narrowing of the ground exemption, held by a real rule.
     const measured = sites.filter((s) => s.ground.kind === 'none').map((s) => s.selector);
-    for (const sel of ['.runs-status-live', '.runs-status-paused', '.watchdog-kind-live', '.set-error', '.rail-caret', '.rail-link']) {
+    for (const sel of ['.runs-status-live', '.runs-status-paused', '.watchdog-kind-live', '.set-error', '.rail-link']) {
       expect(measured).toContain(sel);
     }
     const fails: string[] = [];

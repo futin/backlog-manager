@@ -1,6 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { VersionChip } from 'ui-kit';
 
+import { GlyphTile } from './ui/GlyphTile';
+import type { GlyphName } from './ui/Glyphs';
+import { Pill } from './ui/Pill';
+
 import { useJiraContext } from '../hooks/JiraContext';
 import { setJiraListFilters } from '../hooks/useJiraListFilters';
 import { useJiraNeedsYou } from '../hooks/useJiraNeedsYou';
@@ -71,6 +75,13 @@ interface Props {
    * none — a GitHub row that appeared on a guess and vanished on the answer would be the rail flickering on every load of a files-only machine.
    */
   provisional: boolean;
+  /**
+   * The rail's always-on counts (restyle spec §4.9a): GitHub's PRs that need the reader (amber, a thing waiting on a person) and Runs' live runs (grey). `App`
+   * reads both from the shell's providers — no poller here. Zero or absent draws no pill. Jira's count is the rail's own read (`useJiraNeedsYou`).
+   */
+  counts?: { github?: number; runs?: number };
+  /** Whether the client's existing reads are answering, for the footer card: `null` while unknown draws nothing. No poller of its own. */
+  api?: 'ok' | 'down' | null;
 }
 
 /**
@@ -96,7 +107,7 @@ interface Props {
  * belongs beside the board, in the board toolbar, not in the switch that
  * decides which section is showing.
  */
-export function SideRail({ section, onChange, chipSlot, working, releases, provisional }: Props) {
+export function SideRail({ section, onChange, chipSlot, working, releases, provisional, counts, api }: Props) {
   const narrow = useNarrow();
   const [menuOpen, setMenuOpen] = useState(false);
   const hidden = useRailHidden(narrow, menuOpen);
@@ -160,13 +171,13 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   */
   const brand = (
     <h1 className="rail-brand" aria-label="Backlog Manager">
-      <span className="rail-kicker" aria-hidden="true">
-        Backlog
-      </span>
-      <span className="rail-prompt" aria-hidden="true">
-        <span className="rail-caret">›</span>
-        manager
-        <span className={working === true ? 'rail-cursor blink' : 'rail-cursor'} />
+      <GlyphTile glyph="grid" tone="ink" />
+      <span className="rail-brand-text" aria-hidden="true">
+        <span className="rail-prompt">
+          backlog manager
+          <span className={working === true ? 'rail-cursor blink' : 'rail-cursor'} />
+        </span>
+        <span className="rail-kicker">this machine</span>
       </span>
     </h1>
   );
@@ -201,15 +212,16 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
                 setMenuOpen(false);
               }}
             >
-              <RailIcon section={id} />
-              {RAIL_LABEL[id]}
+              <GlyphTile glyph={RAIL_GLYPH[id]} tone={section === id ? 'ink' : 'neutral'} />
+              <span className="rail-label">{RAIL_LABEL[id]}</span>
             </button>
-            {/* A sibling of the row's button, never inside it: a button in a button is invalid, and the row keeps meaning "open Jira" while the badge means
-                "open what needs me". Hung over the row's right edge by `.rail-group`. Zero draws no element at all (§7.4). */}
+            {/* A sibling of the row's button, never inside it: a button in a button is invalid, and the row keeps meaning "open Jira" while the count means
+                "open what needs me". Hung over the row's right edge by `.rail-group`. Zero draws no element at all (§7.4). GitHub and Runs counts are plain
+                pills: the row itself is the control. */}
             {id === 'jira' && needsYouCount > 0 && (
               <button
                 type="button"
-                className="rail-badge"
+                className="rail-count"
                 aria-label={`${needsYouCount} ${needsYouCount === 1 ? 'session needs' : 'sessions need'} you`}
                 onClick={() => {
                   setJiraPage('sessions');
@@ -218,8 +230,18 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
                   setMenuOpen(false);
                 }}
               >
-                {needsYouCount}
+                <Pill tone="warn">{needsYouCount}</Pill>
               </button>
+            )}
+            {id === 'github' && (counts?.github ?? 0) > 0 && (
+              <span className="rail-count">
+                <Pill tone="warn">{counts?.github}</Pill>
+              </span>
+            )}
+            {id === 'runs' && (counts?.runs ?? 0) > 0 && (
+              <span className="rail-count">
+                <Pill tone="neutral">{counts?.runs}</Pill>
+              </span>
             )}
             {id === 'files' && treeOpen('files') && (
               <RailTree
@@ -294,17 +316,25 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
           wrapper that owns the placement and nothing else. `narrow` is the same `useNarrow()` reading the rest of the rail uses: it gives the pill its
           44 px hit area on a phone, which overhangs the pill by 8 px above and below, so nothing around this wrapper may clip (the rail's own padding and the
           wrapper's margins keep that overhang inside its padding box). A click closes the menu as a section row's does, so the drawer is not opened behind it. */}
-      {releases && (!narrow || menuOpen) && (
-        <div className="rail-release">
-          <VersionChip
-            label={releases.label}
-            dot={releases.dot}
-            narrow={narrow}
-            onClick={() => {
-              releases.onOpen();
-              setMenuOpen(false);
-            }}
-          />
+      {(releases || api) && (!narrow || menuOpen) && (
+        <div className="rail-foot">
+          {releases && (
+            <VersionChip
+              label={releases.label}
+              dot={releases.dot}
+              narrow={narrow}
+              onClick={() => {
+                releases.onOpen();
+                setMenuOpen(false);
+              }}
+            />
+          )}
+          {api && (
+            <span className="rail-api">
+              <span className="rail-api-dot" data-state={api} aria-hidden="true" />
+              {api === 'ok' ? 'API connected' : 'API unreachable'}
+            </span>
+          )}
         </div>
       )}
     </nav>
@@ -412,31 +442,16 @@ function useRailHidden(narrow: boolean, menuOpen: boolean): boolean {
 }
 
 /**
- * One 16 px outline icon per section (§6: ~1.5 px stroke, rounded joins,
- * `--ink` at every row weight — an icon names the section, never its state).
- *
- * Inline SVG rather than an icon package, the same bargain `SectionLoading`
- * makes in App.tsx: five paths do not justify shipping a font or a component
- * library through the bundle.
+ * One glyph per section for the row's tile (plan 1's `Glyph` set — nothing here draws an SVG of its own any more). Record-typed so a section added to
+ * `SECTIONS` cannot ship without one.
  */
-function RailIcon({ section }: { section: Section }) {
-  return (
-    <svg
-      className="rail-ic"
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {ICON_PATHS[section]}
-    </svg>
-  );
-}
+const RAIL_GLYPH: Record<Section, GlyphName> = {
+  files: 'document',
+  github: 'pull-request',
+  jira: 'flag',
+  runs: 'play',
+  settings: 'cpu'
+};
 
 /**
  * The tree's own labels, and the ONLY labels these two views have: task-38
@@ -489,6 +504,7 @@ const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
   setup: 'Setup'
 };
 
+
 /**
  * Both source trees' labels (source-sections spec), one map because the two trees name the same pages the same way — Board and Archive are the views the
  * root rows of those names used to open, now one per source, GitHub's Settings is the tracker settings that lived on Shared Settings, and GitHub's PRs is
@@ -500,44 +516,4 @@ const RAIL_SOURCE_LABEL: Record<FilesPage | GithubPage, string> = {
   prs: 'PRs',
   archive: 'Archive',
   settings: 'Settings'
-};
-
-const ICON_PATHS: Record<Section, ReactNode> = {
-  // Three columns — the board's own shape, which was the root Board row's icon: Files is where a plain backlog's board lives now.
-  files: (
-    <>
-      <path d="M2.5 2.5h3v11h-3zM6.5 2.5h3v7h-3zM10.5 2.5h3v11h-3z" />
-    </>
-  ),
-  // A branch — two commits on one line and a third forked off it: what a git host deals in, drawn as a shape rather than any product's mark.
-  github: (
-    <>
-      <circle cx="5" cy="3.75" r="1.5" />
-      <circle cx="5" cy="12.25" r="1.5" />
-      <circle cx="11" cy="5.5" r="1.5" />
-      <path d="M5 5.25v5.5M11 7c0 2.5-6 2-6 3.75" />
-    </>
-  ),
-  // A play triangle inside a circle: a run is something that is going.
-  runs: (
-    <>
-      <circle cx="8" cy="8" r="5.75" />
-      <path d="M6.75 5.75 10.5 8l-3.75 2.25z" />
-    </>
-  ),
-  // A ticket — a notched stub and a tear line: the unit an issue tracker deals in, drawn as a shape rather than any product's mark.
-  jira: (
-    <>
-      <path d="M2.5 4.5h11v2.25a1.25 1.25 0 0 0 0 2.5v2.25h-11V9.25a1.25 1.25 0 0 0 0-2.5z" />
-      <path d="M10 4.5v7" strokeDasharray="1.5 1.5" />
-    </>
-  ),
-  // A slider row — two tracks, two handles.
-  settings: (
-    <>
-      <path d="M2.5 5.5h11M2.5 10.5h11" />
-      <circle cx="6" cy="5.5" r="1.75" />
-      <circle cx="10.5" cy="10.5" r="1.75" />
-    </>
-  )
 };

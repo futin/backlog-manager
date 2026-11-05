@@ -471,8 +471,8 @@ describe('SideRail · the version chip', () => {
     renderWithReleases({ label: 'v0.2.0+3', dot: false, onOpen: jest.fn() });
     const nav = screen.getByRole('navigation', { name: 'Sections' });
     expect(chip()).toBeInTheDocument();
-    // The chip draws itself (ui-kit takes no className), so the nav's last child is the `.rail-release` wrapper that places it.
-    expect(nav.lastElementChild).toHaveClass('rail-release');
+    // The chip draws itself (ui-kit takes no className), so the nav's last child is the `.rail-foot` card that places it.
+    expect(nav.lastElementChild).toHaveClass('rail-foot');
     expect(nav.lastElementChild).toContainElement(chip());
     expect(nav.querySelector('.uk-chip-dot')).toBeNull();
   });
@@ -496,7 +496,7 @@ describe('SideRail · the version chip', () => {
       expect(chip()).toBeNull();
       await userEvent.click(screen.getByRole('button', { name: 'Menu' }));
       const nav = screen.getByRole('navigation', { name: 'Sections' });
-      expect(nav.lastElementChild).toHaveClass('rail-release');
+      expect(nav.lastElementChild).toHaveClass('rail-foot');
       expect(nav.lastElementChild).toContainElement(chip());
       // The phone shape is ui-kit's: `narrow` is what gives the pill its 44 px hit area.
       expect(chip()).toHaveClass('uk-chip--narrow');
@@ -516,7 +516,7 @@ describe('SideRail · the version chip', () => {
 */
 describe('the Jira row’s Needs-you badge', () => {
   const configured = { data: { configured: true } as unknown as JiraStatusPayload, loading: false, error: false, reload: () => {} };
-  const badge = (): HTMLElement | null => document.querySelector('.rail-badge');
+  const badge = (): HTMLElement | null => document.querySelector('.rail-count');
 
   type Over = { key: string; id: string | null; state: string; endedAt?: string | null };
   const link = (o: Over) => ({
@@ -671,7 +671,7 @@ describe('the Jira row’s Needs-you badge', () => {
     const buttons = within(group).getAllByRole('button');
     expect(buttons.map((b) => b.textContent)).toEqual(['Board', 'Sessions', 'Setup']);
     expect(within(buttons[1]).queryByText('1')).toBeNull();
-    expect(group.querySelector('.rail-badge')).toBeNull();
+    expect(group.querySelector('.rail-count')).toBeNull();
     await userEvent.click(buttons[1]);
     expect(page.result.current[0]).toBe('sessions');
   });
@@ -707,5 +707,64 @@ describe('the Jira row’s Needs-you badge', () => {
     } finally {
       global.fetch = realFetch;
     }
+  });
+});
+
+/*
+  The restyled rail (restyle plan 4, task 6): every row is a glyph tile, a label and — while there is something to say — a count pill. `App` hands GitHub's
+  and Runs' counts in; Jira's is the rail's own read. The footer card says whether the client's reads are answering.
+*/
+describe('the rail rows and footer', () => {
+  beforeEach(() => localStorage.clear());
+
+  const withProps = (props: { counts?: { github?: number; runs?: number }; api?: 'ok' | 'down' | null; working?: boolean }, section: Section = 'files') => (
+    <SettingsProvider>
+      <ProjectsContext.Provider value={{ data: null, drawn: BOTH, reload: () => {} }}>
+        <SideRail section={section} onChange={jest.fn()} provisional={false} {...props} />
+      </ProjectsContext.Provider>
+    </SettingsProvider>
+  );
+  const rowOf = (name: string): HTMLElement => screen.getByRole('button', { name }).closest('div') as HTMLElement;
+
+  it('draws GitHub’s count as an amber pill and nothing at zero', () => {
+    const { rerender } = render(withProps({ counts: { github: 3 } }));
+    const pill = rowOf('GitHub').querySelector('.ui-pill');
+    expect(pill).toHaveTextContent('3');
+    expect(pill).toHaveClass('ui-pill-warn');
+    rerender(withProps({ counts: { github: 0 } }));
+    expect(rowOf('GitHub').querySelector('.ui-pill')).toBeNull();
+  });
+
+  it('draws Runs’ count as a neutral pill', () => {
+    render(withProps({ counts: { runs: 2 } }));
+    const pill = rowOf('Runs').querySelector('.ui-pill');
+    expect(pill).toHaveTextContent('2');
+    expect(pill).toHaveClass('ui-pill-neutral');
+  });
+
+  it('puts a tile on every row and keeps the page and item marks apart', () => {
+    render(withProps({}, 'runs'));
+    expect(screen.getByRole('button', { name: 'Runs' }).querySelector('.ui-glyph-tile')).toHaveAttribute('data-tone', 'ink');
+    expect(screen.getByRole('button', { name: 'Files' }).querySelector('.ui-glyph-tile')).toHaveAttribute('data-tone', 'neutral');
+    expect(screen.getByRole('button', { name: 'Runs' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('names the API state in the footer, and draws nothing while it is unknown', () => {
+    const { rerender } = render(withProps({ api: null }));
+    expect(screen.queryByText(/^API /)).toBeNull();
+    rerender(withProps({ api: 'ok' }));
+    expect(screen.getByText('API connected')).toBeInTheDocument();
+    rerender(withProps({ api: 'down' }));
+    expect(screen.getByText('API unreachable')).toBeInTheDocument();
+  });
+
+  it('blinks the cursor only for working === true', () => {
+    const { rerender } = render(withProps({ working: true }));
+    expect(document.querySelector('.rail-cursor')).toHaveClass('blink');
+    rerender(withProps({ working: false }));
+    expect(document.querySelector('.rail-cursor')).not.toHaveClass('blink');
+    rerender(withProps({}));
+    expect(document.querySelector('.rail-cursor')).not.toHaveClass('blink');
   });
 });

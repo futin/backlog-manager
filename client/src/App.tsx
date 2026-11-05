@@ -19,8 +19,9 @@ import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { ProjectsProvider, useProjectsContext } from './hooks/ProjectsContext';
 import { OrchestratorRunsProvider, useOrchestratorRunsContext } from './hooks/OrchestratorRunsContext';
 import { setFilesPage, setGithubPage, useFilesPage, useGithubPage } from './hooks/useSourcePage';
-import { PullRequestsProvider } from './hooks/PullRequestsContext';
-import { TrackersProvider } from './hooks/TrackersContext';
+import { PullRequestsProvider, usePullRequestsContext } from './hooks/PullRequestsContext';
+import { needsYouCount } from './lib/pr-layouts';
+import { TrackersProvider, useTrackersContext } from './hooks/TrackersContext';
 import { TimeZoneProvider } from './hooks/TimeZoneContext';
 import { useNarrow } from './hooks/useNarrow';
 import { setRunsMode } from './hooks/useRunsMode';
@@ -111,7 +112,11 @@ export function App() {
  */
 function AppShell() {
   const { settings, update, legacyLanding } = useSettings();
-  const { working } = useOrchestratorRunsContext();
+  const { working, liveCount } = useOrchestratorRunsContext();
+  const prs = usePullRequestsContext();
+  const trackers = useTrackersContext();
+  // The rail footer's reading follows the shell's existing tracker read — no poller of its own: an error is `down`, an answer `ok`, and until either, nothing.
+  const api = trackers.error ? 'down' : trackers.data ? 'ok' : null;
   /*
     The section is remembered across loads (`writeSection`): reopening on the section you left is what you want from a board you come back to.
 
@@ -345,6 +350,8 @@ function AppShell() {
           working={working}
           releases={releaseChip}
           provisional={pending !== null}
+          counts={{ github: needsYouCount(prs.data), runs: liveCount }}
+          api={api}
         />
         {whatsNew.open && whatsNew.data && <ReleasesDrawer data={whatsNew.data} onClose={whatsNew.close} />}
         {/* The strip over the well (§8.0). `.maincol` is the rail's paper, so the rail and the strip are one white L and the well's 24 px top-left
