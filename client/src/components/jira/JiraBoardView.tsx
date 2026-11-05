@@ -14,12 +14,13 @@ import {
   fetchJiraWorktrees,
   foldMatches,
   matchesBoardFilters,
+  sortTops,
   ticketWorktrees,
   type JiraAssigneeFilter,
   type JiraBoardFilters,
   type JiraChildrenIndex
 } from '../../lib/jira';
-import { boardAgents, boardShelves } from '../../lib/jira-deck';
+import { boardAgents, boardShelves, topSessionState } from '../../lib/jira-deck';
 import type { JiraPage } from '../../lib/jira-page';
 import type { JiraAction, JiraIssue, JiraLiveSession, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { FilterBar, FilterSection } from '../FilterBar';
@@ -28,6 +29,7 @@ import { Chip } from '../ui/Chip';
 import { JiraAgentDeck } from './JiraAgentDeck';
 import { JiraBandSub } from './JiraBandSub';
 import { JiraBoardPicker } from './JiraBoardPicker';
+import { JiraIssueList } from './JiraIssueList';
 import { JiraShelves } from './JiraShelves';
 import { JiraViewSwitch } from './JiraViewSwitch';
 
@@ -133,12 +135,16 @@ export function JiraBoardView({
   // to 500 issues. F1 (grouped-board spec §5): a top is kept when it matches or when an issue folded under it does, with that issue's key to ring it by.
   // The deck and the shelves read the same `kept`, so one filter answers for both; which tops a live session took OFF the shelves is `boardAgents`' call on
   // the UNFILTERED fold, so a filter never puts a ticket on a shelf and on the deck at once.
-  const { deck, shelves } = useMemo(() => {
+  const { deck, shelves, rows, cellStates } = useMemo(() => {
     const kept = foldMatches(fold, (i) => matchesBoardFilters(i, applied, me));
     const agents = boardAgents(fold, sessions.data, live);
     return {
       deck: agents.filter((e) => kept.has(e.top.key)),
-      shelves: boardShelves(fold, kept, agents, sessions.data)
+      shelves: boardShelves(fold, kept, agents, sessions.data),
+      // The List's rows: every kept top, `sortTops` order, no cut. The Session cell reads the UNFILTERED `agents`, so a top's cell names the deck's lead session
+      // for that card even when a filter would have dropped that session's own ticket from the deck (the card is the top; the filter kept the top).
+      rows: sortTops(fold.tops.filter((t) => kept.has(t.key)), fold.under),
+      cellStates: topSessionState(agents)
     };
   }, [fold, applied, me, sessions.data, live]);
 
@@ -204,7 +210,16 @@ export function JiraBoardView({
       </Band>
 
       {loaded ? (
-        view === 'list' ? null /* Task 4 draws the issue table here; the session table is Jira › Sessions'. */ : (
+        view === 'list' ? (
+          <JiraIssueList
+            tops={rows}
+            fold={fold}
+            sessions={cellStates}
+            now={now}
+            filtered={boardFilterCount(applied) > 0 || filters.search.trim() !== ''}
+            onOpenIssue={onOpenIssue}
+          />
+        ) : (
           <>
             <JiraAgentDeck entries={deck} now={now} onOpenIssue={(issue) => onOpenIssue(issue, fold.childrenOf)} />
             <JiraShelves

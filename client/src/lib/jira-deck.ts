@@ -109,6 +109,27 @@ export function boardAgents(fold: JiraFold, payload: JiraSessionsPayload | null,
   return out.sort(deckOrder);
 }
 
+/**
+ * The List's Session cell: per top, the state of the FIRST entry `boardAgents` returned for it. Those entries are already in `deckOrder` (group, newest
+ * start, id), so the cell names the session the deck leads that card with and this adds no ordering of its own — a card with `needs you` on a child and
+ * `working` on itself reads `needs you` in both places. A top with no live session has no key.
+ */
+export function topSessionState(agents: readonly DeckEntry[]): Map<string, JiraSessionState> {
+  const out = new Map<string, JiraSessionState>();
+  for (const e of agents) if (!out.has(e.top.key)) out.set(e.top.key, e.state);
+  return out;
+}
+
+/** The word beside the dot in the List's Session cell. `ended` is never reached — `boardAgents` drops ended links — and reads as nothing if it were. */
+export function issueCellWord(state: JiraSessionState): string {
+  if (needsYou(state)) return 'needs you';
+  if (state === 'working') return 'working';
+  if (state === 'quiet') return 'quiet';
+  if (state === 'lost') return 'lost contact';
+  if (state === 'starting') return 'starting';
+  return '';
+}
+
 /** The header's tally: how many cards want a person and how many are working — the two numbers a glance at the deck is for. */
 export function deckTally(entries: readonly DeckEntry[]): { needs: number; working: number } {
   return { needs: entries.filter((e) => e.group === 'needs').length, working: entries.filter((e) => e.group === 'working').length };

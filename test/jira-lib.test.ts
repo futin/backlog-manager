@@ -43,6 +43,7 @@ import {
   modalTree,
   progressLine,
   sortTops,
+  rolledUpdated,
   boardRowLine,
   boardsForSetup,
   callsReading,
@@ -69,7 +70,7 @@ import {
 import type { JiraFold } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
-import { SHELF_LIMIT, boardAgents, boardShelves, deckCrumb, deckGroup, deckTally, endedLine } from '../client/src/lib/jira-deck';
+import { SHELF_LIMIT, boardAgents, boardShelves, deckCrumb, deckGroup, deckTally, endedLine, issueCellWord, topSessionState } from '../client/src/lib/jira-deck';
 import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
 import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraRepoRefs, JiraSessionsPayload, JiraSkill, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
@@ -772,6 +773,27 @@ describe('the fold', () => {
       expect(keys(sorted)).toEqual(['Y', 'X']);
       expect(sorted).not.toBe(tops);
       expect(keys(tops)).toEqual(['X', 'Y']);
+    });
+  });
+
+  describe('rolledUpdated', () => {
+    it('is the newest folded issue\u2019s stamp, as given, when a child is newer than the top', () => {
+      const p = n('P', null, 5 * 24);
+      const c = n('P1', 'P', 24);
+      const f = fold([p, c]);
+      expect(rolledUpdated(f.tops[0], f.under)).toBe(c.updated);
+    });
+
+    it('is the top\u2019s own stamp with nothing folded under it', () => {
+      const p = n('P', null, 3);
+      expect(rolledUpdated(p, new Map())).toBe(p.updated);
+    });
+
+    it('skips an unparseable top stamp for a parseable child, and is null when nothing parses', () => {
+      const bad = n('P', null, 0, { updated: 'not a date' });
+      const c = n('P1', 'P', 2);
+      expect(rolledUpdated(bad, new Map([['P', [c]]]))).toBe(c.updated);
+      expect(rolledUpdated(bad, new Map([['P', [n('P2', 'P', 0, { updated: '' })]]]))).toBeNull();
     });
   });
 
@@ -1566,6 +1588,32 @@ describe('lib/jira-deck', () => {
     expect(deckCrumb(entry, [])).toContain('pay');
     const [own] = boardAgents(fold, answer([link('PAY-1', 'a', 'working', 2)]), {});
     expect(deckCrumb(own, [])).not.toContain('↳');
+  });
+
+  describe('topSessionState and issueCellWord (the List\u2019s Session cell)', () => {
+    const tree = foldBoard([top, child, other]);
+
+    it('names the deck\u2019s lead session per top: needs you on a child beats working on the top', () => {
+      const entries = boardAgents(tree, answer([link('PAY-1', 'a', 'working', 3), link('PAY-2', 'b', 'plan', 2)]), {});
+      expect(topSessionState(entries).get('PAY-1')).toBe('plan');
+    });
+
+    it('lets the newest start lead inside one group: a reservation on a child outranks an older lost session on the top', () => {
+      const entries = boardAgents(tree, answer([link('PAY-1', 'a', 'lost', 2)]), { 'PAY-2': { ...reservation(1), starting: true } });
+      expect(topSessionState(entries).get('PAY-1')).toBe('starting');
+    });
+
+    it('is empty with no live links, and keeps two tops apart', () => {
+      expect(topSessionState(boardAgents(tree, answer([]), {})).size).toBe(0);
+      const both = topSessionState(boardAgents(tree, answer([link('PAY-1', 'a', 'working', 3), link('PAY-3', 'b', 'quiet', 2)]), {}));
+      expect([...both]).toEqual([['PAY-1', 'working'], ['PAY-3', 'quiet']]);
+    });
+
+    it('words each live state, and never an ended one', () => {
+      const words = (['plan', 'permission', 'reply', 'answer', 'working', 'quiet', 'lost', 'starting'] as const).map((s) => issueCellWord(s));
+      expect(words).toEqual(['needs you', 'needs you', 'needs you', 'needs you', 'working', 'quiet', 'lost contact', 'starting']);
+      expect(issueCellWord('ended')).toBe('');
+    });
   });
 
   it('boardShelves takes a top with a live session on itself or a folded child off its shelf, and leaves the others', () => {
