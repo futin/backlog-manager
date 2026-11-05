@@ -99,4 +99,27 @@ describe('Segmented', () => {
     expect(screen.getByRole('group', { name: 'Layout' })).toHaveClass('ui-seg-pill');
     expect(screen.getByRole('group', { name: 'Layout' })).not.toHaveClass('ui-seg-track');
   });
+
+  // Task 6's state filter reads "Needs you 1": the count rides inside the button, after a space, so the accessible name carries it.
+  it('draws an optional count after the label, inside the button', () => {
+    render(
+      <Segmented
+        value="a"
+        options={[
+          { value: 'a', label: 'Needs you', count: 1 },
+          { value: 'b', label: 'Zero', count: 0 },
+          { value: 'c', label: 'Plain' }
+        ]}
+        onChange={jest.fn()}
+      />
+    );
+
+    const needs = screen.getByRole('button', { name: 'Needs you 1' });
+    expect(needs.querySelector('.ui-seg-count')).toHaveTextContent('1');
+    expect(needs).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Zero 0' }).querySelector('.ui-seg-count')).toHaveTextContent('0');
+    const plain = screen.getByRole('button', { name: 'Plain' });
+    expect(plain.querySelector('.ui-seg-count')).toBeNull();
+    expect(plain).toHaveAttribute('aria-pressed', 'false');
+  });
 });

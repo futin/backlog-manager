@@ -25,7 +25,7 @@ export function Segmented<T extends string | number>({
 }: {
   value: T;
   /** `readonly`: the component only maps it, so a module-level constant list (GitHub › PRs' `PR_LAYOUT_OPTIONS`) can be handed in as is. */
-  options: readonly { value: T; label: string; disabled?: boolean }[];
+  options: readonly { value: T; label: string; disabled?: boolean; count?: number }[];
   onChange: (v: T) => void;
   /**
    * For a setting the server can't act on — the switch would flip and do nothing. One option can be disabled on its own (`options[].disabled`) for a member
@@ -71,6 +71,13 @@ export function Segmented<T extends string | number>({
           onClick={() => onChange(o.value)}
         >
           {o.label}
+          {/* A space before the span, so the accessible name reads "Needs you 1"; absent `count` leaves today's markup exactly. */}
+          {o.count !== undefined && (
+            <>
+              {' '}
+              <span className="ui-seg-count">{o.count}</span>
+            </>
+          )}
         </button>
       ))}
     </div>

@@ -3651,6 +3651,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-seg button:hover:not(:disabled) { color: var(--ink); background: var(--hover-fill) }
 .ui-seg button:disabled { cursor: default; opacity: .4 }
 .ui-seg button.on { color: var(--ink); background: var(--strip-hi); border-color: var(--ink3) }
+/* The optional per-option count (Sessions' state filter): quieter than the label, steadier on the pressed option; tabular so a changing number does not
+   jiggle the segment. */
+.ui-seg-count { font-size: 11px; font-weight: 600; color: var(--ink3); font-variant-numeric: tabular-nums }
+.ui-seg button.on .ui-seg-count { color: var(--ink2) }
 /* The pill variant (§8.6) — `Segmented`'s `pill` prop, a variant on the
    primitive rather than a second family a page declares (§12.1). A recessed
    `--steel` track under a raised `--strip` option: "on" is legible from the
