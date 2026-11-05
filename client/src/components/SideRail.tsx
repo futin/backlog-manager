@@ -477,7 +477,7 @@ const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
 
 /**
  * The Jira tree's labels (Jira phase 2, spec §6.1; DESIGN.md §8.9) — `RAIL_SUB_LABEL`'s rule: the only labels these three pages have, because no page
- * draws a switch of its own at any width. `Open board` on Setup and the empty board's chip to Setup are this tree's own navigation handed down through
+ * draws a switch of its own at any width. `Open board` on Setup, Sessions' `Open Setup` and the empty board's chip to Setup are this tree's own navigation handed down through
  * `App` (`onOpenJiraPage`), not second controls with wording of their own to keep in step.
  *
  * `Board` repeats the source trees' word on purpose: under the `Jira` row it reads as Jira's board, and the page it opens is a board — three columns of

@@ -638,10 +638,10 @@ the three keys so no suite inherits a developer's credentials. `test/compose-env
 The Jira sessions work adds `jira-sessions-state` (`sessionState` and `needsYou`) and widens `jira-live` (the store, its file, retention, the one-run gate),
 `agents-jira-live` (the quiet clock, re-attach, the pace), `agents-jira-stop` (`{ key, sessionId }`) and `jira-routes` (`GET /sessions`),
 and adds `agents-jira-link` (the link and unlink routes, supertest), the pure `jira-sessions-lib` (`lib/jira-sessions.ts`: the Open buttons, durations, the
-ticket's sessions) and the jsdom suites `jira-list` (the Sessions page's session table and the Board's issue List), `jira-view-store` (the Board and List switch's module store) and `jira-sessions-hook`
+ticket's sessions) and the jsdom suites `jira-list` (the Sessions page's session table; the Board's issue List is in `jira-board`), `jira-view-store` (the Board and List switch's module store) and `jira-sessions-hook`
 (`useJiraSessions`), and widens `rail` (the Needs-you badge), `jira-board` (the agent deck and status shelves) and `jira-detail` (the live session cards and
 history; it was `jira-modal` before the dialog was renamed);
-the Sessions-page work then widens `jira-list` (the Sessions page, the issue List), `jira-board` (the shared pick, the Board | List switch), `jira-lib` (`JIRA_PAGES`,
+the Sessions-page work then widens `jira-list` (the Sessions page), `jira-board` (the issue List, the shared pick, the Board | List switch), `jira-lib` (`JIRA_PAGES`,
 `rolledUpdated`), `rail` (the badge opens Sessions) and `jira-sections` (the page store);
 `test/helpers/jira-links-env.ts` gives every test its own `BM_JIRA_LINKS_FILE` in a temp directory, so none touches a developer's real one and no case inherits
 another's links.

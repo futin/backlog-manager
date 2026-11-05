@@ -17,8 +17,8 @@ import { JiraSetupView } from './JiraSetupView';
  * so a machine that never configures Jira never fetches this chunk.
  *
  * It decides one thing: which of the section's three pages (Board, Sessions, Setup) is drawn, read from `useJiraPage` — the module store the rail's tree writes. It
- * draws NO control that switches them, at any width (the Runs/Settings rule, CLAUDE.md "Settings is three pages…"): the tree is the switch, and the two
- * in-page links that also land on a page (`Open board` on Setup, the empty board's chip to Setup) are `onOpenJiraPage`, the rail's own navigation threaded
+ * draws NO control that switches them, at any width (the Runs/Settings rule, CLAUDE.md "Settings is three pages…"): the tree is the switch, and the in-page
+ * links that also land on a page (`Open board` and Sessions' `Open Setup`, the empty board's chip to Setup) are `onOpenJiraPage`, the rail's own navigation threaded
  * down from `App`, handed to the pages as given.
  *
  * Before a page can draw, the status has to have said `configured: true`, and until then this is where the section stands — `App` holds a stored `jira`
@@ -45,7 +45,7 @@ import { JiraSetupView } from './JiraSetupView';
  * same snapshot forward — never a second modal.
  *
  * **The write counter is held here too** (Jira phase 3, plan ruling R7). The modal's landed write — `Assign to me`, `Move to…` — calls `onWrote`,
- * which bumps `nudge`; the Board page hands it to `useJiraBoard`, whose list re-reads at once on the change, `off` boards included. The two never reach
+ * which bumps `nudge`; the Board and Sessions pages hand it to `useJiraBoard`, whose list re-reads at once on the change, `off` boards included. The two never reach
  * into each other: this component is the one place that holds both the modal and the page, so it is the one place a number can pass between them. The
  * counter is not cleared on a page switch — it is a count of events, not a state, and only its change means anything.
  *

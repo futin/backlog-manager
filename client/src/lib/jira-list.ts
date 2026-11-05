@@ -8,7 +8,7 @@ import { formatZonedClock, startOfZonedDay, zonedParts } from './time-zone';
 
 /**
  * jira-list.ts — what the Sessions page's session table draws: one row per session, live above ended, filtered and counted (Jira sessions spec §7.2, C7; DESIGN.md
- * §8.9.1). Pure, and the one home of these derivations — `JiraSessionList` draws what `buildListRows` and `applyListFilters` return, so no component holds a
+ * §8.9.1). Pure apart from `rowOpens`, which reads DOM nodes, and the one home of these derivations — `JiraSessionList` draws what `buildListRows` and `applyListFilters` return, so no component holds a
  * copy of "which sessions are in scope", "which ended rows the window hides" or "which row comes first".
  *
  * **A row is a session, not a ticket.** The identity is the pair, `${key}:${sessionId}` — the deck's — because one session can be linked to several tickets

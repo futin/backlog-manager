@@ -35,7 +35,7 @@ export function usePickedJiraBoard(nudge: number): PickedJiraBoard {
   const unreadable = data?.configUnreadable ?? null;
   // Resolved against the live list every render; `null` while unreadable, so nothing is requested from a board list the server could not read.
   const board = unreadable === null ? pickBoard(stored, boards) : null;
-  // The ONLY id a page ever asks the server about (Review Focus 3).
+  // The ONLY id a page ever asks the server about (the one stored pick).
   const list = useJiraBoard(board?.id ?? null, board?.interval ?? null, nudge);
   const fold = useMemo(() => foldBoard(list.issues), [list.issues]);
   const loaded = !list.loading && !(list.error && list.issues.length === 0);

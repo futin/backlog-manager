@@ -4,7 +4,7 @@ import { JIRA_VIEW_KEY, isJiraView, type JiraViewMode } from '../lib/jira-view';
 
 /**
  * useJiraView — the Board page's view (`board` or `list`), shared by every surface that names it (Jira sessions spec §7, C1). `useJiraPage`'s shape and its
- * reason: the band's switch, the List's own band and the rail badge's click (C4 sets page `board` and view `list`) are separate mounted readers of one value,
+ * reason: the Board page's band switch and the issue List's own band are separate mounted readers of one value (the rail badge opens the Sessions page and no longer writes it),
  * and `usePersistedState` is a `useState` per caller, so a write from one would reach localStorage and never reach the already-mounted others. The value is
  * held once, at module level, with every mounted reader subscribed.
  *

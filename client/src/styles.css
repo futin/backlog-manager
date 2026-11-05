@@ -192,7 +192,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The Jira row's wrapper is the badge's positioning parent (§8.0): the badge is a sibling of the row's button, so it is placed over the button's right end. */
 .rail-group { position: relative }
 /* The Needs-you count (Jira sessions spec §7.4): the FilterBar funnel's disc — `--ink` fill on `--strip` text, 11/500, tabular, a 16 px circle that widens into a
-   pill for two digits — set on the row's right edge instead of a corner. A real button (it opens the List), so it resets the UA chrome the way `.rail-link`
+   pill for two digits — set on the row's right edge instead of a corner. A real button (it opens the Sessions page, Needs you chip on), so it resets the UA chrome the way `.rail-link`
    does and keeps the board's focus ring. Vertically centred on the 36 px row; the phone's 44 px row re-centres it below. */
 .rail-badge {
   position: absolute; top: 10px; right: 12px;
@@ -1423,7 +1423,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-hist-head { font-size: 13px; font-weight: 500; color: var(--ink) }
 .jira-hist-meta { grid-column: 2 / -1; font-size: 12px; color: var(--ink2); overflow-wrap: anywhere }
 
-/* The List view (spec §7.2, DESIGN.md §8.9.1): a bar (chips with counts, the Repo / Run / window selects, All tickets), then ONE table of sessions in two
+/* The Sessions page's session table (spec §7.2, DESIGN.md §8.9.1): a bar (chips with counts, the Repo / Run / window selects, All tickets), then ONE table of sessions in two
    groups, Live then Ended, ten columns, 44 px rows. A row that needs a person washes in amber from its left edge (a gradient over `--strip`, so it reads on
    every theme without a new token); an ended row is set in `--ink2`. The table scrolls sideways inside its own wrapper under 1120 px rather than squeezing ten
    columns into a phone. Nothing is under 11 px (guard 3). */
@@ -1462,7 +1462,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis
 }
 .jira-list-row[data-ended="true"] td { color: var(--ink2) }
-/* The whole row opens Detail (JiraSessionList's `rowOpens`), so it wears the pointer and a hover fill. The fill is laid on the CELLS and half transparent, so
+/* The whole row opens Detail (`rowOpens` in `lib/jira-list.ts`, used by both tables), so it wears the pointer and a hover fill. The fill is laid on the CELLS and half transparent, so
    a needs-you row's amber wash — the row's own background — still reads through it under the pointer. */
 .jira-list-row { cursor: pointer }
 .jira-list-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }

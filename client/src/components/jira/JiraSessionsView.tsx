@@ -26,7 +26,7 @@ import { JiraSessionList } from './JiraSessionList';
  * with the board either way, and the picker is drawn only when there are boards to pick from and the config could be read.
  *
  * **Search is this page's own state**, `Search sessions` over key, summary, repo and branch — no longer the issue search the Board's List shared. There is no
- * FilterBar (the List's bar carries the session filters) and no Board | List switch; the rail is the only page switch (DESIGN.md §8.0).
+ * FilterBar (the List's bar carries the session filters) and no Board | List switch; the rail is the only page switch (DESIGN.md §8.0; the page itself is §8.9.1).
  */
 export function JiraSessionsView({
   onOpenJiraPage,

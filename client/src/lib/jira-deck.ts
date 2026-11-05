@@ -11,7 +11,7 @@ import { pollAge } from './tracker';
  *
  * **The deck is the live sessions on this board, one card each.** A session counts for a board when its key is on that board's LOADED list — a top or anything
  * folded under one — so a ticket two boards both hold shows its card on each of them (the controller's ruling), and a session on a ticket off every loaded
- * list shows on no board (the List view is where it lives). `starting` never comes from `GET /api/jira/sessions`: a reservation has no link until the dashboard
+ * list shows on no board (the Sessions page is where it lives). `starting` never comes from `GET /api/jira/sessions`: a reservation has no link until the dashboard
  * answers, so a Starting card is built from the status's `live[key]` entry (`JiraStartingCard`'s and Detail's approach); Lost contact IS in the payload, as the
  * state the server derived.
  *

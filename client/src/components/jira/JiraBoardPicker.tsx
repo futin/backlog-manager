@@ -9,7 +9,7 @@ import { Popover } from '../ui/Popover';
 /**
  * The board picker: a `Chip` reading the board's name that opens a `Popover` listing every board by name — pick only (spec §1: Edit and New belong to
  * Setup). A pick stores the board's id and closes the panel; nothing else happens, because what the page draws follows from the stored id alone. The chip is
- * the popover's anchor (its own click toggles; Escape hands focus back to it), which is what `Chip`'s ref is for.
+ * the popover's anchor (its own click toggles; Escape hands focus back to it), which is what `Chip`'s ref is for. DESIGN.md §8.9.1.
  */
 export function JiraBoardPicker({ boards, current, onPick }: { boards: readonly JiraBoardStatus[]; current: JiraBoardStatus; onPick: (id: string) => void }) {
   const [open, setOpen] = useState(false);
