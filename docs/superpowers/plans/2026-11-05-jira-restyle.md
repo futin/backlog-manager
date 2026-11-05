@@ -98,13 +98,13 @@ sheet first` above a hairline. Rows 40 px, 28 px radius-8 tile on `--strip-hi` w
 stays in place (no longer pulled first), its tile `color-mix(in srgb, var(--green-solid) 14%, var(--strip))` with a `--green` glyph and a right-end tick +
 `default` at 11/500 `--green`; the row's accessible name is its label only (sub-line and mark `aria-hidden`). After a pick the menu closes and focus moves to
 the chevron. States from `runChipState` (unchanged): `no-repo` → `dashed` + `disabled`, title `no repository mapped for <key> — Jira › Setup ›
-Repositories`; `live` → `disabled`, title `a session is running on <key>`, text `Running` + ` · <age>` — `pollAge` of the newest live link's `startedAt` among `sessions.links` for the key, omitted when the live reading comes
-from `status.live` alone (sessions not landed) — a 6 px steady `--green-solid` dot before
+Repositories`; `live` → `disabled`, title `a session is running on <key>`, text `Running` + ` · <age>` — `pollAge` of `status.live[key].startedAt` (`JiraLiveSession.startedAt`, `shared/types.ts:922`) when that entry exists, else of the
+newest open `how === 'run'` link's `startedAt` in `sessions.links` (the same predicate `runChipState` uses, `lib/jira.ts:733-735`) — a 6 px steady `--green-solid` dot before
 it, and the Jira-local tint `.jira-run[data-state='live'] > [role='group']` = `color-mix(in srgb, var(--green-solid) 14%, var(--strip))` with `--green`
 text. Spec §4.1 writes this selector as `… .ui-split`, which guard 7 (`test/design-guards.test.ts:380-396`) fails: no selector outside the primitives block
 may carry a `ui-*` family token anywhere in it. The `> [role='group']` form follows the `> button` precedent at `styles.css:1288`; report the deviation.
 `data-state` stays on the `.jira-run` wrapper. `.jira-run[data-state='no-repo'] > button { border-style: dashed }` (`styles.css:1288`) goes (the `dashed`
-prop replaces it); `.jira-modal-controls .jira-run { position: static }` (`:1293`) goes with the modal controls row (Task 5).
+prop replaces it); `.jira-modal-controls .jira-run { position: static }` (`:1293`) is removed in Task 5, with the modal controls row.
 
 - [ ] **Step 1: Update/write the failing tests.**
   - `jira-board.test.tsx`: a card's foot holds buttons `Run <key>` and `Run options for <key>`; clicking `Run <key>` opens the launch sheet with the default
@@ -115,7 +115,8 @@ prop replaces it); `.jira-modal-controls .jira-run { position: static }` (`:1293
     `Run options for <key>`. The existing no-repo case at :761-767 asserts BOTH halves are disabled and carry the no-repo title. The sites that click
     `runChip()` (`/^Run PAY-/`, the left half, :756) and then read `Run menu` — :826, :838, :849, :862, :931 — click `Run options for <key>` instead.
   - `jira-detail.test.tsx`: `modalRun()` still finds `Run PAY-131`; clicking it opens the launch sheet with no `Run menu`; `Run options for PAY-131` opens it;
-    `live` and `no-repo` cases assert both halves disabled with the existing titles; the live left half's text starts `Running`, and with a live link started
+    `live` and `no-repo` cases assert both halves disabled with the existing titles; the live left half's text starts `Running`; the existing :580 case
+    (`SESSION()`, started 3 h back) reads `Running · 3h`; and with only a live link (no `status.live` entry) started
     `hoursAgo(2)` reads `Running · 2h`. The sites that click `modalRun()` and then read `Run menu` — :550, :555, :568, :1061 — click `Run options for
     PAY-131`; :570 `--ui-popover-width` `234px` → `300px`; :572-573 (`scrollIntoView({ block: 'nearest' })` on open in the modal) STAYS — the band can still
     sit in a column that scrolls under 700 px. :589-590 (no-repo click opens nothing) stands.
@@ -182,7 +183,8 @@ stays after the foot.
 Behaviour (spec §4.3): with `tone`, the column has a `--steel` ground, radius 16, 12 px padding with the header inside; header dot `--ink3` / `--amber-solid`
 / `--green-solid`; name 13/600 `--ink`; count pill on `--strip` at 11/500 `--ink2` (not a new `Pill` tone). Mechanism: `Dot` has no such tones and a page
 rule naming `.ui-dot` / `.ui-pill` fails guard 7, so with `tone` set `BoardColumn` draws a page-local `.board-col-dot` span in place of `Dot` and a
-page-local `.board-col-count` span in place of the `Pill`, both styled under `.board-col[data-tone]`. Without `tone`, nothing changes (still `Dot` +
+page-local `.board-col-count` span in place of the `Pill` (inside the existing
+`.board-col-pill` `data-testid="col-count"` wrapper, which five `jira-board` assertions read), both styled under `.board-col[data-tone]`. Without `tone`, nothing changes (still `Dot` +
 `Pill`).
 
 - [ ] **Step 1: Failing tests.** Jira shelves: the three columns carry `data-tone` `todo`, `doing`, `done` in that order, each with one `.board-col-dot`
@@ -247,8 +249,9 @@ The `· <category>` word after the status goes. First enabled row takes focus on
   transition labelled by `transitionOptions` (the existing two-to-one-status fixture shows the transitions' own names); a row click posts `{ key,
   transitionId }` exactly once and closes the dialog; two quick clicks post once; the chip is disabled while the post is pending; title `transitions
   unavailable` after a failed read; `no transitions offered` on an empty list; current status pinning, two fixtures: (a) a new three-transition fixture `[Start → In Progress, Back to
-  review → In Review, Done → Done]` on an `In Review` issue renders rows `[Back to review (aria-disabled), Start, Done]`; (b) the :867-874 fixture renders
-  `[In Review, In Review (2)]` both `aria-disabled`, then `In testing`. Focus: on open the first ENABLED row is `document.activeElement` (in (a), `Start`);
+  review → In Review, Done → Done]` on an `In Review` issue renders rows `[In Review (aria-disabled), In Progress, Done]` (labels are
+  `transitionOptions`', i.e. the landing status when unique); (b) the :867-874 fixture renders
+  `[In Review, In Review (2)]` both `aria-disabled`, then `In Testing`. Focus: on open the first ENABLED row is `document.activeElement` (in (a), `In Progress`);
   Escape closes and returns focus to the `Move to` chip. The four `In Review ·
   in progress` assertions (:235, :421, :437, :446) become `In Review` plus a dot with
   `data-tone="doing"`. `dialog-count-docs.test.ts`: `seven composers` → `eight composers` (the hook comment), DIALOG count assertions unchanged.
