@@ -58,8 +58,8 @@ import type { PrWriteResult } from '../../../../shared/types';
  *
  * **The expansion is a panel AFTER the scroll box, not a row in the table.** `Popover` portals nothing and `.prs-matrix-scroll`'s `overflow-x: auto` clips both
  * axes, so a `Merge menu` opened from a key strip inside the table would be cut off at the box's edge. The open row's strip (`PrActions`, with `blockedText` so a
- * blocked Merge says why, and `omitUpdatingReason`) and the foot (the Confirm, then the outcome line) therefore render in `.prs-matrix-panel`, the scroll box's
- * next sibling; the row stays the disclosure (`aria-expanded`, `aria-controls` = the panel's id) and keeps a pressed ground in the table. A write's result still
+ * blocked Merge says why, and `omitUpdatingReason`) and the foot (the Confirm, then the outcome line) therefore render in `.prs-matrix-panel`, the `Ledger`'s
+ * next sibling inside the `Sheet`; the row stays the disclosure (`aria-expanded`, `aria-controls` = the panel's id) and keeps a pressed ground in the table. A write's result still
  * lands inside the block that caused it. A COLLAPSED row's outcome keeps a row of its own beneath it — a collapsed part never hides the result of a write — and
  * that one row is pinned to the scroll box's visible width, so the outcome never sits off-screen while the table is scrolled. Collapsing a row whose Confirm is
  * open — a second click, or another row opening — closes that Confirm: the page owns it (`PrLayoutProps.confirming`), and a Confirm no row draws would still hold
@@ -80,7 +80,7 @@ import type { PrWriteResult } from '../../../../shared/types';
 const COLUMN_COUNT = 2 + MATRIX_COLUMNS.length + 1;
 
 /**
- * The open row's strip and foot, drawn after the scroll box (see the file's doc). `omitUpdatingReason` and the dropped `updating` outcome are the row's: the Base
+ * The open row's strip and foot, drawn after the `Ledger`, outside every overflow box (see the file's doc). `omitUpdatingReason` and the dropped `updating` outcome are the row's: the Base
  * cell says `updating…`, so neither the why-line nor an outcome line repeats it.
  */
 function MatrixPanel({ r, props, id }: { r: RankedPr; props: PrLayoutProps; id: string }) {
@@ -271,8 +271,8 @@ export function PrMatrix(props: PrLayoutProps) {
                   </tbody>
                 </table>
               </div>
-              {openRow !== undefined && <MatrixPanel r={openRow} props={props} id={panelId} />}
             </Ledger>
+            {openRow !== undefined && <MatrixPanel r={openRow} props={props} id={panelId} />}
           </Sheet>
           <p className="prs-matrix-legend" data-testid="pr-matrix-legend">
             {LEGEND.map(({ tone, word }) => (

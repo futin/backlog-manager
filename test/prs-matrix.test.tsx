@@ -145,7 +145,7 @@ describe('PrMatrix — header, cells and order', () => {
     render(<PrMatrix {...props([repo('a/x', [draft, clean, behind])])} />);
     // The draft is the newest PR, but a draft is Quiet: it ranks after the behind PR, with the clean one.
     expect(rowIds()).toEqual(['pr-mrow-a/x#2', 'pr-mrow-a/x#4', 'pr-mrow-a/x#3']);
-    expect(within(row('a/x#4')).getByText('failing').closest('.prs-cell-bad')).not.toBeNull();
+    expect(within(row('a/x#4')).getByText('failing')).toHaveClass('ui-pill-bad');
     expect(screen.getByRole('columnheader', { name: 'Checks 1' })).toBeInTheDocument();
   });
 
@@ -239,12 +239,14 @@ describe('PrMatrix — the expansion', () => {
     expect(screen.getByTestId('pr-expand-a/x#3').querySelector('.prs-why')).toHaveTextContent('auto-merge not enabled on the repo');
   });
 
-  it('draws the expansion as the scroll box next sibling, not as a row, and ties it to its row', async () => {
+  it('draws the expansion after the Ledger, outside the scroll box and the Ledger group, and ties it to its row', async () => {
     const user = userEvent.setup();
     render(<PrMatrix {...props([repo('a/x', [clean])])} />);
     await user.click(row('a/x#3'));
     const panel = screen.getByTestId('pr-expand-a/x#3');
-    expect(document.querySelector('.prs-matrix-scroll')?.nextElementSibling).toBe(panel);
+    expect(panel.closest('.prs-matrix-scroll')).toBeNull();
+    expect(panel.closest('[role="group"]')).toBeNull();
+    expect(screen.getByRole('group', { name: 'Pull requests' }).nextElementSibling).toBe(panel);
     expect(panel.closest('table')).toBeNull();
     expect(panel.id).not.toBe('');
     expect(row('a/x#3')).toHaveAttribute('aria-expanded', 'true');
@@ -259,6 +261,7 @@ describe('PrMatrix — the expansion', () => {
     await user.click(moreOf(screen.getByTestId('pr-expand-a/x#3')));
     const menu = screen.getByRole('dialog', { name: 'Merge menu' });
     expect(menu.closest('.prs-matrix-scroll')).toBeNull();
+    expect(menu.closest('[role="group"]')).toBeNull();
     expect(screen.getByTestId('pr-expand-a/x#3')).toContainElement(menu);
   });
 

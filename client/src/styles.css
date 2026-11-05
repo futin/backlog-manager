@@ -3321,7 +3321,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* Cards' rows are the compact ones: the head already says the repo, so each row needs less air between hairlines. */
 .prs-list .prs-row { padding: 12px 0 }
 .prs-list .prs-row:first-child { padding-top: 12px }
-.prs-list .prs-row:last-child { padding-bottom: 0 }
 .prs-row + .prs-row { border-top: 1px solid var(--hairline) }
 .prs-row:first-child { padding-top: 0 }
 .prs-row:last-child { padding-bottom: 0 }
@@ -3430,11 +3429,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    scrolled. 34 px starts it under the PR's `#n` rather than under the dot. */
 .prs-matrix-pinned { position: sticky; left: 0; width: 100cqw; box-sizing: border-box; padding-left: 34px }
 /* The open row's expansion is NOT in the table: the Merge menu is a `Popover`, which portals nothing, and the scroll box's `overflow-x: auto` clips both axes.
-   So the panel is the scroll box's next sibling, and the sheet's ledger wrapper (`overflow-x: auto` of its own) is let overflow, found structurally because a
-   page rule never names a `.ui-*` class (guard 7) — the scroll box scrolls the table, the ledger has nothing left to scroll. `min-width: 0` on the sheet so the
-   box still shrinks inside the flex column. */
+   So the panel is the Ledger's next sibling inside the sheet, outside every overflow box, and no page rule touches the primitive's overflow.
+   `min-width: 0` on the sheet so the scroll box still shrinks inside the flex column. */
 .prs-matrix-sheet { min-width: 0 }
-.prs-matrix-sheet > [role='group'] { overflow: visible }
 .prs-matrix-panel {
   display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 12px 16px; border-radius: 12px; background: var(--strip-hi)
 }

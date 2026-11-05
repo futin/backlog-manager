@@ -511,8 +511,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   checks `GlyphTile` (`checksTone`, `checksGlyph`), the `#n` and title, the pill row (`prPills`), then `author · head → base · age` with the run warning as a warn
   pill. **Matrix** is a table, a column per check with a failure count in
   its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; a problem cell and a header count are pills (red for `bad` and Checks,
-  amber otherwise; a healthy cell is plain text); its row toggles one expansion, a panel that is the scroll box's next sibling (`aria-controls`; a `Popover`
-  portals nothing and the box's overflow would clip the Merge menu), holding the key strip with a blocked Merge's reason in words, then the foot.
+  amber otherwise; a healthy cell is plain text); its row toggles one expansion, a panel that is the `Ledger`'s next sibling inside the sheet (`aria-controls`; a `Popover`
+  portals nothing and the scroll box's and Ledger's overflow would clip the Merge menu), holding the key strip with a blocked Merge's reason in words, then the foot.
   **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`), its head a `GlyphTile` in the worst row's checks tone, the repo and an
   `N open` pill, its rows the same `PrRow` Inbox draws (without the repo name); a repo read cleanly with none is counted in the
   toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — the split Merge (main half from `mergeMain`: `Merge`, `Auto-merge` or `Auto-merge on`; its chevron opens `Merge menu`: Merge, Enable/Disable auto-merge, Update branch, the row `primaryKey` names ticked) and an icon link `Open #n on GitHub` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
