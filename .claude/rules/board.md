@@ -44,13 +44,14 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   or rejected is never stale; unparseable or absent stamps read as fresh; a task never leaves the Board, it gains a `stale` marker. `staleDays` (default 30)
   clamps to the DEFAULT below `min`, never to the bound. Why:
   [invariants.md](docs/subsystems/invariants.md#board-versus-archive-is-derived-and-last-touched-has-three-rungs)
-- **Settings is three pages, the page is the scope, and the rail is the only thing that switches them.** `settingsScope` (`client/src/lib/settings.ts`) is
+- **Settings is three pages, the page is the scope, and it is the one page with an in-page switch beside the rail's tree.** `settingsScope` (`client/src/lib/settings.ts`) is
   `local | shared | dashboards`: Local is this browser's `localStorage`, Shared and Dashboards are what the API reads off the host (Dashboards is the machine
-  list and each machine's health and usage, its own page since they outgrew a card; its scope pill reads `this machine`, as Shared's does). No card mixes local
-  and host — which is why `Claude Agents` was two cards and why `open dashboard ↗` sits beside the per-device field supplying its href — and there is no in-page
-  switch at any width, the same rule Runs' three pages follow, and Jira's since phase 2. A host card may also sit on a source's own settings page — GitHub ›
-  Settings' `Sync` (each repo's sync interval), as Jira › Setup holds `jira.json`'s — and Shared draws the read-only `Sources` card alone in its left column,
-  Watchdog, Tick and Time zone in its right. One `RailTree` renders every tree — Files, GitHub, Jira, Runs and Settings, five call sites; `SECTIONS`/`Section`
+  list and each machine's health and usage, its own page since they outgrew a card; it saves `on this machine`, as Shared does). Each card carries its own scope pill, `this browser` or `this machine`. No card mixes local
+  and host — which is why `Claude Agents` was two cards and why `open dashboard ↗` sits beside the per-device field supplying its href. The `Local | Shared |
+  Dashboards` `Segmented` in the band writes the same `settingsScope` as the rail's tree (spec §3 overrides "the rail is the only switch" for this page, and
+  only this one; Runs' three pages and Jira's are still the rail's alone). `Opens on` is a `Segmented`, not a select (decision 64). A host card may also sit on a source's own settings page — GitHub ›
+  Settings' `Sync` (each repo's sync interval), as Jira › Setup holds `jira.json`'s — and each of Local and Shared is ONE column (`.set-col`; `Sources`
+  first on Shared) — `.set-cols` survives only on GitHub › Settings and Jira › Setup. One `RailTree` renders every tree — Files, GitHub, Jira, Runs and Settings, five call sites; `SECTIONS`/`Section`
   live in `client/src/lib/sections.ts` because the rail reading `useSettings` closed a cycle with `lib/settings.ts`. Why:
   [invariants.md](docs/subsystems/invariants.md#settings-is-three-pages-the-page-is-the-scope)
 - **The Jira section's three pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
@@ -64,7 +65,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   `lib/jira-page.ts`, held by `hooks/useJiraPage.ts` — `useRunsMode`'s module store, because the rail's `RailTree` and the in-page links are two mounted
   writers. The Board and Sessions pages share one board pick and load (`hooks/usePickedJiraBoard.ts`, `JiraBoardPicker`). The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board or Sessions page) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
   `change('jira')` and handed down through `JiraView`; the Sources card's `Jira › Setup ↗` link is the same pair, threaded `App` → `SettingsView` → `SharedPage`
-  → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a switch of its own. Settings' `Opens on` offers `Jira` only while
+  → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a page switch of its own (its `Sync now` and per-board icons sweep, they do not navigate). Settings' `Opens on` offers `Jira` only while
   configured (`landingOptions`), keeping a stored `jira` pin's option; a `landing: 'jira'` takes the same fall. Why:
   [invariants.md](docs/subsystems/invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
 - **A source row (Files, GitHub) is drawn only while a registered project has that source, and its pages are switched by the rail's tree or a link threaded down

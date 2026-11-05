@@ -350,9 +350,9 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   presses in one tick share one sweep.
 - **The chip and the Sources card's Jira row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` —
   the strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
-  `Popover` with no links; each board's row carries a `next` meter (`boardPollReading`, the chip's POLL reading is the same function on the soonest board)
-  and a `now` button that posts `POST /api/jira/boards/sweep` — the chip holds the in-flight set, so `syncing…` survives a close and reopen, and re-reads the
-  status when the answer lands, which `useJiraBoard`'s `polledAt` watch turns into a fresh read of the cards on screen. With both chips in the rail bar neither draws its meters (a CSS rule in the 700 px block). The Settings › Shared ›
+  330 px `Popover` with a `Sync now` head button (`POST /api/jira/sweep`, site-wide — a spec §5 deviation from the per-board sweep), a `Jira setup ↗` link and a
+  `Calls` figure; each board's row carries its `polled … · every …` line (`boardPollReading`) and a sync icon that posts `POST /api/jira/boards/sweep` — the chip holds the in-flight set, so `syncing…` survives a close and reopen, and re-reads the
+  status when the answer lands, which `useJiraBoard`'s `polledAt` watch turns into a fresh read of the cards on screen. With both pills in the rail bar each drops its age (a CSS rule in the 700 px block). The Settings › Shared ›
   Sources card (`components/settings/SourcesGroup.tsx`) carries one Jira row from the same `useJira`, drawn whatever Jira's state — `configured · <site> · N
   boards`, `not configured`, or `checking…`/`unavailable` before Jira has answered — with no control, because a board's interval is set on Setup. While
   configured it carries one link, `Jira › Setup ↗`, which is `onOpenJiraPage('setup')` threaded down from `App` through `SettingsView`: the tree's own pair,

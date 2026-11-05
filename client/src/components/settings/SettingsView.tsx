@@ -69,12 +69,12 @@ const LANDINGS: { value: Landing; label: string }[] = [
  * Jira row otherwise and a pin to it would open elsewhere anyway — `App` falls a `jira` section to the first drawn source row (Runs when there is none) on that
  * same answer. Before the status has answered the option is withheld too: offering it on a guess would let a reader pin a section this machine may not have.
  *
- * One exception, and it is not an offer: a STORED `jira` landing keeps its option on an unconfigured machine. A native select whose value matches no option
- * renders blank (the reason `lib/settings.ts` clamps the dispatch defaults rather than keeping an unknown name), so the row would hide the very preference
+ * One exception, and it is not an offer: a STORED `jira` landing keeps its option on an unconfigured machine. A `Segmented` whose value matches no option
+ * marks none of them (the reason `lib/settings.ts` clamps the dispatch defaults rather than keeping an unknown name), so the row would hide the very preference
  * that is in force; drawn, it says what is stored and can be changed. Nothing is rewritten — the machine may get its credentials back, and the pin with them.
  *
  * `Files` and `GitHub` (source-sections spec) take the same rule over the shell's projects answer: offered while a registered project has that source, the
- * rows the rail draws, withheld while the answer is unknown (`drawn` null), and a stored pin keeps its option for the same blank-select reason. A legacy
+ * rows the rail draws, withheld while the answer is unknown (`drawn` null), and a stored pin keeps its option for the same marks-nothing reason. A legacy
  * `board`/`archive` pin reaches here already clamped to `github`, so it shows as `GitHub` — the section it settles on when this machine has one.
  */
 function landingOptions(jiraConfigured: boolean, drawn: DrawnSources | null, current: Landing): { value: Landing; label: string }[] {

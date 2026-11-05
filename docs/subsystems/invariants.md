@@ -3253,7 +3253,8 @@ absent directory, pinned by one case, so an absent directory fails at the guard 
 
 `settingsScope` (`client/src/lib/settings.ts`) is `local | shared | dashboards`, per device, defaulting to `local`. **Local is everything in this browser's
 `localStorage`; Shared and Dashboards are what the API reads off the host** — the watchdog's settings file beside the registry, `dashboards.json`, and the
-environment the server was started with. No card mixes local and host, and the rail's sub-nav tree is the only thing that switches the pages, at every width.
+environment the server was started with. No card mixes local and host. The rail's sub-nav tree switches the pages, and so does the `Local | Shared | Dashboards` `Segmented` in the band (spec §3 of the
+app restyle) — two writers of the one stored `settingsScope`, so they cannot disagree.
 
 ### The rule is "the page is the scope", and one card had to split to satisfy it
 
@@ -3300,17 +3301,19 @@ at once; `GET /api/dashboards/machines` is a health probe of every remote plus e
 fills the meters when it lands (`checking…` until then). Folding the second into the first would let one dead remote hold the config page for 10 s; keeping them
 apart is why a slow machine can only ever leave a dot quiet.
 
-### There is no in-page switch, at any width
+### The in-page switch is Settings' alone, at every width
 
-The dashboard this pattern was ported from draws a pill switch in its Settings band below 700 px. This board does not, and the difference is not an oversight:
-the rail's trees stand open at that width, so the tree is reachable in one tap on the phone exactly as it is on the desktop. Runs' three pages already establish
-the rule — task-38 deleted `runs-mode.ts`'s `MODE_BUTTON` pair along with the in-page control it named — and a second control here would be a second wording
-free to disagree with the tree's. `test/settings-view.test.tsx` pins the absence, because "add a switch on the phone" is exactly the improvement a later reader
-would make without knowing it was already decided against.
+Until the app restyle this board drew no switch in the Settings band, on the argument that the rail's trees stand open at every width and a second control is a
+second wording free to disagree with the tree's. Spec §3 of `docs/superpowers/specs/2026-11-05-app-restyle-design.md` overrides that for this page: the band
+carries a `Segmented` `Local | Shared | Dashboards`, because the page is the one place a reader changes where a setting saves and the switch belongs where the
+question is asked. It is not a second wording — both controls write `settingsScope`, the tree through `setSettingsScope` and the switch through `update` — and
+the override does not travel: Runs' three pages (task-38 deleted `runs-mode.ts`'s `MODE_BUTTON` pair) and Jira's are still switched by the rail's tree or a link
+threaded down from it. `test/settings-view.test.tsx` pins the switch (it used to pin the absence), so "remove the duplicate control" is as much a decision as
+"add one" was.
 
 ### The scope pill is the existing primitive, at `neutral`, on every page
 
-`Band`'s right slot holds one `Pill` — `this browser` on Local, `this machine` on Shared and on Dashboards — and the WORD carries the distinction, not a tone. `PillTone`'s five
+Each card's title row holds one `Pill` (`SettingsGroup`'s `pill`) — `this browser` on Local's cards, `this machine` on Shared's and on the Dashboards page, which saves `on this machine` in the band's sub-line — and the WORD carries the distinction, not a tone. `PillTone`'s five
 members each name a *reading* (`live`, `warn`, `bad`, `done`, `neutral`); none of them means "shared", and minting a sixth look inside the settings block would
 be a second home for a primitive, which `test/design-guards.test.ts`'s guard 7 exists to refuse.
 
@@ -3370,8 +3373,9 @@ construction; a link built inside the page out of its own `localStorage` write a
 page value lives in a module store (`hooks/useJiraPage.ts`, `useRunsMode`'s shape) rather than a `usePersistedState` per caller for the same reason Runs' does:
 the tree and the page are two mounted writers, and a per-caller copy would leave one of them looking at the page the other has just left.
 
-The chip's popover stays a reading with no link at all, for the rule's other face: a `Setup ›` link there would be an in-page switch on a surface that is not
-even in the section. The Sources card's Jira row is the one surface outside the section that links in, and its `Jira › Setup ↗` is not a switch of its own
+The chip's popover was once a reading with no link at all, for the rule's other face: a `Setup ›` link there would be an in-page switch on a surface that is not
+even in the section. Spec §3 of the app restyle overrode that: the popover now carries `Sync now`, per-board sync icons and a `Jira setup ↗` link, and the link is
+not a switch of its own for the reason that follows — it is the shell's pair, not a control that navigates by itself. The Sources card's Jira row is the one surface outside the section that links in, and its `Jira › Setup ↗` is not a switch of its own
 either: it is `onOpenJiraPage`, the shell's pair, threaded down through `SettingsView` and `SharedPage` (the Trackers row before it wrote `Jira › Setup` as
 text), and it is drawn only while configured, since a link into a section the rail does not draw would open a page that falls on arrival.
 
@@ -3564,10 +3568,10 @@ The Jira board cache is the second (`JiraPollerService`, one list per board, `po
 honest the same way; everything below is about the tracker's.
 
 **The pull-request cache is the third, and the only one with no clock of its own** (`PullRequestsService`, Plan B of the source-sections change). It is per
-repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep, because nothing but two
-pages reads pull requests — GitHub › PRs and GitHub › Settings' Access card, both through `usePullRequests`. A background read would spend GraphQL budget on a
-list nobody is drawing, and would keep a poll alive after the page closed, which is exactly what "the poller is armed only while something is connected"
-forbids. Each page's own 60 s fetch is the cadence, and it stops when that page unmounts. It is kept honest the same way as the other two: `polledAt` rides on
+repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep, because the only reader is the shell's one `PullRequestsProvider` — the rail counts PRs that need you on every page, so the read is no longer a page's —
+and GitHub › PRs and GitHub › Settings' Access card read its answer. Its 60 s fetch is the cadence and the only thing that arms the cache, and it is mounted
+only while a GitHub project is registered, so a machine with none spends no GraphQL budget on a list nobody is drawing, which is what "the poller is armed only
+while something is connected" asks of it. It is kept honest the same way as the other two: `polledAt` rides on
 every repo's view and the PRs page renders it, and it moves only on a successful read. A failure keeps the last answer — the previous rows, their `polledAt` —
 beside the failure's `access` and `detail`, because a stale list labelled with its age is more use than an empty one, and an emptied list would read as "no open
 PRs", which is a claim about the repo the cache cannot make.
@@ -4784,7 +4788,7 @@ The other half of the same incident. While the server was stalled, the client's 
 request had come back, so each one stacked a fresh duplicate on every tick; when the server recovered it had a queue of identical questions to answer, most of
 them git spawns, which amplified the stall. `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure of React and tested directly with fake timers) and its React
 shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog`, `useAgents`, `useTicks` and — since
-#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six — and, since Settings › Dashboards, `useMachines`, a seventh that polls a minute while that page is open, and `usePullRequests`, an eighth on the same terms for GitHub › PRs and for GitHub › Settings' Access card — enters through `hooks/useRefreshing.ts` (#285), which owns the
+#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six — and, since Settings › Dashboards, `useMachines`, a seventh that polls a minute while that page is open, and `usePullRequests`, an eighth on the same terms, mounted once by `PullRequestsProvider` for the rail's count, GitHub › PRs and GitHub › Settings' Access card — enters through `hooks/useRefreshing.ts` (#285), which owns the
 board's mount + window-focus triggers once instead of each hook writing the two effects by hand; `useCoalescedFetch` stays the lower layer, used directly by
 `useJiraBoard`, which triggers on its board id rather than on mount and focus. `TimeZoneProvider` (#241) enters through `useRefreshing` too, with no `armed`
 like `useOrchestratorArchive`: it reads the shared zone on mount and focus and never polls, since the value moves only on a person's pick. `ProjectsProvider`
