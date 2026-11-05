@@ -63,7 +63,7 @@ export function WorktreeRow({
   return (
     <li className="jira-wt-row">
       <span className="jira-wt-branch">{branch}</span>
-      <span className="jira-wt-path" title={tree.path}>
+      <span className={projectKey === undefined ? 'jira-wt-path' : 'jira-wt-path jira-setup-code'} title={tree.path}>
         {displayPath(tree.path, home)}
       </span>
       {showRepo && (

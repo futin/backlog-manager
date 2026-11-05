@@ -239,7 +239,7 @@ function RepoRow({
     <div className="set-row set-row-stacked jira-setup-repo">
       <div className="jira-setup-repo-head">
         <Pill title={projectName}>{projectKey}</Pill>
-        <span className="set-hint jira-setup-path" title={path}>
+        <span className="set-hint jira-setup-path jira-setup-code" title={path}>
           {displayPath(path, home)}
         </span>
         {own !== null && count > 0 && (
@@ -270,7 +270,7 @@ function RepoRow({
  * One path's two fields (see the group's header), each under its name — `Base branch` and `Branch name` — with the default said in the placeholder after
  * the value an empty field means: the refs read's `defaultBase` when it lists one, else just `(default)`, and `{key}-{slug} (default)` for the pattern. The
  * drafts are this row's state, seeded from the stored values at mount and set to what was SENT after a landed save (so a trimmed ` develop ` reads `develop`
- * again); the row is keyed on the path, so another path's fields never inherit them. `Save` is off until a draft differs from what is stored, trimmed, and a
+ * again); the row is keyed on project + path, and only a path's first row draws the fields, so another path's never inherit them. `Save` is off until a draft differs from what is stored, trimmed, and a
  * refused save leaves the drafts as typed.
  */
 function RepoDefaults({

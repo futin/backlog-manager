@@ -656,6 +656,14 @@ describe('the Repositories card', () => {
     await waitFor(() => expect(repoHints().filter((h) => h.startsWith('~'))).toEqual(['~/pay']));
   });
 
+  it('titles each row\'s key Pill with the project\'s name, and draws the path as a code span', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] } });
+    await renderSetup();
+    const pill = (await within(reposCard()).findAllByText('PAY'))[0];
+    expect(pill).toHaveAttribute('title', 'Payments');
+    expect(within(reposCard()).getByText('~/pay')).toHaveClass('jira-setup-code');
+  });
+
   it('shows a path as stored while it is not under the home, and never rewrites one that only shares a prefix with it', async () => {
     statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/Users/adam/pay'], OPS: ['/srv/ops'] }, home: '/Users/ada' });
     await renderSetup();

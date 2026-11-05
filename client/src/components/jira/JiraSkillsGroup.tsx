@@ -104,14 +104,14 @@ export function JiraSkillsGroup() {
   }
 
   /** One row in the Run menu's shape. `setting` is the string `jiraDefaultAction` stores for it: a built-in's id or the skill's own. */
-  function row(id: string, label: string, sub: string, glyph: GlyphName, setting: string, title?: string, trailing?: ReactNode) {
+  function row(id: string, label: string, sub: string, glyph: GlyphName, setting: string, title?: string, trailing?: ReactNode, code = false) {
     const isDefault = setting === preferred;
     return (
       <div key={id} className="set-row jira-setup-skill" title={title}>
         <GlyphTile glyph={glyph} tone={isDefault ? 'green' : 'neutral'} />
         <span className="jira-run-text">
           <span className="jira-run-label">{label}</span>
-          {sub !== '' && <span className="jira-run-sub">{sub}</span>}
+          {sub !== '' && <span className={code ? 'jira-run-sub jira-setup-code' : 'jira-run-sub'}>{sub}</span>}
         </span>
         {isDefault ? (
           <span className="jira-setup-default">default</span>
@@ -153,7 +153,8 @@ export function JiraSkillsGroup() {
             <button type="button" className="jira-setup-x" aria-label={`Remove ${skill.name}`} disabled={busy} onClick={() => setAsking(skill.id)}>
               ×
             </button>
-          )
+          ),
+          true
         )
       )}
       <div className="set-row set-row-stacked jira-skill-add">

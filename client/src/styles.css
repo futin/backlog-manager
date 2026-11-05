@@ -1662,11 +1662,15 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The add row: the project Select and `Add` keep their size, the path field takes what is left (the row wraps at Settings' own narrow widths). */
 .jira-setup-add { justify-content: flex-start; gap: 8px }
 .jira-setup-add-path { flex: 1 1 160px; width: auto; min-width: 0 }
-/* A mapping's row (spec §4.4): a head line — key pill, the path (the code-span treatment `.jira-skill-prompt` uses; §8.1 has one face, so "mono" is the span),
+/* A mapping's row (spec §4.4): a head line — key pill, the path (the code-span treatment `.set-hint code` has uses; §8.1 has one face, so "mono" is the span),
    the worktree toggle, the × pushed right — then, under the path's first row only, the two labelled fields and Save, then the expanded tree list. */
 .jira-setup-repo { gap: 10px }
 .jira-setup-repo-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-width: 0 }
-.jira-setup-path { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink); line-height: 1.45 }
+/* The code-span treatment (§8.1 has one face, so "mono" is the span `.set-hint code` / `.item-body code` draw): --ink on --steel, 4 px radius, the face
+   inherited. Setup rows only — the repo path, a worktree's path and a skill's command sub-line carry `jira-setup-code`; the modal's rows and the Run menu do not. */
+.jira-setup-code { color: var(--ink); background: var(--steel); border-radius: 4px; padding: 0 4px }
+.jira-setup-path { flex: 0 1 auto; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 1.45 }
+.jira-setup-skill .jira-run-sub { width: fit-content; max-width: 100% }
 .jira-setup-defaults { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 12px }
 .jira-setup-field { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
 .jira-setup-field-name { font-size: 11px; font-weight: 500; color: var(--ink3) }
@@ -1729,13 +1733,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   font-family: inherit; font-size: 14px; line-height: 1; color: var(--ink3);
 }
 .jira-sheet-x:hover, .jira-setup-x:hover:not(:disabled) { color: var(--ink) }
-/* The Skills card (Jira phase 5, §8.9.3). A skill's template is the row's hint, drawn as a code span (--steel fill, --ink, the card's 4 px radius — §8.1
-   forbids a second face, so "mono" here means the span treatment `.set-hint code` has) and clamped to two lines; the whole text is the `title`, so a long
-   template is read on hover rather than stretching the row. `overflow-wrap: anywhere` because a template is mostly one long slash-command with no spaces. */
-.jira-skill-prompt {
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
-  font-size: 12px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 2px 6px; white-space: pre-wrap;
-}
 /* The add row stacks: name field, template textarea, then `Add` on its own line, left-aligned like the Repositories row's chip. */
 .jira-skill-add { gap: 8px; align-items: flex-start }
 .jira-skill-add-name { width: 100%; max-width: 100% }
