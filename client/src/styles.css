@@ -1662,16 +1662,29 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The add row: the project Select and `Add` keep their size, the path field takes what is left (the row wraps at Settings' own narrow widths). */
 .jira-setup-add { justify-content: flex-start; gap: 8px }
 .jira-setup-add-path { flex: 1 1 160px; width: auto; min-width: 0 }
-/* A path's defaults line (§8.9.3): two fields and Save in one wrapping row under the path's first row, the hint (branches unavailable / a pattern that cannot
-   name a branch) on a line of its own. The fields share what is left; the base is the narrower, a branch name being shorter than a pattern. */
-.jira-setup-defaults { justify-content: flex-start; flex-wrap: wrap; gap: 8px }
-.jira-setup-defaults-base { flex: 1 1 140px; width: auto; min-width: 0 }
-.jira-setup-defaults-pattern { flex: 2 1 200px; width: auto; min-width: 0 }
+/* A mapping's row (spec §4.4): a head line — key pill, the path (the code-span treatment `.jira-skill-prompt` uses; §8.1 has one face, so "mono" is the span),
+   the worktree toggle, the × pushed right — then, under the path's first row only, the two labelled fields and Save, then the expanded tree list. */
+.jira-setup-repo { gap: 10px }
+.jira-setup-repo-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-width: 0 }
+.jira-setup-path { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink); line-height: 1.45 }
+.jira-setup-defaults { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 12px }
+.jira-setup-field { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
+.jira-setup-field-name { font-size: 11px; font-weight: 500; color: var(--ink3) }
+.jira-setup-field .set-text { width: 100%; min-width: 0 }
+.jira-setup-defaults-base { flex: 1 1 140px }
+.jira-setup-defaults-pattern { flex: 2 1 200px }
 .jira-setup-defaults-hint { flex: 1 0 100% }
-/* A path's worktrees (§8.9.3, M7): a stacked row under the defaults line — a small head with its count, then the modal's own `.jira-wt-row`s. */
-.jira-setup-trees { gap: 0 }
-.jira-setup-trees-head { display: flex; align-items: center; gap: 8px }
-.jira-setup-trees .jira-wt-list { margin-top: 4px }
+/* A path's open trees: a sub-head, then the modal's own `.jira-wt-row`s, here with the branch at 600 and the path in `--ink3`. */
+.jira-setup-trees { display: flex; flex-direction: column; gap: 4px }
+.jira-setup-trees-head { font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ink3) }
+.jira-setup-trees .jira-wt-list { margin-top: 0 }
+.jira-setup-trees .jira-wt-branch { font-weight: 600; color: var(--ink) }
+/* A skills row (spec §4.4) in the Run menu's shape — tile, text (`.jira-run-text`'s label over sub-line), then `default` or `Make default`, then the ×. */
+.jira-setup-skill { justify-content: flex-start; flex-wrap: nowrap; gap: 10px; padding: 8px 0 }
+.jira-setup-skill .jira-run-text { flex: 1 1 auto }
+.jira-setup-skill .jira-run-label { font-size: 13px; font-weight: 500; color: var(--ink) }
+.jira-setup-default { flex: none; font-size: 11px; color: var(--ink3) }
+.jira-setup-skill .jira-setup-x { margin-left: 0 }
 /* The connection banner (spec §4.4): one wrapping row — the 40 px initials disc, who is connected, three figures, the status pill — with the server's `detail`
    on a red line under it when the pill is not Healthy. Page-local classes only (guard 7); one face, 11 px floor. */
 .jira-setup-banner-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px }

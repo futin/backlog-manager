@@ -543,7 +543,7 @@ function DispatchGroup() {
       {jiraSkills !== null && (
         <SettingsRow
           name="Jira default action"
-          hint="Listed first in a Jira card's Run menu, marked default. A skill that has since been deleted reads as Work it end to end."
+          hint="Listed first in a Jira card's Run menu, marked default. A skill that has since been deleted reads as Work it end to end. Saved in this browser."
         >
           <Select
             label="Jira default action"

@@ -810,6 +810,12 @@ describe('SettingsView', () => {
       expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').jiraDefaultPermission).toBe('auto');
     });
 
+    it('ends its hint with `Saved in this browser.`, because the choice is per browser', () => {
+      renderWithJira(jiraData());
+      const hint = screen.getByText(/^Listed first in a Jira card/);
+      expect(hint.textContent?.endsWith(' Saved in this browser.')).toBe(true);
+    });
+
     it('persists a pick as the setting string', async () => {
       renderWithJira(jiraData());
       await userEvent.selectOptions(screen.getByLabelText('Jira default action'), 's_0123abcd');

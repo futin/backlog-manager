@@ -1,13 +1,17 @@
 import { useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useMountedRef } from '../../hooks/useMountedRef';
+import { useSettings } from '../../hooks/useSettings';
+import { jiraSettingOf, resolveJiraAction, skillCommand } from '../../lib/jira';
 import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
 import type { JiraSkill } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Confirm } from '../ui/Confirm';
-import { Pill } from '../ui/Pill';
-import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
+import { GlyphTile } from '../ui/GlyphTile';
+import type { GlyphName } from '../ui/Glyphs';
+import { SettingsGroup } from '../ui/SettingsRow';
 import { errorOf, postJson } from '../../lib/http';
 
 /**
@@ -16,16 +20,25 @@ import { errorOf, postJson } from '../../lib/http';
  */
 const PLACEHOLDERS = ['{key}', '{url}', '{repo}', '{branch}', '{base}', '{worktree}'];
 
+/** The two built-ins, as the Run menu words them (`JiraRunMenu`'s `builtIns`): label, sub-line, glyph. */
+const BUILT_INS: { id: 'execute' | 'context'; label: string; sub: string; glyph: GlyphName }[] = [
+  { id: 'execute', label: JIRA_BUILTIN_LABELS.execute, sub: 'Work the ticket end to end', glyph: 'play' },
+  { id: 'context', label: JIRA_BUILTIN_LABELS.context, sub: 'Open with the ticket loaded', glyph: 'document' }
+];
+
 /**
  * Jira › Setup › Skills (Jira phase 5, spec §6.4; DESIGN.md §8.9.3, and §8.6 for the card language) — the named prompts a Jira card's `Run ▾` can start a
  * session with, beside the two the board always has. It is `jira.json`'s `skills` list, written by the server alone (`POST /api/jira/skills`, `/skills/delete`).
  *
- * - **Two locked rows first**, `Work it end to end` and `Open with the ticket loaded`, each reading `built-in` where a skill row carries its ×. They come
- *   from `JIRA_BUILTIN_LABELS`, the one place those two names live, so the menu, the Dispatch row's options and this card cannot disagree on a word. They
- *   have no control because there is nothing to change: a built-in is code, not a stored row.
- * - **One row per skill**: the name over its template in mono, clamped to two lines (the whole template is the title, for a long one), and a `×` that
- *   asks through `ui/Confirm` inline in its place — a skill is a name other people's `Run ▾` menus and a stored default may already point at, and the
- *   confirmation says what is lost rather than "are you sure". Only one row asks at a time.
+ * - **The Run menu's rows** (restyle spec §4.4): a `GlyphTile` (play and document for the two built-ins, sparkle for a skill), the label over a command
+ *   sub-line, and on the right `default` on the row `resolveJiraAction(settings.jiraDefaultAction, skills)` names, `Make default` on every other. Under
+ *   `Built in` come `Work it end to end` and `Open with the ticket loaded` — from `JIRA_BUILTIN_LABELS`, the one place those names live, so the menu, the
+ *   Dispatch row's options and this card cannot disagree on a word; then `Skills on this machine · N` (no head at zero), the same grouping the menu draws.
+ *   `Make default` writes `jiraDefaultAction` — the per-BROWSER Local setting Settings › Local shows as `Jira default action` — through `useSettings`; this
+ *   card's server scope does not change that, and the stored `jira.json` is never touched by it.
+ * - **A skill's row** keeps its `×`, which asks through `ui/Confirm` inline in its place — a skill is a name other people's `Run ▾` menus and a stored default
+ *   may already point at, and the confirmation says what is lost rather than "are you sure". Only one row asks at a time. The sub-line is the template's
+ *   first word when it is a slash command (`skillCommand`, as the menu draws it); the whole template is the row's title, for a long one.
  * - **The add row**: a name field, a template textarea and `Add`, which stays disabled until both hold something after trim. The template is sent trimmed
  *   and otherwise as typed — placeholders are the SERVER's to expand, so this card holds no second parser to drift from it.
  * - **The hint** names the six placeholders and says what the list does NOT do: a skill has to exist in the repo or the Claude install, and this list only
@@ -52,6 +65,8 @@ export function JiraSkillsGroup() {
   const [error, setError] = useState<string | null>(null);
 
   const skills: JiraSkill[] = data?.skills ?? [];
+  const { settings, update } = useSettings();
+  const preferred = jiraSettingOf(resolveJiraAction(settings.jiraDefaultAction, skills));
   const ready = name.trim() !== '' && prompt.trim() !== '';
 
   /** POST one write. Resolves `true` when the server stored it; the sentence for a refusal goes under the add row. */
@@ -88,16 +103,42 @@ export function JiraSkillsGroup() {
     await write('/api/jira/skills/delete', { id: skill.id }, 'the skill was not removed');
   }
 
+  /** One row in the Run menu's shape. `setting` is the string `jiraDefaultAction` stores for it: a built-in's id or the skill's own. */
+  function row(id: string, label: string, sub: string, glyph: GlyphName, setting: string, title?: string, trailing?: ReactNode) {
+    const isDefault = setting === preferred;
+    return (
+      <div key={id} className="set-row jira-setup-skill" title={title}>
+        <GlyphTile glyph={glyph} tone={isDefault ? 'green' : 'neutral'} />
+        <span className="jira-run-text">
+          <span className="jira-run-label">{label}</span>
+          {sub !== '' && <span className="jira-run-sub">{sub}</span>}
+        </span>
+        {isDefault ? (
+          <span className="jira-setup-default">default</span>
+        ) : (
+          <Chip variant="flat" size={28} aria-label={`Make ${label} the default action`} onClick={() => update({ jiraDefaultAction: setting })}>
+            Make default
+          </Chip>
+        )}
+        {trailing}
+      </div>
+    );
+  }
+
   return (
     <SettingsGroup title="Skills" scope="this machine · the prompts a card's Run menu can start a session with">
-      {(['execute', 'context'] as const).map((id) => (
-        <SettingsRow key={id} name={JIRA_BUILTIN_LABELS[id]}>
-          <Pill>built-in</Pill>
-        </SettingsRow>
-      ))}
-      {skills.map((skill) => (
-        <SettingsRow key={skill.id} name={skill.name} hint={<span className="jira-skill-prompt" title={skill.prompt}>{skill.prompt}</span>}>
-          {asking === skill.id ? (
+      <div className="jira-run-head">Built in</div>
+      {BUILT_INS.map((r) => row(r.id, r.label, r.sub, r.glyph, r.id))}
+      {skills.length > 0 && <div className="jira-run-head">Skills on this machine · {skills.length}</div>}
+      {skills.map((skill) =>
+        row(
+          skill.id,
+          skill.name,
+          skillCommand(skill.prompt) ?? '',
+          'sparkle',
+          skill.id,
+          skill.prompt,
+          asking === skill.id ? (
             <Confirm
               label={`Remove ${skill.name}`}
               acceptLabel="Remove"
@@ -112,9 +153,9 @@ export function JiraSkillsGroup() {
             <button type="button" className="jira-setup-x" aria-label={`Remove ${skill.name}`} disabled={busy} onClick={() => setAsking(skill.id)}>
               ×
             </button>
-          )}
-        </SettingsRow>
-      ))}
+          )
+        )
+      )}
       <div className="set-row set-row-stacked jira-skill-add">
         <input
           className="set-text jira-skill-add-name"

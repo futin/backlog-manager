@@ -8,9 +8,11 @@ import '@testing-library/jest-dom';
 import JiraView from '../client/src/components/jira/JiraView';
 import { JiraConnectionGroup } from '../client/src/components/jira/JiraConnectionGroup';
 import { JiraProvider } from '../client/src/hooks/JiraContext';
+import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { JIRA_BOARD_KEY, JIRA_QUERY_PRESETS, accessPhrase, boardRowLine } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
+import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
 import type { JiraBoardStatus, JiraIssue, JiraSkill, JiraStatusPayload } from '../shared/types';
 
 /*
@@ -216,9 +218,11 @@ async function renderSetup(): Promise<void> {
   onOpenJiraPage = jest.fn((p) => setJiraPage(p));
   render(
     <main>
-      <JiraProvider>
-        <JiraView onOpenJiraPage={onOpenJiraPage} />
-      </JiraProvider>
+      <SettingsProvider>
+        <JiraProvider>
+          <JiraView onOpenJiraPage={onOpenJiraPage} />
+        </JiraProvider>
+      </SettingsProvider>
     </main>
   );
   await screen.findByRole('heading', { name: 'Boards' });
@@ -616,6 +620,7 @@ const PROJECTS = [
 
 const reposCard = (): HTMLElement => screen.getByRole('heading', { name: 'Repositories' }).closest('section') as HTMLElement;
 const connectionCard = (): HTMLElement => screen.getByRole('region', { name: 'Connection' });
+const repoKeys = (): string[] => Array.from(reposCard().querySelectorAll('.jira-setup-repo-head > .ui-pill')).map((n) => n.textContent ?? '');
 const repoNames = (): string[] => Array.from(reposCard().querySelectorAll('.set-row .set-name')).map((n) => n.textContent ?? '');
 const repoHints = (): string[] => Array.from(reposCard().querySelectorAll('.set-row .set-hint')).map((n) => n.textContent ?? '');
 const addField = (): HTMLInputElement => within(reposCard()).getByRole('textbox', { name: 'Repository path' }) as HTMLInputElement;
@@ -642,7 +647,7 @@ describe('the Repositories card', () => {
     await renderSetup();
 
     expect(repoHints().filter((h) => h.startsWith('~'))).toEqual(['~/pay', '~/pay-2']);
-    expect(repoNames().slice(0, 2)).toEqual(['PAY · Payments', 'PAY']);
+    expect(repoKeys()).toEqual(['PAY', 'PAY']);
 
     await userEvent.click(within(reposCard()).getByRole('button', { name: 'Remove ~/pay-2' }));
     await waitFor(() => expect(repoPosts()).toEqual([{ project: 'PAY', paths: ['/Users/ada/pay'] }]));
@@ -780,12 +785,23 @@ describe('the Repositories card — a path\'s defaults', () => {
     mapPay({ repoDefaults: { '/home/ada/pay': { base: 'develop' } } });
     await renderSetup();
     expect(baseField().value).toBe('develop');
-    expect(baseField().placeholder).toBe('e.g. develop');
+    // The placeholder says what an empty field means: the refs read's default base, else just `(default)`; the pattern's default is `{key}-{slug}`.
+    await waitFor(() => expect(baseField().placeholder).toBe('main (default)'));
     expect(patternField().value).toBe('');
-    expect(patternField().placeholder).toBe('{key}-{slug}');
+    expect(patternField().placeholder).toBe('{key}-{slug} (default)');
+    expect(within(reposCard()).getByText('Base branch')).toBeInTheDocument();
+    expect(within(reposCard()).getByText('Branch name')).toBeInTheDocument();
     expect(saveButton()).toBeDisabled();
     fireEvent.change(patternField(), { target: { value: '{key}/{slug}' } });
     expect(saveButton()).toBeEnabled();
+  });
+
+  it('reads `(default)` alone as the base placeholder while the refs read lists no default', async () => {
+    mapPay();
+    refsAnswer = (repo) => answer({ repo, available: false, reason: 'is not a git checkout' });
+    await renderSetup();
+    await within(reposCard()).findByText(/branches unavailable/);
+    expect(baseField().placeholder).toBe('(default)');
   });
 
   it('saves both values for the PATH — an empty field as null — then reloads the status and reads as saved again', async () => {
@@ -925,10 +941,17 @@ describe('the Repositories card — a path\'s worktrees', () => {
         unavailable: []
       });
     await renderSetup();
+    // Collapsed by default: one toggle under the path's first mapping only, `aria-expanded` false until it is pressed.
+    const toggle = await within(reposCard()).findByRole('button', { name: '3 worktrees' });
+    expect(within(reposCard()).getAllByRole('button', { name: /worktrees?$/ })).toHaveLength(1);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(treesUnder()).toHaveLength(0);
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await waitFor(() => expect(treesUnder()).toHaveLength(1));
     const [list] = treesUnder();
+    expect(within(list).getByText('Open worktrees beside this checkout')).toBeInTheDocument();
     expect(branchesOf(list)).toEqual(['detached', 'develop', 'pay-1-x']);
-    expect(within(list).getByText('3')).toBeInTheDocument();
     expect(within(list).getByText('~/pay/.worktrees/develop')).toBeInTheDocument();
     // The repository is the row above: the modal's repo column is not drawn again here.
     expect(list.querySelector('.jira-wt-repo')).toBeNull();
@@ -950,12 +973,21 @@ describe('the Repositories card — a path\'s worktrees', () => {
         unavailable: []
       });
     await renderSetup();
+    await userEvent.click(await within(reposCard()).findByRole('button', { name: '2 worktrees' }));
     const live = await within(reposCard()).findByRole('button', { name: 'Remove worktree pay-1-x' });
     expect(live).toBeDisabled();
     expect(live).toHaveAttribute('title', 'a session is running on PAY-1');
     const free = within(reposCard()).getByRole('button', { name: 'Remove worktree develop' });
     expect(free).toBeEnabled();
     expect(free.getAttribute('title')).toMatch(/^Copies the command\./);
+    // The state and ticket pills: a live key reads `session live` and the key the branch carries; the other tree is idle with no ticket pill.
+    const rows = Array.from(reposCard().querySelectorAll('.jira-wt-row')) as HTMLElement[];
+    const liveRow = rows.find((r) => r.textContent?.includes('pay-1-x')) as HTMLElement;
+    const freeRow = rows.find((r) => r.textContent?.includes('develop')) as HTMLElement;
+    expect(within(liveRow).getByText('session live')).toBeInTheDocument();
+    expect(within(liveRow).getByText('PAY-1')).toBeInTheDocument();
+    expect(within(freeRow).getByText('idle')).toBeInTheDocument();
+    expect(freeRow.querySelectorAll('.ui-pill')).toHaveLength(1);
   });
 
   it('reads the trees once per set of mapped paths — a defaults save does not re-read — and a failed read draws no list', async () => {
@@ -975,6 +1007,7 @@ describe('the Repositories card — a path\'s worktrees', () => {
     fireEvent.change(addField(), { target: { value: '/home/ada/ops' } });
     await userEvent.click(within(reposCard()).getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(worktreeReads()).toBe(2));
+    await userEvent.click(await within(reposCard()).findByRole('button', { name: '1 worktree' }));
     await waitFor(() => expect(treesUnder()).toHaveLength(1));
   });
 });
@@ -1090,26 +1123,54 @@ const GROOM: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jir
 const SUMMARISE: JiraSkill = { id: 's_0123abce', name: 'Summarise changes', prompt: '/summarise-jira-ticket-changes {key}' };
 
 const skillsCard = (): HTMLElement => screen.getByRole('heading', { name: 'Skills' }).closest('section') as HTMLElement;
-const skillNames = (): string[] => Array.from(skillsCard().querySelectorAll('.set-row .set-name')).map((n) => n.textContent ?? '');
+const skillNames = (): string[] => Array.from(skillsCard().querySelectorAll('.jira-setup-skill .jira-run-label')).map((n) => n.textContent ?? '');
+/** The skill row whose label reads `name` — by the label span, since a built-in's sub-line repeats its label. */
+const labelIn = (name: string): HTMLElement =>
+  Array.from(skillsCard().querySelectorAll('.jira-setup-skill')).find((r) => r.querySelector('.jira-run-label')?.textContent === name) as HTMLElement;
 const skillPosts = (): { id?: string; name: string; prompt: string }[] => posts('/api/jira/skills').map((p) => JSON.parse(String(p.init?.body)));
 const skillName = (): HTMLInputElement => within(skillsCard()).getByRole('textbox', { name: 'Skill name' }) as HTMLInputElement;
 const skillPrompt = (): HTMLTextAreaElement => within(skillsCard()).getByRole('textbox', { name: 'Skill prompt template' }) as HTMLTextAreaElement;
 const addSkillChip = (): HTMLElement => within(skillsCard()).getByRole('button', { name: 'Add' });
 
 describe('the Skills card', () => {
-  it('draws the two built-ins as locked rows with no ×, then one row per skill with its template and a ×', async () => {
+  it('draws the built-ins under `Built in`, then `Skills on this machine · N` with a row per skill: its command sub-line and a ×', async () => {
     statusAnswer = status({ skills: [GROOM, SUMMARISE] });
     await renderSetup();
 
     expect(skillNames()).toEqual(['Work it end to end', 'Open with the ticket loaded', 'Groom ticket', 'Summarise changes']);
+    expect(within(skillsCard()).getByText('Built in')).toBeInTheDocument();
+    expect(within(skillsCard()).getByText('Skills on this machine · 2')).toBeInTheDocument();
+    // A built-in is code, not a stored row: no ×.
     for (const name of ['Work it end to end', 'Open with the ticket loaded']) {
-      const row = within(skillsCard()).getByText(name).closest('.set-row') as HTMLElement;
-      expect(within(row).getByText('built-in')).toBeInTheDocument();
-      expect(within(row).queryByRole('button')).toBeNull();
+      const row = labelIn(name) as HTMLElement;
+      expect(within(row).queryByRole('button', { name: /^Remove/ })).toBeNull();
     }
-    const groom = within(skillsCard()).getByText('Groom ticket').closest('.set-row') as HTMLElement;
-    expect(within(groom).getByText('/jira-groom {key}')).toBeInTheDocument();
+    const groom = labelIn('Groom ticket') as HTMLElement;
+    expect(within(groom).getByText('/jira-groom')).toBeInTheDocument();
+    expect(groom).toHaveAttribute('title', '/jira-groom {key}');
     expect(within(groom).getByRole('button', { name: 'Remove Groom ticket' })).toBeInTheDocument();
+  });
+
+  it('draws no `Skills on this machine` head at zero skills', async () => {
+    await renderSetup();
+    expect(within(skillsCard()).queryByText(/^Skills on this machine/)).toBeNull();
+  });
+
+  it('marks `default` on the row the setting resolves to and `Make default` on the others; a pick writes the setting', async () => {
+    statusAnswer = status({ skills: [GROOM, SUMMARISE] });
+    await renderSetup();
+    const rowOf = (name: string): HTMLElement => labelIn(name) as HTMLElement;
+    expect(within(rowOf('Work it end to end')).getByText('default')).toBeInTheDocument();
+    expect(within(rowOf('Work it end to end')).queryByRole('button', { name: /^Make/ })).toBeNull();
+    expect(within(rowOf('Groom ticket')).getByText('Make default')).toBeInTheDocument();
+
+    await userEvent.click(within(rowOf('Groom ticket')).getByRole('button', { name: 'Make Groom ticket the default action' }));
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').jiraDefaultAction).toBe('s_0123abcd');
+    expect(within(rowOf('Groom ticket')).getByText('default')).toBeInTheDocument();
+    expect(within(rowOf('Work it end to end')).getByText('Make default')).toBeInTheDocument();
+
+    await userEvent.click(within(rowOf('Open with the ticket loaded')).getByRole('button', { name: /^Make .* the default action$/ }));
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').jiraDefaultAction).toBe('context');
   });
 
   it('sits in the right-hand column, apart from the Boards card (the Connection banner is above both columns)', async () => {
