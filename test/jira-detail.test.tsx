@@ -141,19 +141,22 @@ function mount(
   reload = jest.fn();
   onWrote = jest.fn();
   onRun = jest.fn();
+  // The settings provider is what the Agent band's `default: <label>` reads `jiraDefaultAction` from, the way the Run menu does.
   return render(
-    <JiraContext.Provider value={{ data: status(opts.status), loading: false, error: false, reload }}>
-      <JiraSessionsContext.Provider value={{ data: opts.sessions ?? null, reload: reloadSessions }}>
-        <JiraDetail
-          issue={opts.issue ?? CARD}
-          childrenOf={opts.childrenOf ?? null}
-          onOpenIssue={onOpenIssue}
-          onWrote={onWrote}
-          onRun={onRun}
-          onClose={opts.onClose ?? (() => {})}
-        />
-      </JiraSessionsContext.Provider>
-    </JiraContext.Provider>
+    <SettingsProvider>
+      <JiraContext.Provider value={{ data: status(opts.status), loading: false, error: false, reload }}>
+        <JiraSessionsContext.Provider value={{ data: opts.sessions ?? null, reload: reloadSessions }}>
+          <JiraDetail
+            issue={opts.issue ?? CARD}
+            childrenOf={opts.childrenOf ?? null}
+            onOpenIssue={onOpenIssue}
+            onWrote={onWrote}
+            onRun={onRun}
+            onClose={opts.onClose ?? (() => {})}
+          />
+        </JiraSessionsContext.Provider>
+      </JiraContext.Provider>
+    </SettingsProvider>
   );
 }
 
@@ -237,7 +240,7 @@ describe('JiraDetail — the read', () => {
     expect(fact('Sprint')).toHaveTextContent('Sprint 42');
     expect(fact('Assignee')).toHaveTextContent('Ada Lovelace');
     expect(fact('Reporter')).toHaveTextContent('Grace Hopper');
-    expect(fact('Labels')).toHaveTextContent('payments, refunds');
+    expect(Array.from(fact('Labels')?.querySelectorAll('.jira-detail-label') ?? []).map((n) => n.textContent)).toEqual(['payments', 'refunds']);
     // created is a short date, updated the board's relative age (`1d`): the fixture is 10 days old and updated 1 day ago.
     expect(fact('Created · updated')).toHaveTextContent(`${formatCreated(CARD.created, Date.now(), ZONE)} · 1d`);
     // Only the board whose id the detail names, by NAME — `Platform` is a board the issue is not on.
@@ -419,7 +422,7 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     mount();
 
     expect(fact('Status')).toHaveTextContent('In Review · in progress');
-    expect(fact('Labels')).toHaveTextContent('payments, refunds');
+    expect(Array.from(fact('Labels')?.querySelectorAll('.jira-detail-label') ?? []).map((n) => n.textContent)).toEqual(['payments', 'refunds']);
     expect(screen.getByText('loading…')).toBeInTheDocument();
     // `on boards` comes from the detail, so it is not guessed at while that is in flight.
     expect(fact('On boards')).toBeNull();
@@ -546,7 +549,7 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
     mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' }] } });
     await screen.findByText('not');
     const dialog = screen.getByRole('dialog');
-    expect(dialog.querySelector('.jira-modal-controls')).toContainElement(modalRun());
+    expect(dialog.querySelector('.jira-detail-agent-band')).toContainElement(modalRun());
 
     await userEvent.click(modalMore());
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: new RegExp(JIRA_BUILTIN_LABELS.context) }));
@@ -768,7 +771,8 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
   it('says so when no session is running, and reads from the shell\'s live entry until the sessions payload lands', async () => {
     const none = mount({ sessions: payload() });
     await screen.findByText('not');
-    expect(within(screen.getByRole('dialog')).getByText('no session is running on this ticket')).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).queryByText('no session is running on this ticket')).toBeNull();
+    expect(within(screen.getByRole('dialog')).getByText('No session on this ticket')).toBeInTheDocument();
     none.unmount();
 
     // `sessions: null` is "not landed yet": no card can be drawn, but the fact and the Run gate still read the shell's entry (the old behaviour).
@@ -828,12 +832,54 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     expect(modalRun()).toBeDisabled();
   });
 
-  it('draws Run ▾ after the cards and the history — last in the agent column', async () => {
+  it('draws Run ▾ in the Agent band, which precedes the history', async () => {
     mount({ sessions: payload(link({ how: 'branch', action: null }), link({ sessionId: 'e1', endedAt: hoursAgo(1), state: 'ended', endReason: 'idle' })) });
     await screen.findByText('not');
-    const column = document.querySelector('.jira-detail-agent') as HTMLElement;
-    expect(column.lastElementChild).toContainElement(modalRun());
-    expect(column.querySelector('.jira-hist-list')?.compareDocumentPosition(modalRun())).toBe(Node.DOCUMENT_POSITION_FOLLOWING | 0);
+    const band = document.querySelector('.jira-detail-agent-band') as HTMLElement;
+    expect(band).toContainElement(modalRun());
+    expect(band.compareDocumentPosition(document.querySelector('.jira-hist-list') as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('draws the empty band with the default action and the last run, and a live card inside the band', async () => {
+    const none = mount({ sessions: payload() });
+    await screen.findByText('not');
+    const band = document.querySelector('.jira-detail-agent-band') as HTMLElement;
+    expect(within(band).getByText('No session on this ticket')).toBeInTheDocument();
+    expect(band).toHaveTextContent('default: Work it end to end');
+    expect(band).not.toHaveTextContent('last run');
+    none.unmount();
+
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction: 's_0a1b2c3d' }));
+    const skilled = mount({
+      status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' }] },
+      sessions: payload(link({ sessionId: 'e1', startedAt: hoursAgo(2), endedAt: hoursAgo(1), state: 'ended', endReason: 'idle' }))
+    });
+    await screen.findByText('not');
+    const again = document.querySelector('.jira-detail-agent-band') as HTMLElement;
+    expect(again).toHaveTextContent('default: Groom ticket');
+    expect(again.querySelector('.jira-detail-agent-sub')?.textContent).toMatch(/· last run 1h$/);
+    localStorage.removeItem('backlog-manager.settings');
+    skilled.unmount();
+
+    mount({ sessions: payload(link()) });
+    await screen.findByText('not');
+    const live = document.querySelector('.jira-detail-agent-band') as HTMLElement;
+    expect(live.querySelector('.jira-sess')).not.toBeNull();
+    expect(within(live).queryByText('No session on this ticket')).toBeNull();
+    expect(within(live).getByText('Next session takes over once this one ends.')).toBeInTheDocument();
+  });
+
+  it('draws the priority as a toned pill, each label as a chip, and every fact label behind an aria-hidden glyph', async () => {
+    mount();
+    await screen.findByText('not');
+    expect(fact('Priority')?.querySelector('[data-tone]')).toHaveAttribute('data-tone', 'high');
+    const labels = document.querySelectorAll('.jira-detail-label');
+    expect(Array.from(labels).map((n) => n.textContent)).toEqual(['payments', 'refunds']);
+    const dts = Array.from(document.querySelectorAll('.jira-detail-facts dt'));
+    expect(dts.map((d) => Array.from(d.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join(''))).toEqual(
+      expect.arrayContaining(['Status', 'Assignee', 'Reporter', 'Priority', 'Sprint', 'Parent', 'Labels', 'Created · updated', 'Repository', 'Session'])
+    );
+    for (const d of dts) expect(d.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
   });
 });
 

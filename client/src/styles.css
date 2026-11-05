@@ -1407,13 +1407,29 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-detail-pane > :first-child { margin-top: 0 }
 .jira-detail-none { margin: 0; font-size: 13px; color: var(--ink3) }
 /* The ticket's facts: a 110 px label column, each value a wrapping row so a status pill and its Move to, or a name and its Assign to me, sit on one line. */
-.jira-detail-facts { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 12px; align-items: center; margin: 0; font-size: 13px }
+.jira-detail-facts { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px 12px; align-items: center; margin: 0; font-size: 13px }
 .jira-detail-facts > .item-fact { display: contents }
-.jira-detail-facts dt { font-size: 12px; color: var(--ink3) }
+.jira-detail-facts dt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink3) }
+.jira-detail-facts dt > svg { flex: none }
 .jira-detail-facts dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; color: var(--ink); overflow-wrap: anywhere }
 .jira-detail-cat { color: var(--ink3) }
 .jira-detail-pane .jira-modal-error { margin-top: 12px }
-.jira-detail-run { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink2) }
+/* The Agent band (restyle §4.4): the pane's own ground, 12 px radius, 16 px padding. Its row is the Run menu's positioning parent, so the panel hangs from the
+   row (right edges aligned) and not from the band's foot; the wrapper's own `position: relative` is switched off for it. */
+.jira-detail-agent-band { display: flex; flex-direction: column; gap: 12px; background: var(--strip); border-radius: 12px; padding: 16px; min-width: 0 }
+.jira-detail-agent-row { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0 }
+.jira-detail-agent-row .jira-run { position: static; margin-left: auto }
+.jira-detail-agent-row > .jira-detail-lbl { flex: 1; min-width: 0 }
+.jira-detail-next { font-size: 12px; color: var(--ink2) }
+.jira-detail-agent-tile {
+  display: inline-grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px;
+  border: 1px dashed var(--hairline2); color: var(--ink3)
+}
+.jira-detail-agent-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 }
+.jira-detail-agent-none { font-size: 13px; font-weight: 500; color: var(--ink) }
+.jira-detail-agent-sub { font-size: 12px; color: var(--ink3) }
+.jira-detail-assignee { display: inline-flex; align-items: center; gap: 6px; min-width: 0 }
+.jira-detail-label { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 8px; background: var(--strip-hi); font-size: 11px; font-weight: 500; color: var(--ink2) }
 
 /* One live session's card: the deck card's face, widened to Detail's half. The strip is the board card's own band (`ui/LiveStrip`), clipped to the card's
    radius; under it the facts are a grid of label-over-value cells, four across where the column has the width and fewer where it does not, then the

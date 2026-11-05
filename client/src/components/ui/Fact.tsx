@@ -12,10 +12,15 @@ import type { ReactNode } from 'react';
  * `null` for `groomed`, a zero for a counter). Each call site answers its own
  * question and this renders only what survived it.
  */
-export function Fact({ label, children }: { label: string; children: ReactNode }) {
+export function Fact({ label, icon, children }: { label: string; icon?: ReactNode; children: ReactNode }) {
   return (
     <div className="item-fact">
-      <dt className="item-fact-label">{label}</dt>
+      {/* The glyph is an `aria-hidden` sibling BEFORE the word, and the word stays a direct text node of the `dt`: the Jira dialog's label glyphs (restyle
+          spec §4.4) must not change the label a test or a reader matches on. The item modal passes none and draws what it always did. */}
+      <dt className="item-fact-label">
+        {icon}
+        {label}
+      </dt>
       <dd className="item-fact-value">{children}</dd>
     </div>
   );
