@@ -192,7 +192,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The Jira row's wrapper is the badge's positioning parent (§8.0): the badge is a sibling of the row's button, so it is placed over the button's right end. */
 .rail-group { position: relative }
 /* The Needs-you count (Jira sessions spec §7.4): the FilterBar funnel's disc — `--ink` fill on `--strip` text, 11/500, tabular, a 16 px circle that widens into a
-   pill for two digits — set on the row's right edge instead of a corner. A real button (it opens the List), so it resets the UA chrome the way `.rail-link`
+   pill for two digits — set on the row's right edge instead of a corner. A real button (it opens the Sessions page, Needs you chip on), so it resets the UA chrome the way `.rail-link`
    does and keeps the board's focus ring. Vertically centred on the 36 px row; the phone's 44 px row re-centres it below. */
 .rail-badge {
   position: absolute; top: 10px; right: 12px;
@@ -1423,7 +1423,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-hist-head { font-size: 13px; font-weight: 500; color: var(--ink) }
 .jira-hist-meta { grid-column: 2 / -1; font-size: 12px; color: var(--ink2); overflow-wrap: anywhere }
 
-/* The List view (spec §7.2, DESIGN.md §8.9.1): a bar (chips with counts, the Repo / Run / window selects, All tickets), then ONE table of sessions in two
+/* The Sessions page's session table (spec §7.2, DESIGN.md §8.9.1): a bar (chips with counts, the Repo / Run / window selects, All tickets), then ONE table of sessions in two
    groups, Live then Ended, ten columns, 44 px rows. A row that needs a person washes in amber from its left edge (a gradient over `--strip`, so it reads on
    every theme without a new token); an ended row is set in `--ink2`. The table scrolls sideways inside its own wrapper under 1120 px rather than squeezing ten
    columns into a phone. Nothing is under 11 px (guard 3). */
@@ -1437,17 +1437,19 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    scroll. Fixed, State and Open wrap onto a second line instead of widening their column.
    The columns whose content is bounded — State, Run, Context (a 32 px bar and a percentage), Started, For, Open — are px. Ticket, Repo · branch, Where and
    Model are percentages summing to exactly 100%, so px + % always overflows the table: Chromium then keeps every px column and splits what is left among
-   the four in ratio 32 : 28 : 21 : 19. When Ticket was the one auto column it took all of that leftover, and in full content width on a wide screen the
-   summary held ~740 of 1710 px while Repo, Where and Model ellipsised at 128/92/72. At the 1150 px well of a 1440 screen the ratio lands on 147/128/96/87,
-   no narrower than the old px widths. Do not write these as `calc()` or `max()` mixing px and %: a fixed-layout table reads those as `auto`, and auto
-   columns split the leftover evenly, not by ratio (measured, Chromium). */
+   the four in ratio 45 : 23 : 17 : 15. When Ticket was the one auto column it took all of that leftover, and in full content width on a wide screen the
+   summary held ~740 of 1710 px while Repo, Where and Model ellipsised at 128/92/72. At the 1150 px well of a 1440 screen the ratio lands on 206/105/78/69.
+   It was 32 : 28 : 21 : 19 until real keys were measured: a twelve-character `TIMIFY-27xxx` key is 81 px, and with the type glyph and two 8 px gaps the
+   summary beside it got 11 px of a 147 px Ticket column. At 45% it gets ~70 px, while Repo still holds `backlog-manager`, Where `Terminal` and Model
+   `sonnet` whole (50% gave the summary 94 px but cut the repo name). Do not write these as `calc()` or `max()` mixing px and %: a fixed-layout table reads those as `auto`,
+   and auto columns split the leftover evenly, not by ratio (measured, Chromium). */
 .jira-list-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
 .jira-list-table thead th:nth-child(1) { width: 160px }
-.jira-list-table thead th:nth-child(2) { width: 32% }
+.jira-list-table thead th:nth-child(2) { width: 45% }
 .jira-list-table thead th:nth-child(3) { width: 120px }
-.jira-list-table thead th:nth-child(4) { width: 28% }
-.jira-list-table thead th:nth-child(5) { width: 21% }
-.jira-list-table thead th:nth-child(6) { width: 19% }
+.jira-list-table thead th:nth-child(4) { width: 23% }
+.jira-list-table thead th:nth-child(5) { width: 17% }
+.jira-list-table thead th:nth-child(6) { width: 15% }
 .jira-list-table thead th:nth-child(7) { width: 96px }
 .jira-list-table thead th:nth-child(8) { width: 76px }
 .jira-list-table thead th:nth-child(9) { width: 64px }
@@ -1462,7 +1464,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis
 }
 .jira-list-row[data-ended="true"] td { color: var(--ink2) }
-/* The whole row opens Detail (JiraSessionList's `rowOpens`), so it wears the pointer and a hover fill. The fill is laid on the CELLS and half transparent, so
+/* The whole row opens Detail (`rowOpens` in `lib/jira-list.ts`, used by both tables), so it wears the pointer and a hover fill. The fill is laid on the CELLS and half transparent, so
    a needs-you row's amber wash — the row's own background — still reads through it under the pointer. */
 .jira-list-row { cursor: pointer }
 .jira-list-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }
@@ -1490,6 +1492,42 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    text). Amber and not red: the rows are still right, they are only not kept. The error's own words follow in the muted ink, so the sentence reads first. */
 .jira-list-warn { margin: 0; font-size: 13px; line-height: 1.45; color: var(--amber-ink) }
 .jira-list-warn-detail { color: var(--ink2); overflow-wrap: anywhere }
+/* Jira › Board › List — the issue table (`JiraIssueList`), the session table's twin: the same scroll box, hairline, row height and header type, so the two
+   List-shaped pages read as one family. Eight columns; Summary is the one auto column and takes what the px columns leave, so at 1440 px with the rail open
+   (a ~1150 px well) it keeps ~380 px and the box needs no sideways scroll; below 980 px the BOX scrolls and the page never does. `table-layout: fixed` with
+   widths on the head, for the reason the session table's comment gives: under `auto` a long summary widens its column and pushes Updated off the edge. */
+.jira-issues-scroll { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
+.jira-issues-table { width: 100%; min-width: 980px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
+.jira-issues-table thead th:nth-child(1) { width: 124px }
+.jira-issues-table thead th:nth-child(2) { width: 120px } /* Key: fits a twelve-character key (TIMIFY-28086); the mock's PAY-131 hid that 96 px clips it. */
+.jira-issues-table thead th:nth-child(4) { width: 84px }
+.jira-issues-table thead th:nth-child(5) { width: 128px }
+.jira-issues-table thead th:nth-child(6) { width: 140px }
+.jira-issues-table thead th:nth-child(7) { width: 96px }
+.jira-issues-table thead th:nth-child(8) { width: 76px }
+.jira-issues-table thead th {
+  padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
+  color: var(--ink3); border-bottom: 1px solid var(--hairline); white-space: nowrap;
+}
+.jira-issues-row td {
+  height: 44px; padding: 6px 12px; vertical-align: middle; border-top: 1px solid var(--hairline);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis
+}
+/* The whole row opens the modal (`rowOpens`), so it wears the pointer and the session table's half-transparent hover fill. */
+.jira-issues-row { cursor: pointer }
+.jira-issues-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }
+.jira-issues-flex { display: flex; align-items: center; gap: 8px; min-width: 0 }
+.jira-issues-session { font-weight: 500 }
+.jira-issues-key a { color: var(--ink2); text-decoration: none }
+.jira-issues-key a:hover { text-decoration: underline }
+.jira-issues-title {
+  min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+}
+.jira-issues-title:hover { text-decoration: underline }
+.jira-issues-under, .jira-issues-muted { color: var(--ink3) }
+.jira-issues-under { font-size: 12px }
+.jira-issues-updated { color: var(--ink3) }
 
 /* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
    what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px

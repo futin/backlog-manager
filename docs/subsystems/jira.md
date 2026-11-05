@@ -6,7 +6,7 @@ registry entry, and nothing in `items/` knows it exists. This doc describes **ph
 client, the config reader, the poller and its caches, the issue mapping, the ADF converter, the ticket block and the read routes (six, then seven with phase
 5a's `/prompt`, nine with the repo/branch work's `/refs` and `/worktrees`, ten with the sessions page's `/sessions`). Phase 2 adds `jira.json`'s writers behind
 three guarded write routes (five since
-5a's skills, six with `/repo-defaults`) and the whole client section: a rail entry with two pages (Board and Setup), the Detail dialog, the shell chip and
+5a's skills, six with `/repo-defaults`) and the whole client section: a rail entry with three pages (Board, Sessions and Setup), the Detail dialog, the shell chip and
 a read-only Jira row on Settings › Shared (the Trackers card's then, the Sources card's since the source-sections change). Phase 3 adds the first two writes to
 Jira itself — assign the issue to me and transition it — behind two more guarded routes, each followed
 by a re-read of the issue that is spliced into the board caches, and the modal's two controls that call them. Phase 4 adds the `jira` skill and its CLI,
@@ -40,7 +40,7 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
   read-only mounts, `BM_PROJECT_ROOT` or `BM_JIRA_REPO_ROOT` (both passed to the server as `BM_REPO_ROOTS`), or its refs read as `not mounted into the board`.
   A root that does not exist on the host is created by Docker's bind mount, as an empty directory (root-owned on Linux), so set `BM_JIRA_REPO_ROOT` to a
   directory that already exists on a machine without `~/Documents/timify-projects`.
-- **Per browser**: `backlog-manager.jira-board` (the board pick, `usePersistedState`) and `backlog-manager.jira-page` (`board | setup`, a module store) since
+- **Per browser**: `backlog-manager.jira-board` (the board pick, `usePersistedState`) and `backlog-manager.jira-page` (`board | sessions | setup`, a module store) since
   phase 2; `jiraDefaultAction` (a `Settings` key, capped at 64 characters) since phase 5b, and `jiraDefaultPermission` (`''` per action, or one of the four
   modes) beside it. The Board page's filters and summary search are per mount and never persisted.
 
@@ -272,10 +272,10 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   The rail draws the row only while the status says `configured: true` (or while a stored `jira` section is held for the first answer), `App` falls a `jira`
   section on `configured: false` and on nothing else — to the first drawn source row, Files before GitHub, or Runs when there is none (`firstDrawn`,
   `lib/sources.ts`) — and Settings' `Opens on` offers `Jira` only while configured. `JiraView` (lazy, like every
-  section) picks the page and holds the open issue. The two pages, `JIRA_PAGES` in `lib/jira-page.ts`, are held by `hooks/useJiraPage.ts`, a module store
+  section) picks the page and holds the open issue. The three pages, `JIRA_PAGES` in `lib/jira-page.ts`, are held by `hooks/useJiraPage.ts`, a module store
   with `useRunsMode`'s shape, and switched by the rail's tree or by `onOpenJiraPage` — the tree's own pair, built in `App` and handed down — never by an
   in-page control. The rule and its reasons are
-  [invariants.md](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
+  [invariants.md](invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 - **The provider and the hooks.** `JiraProvider` (`hooks/JiraContext.tsx`) holds the shell's ONE `useJira`, beside `TrackersProvider`, so the rail, the chip,
   both pages and the Sources card's Jira row read one answer on one clock. `useJira` (`hooks/useJira.ts`) is `useTrackers`' shape: one read on mount and focus,
   a timer aimed at the soonest syncing board's `polledAt + interval + TRACKER_FETCH_SLACK_MS` with a `JIRA_STATUS_FLOOR_MS` (15 s) floor, no timer while
@@ -292,12 +292,19 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   failure phrase, the chip's CALLS reading (`callsReading`, against `JIRA_SWEEP_CALL_CEILING` = 100, red inside `JIRA_429_RED_MS` = 15 min of the last 429),
   the Connection card's `sweepLine` and `accessPhrase`, the board pick (`JIRA_BOARD_KEY`, `pickBoard`, `boardsByName`), the filters, `JIRA_QUERY_PRESETS`,
   `unmappedProjects` and `displayPath`. Nothing in it reads a clock: `now` is a required parameter, and every poll or check age goes through `pollAge` (a card's age is `elapsedSince`'s own reading).
-- **Jira › Board** (`components/jira/JiraBoardView.tsx`, `JiraCard.tsx`). The stored pick is a preference: `pickBoard` resolves it against the status's live
+- **Jira › Board** (`components/jira/JiraBoardView.tsx`, `JiraCard.tsx`). The board pick and its load are shared with Jira › Sessions: `usePickedJiraBoard(nudge)`
+  (`hooks/usePickedJiraBoard.ts`) and the `JiraBoardPicker` chip, one stored pick for both pages. The stored pick is a preference: `pickBoard` resolves it against the status's live
   list on every render, and `useJiraBoard` is handed only the id that resolution returns — a deleted or hand-edited pick falls to the first board by name and
   never becomes a request for `/boards/<that id>/issues`. Filters (type, assignee, sprint, the summary search) are read off the loaded list, per mount.
   `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. The board draws the fold's tops only, each column sorted by
   `sortTops` and counting cards, and a filter that matches only a folded issue still shows its top, ringed. A card click lands in `JiraView`'s open-issue
-  slot with the fold's `childrenOf` beside the issue.
+  slot with the fold's `childrenOf` beside the issue. The band's `Board | List` switch (`JiraViewSwitch`, `hooks/useJiraView.ts`) picks the deck over the shelves or
+  `JiraIssueList`: one row per top, never a folded issue, in `sortTops`' order and uncut, with the deck's own session roll-up (`topSessionState`, `issueCellWord`
+  in `lib/jira-deck.ts`) and `rolledUpdated` (`lib/jira.ts`) for the Updated cell; a row opens Detail through `rowOpens` (`lib/jira-list.ts`).
+- **Jira › Sessions** (`components/jira/JiraSessionsView.tsx`, `JiraBandSub.tsx`). The session table, `JiraSessionList`, on a page of its own: the shared board pick and
+  load (`usePickedJiraBoard`), its own `Search sessions` text, no FilterBar and no view switch. The table's bar is drawn in every state and `All tickets` on is scoped
+  to every linked ticket whatever the board is doing, so the rail badge's click (page `sessions`, filters `{ chip: 'needs-you', allTickets: true }`) never waits on a
+  board read. The five list filters stay `useJiraListFilters`' module store.
 - **The Detail dialog** (`components/jira/JiraDetail.tsx`, the former issue modal) composes `ui/Modal` and `ui/Fact` as `ItemModal` does, and keeps the
   modal's slot on the Escape stack. Its facts column is the ticket's sessions (below); everything the issue modal drew sits on the right. It draws every fact
   the card carried at once, and reads `GET /api/jira/issue/:key` fresh on open for the description (through `renderMarkdown`, `lib/markdown.ts`, the sanitising
@@ -631,9 +638,11 @@ the three keys so no suite inherits a developer's credentials. `test/compose-env
 The Jira sessions work adds `jira-sessions-state` (`sessionState` and `needsYou`) and widens `jira-live` (the store, its file, retention, the one-run gate),
 `agents-jira-live` (the quiet clock, re-attach, the pace), `agents-jira-stop` (`{ key, sessionId }`) and `jira-routes` (`GET /sessions`),
 and adds `agents-jira-link` (the link and unlink routes, supertest), the pure `jira-sessions-lib` (`lib/jira-sessions.ts`: the Open buttons, durations, the
-ticket's sessions) and the jsdom suites `jira-list` (the List view), `jira-view-store` (the Board and List switch's module store) and `jira-sessions-hook`
+ticket's sessions) and the jsdom suites `jira-list` (the Sessions page's session table; the Board's issue List is in `jira-board`), `jira-view-store` (the Board and List switch's module store) and `jira-sessions-hook`
 (`useJiraSessions`), and widens `rail` (the Needs-you badge), `jira-board` (the agent deck and status shelves) and `jira-detail` (the live session cards and
 history; it was `jira-modal` before the dialog was renamed);
+the Sessions-page work then widens `jira-list` (the Sessions page), `jira-board` (the issue List, the shared pick, the Board | List switch), `jira-lib` (`JIRA_PAGES`,
+`rolledUpdated`), `rail` (the badge opens Sessions) and `jira-sections` (the page store);
 `test/helpers/jira-links-env.ts` gives every test its own `BM_JIRA_LINKS_FILE` in a temp directory, so none touches a developer's real one and no case inherits
 another's links.
 

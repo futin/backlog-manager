@@ -7,8 +7,8 @@ import { sessionDuration, type SessionLink } from './jira-sessions';
 import { formatZonedClock, startOfZonedDay, zonedParts } from './time-zone';
 
 /**
- * jira-list.ts — what the Board page's List view draws: one row per session, live above ended, filtered and counted (Jira sessions spec §7.2, C7; DESIGN.md
- * §8.9.1). Pure, and the one home of these derivations — `JiraSessionList` draws what `buildListRows` and `applyListFilters` return, so no component holds a
+ * jira-list.ts — what the Sessions page's session table draws: one row per session, live above ended, filtered and counted (Jira sessions spec §7.2, C7; DESIGN.md
+ * §8.9.1). Pure apart from `rowOpens`, which reads DOM nodes, and the one home of these derivations — `JiraSessionList` draws what `buildListRows` and `applyListFilters` return, so no component holds a
  * copy of "which sessions are in scope", "which ended rows the window hides" or "which row comes first".
  *
  * **A row is a session, not a ticket.** The identity is the pair, `${key}:${sessionId}` — the deck's — because one session can be linked to several tickets
@@ -279,6 +279,20 @@ export function listDotTone(state: SessionLink['state']): 'live' | 'ramp-tasks' 
   if (state === 'quiet' || state === 'starting') return 'paused';
   if (state === 'lost') return 'crashed';
   return null;
+}
+
+/** Every element inside a row that owns its own click: the Open chips are links, `Run ▾` a button, and its `Popover` panel a `role="dialog"` in the cell. */
+const ROW_OWN_CONTROLS = 'a, button, input, select, textarea, label, [role="dialog"]';
+
+/**
+ * Whether a click on a List row is the row's — opening Detail — rather than a control's. A target inside one of `ROW_OWN_CONTROLS` is that control's (the
+ * summary button included: it opens Detail through its own `onClick`, so the row must not open it a second time); a target outside the row is a React
+ * synthetic event bubbling from somewhere the DOM does not nest; and a click that leaves a text selection behind was someone copying a branch name.
+ */
+export function rowOpens(row: Element, target: EventTarget | null, selection: string): boolean {
+  if (!(target instanceof Element) || !row.contains(target)) return false;
+  if (target.closest(ROW_OWN_CONTROLS) !== null) return false;
+  return selection === '';
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

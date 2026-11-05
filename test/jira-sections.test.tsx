@@ -160,7 +160,7 @@ describe('the Jira rail entry', () => {
 });
 
 describe('the Jira section and its tree', () => {
-  it('opens on the Jira link, with the Board/Setup tree under it, and the tree alone switches pages', async () => {
+  it('opens on the Jira link, with the Board/Sessions/Setup tree under it, and the tree alone switches pages', async () => {
     render(<App />);
     await screen.findByText('board stub');
     await flush();
@@ -173,7 +173,7 @@ describe('the Jira section and its tree', () => {
       within(tree)
         .getAllByRole('button')
         .map((b) => b.textContent)
-    ).toEqual(['Board', 'Setup']);
+    ).toEqual(['Board', 'Sessions', 'Setup']);
     expect(within(tree).getByRole('button', { name: 'Board' })).toHaveAttribute('aria-current', 'true');
 
     await userEvent.click(within(tree).getByRole('button', { name: 'Setup' }));

@@ -11,7 +11,7 @@ import { pollAge } from './tracker';
  *
  * **The deck is the live sessions on this board, one card each.** A session counts for a board when its key is on that board's LOADED list — a top or anything
  * folded under one — so a ticket two boards both hold shows its card on each of them (the controller's ruling), and a session on a ticket off every loaded
- * list shows on no board (the List view is where it lives). `starting` never comes from `GET /api/jira/sessions`: a reservation has no link until the dashboard
+ * list shows on no board (the Sessions page is where it lives). `starting` never comes from `GET /api/jira/sessions`: a reservation has no link until the dashboard
  * answers, so a Starting card is built from the status's `live[key]` entry (`JiraStartingCard`'s and Detail's approach); Lost contact IS in the payload, as the
  * state the server derived.
  *
@@ -107,6 +107,27 @@ export function boardAgents(fold: JiraFold, payload: JiraSessionsPayload | null,
     });
   }
   return out.sort(deckOrder);
+}
+
+/**
+ * The List's Session cell: per top, the state of the FIRST entry `boardAgents` returned for it. Those entries are already in `deckOrder` (group, newest
+ * start, id), so the cell names the session the deck leads that card with and this adds no ordering of its own — a card with `needs you` on a child and
+ * `working` on itself reads `needs you` in both places. A top with no live session has no key.
+ */
+export function topSessionState(agents: readonly DeckEntry[]): Map<string, JiraSessionState> {
+  const out = new Map<string, JiraSessionState>();
+  for (const e of agents) if (!out.has(e.top.key)) out.set(e.top.key, e.state);
+  return out;
+}
+
+/** The word beside the dot in the List's Session cell. `ended` is never reached — `boardAgents` drops ended links — and reads as nothing if it were. */
+export function issueCellWord(state: JiraSessionState): string {
+  if (needsYou(state)) return 'needs you';
+  if (state === 'working') return 'working';
+  if (state === 'quiet') return 'quiet';
+  if (state === 'lost') return 'lost contact';
+  if (state === 'starting') return 'starting';
+  return '';
 }
 
 /** The header's tally: how many cards want a person and how many are working — the two numbers a glance at the deck is for. */

@@ -543,12 +543,12 @@ describe('the Jira row’s Needs-you badge', () => {
   const payload = (links: Over[], reachable = true): JiraSessionsPayload =>
     ({ links: links.map(link), reachable, rowsAt: '2026-11-01T10:00:00.000Z' }) as unknown as JiraSessionsPayload;
 
-  const tree = (data: JiraSessionsPayload | null, onChange: (s: Section) => void = jest.fn()) => (
+  const tree = (data: JiraSessionsPayload | null, onChange: (s: Section) => void = jest.fn(), section: Section = 'runs') => (
     <SettingsProvider>
       <ProjectsContext.Provider value={{ data: null, drawn: BOTH, reload: () => {} }}>
         <JiraContext.Provider value={configured}>
           <JiraSessionsContext.Provider value={{ data, reload: () => Promise.resolve() }}>
-            <SideRail section="runs" onChange={onChange} provisional={false} />
+            <SideRail section={section} onChange={onChange} provisional={false} />
           </JiraSessionsContext.Provider>
         </JiraContext.Provider>
       </ProjectsContext.Provider>
@@ -637,7 +637,7 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(JSON.parse(localStorage.getItem('backlog-manager.jira-view') ?? 'null')).not.toBe('list');
   });
 
-  it('lands on the Board page’s List with Needs you and All tickets set', async () => {
+  it('lands on the Sessions page with Needs you and All tickets set', async () => {
     const onChange = jest.fn();
     setJiraView('board');
     const filters = renderHook(() => useJiraListFilters());
@@ -650,9 +650,30 @@ describe('the Jira row’s Needs-you badge', () => {
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith('jira');
-    expect(page.result.current[0]).toBe('board');
-    expect(view.result.current[0]).toBe('list');
+    expect(page.result.current[0]).toBe('sessions');
+    expect(view.result.current[0]).toBe('board');
     expect(filters.result.current[0]).toMatchObject({ chip: 'needs-you', allTickets: true });
+  });
+
+  it('no longer writes the Board page’s view: a stored List stays List', async () => {
+    setJiraView('list');
+    const view = renderHook(() => useJiraView());
+    render(tree(payload([{ key: 'OFFBOARD-9', id: 's1', state: 'answer' }])));
+    await userEvent.click(screen.getByRole('button', { name: '1 session needs you' }));
+    expect(view.result.current[0]).toBe('list');
+  });
+
+  it('draws Board, Sessions, Setup in the open Jira tree, carries no count on Sessions, and picking Sessions sets the page', async () => {
+    const page = renderHook(() => useJiraPage());
+    act(() => page.result.current[1]('board'));
+    render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }]), jest.fn(), 'jira'));
+    const group = screen.getByRole('group', { name: 'Jira pages' });
+    const buttons = within(group).getAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual(['Board', 'Sessions', 'Setup']);
+    expect(within(buttons[1]).queryByText('1')).toBeNull();
+    expect(group.querySelector('.rail-badge')).toBeNull();
+    await userEvent.click(buttons[1]);
+    expect(page.result.current[0]).toBe('sessions');
   });
 
   it('is fed by the shell’s one poll: a read with no `open=1` while the section is closed, none at all while Jira is unconfigured', async () => {

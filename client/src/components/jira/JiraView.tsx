@@ -9,15 +9,16 @@ import type { JiraAction, JiraIssue } from '../../../../shared/types';
 import { JiraBoardView } from './JiraBoardView';
 import { JiraDetail } from './JiraDetail';
 import { JiraLaunchSheet } from './JiraLaunchSheet';
+import { JiraSessionsView } from './JiraSessionsView';
 import { JiraSetupView } from './JiraSetupView';
 
 /**
  * JiraView — the Jira section (Jira phase 2, spec §6.1; DESIGN.md §8.9, and §8.0 for the tree that switches its pages). Lazy in `App`, like every section,
  * so a machine that never configures Jira never fetches this chunk.
  *
- * It decides one thing: which of the section's two pages is drawn, read from `useJiraPage` — the module store the rail's `Board`/`Setup` tree writes. It
- * draws NO control that switches them, at any width (the Runs/Settings rule, CLAUDE.md "Settings is three pages…"): the tree is the switch, and the two
- * in-page links that also land on a page (`Open board` on Setup, the empty board's chip to Setup) are `onOpenJiraPage`, the rail's own navigation threaded
+ * It decides one thing: which of the section's three pages (Board, Sessions, Setup) is drawn, read from `useJiraPage` — the module store the rail's tree writes. It
+ * draws NO control that switches them, at any width (the Runs/Settings rule, CLAUDE.md "Settings is three pages…"): the tree is the switch, and the in-page
+ * links that also land on a page (`Open board` and Sessions' `Open Setup`, the empty board's chip to Setup) are `onOpenJiraPage`, the rail's own navigation threaded
  * down from `App`, handed to the pages as given.
  *
  * Before a page can draw, the status has to have said `configured: true`, and until then this is where the section stands — `App` holds a stored `jira`
@@ -36,7 +37,7 @@ import { JiraSetupView } from './JiraSetupView';
  *
  * **The open issue is held HERE, not in the Board page.** The Board's card click lands in this slot (`onOpenIssue`), and the Detail dialog is drawn
  * from it. Held one level above the page so that the slot outlives a re-render of the board under it — a poll that reorders the columns, a board switch —
- * and is read by exactly one modal mount. The modal is drawn only beside the Board page: Setup has no card to open one from, and the slot is cleared whenever `page`
+ * and is read by exactly one modal mount. The modal is drawn beside the Board and Sessions pages: Setup has no card or row to open one from, and the slot is cleared whenever `page`
  * changes, so a stale issue never survives a trip to Setup and back (JiraView itself does not unmount on a page switch).
  *
  * The slot holds the issue AND the board's fold index as it stood at the click (`childrenOf`, grouped-board spec §6), which the modal's Children tree hangs
@@ -44,7 +45,7 @@ import { JiraSetupView } from './JiraSetupView';
  * same snapshot forward — never a second modal.
  *
  * **The write counter is held here too** (Jira phase 3, plan ruling R7). The modal's landed write — `Assign to me`, `Move to…` — calls `onWrote`,
- * which bumps `nudge`; the Board page hands it to `useJiraBoard`, whose list re-reads at once on the change, `off` boards included. The two never reach
+ * which bumps `nudge`; the Board and Sessions pages hand it to `useJiraBoard`, whose list re-reads at once on the change, `off` boards included. The two never reach
  * into each other: this component is the one place that holds both the modal and the page, so it is the one place a number can pass between them. The
  * counter is not cleared on a page switch — it is a count of events, not a state, and only its change means anything.
  *
@@ -88,7 +89,11 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
     // The sessions poll is the shell's (`App` hoists `JiraSessionsProvider` around the rail and this section): the card's `Run ▾`, the Detail dialog and the
     // rail badge read ONE payload, so none of them disagrees with another for a poll. This section being current is what `open` says there.
     <>
-      <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
+      {page === 'sessions' ? (
+        <JiraSessionsView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
+      ) : (
+        <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
+      )}
       {openIssue !== null && (
         <JiraDetail
           issue={openIssue.issue}

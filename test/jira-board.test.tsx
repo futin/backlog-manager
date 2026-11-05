@@ -11,6 +11,8 @@ import { JiraSessionsProvider } from '../client/src/hooks/JiraSessionsContext';
 import { JiraProvider } from '../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
+import { setJiraView } from '../client/src/hooks/useJiraView';
+import { elapsedSince } from '../client/src/lib/item-age';
 import { JIRA_BOARD_KEY, bandSub } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
 import { daysAgoStamp } from './helpers/dates';
@@ -1165,8 +1167,19 @@ describe('the agent deck and the status shelves', () => {
     expect(list).toBeEnabled();
     await userEvent.click(list);
     expect(within(group).getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('region', { name: 'Sessions' })).toBeInTheDocument();
+    // The session table lives on Jira › Sessions now; Task 4 fills List with the issue table.
+    expect(screen.queryByRole('region', { name: 'Sessions' })).toBeNull();
     // Back to the Board for the cases that follow (the view is a module store that outlives a test).
+    await userEvent.click(within(group).getByRole('button', { name: 'Board' }));
+  });
+
+  it('the FilterBar is drawn in List too, and the search reads `Search issues` in both views', async () => {
+    await renderDeck('Refund partial captures');
+    const group = screen.getByRole('group', { name: 'View' });
+    expect(screen.getByRole('button', { name: /^Filters/ })).toBeInTheDocument();
+    await userEvent.click(within(group).getByRole('button', { name: 'List' }));
+    expect(screen.getByRole('button', { name: /^Filters/ })).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search issues' })).toHaveAttribute('placeholder', 'search summaries');
     await userEvent.click(within(group).getByRole('button', { name: 'Board' }));
   });
 
@@ -1240,5 +1253,158 @@ describe('the agent deck and the status shelves', () => {
       await renderDeck('Refund partial captures');
       expect(within(card('Refund partial captures')).queryByTestId('ended-line')).toBeNull();
     });
+  });
+});
+
+/*
+  Jira › Board › List is an issue table (Jira › Sessions plan, Task 4; spec "Jira › Board" D2–D4, mock `Main.dc.html`): one row per board card — a fold top,
+  never a folded issue — in `sortTops` order, with a Session cell that rolls the live sessions up the way the deck does. Same fold shape as `the fold` above,
+  with a second small fold (PAY-210 over PAY-211) so a top with exactly one folded issue is on the list too.
+*/
+describe('the issue List', () => {
+  const hoursAgo = (h: number): string => new Date(Date.now() - h * 3_600_000).toISOString();
+  const linkOn = (key: string, id: string, state: string, h: number) => ({
+    ...runLink(key, { sessionId: id, name: 'jira run', startedAt: hoursAgo(h), repo: '/Users/ada/pay', starting: false }),
+    state
+  });
+  const EPIC = { name: 'Epic', level: 1, subtask: false };
+  const STORY = { name: 'Story', level: 0, subtask: false };
+  const SUB = { name: 'Sub-task', level: -1, subtask: true };
+  const DOING = { name: 'In Progress', category: 'indeterminate' as const };
+  const G_120 = issue({ key: 'PAY-120', summary: 'Payments epic', type: EPIC, updated: daysAgoStamp(5) });
+  const G_160 = issue({ key: 'PAY-160', summary: 'Ledger story', type: STORY, status: DOING, parent: { key: 'PAY-120', summary: 'Payments epic' }, updated: daysAgoStamp(4) });
+  const G_162 = issue({ key: 'PAY-162', summary: 'Ledger rounding fix', type: SUB, parent: { key: 'PAY-160', summary: 'Ledger story' }, updated: daysAgoStamp(0) });
+  const G_170 = issue({ key: 'PAY-170', summary: 'Payout story', type: STORY, parent: { key: 'PAY-120', summary: 'Payments epic' }, updated: daysAgoStamp(6) });
+  const G_180 = issue({ key: 'PAY-180', summary: 'Standalone task', updated: daysAgoStamp(1) });
+  const G_190 = issue({ key: 'PAY-190', summary: 'Payout retries', status: DOING, assignee: ADA, sprint: 'Sprint 44', parent: { key: 'PAY-999', summary: 'Billing platform' }, updated: daysAgoStamp(2) });
+  const G_210 = issue({ key: 'PAY-210', summary: 'Chargeback upload', updated: daysAgoStamp(5) });
+  const G_211 = issue({ key: 'PAY-211', summary: 'Chargeback storage', type: SUB, parent: { key: 'PAY-210', summary: 'Chargeback upload' }, updated: daysAgoStamp(1.5) });
+  const GROUP = [G_120, G_160, G_162, G_170, G_180, G_190, G_210, G_211];
+
+  async function renderList(issues: JiraIssue[] = GROUP): Promise<void> {
+    lists[ALPHA.id] = issues;
+    setJiraView('list');
+    setJiraPage('board');
+    onOpenIssue = jest.fn();
+    render(
+      <SettingsProvider>
+        <JiraProvider>
+          <JiraSessionsProvider open>
+            <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={onOpenIssue} onRun={jest.fn()} nudge={0} />
+          </JiraSessionsProvider>
+        </JiraProvider>
+      </SettingsProvider>
+    );
+    await screen.findByRole('table');
+  }
+  afterEach(() => setJiraView('board'));
+
+  const rowKeys = (): string[] => Array.from(document.querySelectorAll('tr[data-key]')).map((r) => r.getAttribute('data-key') ?? '');
+  const row = (key: string): HTMLElement => document.querySelector(`tr[data-key="${key}"]`) as HTMLElement;
+  const sessionCell = (key: string): string => row(key).querySelector('.jira-issues-session')?.textContent ?? '';
+
+  it('draws one row per top and no folded issue, in sortTops order', async () => {
+    await renderList();
+    // PAY-120 rises on PAY-162's stamp, PAY-210 on PAY-211's; PAY-190 (2 d) sinks below them. Input order is 120, 180, 190, 210.
+    expect(rowKeys()).toEqual(['PAY-120', 'PAY-180', 'PAY-210', 'PAY-190']);
+    for (const folded of ['PAY-160', 'PAY-162', 'PAY-170', 'PAY-211']) expect(row(folded)).toBeNull();
+    expect(screen.queryByText('Ledger rounding fix')).toBeNull();
+  });
+
+  it('puts a newer top first even when the served list ends with it', async () => {
+    await renderList([...GROUP, issue({ key: 'PAY-100', summary: 'Fresh work', status: DOING, updated: daysAgoStamp(0) })]);
+    expect(rowKeys()[0]).toBe('PAY-100');
+  });
+
+  it('draws the columns of the mock: key, summary, type, raw status, assignee, sprint and the rolled-up age', async () => {
+    await renderList();
+    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Assignee', 'Sprint', 'Updated']);
+    const r = row('PAY-190');
+    expect(within(r).getByText('PAY-190')).toBeInTheDocument();
+    expect(within(r).getByText('Payout retries')).toBeInTheDocument();
+    expect(within(r).getByText('Task')).toBeInTheDocument();
+    expect(within(r).getByText('In Progress')).toBeInTheDocument();
+    expect(within(r).getByText('Ada Lovelace')).toBeInTheDocument();
+    expect(within(r).getByText('Sprint 44')).toBeInTheDocument();
+    expect(within(row('PAY-180')).getByText('unassigned')).toBeInTheDocument();
+    expect(within(row('PAY-180')).getByText('—')).toBeInTheDocument();
+  });
+
+  it('names how many issues fold under a top: the whole fold, one for a single, nothing for none', async () => {
+    await renderList();
+    // PAY-120 has two direct children but three folded issues (160, 162 under it, 170); the count is the fold's, not the children's.
+    expect(row('PAY-120').textContent).toContain('3 under it');
+    expect(row('PAY-210').textContent).toContain('1 under it');
+    expect(row('PAY-180').textContent).not.toContain('under it');
+  });
+
+  it('marks a top for a session live only on a folded child, and never draws the child', async () => {
+    sessionsAnswer = () => ({ links: [linkOn('PAY-162', 's162', 'working', 2)], reachable: true, rowsAt: null });
+    await renderList();
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('working'));
+    expect(sessionCell('PAY-180')).toBe('');
+    expect(row('PAY-162')).toBeNull();
+  });
+
+  it('names the deck’s lead session on a card with two: needs you beats working, and the deck leads with the same one', async () => {
+    sessionsAnswer = () => ({ links: [linkOn('PAY-120', 'a', 'working', 3), linkOn('PAY-162', 'b', 'answer', 2)], reachable: true, rowsAt: null });
+    await renderList();
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('needs you'));
+    await userEvent.click(screen.getByRole('button', { name: 'Board' }));
+    const first = document.querySelector('.jira-deck-card');
+    expect(first?.getAttribute('data-state')).toBe('answer');
+    expect(first?.getAttribute('data-key')).toBe('PAY-162');
+  });
+
+  it('keeps a top whose folded issue matches the search', async () => {
+    await renderList();
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'ledger rounding');
+    expect(rowKeys()).toEqual(['PAY-120']);
+  });
+
+  it('the FilterBar filters the rows: assignee me leaves only my tops', async () => {
+    await renderList();
+    await pick('Assignee', 'me');
+    expect(rowKeys()).toEqual(['PAY-190']);
+  });
+
+  it('reads the rolled-up time in Updated: a child’s 1.5 d, not the top’s 5 d', async () => {
+    await renderList();
+    expect(row('PAY-210').querySelector('.jira-issues-updated')?.textContent).toBe(elapsedSince(G_211.updated));
+    expect(row('PAY-210').querySelector('.jira-issues-updated')?.textContent).toBe('1d');
+  });
+
+  it('opens the modal with the fold on a row click, and not from the Jira link', async () => {
+    await renderList();
+    await userEvent.click(within(row('PAY-120')).getByRole('link', { name: /open PAY-120 in Jira/ }));
+    expect(onOpenIssue).not.toHaveBeenCalled();
+    // The Type cell is plain text: only the row's own handler can open the modal from it (the summary button has its own).
+    await userEvent.click(within(row('PAY-120')).getByText('Epic'));
+    expect(onOpenIssue).toHaveBeenCalledTimes(1);
+    const [opened, index] = onOpenIssue.mock.calls[0] as [JiraIssue, ReadonlyMap<string, readonly JiraIssue[]>];
+    expect(opened).toBe(G_120);
+    expect(index.get('PAY-160')?.map((i) => i.key)).toEqual(['PAY-162']);
+  });
+
+  it('says `No issues match` when a search cuts every row', async () => {
+    await renderList();
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'zzzz');
+    expect(screen.getByText('No issues match')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).toBeNull();
+  });
+
+  it('says `No issues` for a loaded board with nothing on it', async () => {
+    lists[ALPHA.id] = [];
+    setJiraView('list');
+    render(
+      <SettingsProvider>
+        <JiraProvider>
+          <JiraSessionsProvider open>
+            <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={jest.fn()} onRun={jest.fn()} nudge={0} />
+          </JiraSessionsProvider>
+        </JiraProvider>
+      </SettingsProvider>
+    );
+    expect(await screen.findByText('No issues')).toBeInTheDocument();
   });
 });

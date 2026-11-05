@@ -5,7 +5,6 @@ import { useJiraContext } from '../hooks/JiraContext';
 import { setJiraListFilters } from '../hooks/useJiraListFilters';
 import { useJiraNeedsYou } from '../hooks/useJiraNeedsYou';
 import { useJiraPage } from '../hooks/useJiraPage';
-import { setJiraView } from '../hooks/useJiraView';
 import { useProjectsContext } from '../hooks/ProjectsContext';
 import { useFilesPage, useGithubPage } from '../hooks/useSourcePage';
 import { useNarrow } from '../hooks/useNarrow';
@@ -121,8 +120,9 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   // `onOpenJiraPage`) are two mounted writers of one value, and a `usePersistedState` per caller would leave the other looking at a stale page.
   const [jiraPage, setJiraPage] = useJiraPage();
   // The Jira row's Needs-you badge (spec §7.4, C4): the shell's one sessions answer, never a read of its own. It counts every linked ticket, so its click opens
-  // the List — the Board's deck shows the picked board only — with the chip and All tickets set, in the same handler that moves the page and the section.
-  // The three stores are module-level for this reason (`useJiraView`, `useJiraListFilters`): this is a writer that is not the page.
+  // the Sessions page — the Board's deck shows the picked board only — with the chip and All tickets set, in the same handler that moves the page and the
+  // section. The stores are module-level for this reason (`useJiraPage`, `useJiraListFilters`): this is a writer that is not the page. It leaves the Board
+  // page's view alone: the badge no longer opens the List.
   const needsYouCount = useJiraNeedsYou();
   /*
     The Jira row (Jira phase 2, spec §6.1) is drawn while `GET /api/jira` says `configured: true`, and in ONE other case: the status is still unknown (`data`
@@ -212,8 +212,7 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
                 className="rail-badge"
                 aria-label={`${needsYouCount} ${needsYouCount === 1 ? 'session needs' : 'sessions need'} you`}
                 onClick={() => {
-                  setJiraPage('board');
-                  setJiraView('list');
+                  setJiraPage('sessions');
                   setJiraListFilters({ chip: 'needs-you', allTickets: true });
                   onChange('jira');
                   setMenuOpen(false);
@@ -477,8 +476,8 @@ const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
 };
 
 /**
- * The Jira tree's labels (Jira phase 2, spec §6.1; DESIGN.md §8.9) — `RAIL_SUB_LABEL`'s rule: the only labels these two pages have, because neither page
- * draws a switch of its own at any width. `Open board` on Setup and the empty board's chip to Setup are this tree's own navigation handed down through
+ * The Jira tree's labels (Jira phase 2, spec §6.1; DESIGN.md §8.9) — `RAIL_SUB_LABEL`'s rule: the only labels these three pages have, because no page
+ * draws a switch of its own at any width. `Open board` on Setup, Sessions' `Open Setup` and the empty board's chip to Setup are this tree's own navigation handed down through
  * `App` (`onOpenJiraPage`), not second controls with wording of their own to keep in step.
  *
  * `Board` repeats the source trees' word on purpose: under the `Jira` row it reads as Jira's board, and the page it opens is a board — three columns of
@@ -486,6 +485,7 @@ const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
  */
 const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
   board: 'Board',
+  sessions: 'Sessions',
   setup: 'Setup'
 };
 

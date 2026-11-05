@@ -275,9 +275,29 @@ export function foldBoard(issues: readonly JiraIssue[]): JiraFold {
  * subtasks are being worked would otherwise sink. The sort key is never drawn: the card's age stays the top's own (`cardAgeStamp`). Returns a new array.
  */
 export function sortTops(tops: readonly JiraIssue[], under: JiraFold['under']): JiraIssue[] {
-  const newest = new Map(tops.map((t) => [t.key, Math.max(updatedMs(t), ...(under.get(t.key) ?? []).map(updatedMs))] as const));
+  const newest = new Map(tops.map((t) => [t.key, stampMs(rolledUpdated(t, under))] as const));
   const at = (t: JiraIssue): number => newest.get(t.key) ?? updatedMs(t);
   return [...tops].sort((a, b) => at(b) - at(a) || byKey(a, b));
+}
+
+const stampMs = (iso: string | null): number => (iso === null ? 0 : Date.parse(iso));
+
+/**
+ * The newest parseable `updated` across a top and everything folded under it (`under.get(top.key)`), as the ISO string the issue carried — the value
+ * `sortTops` ranks by, exported so the List's Updated column prints the very stamp the row was sorted on (a column that read the top's own `updated` would
+ * show `5d` on a row the sort lifted for work done today). `null` when no stamp parses: the sort treats that as the oldest and the cell draws nothing.
+ */
+export function rolledUpdated(top: JiraIssue, under: JiraFold['under']): string | null {
+  let best: string | null = null;
+  let bestMs = 0;
+  for (const i of [top, ...(under.get(top.key) ?? [])]) {
+    const t = Date.parse(i.updated);
+    if (!Number.isNaN(t) && (best === null || t > bestMs)) {
+      best = i.updated;
+      bestMs = t;
+    }
+  }
+  return best;
 }
 
 /** How far along the issues under a card are, by column — `columnOf`'s three buckets, so the bar can never disagree with the columns. */

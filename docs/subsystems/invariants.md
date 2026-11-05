@@ -3351,19 +3351,19 @@ Jira › Setup holds `jira.json`'s writes: the control governs one source, and i
 keeps the read-only report of every source this machine reaches, the `Sources` card, alone in its left column, against Watchdog, Tick and Time zone in its
 right; its two links (`GitHub › Settings ↗`, `Jira › Setup ↗`) are the shell's pairs threaded down, and each is drawn only while the section it opens is drawn.
 
-## The Jira section's two pages are switched by the rail's tree, and the section is drawn only when configured
+## The Jira section's three pages are switched by the rail's tree, and the section is drawn only when configured
 
-The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
+The Jira section's three pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
 `GET /api/jira` says configured. The two halves are separate rules that happen to meet in one rail row, and each has a precedent or a failure behind it.
 
 ### The tree rule is Runs' and Settings', applied a third time
 
-Board and Setup are two pages under one rail entry, which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared, Dashboards) already have, and the rule those
+Board, Sessions and Setup are three pages under one rail entry, which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared, Dashboards) already have, and the rule those
 two settled is that the tree is the switch at every width: the rail's trees stand open below 700 px, so a segmented control on the page would be a second
 wording of the same choice, free to drift from the tree's and reached in the same number of taps. Task-38 deleted Runs' in-page pair for that reason and task-42
 never gave Settings one; a Jira page switch would have been the first thing a later reader removed, so it was never drawn.
 
-The two links that DO land on a page — `Open board` on a Setup row, and `Open Setup` on a board page with no boards — are not switches in that sense, because
+The links that DO land on a page — `Open board` on a Setup row, and `Open Setup` on a board or Sessions page with no boards — are not switches in that sense, because
 they are not a second implementation of one. `App` builds `onOpenJiraPage` once, the same pair the tree calls in the same order (`setJiraPage`, then the
 shell's `change`), and hands it down, exactly as Settings' `Live view` link is `onOpenWatchdog`. A link built that way means what the tree entry means by
 construction; a link built inside the page out of its own `localStorage` write and its own section call would mean it only until one of the two changed. The
