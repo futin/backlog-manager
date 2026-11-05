@@ -952,7 +952,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     expect(within(foot).getByRole('button', { name: /^Run options for PAY-/ })).toBeInTheDocument();
     await userEvent.click(runChip('Refund partial captures'));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
-    expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('execute');
+    expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'End to end' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('dialog', { name: 'Run menu' })).not.toBeInTheDocument();
   });
 
@@ -961,7 +961,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     await renderRun();
     await userEvent.click(runChip('Refund partial captures'));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
-    expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue(`skill:${SKILL.id}`);
+    expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'A skill' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(sheet).getByRole('combobox', { name: 'Skill' })).toHaveValue(`skill:${SKILL.id}`);
   });
 
   it('with no skills on the machine the menu has no Skills header', async () => {
@@ -984,7 +985,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     await userEvent.click(runMore('Refund partial captures'));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.context }));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
-    expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('context');
+    expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'Ticket loaded' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
     // The menu closed behind the pick.
     expect(screen.queryByRole('dialog', { name: 'Run menu' })).not.toBeInTheDocument();
@@ -995,7 +996,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     await userEvent.click(runMore('Refund partial captures'));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: /Groom ticket/ }));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
-    expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue(`skill:${SKILL.id}`);
+    expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'A skill' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(sheet).getByRole('combobox', { name: 'Skill' })).toHaveValue(`skill:${SKILL.id}`);
   });
 
   // I1 (final review): `Jira default action` is read HERE — the menu lists the resolved default first and marks it `default` — because every way into the launch
@@ -1065,7 +1067,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       const menu = await openMenu();
       await userEvent.click(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.context }));
       const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
-      expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('context');
+      expect(within(within(sheet).getByRole('group', { name: 'Action' })).getByRole('button', { name: 'Ticket loaded' })).toHaveAttribute('aria-pressed', 'true');
     });
   });
 
@@ -1085,7 +1087,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     await userEvent.click(runMore('Refund partial captures'));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute }));
     const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
-    const start = await within(sheet).findByRole('button', { name: 'Start' });
+    const start = await within(sheet).findByRole('button', { name: 'Start session' });
     await waitFor(() => expect(start).toBeEnabled());
     // The sessions payload is the second thing a landed Start must re-read (Detail's Start gate and the List's `canRun` read it, not the status).
     const sessionsReads = (): number => requested.filter((u) => u.startsWith('/api/jira/sessions')).length;

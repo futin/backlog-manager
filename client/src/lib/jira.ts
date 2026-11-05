@@ -738,6 +738,20 @@ export function unmappedProjects(status: Pick<JiraStatusPayload, 'projects' | 'r
 }
 
 /**
+ * The launch sheet's foot line (spec §4.5): where the session will start, in the words of the branch choice. `null` without a repository — there is nothing to
+ * say about nowhere. A `null` choice is the Branch section not being ready (refs still loading, or refused); the line then ends after the basename rather than
+ * guessing a mode the person has not been shown. The basename, not the full path, because the foot is one 12 px line and the Repository control above it
+ * already carries the path in its title.
+ */
+export function launchFootLine(repo: string | null, choice: JiraBranchChoice | null): string | null {
+  if (repo === null || repo === '') return null;
+  const name = repo.replace(/\/+$/, '').split('/').pop() || repo;
+  const base = `Starts in ${name}`;
+  if (choice === null) return base;
+  return choice.mode === 'none' ? `${base} on the checkout itself` : choice.mode === 'new' ? `${base} on a new worktree` : `${base} on ${choice.branch}`;
+}
+
+/**
  * A path as the Repositories card shows it: the `$HOME` prefix written `~`. Only at a segment boundary — `/Users/adam/x` is not under `/Users/ada` — and
  * never while `home` is unknown (`null`, or the degenerate `''` / `/`, where every absolute path would "start with" it).
  */

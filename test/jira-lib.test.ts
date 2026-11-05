@@ -72,6 +72,7 @@ import {
   statusTone
 } from '../client/src/lib/jira';
 import type { JiraFold } from '../client/src/lib/jira';
+import { launchFootLine } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
 import { SHELF_LIMIT, boardAgents, boardShelves, deckCrumb, deckGroup, deckTally, endedLine, topSessionCell } from '../client/src/lib/jira-deck';
@@ -1719,5 +1720,19 @@ describe('card tone helpers', () => {
 
   it('statusTone maps the three categories to the three column slugs', () => {
     expect([statusTone('new'), statusTone('indeterminate'), statusTone('done')]).toEqual(['todo', 'doing', 'done']);
+  });
+});
+
+describe('launchFootLine', () => {
+  it('names the checkout itself for none, a new worktree for new, and the branch for continue', () => {
+    expect(launchFootLine('/Users/ada/microservice', { mode: 'none' })).toBe('Starts in microservice on the checkout itself');
+    expect(launchFootLine('/Users/ada/microservice', { mode: 'new', branch: 'b', base: 'main', openMr: false })).toBe('Starts in microservice on a new worktree');
+    expect(launchFootLine('/Users/ada/microservice', { mode: 'continue', branch: 'pay-131-a', openMr: false, target: null })).toBe(
+      'Starts in microservice on pay-131-a'
+    );
+  });
+  it('is null without a repository and ends after the basename without a choice', () => {
+    expect(launchFootLine(null, { mode: 'none' })).toBeNull();
+    expect(launchFootLine('/Users/ada/microservice', null)).toBe('Starts in microservice');
   });
 });

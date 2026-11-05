@@ -66,6 +66,12 @@ describe('Segmented', () => {
     await userEvent.click(screen.getByRole('button', { name: OPTIONS[0].label }));
     expect(onChange).toHaveBeenCalledWith(OPTIONS[0].value);
   });
+  // The launch sheet's Repository shows basenames and keeps the full path one hover away; an option without a title draws none.
+  it('puts an option\'s title on its button and draws none otherwise', () => {
+    render(<Segmented value="cosy" options={[{ ...OPTIONS[0], title: '/Users/ada/pay' }, OPTIONS[1]]} onChange={jest.fn()} />);
+    expect(screen.getByRole('button', { name: OPTIONS[0].label })).toHaveAttribute('title', '/Users/ada/pay');
+    expect(screen.getByRole('button', { name: OPTIONS[1].label })).not.toHaveAttribute('title');
+  });
   /**
    * The `pill` variant (DESIGN.md §8.6) — a recessed track under a raised
    * option, the shape `Switch` draws. A prop rather than a second class family
