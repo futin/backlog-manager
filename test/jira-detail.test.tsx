@@ -1253,7 +1253,9 @@ describe('JiraView — the open-issue slot draws the modal', () => {
         const own = GROUP.find((g) => g.key === key) ?? { key };
         return json(detail({ ...own, children: [], ...details[key] }));
       }
-      if (url.includes('/issues')) return json({ issues: GROUP, polledAt: daysAgoStamp(0) });
+      // The board's own stamp, not a fresh one: `useJiraBoard` re-reads once whenever the list's stamp differs from the status's, so a stamp minted at fetch time
+      // (second precision, a different second under load) adds a list read at an arbitrary moment — which the swap test below counts.
+      if (url.includes('/issues')) return json({ issues: GROUP, polledAt: board.boards[0]!.polledAt });
       return json(board);
     }) as unknown as typeof fetch;
     render(
