@@ -1,0 +1,22 @@
+{
+  "v": 3,
+  "createdOnFiles": { "v": 1, "at": "2026-11-05T10:00:00Z" },
+  "title": "Jira Sessions split",
+  "launch": { "view": "canvas" },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": { "x": 0, "y": 0, "w": 1440, "h": 920, "title": "Jira › Board › List — issues table (agreed)", "expand": "fill" },
+    "SessionsA.dc.html": { "x": 0, "y": 1320, "w": 1440, "h": 920, "title": "A — Sessions: table only, all linked tickets", "expand": "fill" },
+    "SessionsB.dc.html": { "x": 1520, "y": 1320, "w": 1440, "h": 920, "title": "B — Sessions: keeps board picker + All tickets", "expand": "fill" },
+    "SessionsC.dc.html": { "x": 3040, "y": 1320, "w": 1440, "h": 1140, "title": "C — Sessions: live deck above ended history", "expand": "fill" },
+    "Rail.dc.html": { "x": 0, "y": 2860, "w": 220, "h": 920, "title": "Part: side rail" },
+    "SessionTable.dc.html": { "x": 300, "y": 2860, "w": 1180, "h": 640, "title": "Part: session table" }
+  },
+  "order": ["Main.dc.html", "Rail.dc.html", "SessionTable.dc.html", "SessionsA.dc.html", "SessionsB.dc.html", "SessionsC.dc.html"],
+  "notes": {
+    "row1": { "x": 0, "y": -300, "text": "Board page: Board view unchanged, List becomes issues", "kind": "title1", "maxW": 1440 },
+    "row2": { "x": 0, "y": 1020, "text": "Sessions page: pick one", "kind": "title1", "maxW": 4480 },
+    "row3": { "x": 0, "y": 2560, "text": "Shared parts", "kind": "title1", "maxW": 1480 }
+  },
+  "designSystems": []
+}

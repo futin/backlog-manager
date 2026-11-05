@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Session table</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#306c0f}a:hover{color:#1f4a08}
+</style>
+</helmet>
+<div style="width: 100%; max-width: 1180px; font-family: 'Hanken Grotesk', -apple-system, sans-serif; color: #131313; font-size: 13px; background: #ffffff; border: 1px solid #eaeae8; border-radius: 10px; overflow-x: auto; box-sizing: border-box">
+<table style="width: 100%; border-collapse: collapse; min-width: 1100px">
+<thead>
+<tr style="text-align: left; color: #6b6b6b; font-size: 12px">
+<th scope="col" style="padding: 10px 14px; border-bottom: 1px solid #eaeae8; font-weight: 500">State</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500">Ticket</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500">Run</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500">Repo · branch</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500">Where</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500">Model</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500">Context</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500">Started</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500">For</th>
+<th scope="col" style="padding: 10px 14px; border-bottom: 1px solid #eaeae8; font-weight: 500">Open</th>
+</tr>
+</thead>
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="2">
+<tbody>
+<tr><th scope="rowgroup" colspan="10" style="text-align: left; padding: 12px 14px 6px; font-size: 12px; font-weight: 600; color: #525252; background: #fbfbfa; border-bottom: 1px solid #eaeae8">{{g.title}}</th></tr>
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="3">
+<tr>
+<td style="padding: 9px 14px; border-bottom: 1px solid #f2f2f1; white-space: nowrap"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="{{r.dotStyle}}"></span><span style="{{r.wordStyle}}">{{r.state}}</span></span></td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1"><div style="font-weight: 600">{{r.key}}</div><div style="color: #525252; font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{r.summary}}</div></td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; color: #525252">{{r.run}}</td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; color: #525252; font-size: 12px">{{r.repo}}</td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; color: #525252">{{r.where}}</td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; color: #525252">{{r.model}}</td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; color: #525252">{{r.ctx}}</td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; color: #6b6b6b">{{r.started}}</td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; color: #6b6b6b">{{r.dur}}</td>
+<td style="padding: 9px 14px; border-bottom: 1px solid #f2f2f1"><button type="button" style="border: 1px solid #dcdcda; background: #ffffff; border-radius: 6px; padding: 4px 9px; font: inherit; font-size: 12px; white-space: nowrap">{{r.open}}</button></td>
+</tr>
+</sc-for>
+</tbody>
+</sc-for>
+</table>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["all","ended"],"default":"all"},"$preview":{"width":1180,"height":640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mode = this.props.mode ?? 'all';
+    const dot = (c) => 'width: 8px; height: 8px; border-radius: 50%; background: ' + c;
+    const live = [
+      { state: 'needs you · permission', tone: 'needs', key: 'PAY-131', summary: 'Refund webhook retries twice on 502', run: 'execute', repo: 'payments-api · pay-131-refund-retry', where: 'Desktop', model: 'Opus', ctx: '42%', started: '09:12', dur: '38m', open: 'Open in Desktop' },
+      { state: 'needs you · reply', tone: 'needs', key: 'PAY-120', summary: 'Location picker in payout settings', run: 'plan', repo: 'payments-web · pay-120-location-picker', where: 'Terminal', model: 'Sonnet', ctx: '18%', started: '10:02', dur: '9m', open: 'Open terminal' },
+      { state: 'working', tone: 'working', key: 'PAY-118', summary: 'Split payouts per merchant location', run: 'execute', repo: 'payments-api · pay-118-split-payouts', where: 'Desktop', model: 'Opus', ctx: '61%', started: '08:40', dur: '1h 10m', open: 'Open in Desktop' }
+    ];
+    const ended = [
+      { state: 'ended', tone: 'ended', key: 'PAY-119', summary: 'Payout ledger table + migration', run: 'execute', repo: 'payments-api · pay-119-ledger', where: 'Desktop', model: 'Opus', ctx: '74%', started: 'yesterday', dur: '2h 05m', open: 'Resume' },
+      { state: 'ended', tone: 'ended', key: 'PAY-131', summary: 'Refund webhook retries twice on 502', run: 'investigate', repo: 'payments-api · main', where: 'Terminal', model: 'Opus', ctx: '33%', started: 'yesterday', dur: '22m', open: 'Resume' },
+      { state: 'ended', tone: 'ended', key: 'OPS-44', summary: 'Rotate staging DB credentials', run: 'execute', repo: 'infra · ops-44-rotate', where: 'Desktop', model: 'Sonnet', ctx: '12%', started: 'Mon', dur: '14m', open: 'Resume' },
+      { state: 'ended', tone: 'ended', key: 'PAY-88', summary: 'Remove legacy PayPal sandbox keys', run: 'execute', repo: 'payments-api · pay-88-paypal', where: 'Desktop', model: 'Opus', ctx: '29%', started: 'Mon', dur: '31m', open: 'Resume' }
+    ];
+    const tone = {
+      needs: [dot('#F5A15C'), 'color: #8a5214; font-weight: 600'],
+      working: [dot('#7DC242'), 'color: #38631a; font-weight: 600'],
+      ended: [dot('#dcdcda'), 'color: #6b6b6b']
+    };
+    const shape = (rs) => rs.map((r) => ({ ...r, dotStyle: tone[r.tone][0], wordStyle: tone[r.tone][1] }));
+    const groups = mode === 'ended'
+      ? [{ title: 'Ended · 4 in 7 d', rows: shape(ended) }]
+      : [{ title: 'Live · 3', rows: shape(live) }, { title: 'Ended · 4 in 7 d', rows: shape(ended) }];
+    return { groups };
+  }
+}
+</script>
+</body>
+</html>

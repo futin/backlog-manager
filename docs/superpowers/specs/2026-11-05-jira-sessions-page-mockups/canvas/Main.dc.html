@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jira Board List view of issues</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#f4f4f3}
+a{color:#306c0f}a:hover{color:#1f4a08}
+</style>
+</helmet>
+<div style="width: 100%; min-height: 920px; display: flex; flex-wrap: wrap; background: #f4f4f3; font-family: 'Hanken Grotesk', -apple-system, sans-serif; color: #131313; font-size: 13px">
+<dc-import name="Rail" active="board" hint-size="220px,920px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 20px 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px">
+<header style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700">Payments Q4</h1>
+<div style="color: #6b6b6b; font-size: 12px">17 issues · 9 cards · read 12 s ago</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<div role="group" aria-label="View" style="display: flex; background: #ededec; border-radius: 7px; padding: 2px">
+<button type="button" style="border: 0; background: transparent; padding: 5px 12px; border-radius: 5px; font: inherit; color: #525252">Board</button>
+<button type="button" aria-pressed="true" style="border: 0; background: #ffffff; padding: 5px 12px; border-radius: 5px; font: inherit; font-weight: 600; color: #131313; box-shadow: 0 1px 2px rgba(0,0,0,.08)">List</button>
+</div>
+<button type="button" style="border: 1px solid #dcdcda; background: #ffffff; border-radius: 7px; padding: 6px 10px; font: inherit">Payments Q4 ▾</button>
+<label style="display: flex; align-items: center; gap: 6px; background: #ffffff; border: 1px solid #dcdcda; border-radius: 7px; padding: 5px 10px; color: #6b6b6b"><span>⌕</span><input type="search" aria-label="Search issues" placeholder="Search issues" style="border: 0; outline: 0; font: inherit; width: 160px; background: transparent"></label>
+<button type="button" style="border: 1px solid #dcdcda; background: #ffffff; border-radius: 7px; padding: 6px 10px; font: inherit">Filters · 1</button>
+</div>
+</header>
+<div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: #525252; font-size: 12px">
+<span style="background: #ffffff; border: 1px solid #dcdcda; border-radius: 12px; padding: 3px 10px">Assignee: me ✕</span>
+<span style="color: #6b6b6b">Same filters and search as the Board view — they describe an issue.</span>
+</div>
+<div style="background: #ffffff; border: 1px solid #eaeae8; border-radius: 10px; overflow-x: auto">
+<table style="width: 100%; border-collapse: collapse; min-width: 980px">
+<thead>
+<tr style="text-align: left; color: #6b6b6b; font-size: 12px; font-weight: 500">
+<th scope="col" style="padding: 10px 14px; border-bottom: 1px solid #eaeae8; font-weight: 500; width: 92px">Session</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500; width: 104px">Key</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500">Summary</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500; width: 84px">Type</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500; width: 120px">Status</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500; width: 130px">Assignee</th>
+<th scope="col" style="padding: 10px 8px; border-bottom: 1px solid #eaeae8; font-weight: 500; width: 90px">Sprint</th>
+<th scope="col" style="padding: 10px 14px; border-bottom: 1px solid #eaeae8; font-weight: 500; width: 70px">Updated</th>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="10">
+<tr style="{{r.rowStyle}}">
+<td style="padding: 9px 14px; border-bottom: 1px solid #f2f2f1">
+<sc-if value="{{r.live}}" hint-placeholder-val="{{false}}"><span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #525252"><span style="{{r.dotStyle}}"></span>{{r.liveWord}}</span></sc-if>
+</td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; font-weight: 600; white-space: nowrap"><span style="{{r.indentStyle}}">{{r.branch}}</span>{{r.key}}</td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1"><button type="button" style="border: 0; background: transparent; padding: 0; font: inherit; color: #131313; text-align: left; cursor: pointer">{{r.summary}}</button><sc-if value="{{r.folded}}" hint-placeholder-val="{{false}}"><span style="margin-left: 8px; color: #6b6b6b; font-size: 12px">{{r.folded}}</span></sc-if></td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; color: #525252">{{r.type}}</td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1"><span style="{{r.statusStyle}}">{{r.status}}</span></td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; color: #525252">{{r.assignee}}</td>
+<td style="padding: 9px 8px; border-bottom: 1px solid #f2f2f1; color: #525252">{{r.sprint}}</td>
+<td style="padding: 9px 14px; border-bottom: 1px solid #f2f2f1; color: #6b6b6b">{{r.updated}}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div style="color: #6b6b6b; font-size: 12px">One row per board card: the top issues Setup collects, no sub-tasks. "N under it" counts what the card folds; the modal's Children tree still reaches them. Row click opens the same issue modal as a card; the live dot only shows state (a session on the card or anything folded under it, most urgent wins). Updated = newest across the fold, the sort key.</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":920}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pill = {
+      todo: 'display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #ededec; color: #525252',
+      prog: 'display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #e6eefa; color: #2a5fae',
+      done: 'display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #e9f3df; color: #38631a'
+    };
+    const dot = {
+      needs: 'width: 8px; height: 8px; border-radius: 50%; background: #F5A15C',
+      working: 'width: 8px; height: 8px; border-radius: 50%; background: #7DC242'
+    };
+    const raw = [
+      ['PAY-131', 'Refund webhook retries twice on 502', 'Bug', 'In Progress', 'prog', 'Ana Petrović', 'Sprint 44', '4m', 0, 'needs', ''],
+      ['PAY-118', 'Split payouts per merchant location', 'Story', 'In Progress', 'prog', 'Marko Ilić', 'Sprint 44', '1h', 0, 'working', '3 under it'],
+      ['PAY-127', 'Stripe API version bump to 2026-09', 'Task', 'To Do', 'todo', 'Ana Petrović', 'Sprint 44', '3h', 0, '', ''],
+      ['PAY-102', 'Invoice PDF shows wrong VAT rounding', 'Bug', 'To Do', 'todo', '—', 'Sprint 45', '5d', 0, '', ''],
+      ['PAY-96', 'Currency switcher on checkout', 'Story', 'To Do', 'todo', 'Jelena Kos', '—', '1w', 0, '', '1 under it'],
+      ['PAY-140', 'Chargeback dispute evidence upload', 'Story', 'To Do', 'todo', '—', 'Sprint 45', '2d', 0, '', ''],
+      ['PAY-112', 'Retry queue dashboard alert', 'Task', 'In Progress', 'prog', 'Jelena Kos', 'Sprint 44', '6h', 0, '', ''],
+      ['PAY-88', 'Remove legacy PayPal sandbox keys', 'Task', 'Done', 'done', 'Marko Ilić', 'Sprint 43', '2w', 0, '', '']
+    ];
+    const rows = raw.map((r) => ({
+      key: r[0], summary: r[1], type: r[2], status: r[3], statusStyle: pill[r[4]],
+      assignee: r[5], sprint: r[6], updated: r[7],
+      branch: r[8] ? '└ ' : '',
+      indentStyle: r[8] ? 'color: #9a9a98; padding-left: 10px; font-weight: 400' : '',
+      rowStyle: r[8] ? 'background: #fbfbfa' : '',
+      live: !!r[9], dotStyle: dot[r[9]] || '', liveWord: r[9] === 'needs' ? 'needs you' : 'working',
+      folded: r[10]
+    }));
+    return { rows, false: false };
+  }
+}
+</script>
+</body>
+</html>
