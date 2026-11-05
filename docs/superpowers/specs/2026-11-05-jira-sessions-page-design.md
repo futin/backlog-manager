@@ -46,8 +46,8 @@ row per board card.
 | D5 | Jira › Sessions = **option B**: today's session table moved as-is, **keeping the board picker and the `All tickets` toggle** (off = the picked board's tickets, on = every linked ticket). | `SessionsB.dc.html` + `SessionTable.dc.html` |
 | D6 | Rail order: Jira › Board · Sessions · Setup. | `Rail.dc.html` |
 
-Rejected: Sessions option A (table over every linked ticket, no picker — `SessionsA.dc.html`) and option C (live deck above an ended-only history —
-`SessionsC.dc.html`). Earlier rejected: issue List with sub-tasks indented under their top (the first `Main.dc.html` draft), flat-with-sort, grouped-by-status.
+Rejected, and removed from the mocks so nothing builds from them: a Sessions page with no board picker over every linked ticket; a Sessions page with a
+live-session deck above an ended-only history; an issue List with sub-tasks indented under their top.
 
 ## The two pages, in detail
 
@@ -88,7 +88,7 @@ Rejected: Sessions option A (table over every linked ticket, no picker — `Sess
 
 Clicking the Jira row's `N need you` badge opens **Jira › Sessions** with `Needs you` pressed and `All tickets` on — today it opens Jira › Board and flips
 the view to List. It no longer touches the Board page's view. **The badge stays on the Jira row**, where it is today, so it shows with the Jira tree
-collapsed; the Sessions tree entry carries no count. (The first `Rail.dc.html` draft drew it on the Sessions entry; the mock now matches this.)
+collapsed; the Sessions tree entry carries no count.
 
 ### Stored view
 

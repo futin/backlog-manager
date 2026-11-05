@@ -52,10 +52,9 @@ a{color:#306c0f}a:hover{color:#1f4a08}
 </table>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["all","ended"],"default":"all"},"$preview":{"width":1180,"height":640}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1180,"height":640}}'>
 class Component extends DCLogic {
   renderVals() {
-    const mode = this.props.mode ?? 'all';
     const dot = (c) => 'width: 8px; height: 8px; border-radius: 50%; background: ' + c;
     const live = [
       { state: 'needs you · permission', tone: 'needs', key: 'PAY-131', summary: 'Refund webhook retries twice on 502', run: 'execute', repo: 'payments-api · pay-131-refund-retry', where: 'Desktop', model: 'Opus', ctx: '42%', started: '09:12', dur: '38m', open: 'Open in Desktop' },
@@ -74,9 +73,7 @@ class Component extends DCLogic {
       ended: [dot('#dcdcda'), 'color: #6b6b6b']
     };
     const shape = (rs) => rs.map((r) => ({ ...r, dotStyle: tone[r.tone][0], wordStyle: tone[r.tone][1] }));
-    const groups = mode === 'ended'
-      ? [{ title: 'Ended · 4 in 7 d', rows: shape(ended) }]
-      : [{ title: 'Live · 3', rows: shape(live) }, { title: 'Ended · 4 in 7 d', rows: shape(ended) }];
+    const groups = [{ title: 'Live · 3', rows: shape(live) }, { title: 'Ended · 4 in 7 d', rows: shape(ended) }];
     return { groups };
   }
 }
