@@ -3494,10 +3494,10 @@ button.rail-count { cursor: pointer }
 .prs-matrix-row { cursor: pointer }
 .prs-matrix-row:hover td { background: var(--strip-hi) }
 .prs-matrix-row:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px }
-/* The open row keeps a pressed ground (`--strip-hi`) and an inset ink bar on its left edge; its expansion is the panel under the scroll box, which carries the
-   same ground, so the two still read as one block. */
-.prs-matrix-row[aria-expanded="true"] td { background: var(--strip-hi) }
-.prs-matrix-row[aria-expanded="true"] td:first-child { box-shadow: inset 3px 0 0 var(--ink) }
+/* The open row keeps a pressed ground (`--strip-hi`) and an inset ink bar on its left edge; its expansion is the next table row, on the same ground with the
+   bar riding its pinned block (so it stays in view while the table is scrolled), and the two read as one block (mock `PRsLayouts.dc.html`). */
+.prs-matrix-row[aria-expanded="true"] td, .prs-matrix-expand td { background: var(--strip-hi) }
+.prs-matrix-row[aria-expanded="true"] td:first-child, .prs-matrix-expand .prs-matrix-pinned { box-shadow: inset 3px 0 0 var(--ink) }
 /* The cap is on a block inside the cell, never on the `<td>` — CSS leaves `max-width` on a table cell undefined and Chrome ignores it. The dot and PR cells
    together take at most 60 % of the box (34 px dot, 12 px of the PR cell's padding), and the 200 px floor yields to that cap, so a 375 px phone keeps about
    120 px of evidence in view; the title stays one line and ellipsizes (rule below), its full text in the span's `title`. */
@@ -3509,23 +3509,29 @@ button.rail-count { cursor: pointer }
 .prs-matrix-pr .prs-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .prs-matrix-pr .prs-meta { margin-top: 3px; font-size: 12px; color: var(--ink3) }
 .prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
-.prs-matrix-outcome td { border-top: 0; padding-top: 0 }
-/* A collapsed row's outcome is one cell across every column; its content is pinned to the box's visible width, so it never sits off-screen while the table is
-   scrolled. 34 px starts it under the PR's `#n` rather than under the dot. */
+.prs-matrix-outcome td, .prs-matrix-expand td { border-top: 0; padding-top: 0 }
+/* A collapsed row's outcome, and the open row's expansion, are one cell across every column; the content is pinned to the box's visible width, so it never
+   sits off-screen while the table is scrolled. 34 px starts it under the PR's `#n` rather than under the dot. */
 .prs-matrix-pinned { position: sticky; left: 0; width: 100cqw; box-sizing: border-box; padding-left: 34px }
-/* The open row's expansion is NOT in the table: the Merge menu is a `Popover`, which portals nothing, and the scroll box's `overflow-x: auto` clips both axes.
-   So the panel is the Ledger's next sibling inside the sheet, outside every overflow box, and no page rule touches the primitive's overflow.
-   `min-width: 0` on the sheet so the scroll box still shrinks inside the flex column. */
+/* `min-width: 0` on the sheet so the scroll box still shrinks inside the flex column. */
 .prs-matrix-sheet { min-width: 0 }
-.prs-matrix-panel {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 12px 16px; border-radius: 12px; background: var(--strip-hi)
+.prs-matrix-expand .prs-matrix-pinned { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-bottom: 12px }
+.prs-matrix-expand .prs-keys-side { align-items: flex-start; flex: none }
+.prs-matrix-expand .prs-foot { margin-top: 0 }
+/* The Merge menu is drawn IN FLOW here, under the split, at every width. The scroll box's `overflow-x: auto` clips both axes, so an absolute menu was cut
+   at the box's edge — which is why #473 drew the whole expansion after the table, where it sat under the LAST row and read as that PR's. The phone shape's
+   `position: fixed` would not escape either: the box is a size container (`container-type`), and its containment pins a fixed descendant to it. So the
+   menu lengthens the row instead. The family is never named, which guard 7 forbids in a page selector; this selector outranks `[class*='narrow']`'s, so one
+   rule covers both shapes, and `100cqw` (the scroll box's width) less the pinned padding keeps it on a phone.
+   The keys become a two-column grid with the merge wrapper dissolved (`display: contents`), so the split and the Open link share row 1 and the menu spans
+   row 2. Inside the wrapper the 280 px menu widened it and pushed the link 280 px right, away from the split it belongs beside; the `1fr` second column
+   takes a spanning menu's extra width, so the link stays next to the split; the first is `max-content`, not `auto`, because on a phone the box is
+   narrower than its contents and an `auto` track shrank to the split's min-content (18 px), laying the link over it. */
+.prs-matrix-expand .prs-keys { display: grid; grid-template-columns: max-content 1fr; justify-items: start; align-items: center }
+.prs-matrix-expand .prs-keys-merge { display: contents }
+.prs-matrix-expand .prs-keys-merge > [role='dialog'] {
+  grid-row: 2; grid-column: 1 / -1; position: static; width: var(--ui-popover-width); max-width: calc(100cqw - 50px); max-height: none; box-shadow: none
 }
-.prs-matrix-panel .prs-keys-side { align-items: flex-start; flex: none }
-.prs-matrix-panel .prs-foot { margin-top: 0 }
-/* In the panel the split sits at the leading edge, so the base popover's right-anchoring hung the 280 px Merge menu leftwards over the side rail (ui-verify
-   D7, 2026-11-05). It hangs from the split's left edge instead — the Jira Status chip's flip (`.jira-detail-status`), and for the same reasons: the phone
-   bottom sheet is skipped through `[class*='narrow']`, and the family is never named, which guard 7 forbids in a page selector. */
-.prs-matrix-panel .prs-keys-merge > [role='dialog']:not([class*='narrow']) { left: 0; right: auto }
 .prs-matrix-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12px }
 .prs-cell-ok { color: var(--ink2) }
 .prs-cell-bad { color: var(--red) }

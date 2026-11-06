@@ -3,6 +3,8 @@
  */
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { useState } from 'react';
 import '@testing-library/jest-dom';
 
@@ -257,30 +259,36 @@ describe('PrMatrix — the expansion', () => {
     expect(screen.getByTestId('pr-expand-a/x#3').querySelector('.prs-why')).toHaveTextContent('auto-merge not enabled on the repo');
   });
 
-  it('draws the expansion after the Ledger, outside the scroll box and the Ledger group, and ties it to its row', async () => {
+  it('draws the expansion as the table row right under its own PR, not under the last row, and ties it to that row', async () => {
+    // #480 was drawn under #479 because the strip sat after the whole table: the open PR must not be the last row for this case to mean anything.
     const user = userEvent.setup();
-    render(<PrMatrix {...props([repo('a/x', [clean])])} />);
-    await user.click(row('a/x#3'));
-    const panel = screen.getByTestId('pr-expand-a/x#3');
-    expect(panel.closest('.prs-matrix-scroll')).toBeNull();
-    expect(panel.closest('[role="group"]')).toBeNull();
-    expect(screen.getByRole('group', { name: 'Pull requests' }).nextElementSibling).toBe(panel);
-    expect(panel.closest('table')).toBeNull();
-    expect(panel.id).not.toBe('');
-    expect(row('a/x#3')).toHaveAttribute('aria-expanded', 'true');
-    expect(row('a/x#3')).toHaveAttribute('aria-controls', panel.id);
-    expect(document.querySelector('.prs-matrix-expand')).toBeNull();
+    render(<PrMatrix {...props([repo('a/x', [clean, behind])])} />);
+    expect(rowIds()).toEqual(['pr-mrow-a/x#2', 'pr-mrow-a/x#3']);
+    await user.click(row('a/x#2'));
+    const expansion = screen.getByTestId('pr-expand-a/x#2');
+    expect(expansion.tagName).toBe('TR');
+    expect(expansion).toHaveClass('prs-matrix-expand');
+    expect(row('a/x#2').nextElementSibling).toBe(expansion);
+    expect(expansion.nextElementSibling).toBe(row('a/x#3'));
+    expect(expansion.querySelector('td')).toHaveAttribute('colspan', '8');
+    expect(expansion.querySelector('td > .prs-matrix-pinned')).not.toBeNull();
+    expect(expansion.id).not.toBe('');
+    expect(row('a/x#2')).toHaveAttribute('aria-controls', expansion.id);
+    expect(document.querySelector('.prs-matrix-panel')).toBeNull();
   });
 
-  it('keeps the Merge menu out of the scroll box, so its overflow cannot clip it', async () => {
+  it('draws the Merge menu inside the expansion row, in flow, so the scroll box cannot clip it', async () => {
     const user = userEvent.setup();
     render(<PrMatrix {...props([repo('a/x', [clean])])} />);
     await user.click(row('a/x#3'));
     await user.click(moreOf(screen.getByTestId('pr-expand-a/x#3')));
     const menu = screen.getByRole('dialog', { name: 'Merge menu' });
-    expect(menu.closest('.prs-matrix-scroll')).toBeNull();
-    expect(menu.closest('[role="group"]')).toBeNull();
     expect(screen.getByTestId('pr-expand-a/x#3')).toContainElement(menu);
+    // jsdom lays nothing out, so the in-flow half is read from the sheet: one rule, both widths (the phone's `position: fixed` would be pinned to the
+    // scroll box, a size container, so it is released here too), and no rule left for the after-the-table panel this replaced.
+    const css = readFileSync(join(__dirname, '../client/src/styles.css'), 'utf8');
+    expect(css).toMatch(/\.prs-matrix-expand \.prs-keys-merge > \[role='dialog'\] \{[^}]*position: static/);
+    expect(css).not.toMatch(/\.prs-matrix-panel/);
   });
 
   it('collapses row A when row B opens', async () => {
