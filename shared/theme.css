@@ -93,6 +93,13 @@
    token rather than a `.ui-band .ui-chip:hover` rule because that selector out-specifies the chip's own `[aria-disabled]` and ink hovers and would
    repaint both. Declared here, not in client/src/styles.css, so test/daylight-contrast.test.ts's cascade can resolve the rules that read it. */
 :root{--hover-fill:var(--strip-hi)}
+/* The hover fill of a board card (`.board-card`, which the Files board, the Jira board and the archive all draw). Its own token, not --tile-hover: a card
+   carries --ink3 meta text, and daylight's --tile-hover #e8e8e6 holds that ink at only 4.3:1. A context token like --hover-fill, because a card sits on
+   one of two grounds: straight on --board (the archive), or inside a `.board-col[data-ground]` --steel column (Files, Jira), which re-points --card-hover at
+   --card-hover-steel for its cards. On the dark palettes both are --strip-hi, lighter than either ground, so the card lifts. Daylight needs two greys:
+   on the board, --steel (a step darker than the board, --ink3 at 4.55:1 — anything lighter dissolves the card into the page); in a steel column, a grey
+   halfway between the white paper and the column, because --steel there is the column itself. */
+:root{--card-hover:var(--strip-hi);--card-hover-steel:var(--strip-hi)}
 /* Graphite — the same board with the blue cast taken out. For anyone who finds
    the navy too warm-shifted on a wide-gamut display. */
 [data-theme="graphite"]{
@@ -148,6 +155,7 @@
      rule, broken by the hover state alone. A grey a step darker than the board keeps it a control. --strip-hi itself stays: it fills the rail's active
      row, popover rows and pressed chips, which sit on paper and read fine there. test/daylight-contrast.test.ts holds the pair on every palette. */
   --tile-hover:#e8e8e6;
+  --card-hover:var(--steel);--card-hover-steel:#f6f6f5;
   --frame:#e8e8e6;
   --edge:rgba(0,0,0,.03);--hairline:#eaeae8;--hairline2:#dcdcda;
   --ink:#131313;--ink2:#525252;--ink3:#6b6b6b;
