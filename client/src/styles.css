@@ -149,7 +149,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   align-self: flex-start; position: sticky; top: 0; z-index: 5;
   height: calc(100vh / var(--font-scale, 1)); overflow-y: auto;
   padding: 24px 12px;
-  background: var(--board);
+  background: var(--frame);
 }
 /* The app's only wordmark, in the rail rather than the page: a terminal prompt — `backlog manager▌` at 14/700 with the 11/400 `this machine` kicker stacked 4 px under it (§8.0;
    the dashboard's own, from its design handoff "1h"). One face, not a mono (§1 allows exactly one). Left-aligned in a column, because the prompt is a
@@ -176,7 +176,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    on — a cursor frozen at `opacity: 0` would read as no wordmark at all. Same selector as the rule above and after it, so no `!important`. */
 @media (prefers-reduced-motion: reduce) { .rail-cursor.blink { animation: none } }
 
-/* A row: 28 px tile, label, and (as a sibling `.rail-count`) the count pill. The open row is `--strip` paper on the `--board` rail with the tile gone ink —
+/* A row: 28 px tile, label, and (as a sibling `.rail-count`) the count pill. The open row is `--strip` paper on the `--frame` rail with the tile gone ink —
    a white row against the grey rail, never a colour change in the label (§5). Hover darkens the LABEL only, so a hovered row and a selected one never read as one fill. */
 .rail-link {
   position: relative; display: flex; align-items: center; gap: 10px; width: 100%;
@@ -252,17 +252,19 @@ button.rail-count { cursor: pointer }
   background: none; color: var(--ink); font-size: 15px; cursor: pointer;
 }
 
-/* The column right of the rail: the shell strip over the well. Painted --strip, while the rail is --board (so its white open row shows): the strip is the white
-   band the well's 24 px top-left curve is drawn against. Before the strip, `.main` carried a 24 px top margin for that curve, but `body` paints --board too,
-   so the margin was grey on grey and the corner never showed (the tracker strip spec, §1). */
-.maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--strip) }
+/* The column right of the rail: the shell strip over the well. Painted --frame, the rail's own token, so the rail and the strip are ONE surface wrapped round
+   the well and its 24 px top-left curve is drawn against that frame. Before the strip, `.main` carried a 24 px top margin for that curve, but `body` paints
+   --board too, so the margin was grey on grey and the corner never showed (the tracker strip spec, §1). Then the strip was --strip while the rail was --board
+   (decision 63): the well, the rail's grey, met a white band at its corner and read as a notch cut between two greys. --frame is a step darker than
+   --board on every palette, so the well is the lighter sheet set into it and the rail's white open row still reads as a card. */
+.maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--frame) }
 /* The shell strip (§8.0): what is true of the machine wherever you stand — the tracker chip and the Jira chip, right-aligned, 8 px apart. Its height is `--main-gap`, and it
    keeps that height when empty, so the well's top edge never moves with whether a tracker is connected. */
 .topstrip {
   height: var(--main-gap); flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   padding: 0 var(--body-pad);
 }
-/* The well: --board with a 24 px top-LEFT radius — the corner against the white strip above it, the design's app-shell inset (§8.0). No top margin: the strip IS the gap, one token (guard 9). `body` stays --board, so below the fold and behind a short
+/* The well: --board with a 24 px top-LEFT radius — the corner against the --frame strip and rail, the design's app-shell inset (§8.0). No top margin: the strip IS the gap, one token (guard 9). `body` stays --board, so below the fold and behind a short
    section the page is still the well's colour, which is what the rail's own bottom edge expects. */
 .main {
   flex: 1; min-width: 0; padding: var(--body-pad);
@@ -328,7 +330,9 @@ button.rail-count { cursor: pointer }
 .tracker-chip {
   display: inline-flex; align-items: center; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--ink); cursor: pointer; font: inherit;
 }
-.tracker-chip:hover > span, .tracker-chip[aria-expanded="true"] > span { background: var(--hairline) }
+/* --strip, not --hairline: the pill sits on --frame (the strip, or the phone's rail bar), and on daylight --hairline is #eaeae8 against the frame's #e8e8e6 —
+   a hovered or open pill dissolved into the frame. White paper is the rail's own "open" fill, so the pill you are looking at reads the way the open row does. */
+.tracker-chip:hover > span, .tracker-chip[aria-expanded="true"] > span { background: var(--strip) }
 .tracker-av {
   position: relative; flex: none; width: 26px; height: 26px; border-radius: 999px; background: var(--strip-hi);
   display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--ink);
