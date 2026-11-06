@@ -338,6 +338,51 @@ describe('useTrackers', () => {
   });
 });
 
+/*
+ * A refused `POST /api/trackers/sync`: the reason sits beside the row, read through `errorOf` like every other refusal on the board (#464). The sentence must be
+ * non-empty, because an empty one renders an empty alert and says less than the status does; a body that is not JSON falls to the status the same way.
+ */
+describe('saveInterval refusals', () => {
+  function SaveProbe() {
+    const { saveInterval, refusals } = useTrackers();
+    return (
+      <div>
+        <button onClick={() => void saveInterval('futin/x', '5m')}>save</button>
+        <span data-testid="refusal">{JSON.stringify(refusals)}</span>
+      </div>
+    );
+  }
+
+  function refuseWith(res: Partial<Response>): void {
+    fetchMock.mockImplementation((url: string) => (url === '/api/trackers/sync' ? Promise.resolve({ ok: false, ...res } as Response) : answer(healthy())));
+  }
+
+  async function refusalAfterSave(): Promise<unknown> {
+    render(<SaveProbe />);
+    await flush();
+    await act(async () => {
+      screen.getByRole('button', { name: 'save' }).click();
+    });
+    await flush();
+    return JSON.parse(screen.getByTestId('refusal').textContent ?? 'null');
+  }
+
+  it('reads the server sentence of a 400', async () => {
+    refuseWith({ status: 400, json: () => Promise.resolve({ error: 'nope' }) });
+    expect(await refusalAfterSave()).toEqual({ 'futin/x': 'nope' });
+  });
+
+  it('reads an empty sentence as the status, never as an empty alert', async () => {
+    refuseWith({ status: 400, json: () => Promise.resolve({ error: '' }) });
+    expect(await refusalAfterSave()).toEqual({ 'futin/x': 'refused (400)' });
+  });
+
+  it('reads a body that is not JSON as the status', async () => {
+    refuseWith({ status: 502, json: () => Promise.reject(new SyntaxError('Unexpected token <')) });
+    expect(await refusalAfterSave()).toEqual({ 'futin/x': 'refused (502)' });
+  });
+});
+
 describe('TrackersContext', () => {
   it('the provider hands one state to every reader', async () => {
     render(

@@ -58,6 +58,7 @@ import {
   initialsOf,
   issueDatesLine,
   isJiraStatusPayload,
+  parseJiraBoardIssues,
   defaultModeFor,
   jiraSettingOf,
   jiraWritesStand,
@@ -644,6 +645,31 @@ describe('isJiraStatusPayload', () => {
     expect(isJiraStatusPayload(null)).toBe(false);
     expect(isJiraStatusPayload('x')).toBe(false);
     expect(isJiraStatusPayload([])).toBe(false);
+  });
+});
+
+describe('parseJiraBoardIssues', () => {
+  const row = { key: 'A-1', summary: 's' };
+
+  it('returns the rows and the stamp of a good answer unchanged', () => {
+    expect(parseJiraBoardIssues({ issues: [row], polledAt: '2026-11-04T00:00:00Z' })).toEqual({ issues: [row], polledAt: '2026-11-04T00:00:00Z' });
+  });
+
+  it('reads an absent or non-string polledAt as null', () => {
+    expect(parseJiraBoardIssues({ issues: [row] })?.polledAt).toBeNull();
+    expect(parseJiraBoardIssues({ issues: [row], polledAt: 3 })?.polledAt).toBeNull();
+  });
+
+  it('answers null for what has no issues array', () => {
+    for (const bad of [null, 'x', [], {}, { issues: 'x' }]) expect(parseJiraBoardIssues(bad)).toBeNull();
+  });
+
+  it('filters a bad row rather than refusing the payload, because one bad row must not blank a board', () => {
+    expect(parseJiraBoardIssues({ issues: [null, 3, {}, { key: 'A-1' }, { summary: 's' }, row] })?.issues).toEqual([row]);
+  });
+
+  it('reads an empty board as an empty answer, not as no answer', () => {
+    expect(parseJiraBoardIssues({ issues: [] })).toEqual({ issues: [], polledAt: null });
   });
 });
 

@@ -103,6 +103,7 @@ export function useJira(): JiraState {
     };
   }, [reload, clear]);
 
+  // Not `useRefreshing`: that is `useCoalescedFetch`, which exists to prevent the overlapping reads this hook allows under its newest-read-wins counter (#231).
   useWindowFocus(reload);
 
   return { ...state, reload };

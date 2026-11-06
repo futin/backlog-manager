@@ -3489,6 +3489,12 @@ export interface ItemPlanReviewRequest extends ItemWriteRequest {
   planReview: boolean;
 }
 
+/** What `plan-review` answers on success: the item and the mark as it now stands. */
+export interface ItemPlanReviewResult {
+  id: string;
+  planReview: boolean;
+}
+
 /** What `claim`, `release` and `heartbeat` answer on success: the comment that
  *  IS the claim, and the record now inside it. */
 export interface ClaimResult {

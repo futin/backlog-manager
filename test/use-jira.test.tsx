@@ -402,6 +402,23 @@ describe('useJiraBoard', () => {
     expect(screen.getByTestId('b')).toHaveTextContent('B_1-1|stamp|false|true');
   });
 
+  it('reads a 200 with no issues array as a failed poll, keeping the last list', async () => {
+    render(<BoardProbe id="b_1" interval="1m" />);
+    await flush();
+    boardFetch.mockImplementation(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ issues: 'x' }) } as Response));
+    await advance(BOARD_TRACKER_POLL_MS);
+    expect(screen.getByTestId('b')).toHaveTextContent('B_1-1|stamp|false|true');
+  });
+
+  it('drops a bad row and keeps the rest, because one bad row must not blank a board', async () => {
+    const good = issue('B_1-2');
+    const body = { issues: [null, { key: 'B_1-3' }, good], polledAt: null };
+    boardFetch.mockImplementation(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response));
+    render(<BoardProbe id="b_1" interval="1m" />);
+    await flush();
+    expect(screen.getByTestId('b')).toHaveTextContent('B_1-2|null|false|false');
+  });
+
   it('asks for an id percent-encoded, as the modal does', async () => {
     render(<BoardProbe id="b/1 x" interval="1m" />);
     await flush();

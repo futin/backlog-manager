@@ -3,14 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useMountedRef } from '../../hooks/useMountedRef';
 import { useNow } from '../../hooks/useNow';
-import { JIRA_CUSTOM_QUERY, JIRA_QUERY_PRESETS, type JiraQueryPreset } from '../../lib/jira';
+import { JIRA_CUSTOM_QUERY, JIRA_QUERY_PRESETS, parseJiraBoardIssues, type JiraQueryPreset } from '../../lib/jira';
 import { errorOf, postJson } from '../../lib/http';
 import { pollAge } from '../../lib/tracker';
 import {
   DEFAULT_JIRA_INTERVAL,
   SYNC_INTERVALS,
   type JiraBoard,
-  type JiraBoardIssuesPayload,
   type JiraIssue,
   type JiraJqlCheckResult,
   type JiraProjectRef,
@@ -119,12 +118,11 @@ export function JiraBoardSheet({
       try {
         const res = await fetch(`/api/jira/boards/${encodeURIComponent(boardId)}/issues`);
         if (!res.ok) return;
-        const body = (await res.json()) as Unchecked<JiraBoardIssuesPayload>;
-        if (!mounted.current || !Array.isArray(body.issues)) return;
-        const cached = body.issues as JiraBoardIssuesPayload['issues'];
+        const parsed = parseJiraBoardIssues(await res.json());
+        if (!mounted.current || parsed === null) return;
         setSummaries((prev) => {
           const next = new Map(prev);
-          for (const i of cached) if (typeof i?.key === 'string' && typeof i.summary === 'string' && !next.has(i.key)) next.set(i.key, i.summary);
+          for (const i of parsed.issues) if (!next.has(i.key)) next.set(i.key, i.summary);
           return next;
         });
       } catch {
