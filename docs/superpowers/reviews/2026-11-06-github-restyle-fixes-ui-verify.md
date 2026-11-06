@@ -3,7 +3,7 @@
 Plan: `docs/superpowers/plans/2026-11-06-github-restyle-fixes.md`. Mocks: `docs/superpowers/specs/2026-11-05-jira-restyle-mockups/` — `Board.dc.html`,
 `PRs.dc.html`, `PRsLayouts.dc.html`. Branch `fix/github-views-mocks` at `09a4df52`, served by its own Vite on 5199 (client-only, proxying the stack's API).
 
-**Verdict: FAIL (round 1)** — five small defects (D1–D5 below), everything else a match or an accepted deviation. Re-measure after the fix wave is at the end.
+**Verdict: FAIL (round 1), PASS (round 2)** — five small defects (D1–D5 below), fixed in `78708ec5`; everything else a match or an accepted deviation. Round 2 is at the end.
 
 ## Inventory
 
@@ -93,3 +93,19 @@ well; Archive columns no ground; at 600/390 columns stack, each its own height (
 
 Scratchpad `shots/`: `v-{inbox,matrix,cards,board}-{1440,600,390}.jpg`, `v-menu-1440.jpg`, `v-jira-1440.jpg`, `v-archive-1440.jpg`, `v-runs-1440.jpg`,
 `v-settings-1440.jpg`, mocks `m-Board.jpg`, `m-PRs.jpg`, `m-PRsLayouts.jpg`.
+
+## Round 2 (after `78708ec5`)
+
+**Verdict: PASS.** Re-shot with the same harness and fixture (`s17.json`, `s18.json`): Inbox 1440/390, merge menu on #490 and on #481, Matrix 1440, Cards
+1440/600. No `page scrolls sideways`; the only overflow lines are Matrix's intended `SPAN.prs-title` ellipsis.
+
+- D1 — `Worth a look` dot paints `--amber-solid` (Inbox triage, Matrix #480) — **match**.
+- D2 — #480 carries `mergeability pending` (neutral, clock glyph) in Inbox and Cards — **match**.
+- D3 — a 16 px initials disc before every author (`F`, `M`, `R`) — **match**.
+- D4 — the branch glyph before `head → base` in Inbox and Cards meta — **match**.
+- D5 — #481's menu: `Update branch` draws the up arrow, primary row on `rgb(242,242,241)` with its tick, the two disabled rows white — **match**.
+
+One Minor, not a mock region: where the meta line wraps (Cards two-up at 1440, Inbox at 390) a ` · ` separator can end a line or start the next one
+(`futin ·` / `· execute/468 → main`). Carried into the final review's fix dispatch.
+
+Screenshots: scratchpad `shots/r2-{inbox-1440,inbox-390,menu-1440,menu481-1440,matrix-1440,cards-1440,cards-600}.jpg`.
