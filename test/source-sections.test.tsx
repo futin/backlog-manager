@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import { App } from '../client/src/App';
@@ -117,7 +117,17 @@ const current = (): string | null =>
     .getAllByRole('button')
     .find((b) => b.getAttribute('aria-current') === 'page')?.textContent ?? null;
 
-/** Lets the lazy chunks, the fetches and their `.json()` settle. */
+/**
+ * Lets the lazy chunks, the fetches and their `.json()` settle — for work React queued while the act environment was ON, which is all of it in a case that
+ * never awaits a `findBy*`.
+ *
+ * It does NOT settle work queued during a `findBy*`/`waitFor`: RTL's `asyncWrapper` switches the act environment OFF for the whole wait, so an update that
+ * lands then (the projects answer, typically) is scheduled on React's real Scheduler — macrotasks — and these microtask-only `act` turns never run it. A
+ * settings write is two passive-effect hops behind the projects answer (the shell's settle effect calls `update()`, then `usePersistedState`'s effect writes
+ * localStorage), so after a `findBy*` it can still be pending here: the deep-link case read `landing` as `board` on a loaded CI runner (PR #487, run
+ * 42201092317) and passed every time on an idle laptop. A localStorage read that follows a `findBy*` therefore goes through `waitFor`, which polls across
+ * macrotasks; the section key needs none, because `writeSection` writes it synchronously inside the settle, before the commit that paints the stub.
+ */
 async function flush(): Promise<void> {
   for (let i = 0; i < 6; i += 1) {
     await act(async () => {
@@ -219,8 +229,8 @@ describe('settling a provisional landing', () => {
     const first = render(<App />);
     expect(await screen.findByText('board stub')).toBeInTheDocument();
     expect(current()).toBe('Files');
-    await flush();
-    expect((stored(SETTINGS_STORAGE_KEY) as { landing: unknown }).landing).toBe('files');
+    // `waitFor`, not `flush()`: the rewrite is queued during the `findByText` above, off the act queue — see `flush`.
+    await waitFor(() => expect((stored(SETTINGS_STORAGE_KEY) as { landing: unknown }).landing).toBe('files'));
     first.unmount();
 
     const held = deferred<unknown[]>();
@@ -256,9 +266,9 @@ describe('settling a provisional landing', () => {
     projectsAnswer = FILES;
     render(<App />);
     expect(await screen.findByText('runs stub')).toBeInTheDocument();
-    await flush();
+    // `waitFor`, not `flush()`: the settle's write is queued during the `findByText` above, off the act queue — see `flush`.
+    await waitFor(() => expect(landing()).toBe('files'));
     expect(current()).toBe('Runs');
-    expect(landing()).toBe('files');
   });
 
   it('a deep-linked Settings scope does not write the clamped github while the answer is held', async () => {
