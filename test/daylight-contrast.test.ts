@@ -483,3 +483,27 @@ describe('a hovered control on the board stays distinct from it', () => {
     });
   });
 });
+
+/**
+ * The app frame — `.rail` and `.maincol` (the shell strip) — is `--frame`, one surface wrapped round the well, which stays `--board` with its 24 px top-left
+ * corner. Before it, the rail was `--board` and the strip `--strip`: the well was the rail's own grey and met a white band at its corner, so the corner read as
+ * a notch cut between two greys. The frame works only while it is DARKER than the well on every palette: a frame the well's own colour is that notch again,
+ * and a frame lighter than the well turns the inset inside out and pulls the frame toward the rail's white open row (`--strip`), which must read as a card on it.
+ */
+describe('the app frame sits a step darker than the well', () => {
+  const PALETTES = [...DARK, 'daylight'] as const;
+
+  it('on every palette --frame is distinct from --board, and --strip stands further from --frame than from --board', () => {
+    const fails: string[] = [];
+    for (const id of PALETTES) {
+      const tokens = cascade(id);
+      const board = color('var(--board)', tokens);
+      const frame = color('var(--frame)', tokens);
+      const paper = color('var(--strip)', tokens);
+      const apart = ratio(board, frame);
+      if (apart < 1.04) fails.push(`${id}: --frame is ${apart.toFixed(3)}:1 on --board, under 1.04`);
+      if (ratio(paper, frame) <= ratio(paper, board)) fails.push(`${id}: --frame is lighter than --board, so the inset reads inside out`);
+    }
+    expect(fails).toEqual([]);
+  });
+});
