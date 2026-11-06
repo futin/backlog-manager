@@ -262,14 +262,49 @@ describe('PullRequestsView — grouping and the rows', () => {
     expect(within(r7).getByText('draft', { selector: '.ui-pill' })).toBeInTheDocument();
   });
 
-  it('heads each card with a tile in its worst checks tone, the repo, an `N open` pill and the age', async () => {
+  it('heads each card with a dark 28 px repo tile, the short repo name, the `N open` pill, then the age at the trailing edge', async () => {
     payload.repos[0] = repo({ repo: 'futin/x', prs: [PR7, { ...PR9, checks: 'failure' }] });
     await mount();
     const head = screen.getByTestId('pr-head-futin/x');
-    expect(head).toHaveTextContent('futin/x');
-    expect(within(head).getByText('2 open')).toHaveClass('ui-pill');
-    expect(head.querySelector('.ui-glyph-tile')).toHaveAttribute('data-tone', 'red');
-    expect(head).toHaveTextContent('polled 12 s ago');
+    const tile = head.querySelector('.ui-glyph-tile') as HTMLElement;
+    const name = head.querySelector('.prs-repo-name') as HTMLElement;
+    const pill = within(head).getByText('2 open');
+    const age = within(head).getByText('polled 12 s ago');
+    // The tile is the repo's mark, not a checks reading: dark, 28 px — the worst row's red lives on that row's own tile.
+    expect(tile).toHaveAttribute('data-tone', 'ink');
+    expect(tile).toHaveAttribute('data-size', '28');
+    expect(name).toHaveTextContent(/^x$/);
+    expect(pill).toHaveClass('ui-pill');
+    expect(head.querySelectorAll('.ui-glyph-tile')).toHaveLength(1);
+    const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(tile, name)).toBe(true);
+    expect(follows(name, pill)).toBe(true);
+    expect(follows(pill, age)).toBe(true);
+    // The age is not inside the title group with the pill: it sits in the head's trailing slot, so a wide card pushes it to the edge.
+    expect(age.closest('.ui-sheet-head-right')).not.toBeNull();
+    expect(pill.closest('.ui-sheet-head-right')).toBeNull();
+  });
+
+  it('keeps the full owner/name in a head when another shown repo shares the short name (repoShortName)', async () => {
+    payload.repos.push(repo({ repo: 'acme/x', prs: [pr({ number: 31, headSha: 'c'.repeat(40) })], total: 1 }));
+    await mount();
+    expect(screen.getByTestId('pr-head-futin/x').querySelector('.prs-repo-name')).toHaveTextContent('futin/x');
+    expect(screen.getByTestId('pr-head-acme/x').querySelector('.prs-repo-name')).toHaveTextContent('acme/x');
+    expect(screen.getByTestId('pr-head-futin/y').querySelector('.prs-repo-name')).toHaveTextContent(/^y$/);
+  });
+
+  it('flows the repo sheets in a `.prs-cards-grid` and keeps the `Can\'t read` notes outside it', async () => {
+    payload.repos.push(repo({ repo: 'futin/z', access: 'rate-limited', detail: 'rate limited — retrying at 12:30', prs: [], total: 0 }));
+    await mount();
+    const grid = document.querySelector('.prs-cards-grid') as HTMLElement;
+    expect(grid).not.toBeNull();
+    const sheets = Array.from(document.querySelectorAll('[data-testid^="pr-repo-"]')).map((el) => el.parentElement);
+    expect(sheets).toHaveLength(2);
+    for (const sheet of sheets) expect(sheet?.parentElement).toBe(grid);
+    expect(grid.children).toHaveLength(2);
+    const note = screen.getByTestId('pr-cantread-futin/z');
+    expect(grid.contains(note)).toBe(false);
+    expect(note.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
 
   it('draws each card row with a 28 px tile, one pills-and-meta line and no repo name — the head already says it', async () => {

@@ -3319,10 +3319,15 @@ button.rail-count { cursor: pointer }
 .prs-status { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-status-error { color: var(--red) }
 .prs-repo-inner { display: flex; flex-direction: column; min-width: 0 }
-.prs-repo-sub { display: flex; flex-wrap: wrap; gap: 4px 12px }
-/* A card's head: the tile leads the repo name inside the title, and the `N open` pill (with `sync off`) sits in the head's right slot. */
-.prs-repo-title { display: inline-flex; align-items: center; gap: 12px; min-width: 0; overflow-wrap: anywhere }
+/* A card's head (mock `PRsLayouts.dc.html`, Cards): the dark repo tile, the short name and the `N open` pill (with `sync off`) lead as one group in the title, and the
+   poll age is the only thing in the head's right slot, so it sits at the trailing edge. `nowrap` on the trail keeps `polled 12 s ago` one line; the title group
+   wraps its pill under the name instead when a narrow card cannot hold both. */
+.prs-repo-title { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; overflow-wrap: anywhere }
 .prs-repo-pills { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px }
+.prs-repo-trail { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; font-size: 13px; font-weight: 400; color: var(--ink2); white-space: nowrap }
+/* Cards flow two-up where the pane has room for two 520 px cards and one column below that; `min(520px, 100%)` lets a pane narrower than 520 px still take one
+   column without sideways scroll. Top-aligned, because a repo with two PRs beside one with six should not stretch to its neighbour's height. */
+.prs-cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(520px, 100%), 1fr)); gap: 16px; align-items: start; min-width: 0 }
 /* The repo's own note under its head — the sync-off sentence. Readable without hover: on a phone there is none. */
 .prs-note { font-size: 13px; color: var(--ink2); line-height: 1.45; margin-bottom: 12px }
 .prs-list { list-style: none; margin: 0; padding: 0 }
