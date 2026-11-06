@@ -745,7 +745,7 @@ export default function BoardView({ source, onOpenRuns }: { source: SourceSectio
               now
             );
             return (
-              <BoardColumn key={col.section} slug={col.slug} label={col.label} count={colItems.length}>
+              <BoardColumn key={col.section} slug={col.slug} ground label={col.label} count={colItems.length}>
                 {colItems.map((item) => (
                   <ItemCard
                     key={item.path}

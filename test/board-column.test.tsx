@@ -216,6 +216,59 @@ describe('BoardColumn', () => {
     // is how a redrawn surface comes to be restyled back by accident.
     expect(ruleBlock(css, '.board-col-h')).toBeNull();
   });
+
+  /**
+   * The `--steel` ground is opt-in (`ground`), implied neither by the slug nor by `tone`: the GitHub Board and the Jira shelves pass it, Archive does not,
+   * because Archive's sticky `.archive-month` paints `--board` and would read as a white band across a steel column. The ground is one rule on
+   * `[data-ground]`; `data-tone` keeps only the dot's colour. Asserted on the attribute and on the sheet together — jsdom loads no stylesheet, so an
+   * attribute alone would stay green with the rule deleted.
+   */
+  it('draws the ground on the GitHub Board column and on a toned one, never on an Archive column', async () => {
+    await renderBoard();
+    for (const col of screen.getAllByTestId('board-col')) {
+      expect(col).toHaveAttribute('data-ground');
+      // The Board's column keeps its ramp Dot: only the ground is shared with the Jira shelves.
+      expect(col.querySelector('.board-col-head .ui-dot')).not.toBeNull();
+      expect(col).not.toHaveAttribute('data-tone');
+    }
+
+    const { container } = render(
+      <BoardColumn slug="doing" tone="doing" ground label="Toned" count={1}>
+        <i />
+      </BoardColumn>,
+    );
+    const toned = container.querySelector('.board-col') as HTMLElement;
+    expect(toned).toHaveAttribute('data-ground');
+    expect(toned).toHaveAttribute('data-tone', 'doing');
+    expect(toned.querySelector('.board-col-dot')).not.toBeNull();
+
+    // Archive passes neither, and its columns stay exactly as they were.
+    const archive = render(
+      <BoardColumn slug="bugs" label="Archived" count={1}>
+        <i />
+      </BoardColumn>,
+    );
+    expect(archive.container.querySelector('.board-col')).not.toHaveAttribute('data-ground');
+
+    const css = readStyles();
+    const ground = ruleBlock(css, '.board-col[data-ground]') as string;
+    expect(ground).toMatch(/background:\s*var\(--steel\)/);
+    expect(ground).toMatch(/border-radius:\s*16px/);
+    expect(ground).toMatch(/padding:\s*12px/);
+    // The ground no longer hangs off the tone hook; `data-tone` keeps the dot's colour alone.
+    expect(css).not.toMatch(/\.board-col\[data-tone\]\s*\{[^}]*background:\s*var\(--steel\)/);
+  });
+
+  /**
+   * The cut ground: `align-items: start` let each column end at its last card, so the ground stopped there (an empty In Progress was a 40 px strip). The
+   * grid must stretch its items, and the board must fill the well down to its foot, so every column is one height. Read from the sheet, because jsdom
+   * performs no layout.
+   */
+  it('lets the grid stretch its columns and the board fill the well', () => {
+    const css = readStyles();
+    expect(ruleBlock(css, '.board-columns') as string).not.toMatch(/align-items:\s*start/);
+    expect(ruleBlock(css, '.board > .board-columns') as string).toMatch(/flex:\s*1/);
+  });
 });
 
 describe("the card's marker row", () => {

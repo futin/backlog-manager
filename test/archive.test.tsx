@@ -326,6 +326,12 @@ describe('ArchiveView', () => {
     for (const c of screen.getAllByTestId('board-col')) expect(c).not.toHaveAttribute('data-tone');
   });
 
+  // Archive's sticky `.archive-month` paints `--board`, which would read as a white band across a steel ground, so Archive never opts in.
+  it('draws no ground on its columns', async () => {
+    await renderArchive();
+    for (const c of screen.getAllByTestId('board-col')) expect(c).not.toHaveAttribute('data-ground');
+  });
+
   it('counts what each column actually holds', async () => {
     await renderArchive();
     // refactors 1, ideas 1, bugs 2 (alpha's stale one and beta's), oos 1.

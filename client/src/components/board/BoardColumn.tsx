@@ -66,15 +66,20 @@ export function BoardColumn({
   label,
   count,
   tone,
+  ground,
   children,
 }: {
   slug: BoardColumnSlug;
   label: string;
   count: number;
-  /** Jira restyle §4.3: only `JiraShelves` passes it. It gives the column a `--steel` ground and a toned header, drawn by page-local `.board-col-dot` /
-   *  `.board-col-count` spans because `Dot` has no such tones and a page rule naming `.ui-dot` / `.ui-pill` fails design-guards guard 7. Absent, the
-   *  Board's and Archive's columns are exactly what they were. */
+  /** Jira restyle §4.3: only `JiraShelves` passes it. It tones the header: the dot is a page-local `.board-col-dot` and the count a `.board-col-count` span
+   *  because `Dot` has no such tones and a page rule naming `.ui-dot` / `.ui-pill` fails design-guards guard 7. The `--steel` ground is NOT this prop's any
+   *  more — it is `ground`'s, so a column can have one without a tone. Absent, the column draws its ramp `Dot` and neutral `Pill` as it always did. */
   tone?: 'todo' | 'doing' | 'done';
+  /** Opt-in `--steel` ground (radius 16, 12 px padding, the header inside it — mock `Board.dc.html`; user override of restyle spec §4.3, 2026-11-06, which
+   *  limited it to Jira). `BoardView` and `JiraShelves` pass it; `ArchiveView` does not, because its sticky `.archive-month` paints `--board` and would read
+   *  as a white band across a steel column. Drawn by `.board-col[data-ground]`; `data-tone` keeps only the dot's colour. */
+  ground?: boolean;
   children: ReactNode;
 }) {
   /* Narrowed through the list rather than cast: `tone` is `DotTone`, whose
@@ -83,7 +88,7 @@ export function BoardColumn({
   const ramp = (RAMP_SLUGS as readonly string[]).includes(slug) ? (slug as (typeof RAMP_SLUGS)[number]) : null;
 
   return (
-    <div className={`board-col board-col-${slug}`} data-testid="board-col" data-tone={tone}>
+    <div className={`board-col board-col-${slug}`} data-testid="board-col" data-tone={tone} data-ground={ground ? '' : undefined}>
       {/* `.board-col-head`, not the `.board-col-h` this markup was extracted
           from. That class carried a hairline rule under the header and was
           Archive's alone once the Board stopped drawing one; task-39 put

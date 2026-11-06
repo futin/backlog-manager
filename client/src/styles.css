@@ -384,6 +384,16 @@ button.rail-count { cursor: pointer }
    toolbar narrows to a project, the columns never do. A card opens the drawer,
    which fetches that one item's body from GET /api/items/body. */
 .board { display: flex; flex-direction: column; gap: var(--group-gap) }
+/* A board of columns fills the well down to its foot, so with few cards the grounds still run full height and every column is one height (mock
+   Board.dc.html: the grid is `flex-grow: 1`). The well is `.main` — already `flex: 1` of `.maincol`, which the shell stretches to the viewport — so the chain
+   is made flex all the way down: `.main` a column, its one child `.wrap` growing, and the `.board` and its `.board-columns` growing in turn. `.wrap` is a flex
+   column ONLY where it holds a board of columns (`:has`), so Runs, Settings, the Sessions table and the rest keep their block layout untouched. Every link
+   is `flex: 1`, never a height, so with many cards the content is simply taller than the well and the page scrolls as it always did; and under 700 px
+   `.maincol` is `display: contents` and the shell is not stretched, so nothing fills there — the columns stack at their own height. */
+.main { display: flex; flex-direction: column }
+.wrap:has(> .board > .board-columns) { flex: 1; display: flex; flex-direction: column }
+.wrap > .board:has(> .board-columns) { flex: 1 }
+.board > .board-columns { flex: 1 }
 /* Task 13's `.board-orchestrate` — the toolbar's filled cyan "drain this
    project's queue" button — is gone with the toolbar (task-37). The control is
    the page's ONE ink `Chip` now (DESIGN.md §8.3), and both attribute states it
@@ -1120,10 +1130,13 @@ button.rail-count { cursor: pointer }
    would reflow by width alone and drop a column under its neighbour on some
    widths; the type axis is the board's whole point, so the column count is
    stepped explicitly instead. minmax(0, 1fr) keeps a column with a long
-   unbroken title shrinking with the row rather than overflowing it, and
-   align-items:start keeps a short column from stretching to its tallest
-   neighbour. */
-.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--col-gap); align-items: start }
+   unbroken title shrinking with the row rather than overflowing it.
+   No `align-items: start` (it stood here until 2026-11-06): the grid's default
+   `stretch` makes every column the height of the tallest, which is what lets a
+   column's `--steel` ground (`.board-col[data-ground]`) run the full height of
+   the row instead of ending at its last card — with `start`, an empty column's
+   ground was a 40 px strip. */
+.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--col-gap) }
 @media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
 
@@ -1161,11 +1174,13 @@ button.rail-count { cursor: pointer }
    in place of the stack, and any per-column overflow later has to scroll the
    cards without dragging the header off its rule with them. */
 .board-col-cards { display: flex; flex-direction: column; gap: var(--card-gap) }
-/* The Jira shelves' toned column (restyle spec §4.3, mock Board.dc.html): a `--steel` well, radius 16, 12 px padding with the header inside it. The dot and
+/* A column's ground (mock Board.dc.html; restyle spec §4.3 gave it to Jira alone and the user extended it to the GitHub Board, 2026-11-06): a `--steel` well,
+   radius 16, 12 px padding with the header inside it, on `[data-ground]` — which `BoardView` and `JiraShelves` set and Archive does not, because its sticky
+   `.archive-month` paints `--board` and would read as a white band across it. The Jira shelves' toned header (`[data-tone]`) is separate: the dot and
    the count are page-local spans rather than `.ui-dot` / `.ui-pill` — `Dot` has no todo/doing/done tones and guard 7 forbids a page rule naming a ui-* family
    token. Plain colours and a solid `--strip` pill, no tint, so nothing joins the daylight-contrast PINNED list; 11/500 `--ink2` on `--strip` is a
    surface pair the contrast suite already measures. */
-.board-col[data-tone] { background: var(--steel); border-radius: 16px; padding: 12px }
+.board-col[data-ground] { background: var(--steel); border-radius: 16px; padding: 12px }
 .board-col-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ink3) }
 .board-col[data-tone='doing'] .board-col-dot { background: var(--amber-solid) }
 .board-col[data-tone='done'] .board-col-dot { background: var(--green-solid) }
