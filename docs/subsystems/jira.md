@@ -556,7 +556,7 @@ section (eight dialogs). The browser still never talks to Jira or the dashboard:
   (before the first sessions answer) leaves its top on the shelf with no deck card until that answer lands. The deck, like Detail, clears on the next read of
   the sessions provider.
 - **The modal's session.** A `session` fact (`<name> · <repo> · <elapsed>`, `starting`, or `—`) and `Stop session`, a row of `SessionOpen`'s `Session actions` menu whose
-  `Stop session` is replaced in place by `ui/Confirm` (focus returns to the split's chevron once it is answered), offered only while agents are enabled AND the
+  `Stop session` is replaced in place by `ui/Confirm` (focus returns to the split's chevron after `Keep running`, and to the session card — focusable, `tabIndex={-1}` — after an accepted Stop, whose write guard disables the chevron, #475), offered only while agents are enabled AND the
   key has a confirmed, non-`starting` entry — the `stoppable && agentsOn` gate `JiraSessionCard` applies before it passes `onStop`. It posts `stopJira(key, sessionId)` (`POST /api/agents/jira-stop`, naming the session the entry holds) through the same
   `useAction` as the two writes, so one guard and one
   error line serve all three; a landed stop reloads the status and nudges the board.

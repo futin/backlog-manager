@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
@@ -127,6 +127,9 @@ export function JiraSessionCard({
   const phone = useNarrow();
   const handover = useAction();
   const agents = useAgents();
+  // The card takes the focus after an accepted Stop, when the control that held it is disabled (`SessionOpen`'s header, #475); `tabIndex={-1}` makes it
+  // focusable from script without adding a tab stop.
+  const cardRef = useRef<HTMLElement>(null);
   const { row, state } = link;
   const sessionId = link.sessionId;
   if (sessionId === null) return null;
@@ -145,7 +148,7 @@ export function JiraSessionCard({
   const stopping = row?.stopState === 'stopping';
 
   return (
-    <article className="jira-sess" aria-label={`Session ${shortSessionId(sessionId)}`} data-state={state}>
+    <article ref={cardRef} className="jira-sess" aria-label={`Session ${shortSessionId(sessionId)}`} data-state={state} tabIndex={-1}>
       <LiveStrip tone={state} label={STATE_LABEL[state]} mark={pollAge(link.stateSince, now)} title={stripTitle(state)} />
       <div className="jira-sess-face">
         <dl className="jira-sess-facts">
@@ -180,6 +183,7 @@ export function JiraSessionCard({
             onHandover={(id) => handover.run(() => openDesktopJira(id))}
             onUnlink={link.how === 'branch' ? onUnlink : undefined}
             onStop={stoppable && agentsOn ? onStop : undefined}
+            cardRef={cardRef}
           />
         </div>
         {handover.error !== null && (

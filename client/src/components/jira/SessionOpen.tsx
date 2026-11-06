@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 
 import { useNarrow } from '../../hooks/useNarrow';
 import { useSettings } from '../../hooks/useSettings';
@@ -26,6 +26,11 @@ import { OpenChip } from './JiraSessionCard';
  * **Stop swaps the split for `Confirm`** in place, as `StopSession` did for its chip: the question replaces the control, the safe answer holds the focus, the
  * menu closes first. The POST itself is the parent's.
  *
+ * **Where the focus goes once the question closes depends on the answer** (#475). `Keep running` hands it back to the chevron that opened the menu. An
+ * accepted Stop cannot: the parent's write guard turns `busy` on in the same render, a disabled button cannot take focus, and the browser drops it to the page,
+ * so a keyboard reader lost their place. It goes to `cardRef` instead — the card around the control, which the caller makes focusable (`tabIndex={-1}`) and
+ * which stays put while the stop is in flight. A caller with no Stop to offer passes none.
+ *
  * The main half is ink while a person is wanted (`needsYou`) and outline otherwise, so the one pill that asks for you is the only dark one on the card.
  */
 export function SessionOpen({
@@ -38,7 +43,8 @@ export function SessionOpen({
   onHandover,
   onUnlink,
   onStop,
-  busy = false
+  busy = false,
+  cardRef
 }: {
   issueKey: string;
   sessionId: string;
@@ -50,6 +56,8 @@ export function SessionOpen({
   onUnlink?: (sessionId: string) => void;
   onStop?: (sessionId: string) => void;
   busy?: boolean;
+  /** The card to focus after an accepted Stop (see the header); without one the focus is aimed at the chevron, as for `Keep running`. */
+  cardRef?: RefObject<HTMLElement | null>;
 }) {
   const { settings } = useSettings();
   const phone = useNarrow();
@@ -58,8 +66,8 @@ export function SessionOpen({
   const moreRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   // `Confirm` unmounted the split, so the chevron that opened the menu is a new element once the question closes; set when the question is answered, spent by the
-  // effect below. A Stop that was accepted leaves the row busy, so the chevron may be disabled by then and the focus simply falls to the page — nothing to aim at.
-  const refocus = useRef(false);
+  // effect below. A Stop that was accepted leaves the row busy, so the chevron is disabled by then and the card is the target instead (header, #475).
+  const refocus = useRef<'chevron' | 'card' | null>(null);
 
   const plan = (b: OpenButton) => openTarget(b, sessionId, row, launch, phone, settings.linkBase);
   const primary = plan(buttons.primary);
@@ -72,14 +80,14 @@ export function SessionOpen({
   }, [open]);
 
   useEffect(() => {
-    if (!asking && refocus.current) {
-      refocus.current = false;
-      moreRef.current?.focus();
-    }
-  }, [asking]);
+    if (asking || refocus.current === null) return;
+    const to = refocus.current;
+    refocus.current = null;
+    (to === 'card' && cardRef?.current ? cardRef.current : moreRef.current)?.focus();
+  }, [asking, cardRef]);
 
   if (primary === null && !hasRows) return null;
-  if (primary === null) return <PlainActions sessionId={sessionId} busy={busy} onUnlink={onUnlink} onStop={onStop} />;
+  if (primary === null) return <PlainActions sessionId={sessionId} busy={busy} onUnlink={onUnlink} onStop={onStop} cardRef={cardRef} />;
   if (!hasRows) return <OpenChip button={buttons.primary} sessionId={sessionId} row={row} launch={launch} primary={needsYou(state)} onHandover={onHandover} />;
 
   if (asking)
@@ -90,11 +98,11 @@ export function SessionOpen({
         acceptLabel="Stop session"
         dismissLabel="Keep running"
         onDismiss={() => {
-          refocus.current = true;
+          refocus.current = 'chevron';
           setAsking(false);
         }}
         onAccept={() => {
-          refocus.current = true;
+          refocus.current = 'card';
           setAsking(false);
           onStop?.(sessionId);
         }}
@@ -180,10 +188,29 @@ export function SessionOpen({
 
 /**
  * No Open is shown (a phone's Desktop-only answer, say) but Unlink or Stop still is: today's plain controls, no split — a split with no main half would be a
- * chevron over nothing. Stop keeps its `Confirm` in place of the chip.
+ * chevron over nothing. Stop keeps its `Confirm` in place of the chip, and an accepted one sends the focus to `cardRef` for SessionOpen's reason: the Stop
+ * chip that comes back is disabled by `busy` (#475).
  */
-function PlainActions({ sessionId, busy, onUnlink, onStop }: { sessionId: string; busy: boolean; onUnlink?: (id: string) => void; onStop?: (id: string) => void }) {
+function PlainActions({
+  sessionId,
+  busy,
+  onUnlink,
+  onStop,
+  cardRef
+}: {
+  sessionId: string;
+  busy: boolean;
+  onUnlink?: (id: string) => void;
+  onStop?: (id: string) => void;
+  cardRef?: RefObject<HTMLElement | null>;
+}) {
   const [asking, setAsking] = useState(false);
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (asking || !refocus.current) return;
+    refocus.current = false;
+    cardRef?.current?.focus();
+  }, [asking, cardRef]);
   if (asking)
     return (
       <Confirm
@@ -193,6 +220,7 @@ function PlainActions({ sessionId, busy, onUnlink, onStop }: { sessionId: string
         dismissLabel="Keep running"
         onDismiss={() => setAsking(false)}
         onAccept={() => {
+          refocus.current = true;
           setAsking(false);
           onStop?.(sessionId);
         }}
