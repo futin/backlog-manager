@@ -3522,13 +3522,17 @@ button.rail-count { cursor: pointer }
 .prs-matrix-pr .prs-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .prs-matrix-pr .prs-meta { margin-top: 3px; font-size: 12px; color: var(--ink3) }
 .prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
-.prs-matrix-outcome td, .prs-matrix-expand td { border-top: 0; padding-top: 0 }
+.prs-matrix-outcome td { border-top: 0; padding-top: 0 }
+/* The expansion's ink bar is its pinned block's inset shadow (it must ride the sticky block to stay in view while the table scrolls), so the cell keeps no
+   vertical padding of its own: the 14 px every table cell keeps below its content was a strip of ground under the block with no bar on it, and the bar
+   stopped short of the row's foot. That 14 px moves into the block's own bottom padding (12 + 14), so the spacing is unchanged. */
+.prs-matrix-expand td { border-top: 0; padding-top: 0; padding-bottom: 0 }
 /* A collapsed row's outcome, and the open row's expansion, are one cell across every column; the content is pinned to the box's visible width, so it never
    sits off-screen while the table is scrolled. 34 px starts it under the PR's `#n` rather than under the dot. */
 .prs-matrix-pinned { position: sticky; left: 0; width: 100cqw; box-sizing: border-box; padding-left: 34px }
 /* `min-width: 0` on the sheet so the scroll box still shrinks inside the flex column. */
 .prs-matrix-sheet { min-width: 0 }
-.prs-matrix-expand .prs-matrix-pinned { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-bottom: 12px }
+.prs-matrix-expand .prs-matrix-pinned { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-bottom: 26px }
 .prs-matrix-expand .prs-keys-side { align-items: flex-start; flex: none }
 .prs-matrix-expand .prs-foot { margin-top: 0 }
 /* The Merge menu is drawn IN FLOW here, under the split, at every width. The scroll box's `overflow-x: auto` clips both axes, so an absolute menu was cut
