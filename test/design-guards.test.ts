@@ -227,6 +227,7 @@ describe('guard 5 — the daylight palette and the two fill tokens', () => {
     '--strip': '#ffffff',
     '--strip-hi': '#f2f2f1',
     '--tile-hover': '#e8e8e6',
+    '--frame': '#e8e8e6',
     '--edge': 'rgba(0,0,0,.03)',
     '--hairline': '#eaeae8',
     '--hairline2': '#dcdcda',

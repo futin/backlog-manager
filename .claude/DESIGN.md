@@ -169,7 +169,7 @@ The rail is the dashboard's own shipped rail, figure for figure, because the two
 
 | | Spec / mock | This board | Why |
 |---|---|---|---|
-| Rail width | 300 px | **240 px**, 24 px above and below and 12 px at the sides, rows 4 px apart, painted `--board` | the dashboard's shipped rail width (`.rail{flex:0 0 240px}`); this board was 280 px, and that 40 px was the most visible of the differences when switching tabs. The side padding is 12 px since the restyle (spec §4.9) because a row is now a card with a padding of its own. The paper moved with the rows: the rail is `--board` so the white open row reads as a card on grey, and `.maincol` carries `--strip` (decision 63) |
+| Rail width | 300 px | **240 px**, 24 px above and below and 12 px at the sides, rows 4 px apart, painted `--frame` | the dashboard's shipped rail width (`.rail{flex:0 0 240px}`); this board was 280 px, and that 40 px was the most visible of the differences when switching tabs. The side padding is 12 px since the restyle (spec §4.9) because a row is now a card with a padding of its own. The paper moved with the rows: the rail is grey so the white open row reads as a card on it (decision 63). Since 2026-11-06 the rail and `.maincol` share `--frame`, a step darker than `--board`, so the well is one lighter sheet set into the frame rather than the rail's own grey under a white strip |
 | Nav row height | 44 px | **40 px** at least (44 px on the phone menu), around a 28 px `GlyphTile`, 13/500 | the shell mock's row (spec §4.9): a tile and a label rather than an icon and a label. The mock's full 44 px is kept for the phone menu, where the row is a thumb target rather than a pointer one |
 | Sub-nav indent | 36 px (the icon's right edge) | **38 px** in from the row's edge: 28 px rows at 12.5/400 `--ink2`, the open page a white `--strip` row at 600 `--ink` | the shell mock's. The white row replaces the old 24 px stem and 12 px tick, so there is no stem to hang from an icon's centreline and the tree is simply indented past the tile; a phone sub-row floors at 40 px. Resting rows beside an `--ink` one would still read as disabled, so the open page is told apart by weight, ink and the white ground together |
 
@@ -179,7 +179,7 @@ under it. It was the dashboard's prompt cursor (design handoff "1h") — a `BACK
 the mock's tile and one-line prompt, and the sub-line now says whose board this is. The cursor is the one part that moves: it blinks (`steps(1)` over 1.06 s) while a run on this machine is working — `runsWorking` (`client/src/lib/run-pulse.ts`): a `starting` entry, or a local run that is `running` and not crashed, never a paused or a remote one — and stands solid otherwise (and before the first answer). It is a hint and never the record; `RunChip` and the Runs page say it in words. `App` reads it from the shell's one runs poll (`OrchestratorRunsProvider`, `useOrchestratorRunsContext().working`), which is `undefined` until the first answer lands and survives a view change. The `<h1>` is named `Backlog Manager` by `aria-label` and its drawn parts are `aria-hidden`. In the phone bar the brand loses its padding and the kicker stays at 11 px — guard 3's floor. Every `<button>` in the rail draws Hanken Grotesk because of one reset rule — `button, input, select, textarea { font-family: inherit; font-variant-numeric: inherit }` — which design guard 2 pins: without it the UA's own `font` shorthand drew every rail row and every card chip in Arial, and that, more than any figure in this table, is why the two rails once looked different.
 
 A row is a 28 px `GlyphTile` and a 13/500 label 10 px apart, with 6 px of padding, a 10 px radius and 40 px at least. At rest the tile is neutral and the label
-`--ink2`. The open row is white — `--strip` paper with a faint `--ink` 8 % lift — on the grey `--board` rail, its tile gone `ink` and its label `--ink` at 600,
+`--ink2`. The open row is white — `--strip` paper with a faint `--ink` 8 % lift — on the grey `--frame` rail, its tile gone `ink` and its label `--ink` at 600,
 so the open section is the one white card in the rail and never a colour change in the label alone (§5). Hover darkens the label and nothing else; the white
 fill stays reserved for the open row, so a hovered row and a selected row read as two different things rather than one filled twice. A tile names its section;
 the one thing it shows of state is the ink tone of the open row (§6).
@@ -203,12 +203,13 @@ chip (§8.10) and, at its right, `.rail-api`: an 8 px dot — `--green-solid`, o
 at 11 px `--ink3`, from the shell's health read (`App`'s `api`; `null` draws nothing). The card is drawn only while it has either, and in the phone menu it is
 the last row, 12 px under the rows.
 
-Settings sits under a 1 px rule with 24 px of air either side: it is about the board, the rows above it — up to four: Files, GitHub, Jira, Runs — are about the work. `.main` sits on `--board` with a 24 px top-left radius — the one corner the rail and the shell strip meet — and no top margin: the strip above it is the gap.
+Settings sits under a 1 px rule with 24 px of air either side: it is about the board, the rows above it — up to four: Files, GitHub, Jira, Runs — are about the work. `.main` sits on `--board` with a 24 px top-left radius — the one corner the rail and the shell strip meet — and no top margin: the strip above it is the gap. The rail and the strip are one `--frame` surface, so the corner is drawn against the frame on both sides.
 
 Below 700 px the rail becomes a top bar, wordmark left and ☰ right, with every tree standing open so a sub-view is a tap away rather than behind an accordion. The bar hides on a downward scroll and returns on the first upward one, and stays pinned while the menu is open, because the menu hangs off it.
 
-**Shell strip.** Right of the rail, `.maincol` stacks a 50 px `.topstrip` over the well on `--strip`, while the rail is `--board` (decision 63): the strip is
-the one white band, and the well's 24 px top-left curve is drawn against it (a top margin on `.main` drew it grey on grey, because `body` is `--board` too, and
+**Shell strip.** Right of the rail, `.maincol` stacks a 50 px `.topstrip` over the well on `--frame`, the rail's own token: rail and strip are one frame round the well, and the well's 24 px top-left curve is drawn against it. Decision 63
+made the strip `--strip` while the rail was `--board`, and the well — the rail's own grey — met a white band at its corner, which read as a notch (user review,
+2026-11-06; three variants shot over the live Settings page, the darker frame picked) (a top margin on `.main` drew it grey on grey, because `body` is `--board` too, and
 `body` stays so). On the phone `.maincol` is `display: contents`. The strip's height, the well's gap and what `.runs-board` subtracts to fill the viewport are
 one token, `--main-gap` (50 px, `0px` on the phone), and design guard 9 pins it. The strip holds what is true of the machine wherever you stand — the
 dashboard's rule for its account header — which today is up to two things, right-aligned and 8 px apart: the GitHub status pill and, after it, the Jira one
@@ -272,6 +273,7 @@ Three faces — Barlow, Barlow Condensed and IBM Plex Mono — left behind 80 `-
 |---|---|
 | `--board` / `--steel` / `--strip` / `--strip-hi` | `#f4f4f3` / `#ededec` / `#ffffff` / `#f2f2f1` |
 | `--tile-hover` | `#e8e8e6` |
+| `--frame` | `#e8e8e6` — the rail and the shell strip; on the dark palettes a step darker than their `--board` (`test/daylight-contrast.test.ts` holds it ≥ 1.04:1 off the board and on the dark side of it) |
 | `--edge` / `--hairline` / `--hairline2` | `rgba(0,0,0,.03)` / `#eaeae8` / `#dcdcda` |
 | `--ink` / `--ink2` / `--ink3` | `#131313` / `#525252` / `#6b6b6b` |
 | `--green` / `--amber` / `--mustard` / `--cyan` / `--red` / `--magenta` | `#38631a` / `#c4761f` / `#5f530b` / `#306c0f` / `#b03b28` / `#6b52a8` |

@@ -1532,7 +1532,9 @@ describe('the issue List', () => {
   });
 
   it('marks a top for a session live only on a folded child, and never draws the child', async () => {
-    sessionsAnswer = () => ({ links: [linkOn('PAY-162', 's162', 'working', 2)], reachable: true, rowsAt: null });
+    // 2.05, not 2: the same race the ended-row case below names — the row's `now` is read at mount, before `sessionsAnswer` mints this stamp, so an exact
+    // 2 h reads `1h` by a few ms. It went red in CI on PR #480 (a CSS-only change), so it is the fixture's flake, not the row's.
+    sessionsAnswer = () => ({ links: [linkOn('PAY-162', 's162', 'working', 2.05)], reachable: true, rowsAt: null });
     await renderList();
     await waitFor(() => expect(sessionCell('PAY-120')).toContain('Working · 2h'));
     expect(sessionCell('PAY-180')).toBe('—');
