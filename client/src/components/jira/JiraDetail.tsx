@@ -26,10 +26,13 @@ import {
   unlinkJira,
   type JiraChildrenIndex
 } from '../../lib/jira';
+import { childSessions, type DeckEntry } from '../../lib/jira-deck';
 import { ticketSessions } from '../../lib/jira-sessions';
+import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
 import { elapsedSince } from '../../lib/item-age';
 import { renderMarkdown } from '../../lib/markdown';
+import { STATE_LABEL, type JiraSessionState } from '../../../../shared/jira-sessions';
 import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
 import type { JiraAction, JiraIssue, JiraTransition, JiraIssueDetail, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
@@ -231,6 +234,10 @@ export function JiraDetail({
   const failure = mine !== null && 'failure' in mine ? mine.failure : null;
   // The detail's copy is the fresher one; the card's is what the column draws until it lands (or for good, when the read fails).
   const src: JiraIssue = detail ?? issue;
+  // The Children tree, once here rather than inside `ChildrenTree`, because two places read it: the tree draws its rows, and the agent band's empty shape says
+  // which of them a session is live on. `underway` is the deck's own reading over those rows (`childSessions`), so a row and the band cannot disagree.
+  const tree = detail === null || detail.children.length === 0 ? null : modalTree(detail.key, detail.children, childrenOf);
+  const underway = tree === null ? [] : childSessions(tree.rows.map((r) => r.issue), sessions, data?.live ?? {});
 
   // `useNow`, like the card strip's: every age on the cards, the session fact's elapsed reading and `created · updated` tick while the dialog sits open
   // between polls.
@@ -338,6 +345,9 @@ export function JiraDetail({
               <div className="jira-detail-agent-text">
                 <span className="jira-detail-agent-none">No session on this ticket</span>
                 <span className="jira-detail-agent-sub">{bandSub}</span>
+                {underway.length > 0 && (
+                  <ChildSessionLine first={underway[0]} more={underway.length - 1} onOpen={() => onOpenIssue(underway[0].issue, childrenOf)} />
+                )}
               </div>
               {runControl}
             </div>
@@ -478,9 +488,15 @@ export function JiraDetail({
             <Description key={detail.key} markdown={detail.description} />
           )}
         </div>
-        {detail !== null && detail.children.length > 0 && (
+        {detail !== null && tree !== null && (
           <div className="jira-detail-pane">
-            <ChildrenTree selfKey={detail.key} direct={detail.children} childrenOf={childrenOf} onOpenIssue={onOpenIssue} />
+            <ChildrenTree
+              direct={detail.children.length}
+              tree={tree}
+              underway={underway}
+              childrenOf={childrenOf}
+              onOpenIssue={onOpenIssue}
+            />
           </div>
         )}
         {ticketTrees.length > 0 && (
@@ -563,25 +579,32 @@ function Description({ markdown }: { markdown: string }) {
   );
 }
 
-/** The Children section — head row, spread bar, tree — over `modalTree` (see the header). Drawn only when the detail has direct children. */
+/**
+ * The Children section — head row, spread bar, tree — over `modalTree` (see the header). Drawn only when the detail has direct children. A row a session is
+ * live on wears that session's state as a neutral `Pill` led by the state's dot (`underway`, one per row), before the ticket's own status pill: an epic's
+ * List row can read `Working` for a sub-task's session, and this is where the reader finds which one.
+ */
 function ChildrenTree({
-  selfKey,
   direct,
+  tree,
+  underway,
   childrenOf,
   onOpenIssue
 }: {
-  selfKey: string;
-  direct: readonly JiraIssue[];
+  direct: number;
+  tree: ReturnType<typeof modalTree>;
+  underway: readonly DeckEntry[];
   childrenOf: JiraChildrenIndex | null;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
 }) {
-  const { rows, progress } = modalTree(selfKey, direct, childrenOf);
+  const { rows, progress } = tree;
+  const live = new Map(underway.map((e) => [e.issue.key, e.state] as const));
   return (
     <>
       <div className="jira-tree-head">
         <h3>Children</h3>
-        <Pill tone="neutral">{direct.length}</Pill>
-        {rows.length > direct.length && <span className="jira-tree-all">{`${rows.length} in all`}</span>}
+        <Pill tone="neutral">{direct}</Pill>
+        {rows.length > direct && <span className="jira-tree-all">{`${rows.length} in all`}</span>}
       </div>
       {/* Wrapped, because the spacing is this surface's and the primitive's own selectors stay in the ui block (design-guard 7). */}
       <div className="jira-tree-spread">
@@ -599,12 +622,40 @@ function ChildrenTree({
               <span className={row.assignee === null ? 'jira-card-av none' : 'jira-card-av'} aria-hidden="true">
                 {row.assignee === null ? '' : initialsOf(row.assignee.name)}
               </span>
+              {live.has(row.key) && <RowSession state={live.get(row.key) as JiraSessionState} />}
               <Pill tone="neutral">{row.status.name}</Pill>
             </button>
           </li>
         ))}
       </ul>
     </>
+  );
+}
+
+/** A Children row's session: the state's dot and word in a neutral pill, wrapped so the tree places it (`.jira-tree-session`) without restyling `Pill`. */
+function RowSession({ state }: { state: JiraSessionState }) {
+  return (
+    <span className="jira-tree-session">
+      <Pill tone="neutral" title={`a session is ${STATE_LABEL[state].toLowerCase()} on this ticket`}>
+        <i className="ui-stripe-dot" data-tone={sessionTone(state)} aria-hidden="true" />
+        {STATE_LABEL[state]}
+      </Pill>
+    </span>
+  );
+}
+
+/**
+ * The empty agent band's third line when a child has a live session (`underway[0]`, the deck's lead among the tree's rows): `<state> on <key>`, `+N more`
+ * when others are live too. It opens that child the way its Children row does — the same `onOpenIssue` and the same snapshot — so a reader who came here from a
+ * `Working` epic reaches the session in one press.
+ */
+function ChildSessionLine({ first, more, onOpen }: { first: DeckEntry; more: number; onOpen: () => void }) {
+  return (
+    <button type="button" className="jira-detail-agent-child" onClick={onOpen}>
+      <i className="ui-stripe-dot" data-tone={sessionTone(first.state)} aria-hidden="true" />
+      <span className="jira-detail-agent-child-text">{`${STATE_LABEL[first.state]} on ${first.issue.key} →`}</span>
+      {more > 0 && <span className="jira-detail-agent-child-more">{`+${more} more`}</span>}
+    </button>
   );
 }
 
