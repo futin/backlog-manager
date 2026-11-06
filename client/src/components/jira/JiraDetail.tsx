@@ -141,7 +141,9 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * pill and says `N in all` only when the tree draws more rows than that; the spread bar counts the rows as drawn. No filter marking inside the tree — the
  * filter ring is the card's (spec §8 non-goal). A row click hands the row's issue and the SAME snapshot to `onOpenIssue`, which is the very setter the board
  * calls, so `JiraView` swaps the one dialog's issue and the keyed read below fetches the new detail. Never a second `Modal`: Escape has one owner, and a
- * stack of issue dialogs would make it close one layer of a walk the reader thinks of as one dialog.
+ * stack of issue dialogs would make it close one layer of a walk the reader thinks of as one dialog. The walk is `JiraView`'s, not this dialog's: it hands
+ * down `back`, the issue one step up, and the head draws `← <key>` while there is one; a press pops one step and the same keyed read re-fetches that issue.
+ * Escape still closes the whole dialog — Back is a step, close is leaving.
  */
 
 type Held = { detail: JiraIssueDetail } | { failure: string };
@@ -160,6 +162,8 @@ export function JiraDetail({
   issue,
   childrenOf,
   onOpenIssue,
+  back,
+  onBack,
   onWrote,
   onRun,
   onClose
@@ -167,6 +171,9 @@ export function JiraDetail({
   issue: JiraIssue;
   childrenOf: JiraChildrenIndex | null;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+  /** The issue a Children-row click came FROM, or `null` on the issue the walk started at — the head draws `← <key>` only when there is one. */
+  back: JiraIssue | null;
+  onBack: () => void;
   onWrote: () => void;
   /** `Run ▾`'s pick — the page opens the launch sheet over this dialog. */
   onRun: (issue: JiraIssue, action: JiraAction) => void;
@@ -354,6 +361,12 @@ export function JiraDetail({
   const head = (
     <div className="jira-detail-head">
       <div className="jira-detail-crumbs">
+        {/* One step up the walk (`JiraView` holds it): the key it lands on is the label, so the reader knows where Back goes before pressing it. */}
+        {back !== null && (
+          <Chip size={28} aria-label={`Back to ${back.key}`} title={`Back to ${back.key} ${back.summary}`} onClick={onBack}>
+            <span aria-hidden="true">←</span> {back.key}
+          </Chip>
+        )}
         <span className="jira-card-type" data-tone={typeTone(src.type)} title={src.type.name}>
           <JiraTypeIcon type={src.type} />
         </span>

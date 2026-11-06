@@ -120,6 +120,7 @@ const AGENTS_ON: AgentsStatus = {
 };
 
 let onOpenIssue: jest.Mock;
+let onBack: jest.Mock;
 let reload: jest.Mock;
 let onWrote: jest.Mock;
 let onRun: jest.Mock;
@@ -132,12 +133,15 @@ function mount(
     onClose?: () => void;
     childrenOf?: JiraChildrenIndex | null;
     onOpenIssue?: jest.Mock;
+    /** The issue one step up `JiraView`'s walk; absent is the walk's first issue (`null`). */
+    back?: JiraIssue | null;
     /** `GET /api/jira/sessions`' answer, handed to the context the section's provider would fill; absent is "not landed yet" (`null`). */
     sessions?: JiraSessionsPayload | null;
   } = {}
 ) {
   reloadSessions = jest.fn(() => Promise.resolve());
   onOpenIssue = opts.onOpenIssue ?? jest.fn();
+  onBack = jest.fn();
   reload = jest.fn();
   onWrote = jest.fn();
   onRun = jest.fn();
@@ -150,6 +154,8 @@ function mount(
             issue={opts.issue ?? CARD}
             childrenOf={opts.childrenOf ?? null}
             onOpenIssue={onOpenIssue}
+            back={opts.back ?? null}
+            onBack={onBack}
             onWrote={onWrote}
             onRun={onRun}
             onClose={opts.onClose ?? (() => {})}
@@ -397,6 +403,24 @@ describe('JiraDetail — the body', () => {
     expect(onOpenIssue.mock.calls[0][1]).toBe(childrenOf);
   });
 
+  it('draws no Back chip on the issue the walk started at', async () => {
+    mount();
+    await screen.findByRole('heading', { name: CARD.summary });
+    expect(screen.queryByRole('button', { name: /^Back to / })).toBeNull();
+  });
+
+  it('draws `← <key>` for the issue one step up, titled with its summary, at the head of the crumbs, and a press hands up onBack alone', async () => {
+    const parent = { ...CARD, key: 'PAY-100', summary: 'Payments epic' };
+    mount({ back: parent });
+    const chip = await screen.findByRole('button', { name: 'Back to PAY-100' });
+    expect(chip).toHaveTextContent('← PAY-100');
+    expect(chip).toHaveAttribute('title', 'Back to PAY-100 Payments epic');
+    expect(chip.parentElement?.firstElementChild).toBe(chip);
+    await userEvent.click(chip);
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(onOpenIssue).not.toHaveBeenCalled();
+  });
+
   it('says comments stay in Jira, with the link', async () => {
     mount();
     await screen.findByText('not');
@@ -460,7 +484,7 @@ describe('JiraDetail — while loading, and when the read fails', () => {
     const other: JiraIssue = { ...CARD, key: 'PAY-9', summary: 'Another' };
     view.rerender(
       <JiraContext.Provider value={{ data: status(), loading: false, error: false, reload: () => {} }}>
-        <JiraDetail issue={other} childrenOf={null} onOpenIssue={jest.fn()} onWrote={jest.fn()} onRun={jest.fn()} onClose={() => {}} />
+        <JiraDetail issue={other} childrenOf={null} onOpenIssue={jest.fn()} back={null} onBack={jest.fn()} onWrote={jest.fn()} onRun={jest.fn()} onClose={() => {}} />
       </JiraContext.Provider>
     );
 
@@ -1459,7 +1483,7 @@ describe('JiraDetail — Worktrees (Jira repo/branch)', () => {
 
     view.rerender(
       <JiraContext.Provider value={{ data: status({ live: {} }), loading: false, error: false, reload }}>
-        <JiraDetail issue={CARD} childrenOf={null} onOpenIssue={onOpenIssue} onWrote={onWrote} onRun={onRun} onClose={() => {}} />
+        <JiraDetail issue={CARD} childrenOf={null} onOpenIssue={onOpenIssue} back={null} onBack={jest.fn()} onWrote={onWrote} onRun={onRun} onClose={() => {}} />
       </JiraContext.Provider>
     );
     await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: /^Remove/ })).toBeEnabled());
