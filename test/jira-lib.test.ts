@@ -76,7 +76,7 @@ import type { JiraFold } from '../client/src/lib/jira';
 import { NO_JIRA_FILTERS, boardFilterOptions, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
-import { SHELF_LIMIT, boardAgents, boardShelves, deckCrumb, deckGroup, deckTally, endedLine, topSessionCell } from '../client/src/lib/jira-deck';
+import { SHELF_LIMIT, boardAgents, boardShelves, childSessions, deckCrumb, deckGroup, deckTally, endedLine, topSessionCell } from '../client/src/lib/jira-deck';
 import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
 import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraRepoRefs, JiraSessionsPayload, JiraSkill, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
@@ -1699,12 +1699,12 @@ describe('lib/jira-deck', () => {
     const cellOf = (links: Link[], live: Record<string, JiraLiveSession> = {}) => topSessionCell(boardAgents(tree, answer(links), live), links, tree);
 
     it('names the deck\u2019s lead session per top with its own `since`: needs you on a child beats working on the top', () => {
-      expect(cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-2', 'b', 'plan', 2)]).get('PAY-1')).toEqual({ state: 'plan', since: hoursAgo(2) });
+      expect(cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-2', 'b', 'plan', 2)]).get('PAY-1')).toEqual({ state: 'plan', since: hoursAgo(2), on: 'PAY-2', more: 1 });
     });
 
     it('a live plan on the top gives { plan, since }', () => {
       const links = [link('PAY-1', 'a', 'plan', 4)];
-      expect(cellOf(links).get('PAY-1')).toEqual({ state: 'plan', since: links[0].stateSince });
+      expect(cellOf(links).get('PAY-1')).toEqual({ state: 'plan', since: links[0].stateSince, on: null, more: 0 });
     });
 
     it('lets the newest start lead inside one group: a reservation on a child outranks an older lost session on the top', () => {
@@ -1718,7 +1718,7 @@ describe('lib/jira-deck', () => {
 
     it('reads an ended session on a folded child as { ended, since: endedAt }', () => {
       const cell = cellOf([link('PAY-2', 'b', 'ended', 5, { endedAt: hoursAgo(2) })]);
-      expect(cell.get('PAY-1')).toEqual({ state: 'ended', since: hoursAgo(2) });
+      expect(cell.get('PAY-1')).toEqual({ state: 'ended', since: hoursAgo(2), on: 'PAY-2', more: 0 });
     });
 
     it('takes the newer of two ended links', () => {
@@ -1726,10 +1726,54 @@ describe('lib/jira-deck', () => {
       expect(cell.get('PAY-1')?.since).toBe(hoursAgo(3));
     });
 
+    it('names the child the lead runs on (`on`), and `null` when the lead runs on the top itself', () => {
+      expect(cellOf([link('PAY-2', 'b', 'working', 1)]).get('PAY-1')).toMatchObject({ on: 'PAY-2', more: 0 });
+      // The top's own session leads (newer start in the same group), so the cell is the top's and the child's is only counted.
+      expect(cellOf([link('PAY-1', 'a', 'working', 1), link('PAY-2', 'b', 'working', 4)]).get('PAY-1')).toMatchObject({ on: null, more: 1 });
+    });
+
+    it('names the top for an ended session on the top itself, so an ended cell says where it ran too', () => {
+      const cell = cellOf([link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) }), link('PAY-2', 'b', 'ended', 9, { endedAt: hoursAgo(9) })]);
+      expect(cell.get('PAY-1')).toMatchObject({ state: 'ended', on: null, more: 0 });
+    });
+
     it('has no key with nothing live or ended, and keeps two tops apart', () => {
       expect(cellOf([]).size).toBe(0);
       const both = cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-3', 'b', 'quiet', 2)]);
       expect([...both].map(([k, v]) => [k, v.state])).toEqual([['PAY-1', 'working'], ['PAY-3', 'quiet']]);
+    });
+  });
+
+  describe('childSessions (Detail\u2019s Children rows and the Agent pane\u2019s on-a-child line)', () => {
+    const grand = issue({ key: 'PAY-4', summary: 'Grandchild', parent: { key: 'PAY-2', summary: 'Child' } });
+    const keys = (entries: ReturnType<typeof childSessions>): [string, string][] => entries.map((e) => [e.issue.key, e.state]);
+
+    it('is empty with no live session on any of the issues', () => {
+      expect(childSessions([child, grand], answer([link('PAY-1', 'a', 'working', 1)]), {})).toEqual([]);
+      expect(childSessions([child], null, {})).toEqual([]);
+    });
+
+    it('draws one entry per issue \u2014 the deck\u2019s lead \u2014 and orders the issues the way the deck does', () => {
+      const payload = answer([
+        link('PAY-2', 'a', 'working', 3),
+        link('PAY-2', 'b', 'plan', 5),
+        link('PAY-4', 'c', 'working', 1),
+        link('PAY-4', 'd', 'ended', 9, { endedAt: hoursAgo(1) })
+      ]);
+      // PAY-2's plan (needs you) leads it and outranks PAY-4's working; an ended link is never a child's session.
+      expect(keys(childSessions([child, grand], payload, {}))).toEqual([['PAY-2', 'plan'], ['PAY-4', 'working']]);
+      const [first] = childSessions([child, grand], payload, {});
+      expect(first.issue).toBe(child);
+      expect(first.top).toBe(child);
+      expect(first.since).toBe(payload.links[1].stateSince);
+    });
+
+    it('counts a reservation from the status as `starting`, which the sessions payload never carries', () => {
+      expect(keys(childSessions([child, grand], answer([]), { 'PAY-4': { ...reservation(1), starting: true } }))).toEqual([['PAY-4', 'starting']]);
+    });
+
+    it('ignores a session on an issue that is not in the list it was handed', () => {
+      expect(childSessions([grand], answer([link('PAY-2', 'a', 'working', 1)]), {})).toEqual([]);
     });
   });
 

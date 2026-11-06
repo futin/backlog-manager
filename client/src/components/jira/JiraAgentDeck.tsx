@@ -8,6 +8,7 @@ import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
 import { STATE_LABEL } from '../../../../shared/jira-sessions';
 import type { JiraIssue } from '../../../../shared/types';
+import { FoldMark } from '../ui/FoldMark';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Meter } from '../ui/Meter';
 import { SessionOpen } from './SessionOpen';
@@ -75,7 +76,7 @@ function DeckCard({ entry, now, onOpenIssue }: { entry: DeckEntry; now: number; 
             <JiraTypeIcon type={issue.type} />
           </span>
           <span className="jira-card-key">{issue.key}</span>
-          {folded && <span className="jira-deck-fold">{`↳ ${entry.top.key}`}</span>}
+          {folded && <FoldMark issueKey={entry.top.key} />}
         </div>
         <button type="button" className="jira-deck-title" onClick={() => onOpenIssue(issue)}>
           {issue.summary}

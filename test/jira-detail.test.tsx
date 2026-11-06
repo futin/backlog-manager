@@ -928,6 +928,47 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
   });
 });
 
+describe('JiraDetail — a session on a child (the epic that reads `Working` on the List)', () => {
+  const deep = (): JiraIssue => kid('PAY-162', 'Ledger rounding fix', 'new', 'PAY-160');
+  const childrenOf = (): JiraChildrenIndex => new Map([['PAY-160', [deep()]]]);
+  const rowOf = (key: string): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: new RegExp(`^${key} `) });
+
+  it('wears the session\u2019s state on the Children row it runs on, at any depth, and on no other row', async () => {
+    answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate'), kid('PAY-170', 'Payout story', 'done')] }));
+    mount({ childrenOf: childrenOf(), sessions: payload(link({ key: 'PAY-162', sessionId: 'deep', state: 'plan' })) });
+    await screen.findByRole('heading', { name: 'Children' });
+    expect(within(rowOf('PAY-162')).getByText('Waiting for plan approval')).toBeInTheDocument();
+    expect(rowOf('PAY-162').querySelector('.jira-tree-session .ui-stripe-dot')).toHaveAttribute('data-tone', 'amber');
+    for (const key of ['PAY-160', 'PAY-170']) expect(rowOf(key).querySelector('.jira-tree-session')).toBeNull();
+  });
+
+  it('names the child in the empty agent band and opens it, with the snapshot, in one press', async () => {
+    answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate')] }));
+    const index = childrenOf();
+    mount({ childrenOf: index, sessions: payload(link({ key: 'PAY-162', sessionId: 'deep' }), link({ key: 'PAY-160', sessionId: 'mid', startedAt: hoursAgo(6) })) });
+    const line = await screen.findByRole('button', { name: /^Working on PAY-162 →/ });
+    expect(within(screen.getByRole('dialog')).getByText('No session on this ticket')).toBeInTheDocument();
+    expect(line).toHaveTextContent('+1 more');
+    await userEvent.click(line);
+    expect(onOpenIssue).toHaveBeenCalledTimes(1);
+    expect(onOpenIssue.mock.calls[0][0]).toMatchObject({ key: 'PAY-162' });
+    expect(onOpenIssue.mock.calls[0][1]).toBe(index);
+  });
+
+  it('draws no child line while this ticket has a session of its own, nor when no child has one', async () => {
+    answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate')] }));
+    const own = mount({ sessions: payload(link(), link({ key: 'PAY-160', sessionId: 'kid' })) });
+    await screen.findByRole('heading', { name: 'Children' });
+    expect(screen.queryByRole('button', { name: /on PAY-160 →/ })).toBeNull();
+    own.unmount();
+
+    mount({ sessions: payload(link({ key: 'PAY-160', sessionId: 'old', state: 'ended', endedAt: hoursAgo(1) })) });
+    await screen.findByRole('heading', { name: 'Children' });
+    expect(screen.queryByRole('button', { name: / on PAY-160 →/ })).toBeNull();
+    expect(document.querySelector('.jira-tree-session')).toBeNull();
+  });
+});
+
 describe('JiraDetail — Assign to me and Move to… (Jira phase 3)', () => {
   it('posts the assign as JSON with the key alone, then reloads the status, nudges the board and re-reads the detail', async () => {
     answer = () => json(detail({ assignee: null }));

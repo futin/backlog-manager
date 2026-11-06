@@ -949,7 +949,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       return found;
     });
     // The fold is a pill beside the key now, not the crumb's lead.
-    expect(deck.querySelector('.jira-deck-fold')).toHaveTextContent('↳ PAY-160');
+    expect(deck.querySelector('.ui-fold')).toHaveTextContent('↳ PAY-160');
     expect(deck.querySelector('.jira-card-crumb')).not.toHaveTextContent('↳');
     expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
     expect(onShelves('Top story')).toBe(false);
@@ -1590,6 +1590,18 @@ describe('the issue List', () => {
     const session = row('PAY-120').querySelector('.jira-issues-session') as HTMLElement;
     expect(session.querySelector('.jira-issues-cut')?.textContent).toBe('Waiting for plan approval');
     expect(session.querySelector('.jira-issues-age')?.textContent).toMatch(/^ · \d/);
+  });
+
+  it('names the folded ticket a session runs on under the Session cell\u2019s state, and counts the card\u2019s other live sessions', async () => {
+    sessionsAnswer = () => ({ links: [linkOn('PAY-162', 's1', 'working', 1), linkOn('PAY-170', 's2', 'working', 3), linkOn('PAY-180', 's3', 'working', 2)], reachable: true, rowsAt: null });
+    await renderList();
+    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Working'));
+    const on = row('PAY-120').querySelector('.jira-issues-on') as HTMLElement;
+    expect(on.querySelector('.ui-fold')).toHaveTextContent('↳ PAY-162');
+    expect(on.querySelector('.jira-issues-more')).toHaveTextContent('+1');
+    // A session on the top itself needs no mark: the row already is its ticket.
+    expect(sessionCell('PAY-180')).toContain('Working');
+    expect(row('PAY-180').querySelector('.jira-issues-on')).toBeNull();
   });
 
   it('names how many issues fold under a top: the whole fold, one for a single, nothing for none', async () => {
