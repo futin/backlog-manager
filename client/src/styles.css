@@ -3389,11 +3389,25 @@ button.rail-count { cursor: pointer }
 .prs-notes-line { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-notes-error { color: var(--red) }
 
-/* GitHub › PRs toolbar (.claude/DESIGN.md §8.11): the layout switcher on the left, the hidden-repos note beside it, the newest read's age pushed to the right.
-   Own classes only — the Segmented's `.ui-*` look is never restyled here (design guard 7); this lays the three out in a row that wraps on a narrow window. */
+/* GitHub › PRs head (.claude/DESIGN.md §8.11; restyle fixes I5): one band for all three layouts. The sub-line leads with a live dot (the mock's 7 px `.dot.g`),
+   and the layout switch rides the band's trailing slot, wrapped in `.prs-switch` so this page owns its width — the `Segmented`'s `.ui-*` look is never restyled
+   here (design guard 7), only laid out through `[role='group']`. On a phone the slot wraps under the title (`.prs-band`'s last child is `.ui-band-right`,
+   reached positionally because guard 7 forbids naming the primitive's class) and the switch takes the full width, its three buttons sharing it, so Inbox,
+   Matrix and Cards are reachable without sideways scroll. */
+.prs-band-sub { display: inline-flex; align-items: center; gap: 6px }
+.prs-band-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green-solid) }
+.prs-switch { display: flex; min-width: 0 }
+@media (max-width: 700px) {
+  .prs-band > :last-child { flex: 1 0 100%; margin-left: 0 }
+  .prs-switch { flex: 1 1 auto }
+  .prs-switch [role='group'] { display: flex; flex: 1 1 auto; min-width: 0 }
+  .prs-switch [role='group'] button { flex: 1 1 0; min-width: 0; justify-content: center }
+}
+
+/* GitHub › PRs toolbar (.claude/DESIGN.md §8.11): only the notes now — `N repos hidden — no access`, Cards' `N repos with no open PRs` — and the row is not
+   drawn when there are none. Own classes only; it wraps on a narrow window. */
 .prs-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px }
 .prs-toolbar-note { margin: 0; font-size: 13px; color: var(--ink2) }
-.prs-toolbar-age { margin-left: auto; font-size: 13px; color: var(--ink2) }
 
 /* GitHub › PRs, Matrix layout (§8.11; specs 2026-10-29-prs-layouts-design.md and 2026-10-30-prs-page-fixes-design.md, "Matrix"). One `<table>` inside the
    page's own scroll box, one row per PR, one column per check. Colour is for a problem only: ok and na stay in ink (--ink2 / --ink3), bad is --red, meh --amber-ink and live --live-ink — the §8.2 TEXT

@@ -12,7 +12,8 @@ import type { PrRepoView, PullRequestRow } from '../../../../shared/types';
 
 /**
  * `polled 12 s ago`, on a one-second clock of its own: the age is the only reading on the page that moves every second, so it owns its own `useNow` and
- * re-renders a span, not every row of every repo. Exported because the page's toolbar draws the newest shown repo's age with it.
+ * re-renders a span, not every row of every repo. Cards' repo heads draw it; the page's band says the newest shown repo's age through `PrBandSub`, which reads
+ * the same `pollAge`.
  */
 export function PolledAge({ polledAt }: { polledAt: string | null }) {
   const now = useNow(polledAt !== null, 1_000);

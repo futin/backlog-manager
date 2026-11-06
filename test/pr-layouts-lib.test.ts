@@ -14,6 +14,7 @@ import {
   MATRIX_LABEL,
   matrixCells,
   newestPolledAt,
+  openRepoCount,
   parseLayout,
   PR_LAYOUT_OPTIONS,
   prLevel,
@@ -205,6 +206,11 @@ describe('page-level readings', () => {
   it('transientFailures keeps rate-limited and error repos, and drops ok ones', () => {
     const shown = [repo({ repo: 'a/1' }), repo({ repo: 'a/2', access: 'rate-limited' }), repo({ repo: 'a/3', access: 'error' })];
     expect(transientFailures(shown).map((r) => r.repo)).toEqual(['a/2', 'a/3']);
+  });
+
+  it('openRepoCount counts the shown repos whose total is above zero', () => {
+    expect(openRepoCount([repo({ total: 2 }), repo({ total: 0, prs: [] }), repo({ total: 100 })])).toBe(2);
+    expect(openRepoCount([])).toBe(0);
   });
 
   it('newestPolledAt ignores nulls and is null when there is nothing to read', () => {

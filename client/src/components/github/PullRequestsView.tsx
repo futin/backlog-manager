@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { PolledAge, PrCards } from './PrCards';
+import { PrBandSub } from './PrBandSub';
+import { PrCards } from './PrCards';
 import { PrInbox } from './PrInbox';
 import { PrMatrix } from './PrMatrix';
 import type { PrLayoutProps } from './pr-layout-props';
 import { Band } from '../ui/Band';
-import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
 import { useOrchestratorRunsContext } from '../../hooks/OrchestratorRunsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { usePullRequestsContext } from '../../hooks/PullRequestsContext';
-import { emptyRepoNote, newestPolledAt, parseLayout, PR_LAYOUT_KEY, PR_LAYOUT_OPTIONS, splitReach, type PrLayout } from '../../lib/pr-layouts';
+import { emptyRepoNote, parseLayout, PR_LAYOUT_KEY, PR_LAYOUT_OPTIONS, splitReach, type PrLayout } from '../../lib/pr-layouts';
 import type { PrRunContext } from '../../lib/pr-run';
 import { applyUpdateOutcome, findPr, groupRepos, mergeBlock, outcomeLine, updateTransition, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
 import type { PrWriteResult } from '../../../../shared/types';
@@ -35,11 +35,12 @@ const WARNING_CLOCK_MS = 15_000;
  * **Order.** Cards draws `groupRepos`' order: repos with open PRs first, most recently touched on top, then the empty ones by name; each repo's PRs newest
  * update first. Inbox and Matrix rank across repos instead (`rankPrs`). The payload's own order is never what is drawn.
  *
- * **Layouts and reach.** Three layouts — Inbox (the default), Matrix and Cards — behind a `Segmented` in the toolbar (`PR_LAYOUT_OPTIONS`, all three at every
+ * **Layouts and reach.** Three layouts — Inbox (the default), Matrix and Cards — behind a `Segmented` in the band's trailing slot (`PR_LAYOUT_OPTIONS`, all three at every
  * width: Matrix scrolls sideways on a phone rather than vanishing), the choice stored per device (`PR_LAYOUT_KEY`, read through `parseLayout` so a hand-edited
- * value is Inbox). A repo the token cannot read (`splitReach`: `forbidden`, `not-found`) is never handed to a layout, never counted in `N open`, and is named
+ * value is Inbox). A repo the token cannot read (`splitReach`: `forbidden`, `not-found`) is never handed to a layout, never counted in `N open in M repos`, and is named
  * only by the toolbar's `N repos hidden — no access · GitHub › Settings`, the link being `onOpenSettings` (threaded from `App` like the Sources card's, so the
- * rail's tree stays the only switch). In Cards the toolbar also counts the repos it does not draw because they were read and hold nothing (`emptyRepoNote`).
+ * rail's tree stays the only switch); the toolbar holds nothing but these notes and is not drawn without one. The band's sub-line is `PrBandSub`'s `N open in M
+ * repos · polled <age>`. In Cards the toolbar also counts the repos it does not draw because they were read and hold nothing (`emptyRepoNote`).
  * Empty states, in order: the PAYLOAD has no repo → `no GitHub repo registered`; it has repos but none is shown → `no repo this token can read`; otherwise the
  * layout, which says `no open pull requests` itself, once.
  *
@@ -202,12 +203,26 @@ export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: 
     setStored(next);
   };
   const emptyNote = layout === 'cards' ? emptyRepoNote(shown, outcomes) : null;
+  // The band draws the switch and the count whenever the payload names a repo; the toolbar is only what is left over — the notes — and is not drawn without one.
+  const counted = data !== null && data.token && data.repos.length > 0;
+  const toolbarNotes = hidden.length > 0 || emptyNote !== null;
   const props: PrLayoutProps = { repos: shown, outcomes, marks, now, ctx, write, inFlight, confirming, setConfirming };
 
   return (
     <div className="prs">
-      <Band title="Pull requests" sub="open pull requests on this machine's GitHub repos">
-        {data !== null && data.token && <Pill tone="neutral">{`${open} open`}</Pill>}
+      {/* One head for all three layouts (restyle fixes I5): the sub-line counts and dates the page, and the layout switch sits in the trailing slot — both only
+          once there is a repo to count, the state the toolbar's switch was drawn in. `prs-band` is this page's layout hook for the phone, where the slot wraps
+          under the title at full width. */}
+      <Band
+        className="prs-band"
+        title="Pull requests"
+        sub={counted ? <PrBandSub shown={shown} open={open} /> : "open pull requests on this machine's GitHub repos"}
+      >
+        {counted && (
+          <div className="prs-switch">
+            <Segmented<PrLayout> label="Layout" value={layout} options={PR_LAYOUT_OPTIONS} onChange={pickLayout} track />
+          </div>
+        )}
       </Band>
       {data === null ? (
         <p className="prs-status" role={error === null ? undefined : 'alert'}>
@@ -226,28 +241,26 @@ export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: 
             <p className="prs-status">no GitHub repo registered</p>
           ) : (
             <>
-              <div className="prs-toolbar" data-testid="pr-toolbar">
-                <Segmented<PrLayout> label="Layout" value={layout} options={PR_LAYOUT_OPTIONS} onChange={pickLayout} track />
-                {hidden.length > 0 && (
-                  <p className="prs-toolbar-note">
-                    {`${hidden.length} ${hidden.length === 1 ? 'repo' : 'repos'} hidden — no access`}
-                    {onOpenSettings !== undefined && (
-                      <>
-                        {' · '}
-                        {/* A button, not an anchor: the destination is the shell's own state (the Sources card's `GitHub › Settings ↗` is the
-                            precedent). `prs-textlink`, not `set-link`: that is §8.6's bordered row control and reads as a button inside a sentence. */}
-                        <button type="button" className="prs-textlink" onClick={onOpenSettings}>
-                          GitHub › Settings
-                        </button>
-                      </>
-                    )}
-                  </p>
-                )}
-                {emptyNote !== null && <span className="prs-toolbar-note">{emptyNote}</span>}
-                <span className="prs-toolbar-age">
-                  <PolledAge polledAt={newestPolledAt(shown)} />
-                </span>
-              </div>
+              {toolbarNotes && (
+                <div className="prs-toolbar" data-testid="pr-toolbar">
+                  {hidden.length > 0 && (
+                    <p className="prs-toolbar-note">
+                      {`${hidden.length} ${hidden.length === 1 ? 'repo' : 'repos'} hidden — no access`}
+                      {onOpenSettings !== undefined && (
+                        <>
+                          {' · '}
+                          {/* A button, not an anchor: the destination is the shell's own state (the Sources card's `GitHub › Settings ↗` is the
+                              precedent). `prs-textlink`, not `set-link`: that is §8.6's bordered row control and reads as a button inside a sentence. */}
+                          <button type="button" className="prs-textlink" onClick={onOpenSettings}>
+                            GitHub › Settings
+                          </button>
+                        </>
+                      )}
+                    </p>
+                  )}
+                  {emptyNote !== null && <span className="prs-toolbar-note">{emptyNote}</span>}
+                </div>
+              )}
               {shown.length === 0 ? (
                 <p className="prs-status">no repo this token can read</p>
               ) : layout === 'inbox' ? (

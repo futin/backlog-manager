@@ -199,7 +199,15 @@ export function transientFailures(shown: readonly PrRepoView[]): PrRepoView[] {
   return shown.filter((repo) => repo.access !== 'ok');
 }
 
-/** The most recent successful read across the shown repos — the one `polled … ago` the toolbar draws — or `null` when none has read yet. */
+/**
+ * How many of the shown repos hold at least one open PR — the `M` in the band's `N open in M repos`. Counted on `total`, as `N` is, so a truncated repo and the
+ * count beside it agree; a repo that was read and holds nothing is not "a repo with PRs", which is also what Cards' own `N repos with no open PRs` says.
+ */
+export function openRepoCount(shown: readonly PrRepoView[]): number {
+  return shown.filter((repo) => repo.total > 0).length;
+}
+
+/** The most recent successful read across the shown repos — the one `polled … ago` the band draws — or `null` when none has read yet. */
 export function newestPolledAt(shown: readonly PrRepoView[]): string | null {
   let best: string | null = null;
   for (const repo of shown) {
