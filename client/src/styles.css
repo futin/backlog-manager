@@ -1408,6 +1408,9 @@ button.rail-count { cursor: pointer }
 }
 .jira-tree-row:hover { background: var(--strip-hi) }
 .jira-tree-key { font-weight: 500; color: var(--ink2); white-space: nowrap }
+/* A Children row's live session (`childSessions`): a neutral `Pill` led by the state's stripe dot, before the status pill, so the row a run is on reads from
+   the tree without opening it. The status pill beside it is the ticket's, this one the session's — the dot is what tells them apart. */
+.jira-tree-session { flex: none }
 /* The Worktrees list (§8.9.2) borrows the Children head above (`.jira-tree-head`); each row is the branch, the path and the repo — path first to ellipsise, the
    branch never — then `Remove`. The copied command, when the clipboard refused, takes a row of its own under them. */
 .jira-wt-list { list-style: none; padding-left: 0; margin: 8px 0 0 }
@@ -1491,6 +1494,15 @@ button.rail-count { cursor: pointer }
 .jira-detail-agent-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 }
 .jira-detail-agent-none { font-size: 13px; font-weight: 500; color: var(--ink) }
 .jira-detail-agent-sub { font-size: 12px; color: var(--ink3) }
+/* The empty band's third line when a CHILD has a live session: the state's dot, `<state> on <key>`, and `+N more` — a button that opens that child, as its
+   Children row does. A link's skin, not a chip's: the band's one control is Run, and this is the way to the session, not an action on it. */
+.jira-detail-agent-child {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: none;
+  font: inherit; font-size: 12px; font-weight: 500; color: var(--ink2); text-align: left; cursor: pointer
+}
+.jira-detail-agent-child:hover .jira-detail-agent-child-text { text-decoration: underline }
+.jira-detail-agent-child-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.jira-detail-agent-child-more { flex: none; color: var(--ink3); font-weight: 400 }
 .jira-detail-assignee { display: inline-flex; align-items: center; gap: 6px; min-width: 0 }
 .jira-detail-label { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 8px; background: var(--strip-hi); font-size: 11px; font-weight: 500; color: var(--ink2) }
 
@@ -1529,8 +1541,6 @@ button.rail-count { cursor: pointer }
 .jira-deck-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
 /* The card's first line: the state's dot, its words and how long it has held, in the one small ink3 reading the deck head uses. */
 .jira-deck-state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink3) }
-/* The fold pill: `↳ <top key>`, drawn only when the session's ticket hangs under another card. */
-.jira-deck-fold { flex: none; padding: 1px 7px; border-radius: 8px; border: 1px solid var(--hairline2); font-size: 11px; font-weight: 500; color: var(--ink2); background: var(--strip) }
 /* SessionOpen — the anchor of its `Session actions` panel, and the panel's rows (36 px, `.jira-move-row`'s skin, which a row of links and presses also wears). */
 .jira-open { position: relative; display: inline-flex }
 .jira-open-rows { display: flex; flex-direction: column; gap: 2px; margin: -8px }
@@ -1662,7 +1672,9 @@ button.rail-count { cursor: pointer }
   .jira-issues-scroll { overflow-x: auto }
 }
 .jira-issues-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
-.jira-issues-table thead th:nth-child(1) { width: 110px } /* Session: the word ellipsises (`Waiting on your answer` is longer); the dot and the age are the reading and never cut. */
+.jira-issues-table thead th:nth-child(1) { width: 140px } /* Session: the word ellipsises (`Waiting on your answer` is longer); the dot and the age are the reading and never cut. 140, not 110: the
+   second line's `↳ TIMIFY-26366` pill (a session on a folded ticket) is 96 px and `+1` beside it another 18, which 132 cut to `TIMIFY-26…` in /ui-verify.
+   Summary pays. */
 .jira-issues-table thead th:nth-child(2) { width: 108px } /* Key: fits a twelve-character key (TIMIFY-28086) at 13 px. */
 .jira-issues-table thead th:nth-child(4) { width: 100px }
 .jira-issues-table thead th:nth-child(5) { width: 116px }
@@ -1693,6 +1705,11 @@ button.rail-count { cursor: pointer }
 /* The session's reading is the word AND its age: the age is `flex: none` and only the word ellipsises. `white-space: pre` keeps the space before ` · ` that a flex item would otherwise drop at its line start. */
 .jira-issues-sess { display: flex; min-width: 0 }
 .jira-issues-age { flex: none; white-space: pre }
+/* The cell's second line, drawn only when the session runs on a folded ticket: that ticket's `FoldMark`, and `+N` for the card's other live sessions, which
+   never shrinks — the mark takes the ellipsis. Two lines in this one cell grow its row a little; every other row keeps the 44 px. */
+.jira-issues-stack { display: flex; flex-direction: column; gap: 3px; min-width: 0 }
+.jira-issues-on { display: flex; align-items: center; gap: 4px; min-width: 0 }
+.jira-issues-more { flex: none; font-size: 11px; color: var(--ink3) }
 .jira-issues-key a { color: var(--ink2); text-decoration: none }
 .jira-issues-key a:hover { text-decoration: underline }
 .jira-issues-title {
@@ -2735,15 +2752,19 @@ button.rail-count { cursor: pointer }
    8 px apart, rather than rows that share a hairline. Drawn as touching rows, two stripes in one tone met end to end and read as one long bar down the sheet,
    and the selected row's outline sat flush against its neighbour's hairline. The inset stripe follows the radius, so nothing needs clipping.
    No fill on hover or on selection: `--strip-hi` is the neutral pill's own ground, so a filled card swallowed its `remote` tag — the tag vanished from exactly
-   the card being looked at. Hover deepens the stroke instead; selection is the mock's ink stroke plus a 1 px ink ring outside it, which keeps the stripe.
+   the card being looked at. Hover deepens the stroke instead. Selection is a lift, not an outline: the hover's `--hairline2` stroke, the stripe widened from
+   3 px to 5 px, and a soft `--shadow2` drop under the card — §8's "a raised control marks a state", the state here being "this is the run the detail shows".
+   It was the mock's `--ink` stroke plus a 1 px `--ink` ring, which read as a 2 px black frame and drew the eye harder than anything else on the page
+   (reported 2026-11-06); the wider stripe still says which card at a glance, and it stays in the run's own tone, so selection adds weight, never a colour.
+   The 15 px leading padding still clears a 5 px stripe by 10 px.
    `.runs-row.runs-card` is two classes on purpose: `.runs-row:first-child`, `:hover` and `[aria-current]` are two-class rules declared earlier, and a bare
    `.runs-card` would lose to every one of them. */
 .runs-live-sheet .runs-rows { gap: 8px }
 .runs-row.runs-card { border: 1px solid var(--hairline); border-radius: 10px; padding-top: 12px; padding-bottom: 12px; background: var(--strip) }
 .runs-row.runs-card:hover { background: var(--strip); border-color: var(--hairline2) }
 .runs-row.runs-card[aria-current='true'] {
-  background: var(--strip); border-color: var(--ink);
-  box-shadow: inset 3px 0 0 var(--stripe, transparent), 0 0 0 1px var(--ink);
+  background: var(--strip); border-color: var(--hairline2);
+  box-shadow: inset 5px 0 0 var(--stripe, transparent), 0 2px 10px var(--shadow2);
 }
 .runs-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0 }
 /* The id holds the leading edge and everything after it — the machine tag, then the age — packs to the trailing one, as the mock's card draws it
@@ -4264,6 +4285,13 @@ tr.ui-stripe > :first-child { box-shadow: inset 3px 0 0 var(--stripe, transparen
 .ui-stripe-dot[data-tone='amber'] { background: var(--amber-solid) }
 .ui-stripe-dot[data-tone='red'] { background: var(--red) }
 .ui-stripe-dot[data-tone='grey'] { background: var(--hairline2) }
+
+/* FoldMark — the `↳ <key>` pill (§8.9.1): the deck card names the top its ticket folds under, the List's Session cell the folded ticket its session runs on. It
+   may shrink and ellipsise inside a narrow cell (its `title` holds the whole key); where there is room it is its own width. */
+.ui-fold {
+  display: inline-block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 1px 7px; border-radius: 8px; border: 1px solid var(--hairline2); font-size: 11px; font-weight: 500; color: var(--ink2); background: var(--strip)
+}
 
 /* GlyphTile — a glyph on a tinted square. The tint is the dark themes' own surface mixed 12-14 % toward the hue (daylight keeps the -solid mark), and the glyph
    takes the text token of its hue so it clears 4.5:1 over it. Radius steps with the box: 5 / 8 / 9. */

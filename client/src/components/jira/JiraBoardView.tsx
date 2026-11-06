@@ -6,9 +6,12 @@ import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useJiraView } from '../../hooks/useJiraView';
 import { useNow } from '../../hooks/useNow';
 import { usePickedJiraBoard } from '../../hooks/usePickedJiraBoard';
+import { usePersistedState } from '../../hooks/usePersistedState';
 import {
-  NO_JIRA_FILTERS,
+  JIRA_FILTERS_KEY,
+  NO_JIRA_PANEL_FILTERS,
   boardFilterCount,
+  clampJiraPanelFilters,
   boardFilterOptions,
   effectiveBoardFilters,
   fetchJiraWorktrees,
@@ -18,7 +21,8 @@ import {
   ticketWorktrees,
   type JiraAssigneeFilter,
   type JiraBoardFilters,
-  type JiraChildrenIndex
+  type JiraChildrenIndex,
+  type JiraPanelFilters
 } from '../../lib/jira';
 import { boardAgents, boardShelves, topSessionCell } from '../../lib/jira-deck';
 import type { JiraPage } from '../../lib/jira-page';
@@ -52,8 +56,9 @@ const NO_TREES: readonly JiraWorktree[] = [];
  * `Chip` naming the board, opening a `Popover` of every board by name — pick only: `Edit` and `New` are Setup's, spec §1), the summary search, and the filter
  * track.
  *
- * **Filters are per mount** (the global constraints): type, status (multi-select, by name), assignee (`anyone` / `me` / `unassigned`; no `me` while the
- * identity is unknown) and sprint, all read off the LOADED list, plus the search over key and summary — none persisted, none a request. A pick the current list
+ * **The panel filters persist; the search is per mount**: type, status (multi-select, by name), assignee (`anyone` / `me` / `unassigned`; no `me` while
+ * the identity is unknown) and sprint, all read off the LOADED list and stored under `JIRA_FILTERS_KEY` (one value for every board — `JiraBoardFilters`
+ * says why the panel persists and the search does not), plus the search over key and summary, held in this mount only — none a request. A pick the current list
  * no longer offers reads as "any" (`effectiveBoardFilters`), so switching boards cannot leave the columns emptied by a filter the panel no longer draws. The
  * options read EVERY loaded issue, folded or not, so a type only sub-tasks carry is still pickable; and a filter finds folded issues through their top card
  * (F1, `foldMatches`), which is shown ringed with the match named rather than hidden — a fold must never make a matching issue unfindable (grouped-board spec
@@ -116,8 +121,13 @@ export function JiraBoardView({
   // Card ages are relative (`now`, `4m`, `2h`, `6d`), so a minute's tick is plenty; the band's seconds have their own clock below.
   const now = useNow(true);
 
-  const [filters, setFilters] = useState<JiraBoardFilters>(NO_JIRA_FILTERS);
-  const set = <K extends keyof JiraBoardFilters>(key: K, value: JiraBoardFilters[K]): void => setFilters((f) => ({ ...f, [key]: value }));
+  // The panel's four filters survive a reload (`JIRA_FILTERS_KEY`); the search does not (`JiraBoardFilters` says why). What comes back from storage is
+  // clamped on every read, so a hand-edited or older-build value can be a wrong shape and still never reach `effectiveBoardFilters` as one.
+  const [stored, setStored] = usePersistedState<JiraPanelFilters>(JIRA_FILTERS_KEY, NO_JIRA_PANEL_FILTERS);
+  const panel = useMemo(() => clampJiraPanelFilters(stored), [stored]);
+  const [search, setSearch] = useState('');
+  const filters = useMemo<JiraBoardFilters>(() => ({ ...panel, search }), [panel, search]);
+  const set = <K extends keyof JiraPanelFilters>(key: K, value: JiraPanelFilters[K]): void => setStored({ ...panel, [key]: value });
 
   const me = data?.me ?? null;
   const live = data?.live ?? NO_LIVE;
@@ -181,7 +191,7 @@ export function JiraBoardView({
           aria-label="Search issues"
           placeholder="search summaries"
           value={filters.search}
-          onChange={(e) => set('search', e.target.value)}
+          onChange={(e) => setSearch(e.target.value)}
         />
         {/* One element in one place on every render, for the reason BoardView gives at length: `FilterBar` keeps which panel is open in its own state
             and a pick does not close it, so a remount on a pick — or on a Board | List switch — would shut the panel under the reader's pointer. Drawn in
@@ -189,7 +199,7 @@ export function JiraBoardView({
         <FilterBar
           count={boardFilterCount(applied)}
           showing={{ shown: rows.length, total: fold.tops.length, note: 'options come from the loaded issues' }}
-          onClear={() => setFilters((f) => ({ ...NO_JIRA_FILTERS, search: f.search }))}>
+          onClear={() => setStored(NO_JIRA_PANEL_FILTERS)}>
             <Picks title="Type" all="All types" values={options.types} value={applied.type} onPick={(v) => set('type', v ?? undefined)} />
             {/* The one multi-select: a chip toggles its status in or out, `All statuses` empties the set. Toggled against `applied`, not `filters`, so a
                 pick the board no longer offers is dropped by the next click rather than lingering unseen in state. */}

@@ -1,12 +1,14 @@
 import type { MouseEvent } from 'react';
 
-import { STATE_LABEL, type JiraSessionState } from '../../../../shared/jira-sessions';
+import { STATE_LABEL } from '../../../../shared/jira-sessions';
 import type { JiraAction, JiraIssue } from '../../../../shared/types';
 import { elapsedSince } from '../../lib/item-age';
 import { initialsOf, priorityTone, rolledUpdated, statusTone, typeTone, type JiraChildrenIndex, type JiraFold } from '../../lib/jira';
+import type { TopSessionCell } from '../../lib/jira-deck';
 import { rowOpens } from '../../lib/jira-list';
 import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
+import { FoldMark } from '../ui/FoldMark';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { JiraRunMenu } from './JiraRunMenu';
@@ -20,6 +22,8 @@ import { JiraRunMenu } from './JiraRunMenu';
  *
  * **The Session cell is the deck's reading, not a second one.** `sessions` is `topSessionCell(...)`: a session live on a folded child marks its
  * top, and when a card carries two the cell names the one the deck leads with; a top with none live reads `Ended · <age>` for its newest ended session.
+ * When that session ran on a folded ticket rather than the top, a second line names it with the deck's own `FoldMark` (`↳ PAY-162`), and `+N` counts the card's
+ * other live sessions — the row is the top's, so without the mark a `Working` epic opens on `No session on this ticket`.
  * The cell is a stripe dot, the state's word and an age, and is not a link — opening a session is the Sessions page's and Detail's job. Type, Status,
  * Priority and Assignee wear the board card's own marks (plan 1's classes), so a row and its card cannot disagree on what a colour means. The last cell is
  * the card's split Run, shown on row hover or focus only (it stays in the DOM and tabbable — the stylesheet fades it, never removes it). **Updated** is `rolledUpdated`, the stamp the rows were sorted on.
@@ -37,7 +41,7 @@ export function JiraIssueList({
 }: {
   tops: readonly JiraIssue[];
   fold: JiraFold;
-  sessions: ReadonlyMap<string, { state: JiraSessionState; since: string }>;
+  sessions: ReadonlyMap<string, TopSessionCell>;
   now: number;
   /** A filter or a search is applied — only the empty line's wording reads it. */
   filtered: boolean;
@@ -84,7 +88,7 @@ function IssueRow({
 }: {
   top: JiraIssue;
   fold: JiraFold;
-  cell: { state: JiraSessionState; since: string } | null;
+  cell: TopSessionCell | null;
   now: number;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
@@ -105,12 +109,23 @@ function IssueRow({
         {cell === null ? (
           '—'
         ) : (
-          <span className="jira-issues-flex">
-            <span className="ui-stripe-dot" data-tone={sessionTone(cell.state)} aria-hidden="true" />
-            <span className="jira-issues-sess">
-              <span className="jira-issues-cut">{STATE_LABEL[cell.state]}</span>
-              {age !== null && <span className="jira-issues-age"> · {age}</span>}
+          <span className="jira-issues-stack">
+            <span className="jira-issues-flex">
+              <span className="ui-stripe-dot" data-tone={sessionTone(cell.state)} aria-hidden="true" />
+              <span className="jira-issues-sess">
+                <span className="jira-issues-cut">{STATE_LABEL[cell.state]}</span>
+                {age !== null && <span className="jira-issues-age"> · {age}</span>}
+              </span>
             </span>
+            {/* The ticket the session runs on, when it is not this row's: without it a `Working` epic opens on `No session on this ticket`. */}
+            {(cell.on !== null || cell.more > 0) && (
+              <span className="jira-issues-on">
+                {cell.on !== null && <FoldMark issueKey={cell.on} />}
+                {cell.more > 0 && (
+                  <span className="jira-issues-more" title={`${cell.more} more live session${cell.more === 1 ? '' : 's'} on this card`}>{`+${cell.more}`}</span>
+                )}
+              </span>
+            )}
           </span>
         )}
       </td>

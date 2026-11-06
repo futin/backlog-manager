@@ -662,8 +662,10 @@ export function pickBoard(storedId: unknown, boards: readonly JiraBoardStatus[])
 // ── The Board page's filters ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * What the Board page's four filters and its search hold (spec §6.2). Per mount, never persisted — the global constraints' rule, because a filter that
- * survived a reload would hide cards from a reader who no longer remembers setting it, and the band's list is cheap to narrow again.
+ * What the Board page's four filters and its search hold (spec §6.2). The four panel filters are persisted per browser (`JIRA_FILTERS_KEY`), the search is
+ * not. The spec first kept all of them per mount, on the fear that a filter surviving a reload hides cards from a reader who forgot setting it; in use the
+ * opposite cost won — re-picking the same statuses after every refresh — and the funnel's badge (`Filters, 1 set`) plus `Showing n of m` already say a
+ * filter is in force. The search stays per mount: it is typed, in plain sight on the band, and a stale query is the one pick that empties a board silently.
  *
  * `type` and `sprint` are `undefined` for "any"; `sprint: null` is the `no sprint` pick, which is why "any" cannot also be `null`. `assignee` is the three
  * words the panel draws. `statuses` is the one MULTI-select: status names, empty for "any", because the pick a reader wants is a set — `To Do` plus
@@ -681,6 +683,33 @@ export interface JiraBoardFilters {
 }
 
 export const NO_JIRA_FILTERS: JiraBoardFilters = { type: undefined, assignee: 'anyone', sprint: undefined, statuses: [], search: '' };
+
+/** The four panel filters — the part of `JiraBoardFilters` that is stored. */
+export type JiraPanelFilters = Omit<JiraBoardFilters, 'search'>;
+
+export const NO_JIRA_PANEL_FILTERS: JiraPanelFilters = { type: undefined, assignee: 'anyone', sprint: undefined, statuses: [] };
+
+/**
+ * The per-browser key holding the panel filters (`usePersistedState`, so the value is JSON). ONE key for every board, not one per board: a pick already
+ * rode along a board switch within a mount, and `effectiveBoardFilters` reads a pick the next board does not offer as "any", so the stored value is only
+ * ever a preference and can never empty a board that lacks the status or type it names.
+ */
+export const JIRA_FILTERS_KEY = 'backlog-manager.jira-filters';
+
+/**
+ * A stored value as panel filters. Takes `unknown` for `isJiraPage`'s reason — localStorage hands back whatever was written, by any build or by hand — and
+ * reads every field that is not the right shape as its "any", field by field, so one bad field never costs the others. `sprint: null` (the `no sprint`
+ * pick) survives because JSON keeps `null`; an `undefined` field was dropped by `JSON.stringify` and reads as "any", which is what it meant.
+ */
+export function clampJiraPanelFilters(v: unknown): JiraPanelFilters {
+  const o: Record<string, unknown> = v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  return {
+    type: typeof o.type === 'string' ? o.type : undefined,
+    assignee: o.assignee === 'me' || o.assignee === 'unassigned' ? o.assignee : 'anyone',
+    sprint: typeof o.sprint === 'string' || o.sprint === null ? o.sprint : undefined,
+    statuses: Array.isArray(o.statuses) ? o.statuses.filter((s): s is string => typeof s === 'string') : []
+  };
+}
 
 /** Workflow order for the status chips: every `new` status, then `indeterminate`, then `done`, so the row reads left to right the way a ticket moves. */
 const CATEGORY_RANK: Record<JiraStatusCategory, number> = { new: 0, indeterminate: 1, done: 2 };

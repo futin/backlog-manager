@@ -75,6 +75,19 @@ export function boardAgents(fold: JiraFold, payload: JiraSessionsPayload | null,
     on.set(top.key, { issue: top, top });
     for (const under of fold.under.get(top.key) ?? []) on.set(under.key, { issue: under, top });
   }
+  return liveEntries(on, payload, live);
+}
+
+/**
+ * The one reading of "which sessions are live on these tickets", shared by the deck (`boardAgents`, over a board's fold) and Detail (`childSessions`, over a
+ * ticket's Children tree), so the two can never disagree on what counts as live: a linked session that has not ended, or a `starting` reservation from the
+ * status. `on` maps each ticket key to the issue and the top it is drawn under; a key not in it is not this caller's. Sorted in `deckOrder`.
+ */
+function liveEntries(
+  on: ReadonlyMap<string, { issue: JiraIssue; top: JiraIssue }>,
+  payload: JiraSessionsPayload | null,
+  live: Readonly<Record<string, JiraLiveSession>>
+): DeckEntry[] {
   const out: DeckEntry[] = [];
   for (const link of payload?.links ?? []) {
     const hit = on.get(link.key);
@@ -110,33 +123,63 @@ export function boardAgents(fold: JiraFold, payload: JiraSessionsPayload | null,
 }
 
 /**
+ * Detail's reading of the sessions under a ticket (DESIGN.md §8.9.2): for each of `issues` — the Children tree's rows, at any depth — that has a live
+ * session, the one the deck would lead that ticket with, in `deckOrder`. One entry per issue, not per session: a Children row wears one state pill, and the
+ * Agent pane's `on a child` line names the first entry and counts the rest. Each entry's `top` is its own issue — a Children row is not a fold, and nothing here
+ * draws a `↳` crumb.
+ */
+export function childSessions(
+  issues: readonly JiraIssue[],
+  payload: JiraSessionsPayload | null,
+  live: Readonly<Record<string, JiraLiveSession>>
+): DeckEntry[] {
+  const on = new Map(issues.map((issue) => [issue.key, { issue, top: issue }] as const));
+  const seen = new Set<string>();
+  return liveEntries(on, payload, live).filter((e) => !seen.has(e.issue.key) && (seen.add(e.issue.key), true));
+}
+
+/** One List Session cell (`topSessionCell`). */
+export interface TopSessionCell {
+  state: JiraSessionState;
+  since: string;
+  /** The folded ticket the cell's session runs on, or `null` when it runs on the top itself — the cell's `↳ <key>` pill. */
+  on: string | null;
+  /** How many OTHER live sessions the card carries (on the top or anything folded under it) — the cell's `+N`. Always 0 for an ended cell. */
+  more: number;
+}
+
+/**
  * The List's Session cell: per top, the session the deck leads that card with, else the newest one that ENDED on it. A live entry is the FIRST one
  * `boardAgents` returned for the top — those are already in `deckOrder` (group, newest start, id), so this adds no ordering of its own: a card with `needs you`
  * on a child and `working` on itself reads `needs you` in both places — and its `since` is the entry's own. With none live, the newest ended link (`endedAt`)
  * on the top or on any issue folded under it reads `ended`, `since` = that `endedAt`; a live session always wins, so a cell never says both. A top with
  * neither has no key.
+ *
+ * `on` names the folded ticket the cell's session ran on when it is not the top — the row is the top's, so without it a `Working` cell on an epic whose
+ * sub-task is the one being worked reads as if the epic were, and opening the epic shows `No session on this ticket`. `more` counts the card's other live
+ * sessions, so a cell that names one of two never reads as the only one.
  */
-export function topSessionCell(
-  agents: readonly DeckEntry[],
-  links: readonly SessionLink[],
-  fold: JiraFold
-): Map<string, { state: JiraSessionState; since: string }> {
-  const out = new Map<string, { state: JiraSessionState; since: string }>();
-  for (const e of agents) if (!out.has(e.top.key)) out.set(e.top.key, { state: e.state, since: e.since });
+export function topSessionCell(agents: readonly DeckEntry[], links: readonly SessionLink[], fold: JiraFold): Map<string, TopSessionCell> {
+  const out = new Map<string, TopSessionCell>();
+  for (const e of agents) {
+    const cur = out.get(e.top.key);
+    if (cur !== undefined) cur.more += 1;
+    else out.set(e.top.key, { state: e.state, since: e.since, on: e.issue.key === e.top.key ? null : e.issue.key, more: 0 });
+  }
   const topOf = new Map<string, string>();
   for (const top of fold.tops) {
     topOf.set(top.key, top.key);
     for (const under of fold.under.get(top.key) ?? []) topOf.set(under.key, top.key);
   }
-  const newest = new Map<string, string>();
+  const newest = new Map<string, { since: string; key: string }>();
   for (const l of links) {
     if (l.endedAt === null) continue;
     const top = topOf.get(l.key);
     if (top === undefined || out.has(top)) continue;
     const cur = newest.get(top);
-    if (cur === undefined || ms(l.endedAt) > ms(cur)) newest.set(top, l.endedAt);
+    if (cur === undefined || ms(l.endedAt) > ms(cur.since)) newest.set(top, { since: l.endedAt, key: l.key });
   }
-  for (const [top, since] of newest) out.set(top, { state: 'ended', since });
+  for (const [top, { since, key }] of newest) out.set(top, { state: 'ended', since, on: key === top ? null : key, more: 0 });
   return out;
 }
 
