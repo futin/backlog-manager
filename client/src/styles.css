@@ -3351,13 +3351,15 @@ button.rail-count { cursor: pointer }
 .prs-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
 .prs-keys > a { width: 28px; padding: 0; justify-content: center }
 .prs-keys-merge { position: relative; display: inline-flex }
-/* The `Merge menu`'s rows: two lines (label, then what it does — or why it cannot), an 18 px tile leading and the primary's tick trailing. */
+/* The `Merge menu`'s rows: two lines (label, then what it does — or why it cannot), a 28 px tinted tile leading (mock `.mi`) and the primary's tick trailing. */
 .prs-keys-rows { display: flex; flex-direction: column; gap: 2px; margin: -8px }
 .prs-keys-row {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 6px 10px; box-sizing: border-box;
   border: 0; border-radius: 8px; background: var(--strip); text-align: left; cursor: pointer; color: var(--ink);
 }
 .prs-keys-row:hover:not([aria-disabled='true']) { background: var(--strip-hi) }
+/* The primary row — the one the tick marks — rests on the hover ground (mock `.mi.on`); `PrActions` sets the class, never a blocked row. */
+.prs-keys-row-on { background: var(--strip-hi) }
 .prs-keys-row[aria-disabled='true'] { cursor: default; color: var(--ink3) }
 .prs-keys-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0 }
 .prs-keys-label { font-size: 13px; font-weight: 500 }

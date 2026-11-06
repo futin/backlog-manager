@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 import { Chip } from '../ui/Chip';
 import { Glyph, type GlyphName } from '../ui/Glyphs';
-import { GlyphTile } from '../ui/GlyphTile';
+import { GlyphTile, type GlyphTileTone } from '../ui/GlyphTile';
 import { Popover } from '../ui/Popover';
 import { SplitChip } from '../ui/SplitChip';
 import { primaryKey } from '../../lib/pr-layouts';
@@ -105,12 +105,14 @@ export function PrActions({
   const update = (): void => void onWrite(() => updateBranch({ repo: repo.repo, number: pr.number, headSha: pr.headSha }));
 
   const base = pr.base;
-  const rows: { id: string; glyph: GlyphName; label: string; sub: string; block: string | null; act: () => void; primary: boolean }[] = [
-    { id: 'merge', glyph: 'merge', label: 'Merge', sub: `asks first, then merges into ${base}`, block: mergeBlock(pr, repo), act: onMerge, primary: primary === 'merge' },
+  // `tone` is the mock's tile ground (`PRs.dc.html` `.tile` / `.tile.g`): Merge is the one green mark, auto-merge and Update are neutral, so the one write that cannot be taken back is the one tinted mark in the menu and the
+  // two reversible ones recede.
+  const rows: { id: string; glyph: GlyphName; tone: GlyphTileTone; label: string; sub: string; block: string | null; act: () => void; primary: boolean }[] = [
+    { id: 'merge', glyph: 'merge', tone: 'green', label: 'Merge', sub: `asks first, then merges into ${base}`, block: mergeBlock(pr, repo), act: onMerge, primary: primary === 'merge' },
     armed
-      ? { id: 'auto', glyph: 'clock', label: 'Disable auto-merge', sub: 'GitHub stops waiting to merge', block: autoMergeBlock(pr, repo), act: arm, primary: false }
-      : { id: 'auto', glyph: 'clock', label: 'Enable auto-merge', sub: 'GitHub merges when checks pass', block: autoMergeBlock(pr, repo), act: arm, primary: false },
-    { id: 'update', glyph: 'refresh', label: 'Update branch', sub: `merge ${base} into ${pr.head}`, block: updateBlock(pr, repo, updating), act: update, primary: primary === 'update' }
+      ? { id: 'auto', glyph: 'clock', tone: 'neutral', label: 'Disable auto-merge', sub: 'GitHub stops waiting to merge', block: autoMergeBlock(pr, repo), act: arm, primary: false }
+      : { id: 'auto', glyph: 'clock', tone: 'neutral', label: 'Enable auto-merge', sub: 'GitHub merges when checks pass', block: autoMergeBlock(pr, repo), act: arm, primary: false },
+    { id: 'update', glyph: 'refresh', tone: 'neutral', label: 'Update branch', sub: `merge ${base} into ${pr.head}`, block: updateBlock(pr, repo, updating), act: update, primary: primary === 'update' }
   ];
 
   const mainId = `${ids}-main`;
@@ -148,7 +150,8 @@ export function PrActions({
                   <button
                     key={row.id}
                     type="button"
-                    className="prs-keys-row"
+                    // The primary row (the one the tick marks) rests on the `--strip-hi` ground — the mock's `.mi.on` — which every other row only takes on hover.
+                    className={row.primary && row.block === null ? 'prs-keys-row prs-keys-row-on' : 'prs-keys-row'}
                     aria-labelledby={`${ids}-${row.id}-label`}
                     aria-describedby={`${ids}-${row.id}-sub`}
                     aria-disabled={row.block === null ? undefined : 'true'}
@@ -160,7 +163,7 @@ export function PrActions({
                       row.act();
                     }}
                   >
-                    <GlyphTile glyph={row.glyph} size={18} />
+                    <GlyphTile glyph={row.glyph} tone={row.tone} size={28} />
                     <span className="prs-keys-text">
                       <span id={`${ids}-${row.id}-label`} className="prs-keys-label">
                         {row.label}
