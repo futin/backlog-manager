@@ -3474,6 +3474,10 @@ button.rail-count { cursor: pointer }
    120 px of evidence in view; the title wraps inside it rather than ellipsizing. */
 .prs-matrix-pr-inner { min-width: min(200px, calc(60cqw - 46px)); max-width: calc(60cqw - 46px) }
 .prs-matrix-pr .prs-row-title { font-size: 14px }
+/* Matrix's title is one line with an ellipsis (mock `PRsLayouts.dc.html`; the full title is the span's `title`). `min-width: 0` on this flex item is what lets the
+   ellipsis engage inside `.prs-matrix-pr-inner`'s 60cqw cap, so a long title never widens the table past its columns' natural widths. Inbox and Cards keep
+   `.prs-title`'s wrapping — they are not under `.prs-matrix-pr`. */
+.prs-matrix-pr .prs-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .prs-matrix-pr .prs-meta { margin-top: 3px; font-size: 12px; color: var(--ink3) }
 .prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
 .prs-matrix-outcome td { border-top: 0; padding-top: 0 }
