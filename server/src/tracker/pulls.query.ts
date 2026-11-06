@@ -21,7 +21,9 @@ import { GithubClient, refuseRepo, type GithubResponse, type GraphqlError } from
  */
 
 /** The fields of one PR every query here selects, shared so the list and the single read can never disagree about what a row is. `commits(last: 1)` is
- *  the head commit — the one whose rollup is the PR's checks. */
+ *  the head commit — the one whose rollup is the PR's checks. `contexts(first: 0)` asks for no check at all, only GitHub's per-state tallies of them: the
+ *  Checks cell says `2 of 7 failing`, and the tallies are what that needs — the names of a hundred checks per PR would be a hundred times the payload for a
+ *  sentence nobody asked for. */
 const PR_FIELDS = `
   number
   title
@@ -39,7 +41,16 @@ const PR_FIELDS = `
   viewerCanUpdateBranch
   author { login }
   autoMergeRequest { mergeMethod enabledAt }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+  commits(last: 1) {
+    nodes {
+      commit {
+        statusCheckRollup {
+          state
+          contexts(first: 0) { totalCount checkRunCountsByState { state count } statusContextCountsByState { state count } }
+        }
+      }
+    }
+  }
 `;
 
 /**
@@ -102,7 +113,24 @@ export interface GqlPullRequest {
   viewerCanUpdateBranch: boolean;
   author: { login: string } | null;
   autoMergeRequest: { mergeMethod: string; enabledAt: string | null } | null;
-  commits: { nodes: ({ commit: { statusCheckRollup: { state: string } | null } } | null)[] } | null;
+  commits: { nodes: ({ commit: { statusCheckRollup: GqlRollup | null } } | null)[] } | null;
+}
+
+/** One state's tally, as both `…CountsByState` lists answer it. */
+interface GqlStateCount {
+  state: string;
+  count: number;
+}
+
+/** The head commit's rollup. `contexts` is optional because a fixture, or a token refused the tallies but not the state, may answer without it — the row
+ *  then has no counts and the page says the bare word, as it did before counts existed. */
+export interface GqlRollup {
+  state: string;
+  contexts?: {
+    totalCount: number;
+    checkRunCountsByState: GqlStateCount[] | null;
+    statusContextCountsByState: GqlStateCount[] | null;
+  } | null;
 }
 
 interface GqlListData {
@@ -149,19 +177,21 @@ function splitRepo(repo: string): { owner: string; name: string } {
   return { owner, name };
 }
 
-/** The one field whose refusal these reads survive: the head commit's `statusCheckRollup`, the last step of every error path that is about it. */
+/** The one field whose refusal these reads survive: the head commit's `statusCheckRollup`. An error path that is about checks ends at it, or — for the
+ *  tallies beneath it (`contexts`), which a token could in principle be refused while the state is delivered — passes through it. */
 const CHECKS_FIELD = 'statusCheckRollup';
 
 /**
  * GitHub's sentence when `res` is the one partial answer these reads keep, else `null`: the client restated a FORBIDDEN (`status` 403), the repository
- * itself was delivered, and EVERY error is a FORBIDDEN whose path ends at `statusCheckRollup`. One error of any other kind, or on any other field, fails
+ * itself was delivered, and EVERY error is a FORBIDDEN whose path ends at or passes through `statusCheckRollup`. One error of any other kind, or on any
+ * other field, fails
  * the read as a whole — a repo the token cannot see arrives as a FORBIDDEN at `['repository']`, and that must stay the 403 it is. The first message is the
  * detail: GitHub repeats one sentence per refused PR.
  */
 function checksRefusal(res: GithubResponse<{ repository: unknown }>): string | null {
   const errors = res.errors ?? [];
   if (res.status !== 403 || res.data?.repository == null || errors.length === 0) return null;
-  const onChecks = errors.every((e) => e.type === 'FORBIDDEN' && Array.isArray(e.path) && e.path[e.path.length - 1] === CHECKS_FIELD);
+  const onChecks = errors.every((e) => e.type === 'FORBIDDEN' && Array.isArray(e.path) && e.path.includes(CHECKS_FIELD));
   return onChecks ? (errors[0]?.message ?? 'checks not readable by this token') : null;
 }
 
@@ -252,6 +282,30 @@ const CHECKS: Record<string, PullRequestRow['checks']> = {
   EXPECTED: 'pending'
 };
 
+/** `CheckRunState` values that count as failing: what GitHub's own rollup reads as a failure — a conclusion that blocks the merge. */
+const RUN_FAILING = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED', 'CANCELLED']);
+/** `CheckRunState` values that count as running: not concluded yet, whether started or still waiting for a runner or an approval. */
+const RUN_RUNNING = new Set(['IN_PROGRESS', 'PENDING', 'QUEUED', 'WAITING', 'REQUESTED']);
+/** `StatusState` values, read as `CHECKS` above reads the rollup: `ERROR` fails, `EXPECTED` (a required context not reported yet) waits. */
+const STATUS_FAILING = new Set(['FAILURE', 'ERROR']);
+const STATUS_RUNNING = new Set(['PENDING', 'EXPECTED']);
+
+/**
+ * The rollup's tallies → `PullRequestRow.checkCounts`, or `null` when GitHub sent none. A sum over GitHub's own per-state counts, check runs and status
+ * contexts alike, and nothing else: every state the sets above do not name (success, neutral, skipped, stale, a state added later) is neither failing nor
+ * running, so it counts towards `total` only — `7 passing` reads `total`, never a third tally that a new state could fall outside of.
+ */
+function checkCounts(rollup: GqlRollup): PullRequestRow['checkCounts'] {
+  const c = rollup.contexts;
+  if (c == null) return null;
+  const tally = (list: GqlStateCount[] | null, states: Set<string>) => (list ?? []).reduce((n, s) => n + (states.has(s.state) ? s.count : 0), 0);
+  return {
+    total: c.totalCount,
+    failing: tally(c.checkRunCountsByState, RUN_FAILING) + tally(c.statusContextCountsByState, STATUS_FAILING),
+    running: tally(c.checkRunCountsByState, RUN_RUNNING) + tally(c.statusContextCountsByState, STATUS_RUNNING)
+  };
+}
+
 /**
  * A GraphQL PR node → the row the page draws. Each field is one of GitHub's, renamed or narrowed — nothing combines two, so a row can always be read back
  * against GitHub's own view of the PR. An enum value this file does not know falls back to the reading that claims least: `unknown` mergeability, no review
@@ -281,6 +335,7 @@ export function toRow(node: GqlPullRequest, checksRefused = false): PullRequestR
     mergeState: node.mergeStateStatus.toLowerCase(),
     review: node.reviewDecision === null ? null : (REVIEW[node.reviewDecision] ?? null),
     checks: rollup !== null ? (CHECKS[rollup.state] ?? 'pending') : checksRefused ? 'unknown' : 'none',
+    checkCounts: rollup === null ? null : checkCounts(rollup),
     autoMerge: auto === null || method === null ? null : { method, enabledAt: auto.enabledAt ?? '' },
     // GitHub's own answer (verified against the public schema, 2026-10-29): false when the head is already up to date OR this token cannot update it.
     canUpdateBranch: node.viewerCanUpdateBranch

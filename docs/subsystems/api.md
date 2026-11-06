@@ -182,7 +182,10 @@ successful read clears only a `graphql` sleep that has run out. `pulls.controlle
   and exposes the raw `errors`; `pulls.query.ts`'s `checksRefusal` accepts the answer only when the repository was delivered and EVERY error is a `FORBIDDEN`
   whose path ends at that field — then each refused row's `checks` is `unknown` (never `none`: the commit may well have checks) and GitHub's sentence is
   `checksDetail`, set or cleared by every successful list read; any other error, or that one beside another, fails the read as before. Until 2026-11-02 the
-  client blanked `data` on any error, so three readable repos were hidden as `forbidden`.
+  client blanked `data` on any error, so three readable repos were hidden as `forbidden`. Each row's `checkCounts` (`{ total, failing, running }`) comes from
+  the same rollup's `contexts(first: 0)` — GitHub's per-state tallies of check runs and status contexts, summed in `pulls.query.ts`'s `checkCounts`, never a
+  list of checks — and is `null` without a rollup or without tallies. A refusal whose path passes through `statusCheckRollup` (the tallies beneath it) is
+  the same tolerated refusal: the delivered state stands and that row has no counts.
 - `POST /api/prs/merge` `{ repo, number, method, headSha }` → REST `PUT /repos/{repo}/pulls/{n}/merge` with `merge_method` and `sha`; `200` `merged`, or
   `already-merged` when GitHub refused and the re-read says `MERGED`.
 - `POST /api/prs/auto-merge` `{ repo, number, enable, method? }` (`method` required to enable) → the single-PR read (node id, armed state), then

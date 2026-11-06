@@ -46,6 +46,7 @@ function pr(over: Partial<PullRequestRow> = {}): PullRequestRow {
     mergeState: 'clean',
     review: null,
     checks: 'success',
+    checkCounts: null,
     autoMerge: null,
     canUpdateBranch: true,
     ...over

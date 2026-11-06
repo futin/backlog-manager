@@ -599,7 +599,8 @@ export type MergeMethod = 'squash' | 'merge' | 'rebase';
 /** Every merge method, in the order a PR's default is picked from: the repo's first ALLOWED one in this order (spec, "Merge method"). */
 export const MERGE_METHODS: readonly MergeMethod[] = ['squash', 'merge', 'rebase'];
 
-/** One open pull request, as the PRs page draws it. Every enum is GitHub's, lower-cased or narrowed in `toRow`; nothing here is derived from two fields. */
+/** One open pull request, as the PRs page draws it. Every enum is GitHub's, lower-cased or narrowed in `toRow`; nothing here is derived from two fields —
+ *  `checkCounts` sums one connection's per-state tallies, which is a reading of one field, not a combination of two. */
 export interface PullRequestRow {
   number: number;
   title: string;
@@ -628,6 +629,10 @@ export interface PullRequestRow {
    *  fine-grained token without `Checks: Read-only` and `Commit statuses: Read-only` on a private repo, which GitHub refuses per field while delivering the
    *  rest of the PR (`PrRepoView.checksDetail` carries its sentence). Not `none`: the commit may well have checks, so the page claims nothing either way. */
   checks: 'success' | 'failure' | 'pending' | 'none' | 'unknown';
+  /** How many checks the head commit has, and how many of them fail or still run — GitHub's per-state tallies of check runs and status contexts summed
+   *  (`checkCounts` in `pulls.query.ts`). `null` whenever `checks` is `none` or `unknown`, and when GitHub sent no tallies: the page then says the bare word.
+   *  `checks` stays the verdict — a rollup can read `pending` while every tally is zero (a required check not created yet) — and the counts only size it. */
+  checkCounts: { total: number; failing: number; running: number } | null;
   /** Armed auto-merge, or `null`. `enabledAt` is `''` in the one case GitHub's nullable `DateTime` comes back empty. */
   autoMerge: { method: MergeMethod; enabledAt: string } | null;
   /** GitHub's own `viewerCanUpdateBranch`: false when the head is already up to date with its base OR this token may not update it. */
