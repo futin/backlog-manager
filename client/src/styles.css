@@ -588,6 +588,9 @@ button.rail-count { cursor: pointer }
   background: var(--strip); border-radius: 12px;
   cursor: pointer; overflow: hidden;
 }
+/* Hover fills the card with --card-hover (shared/theme.css says why it is its own token). `.jira-card-match`'s amber ring is a box-shadow, so a hovered
+   matching card keeps it. */
+.board-card:hover { background: var(--card-hover) }
 /* Every padding and gap the card has lives in this one rule, so the
    compact-density retune stays a single block (of variables) rather than a
    hunt through four selectors. 14/16/12 with a 10 px internal gap. */
@@ -1186,7 +1189,7 @@ button.rail-count { cursor: pointer }
    the count are page-local spans rather than `.ui-dot` / `.ui-pill` — `Dot` has no todo/doing/done tones and guard 7 forbids a page rule naming a ui-* family
    token. Plain colours and a solid `--strip` pill, no tint, so nothing joins the daylight-contrast PINNED list; 11/500 `--ink2` on `--strip` is a
    surface pair the contrast suite already measures. */
-.board-col[data-ground] { background: var(--steel); border-radius: 16px; padding: 12px }
+.board-col[data-ground] { background: var(--steel); border-radius: 16px; padding: 12px; --card-hover: var(--card-hover-steel) }
 .board-col-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ink3) }
 .board-col[data-tone='doing'] .board-col-dot { background: var(--amber-solid) }
 .board-col[data-tone='done'] .board-col-dot { background: var(--green-solid) }
