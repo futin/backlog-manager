@@ -41,8 +41,10 @@ import { JiraSetupView } from './JiraSetupView';
  * changes, so a stale issue never survives a trip to Setup and back (JiraView itself does not unmount on a page switch).
  *
  * The slot holds the issue AND the board's fold index as it stood at the click (`childrenOf`, grouped-board spec §6), which the modal's Children tree hangs
- * grandchildren from. One setter serves both the board's card click and the modal's tree-row click, so a row swaps the one modal's issue and carries the
- * same snapshot forward — never a second modal.
+ * grandchildren from. A tree-row click swaps the one modal's issue and carries the same snapshot forward — never a second modal — but it PUSHES onto the
+ * walk rather than replacing the slot, so the modal's head can offer `← <the issue before>` and a reader who went three children deep can climb back out
+ * without closing and reopening the card (DESIGN.md §8.9.2, Head). A page's open always starts a fresh walk: a card click is a new reading, not a step of
+ * the last one.
  *
  * **The write counter is held here too** (Jira phase 3, plan ruling R7). The modal's landed write — `Assign to me`, `Move to…` — calls `onWrote`,
  * which bumps `nudge`; the Board and Sessions pages hand it to `useJiraBoard`, whose list re-reads at once on the change, `off` boards included. The two never reach
@@ -59,15 +61,22 @@ import { JiraSetupView } from './JiraSetupView';
  * `live`, and the status poll alone runs on the boards' clock, minutes away) AND the sessions payload, and bump `nudge`, because the ticket may have been
  * assigned and moved either way. Like the open issue, the slot is cleared whenever `page` changes.
  */
+type OpenSlot = { issue: JiraIssue; childrenOf: JiraChildrenIndex | null };
+
 export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
   const { data, error, reload } = useJiraContext();
   const { reload: reloadSessions } = useJiraSessionsContext();
   const [page] = useJiraPage();
-  const [openIssue, setOpenIssue] = useState<{ issue: JiraIssue; childrenOf: JiraChildrenIndex | null } | null>(null);
-  const openOne = (issue: JiraIssue, childrenOf: JiraChildrenIndex | null): void => setOpenIssue({ issue, childrenOf });
+  // The walk: the issue opened from a page, then every Children row clicked from there, the last one shown. A page's open STARTS a walk (one entry), a
+  // tree-row click pushes, the head's Back chip pops, and a close empties it — so `[]` is "no modal" and there is no separate null slot to disagree with it.
+  const [walk, setWalk] = useState<readonly OpenSlot[]>([]);
+  const openOne = (issue: JiraIssue, childrenOf: JiraChildrenIndex | null): void => setWalk([{ issue, childrenOf }]);
+  const openChild = (issue: JiraIssue, childrenOf: JiraChildrenIndex | null): void => setWalk((w) => [...w, { issue, childrenOf }]);
+  const openIssue = walk.length === 0 ? null : walk[walk.length - 1];
+  const cameFrom = walk.length < 2 ? null : walk[walk.length - 2].issue;
   // The slot is JiraView's, and JiraView does not unmount on a page switch, so leaving the Board must clear it by hand — otherwise returning to Board would
   // redraw the modal for an issue the reader closed the page on.
-  useEffect(() => setOpenIssue(null), [page]);
+  useEffect(() => setWalk([]), [page]);
   const [launch, setLaunch] = useState<{ issue: JiraIssue; action: JiraAction } | null>(null);
   useEffect(() => setLaunch(null), [page]);
   const [nudge, setNudge] = useState(0);
@@ -98,10 +107,12 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
         <JiraDetail
           issue={openIssue.issue}
           childrenOf={openIssue.childrenOf}
-          onOpenIssue={openOne}
+          onOpenIssue={openChild}
+          back={cameFrom}
+          onBack={() => setWalk((w) => w.slice(0, -1))}
           onWrote={() => setNudge((n) => n + 1)}
           onRun={run}
-          onClose={() => setOpenIssue(null)}
+          onClose={() => setWalk([])}
         />
       )}
       {/* Drawn after the modal; it ranks above it because it mounts later — see the header. Keyed by issue so a second launch never inherits the first's form. */}

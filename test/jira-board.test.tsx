@@ -1162,6 +1162,53 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     expect(boardRequests().length).toBe(boardBefore + 1);
   });
 
+  // DESIGN.md §8.9.2, Head: a Children-row click pushes onto `JiraView`'s walk, and the head's `← <key>` pops one step — through the real page, because
+  // the walk lives one level above the modal and `jira-detail`'s cases hand the modal a mock `onBack`.
+  it('a Children row walks down, Back climbs one step at a time, and a fresh card click starts a new walk', async () => {
+    await renderRun();
+    const refund = (lists[ALPHA.id] ?? []).find((i) => i.key === 'PAY-131') as JiraIssue;
+    const child = { ...refund, key: 'PAY-200', summary: 'Child story', parent: { key: 'PAY-131', summary: refund.summary } };
+    const grandchild = { ...refund, key: 'PAY-201', summary: 'Grandchild task', parent: { key: 'PAY-200', summary: 'Child story' } };
+    const kids: Record<string, JiraIssue[]> = { 'PAY-131': [child], 'PAY-200': [grandchild], 'PAY-201': [] };
+    const byKey: Record<string, JiraIssue> = { 'PAY-131': refund, 'PAY-200': child, 'PAY-201': grandchild };
+    const answered = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const m = /^\/api\/jira\/issue\/(PAY-\d+)$/.exec(String(input));
+      if (m !== null && byKey[m[1]] !== undefined)
+        return ok({ ...byKey[m[1]], description: '', children: kids[m[1]], transitions: [], boards: [ALPHA.id], session: null });
+      return (answered as jest.Mock)(input, init);
+    }) as unknown as typeof fetch;
+    const dialog = (): HTMLElement => screen.getByRole('dialog');
+    const back = (): HTMLElement | null => within(dialog()).queryByRole('button', { name: /^Back to / });
+
+    await userEvent.click(card('Refund partial captures'));
+    await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
+    expect(back()).toBeNull();
+
+    await userEvent.click(await within(dialog()).findByRole('button', { name: /PAY-200 Child story/ }));
+    await screen.findByRole('dialog', { name: /PAY-200 Child story/ });
+    expect(back()).toHaveAccessibleName('Back to PAY-131');
+    await userEvent.click(await within(dialog()).findByRole('button', { name: /PAY-201 Grandchild task/ }));
+    await screen.findByRole('dialog', { name: /PAY-201 Grandchild task/ });
+    expect(back()).toHaveAccessibleName('Back to PAY-200');
+
+    await userEvent.click(back() as HTMLElement);
+    await screen.findByRole('dialog', { name: /PAY-200 Child story/ });
+    expect(back()).toHaveAccessibleName('Back to PAY-131');
+    await userEvent.click(back() as HTMLElement);
+    await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
+    expect(back()).toBeNull();
+
+    // Down one, close, and open the card again: the walk is the reading's, so the reopened dialog has nowhere to go back to.
+    await userEvent.click(await within(dialog()).findByRole('button', { name: /PAY-200 Child story/ }));
+    await screen.findByRole('dialog', { name: /PAY-200 Child story/ });
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await userEvent.click(card('Refund partial captures'));
+    await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
+    expect(back()).toBeNull();
+  });
+
   it('the chip stops the card: a click or Enter on it opens no modal', async () => {
     await renderRun();
     const chip = runMore('Refund partial captures');

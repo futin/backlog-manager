@@ -303,7 +303,7 @@ describe('the six dialogs on the stack', () => {
       render(<OrchestrateSheet project="/abs/alpha" projectName="alpha" source="files" items={[item]} spawnMaxPermission="acceptEdits" onClose={close[2]} refresh={() => {}} />),
       render(
         <JiraContext.Provider value={jira}>
-          <JiraDetail issue={JIRA_CARD} childrenOf={null} onOpenIssue={() => {}} onWrote={() => {}} onRun={() => {}} onClose={close[3]} />
+          <JiraDetail issue={JIRA_CARD} childrenOf={null} onOpenIssue={() => {}} back={null} onBack={() => {}} onWrote={() => {}} onRun={() => {}} onClose={close[3]} />
         </JiraContext.Provider>
       ),
       render(
