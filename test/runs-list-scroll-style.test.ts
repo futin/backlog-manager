@@ -181,6 +181,25 @@ describe('runs list bounded-scroll stylesheet rules (task-16)', () => {
     expect(declares(css, '.ui-ledger-day', /(^|[\s;])background\s*:\s*var\(\s*--strip\s*\)/)).toBe(true);
   });
 
+  /* #474: the Live sheet never yields (`flex: none`, so it stays put above a long History), and with nothing capping it a tall live list plus the History's
+     240 px floor overflowed the split — the document grew past the viewport at 1440×1000 and the sticky rail scrolled off. It is capped at the column less
+     that floor and the gap, and scrolls itself past the cap; `flex: none` stays, because proportional shrinking would squeeze a short Live list instead. */
+  it('caps the Live sheet so the History floor always fits beside it, scrolling past the cap, without letting it shrink', () => {
+    expect(declares(base, '.runs-live-sheet', /(^|[\s;])flex\s*:\s*none\b/)).toBe(true);
+    expect(declares(base, '.runs-live-sheet', /(^|[\s;])max-height\s*:\s*calc\(\s*100%\s*-\s*240px\s*-\s*var\(--group-gap\)\s*\)/)).toBe(true);
+    expect(declares(base, '.runs-live-sheet', /(^|[\s;])overflow-y\s*:\s*auto\b/)).toBe(true);
+    expect(declares(base, '.runs-live-sheet', /(^|[\s;])overscroll-behavior\s*:\s*contain\b/)).toBe(true);
+  });
+
+  /* #474: `flex: 1` is a zero basis, so the project name was laid out as needing no width and got whatever the `flex: none` status, counts and wall time
+     left — 53–81 px at 1440, nearly nothing at 390. Its own width now, floored at 20ch, so the head wraps the trailing items under it instead. */
+  it('lays the row\'s project name out at its own width, floored at 20ch, not at a zero basis', () => {
+    expect(declares(base, '.runs-row-project', /(^|[\s;])flex\s*:\s*1 1 auto\s*(;|$)/)).toBe(true);
+    expect(declares(base, '.runs-row-project', /(^|[\s;])min-width\s*:\s*min\(\s*100%\s*,\s*20ch\s*\)/)).toBe(true);
+    expect(declares(base, '.runs-row-project', /(^|[\s;])flex\s*:\s*1\s*(;|$)/)).toBe(false);
+    expect(declares(base, '.runs-row-head', /(^|[\s;])flex-wrap\s*:\s*wrap\b/)).toBe(true);
+  });
+
   it('un-bounds the whole section once the split stacks', () => {
     expect(runsPhoneBlock).toBeDefined();
     const phone = runsPhoneBlock as string;
@@ -195,6 +214,9 @@ describe('runs list bounded-scroll stylesheet rules (task-16)', () => {
       expect(declares(phone, selector, /(^|[\s;])max-height\s*:\s*none\b/)).toBe(true);
       expect(declares(phone, selector, /(^|[\s;])overflow\s*:\s*visible\b/)).toBe(true);
     }
+    // The Live sheet's cap (#474) comes off with the rest of the bound: in one column the page scrolls, and no box inside it may.
+    expect(declares(phone, '.runs-live-sheet', /(^|[\s;])max-height\s*:\s*none\b/)).toBe(true);
+    expect(declares(phone, '.runs-live-sheet', /(^|[\s;])overflow\s*:\s*visible\b/)).toBe(true);
   });
 });
 
