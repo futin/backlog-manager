@@ -72,8 +72,8 @@ export interface PrChip {
  * The chips of one row, in the order a person reads a PR: is it a draft, what do reviewers say, what do the checks say, can it merge, is it behind, is
  * auto-merge armed. `checks: 'none'` draws nothing — a repo with no checks has nothing to say, and `checks passing` there would be a claim GitHub never made.
  * `checks: 'unknown'` DOES draw, neutral: the token may not read this repo's checks (`PrRepoView.checksDetail`), and a row that said nothing would read as a
- * repo without checks, which is the one thing the page does not know. `mergeable: 'unknown'` draws nothing: GitHub is still computing it, which is a
- * moment, not a state worth a chip.
+ * repo without checks, which is the one thing the page does not know. `mergeable: 'unknown'` draws a neutral `mergeability pending` with a clock (the mock's pill, ui-verify D2): GitHub is still
+ * computing it, so the chip claims no verdict, only that there is none yet — a row that said nothing read as mergeable.
  */
 export function prChips(pr: PullRequestRow): PrChip[] {
   const chips: PrChip[] = [];
@@ -86,6 +86,8 @@ export function prChips(pr: PullRequestRow): PrChip[] {
   else if (pr.checks === 'pending') chips.push({ label: 'checks pending', tone: 'warn', glyph: 'clock' });
   else if (pr.checks === 'unknown') chips.push({ label: 'checks unknown', tone: 'neutral' });
   if (pr.mergeable === 'conflicting') chips.push({ label: 'conflicts', tone: 'bad', glyph: 'cross' });
+  // Neutral, not a warn: it is a moment, not a problem. Matrix's Mergeable cell says `computing` for the same fact.
+  if (pr.mergeable === 'unknown') chips.push({ label: 'mergeability pending', tone: 'neutral', glyph: 'clock' });
   if (pr.mergeState === 'behind') chips.push({ label: 'behind base', tone: 'warn' });
   // `done`, the tint the mock gives `auto-merge on`: an armed PR is a thing GitHub will finish by itself, not something running, and the solid `live` fill
   // made it the loudest pill on the row.

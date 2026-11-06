@@ -6,6 +6,7 @@ import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
+import { Glyph, type GlyphName } from '../client/src/components/ui/Glyphs';
 import { PrInbox } from '../client/src/components/github/PrInbox';
 import type { PrLayoutProps } from '../client/src/components/github/pr-layout-props';
 import { prRunWarning } from '../client/src/lib/pr-run';
@@ -13,6 +14,9 @@ import { mainOf, moreOf, openOf, menuRow } from './helpers/pr-keys';
 import { readStyles, ruleBlock, ruleBlocks } from './helpers/css-rule';
 import { PrCards } from '../client/src/components/github/PrCards';
 import type { OrchestratorRun, ProjectSummary, PrRepoView, PullRequestRow, RunQueueItem } from '../shared/types';
+
+/** A glyph's markup, rendered into a detached container (`Glyph` carries no name attribute, and `react-dom/server` needs TextEncoder, which jsdom lacks). */
+const glyphSvg = (name: GlyphName): string => render(<Glyph name={name} />, { container: document.createElement('div') }).container.innerHTML;
 
 /**
  * GitHub › PRs, Inbox layout (`.claude/DESIGN.md` §8.11; specs `2026-10-29-prs-layouts-design.md`, "Inbox" and "Writes and outcomes", and
@@ -176,6 +180,37 @@ describe('PrInbox — items', () => {
     expect(item).toHaveTextContent('feature/1 → main');
     expect(item).toHaveTextContent('1h ago');
     expect(screen.getByTestId('pr-row-a/x#4')).toHaveTextContent('ghost');
+  });
+
+  /*
+    The mock's meta line (`PRs.dc.html`: `<span class="av">F</span>futin · <branch glyph> execute/468 → main`): a 16 px initials disc before the author and the branch
+    glyph before the branches (ui-verify D3, D4). Both decoration — the login and the branches are written beside them. Cards draws the same `PrRow`.
+  */
+  it('leads the author with an aria-hidden one-letter disc, uppercased in JS, and the branches with the branch glyph', () => {
+    render(<PrInbox {...props([repo('a/x', [pr({ number: 51, author: 'futin' }), pr({ number: 52, author: null })])])} />);
+    const meta = (n: number) => screen.getByTestId(`pr-row-a/x#${n}`).querySelector('.prs-meta') as HTMLElement;
+    const disc = meta(51).querySelector('.prs-av') as HTMLElement;
+    expect(disc).toHaveTextContent(/^F$/);
+    expect(disc).toHaveAttribute('aria-hidden', 'true');
+    // The login stays beside the disc, as its own text.
+    expect(within(meta(51)).getByText('futin')).toBeInTheDocument();
+    // A deleted account reads `ghost`, so its disc is `G`.
+    expect(meta(52).querySelector('.prs-av')).toHaveTextContent(/^G$/);
+    const branches = meta(51).querySelector('.prs-branches') as HTMLElement;
+    const glyph = branches.previousElementSibling as HTMLElement;
+    expect(glyph.tagName.toLowerCase()).toBe('svg');
+    expect(glyph).toHaveAttribute('aria-hidden', 'true');
+    expect(glyph.outerHTML).toBe(glyphSvg('branch'));
+  });
+
+  it('sizes the author disc for the meta line: 16 px, round, the board\'s magenta tint, a letter at the 11 px floor, and no text-transform', () => {
+    const disc = ruleBlock(readStyles(), '.prs-av') as string;
+    expect(disc).toMatch(/width: 16px/);
+    expect(disc).toMatch(/height: 16px/);
+    expect(disc).toMatch(/border-radius: 999px/);
+    expect(disc).toMatch(/color-mix\(in srgb, var\(--magenta\) 14%, var\(--strip\)\)/);
+    expect(disc).toMatch(/font-size: 11px/);
+    expect(disc).not.toMatch(/text-transform/);
   });
 
   it('draws the checks tile in the checks tone, the neutral one when there are none', () => {
@@ -365,7 +400,8 @@ describe('PrInbox — one row vocabulary', () => {
     expect(Array.from(meta.children).map((el) => el.textContent)).toEqual([
       'x',
       '·',
-      'futin',
+      // The author is the disc's letter and the login in one flex item (`.prs-author`); the glyph before the branches has no text.
+      'Ffutin',
       '·',
       'backlog/42 → main',
       '·',
@@ -496,7 +532,7 @@ describe('PrInbox — cards, triage dots and the Quiet section', () => {
     const worth = screen.getByRole('button', { name: 'Worth a look 1' });
     const quiet = screen.getByRole('button', { name: 'Quiet 1' });
     expect(needs.querySelector('.ui-dot')).toHaveClass('ui-dot-crashed');
-    expect(worth.querySelector('.ui-dot')).toHaveClass('ui-dot-paused');
+    expect(worth.querySelector('.ui-dot')).toHaveClass('ui-dot-warn');
     expect(quiet.querySelector('.ui-dot')).toBeNull();
     // Before the label, and decorative: the accessible names above still read as the words and the count.
     expect(needs.firstElementChild).toContainElement(needs.querySelector('.ui-dot') as HTMLElement);

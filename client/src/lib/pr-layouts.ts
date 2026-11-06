@@ -399,7 +399,7 @@ export function columnCounts(ranked: readonly RankedPr[]): Record<MatrixColumn, 
 /** A level's `Dot` tone. Quiet is `undefined` on purpose: `Dot` draws no tone as a toneless grey, which is the level's own look. */
 export const LEVEL_DOT: Record<PrLevel, DotTone | undefined> = {
   'needs-you': 'crashed',
-  'worth-a-look': 'paused',
+  'worth-a-look': 'warn',
   quiet: undefined
 };
 

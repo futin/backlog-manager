@@ -1,6 +1,8 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { render } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
@@ -22,12 +24,23 @@ describe('Dot', () => {
   });
 
   it('lands each status tone as its own class', () => {
-    const tones: DotTone[] = ['live', 'paused', 'crashed', 'done', 'ramp-refactors', 'ramp-ideas', 'ramp-bugs', 'ramp-tasks'];
+    const tones: DotTone[] = ['live', 'paused', 'warn', 'crashed', 'done', 'ramp-refactors', 'ramp-ideas', 'ramp-bugs', 'ramp-tasks'];
     for (const tone of tones) {
       const { unmount } = render(<Dot tone={tone} />);
       expect(dot()).toHaveClass(`ui-dot-${tone}`);
       unmount();
     }
+  });
+
+  /*
+    `warn` is the amber MARK, `--amber-solid` (DESIGN §8.2's daylight table), and `paused` stays `--mustard` for the runs that use it: the PRs page's worth-a-look dot
+    was drawn through `paused` and read olive where the mock's `.dot.a` is amber (ui-verify D1). The stylesheet is read as text, as motion-style.test.ts does,
+    because jsdom computes no cascade.
+  */
+  it('paints warn with --amber-solid and leaves paused on --mustard', () => {
+    const css = readFileSync(join(__dirname, '../client/src/styles.css'), 'utf8');
+    expect(css).toMatch(/\.ui-dot-warn \{ background: var\(--amber-solid\) \}/);
+    expect(css).toMatch(/\.ui-dot-paused \{ background: var\(--mustard\) \}/);
   });
 
   /*

@@ -1,3 +1,4 @@
+import { Glyph } from '../ui/Glyphs';
 import { GlyphTile } from '../ui/GlyphTile';
 import { Pill } from '../ui/Pill';
 import { PrActions } from './PrActions';
@@ -43,6 +44,7 @@ export function PrRow({
   const updating = props.marks[key] !== undefined;
   const outcome = props.outcomes[key];
   const warning = prRunWarning(pr, repo.repo, props.ctx, props.now);
+  const author = pr.author ?? 'ghost';
   const age = ageText(pr.updatedAt, props.now);
   const pills = prPills(pr);
   const write = (call: () => Promise<PrWriteResult>) => props.write(key, pr.headSha, call);
@@ -76,9 +78,20 @@ export function PrRow({
                 <span aria-hidden="true">·</span>
               </>
             )}
-            <span>{pr.author ?? 'ghost'}</span>
+            <span className="prs-author">
+              {/* The mock's initials disc (`.av`, as the Jira card's foot draws one): one letter, uppercased HERE, because design guard 4 allows exactly one
+                  `text-transform` rule. Decoration — the login is written beside it. */}
+              <span className="prs-av" aria-hidden="true">
+                {Array.from(author)[0].toUpperCase()}
+              </span>
+              <span>{author}</span>
+            </span>
             <span aria-hidden="true">·</span>
-            <span className="prs-branches">{`${pr.head} → ${pr.base}`}</span>
+            {/* The branch glyph leads `head → base` as in the mock; Matrix's sub-line draws none. */}
+            <span className="prs-branch-pair">
+              <Glyph name="branch" />
+              <span className="prs-branches">{`${pr.head} → ${pr.base}`}</span>
+            </span>
             {age !== null && (
               <>
                 <span aria-hidden="true">·</span>

@@ -484,7 +484,7 @@ describe('columnCounts', () => {
 
 describe('LEVEL_DOT', () => {
   it('maps the two loud levels to Dot tones and leaves Quiet toneless', () => {
-    expect(LEVEL_DOT).toEqual({ 'needs-you': 'crashed', 'worth-a-look': 'paused', quiet: undefined });
+    expect(LEVEL_DOT).toEqual({ 'needs-you': 'crashed', 'worth-a-look': 'warn', quiet: undefined });
   });
 });
 

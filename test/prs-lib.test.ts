@@ -108,6 +108,17 @@ describe('prChips', () => {
     expect(prChips(pr({ checks: 'unknown' }))).toEqual([{ label: 'checks unknown', tone: 'neutral' }]);
   });
 
+  it('says mergeability pending, neutral with a clock, while GitHub has not computed it — the mock draws it, and Matrix\'s cell already says computing', () => {
+    expect(prChips(pr({ mergeable: 'unknown' }))).toEqual([{ label: 'mergeability pending', tone: 'neutral', glyph: 'clock' }]);
+    // In reading order: after the checks chip, before `behind base` and auto-merge.
+    expect(prChips(pr({ checks: 'success', mergeable: 'unknown', mergeState: 'behind' }))).toEqual([
+      { label: 'checks passing', tone: 'done', glyph: 'tick' },
+      { label: 'mergeability pending', tone: 'neutral', glyph: 'clock' },
+      { label: 'behind base', tone: 'warn' }
+    ]);
+    expect(prChips(pr({ mergeable: 'mergeable' }))).toEqual([]);
+  });
+
   it('draws no checks chip for checks: none, and nothing for a clean PR with no review', () => {
     expect(prChips(pr({ checks: 'none', review: null }))).toEqual([]);
   });

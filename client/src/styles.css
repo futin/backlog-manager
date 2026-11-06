@@ -3376,6 +3376,16 @@ button.rail-count { cursor: pointer }
 .prs-title { min-width: 0; overflow-wrap: anywhere }
 .prs-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; color: var(--ink2) }
 .prs-branches { overflow-wrap: anywhere }
+/* The meta line's two lead-ins, from the mock's row (`PRs.dc.html`: `<span class="av">F</span>futin · <branch glyph> head → base`). Each pair is one flex item of
+   `.prs-line`, so the disc never wraps away from its login nor the glyph from its branches. The disc is the Jira card's initials disc (`.jira-card-av`: the
+   magenta tint on `--strip`, 999px, 600 weight) sized for a 13 px line — 16 px, as the mock's inline `.av` — and the 11 px floor is the guard's, so the mock's 8 px
+   letter does not survive; the letter is uppercased in JS, never by `text-transform` (guard 4). */
+.prs-author, .prs-branch-pair { display: inline-flex; align-items: center; gap: 4px; min-width: 0 }
+.prs-av {
+  display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; border-radius: 999px;
+  background: color-mix(in srgb, var(--magenta) 14%, var(--strip)); color: var(--magenta); font-size: 11px; font-weight: 600; line-height: 1;
+}
+.prs-branch-pair > svg { flex: none }
 .prs-chips { display: flex; flex-wrap: wrap; gap: 6px }
 /* A row's pills and meta are ONE wrapping line (mock `PRs.dc.html`: the pills, then `author · head → base · age`). The two wrappers stay in the markup so the meta's
    children are still a list, and dissolve here so their items flow in this container; Matrix's own `.prs-meta` is untouched, it is not inside `.prs-line`. */
@@ -3684,6 +3694,8 @@ button.rail-count { cursor: pointer }
 .ui-dot-10 { width: 10px; height: 10px }
 .ui-dot-live { background: var(--fill-live) }
 .ui-dot-paused { background: var(--mustard) }
+/* The amber MARK (`--amber-solid`, DESIGN §8.2's daylight table) — the PRs page's worth-a-look dot. `paused` stays mustard for the runs that use it. */
+.ui-dot-warn { background: var(--amber-solid) }
 .ui-dot-crashed { background: var(--red) }
 .ui-dot-done { background: var(--fill-progress) }
 /* The category ramp read left to right (§8.2), the same four the column heads

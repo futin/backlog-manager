@@ -112,7 +112,7 @@ export function PrActions({
     armed
       ? { id: 'auto', glyph: 'clock', tone: 'neutral', label: 'Disable auto-merge', sub: 'GitHub stops waiting to merge', block: autoMergeBlock(pr, repo), act: arm, primary: false }
       : { id: 'auto', glyph: 'clock', tone: 'neutral', label: 'Enable auto-merge', sub: 'GitHub merges when checks pass', block: autoMergeBlock(pr, repo), act: arm, primary: false },
-    { id: 'update', glyph: 'refresh', tone: 'neutral', label: 'Update branch', sub: `merge ${base} into ${pr.head}`, block: updateBlock(pr, repo, updating), act: update, primary: primary === 'update' }
+    { id: 'update', glyph: 'up', tone: 'neutral', label: 'Update branch', sub: `merge ${base} into ${pr.head}`, block: updateBlock(pr, repo, updating), act: update, primary: primary === 'update' }
   ];
 
   const mainId = `${ids}-main`;
