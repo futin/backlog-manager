@@ -35,8 +35,8 @@ export const LEVEL_LABEL: Record<PrLevel, string> = {
 };
 
 /**
- * A repo the token cannot read — its last read said `forbidden` or `not-found`. Every layout, the `N open` pill and the toolbar's hidden count read this one
- * function (spec, "Reach of a repo"). A transient failure (`rate-limited`, `error`) is NOT no-access: the repo is still readable, so it stays shown, beside
+ * A repo the token cannot read — its last read said `forbidden` or `not-found`. Every layout, the band's `N open in M repos` and the toolbar's hidden count read
+ * this one function (spec, "Reach of a repo"). A transient failure (`rate-limited`, `error`) is NOT no-access: the repo is still readable, so it stays shown, beside
  * its last answer and a line saying what went wrong.
  */
 export function isNoAccess(repo: PrRepoView): boolean {

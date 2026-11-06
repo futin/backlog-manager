@@ -389,7 +389,9 @@ button.rail-count { cursor: pointer }
    is made flex all the way down: `.main` a column, its one child `.wrap` growing, and the `.board` and its `.board-columns` growing in turn. `.wrap` is a flex
    column ONLY where it holds a board of columns (`:has`), so Runs, Settings, the Sessions table and the rest keep their block layout untouched. Every link
    is `flex: 1`, never a height, so with many cards the content is simply taller than the well and the page scrolls as it always did; and under 700 px
-   `.maincol` is `display: contents` and the shell is not stretched, so nothing fills there — the columns stack at their own height. */
+   `.maincol` is `display: contents` and the shell is not stretched, so nothing fills there — the columns stack at their own height. Files › Archive renders
+   the same `.board-columns` inside a `.board`, so its toneless, groundless columns stretch too — on purpose, not by accident, and harmless: nothing there paints a
+   column's height, and `.archive-month`'s sticky belongs to its month group, which is not a stretched element. */
 .main { display: flex; flex-direction: column }
 .wrap:has(> .board > .board-columns) { flex: 1; display: flex; flex-direction: column }
 .wrap > .board:has(> .board-columns) { flex: 1 }
@@ -3381,6 +3383,10 @@ button.rail-count { cursor: pointer }
    magenta tint on `--strip`, 999px, 600 weight) sized for a 13 px line — 16 px, as the mock's inline `.av` — and the 11 px floor is the guard's, so the mock's 8 px
    letter does not survive; the letter is uppercased in JS, never by `text-transform` (guard 4). */
 .prs-author, .prs-branch-pair { display: inline-flex; align-items: center; gap: 4px; min-width: 0 }
+/* A meta item and its trailing `·` are one flex item of `.prs-line` (`PrRow`), so a wrap breaks between items, never inside a pair: no dot starts a line or
+   sits alone at the end of one. The 6 px before the dot restores the spacing the line's own gap used to give a free-standing separator. */
+.prs-meta-item { display: inline-flex; align-items: center; min-width: 0 }
+.prs-sep { margin-left: 6px }
 .prs-av {
   display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; border-radius: 999px;
   background: color-mix(in srgb, var(--magenta) 14%, var(--strip)); color: var(--magenta); font-size: 11px; font-weight: 600; line-height: 1;
@@ -3404,6 +3410,12 @@ button.rail-count { cursor: pointer }
 .prs-inbox { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
 .prs-inbox-triage { display: flex; min-width: 0 }
 .prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px }
+/* On a phone the 320 px text basis plus the 40 px tile and the 16 px gap is wider than a boxed card's ~306 px inner width, so the text column wrapped under the
+   tile and left it alone on the first line. Under 700 px the basis drops to 0 (the keys already take their own line below), so the text grows into whatever the
+   tile leaves and the tile stays beside the title. Inbox's list only: Cards' rows already have a 240 px basis. */
+@media (max-width: 700px) {
+  .prs-inbox-list > .prs-row > .prs-row-main { flex: 1 1 0 }
+}
 /* The shared row's first/last padding resets and its between-rows rule are each as specific as this and earlier in the sheet, so they are restated here for
    the card: every card is padded the same and the hairline is its border, not a divider. */
 .prs-inbox-list > .prs-row,
@@ -3434,10 +3446,10 @@ button.rail-count { cursor: pointer }
 .prs-band-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green-solid) }
 .prs-switch { display: flex; min-width: 0 }
 @media (max-width: 700px) {
-  .prs-band > :last-child { flex: 1 0 100%; margin-left: 0 }
+  .prs-band:has(.prs-switch) > :last-child { flex: 1 0 100%; margin-left: 0 }
   .prs-switch { flex: 1 1 auto }
   .prs-switch [role='group'] { display: flex; flex: 1 1 auto; min-width: 0 }
-  .prs-switch [role='group'] button { flex: 1 1 0; min-width: 0; justify-content: center }
+  .prs-switch [role='group'] button { flex: 1 1 0; min-width: 0 }
 }
 
 /* GitHub › PRs toolbar (.claude/DESIGN.md §8.11): only the notes now — `N repos hidden — no access`, Cards' `N repos with no open PRs` — and the row is not
@@ -3481,7 +3493,7 @@ button.rail-count { cursor: pointer }
 .prs-matrix-row[aria-expanded="true"] td:first-child { box-shadow: inset 3px 0 0 var(--ink) }
 /* The cap is on a block inside the cell, never on the `<td>` — CSS leaves `max-width` on a table cell undefined and Chrome ignores it. The dot and PR cells
    together take at most 60 % of the box (34 px dot, 12 px of the PR cell's padding), and the 200 px floor yields to that cap, so a 375 px phone keeps about
-   120 px of evidence in view; the title wraps inside it rather than ellipsizing. */
+   120 px of evidence in view; the title stays one line and ellipsizes (rule below), its full text in the span's `title`. */
 .prs-matrix-pr-inner { min-width: min(200px, calc(60cqw - 46px)); max-width: calc(60cqw - 46px) }
 .prs-matrix-pr .prs-row-title { font-size: 14px }
 /* Matrix's title is one line with an ellipsis (mock `PRsLayouts.dc.html`; the full title is the span's `title`). `min-width: 0` on this flex item is what lets the
@@ -3838,10 +3850,10 @@ button.rail-count { cursor: pointer }
 .ui-seg button:hover:not(:disabled) { color: var(--ink); background: var(--hover-fill) }
 .ui-seg button:disabled { cursor: default; opacity: .4 }
 .ui-seg button.on { color: var(--ink); background: var(--strip-hi); border-color: var(--ink3) }
-/* The optional per-option count (Sessions' state filter): quieter than the label, steadier on the pressed option; tabular so a changing number does not
-   jiggle the segment. */
 /* `Segmented`'s optional `leading` node (a level `Dot` in GitHub › PRs' triage): before the label, centred on its line, 6 px clear of it. */
 .ui-seg-lead { display: inline-block; margin-right: 6px; vertical-align: middle; line-height: 0 }
+/* The optional per-option count (Sessions' state filter): quieter than the label, steadier on the pressed option; tabular so a changing number does not
+   jiggle the segment. */
 .ui-seg-count { font-size: 11px; font-weight: 600; color: var(--ink3); font-variant-numeric: tabular-nums }
 .ui-seg button.on .ui-seg-count { color: var(--ink2) }
 /* The pill variant (§8.6) — `Segmented`'s `pill` prop, a variant on the

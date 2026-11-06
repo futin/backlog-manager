@@ -40,7 +40,9 @@ function RepoSheet(props: PrLayoutProps & { repo: PrRepoView; shown: readonly st
             title={
               <span className="prs-repo-title">
                 <GlyphTile glyph="branch" tone="ink" size={28} />
-                <span className="prs-repo-name">{repoShortName(repo.repo, shown)}</span>
+                <span className="prs-repo-name" title={repo.repo}>
+                  {repoShortName(repo.repo, shown)}
+                </span>
                 <span className="prs-repo-pills">
                   {repo.prs.length > 0 && <Pill>{`${repo.prs.length} open`}</Pill>}
                   {repo.syncOff !== null && <Pill tone="warn">sync off</Pill>}
@@ -83,7 +85,8 @@ function RepoSheet(props: PrLayoutProps & { repo: PrRepoView; shown: readonly st
 export function PrCards(props: PrLayoutProps) {
   const cards = cardRepos(props.repos, props.outcomes);
   if (cards.length === 0 && transientFailures(props.repos).length === 0) return <p className="prs-status">no open pull requests</p>;
-  const shown = cards.map((repo) => repo.repo);
+  // Every shown repo, drawn or not — the set Inbox and Matrix hand `repoShortName` — so one repo is never shortened differently in two layouts.
+  const shown = props.repos.map((repo) => repo.repo);
   return (
     <>
       <div className="prs-cards-grid">

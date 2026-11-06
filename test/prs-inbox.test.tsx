@@ -267,15 +267,15 @@ describe('PrInbox — items', () => {
   it('names a PR\'s repo at the start of the meta line, short, and the full owner/name only where two shown repos share a short one', () => {
     const { unmount } = render(<PrInbox {...props([repo('futin/backlog-manager', [pr({ number: 41 })]), repo('futin/timify-web', [pr({ number: 42 })])])} />);
     const meta = (n: number, name: string) => screen.getByTestId(`pr-row-${name}#${n}`).querySelector('.prs-meta') as HTMLElement;
-    expect(meta(41, 'futin/backlog-manager').firstElementChild).toHaveTextContent(/^backlog-manager$/);
-    expect(meta(42, 'futin/timify-web').firstElementChild).toHaveTextContent(/^timify-web$/);
+    expect(meta(41, 'futin/backlog-manager').querySelector('.prs-inbox-repo')).toHaveTextContent(/^backlog-manager$/);
+    expect(meta(42, 'futin/timify-web').querySelector('.prs-inbox-repo')).toHaveTextContent(/^timify-web$/);
     // The name is no longer beside the title.
     expect(screen.getByTestId('pr-row-futin/timify-web#42').querySelector('.prs-row-title .prs-inbox-repo')).toBeNull();
     unmount();
 
     render(<PrInbox {...props([repo('acme/ui-kit', [pr({ number: 43 })]), repo('futin/ui-kit', [pr({ number: 43 })])])} />);
-    expect(meta(43, 'acme/ui-kit').firstElementChild).toHaveTextContent(/^acme\/ui-kit$/);
-    expect(meta(43, 'futin/ui-kit').firstElementChild).toHaveTextContent(/^futin\/ui-kit$/);
+    expect(meta(43, 'acme/ui-kit').querySelector('.prs-inbox-repo')).toHaveTextContent(/^acme\/ui-kit$/);
+    expect(meta(43, 'futin/ui-kit').querySelector('.prs-inbox-repo')).toHaveTextContent(/^futin\/ui-kit$/);
   });
 
   it('draws an armed auto-merge as a tinted done pill, not the solid live fill', () => {
@@ -396,18 +396,24 @@ describe('PrInbox — one row vocabulary', () => {
     render(<PrInbox {...props([repo('a/x', [runPr])], { ctx: runCtx })} />);
     const row = screen.getByTestId('pr-row-a/x#9');
     const meta = row.querySelector('.prs-meta') as HTMLElement;
-    // The separators are their own spans, spaced by the flex gap, so the line is read part by part.
+    // Each item carries its own trailing `·`, so a wrap can never strand one; the last item has none, and the warning pill is not an item of the dotted run.
     expect(Array.from(meta.children).map((el) => el.textContent)).toEqual([
-      'x',
-      '·',
+      'x·',
       // The author is the disc's letter and the login in one flex item (`.prs-author`); the glyph before the branches has no text.
-      'Ffutin',
-      '·',
-      'backlog/42 → main',
-      '·',
+      'Ffutin·',
+      'backlog/42 → main·',
       '2h ago',
       'run in progress on this machine'
     ]);
+    // No child of the wrapping line is a bare separator, and every dot is decoration the screen reader skips.
+    const line = row.querySelector('.prs-line') as HTMLElement;
+    for (const el of [...Array.from(line.children), ...Array.from(meta.children)]) expect(el.textContent).not.toBe('·');
+    for (const dot of Array.from(meta.querySelectorAll('.prs-sep'))) {
+      expect(dot).toHaveAttribute('aria-hidden', 'true');
+      expect(dot.parentElement).toHaveClass('prs-meta-item');
+      expect(dot.parentElement?.lastElementChild).toBe(dot);
+    }
+    expect(meta.querySelectorAll('.prs-sep')).toHaveLength(3);
     expect(within(row).getAllByText('run in progress on this machine')).toHaveLength(1);
   });
 

@@ -504,12 +504,12 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   repos — forks and other authors included — drawn as Inbox, Matrix or Cards (below). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
   last answer, plus mount and focus), mounted once by the shell's `PullRequestsProvider` and read here and by GitHub › Settings' Access card through
   `usePullRequestsContext`: the server's PR cache has no timer, so with no GitHub project registered there are no PR reads at all. A repo the token cannot read (`forbidden` or `not-found`, `splitReach` in `lib/pr-layouts.ts`) is handed to no layout and left out of
-  `N open`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card
+  the band's `N open in M repos · polled <age>`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card
   (`GithubAccessGroup`, the hook's second mount) lists each with GitHub's `detail` and the token fix; a repo the token reads whose checks it may not
   (`checksDetail`, a `FORBIDDEN` on `statusCheckRollup` alone) is drawn like any other with every PR's `checks` `unknown` and listed on that card under
   `Checks not readable`; a rate-limited or `error` repo is transient, keeps its rows and is said once below the list as `Can't read · <repo> — <detail>` in
   every layout, never as a row.
- The layout is a `Segmented` in the toolbar offering
+ The layout is a `Segmented` in the band's trailing slot (`.prs-switch`) offering
   all three at every width (`PR_LAYOUT_OPTIONS`), stored per device (`PR_LAYOUT_KEY`; an unknown word is Inbox). **Inbox** (default) ranks every shown PR across
   repos (`rankPrs`: level, severity, newest) under a `Segmented` labelled `Triage` (a counted option per level, no `all`; the pressed one clears the filter), every row one `prs-row` — a 40 px (28 in
   Cards) checks `GlyphTile` (`checksTone`, `checksGlyph`), the `#n` and title, then one wrapping line: the pills (`prPills`, the checks and conflicts ones leading with a

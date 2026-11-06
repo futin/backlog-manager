@@ -273,6 +273,22 @@ describe('BoardColumn', () => {
     for (const block of blocks) expect(block).not.toMatch(/align-items:\s*start/);
     expect(ruleBlock(css, '.board > .board-columns') as string).toMatch(/flex:\s*1/);
   });
+
+  /**
+   * The fill chain's other links: `.board-columns` growing is not enough unless every ancestor up to the well grows with it. `.main` is the flex column, `.wrap`
+   * flex-fills only where it holds a board of columns, and `.board` flex-fills inside that. Comments are stripped first, because the sheet's own comments
+   * name these selectors and `ruleBlock` takes the first mention it finds.
+   */
+  it('keeps the whole fill chain flex from the well down to the columns', () => {
+    const css = readStyles().replace(/\/\*[\s\S]*?\*\//g, '');
+    // `.main` is named by several rules (the well's own padding and ground among them), so it is the one that makes it a column that counts.
+    expect(ruleBlocks(css, '.main').some((block) => /display:\s*flex/.test(block) && /flex-direction:\s*column/.test(block))).toBe(true);
+    const wrap = ruleBlock(css, '.wrap:has(> .board > .board-columns)') as string;
+    expect(wrap).toMatch(/flex:\s*1/);
+    expect(wrap).toMatch(/display:\s*flex/);
+    expect(wrap).toMatch(/flex-direction:\s*column/);
+    expect(ruleBlock(css, '.wrap > .board:has(> .board-columns)') as string).toMatch(/flex:\s*1/);
+  });
 });
 
 describe("the card's marker row", () => {

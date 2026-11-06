@@ -274,6 +274,8 @@ describe('PullRequestsView — grouping and the rows', () => {
     expect(tile).toHaveAttribute('data-tone', 'ink');
     expect(tile).toHaveAttribute('data-size', '28');
     expect(name).toHaveTextContent(/^x$/);
+    // The short name drops the owner, so the full `owner/name` is on hover, as Inbox's repo label has it.
+    expect(name).toHaveAttribute('title', 'futin/x');
     expect(pill).toHaveClass('ui-pill');
     expect(head.querySelectorAll('.ui-glyph-tile')).toHaveLength(1);
     const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
@@ -291,6 +293,17 @@ describe('PullRequestsView — grouping and the rows', () => {
     expect(screen.getByTestId('pr-head-futin/x').querySelector('.prs-repo-name')).toHaveTextContent('futin/x');
     expect(screen.getByTestId('pr-head-acme/x').querySelector('.prs-repo-name')).toHaveTextContent('acme/x');
     expect(screen.getByTestId('pr-head-futin/y').querySelector('.prs-repo-name')).toHaveTextContent(/^y$/);
+  });
+
+  it('shortens against every shown repo, drawn or not, so Cards agrees with Inbox and Matrix', async () => {
+    payload.repos.push(
+      repo({ repo: 'acme/ui-kit', prs: [pr({ number: 41, headSha: 'c'.repeat(40) })], total: 1 }),
+      repo({ repo: 'futin/ui-kit', prs: [], total: 0 })
+    );
+    await mount();
+    // `futin/ui-kit` has no card, but it is shown, so `acme/ui-kit` must keep its owner here just as it does in Inbox's meta line and Matrix's rows.
+    expect(screen.queryByTestId('pr-head-futin/ui-kit')).toBeNull();
+    expect(screen.getByTestId('pr-head-acme/ui-kit').querySelector('.prs-repo-name')).toHaveTextContent(/^acme\/ui-kit$/);
   });
 
   it('flows the repo sheets in a `.prs-cards-grid` and keeps the `Can\'t read` notes outside it', async () => {

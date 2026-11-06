@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Glyph } from '../ui/Glyphs';
 import { GlyphTile } from '../ui/GlyphTile';
 import { Pill } from '../ui/Pill';
@@ -12,7 +13,7 @@ import type { PrRepoView, PrWriteResult, PullRequestRow } from '../../../../shar
 /**
  * One pull request's row, the anatomy Inbox and Cards share (.claude/DESIGN.md §8.11, "Row anatomy"): a `GlyphTile` in the checks tone (`checksTone` /
  * `checksGlyph`; conflicts, behind and changes-requested are pills, never the tile), the `#n` link and title, ONE wrapping line of the pills (`prPills`) and then
- * the meta `author · head → base · age` with the run warning as one warn pill after it, then the foot (the Confirm, then the outcome line); the key strip is
+ * the meta `author · head → base · age` (each `·` trailing inside the item before it) with the run warning as one warn pill after it, then the foot (the Confirm, then the outcome line); the key strip is
  * the row's right-hand side. It decides nothing — the pills, the tile and the warning are `lib/pr-layouts.ts`' and `lib/pr-run.ts`' — so the two layouts that
  * draw it cannot read one PR two ways.
  *
@@ -47,6 +48,42 @@ export function PrRow({
   const author = pr.author ?? 'ghost';
   const age = ageText(pr.updatedAt, props.now);
   const pills = prPills(pr);
+  const metaItems: { key: string; node: ReactNode }[] = [];
+  if (repoLabel !== undefined) {
+    metaItems.push({
+      key: 'repo',
+      // The full name on hover: the short form drops the owner, which is the one thing two same-named repos would differ by.
+      node: (
+        <span className="prs-inbox-repo" title={repo.repo}>
+          {repoLabel}
+        </span>
+      )
+    });
+  }
+  metaItems.push({
+    key: 'author',
+    node: (
+      <span className="prs-author">
+        {/* The mock's initials disc (`.av`, as the Jira card's foot draws one): one letter, uppercased HERE, because design guard 4 allows exactly one
+            `text-transform` rule. Decoration — the login is written beside it. */}
+        <span className="prs-av" aria-hidden="true">
+          {Array.from(author)[0].toUpperCase()}
+        </span>
+        <span>{author}</span>
+      </span>
+    )
+  });
+  metaItems.push({
+    key: 'branches',
+    // The branch glyph leads `head → base` as in the mock; Matrix's sub-line draws none.
+    node: (
+      <span className="prs-branch-pair">
+        <Glyph name="branch" />
+        <span className="prs-branches">{`${pr.head} → ${pr.base}`}</span>
+      </span>
+    )
+  });
+  if (age !== null) metaItems.push({ key: 'age', node: <span>{age}</span> });
   const write = (call: () => Promise<PrWriteResult>) => props.write(key, pr.headSha, call);
   return (
     <li className="prs-row" data-testid={`pr-row-${key}`}>
@@ -69,35 +106,18 @@ export function PrRow({
             </div>
           )}
           <div className="prs-meta">
-            {repoLabel !== undefined && (
-              <>
-                {/* The full name on hover: the short form drops the owner, which is the one thing two same-named repos would differ by. */}
-                <span className="prs-inbox-repo" title={repo.repo}>
-                  {repoLabel}
-                </span>
-                <span aria-hidden="true">·</span>
-              </>
-            )}
-            <span className="prs-author">
-              {/* The mock's initials disc (`.av`, as the Jira card's foot draws one): one letter, uppercased HERE, because design guard 4 allows exactly one
-                  `text-transform` rule. Decoration — the login is written beside it. */}
-              <span className="prs-av" aria-hidden="true">
-                {Array.from(author)[0].toUpperCase()}
+            {metaItems.map((item, i) => (
+              // Each separator is the TRAILING child of the item before it, so a wrap can never strand a `·` at the start of a line or leave one alone at the
+              // end of one: the item and its dot are one flex item and break together. The last item has none.
+              <span key={item.key} className="prs-meta-item">
+                {item.node}
+                {i < metaItems.length - 1 && (
+                  <span className="prs-sep" aria-hidden="true">
+                    ·
+                  </span>
+                )}
               </span>
-              <span>{author}</span>
-            </span>
-            <span aria-hidden="true">·</span>
-            {/* The branch glyph leads `head → base` as in the mock; Matrix's sub-line draws none. */}
-            <span className="prs-branch-pair">
-              <Glyph name="branch" />
-              <span className="prs-branches">{`${pr.head} → ${pr.base}`}</span>
-            </span>
-            {age !== null && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>{age}</span>
-              </>
-            )}
+            ))}
             {warning !== null && <Pill tone="warn">{warning}</Pill>}
           </div>
         </div>
