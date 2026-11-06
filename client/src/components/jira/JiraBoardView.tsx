@@ -52,11 +52,12 @@ const NO_TREES: readonly JiraWorktree[] = [];
  * `Chip` naming the board, opening a `Popover` of every board by name — pick only: `Edit` and `New` are Setup's, spec §1), the summary search, and the filter
  * track.
  *
- * **Filters are per mount** (the global constraints): type, assignee (`anyone` / `me` / `unassigned`; no `me` while the identity is unknown) and sprint, all
- * read off the LOADED list, plus the search over key and summary — none persisted, none a request. A pick the current list no longer offers reads as "any"
- * (`effectiveBoardFilters`), so switching boards cannot leave the columns emptied by a filter the panel no longer draws. The options read EVERY loaded
- * issue, folded or not, so a type only sub-tasks carry is still pickable; and a filter finds folded issues through their top card (F1, `foldMatches`),
- * which is shown ringed with the match named rather than hidden — a fold must never make a matching issue unfindable (grouped-board spec §5).
+ * **Filters are per mount** (the global constraints): type, status (multi-select, by name), assignee (`anyone` / `me` / `unassigned`; no `me` while the
+ * identity is unknown) and sprint, all read off the LOADED list, plus the search over key and summary — none persisted, none a request. A pick the current list
+ * no longer offers reads as "any" (`effectiveBoardFilters`), so switching boards cannot leave the columns emptied by a filter the panel no longer draws. The
+ * options read EVERY loaded issue, folded or not, so a type only sub-tasks carry is still pickable; and a filter finds folded issues through their top card
+ * (F1, `foldMatches`), which is shown ringed with the match named rather than hidden — a fold must never make a matching issue unfindable (grouped-board spec
+ * §5).
  *
  * **The shapes that are not a board.** `configUnreadable` → `jira.json cannot be read — <reason>` (Review Focus 2): the credentials are in `.env`, so the
  * status still says `configured`, but the boards could not be read, and `No boards yet` would invite the reader to create a board the server would refuse to
@@ -184,12 +185,30 @@ export function JiraBoardView({
         />
         {/* One element in one place on every render, for the reason BoardView gives at length: `FilterBar` keeps which panel is open in its own state
             and a pick does not close it, so a remount on a pick — or on a Board | List switch — would shut the panel under the reader's pointer. Drawn in
-            both views since the List became an issue table: its type, assignee and sprint describe issues, as the Board's do. */}
+            both views since the List became an issue table: its type, status, assignee and sprint describe issues, as the Board's do. */}
         <FilterBar
           count={boardFilterCount(applied)}
           showing={{ shown: rows.length, total: fold.tops.length, note: 'options come from the loaded issues' }}
           onClear={() => setFilters((f) => ({ ...NO_JIRA_FILTERS, search: f.search }))}>
             <Picks title="Type" all="All types" values={options.types} value={applied.type} onPick={(v) => set('type', v ?? undefined)} />
+            {/* The one multi-select: a chip toggles its status in or out, `All statuses` empties the set. Toggled against `applied`, not `filters`, so a
+                pick the board no longer offers is dropped by the next click rather than lingering unseen in state. */}
+            <FilterSection title="Status">
+              <div className="filter-bar-picks" role="group" aria-label="Status">
+                <Chip size={28} pressed={applied.statuses.length === 0} onClick={() => set('statuses', [])}>
+                  All statuses
+                </Chip>
+                {options.statuses.map((s) => (
+                  <Chip
+                    key={s}
+                    size={28}
+                    pressed={applied.statuses.includes(s)}
+                    onClick={() => set('statuses', applied.statuses.includes(s) ? applied.statuses.filter((x) => x !== s) : [...applied.statuses, s])}>
+                    {s}
+                  </Chip>
+                ))}
+              </div>
+            </FilterSection>
             <FilterSection title="Assignee">
               <div className="filter-bar-picks" role="group" aria-label="Assignee">
                 {(['anyone', 'me', 'unassigned'] as JiraAssigneeFilter[])

@@ -251,7 +251,7 @@ async function openFilters(): Promise<HTMLElement> {
   return screen.getByRole('dialog', { name: 'Filters' });
 }
 
-async function pick(group: 'Type' | 'Assignee' | 'Sprint', name: string): Promise<void> {
+async function pick(group: 'Type' | 'Status' | 'Assignee' | 'Sprint', name: string): Promise<void> {
   const dialog = await openFilters();
   await userEvent.click(within(within(dialog).getByRole('group', { name: group })).getByRole('button', { name }));
 }
@@ -525,6 +525,28 @@ describe('filters and search', () => {
     await pick('Sprint', 'Sprint 42');
     expect(shown()).toEqual(['Refund partial captures', 'Rounding wrong on invoices over 1,000']);
     expect(screen.getByRole('button', { name: 'Filters, 1 set' })).toBeInTheDocument();
+  });
+
+  // The one multi-select: `To Do` + `In Progress` is a set no single chip names. Chips run in workflow order (category, then name), not alphabetically.
+  it('status is a multi-select in workflow order; `All statuses` empties the set', async () => {
+    await renderAlpha();
+    const group = (): HTMLElement => within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Status' });
+    await openFilters();
+    expect(within(group()).getAllByRole('button').map((b) => b.textContent)).toEqual(['All statuses', 'Backlog', 'To Do', 'In Review', 'Done']);
+    expect(within(group()).getByRole('button', { name: 'All statuses' })).toHaveAttribute('aria-pressed', 'true');
+    await pick('Status', 'To Do');
+    expect(shown()).toEqual(['Refund flows']);
+    await pick('Status', 'In Review');
+    expect(shown()).toEqual(['Refund flows', 'Refund partial captures']);
+    expect(within(group()).getByRole('button', { name: 'All statuses' })).toHaveAttribute('aria-pressed', 'false');
+    // Two statuses are one filter on the badge.
+    expect(screen.getByRole('button', { name: 'Filters, 1 set' })).toBeInTheDocument();
+    // A second click takes a status back out of the set.
+    await pick('Status', 'To Do');
+    expect(shown()).toEqual(['Refund partial captures']);
+    await pick('Status', 'All statuses');
+    expect(shown()).toEqual(ALL);
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
   });
 
   it('the search matches the summary or the key, case-insensitively; clearing it restores every card', async () => {

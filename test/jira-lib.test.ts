@@ -73,7 +73,7 @@ import {
   statusTone
 } from '../client/src/lib/jira';
 import type { JiraFold } from '../client/src/lib/jira';
-import { launchFootLine } from '../client/src/lib/jira';
+import { NO_JIRA_FILTERS, boardFilterOptions, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
 import { SHELF_LIMIT, boardAgents, boardShelves, deckCrumb, deckGroup, deckTally, endedLine, topSessionCell } from '../client/src/lib/jira-deck';
@@ -554,6 +554,30 @@ describe('pickBoard', () => {
     const boards = [beta, alpha];
     pickBoard(null, boards);
     expect(boards.map((b) => b.id)).toEqual(['b_b', 'b_a']);
+  });
+});
+
+describe('the status filter', () => {
+  const todo = issue({ key: 'PAY-1', status: { name: 'To Do', category: 'new' } });
+  const doing = issue({ key: 'PAY-2', status: { name: 'In Progress', category: 'indeterminate' } });
+  const done = issue({ key: 'PAY-3', status: { name: 'Done', category: 'done' } });
+  const review = issue({ key: 'PAY-4', status: { name: 'Code Review', category: 'indeterminate' } });
+
+  it('offers statuses in workflow order — category first, then name — whatever order the list came in', () => {
+    expect(boardFilterOptions([done, review, todo, doing]).statuses).toEqual(['To Do', 'Code Review', 'In Progress', 'Done']);
+  });
+
+  it('keeps an issue whose status is in the set; an empty set keeps everything', () => {
+    const f = { ...NO_JIRA_FILTERS, statuses: ['To Do', 'In Progress'] };
+    expect([todo, doing, done, review].filter((i) => matchesBoardFilters(i, f, null)).map((i) => i.key)).toEqual(['PAY-1', 'PAY-2']);
+    expect([todo, doing, done].every((i) => matchesBoardFilters(i, NO_JIRA_FILTERS, null))).toBe(true);
+  });
+
+  // Per name, not all-or-nothing: a board switch that loses `In Progress` must keep the `To Do` half rather than drop the whole pick or empty the board.
+  it('drops only the picked statuses the loaded list no longer offers', () => {
+    const f = { ...NO_JIRA_FILTERS, statuses: ['To Do', 'In Progress'] };
+    expect(effectiveBoardFilters(f, boardFilterOptions([todo, done]), null).statuses).toEqual(['To Do']);
+    expect(effectiveBoardFilters(f, boardFilterOptions([done]), null).statuses).toEqual([]);
   });
 });
 
