@@ -2269,8 +2269,9 @@ The strip's height and the well's gap are one token, `--main-gap`, read by the s
 
 **Why the strip exists at all.** Since the redesign, `.main` carried a 24 px top margin and a 24 px top-left radius so the grey well would curve in where it
 meets the white rail. It never showed: `body` paints `--board` too, so the margin was grey on grey and the corner was invisible. The strip is `.maincol`'s
-paper — `--strip`, the rail's own token rather than a new one, because the point is that the strip is the one white band beside the rail's `--board` (decision 63; the rail is no longer white) around the well — and the
-well now begins exactly where the strip ends, so its radius is finally drawn against white. `body` stays `--board`: below the fold and behind a short section
+paper — `--frame` since 2026-11-06, the rail's own token, so the rail and the strip are one surface round the well. Decision 63 had made it `--strip`, the one
+white band beside the rail's `--board`; the well, the rail's own grey, then met that white band at its corner and read as a notch cut between two greys. `--frame`
+is a step darker than `--board` on every palette — and the well begins exactly where the strip ends, so its radius is drawn against the frame. `body` stays `--board`: below the fold and behind a short section
 the page is still the well's colour, which the rail's bottom edge expects.
 
 **Why one token.** The same 50 px is three facts: how tall the strip is, where the well starts, and how much the Runs page must give up to fill the viewport
