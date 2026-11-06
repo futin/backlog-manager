@@ -1,6 +1,6 @@
 # backlog-groom gets a PR finish; groom and execute PRs can auto-merge and fix themselves
 
-Date: 2026-10-24. Status: draft, awaiting approval.
+Date: 2026-10-24. Status: shipped in #361 (merged 2026-10-25).
 
 ## Why
 
