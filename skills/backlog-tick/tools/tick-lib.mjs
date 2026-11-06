@@ -117,15 +117,18 @@ function sectionText(body, heading) {
 }
 
 // Twin: `UNKNOWN` in server/src/items/parse.util.ts, copied BYTE FOR BYTE — `tick-lib.test.mjs` reads that file as text and fails if this source is not in it.
-// A Cause or Fix that still says "I don't know yet", any case: the bare sentinel `backlog-capture` writes, with markdown emphasis stripped from both ends, and the
-// word followed by punctuation/a dash and a tail, or ending its line and followed by a paragraph. It deliberately does NOT match a sentence that merely opens with
-// the word ("Unknown option passed to X" is a real cause). The server's header comment tells the whole story; the bias runs one way on purpose — a false
-// "ungroomed" costs a groom that had little to do, a false "groomed" spends a whole session to be refused.
+// A Cause or Fix that still says "I don't know yet", any case: the bare sentinel `backlog-capture` writes or another deferral (`Not decided`, `TBD`, `To be
+// determined`, `Needs design` … — a vocabulary since #494, because ixray #58's `Not decided — …` Fix read as groomed and this tool picked it for execute), with
+// markdown emphasis stripped from both ends, and the word followed by punctuation/a dash and a tail, or ending its line and followed by a paragraph. It
+// deliberately does NOT match a sentence that merely opens with the word ("Unknown option passed to X" is a real cause, "Not decided by the caller, so …" a
+// real fix). The server's header comment tells the whole story; the bias runs one way on purpose — a false "ungroomed" costs a groom that had little to do,
+// a false "groomed" spends a whole session to be refused.
 //
 // Exported only so the twin guard can read `.source`.
-export const UNKNOWN = /^[\s*_`#]*unknown[ \t*_`]*(?:$|\r?\n[\s\S]*$|[.,:;!?\-–—][\s\S]*$)/i;
+export const UNKNOWN =
+  /^[\s*_`#]*(?:unknown|not[ \t]+(?:yet[ \t]+)?(?:known|decided)|undecided|tbd|to[ \t]+be[ \t]+(?:decided|determined)|needs[ \t]+(?:design|grooming))[ \t*_`]*(?:$|\r?\n[\s\S]*$|[.,:;!?\-–—][\s\S]*$)/i;
 
-// Twin: `deriveGroomed` in server/src/items/parse.util.ts. A bug is groomed when its Cause AND its Fix are filled and neither is the unknown sentinel; a task when
+// Twin: `deriveGroomed` in server/src/items/parse.util.ts. A bug is groomed when its Cause AND its Fix are filled and neither is a deferral; a task when
 // its Plan is non-empty. Ideas and refactors derive `null`, not `false` — grooming is not a state they have, what they wait in is being promoted.
 export function deriveGroomed(section, body) {
   if (section === 'bugs') {

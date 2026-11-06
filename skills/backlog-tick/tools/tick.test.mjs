@@ -736,6 +736,17 @@ test('ungroomed bug before refactor; a refactor alone is promoted', async (t) =>
   assert.equal(ref.args, 'ref-2, promote it to a task [backlog-tick]');
 });
 
+// #494: a Fix that defers in words other than `unknown` ("Not decided — …") read as groomed, so the tick picked ixray #58 for EXECUTE and could never
+// groom it. The widened sentinel makes it a groom candidate and never an execute one.
+test('a bug whose Fix is "Not decided" is groomed, not executed', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-6', '## Symptom\n\nx\n\n## Cause\n\na real cause\n\n## Fix\n\nNot decided — this is a spec-level gap, not an implementation defect.\n');
+  commitAll(fx.root);
+  const v = await decide(fx, ['--dry-run']);
+  assert.equal(v.verdict, 'groom');
+  assert.equal(v.id, 'bug-6');
+});
+
 test('ideas and ungroomed tasks are never groomed, nor a started or failed item', async (t) => {
   const fx = project(t);
   item(fx, 'idea-1', ANY_BODY);
