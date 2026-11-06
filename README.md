@@ -372,8 +372,11 @@ on it, and drop the image at `docs/board.png`._
 ## Configuration
 
 Everything lives in `.env`, and `.env.example` documents each key — except the rows marked "Not in `.env.example`" below (`BM_ORCH_HOME`,
-`BM_ORCH_CONTROL_HOME`, `BM_TRACKER_SYNC_FILE`, `BM_JIRA_FILE`, `BM_TICK_FILE`, `BM_TICK_HOME`, `BM_DASHBOARDS_FILE`, `BM_TIMEZONE_FILE` and
-`BM_AGENTS_TOKEN_<NAME>`), which are read straight from the process environment.
+`BM_ORCH_CONTROL_HOME`, `BM_TRACKER_SYNC_FILE`, `BM_JIRA_FILE`, `BM_TICK_FILE`, `BM_TICK_HOME`, `BM_DASHBOARDS_FILE`, `BM_TIMEZONE_FILE`,
+`BM_JIRA_LINKS_FILE`, `BM_RETRO_HOME`, `BM_CLAUDE_PROJECTS` and `BM_AGENTS_TOKEN_<NAME>`), which are read straight from the process environment. The two that
+only `retro.mjs` reads, `BM_RETRO_HOME` and `BM_CLAUDE_PROJECTS`, come from the shell that runs it, not from `.env`. The tables leave out, on purpose,
+`BM_IMPORT_PACE_MS` (the pace of `backlog.mjs import`, default 1000 ms, documented in `skills/backlog/SKILL.md`) and the seams that exist for the test suites:
+`BM_RELEASES_ROOT`, `BM_ENV_FILE`, `BM_NODETEST_TMP_ROOT`, `BM_RUN_LOCK_TIMEOUT_MS`, `BM_JIRA_FETCH_RETRY_MS` and `BM_JIRA_FETCH_TIMEOUT_MS`.
 
 ### Core
 
@@ -417,10 +420,10 @@ Everything lives in `.env`, and `.env.example` documents each key — except the
 
 ### State and settings files
 
-Paths the tools and the server keep their state in. None of them is in `.env.example`; the defaults suit almost everyone.
+Paths the tools and the server keep their state in, or read another tool's state from. None of them is in `.env.example`; the defaults suit almost everyone.
 
 <details>
-<summary>Eight path overrides</summary>
+<summary>Eleven path overrides</summary>
 
 | Key                    | Default                                             | Purpose |
 | ---------------------- | --------------------------------------------------- | ------- |
@@ -431,6 +434,9 @@ Paths the tools and the server keep their state in. None of them is in `.env.exa
 | `BM_TICK_FILE`         | `~/.backlog-manager/settings/tick.json`             | The tick's settings: how many failed ticks in a row halt a project, and the plan-review and open-PR caps a tick job applies when its prompt carries no `--max-plans` / `--max-prs` flag (Settings › Shared › Backlog tick; a job's flag still wins), and when each project was last Reset (Runs › Ticks). The server writes it through `POST /api/ticks/config` and `/reset`; `tick.mjs` reads it. A file that cannot be read is never replaced. Not in `.env.example` |
 | `BM_DASHBOARDS_FILE`   | `~/.backlog-manager/settings/dashboards.json`       | The other machines' dashboards this board can start work on, plus the strategy, threshold and prefer order its machine suggestion reads. The server writes it from Settings › Dashboards; a file that cannot be read is never replaced, and its remotes are ignored until it is fixed. No file means home-only. Not in `.env.example` |
 | `BM_TICK_HOME`         | `~/.backlog-manager/tick/`                          | Where `tick.mjs` keeps each project's `state.json` and lock — its one writer. The server only reads it, per call, for Runs › Ticks and a project's halt; a Reset is written to `tick.json`, never here. Not in `.env.example` |
+| `BM_JIRA_LINKS_FILE`   | `~/.backlog-manager/settings/jira-links.json`       | Which Jira ticket each agent session is linked to. The server is its one writer (`server/src/jira/links.store.ts`). Not in `.env.example` |
+| `BM_RETRO_HOME`        | `~/.backlog-manager/retro/`                         | The sweep records `retro.mjs record` writes; `sweep` only reads them, to measure against the last one (`skills/backlog-retro/tools/lib/paths.mjs`). Not in `.env.example` |
+| `BM_CLAUDE_PROJECTS`   | `~/.claude/projects`                                | Claude Code's own transcript root, which `retro.mjs` reads, never writes, for a run's driver transcript (same file). Not in `.env.example` |
 | `BM_TIMEZONE_FILE`     | `~/.backlog-manager/settings/timezone.json`         | The board's one shared time zone (Settings › Shared), which every clock, day group and date on the board is drawn in. The server writes it through `POST /api/settings/timezone`; no file, or one that does not parse, means each browser keeps its own zone. Not in `.env.example` |
 
 </details>
@@ -441,7 +447,8 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` / `B
 connected to a tracker, `BM_API_PORT` is also what the skills dial, so the stack has to be up for any `backlog.mjs` command there. On the host both processes
 bind `127.0.0.1`, and under compose both ports publish on `127.0.0.1` — nothing here has auth in front of it, so loopback is the access control. `BM_BIND` moves
 the bind if you really need to; to reach the board from another device, put a `tailscale serve` in front of the loopback port instead — `pnpm run tailnet` is
-that command, see [Read it from your phone](#8-optional-read-it-from-your-phone).
+that command, see [Read it from your phone](#8-optional-read-it-from-your-phone). `vite.config.ts` also reads `API_HOST` and `WEB_PORT`; compose sets them
+(`server`, `5177`), and nobody needs to set them by hand.
 
 ## Development
 
