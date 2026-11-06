@@ -291,6 +291,14 @@ describe('PrMatrix — the expansion', () => {
     expect(css).not.toMatch(/\.prs-matrix-panel/);
   });
 
+  it('runs the ink bar down the full height of the expansion: the cell keeps no vertical padding outside the block that carries the bar', () => {
+    // The bar is the pinned block's inset shadow, so any padding on the cell itself is a strip of ground with no bar — the 14 px the table's cells keep
+    // below their content left the bar stopping short of the row's foot. jsdom lays nothing out, so this is read from the sheet.
+    const css = readFileSync(join(__dirname, '../client/src/styles.css'), 'utf8');
+    expect(css).toMatch(/\.prs-matrix-expand \.prs-matrix-pinned \{[^}]*box-shadow: inset 3px 0 0 var\(--ink\)/);
+    expect(css).toMatch(/\.prs-matrix-expand td \{[^}]*padding-top: 0; padding-bottom: 0/);
+  });
+
   it('collapses row A when row B opens', async () => {
     const user = userEvent.setup();
     render(<PrMatrix {...props([repo('a/x', [clean, behind])])} />);
