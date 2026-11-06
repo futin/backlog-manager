@@ -154,6 +154,18 @@ describe('PrMatrix — header, cells and order', () => {
     expect(sub?.textContent?.startsWith('x · ')).toBe(true);
   });
 
+  it('keeps the sub-line on one line too: its full text rides the span as its title attribute', () => {
+    // #474: inside the 60cqw cap, `.prs-branches`' Inbox-wide `overflow-wrap: anywhere` broke long branch names mid-word at 390 px. Matrix scopes it to one
+    // line with an ellipsis, so the full repo and branch pair has to stay reachable the way the title's is. jsdom lays nothing out: the rule is read below.
+    const head = 'backlog/474-runs-and-prs-views-break-at-phone-width';
+    render(<PrMatrix {...props([repo('a/x', [pr({ number: 5, head })])])} />);
+    const sub = row('a/x#5').querySelector('.prs-matrix-pr .prs-branches');
+    expect(sub?.textContent).toBe(`x · ${head} → main`);
+    expect(sub).toHaveAttribute('title', `x · ${head} → main`);
+    const css = readFileSync(join(__dirname, '../client/src/styles.css'), 'utf8');
+    expect(css).toMatch(/\.prs-matrix-pr \.prs-branches \{[^}]*white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; overflow-wrap: normal/);
+  });
+
   it('keeps the full owner/name on the sub-line where two shown repos share a short name', () => {
     render(<PrMatrix {...props([repo('a/ui-kit', [pr({ number: 5 })]), repo('b/ui-kit', [pr({ number: 6 })])])} />);
     expect(row('a/ui-kit#5').querySelector('.prs-meta')?.textContent?.startsWith('a/ui-kit · ')).toBe(true);

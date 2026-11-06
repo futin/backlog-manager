@@ -222,3 +222,26 @@ describe('stage-track four-state stylesheet rules (task-38)', () => {
     expect(ruleBlock(css, '.run-track-node[data-in="done"]::before') as string).toMatch(/background\s*:\s*var\(--fill-progress\)/);
   });
 });
+
+/* #474: at 390 px seven `minmax(0, 1fr)` columns are about 39 px each, and `dispatched` alone is 54 px at the 11 px floor, so the stage words clipped. Under
+   700 px each column is floored at 64 px and the track scrolls sideways inside itself (DESIGN §8.11's Matrix move), still seven equal columns (§8.4.3). The
+   `×N` pill sits at `top: -4px`, and `overflow-x: auto` makes the y-axis `auto` too, so the block moves 6 px of the margin into padding to keep it inside the
+   scroll box. jsdom lays nothing out and evaluates no media query, so this is read from the sheet. */
+describe('stage-track phone width (#474)', () => {
+  const css = readStyles().replace(/\/\*[\s\S]*?\*\//g, '');
+  const phone = mediaBlocks(css, '@media (max-width: 700px)').find((block) => ruleBlock(block, '.run-track') !== null);
+
+  it('floors each of the seven columns at 64 px and scrolls the track sideways inside itself', () => {
+    expect(phone).toBeDefined();
+    const rule = ruleBlock(phone as string, '.run-track') as string;
+    expect(rule).toMatch(/grid-template-columns\s*:\s*repeat\(\s*7\s*,\s*minmax\(\s*64px\s*,\s*1fr\s*\)\s*\)/);
+    expect(rule).toMatch(/(^|[\s;])overflow-x\s*:\s*auto\b/);
+    expect(rule).toMatch(/(^|[\s;])overscroll-behavior-x\s*:\s*contain\b/);
+  });
+
+  it('keeps the fix-loop pill inside the scroll box by trading 6 px of margin for padding', () => {
+    const rule = ruleBlock(phone as string, '.run-track') as string;
+    expect(rule).toMatch(/(^|[\s;])margin-top\s*:\s*6px/);
+    expect(rule).toMatch(/(^|[\s;])padding-top\s*:\s*6px/);
+  });
+});

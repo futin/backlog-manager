@@ -2615,7 +2615,17 @@ button.rail-count { cursor: pointer }
    what makes a sticky day kicker stick to the top of the list it belongs to
    rather than to the top of the column. */
 .runs-col, .runs-list { display: flex; flex-direction: column; gap: var(--group-gap); min-width: 0; max-height: 100%; min-height: 0 }
-.runs-live-sheet { flex: none }
+/* The Live sheet never yields to the History below it (`flex: none`), so it stays put above a long, scrolling History — but on its own that made it the one
+   box in this column nothing could bound: a tall live list plus the History's 240 px floor overflowed the split, the document grew past the viewport and the
+   sticky rail scrolled off with it (#474, 392–803 px of live rows at 1440×1000). So it is CAPPED rather than shrunk: at most the column's height less the
+   History floor and the gap between them, scrolling itself past that, contained for the reason the History sheet's rule gives. Not `flex-shrink: 1`
+   instead — flex shrinks in proportion to basis, so a short Live list beside a long History would be squeezed to a few px. The `100%` is `.runs-list`'s
+   height, definite for the same reason the History sheet's own `max-height: 100%` relies on. The 1100 px block takes the cap off with the rest of the
+   bound. */
+.runs-live-sheet {
+  flex: none;
+  max-height: calc(100% - 240px - var(--group-gap)); overflow-y: auto; overscroll-behavior: contain;
+}
 /* The one scroll box in the column. `overscroll-behavior: contain` because a
    nested scroll box that chains its scroll to the document at either end is
    worse than an unbounded page: the page would lurch the moment the list
@@ -2700,7 +2710,11 @@ button.rail-count { cursor: pointer }
    state and the word says its ending, so selection cannot be a colour. */
 .runs-row[aria-current='true'] { background: var(--strip-hi); box-shadow: inset 2px 0 0 var(--ink) }
 .runs-row-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
-.runs-row-project { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* The name enters line-breaking at its OWN width (`flex: 1 1 auto`, not `flex: 1`, whose zero basis laid it out as needing no room at all, so the `flex: none`
+   status, counts, tag and wall time kept theirs and the name got the 53–81 px left over — #474). Floored at 20ch, about the 160 px the longest reviewed name
+   needs at 14 px: when the head cannot hold the name and the trailing items together, the head's `flex-wrap` drops the trailing items under the name
+   instead of cutting it. `min(100%, …)` so a name longer than the whole row still ellipsizes at the row's width. */
+.runs-row-project { flex: 1 1 auto; min-width: min(100%, 20ch); font-size: 14px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* `⚠ N` — the count and its glyph, which is what `N needs attention`
    compresses to at this width. Amber because a person has to act. */
 .runs-row-attn { flex: none; color: var(--amber-ink); font-variant-numeric: tabular-nums }
@@ -2791,6 +2805,7 @@ button.rail-count { cursor: pointer }
   .runs-board { height: auto }
   .runs-split { grid-template-columns: minmax(0, 1fr); min-height: auto }
   .runs-col, .runs-list, .runs-history-sheet, .runs-detail { max-height: none; overflow: visible; min-height: auto }
+  .runs-live-sheet { max-height: none; overflow: visible }
 }
 
 /* ---------------------------------------------- the wide board (2026-09-17)
@@ -3256,6 +3271,14 @@ button.rail-count { cursor: pointer }
      grid at phone width; the name is already at the 11 px floor, so it keeps
      its size and ellipsises instead. */
   .run-track-val { font-size: 11px }
+  /* Seven equal columns still (§8.4.3), but each at least as wide as the longest stage word plus its gutter: at 390 px a `minmax(0, 1fr)` column is about
+     39 px and `dispatched` alone is 54 px at the 11 px floor, so the words clipped (#474). The track scrolls sideways inside itself instead, the way the
+     Matrix does (§8.11). `overflow-x: auto` turns the y-axis to `auto` too, which would clip the `×N` fix-loop pill (`top: -4px`), so 6 px of the base
+     `margin-top: 12px` moves into `padding-top`: the pill stays inside the scroll box and the spacing is unchanged. */
+  .run-track {
+    grid-template-columns: repeat(7, minmax(64px, 1fr)); overflow-x: auto; overscroll-behavior-x: contain;
+    margin-top: 6px; padding-top: 6px;
+  }
 }
 /* This section's own reduced-motion carve-out — kept inside the run-track
    block itself, rather than folded into the blanket rule near the top of the
@@ -3521,6 +3544,9 @@ button.rail-count { cursor: pointer }
    `.prs-title`'s wrapping — they are not under `.prs-matrix-pr`. */
 .prs-matrix-pr .prs-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .prs-matrix-pr .prs-meta { margin-top: 3px; font-size: 12px; color: var(--ink3) }
+/* The sub-line under the title (`repo · head → base`) is one line too, for the same reason: `.prs-branches`' `overflow-wrap: anywhere` is there for Inbox
+   and Cards, and inside the 60cqw cap — about 120 px at 390 — it broke long branch names mid-word (#474). The full text is the span's `title`. */
+.prs-matrix-pr .prs-branches { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; overflow-wrap: normal }
 .prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
 .prs-matrix-outcome td { border-top: 0; padding-top: 0 }
 /* The expansion's ink bar is its pinned block's inset shadow (it must ride the sticky block to stay in view while the table scrolls), so the cell keeps no

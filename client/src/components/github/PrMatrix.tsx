@@ -161,6 +161,8 @@ function MatrixRow({
   const cells = matrixCells(pr, updating);
   const warning = prRunWarning(pr, repo.repo, props.ctx, props.now);
   const age = ageText(pr.updatedAt, props.now);
+  // The sub-line is one line with an ellipsis in Matrix, so its full text rides the span's `title`, as the PR title's does.
+  const branches = `${repoShortName(repo.repo, shownNames)} · ${pr.head} → ${pr.base}`;
   // The Base cell says `updating…`; an outcome that only repeats it is not drawn here.
   const outcome = props.outcomes[key]?.kind === 'updating' ? undefined : props.outcomes[key];
 
@@ -204,7 +206,9 @@ function MatrixRow({
               {pr.draft && <Pill>draft</Pill>}
             </div>
             <div className="prs-meta">
-              <span className="prs-branches">{`${repoShortName(repo.repo, shownNames)} · ${pr.head} → ${pr.base}`}</span>
+              <span className="prs-branches" title={branches}>
+                {branches}
+              </span>
               {warning !== null && <Pill tone="warn">{warning}</Pill>}
             </div>
           </div>
