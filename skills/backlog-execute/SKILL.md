@@ -175,8 +175,9 @@ whole execute session spent on it. The section check is what makes the gate tota
 
 - **Task:** look at `## Plan`. Refuse if the heading is missing entirely, if there is nothing under it before the next `##` heading (or the end of the file), or
   if all that's there is a placeholder like `unknown`. Tell the user: run `/backlog-groom` on `<id>` first.
-- **Bug:** look at `## Fix`. Refuse if its content is still exactly `unknown` — the placeholder `backlog-capture` writes for a bug nobody has diagnosed yet.
-  Tell the user: run `/backlog-groom` on `<id>` first.
+- **Bug:** look at `## Fix`. Refuse if its content is still `unknown` or another deferral (`Not decided`, `TBD`, `To be determined`, … — the vocabulary in
+  `UNKNOWN`, `server/src/items/parse.util.ts`) — the placeholder `backlog-capture` writes for a bug nobody has diagnosed yet, or a groom's way of saying the
+  fix is deliberately not decided. Tell the user: run `/backlog-groom` on `<id>` first.
 - **Either, in either source and either finish mode:** refuse an item carrying the plan-review mark — a files item whose frontmatter has a `plan-review:` line
   with any value but `false` (trimmed, case-insensitive), a tracker item whose `show <id> --json` carries `"planReview":true` —
   with `this plan awaits review`. The mark is a plan written unattended and not yet read by a person; lifting it is the person's act (`plan-review <id> off` on a

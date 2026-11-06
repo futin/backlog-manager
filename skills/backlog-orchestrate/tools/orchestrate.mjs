@@ -1424,6 +1424,16 @@ const GATE_SECTIONS = { bugs: 'bug', tasks: 'task' };
 // content ... that is not just unknown/whitespace").
 const PLACEHOLDER = 'unknown';
 
+// What a bug's `## Fix` must not be (#494): `unknown` or any other deferral — `Not decided`, `TBD`, `To be determined`, `Needs design` … — under the shape
+// rules the server's `UNKNOWN` (server/src/items/parse.util.ts) carries: emphasis stripped, the word alone or followed by punctuation and a tail, or ending its
+// line with a paragraph below it, but never a sentence that merely opens with the word ("Not decided by the caller, so default to X" is a real fix). This was
+// `fix.trim() === PLACEHOLDER`, an exact match stricter than even the server's shape leniency, so a groom that deferred in its own words (ixray #58's
+// `Not decided — …`) was queued and parked when execute refused it. A HAND COPY rather than an import, because this tool imports nothing from the server or
+// another skill (see the header); orchestrate.test.mjs reads parse.util.ts as text and fails if this `.source` is not in it, the guard tick-lib.mjs's twin has.
+// Exported only for that guard and the gate's own cases.
+export const UNKNOWN =
+  /^[\s*_`#]*(?:unknown|not[ \t]+(?:yet[ \t]+)?(?:known|decided)|undecided|tbd|to[ \t]+be[ \t]+(?:decided|determined)|needs[ \t]+(?:design|grooming))[ \t*_`]*(?:$|\r?\n[\s\S]*$|[.,:;!?\-–—][\s\S]*$)/i;
+
 // Every open item in one section (bugs or tasks), each as its id, its
 // numeric id (for the oldest-first sort below — ids are minted as a
 // monotonic max+1 per store, so the number IS creation order, unlike file
@@ -1565,20 +1575,21 @@ function gateTask(body) {
   return { reasons: [], questionSection: plan };
 }
 
-// The bug half: `## Fix` must not be exactly the `unknown` placeholder.
-// Mirrors backlog-execute's own wording precisely ("Refuse if its content is
-// still exactly `unknown`") — that skill does not separately call out a
-// missing `## Fix` heading, because backlog-capture's bug template always
-// writes one; a heading that is missing anyway is refused here too, rather
-// than silently read as "ready," since there is equally nothing there for
-// backlog-execute to work.
-function gateBug(body) {
+// The bug half: `## Fix` must not be the `unknown` placeholder or another
+// deferral — `UNKNOWN` above. Mirrors backlog-execute's own wording ("Refuse
+// if its content is still `unknown` or another deferral") — that skill does
+// not separately call out a missing `## Fix` heading, because
+// backlog-capture's bug template always writes one; a heading that is missing
+// anyway is refused here too, rather than silently read as "ready," since
+// there is equally nothing there for backlog-execute to work. Cause is not
+// gated here, and never was.
+export function gateBug(body) {
   const fix = extractSection(body, 'Fix');
   if (fix === undefined) {
     return { reasons: ['## Fix heading is missing'], questionSection: undefined };
   }
-  if (fix.trim() === PLACEHOLDER) {
-    return { reasons: [`## Fix is still the "${PLACEHOLDER}" placeholder — nobody has diagnosed this yet`], questionSection: fix };
+  if (UNKNOWN.test(fix)) {
+    return { reasons: [`## Fix is still a placeholder ("${PLACEHOLDER}", "Not decided", "TBD", …) — nobody has decided it yet`], questionSection: fix };
   }
   return { reasons: [], questionSection: fix };
 }

@@ -30,6 +30,11 @@ test('deriveGroomed ends a section at an indented ## heading', () => {
   assert.equal(deriveGroomed('tasks', '  ## Plan\nsteps\n'), true);
 });
 
+// #494: the twin's half of parse.test.ts's deferral cases — a Fix that says "Not decided" is not a fix.
+test('deriveGroomed reads a "Not decided" Fix as ungroomed', () => {
+  assert.equal(deriveGroomed('bugs', '## Cause\n\ncause\n\n## Fix\n\nNot decided — this is a spec-level gap, not an implementation defect, and\nmore.\n'), false);
+});
+
 test('deriveGroomed is a byte copy of parse.util.ts', () => {
   const server = fs.readFileSync(PARSE_UTIL, 'utf8');
   assert.ok(server.includes(UNKNOWN.source), 'the twin UNKNOWN regex source must appear verbatim in server/src/items/parse.util.ts');

@@ -111,8 +111,25 @@ export function sectionText(body: string, heading: string): string {
  * or tabs trailing the word are the only thing allowed to sit in front of it.
  * The bias runs one way on purpose: a false "ungroomed" costs a groom that had
  * little to do, while a false "groomed" spends a whole session to be refused.
+ *
+ * The word is a VOCABULARY, not one word (#494). `unknown` is what
+ * backlog-capture writes, but a groom that defers a Fix on purpose writes it
+ * in its own words — ixray #58's Fix opened `Not decided — this is a
+ * spec-level gap…`, derived as groomed, and a tick picked it for execute (and,
+ * being "groomed", could never pick it for groom) only for backlog-execute to
+ * refuse it after a whole session. So the word is any of the deferrals —
+ * unknown, not (yet) known, not (yet) decided, undecided, TBD, to be decided,
+ * to be determined, needs design, needs grooming — with any run of spaces or
+ * tabs between a phrase's words. Widening the vocabulary is safe only because
+ * every shape rule above still applies to it unchanged, the same-line rule
+ * above all: `Not decided by the caller, so default to X` and `TBD markers are
+ * stripped first` keep prose on the word's own line, so they stay real fixes.
+ * The pattern has two hand copies, each pinned to this source by a text guard:
+ * `UNKNOWN` in skills/backlog-tick/tools/tick-lib.mjs and the bug gate's in
+ * skills/backlog-orchestrate/tools/orchestrate.mjs.
  */
-const UNKNOWN = /^[\s*_`#]*unknown[ \t*_`]*(?:$|\r?\n[\s\S]*$|[.,:;!?\-–—][\s\S]*$)/i;
+const UNKNOWN =
+  /^[\s*_`#]*(?:unknown|not[ \t]+(?:yet[ \t]+)?(?:known|decided)|undecided|tbd|to[ \t]+be[ \t]+(?:decided|determined)|needs[ \t]+(?:design|grooming))[ \t*_`]*(?:$|\r?\n[\s\S]*$|[.,:;!?\-–—][\s\S]*$)/i;
 
 /**
  * `phase` frontmatter is `groom` | `execute` while work is live, and the key
@@ -145,8 +162,9 @@ export function parseElapsed(value: string | undefined): number {
 
 /**
  * Groomed is derived, never stored — see the spec. bugs: Cause and Fix both
- * filled and not the "unknown" sentinel (that emptiness is precisely what
- * backlog-execute refuses to work on). tasks: a non-empty Plan (capture
+ * filled and neither a deferral (`unknown`, `Not decided`, `TBD`, … — the
+ * `UNKNOWN` vocabulary above; that emptiness is precisely what backlog-execute
+ * refuses to work on). tasks: a non-empty Plan (capture
  * refuses a task without one, so false only ever means a hand-made file).
  * ideas, refactors and out-of-scope: null — grooming is not a state they have.
  *

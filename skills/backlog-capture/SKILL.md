@@ -169,6 +169,8 @@ A refactor's headings are not an idea's with different words. `## What exists to
 now, not the benefit imagined later.
 
 `## Affects` holds a `file:line` list. On a freshly captured bug it's normal for `## Cause` and `## Fix` to both say `unknown` — that's exactly what makes the
-bug ungroomed, and `backlog-execute` will refuse to work it until `backlog-groom` fills them in.
+bug ungroomed, and `backlog-execute` will refuse to work it until `backlog-groom` fills them in. A Cause or Fix that is deliberately deferred — known
+to need a decision nobody has made yet — still starts with `unknown` on its own line, followed by the reasons in a paragraph below it: every reader of the
+groomed flag reads that shape as ungroomed, while a deferral worded freely is only caught if its words happen to be in the vocabulary (#494).
 
 Once filed, `/backlog` shows it on the board.

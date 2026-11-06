@@ -109,8 +109,9 @@ happened.
   Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-and-pull-request-caches-are-the-three-caches-in-this-server-whose-age-is-a-rendered-value)
 - **A tracker project has no item files, and that shows up in three places — and dispatch is NOT one of them.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places)
-- **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan non-empty), never stored; status is the directory, never frontmatter. Ideas,
-  refactors and out-of-scope derive `null`, not `false` — grooming is not a state they have, and for the first two the state they wait in is _promoted_.
+- **Groomed is derived** (bug: Cause+Fix filled and not a deferral — `unknown`, `Not decided`, `TBD`, …; task: Plan non-empty), never stored; status is the
+  directory, never frontmatter. Ideas, refactors and out-of-scope derive `null`, not `false` — grooming is not a state they have, and for the first two the
+  state they wait in is _promoted_.
 - **The Orchestrate sheet's `uncommitted` flag is read from git per request, memoised nowhere, and must never join the memo one file over.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-sheets-uncommitted-flag-is-read-from-git-per-request-and-memoised-nowhere)
 - **The server never spawns git synchronously: every git read is `runGit`, async, bounded at 10 s, and a timeout lands in the failure branch the call site

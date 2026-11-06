@@ -138,6 +138,37 @@ describe('deriveGroomed', () => {
     expect(deriveGroomed('bugs', body)).toBe(true);
   });
 
+  // #494: `unknown` is not the only way a Fix says "not decided yet". ixray #58's Fix opened `Not decided — this is a spec-level gap…`, read as groomed, and
+  // a tick spent a whole execute session on it to be refused. The sentinel is a vocabulary of deferrals now, under the same shape rules as the bare word.
+  it('bug whose Fix is a deferral other than unknown is not groomed', () => {
+    const fixes = [
+      'Not decided — this is a spec-level gap, not an implementation defect, and\nneeds grooming before it is planned.',
+      'TBD',
+      '**TBD.**',
+      'undecided\n\nWaiting on the contract.',
+      'To be determined: depends on #12.',
+      'Not yet decided.',
+      'Needs design — two options below.',
+      'NOT DECIDED',
+    ];
+    for (const fix of fixes) {
+      expect([fix, deriveGroomed('bugs', `## Cause\n\nReal cause.\n\n## Fix\n\n${fix}\n`)]).toEqual([fix, false]);
+    }
+  });
+
+  // The other side again: each deferral word may open a real fix, as long as more prose follows on the SAME line.
+  it('bug whose Fix merely opens with a deferral word is groomed', () => {
+    const fixes = [
+      'Not decided by the caller, so default to stratified.',
+      'TBD markers in the parser are stripped first.',
+      'Undecided votes count as abstentions in tally().',
+      'Use <=.',
+    ];
+    for (const fix of fixes) {
+      expect([fix, deriveGroomed('bugs', `## Cause\n\nReal cause.\n\n## Fix\n\n${fix}\n`)]).toEqual([fix, true]);
+    }
+  });
+
   it('bug missing the sections entirely is not groomed', () => {
     expect(deriveGroomed('bugs', '## Symptom\n\nx\n')).toBe(false);
   });

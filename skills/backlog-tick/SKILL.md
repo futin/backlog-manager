@@ -67,8 +67,8 @@ Decide `ok` or `failed` from what the skill left behind, never from how confiden
 | `execute` | the skill's final message ends with a PR URL on a line of its own | anything else — reason: its `failed:` line, or a one-line summary |
 | `groom` | the item is groomed afterwards (below) | anything else, a skill that wrote nothing included — same reason |
 
-A groom is `ok` only when the item is groomed AND carries the `plan-review` mark: a **bug** has `## Cause` and `## Fix` filled, neither "unknown", and the
-mark; a **refactor** was promoted to a task that has a plan and the mark. Anything else is `failed` — a bug groom that ends still ungroomed, recorded `ok`,
+A groom is `ok` only when the item is groomed AND carries the `plan-review` mark: a **bug** has `## Cause` and `## Fix` filled, neither a deferral
+(`unknown`, `Not decided`, `TBD`, …), and the mark; a **refactor** was promoted to a task that has a plan and the mark. Anything else is `failed` — a bug groom that ends still ungroomed, recorded `ok`,
 would be re-picked every tick, and an unmarked plan would be executed unseen. Read it back, read-only, on the bug's id, or on the new task id the groom printed
 — that new id is for this read-back ONLY:
 
@@ -78,7 +78,7 @@ cd '<root>' && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" sho
 
 Every step-3 command starts `cd '<root>' &&`, with `root` from step 1's JSON: an execute's `--finish pr` leaves this session's cwd inside its own worktree.
 
-In a tracker project the JSON carries `item.groomed` (`true` when Cause and Fix are filled and not "unknown", or the task has a plan) and `item.planReview`
+In a tracker project the JSON carries `item.groomed` (`true` when Cause and Fix are filled and not a deferral — `unknown`, `Not decided`, `TBD`, … — or the task has a plan) and `item.planReview`
 (`true`, or absent). In a files project `show` prints the path and frontmatter only — the `plan-review: true` line is in that block (any value but `false`
 counts) — so Read the file at the printed path for the `## Cause` / `## Fix` or `## Plan` text.
 

@@ -11,7 +11,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   RUN_STALE_MS,
+  UNKNOWN,
   archiveStem,
+  gateBug,
   isZombieStatState
 } from './orchestrate.mjs';
 import {
@@ -1403,6 +1405,28 @@ test('plan: a bug whose ## Fix is exactly "unknown" is ungroomed', (t) => {
     item.reasons.some((r) => /fix/i.test(r)),
     `expected a reason naming ## Fix, got ${JSON.stringify(item.reasons)}`
   );
+});
+
+// Case 4b (#494): a Fix that defers in other words — "Not decided", "TBD" — is
+// the same placeholder as `unknown`, and a real fix that merely opens with one
+// of those words on a longer line still passes. The gate's pattern is a hand
+// copy of the server's `UNKNOWN`, pinned below by the same text guard
+// tick-lib.test.mjs uses for its twin.
+test('gateBug refuses a deferral Fix, not only exactly "unknown"', () => {
+  for (const fix of ['Not decided — x', 'TBD', 'unknown']) {
+    const { reasons } = gateBug(`## Cause\n\nc\n\n## Fix\n\n${fix}\n`);
+    assert.equal(reasons.length, 1, `expected ${JSON.stringify(fix)} refused`);
+    assert.match(reasons[0], /## Fix is still a placeholder/);
+  }
+  for (const fix of ['The real fix — not the placeholder.', 'Not decided by the caller, so default to stratified.']) {
+    assert.deepEqual(gateBug(`## Cause\n\nc\n\n## Fix\n\n${fix}\n`).reasons, [], `expected ${JSON.stringify(fix)} to pass`);
+  }
+});
+
+test('the gate\'s UNKNOWN is a copy of server/src/items/parse.util.ts\'s', () => {
+  const server = fs.readFileSync(fileURLToPath(new URL('../../../server/src/items/parse.util.ts', import.meta.url)), 'utf8');
+  assert.ok(server.includes(UNKNOWN.source), 'the UNKNOWN regex source must appear verbatim in server/src/items/parse.util.ts');
+  assert.equal(UNKNOWN.flags, 'i');
 });
 
 // Case 5: a TBD in an otherwise-real Plan is needs-answers, not ungroomed —

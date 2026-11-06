@@ -130,7 +130,7 @@ cwd. Real output looks like this:
 ```
 ready         task-4  Re-ask the dispatch route for a project it cannot see  (runner fix — hoisted)
 ungroomed     bug-2  Settings hue swatch preview lags one theme change behind
-    - ## Fix is still the "unknown" placeholder — nobody has diagnosed this yet
+    - ## Fix is still a placeholder ("unknown", "Not decided", "TBD", …) — nobody has decided it yet
 ready         bug-7  Dispatch launch sheet drops the selected model on a fast double-click
 ready         task-1  Show a queue preview before an orchestrator run starts
 needs-answers task-5  Let the run drawer jump straight to a parked item's worktree
