@@ -128,4 +128,25 @@ describe('Segmented', () => {
     expect(plain.querySelector('.ui-seg-count')).toBeNull();
     expect(plain).toHaveAttribute('aria-pressed', 'false');
   });
+
+  // The Inbox triage leads two of its options with a level `Dot`: an optional node before the label, decorative, so the accessible name is still label + count.
+  it('draws an optional leading node before the label, hidden from the accessible name', () => {
+    render(
+      <Segmented
+        value="a"
+        options={[
+          { value: 'a', label: 'Needs you', count: 1, leading: <i data-testid="lead" /> },
+          { value: 'b', label: 'Plain', count: 0 }
+        ]}
+        onChange={jest.fn()}
+      />
+    );
+
+    const needs = screen.getByRole('button', { name: 'Needs you 1' });
+    const lead = screen.getByTestId('lead');
+    expect(lead.parentElement).toHaveAttribute('aria-hidden', 'true');
+    expect(needs.firstElementChild).toBe(lead.parentElement);
+    expect(needs.firstElementChild).toHaveClass('ui-seg-lead');
+    expect(screen.getByRole('button', { name: 'Plain 0' }).querySelector('.ui-seg-lead')).toBeNull();
+  });
 });

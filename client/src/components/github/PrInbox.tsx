@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { Dot } from '../ui/Dot';
 import { Segmented } from '../ui/Segmented';
 import { PrRow } from './PrRow';
 import { PrRepoNotes } from './PrRepoNotes';
 import type { PrLayoutProps } from './pr-layout-props';
 import {
   LEVELS,
+  LEVEL_DOT,
   LEVEL_LABEL,
   levelCounts,
   rankPrs,
@@ -26,6 +28,9 @@ import {
  * `No pull request at this level.` — a tile that still selected a PR the data no longer puts there would be lying. An option for an empty level stays drawn, so
  * the person who selected it can see why the list is empty and click it off. A filter that hides the row whose Confirm is open closes that Confirm: a row out
  * of the list is out of the list, whatever took it, and a Confirm nothing draws would still hold the Escape stack.
+ *
+ * **Each row is its own card** — a rule of the list (`.prs-inbox-list > .prs-row`), not of `PrRow`, so Cards' rows stay boxless inside their repo card. The triage's
+ * `Needs you` and `Worth a look` lead with their level `Dot` (Quiet none, as the mock), and `Quiet` is a section label with room above it.
  *
  * **Every row is keyed by `<repo>#<number>`, never by index.** Two repos can each have a `#7`, and a re-read reorders the list; a row that remounted because
  * its position changed would lose its place under the person's eye. The open Confirm is the page's (`PrLayoutProps.confirming`), so it follows the key, not
@@ -77,7 +82,13 @@ export function PrInbox(props: PrLayoutProps) {
               track
               label="Triage"
               value={filter ?? 'all'}
-              options={LEVELS.map((level) => ({ value: level, label: LEVEL_LABEL[level], count: counts[level] }))}
+              options={LEVELS.map((level) => ({
+                value: level,
+                label: LEVEL_LABEL[level],
+                count: counts[level],
+                // The level's own dot, the one Matrix's rows lead with (`LEVEL_DOT`); Quiet's is `undefined` and the mock draws none there.
+                leading: LEVEL_DOT[level] ? <Dot tone={LEVEL_DOT[level]} /> : undefined
+              }))}
               onChange={(v) => setFilter((current) => (v === 'all' || current === v ? null : v))}
             />
           </div>

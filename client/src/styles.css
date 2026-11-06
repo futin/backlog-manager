@@ -3376,12 +3376,23 @@ button.rail-count { cursor: pointer }
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
 
 /* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The triage is a `Segmented` and each row leads with a `GlyphTile` in its checks tone. Its rows are the shared
-   `.prs-row` above, boxless with a hairline between them. Own `.prs-inbox*` and `.prs-notes*` classes only — a `.ui-*` primitive is never restyled from here
+   `.prs-row` above; each is its own card (restyle fixes I1, mock `PRs.dc.html`:109) — `--card` ground, hairline border, 14 px radius, 14 x 16 padding, 10 px
+   between rows and no divider rule. The skin is the LIST's (`.prs-inbox-list > .prs-row`), never the shared `.prs-row`, because Cards draws the same row boxless
+   inside its repo card. Own `.prs-inbox*` and `.prs-notes*` classes only — a `.ui-*` primitive is never restyled from here
    (guard 7). */
 .prs-inbox { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
 .prs-inbox-triage { display: flex; min-width: 0 }
-.prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0 }
-.prs-inbox-heading { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
+.prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px }
+/* The shared row's first/last padding resets and its between-rows rule are each as specific as this and earlier in the sheet, so they are restated here for
+   the card: every card is padded the same and the hairline is its border, not a divider. */
+.prs-inbox-list > .prs-row,
+.prs-inbox-list > .prs-row:first-child,
+.prs-inbox-list > .prs-row:last-child {
+  padding: 14px 16px; background: var(--card); border: 1px solid var(--hairline); border-radius: 14px
+}
+/* `Quiet` is a section label, not a bare word between cards: the triage's own 13/500 type, with 8 px on top of `.prs-inbox`'s 16 px gap (24 px above, 16 at
+   least). */
+.prs-inbox-heading { margin: 8px 0 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
 .prs-inbox-repo { flex: none; font-size: 13px; font-weight: 400; color: var(--ink3) }
 /* One text-link look for the page's inline controls — the toolbar's `GitHub › Settings`. `.set-link` is §8.6's 36 px bordered row control and reads as a
    button inside a sentence, so this page keeps its own (a PRs class, not a restyle of `.set-link`). */
@@ -3802,6 +3813,8 @@ button.rail-count { cursor: pointer }
 .ui-seg button.on { color: var(--ink); background: var(--strip-hi); border-color: var(--ink3) }
 /* The optional per-option count (Sessions' state filter): quieter than the label, steadier on the pressed option; tabular so a changing number does not
    jiggle the segment. */
+/* `Segmented`'s optional `leading` node (a level `Dot` in GitHub › PRs' triage): before the label, centred on its line, 6 px clear of it. */
+.ui-seg-lead { display: inline-block; margin-right: 6px; vertical-align: middle; line-height: 0 }
 .ui-seg-count { font-size: 11px; font-weight: 600; color: var(--ink3); font-variant-numeric: tabular-nums }
 .ui-seg button.on .ui-seg-count { color: var(--ink2) }
 /* The pill variant (§8.6) — `Segmented`'s `pill` prop, a variant on the
