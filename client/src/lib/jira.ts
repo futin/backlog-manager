@@ -660,11 +660,13 @@ export function pickBoard(storedId: unknown, boards: readonly JiraBoardStatus[])
 // ── The Board page's filters ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * What the Board page's three filters and its search hold (spec §6.2). Per mount, never persisted — the global constraints' rule, because a filter that
+ * What the Board page's four filters and its search hold (spec §6.2). Per mount, never persisted — the global constraints' rule, because a filter that
  * survived a reload would hide cards from a reader who no longer remembers setting it, and the band's list is cheap to narrow again.
  *
  * `type` and `sprint` are `undefined` for "any"; `sprint: null` is the `no sprint` pick, which is why "any" cannot also be `null`. `assignee` is the three
- * words the panel draws.
+ * words the panel draws. `statuses` is the one MULTI-select: status names, empty for "any", because the pick a reader wants is a set — `To Do` plus
+ * `In Progress`, everything not yet in review — and no single status names it. Names, not categories: the columns already split by category, and a board's
+ * `indeterminate` holds `In Progress` and `In Review` alike.
  */
 export type JiraAssigneeFilter = 'anyone' | 'me' | 'unassigned';
 
@@ -672,28 +674,36 @@ export interface JiraBoardFilters {
   type: string | undefined;
   assignee: JiraAssigneeFilter;
   sprint: string | null | undefined;
+  statuses: readonly string[];
   search: string;
 }
 
-export const NO_JIRA_FILTERS: JiraBoardFilters = { type: undefined, assignee: 'anyone', sprint: undefined, search: '' };
+export const NO_JIRA_FILTERS: JiraBoardFilters = { type: undefined, assignee: 'anyone', sprint: undefined, statuses: [], search: '' };
+
+/** Workflow order for the status chips: every `new` status, then `indeterminate`, then `done`, so the row reads left to right the way a ticket moves. */
+const CATEGORY_RANK: Record<JiraStatusCategory, number> = { new: 0, indeterminate: 1, done: 2 };
 
 const byText = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true });
 
 /**
  * The picks the panel offers, read off the LOADED list rather than off Jira's own catalogue: a type or a sprint no card on this board carries would be a
  * chip that empties the columns, and the browser has no other source anyway (it never talks to Jira). Sorted, with `Sprint 9` before `Sprint 10`.
- * `noSprint` says whether the `no sprint` chip has anything to show.
+ * `noSprint` says whether the `no sprint` chip has anything to show. Statuses are the exception to the alphabetical order: they sort by category first
+ * (`CATEGORY_RANK`), then by name, so `To Do` never lands after `Done`. A name two categories share (a misconfigured workflow) takes the first one seen.
  */
-export function boardFilterOptions(issues: readonly JiraIssue[]): { types: string[]; sprints: string[]; noSprint: boolean } {
+export function boardFilterOptions(issues: readonly JiraIssue[]): { types: string[]; sprints: string[]; noSprint: boolean; statuses: string[] } {
   const types = new Set<string>();
   const sprints = new Set<string>();
+  const statuses = new Map<string, JiraStatusCategory>();
   let noSprint = false;
   for (const i of issues) {
     types.add(i.type.name);
+    if (!statuses.has(i.status.name)) statuses.set(i.status.name, i.status.category);
     if (i.sprint === null) noSprint = true;
     else sprints.add(i.sprint);
   }
-  return { types: [...types].sort(byText), sprints: [...sprints].sort(byText), noSprint };
+  const byWorkflow = (a: string, b: string): number => CATEGORY_RANK[statuses.get(a)!] - CATEGORY_RANK[statuses.get(b)!] || byText(a, b);
+  return { types: [...types].sort(byText), sprints: [...sprints].sort(byText), noSprint, statuses: [...statuses.keys()].sort(byWorkflow) };
 }
 
 /**
@@ -711,13 +721,15 @@ export function effectiveBoardFilters(
     type: filters.type !== undefined && options.types.includes(filters.type) ? filters.type : undefined,
     assignee: filters.assignee === 'me' && me === null ? 'anyone' : filters.assignee,
     sprint: sprintOffered ? filters.sprint : undefined,
+    // Per name, not all-or-nothing: of `To Do` + `In Progress`, a board with no `In Progress` still keeps the `To Do` half of the pick.
+    statuses: filters.statuses.filter((s) => options.statuses.includes(s)),
     search: filters.search
   };
 }
 
-/** How many of the three panel filters are set — the funnel's badge. The search is not one: it is in plain sight on the band, and `Clear all` leaves it. */
+/** How many of the four panel filters are set — the funnel's badge. The search is not one: it is in plain sight on the band, and `Clear all` leaves it. */
 export function boardFilterCount(f: JiraBoardFilters): number {
-  return (f.type !== undefined ? 1 : 0) + (f.assignee !== 'anyone' ? 1 : 0) + (f.sprint !== undefined ? 1 : 0);
+  return (f.type !== undefined ? 1 : 0) + (f.assignee !== 'anyone' ? 1 : 0) + (f.sprint !== undefined ? 1 : 0) + (f.statuses.length > 0 ? 1 : 0);
 }
 
 /**
@@ -727,6 +739,7 @@ export function boardFilterCount(f: JiraBoardFilters): number {
 export function matchesBoardFilters(issue: JiraIssue, f: JiraBoardFilters, me: { accountId: string } | null): boolean {
   if (f.type !== undefined && issue.type.name !== f.type) return false;
   if (f.sprint !== undefined && issue.sprint !== f.sprint) return false;
+  if (f.statuses.length > 0 && !f.statuses.includes(issue.status.name)) return false;
   if (f.assignee === 'unassigned' && issue.assignee !== null) return false;
   if (f.assignee === 'me' && (me === null || issue.assignee?.accountId !== me.accountId)) return false;
   const q = f.search.trim().toLowerCase();
