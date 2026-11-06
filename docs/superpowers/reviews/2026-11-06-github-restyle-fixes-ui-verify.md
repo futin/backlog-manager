@@ -109,3 +109,9 @@ One Minor, not a mock region: where the meta line wraps (Cards two-up at 1440, I
 (`futin ·` / `· execute/468 → main`). Carried into the final review's fix dispatch.
 
 Screenshots: scratchpad `shots/r2-{inbox-1440,inbox-390,menu-1440,menu481-1440,matrix-1440,cards-1440,cards-600}.jpg`.
+
+## Round 3 (after the final-review fix `497e914a`)
+
+Re-shot Inbox 1440/390, Cards 1440 and the #490 menu (`s19.json`): no overflow lines, no page errors. A wrapped meta line now ends on its separator
+(`futin ·`) and never starts with one — the separator rides inside the item before it. At 390 the 40 px tile sits beside `#n` + title instead of alone
+on the first line. Menu primary ground unchanged. Screenshots: scratchpad `shots/r3-{inbox-1440,inbox-390,cards-1440,menu-1440}.jpg`.
