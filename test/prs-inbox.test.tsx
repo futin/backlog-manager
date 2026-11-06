@@ -189,7 +189,7 @@ describe('PrInbox — items', () => {
     expect(tone(12)).toHaveAttribute('data-tone', 'amber');
     expect(tone(13)).toHaveAttribute('data-tone', 'green');
     expect(tone(14)).toHaveAttribute('data-tone', 'neutral');
-    expect(tone(11)).toHaveAttribute('data-size', '32');
+    expect(tone(11)).toHaveAttribute('data-size', '40');
   });
 
   it('draws the facts as pills and no verdict, steps or quiet-facts line', () => {
@@ -199,6 +199,53 @@ describe('PrInbox — items', () => {
     for (const label of ['checks failing', 'behind base', 'approved']) expect(pills.getByText(label)).toBeInTheDocument();
     expect(item.querySelector('.prs-inbox-verdict, .prs-inbox-steps, .prs-inbox-facts')).toBeNull();
     expect(within(item).queryByText('Checks are failing.')).not.toBeInTheDocument();
+  });
+
+  it('leads the checks and mergeability pills with a glyph, and draws none on a pill that is only text', () => {
+    const rows = [
+      pr({ number: 21, checks: 'failure' }),
+      pr({ number: 22, checks: 'success' }),
+      pr({ number: 23, checks: 'pending' }),
+      pr({ number: 24, mergeable: 'conflicting' }),
+      pr({ number: 25, mergeState: 'behind' })
+    ];
+    render(<PrInbox {...props([repo('a/x', rows)])} />);
+    const pill = (n: number, label: string) => within(screen.getByTestId(`pr-row-a/x#${n}`)).getByText(label, { selector: '.ui-pill' });
+    expect(pill(21, 'checks failing').querySelector('svg')).not.toBeNull();
+    expect(pill(22, 'checks passing').querySelector('svg')).not.toBeNull();
+    expect(pill(23, 'checks pending').querySelector('svg')).not.toBeNull();
+    expect(pill(24, 'conflicts').querySelector('svg')).not.toBeNull();
+    expect(pill(25, 'behind base').querySelector('svg')).toBeNull();
+  });
+
+  it('puts the pills and the meta in one container, so they wrap as one line, and the run warning stays at its end', () => {
+    render(<PrInbox {...props([repo('a/x', [pr({ number: 31, checks: 'failure' })])])} />);
+    const line = screen.getByTestId('pr-row-a/x#31').querySelector('.prs-line') as HTMLElement;
+    expect(line.querySelector('.prs-chips')).not.toBeNull();
+    expect(line.querySelector('.prs-meta')).not.toBeNull();
+    // Pills first, then the meta: the order the eye reads, and the only DOM order that wraps them as one flow.
+    expect(Array.from(line.children).map((el) => el.className)).toEqual(['prs-chips', 'prs-meta']);
+  });
+
+  it('names a PR\'s repo at the start of the meta line, short, and the full owner/name only where two shown repos share a short one', () => {
+    const { unmount } = render(<PrInbox {...props([repo('futin/backlog-manager', [pr({ number: 41 })]), repo('futin/timify-web', [pr({ number: 42 })])])} />);
+    const meta = (n: number, name: string) => screen.getByTestId(`pr-row-${name}#${n}`).querySelector('.prs-meta') as HTMLElement;
+    expect(meta(41, 'futin/backlog-manager').firstElementChild).toHaveTextContent(/^backlog-manager$/);
+    expect(meta(42, 'futin/timify-web').firstElementChild).toHaveTextContent(/^timify-web$/);
+    // The name is no longer beside the title.
+    expect(screen.getByTestId('pr-row-futin/timify-web#42').querySelector('.prs-row-title .prs-inbox-repo')).toBeNull();
+    unmount();
+
+    render(<PrInbox {...props([repo('acme/ui-kit', [pr({ number: 43 })]), repo('futin/ui-kit', [pr({ number: 43 })])])} />);
+    expect(meta(43, 'acme/ui-kit').firstElementChild).toHaveTextContent(/^acme\/ui-kit$/);
+    expect(meta(43, 'futin/ui-kit').firstElementChild).toHaveTextContent(/^futin\/ui-kit$/);
+  });
+
+  it('draws an armed auto-merge as a tinted done pill, not the solid live fill', () => {
+    render(<PrInbox {...props([repo('a/x', [pr({ number: 51, autoMerge: { method: 'squash', enabledAt: '2026-10-29T09:00:00Z' } })])])} />);
+    const pill = within(screen.getByTestId('pr-row-a/x#51')).getByText('auto-merge · squash');
+    expect(pill).toHaveClass('ui-pill-done');
+    expect(pill).not.toHaveClass('ui-pill-live');
   });
 
   it('draws two repos each with #7, keyed apart', () => {
@@ -314,6 +361,8 @@ describe('PrInbox — one row vocabulary', () => {
     const meta = row.querySelector('.prs-meta') as HTMLElement;
     // The separators are their own spans, spaced by the flex gap, so the line is read part by part.
     expect(Array.from(meta.children).map((el) => el.textContent)).toEqual([
+      'x',
+      '·',
       'futin',
       '·',
       'backlog/42 → main',

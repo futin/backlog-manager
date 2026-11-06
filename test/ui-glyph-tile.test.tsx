@@ -23,8 +23,15 @@ describe('GlyphTile', () => {
     expect(tile).toHaveAttribute('data-size', '18');
     expect(tile.querySelector('svg')).toHaveAttribute('width', '10');
   });
-  it('draws a 14 px glyph at 28 and 32', () => {
-    const { container } = render(<GlyphTile glyph="tick" size={32} />);
-    expect(container.querySelector('svg')).toHaveAttribute('width', '14');
+  it('draws a 14 px glyph at 28, 32 and 40', () => {
+    for (const size of [28, 32, 40] as const) {
+      const { container, unmount } = render(<GlyphTile glyph="tick" size={size} />);
+      expect(container.querySelector('svg')).toHaveAttribute('width', '14');
+      unmount();
+    }
+  });
+  it('takes size 40, the Inbox row tile, and says it in data-size for the CSS rule to read', () => {
+    const { container } = render(<GlyphTile glyph="cross" tone="red" size={40} />);
+    expect(container.firstElementChild).toHaveAttribute('data-size', '40');
   });
 });

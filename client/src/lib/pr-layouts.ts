@@ -207,6 +207,18 @@ export function openRepoCount(shown: readonly PrRepoView[]): number {
   return shown.filter((repo) => repo.total > 0).length;
 }
 
+/**
+ * A repo's name as a row says it: the last `/` segment (`futin/backlog-manager` → `backlog-manager`), because the owner is the same on nearly every repo of a
+ * machine and says nothing there. Two shown repos that share the last segment (`acme/ui-kit`, `futin/ui-kit`) would then read as one, so a repo whose segment
+ * another shown repo also has keeps its full `owner/name`. `shown` is the full names on the page (a repo listed twice under one name is not a collision with
+ * itself). The one home of the rule: Inbox's meta line, Cards' head and Matrix's rows all call this, so they cannot shorten one repo three ways.
+ */
+export function repoShortName(repo: string, shown: readonly string[]): string {
+  const segment = (name: string) => name.slice(name.lastIndexOf('/') + 1);
+  const short = segment(repo);
+  return shown.some((other) => other !== repo && segment(other) === short) ? repo : short;
+}
+
 /** The most recent successful read across the shown repos — the one `polled … ago` the band draws — or `null` when none has read yet. */
 export function newestPolledAt(shown: readonly PrRepoView[]): string | null {
   let best: string | null = null;

@@ -711,10 +711,13 @@ count and a filter were one control drawn at tile size (restyle spec §4.8; mock
 simply leaves the list; an empty level keeps its segment, and a filter that hides the confirming row closes its Confirm. Below it every shown PR is ranked
 across all repos (`rankPrs`: level, then problem severity, then newest update) and drawn by level, the Quiet ones under a `Quiet` heading. Every row, loud or
 quiet, is the same `PrRow` (`prs-row`, `pr-row-<key>`; the component Cards draws too), boxless with a hairline between rows. Its left edge is the **status
-tile**, a 32 px `GlyphTile` in the `checks` tone (`checksTone`, `checksGlyph`: `failure` a red cross, `pending` an amber clock, `success` a green tick, `none`
+tile**, a 40 px `GlyphTile` (28 px in Cards; the mocks' `.tile.lg` and `.tile`) in the `checks` tone (`checksTone`, `checksGlyph`: `failure` a red cross, `pending` an amber clock, `success` a green tick, `none`
 and `unknown` the grey pull-request mark) — conflicts, changes requested and behind are carried by the pills, never the tile, so one glance reads the checks and
-the pills say the rest. Its text, top to bottom: the `#n` link (a link and nothing more), the title at 15/500 and, in Inbox only, the repo at 13 px `--ink3`;
-the pills (`prPills`, the Cards list below); the meta line, `author · head → base · age`, with the run warning as a warn `Pill` at its end; then the foot. The
+the pills say the rest. Its text, top to bottom: the `#n` link (a link and nothing more), the title at 15/500;
+then ONE wrapping line (`.prs-line`) — the pills (`prPills`; the checks and conflicts pills lead with their glyph, ✕ ✓ or a clock, and `auto-merge · <method>` is the
+tinted `done` pill, not the solid `live` fill), then the meta, `author · head → base · age`, with the run warning as a warn `Pill` at its end. In Inbox only, the
+meta opens with the repo's short name at 13 px `--ink3` (`repoShortName`: the last `/` segment, the full `owner/name` only where two shown repos share it; the mocks
+draw no repo in an Inbox row, but the list mixes repos). Branch names stay in the body face — the mock's mono loses to design guard 2. Then the foot. The
 verdict sentence and the steps under it (`prVerdict`, `quietFacts`) are gone: the tile and the pills state the same facts without a sentence to read, and
 ranking, which still sorts by level and severity, is what puts the loud rows first. The key strip sits at the row's right, top-aligned with the tile. The text
 keeps a `flex: 1 1 320px` basis, so the strip drops under it whenever the title would get less than 320 px — the title is never squeezed to make room for the

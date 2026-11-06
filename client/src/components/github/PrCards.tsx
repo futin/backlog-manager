@@ -68,7 +68,7 @@ function RepoSheet(props: PrLayoutProps & { repo: PrRepoView }) {
         {repo.prs.length > 0 && (
           <ul className="prs-list" aria-label={`${repo.repo} pull requests`}>
             {repo.prs.map((pr) => (
-              <PrRow key={pr.number} repo={repo} pr={pr} props={props} />
+              <PrRow key={pr.number} repo={repo} pr={pr} props={props} tileSize={28} />
             ))}
           </ul>
         )}

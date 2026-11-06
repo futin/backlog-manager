@@ -511,9 +511,9 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   every layout, never as a row.
  The layout is a `Segmented` in the toolbar offering
   all three at every width (`PR_LAYOUT_OPTIONS`), stored per device (`PR_LAYOUT_KEY`; an unknown word is Inbox). **Inbox** (default) ranks every shown PR across
-  repos (`rankPrs`: level, severity, newest) under a `Segmented` labelled `Triage` (a counted option per level, no `all`; the pressed one clears the filter), every row one `prs-row` — a 32 px
-  checks `GlyphTile` (`checksTone`, `checksGlyph`), the `#n` and title, the pill row (`prPills`), then `author · head → base · age` with the run warning as a warn
-  pill. **Matrix** is a table, a column per check with a failure count in
+  repos (`rankPrs`: level, severity, newest) under a `Segmented` labelled `Triage` (a counted option per level, no `all`; the pressed one clears the filter), every row one `prs-row` — a 40 px (28 in
+  Cards) checks `GlyphTile` (`checksTone`, `checksGlyph`), the `#n` and title, then one wrapping line: the pills (`prPills`, the checks and conflicts ones leading with a
+  glyph), then `[repo short name ·] author · head → base · age` (`repoShortName`, Inbox only) with the run warning as a warn pill. **Matrix** is a table, a column per check with a failure count in
   its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; a problem cell and a header count are pills (red for `bad` and Checks,
   amber otherwise; a healthy cell is plain text); its row toggles one expansion, a panel that is the `Ledger`'s next sibling inside the sheet (`aria-controls`; a `Popover`
   portals nothing and the scroll box's and Ledger's overflow would clip the Merge menu), holding the key strip with a blocked Merge's reason in words, then the foot.

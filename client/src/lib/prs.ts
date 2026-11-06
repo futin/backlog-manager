@@ -1,4 +1,5 @@
 import { MERGE_METHODS, PR_UPDATING_MS } from '../../../shared/types';
+import type { GlyphName } from '../components/ui/Glyphs';
 import type { PillTone } from '../components/ui/Pill';
 import type { MergeMethod, PrRepoView, PrWriteResult, PullRequestRow } from '../../../shared/types';
 
@@ -56,10 +57,15 @@ export function findPr(repos: readonly PrRepoView[], key: string): { repo: PrRep
   return repo === undefined || pr === undefined ? undefined : { repo, pr };
 }
 
-/** A chip a row draws: the label is the whole claim, the tone is `Pill`'s vocabulary. */
+/**
+ * A chip a row draws: the label is the whole claim, the tone is `Pill`'s vocabulary. `glyph` is the mark that LEADS the label — only on the two facts the mock
+ * (`PRs.dc.html`, a row) draws one for, the checks and the mergeability — so a glance down a column of rows finds the red ✕ before reading a word. It is
+ * decoration beside the label, never instead of it.
+ */
 export interface PrChip {
   label: string;
   tone: PillTone;
+  glyph?: GlyphName;
 }
 
 /**
@@ -75,13 +81,15 @@ export function prChips(pr: PullRequestRow): PrChip[] {
   if (pr.review === 'approved') chips.push({ label: 'approved', tone: 'done' });
   else if (pr.review === 'changes-requested') chips.push({ label: 'changes requested', tone: 'bad' });
   else if (pr.review === 'review-required') chips.push({ label: 'review required', tone: 'warn' });
-  if (pr.checks === 'success') chips.push({ label: 'checks passing', tone: 'done' });
-  else if (pr.checks === 'failure') chips.push({ label: 'checks failing', tone: 'bad' });
-  else if (pr.checks === 'pending') chips.push({ label: 'checks pending', tone: 'warn' });
+  if (pr.checks === 'success') chips.push({ label: 'checks passing', tone: 'done', glyph: 'tick' });
+  else if (pr.checks === 'failure') chips.push({ label: 'checks failing', tone: 'bad', glyph: 'cross' });
+  else if (pr.checks === 'pending') chips.push({ label: 'checks pending', tone: 'warn', glyph: 'clock' });
   else if (pr.checks === 'unknown') chips.push({ label: 'checks unknown', tone: 'neutral' });
-  if (pr.mergeable === 'conflicting') chips.push({ label: 'conflicts', tone: 'bad' });
+  if (pr.mergeable === 'conflicting') chips.push({ label: 'conflicts', tone: 'bad', glyph: 'cross' });
   if (pr.mergeState === 'behind') chips.push({ label: 'behind base', tone: 'warn' });
-  if (pr.autoMerge !== null) chips.push({ label: `auto-merge · ${pr.autoMerge.method}`, tone: 'live' });
+  // `done`, the tint the mock gives `auto-merge on`: an armed PR is a thing GitHub will finish by itself, not something running, and the solid `live` fill
+  // made it the loudest pill on the row.
+  if (pr.autoMerge !== null) chips.push({ label: `auto-merge · ${pr.autoMerge.method}`, tone: 'done' });
   return chips;
 }
 

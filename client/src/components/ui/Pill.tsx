@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 
+import { Glyph, type GlyphName } from './Glyphs';
+
 export type PillTone = 'neutral' | 'live' | 'warn' | 'bad' | 'done';
 
 /**
@@ -21,10 +23,26 @@ export type PillTone = 'neutral' | 'live' | 'warn' | 'bad' | 'done';
  * The tone class stays on the element (the pill still names what it is a
  * reading OF) and `ui-pill-off` rides beside it, so the look that says "not
  * allowed" never has to be restated per tone and a palette swap still moves it.
+ *
+ * `glyph` is an optional mark that leads the text (a failing check's ✕, a passing one's ✓), drawn at the default 14 px like the mock's pill icons and `aria-hidden`
+ * as every `Glyph` is: the words carry the claim, the mark is only the cue the eye finds first. Nothing is drawn without it, so a count pill is still one text node.
  */
-export function Pill({ children, tone = 'neutral', title, off = false }: { children: ReactNode; tone?: PillTone; title?: string; off?: boolean }) {
+export function Pill({
+  children,
+  tone = 'neutral',
+  title,
+  off = false,
+  glyph
+}: {
+  children: ReactNode;
+  tone?: PillTone;
+  title?: string;
+  off?: boolean;
+  glyph?: GlyphName;
+}) {
   return (
     <span className={`ui-pill ui-pill-${tone}${off ? ' ui-pill-off' : ''}`} title={title}>
+      {glyph !== undefined && <Glyph name={glyph} />}
       {children}
     </span>
   );

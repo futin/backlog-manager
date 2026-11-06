@@ -272,6 +272,15 @@ describe('PullRequestsView — grouping and the rows', () => {
     expect(head).toHaveTextContent('polled 12 s ago');
   });
 
+  it('draws each card row with a 28 px tile, one pills-and-meta line and no repo name — the head already says it', async () => {
+    await mount();
+    const r = row('futin/y#12');
+    expect(r.querySelector('.ui-glyph-tile')).toHaveAttribute('data-size', '28');
+    const line = r.querySelector('.prs-line') as HTMLElement;
+    expect(line.querySelector('.prs-meta')).not.toBeNull();
+    expect(r.querySelector('.prs-inbox-repo')).toBeNull();
+  });
+
   it('draws each card row with its checks tile, the pills and the split Merge', async () => {
     await mount();
     const r = row('futin/y#12');

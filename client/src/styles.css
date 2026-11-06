@@ -3366,6 +3366,10 @@ button.rail-count { cursor: pointer }
 .prs-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; color: var(--ink2) }
 .prs-branches { overflow-wrap: anywhere }
 .prs-chips { display: flex; flex-wrap: wrap; gap: 6px }
+/* A row's pills and meta are ONE wrapping line (mock `PRs.dc.html`: the pills, then `author · head → base · age`). The two wrappers stay in the markup so the meta's
+   children are still a list, and dissolve here so their items flow in this container; Matrix's own `.prs-meta` is untouched, it is not inside `.prs-line`. */
+.prs-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0 }
+.prs-line > .prs-chips, .prs-line > .prs-meta { display: contents }
 .prs-why { font-size: 12px; color: var(--ink2) }
 .prs-outcome { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-outcome-error { color: var(--red) }
@@ -4158,6 +4162,7 @@ tr.ui-stripe > :first-child { box-shadow: inset 3px 0 0 var(--stripe, transparen
 .ui-glyph-tile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--strip-hi); color: var(--ink2) }
 .ui-glyph-tile[data-size='18'] { width: 18px; height: 18px; border-radius: 5px }
 .ui-glyph-tile[data-size='32'] { width: 32px; height: 32px; border-radius: 9px }
+.ui-glyph-tile[data-size='40'] { width: 40px; height: 40px; border-radius: 12px }
 .ui-glyph-tile[data-tone='green'] { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
 .ui-glyph-tile[data-tone='red'] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
 .ui-glyph-tile[data-tone='amber'] { background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)); color: var(--amber-ink) }

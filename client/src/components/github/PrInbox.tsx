@@ -9,6 +9,7 @@ import {
   LEVEL_LABEL,
   levelCounts,
   rankPrs,
+  repoShortName,
   transientFailures,
   type PrLevel
 } from '../../lib/pr-layouts';
@@ -30,8 +31,9 @@ import {
  * its position changed would lose its place under the person's eye. The open Confirm is the page's (`PrLayoutProps.confirming`), so it follows the key, not
  * the position.
  *
- * **One row, loud or quiet.** `PrRow` (shared with Cards, which draws it without the repo name): a 32 px checks `GlyphTile`, the `#n` link, title and repo, the
- * pill row, the meta line with the run warning as one warn pill, then the foot; the keys and their why-line are the row's right-hand side, top-aligned with the
+ * **One row, loud or quiet.** `PrRow` (shared with Cards, which draws it at 28 px and without the repo name): a 40 px checks `GlyphTile`, the `#n` link and title, then ONE
+ * wrapping line — the pills, then the meta that opens with the repo's short name (`repoShortName`: the last segment, the full `owner/name` only where two shown
+ * repos share it) and carries the run warning as one warn pill — then the foot; the keys and their why-line are the row's right-hand side, top-aligned with the
  * title, and wrap under the text when the title would get less than 320 px — and always below the narrow breakpoint. A quiet row carries the same keys as every
  * other row and its `#n` is a link and nothing more.
  *
@@ -46,6 +48,7 @@ export function PrInbox(props: PrLayoutProps) {
   const ranked = useMemo(() => rankPrs(repos), [repos]);
   const counts = levelCounts(ranked);
   const failures = transientFailures(repos);
+  const shownNames = useMemo(() => repos.map((r) => r.repo), [repos]);
 
   const visible = filter === null ? ranked : ranked.filter((r) => r.level === filter);
   const loud = visible.filter((r) => r.level !== 'quiet');
@@ -82,7 +85,7 @@ export function PrInbox(props: PrLayoutProps) {
           {loud.length > 0 && (
             <ul className="prs-inbox-list">
               {loud.map((r) => (
-                <PrRow key={r.key} repo={r.repo} pr={r.pr} props={props} showRepo />
+                <PrRow key={r.key} repo={r.repo} pr={r.pr} props={props} tileSize={40} repoLabel={repoShortName(r.repo.repo, shownNames)} />
               ))}
             </ul>
           )}
@@ -91,7 +94,7 @@ export function PrInbox(props: PrLayoutProps) {
               <h3 className="prs-inbox-heading">Quiet</h3>
               <ul className="prs-inbox-list">
                 {quiet.map((r) => (
-                  <PrRow key={r.key} repo={r.repo} pr={r.pr} props={props} showRepo />
+                  <PrRow key={r.key} repo={r.repo} pr={r.pr} props={props} tileSize={40} repoLabel={repoShortName(r.repo.repo, shownNames)} />
                 ))}
               </ul>
             </>

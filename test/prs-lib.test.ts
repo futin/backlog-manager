@@ -85,21 +85,22 @@ describe('prChips', () => {
     expect(chips).toEqual([
       { label: 'draft', tone: 'neutral' },
       { label: 'changes requested', tone: 'bad' },
-      { label: 'checks failing', tone: 'bad' },
-      { label: 'conflicts', tone: 'bad' },
+      { label: 'checks failing', tone: 'bad', glyph: 'cross' },
+      { label: 'conflicts', tone: 'bad', glyph: 'cross' },
       { label: 'behind base', tone: 'warn' },
-      { label: 'auto-merge · rebase', tone: 'live' }
+      // The `done` tint, as the mock's `auto-merge on` — not the solid `live` fill, which reads as a running thing.
+      { label: 'auto-merge · rebase', tone: 'done' }
     ]);
   });
 
   it('maps the other review and check values', () => {
     expect(prChips(pr({ review: 'approved', checks: 'success' }))).toEqual([
       { label: 'approved', tone: 'done' },
-      { label: 'checks passing', tone: 'done' }
+      { label: 'checks passing', tone: 'done', glyph: 'tick' }
     ]);
     expect(prChips(pr({ review: 'review-required', checks: 'pending' }))).toEqual([
       { label: 'review required', tone: 'warn' },
-      { label: 'checks pending', tone: 'warn' }
+      { label: 'checks pending', tone: 'warn', glyph: 'clock' }
     ]);
   });
 
