@@ -1,5 +1,5 @@
 import { elapsedSince } from './item-age';
-import { groupRepos, parsePrKey, prChips, type PrChip, prKey, mergeBlock, updateBlock, type PrOutcome } from './prs';
+import { groupRepos, parsePrKey, checkTally, prChips, type PrChip, prKey, mergeBlock, updateBlock, type PrOutcome } from './prs';
 import type { DotTone } from '../components/ui/Dot';
 import type { GlyphName } from '../components/ui/Glyphs';
 import type { PrRepoView, PullRequestRow, PullRequestsPayload } from '../../../shared/types';
@@ -344,13 +344,16 @@ const NA: MatrixCell = { text: '—', tone: 'na' };
  * cell and the level cannot disagree about whether a block has a name.
  */
 export function matrixCells(pr: PullRequestRow, updating: boolean): Record<MatrixColumn, MatrixCell> {
+  // `2 of 7 failing` when GitHub's tallies back the word (`checkTally`, the chips' own sizing), the bare word otherwise.
+  const tally = checkTally(pr);
+  const sized = (word: string) => (tally === null ? word : `${tally.count} ${word}`);
   const checks: MatrixCell =
     pr.checks === 'success'
-      ? { text: 'passing', tone: 'ok' }
+      ? { text: sized('passing'), tone: 'ok' }
       : pr.checks === 'failure'
-        ? { text: 'failing', tone: 'bad' }
+        ? { text: sized('failing'), tone: 'bad' }
         : pr.checks === 'pending'
-          ? { text: 'running', tone: 'live' }
+          ? { text: sized('running'), tone: 'live' }
           : pr.checks === 'unknown'
             ? // Said in words rather than `—`: the dash means "no checks", and here there may well be some this token cannot read.
               { text: 'unknown', tone: 'na' }

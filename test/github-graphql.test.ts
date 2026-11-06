@@ -242,6 +242,7 @@ describe('toRow', () => {
       mergeState: 'behind',
       review: 'changes-requested',
       checks: 'failure',
+      checkCounts: null,
       autoMerge: { method: 'squash', enabledAt: '2026-10-21T09:00:00Z' },
       canUpdateBranch: true
     });
@@ -261,6 +262,7 @@ describe('toRow', () => {
       mergeState: 'clean',
       review: 'approved',
       checks: 'pending',
+      checkCounts: null,
       autoMerge: null,
       canUpdateBranch: true
     });
@@ -280,6 +282,7 @@ describe('toRow', () => {
       mergeState: 'blocked',
       review: 'review-required',
       checks: 'success',
+      checkCounts: null,
       autoMerge: { method: 'merge', enabledAt: '2026-10-25T07:20:00Z' },
       canUpdateBranch: false
     });
@@ -308,6 +311,41 @@ describe('toRow', () => {
     const refused = { ...NODE_7, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } };
     expect(toRow(refused, true).checks).toBe('unknown');
     expect(toRow(refused, false).checks).toBe('none');
+  });
+
+  it('counts sum check runs and status contexts by state; every state not failing or running only adds to the total', () => {
+    const tallies = (runs: [string, number][], statuses: [string, number][], totalCount: number) => ({
+      ...NODE_12,
+      commits: {
+        nodes: [
+          {
+            commit: {
+              statusCheckRollup: {
+                state: 'FAILURE',
+                contexts: {
+                  totalCount,
+                  checkRunCountsByState: runs.map(([state, count]) => ({ state, count })),
+                  statusContextCountsByState: statuses.map(([state, count]) => ({ state, count }))
+                }
+              }
+            }
+          }
+        ]
+      }
+    });
+    const node = tallies(
+      [['FAILURE', 1], ['TIMED_OUT', 1], ['CANCELLED', 1], ['IN_PROGRESS', 2], ['QUEUED', 1], ['SUCCESS', 3], ['SKIPPED', 1], ['NEUTRAL', 1], ['SOMETHING_NEW', 1]],
+      [['ERROR', 1], ['EXPECTED', 1], ['PENDING', 1], ['SUCCESS', 2]],
+      19
+    );
+    expect(toRow(node).checkCounts).toEqual({ total: 19, failing: 4, running: 5 });
+    expect(toRow(tallies([], [], 0)).checkCounts).toEqual({ total: 0, failing: 0, running: 0 });
+  });
+
+  it('no rollup, or a rollup without tallies, has no counts', () => {
+    expect(toRow({ ...NODE_7, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }).checkCounts).toBeNull();
+    expect(toRow({ ...NODE_7, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }, true).checkCounts).toBeNull();
+    expect(toRow({ ...NODE_7, commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS', contexts: null } } }] } }).checkCounts).toBeNull();
   });
 
   it('a deleted author is null', () => {
@@ -419,6 +457,27 @@ describe('the PR queries against the fake', () => {
     const both = await readPullList(new GithubClient(byUrl(() => ({ status: 200, body: mixed }))), FAKE_REPO, { token: TOKEN });
     expect(both.status).toBe(403);
     expect(both.data).toBeNull();
+  });
+
+  it('a FORBIDDEN beneath statusCheckRollup keeps the list: the delivered state stands, the row just has no counts', async () => {
+    const under = ['repository', 'pullRequests', 'nodes', 0, 'commits', 'nodes', 0, 'commit', 'statusCheckRollup', 'contexts', 'checkRunCountsByState'];
+    const node = { ...NODE_12, commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS', contexts: null } } }] } };
+    const body = {
+      data: {
+        repository: {
+          squashMergeAllowed: true,
+          mergeCommitAllowed: true,
+          rebaseMergeAllowed: true,
+          autoMergeAllowed: true,
+          pullRequests: { totalCount: 1, nodes: [node] }
+        }
+      },
+      errors: [{ type: 'FORBIDDEN', message: CHECKS_REFUSED, path: under }]
+    };
+    const res = await readPullList(new GithubClient(byUrl(() => ({ status: 200, body }))), FAKE_REPO, { token: TOKEN });
+    expect(res.status).toBe(200);
+    expect(res.data?.rows.map((r) => [r.number, r.checks, r.checkCounts])).toEqual([[12, 'success', null]]);
+    expect(res.data?.checksDetail).toBe(CHECKS_REFUSED);
   });
 
   it('the single read sees any state and carries the node id beside the row', async () => {

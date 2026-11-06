@@ -69,6 +69,21 @@ export interface PrChip {
 }
 
 /**
+ * How much of the head commit's checks the `checks` word is about, for a cell or a chip to say `2 of 7 failing` instead of `failing`: the failing ones on
+ * `failure`, the running ones on `pending`, all of them on `success`, and `count` drops the `of` when the part is the whole (`7 passing`, never `7 of 7`).
+ * `null` — say the bare word — when there are no counts (`checks` is `none` or `unknown`, or GitHub sent no tallies), when there are no checks to count, and
+ * when the tallies do not back the word: a rollup can read `PENDING` before its required check exists, and a count of `0 of 3 running` would contradict the
+ * cell it sits in. The word is GitHub's verdict; the count only sizes it, never overrides it. `noun` is `check` for a commit with exactly one.
+ */
+export function checkTally(pr: PullRequestRow): { count: string; noun: 'check' | 'checks' } | null {
+  const c = pr.checkCounts;
+  if (c === null || c.total <= 0) return null;
+  const part = pr.checks === 'failure' ? c.failing : pr.checks === 'pending' ? c.running : pr.checks === 'success' ? c.total : 0;
+  if (part <= 0) return null;
+  return { count: part >= c.total ? `${c.total}` : `${part} of ${c.total}`, noun: c.total === 1 ? 'check' : 'checks' };
+}
+
+/**
  * The chips of one row, in the order a person reads a PR: is it a draft, what do reviewers say, what do the checks say, can it merge, is it behind, is
  * auto-merge armed. `checks: 'none'` draws nothing — a repo with no checks has nothing to say, and `checks passing` there would be a claim GitHub never made.
  * `checks: 'unknown'` DOES draw, neutral: the token may not read this repo's checks (`PrRepoView.checksDetail`), and a row that said nothing would read as a
@@ -81,9 +96,13 @@ export function prChips(pr: PullRequestRow): PrChip[] {
   if (pr.review === 'approved') chips.push({ label: 'approved', tone: 'done' });
   else if (pr.review === 'changes-requested') chips.push({ label: 'changes requested', tone: 'bad' });
   else if (pr.review === 'review-required') chips.push({ label: 'review required', tone: 'warn' });
-  if (pr.checks === 'success') chips.push({ label: 'checks passing', tone: 'done', glyph: 'tick' });
-  else if (pr.checks === 'failure') chips.push({ label: 'checks failing', tone: 'bad', glyph: 'cross' });
-  else if (pr.checks === 'pending') chips.push({ label: 'checks pending', tone: 'warn', glyph: 'clock' });
+  const tally = checkTally(pr);
+  const checks = (word: string) => (tally === null ? `checks ${word}` : `${tally.count} ${tally.noun} ${word}`);
+  if (pr.checks === 'success') chips.push({ label: checks('passing'), tone: 'done', glyph: 'tick' });
+  else if (pr.checks === 'failure') chips.push({ label: checks('failing'), tone: 'bad', glyph: 'cross' });
+  // `running` once there is a count to size it (`3 of 7 checks running`); the bare `checks pending` stays, because without a count all the page knows is the
+  // rollup's word, and GitHub's `PENDING` also covers a required check that has not started.
+  else if (pr.checks === 'pending') chips.push({ label: tally === null ? 'checks pending' : checks('running'), tone: 'warn', glyph: 'clock' });
   else if (pr.checks === 'unknown') chips.push({ label: 'checks unknown', tone: 'neutral' });
   if (pr.mergeable === 'conflicting') chips.push({ label: 'conflicts', tone: 'bad', glyph: 'cross' });
   // Neutral, not a warn: it is a moment, not a problem. Matrix's Mergeable cell says `computing` for the same fact.

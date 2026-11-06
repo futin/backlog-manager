@@ -51,6 +51,7 @@ function row(over: Partial<PullRequestRow> = {}): PullRequestRow {
     mergeState: 'clean',
     review: null,
     checks: 'none',
+    checkCounts: null,
     autoMerge: null,
     canUpdateBranch: false,
     ...over
@@ -430,6 +431,13 @@ describe('matrixCells', () => {
     expect(matrixCells(row({ checks: 'none' }), false).checks).toEqual({ text: '—', tone: 'na' });
     // Never `running` or `passing`: the token could not read them, and a cell that guessed would be a claim GitHub refused to make.
     expect(matrixCells(row({ checks: 'unknown' }), false).checks).toEqual({ text: 'unknown', tone: 'na' });
+    // Sized by GitHub's tallies when they back the word; the tone is the word's either way.
+    const counted = (checks: PullRequestRow['checks'], total: number, failing: number, running: number) =>
+      matrixCells(row({ checks, checkCounts: { total, failing, running } }), false).checks;
+    expect(counted('failure', 7, 2, 3)).toEqual({ text: '2 of 7 failing', tone: 'bad' });
+    expect(counted('pending', 7, 0, 3)).toEqual({ text: '3 of 7 running', tone: 'live' });
+    expect(counted('success', 7, 0, 0)).toEqual({ text: '7 passing', tone: 'ok' });
+    expect(counted('pending', 3, 0, 0)).toEqual({ text: 'running', tone: 'live' });
     expect(matrixCells(row({ review: 'approved' }), false).review).toEqual({ text: 'approved', tone: 'ok' });
     expect(matrixCells(row({ review: 'changes-requested' }), false).review).toEqual({ text: 'changes', tone: 'bad' });
     expect(matrixCells(row({ review: 'review-required' }), false).review).toEqual({ text: 'required', tone: 'meh' });

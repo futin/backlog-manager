@@ -517,7 +517,9 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   Cards) checks `GlyphTile` (`checksTone`, `checksGlyph`), the `#n` and title, then one wrapping line: the pills (`prPills`, the checks and conflicts ones leading with a
   glyph), then `[repo short name ·] author · head → base · age` (`repoShortName`, Inbox only) with the run warning as a warn pill. **Matrix** is a table, a column per check with a failure count in
   its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; a problem cell and a header count are pills (red for `bad` and Checks,
-  amber otherwise; a healthy cell is plain text); its row toggles one expansion, a panel that is the `Ledger`'s next sibling inside the sheet (`aria-controls`; a `Popover`
+  amber otherwise; a healthy cell is plain text). The Checks cell and the checks chip are sized by `checkTally` (`lib/prs.ts`) — `2 of 7 failing`, `3 of 7
+  running`, `7 passing`, and `2 of 7 checks failing` on a chip — from `PullRequestRow.checkCounts`, and say the bare word when there are no counts or the
+  counts do not back the word (a `pending` rollup with nothing running); its row toggles one expansion, a panel that is the `Ledger`'s next sibling inside the sheet (`aria-controls`; a `Popover`
   portals nothing and the scroll box's and Ledger's overflow would clip the Merge menu), holding the key strip with a blocked Merge's reason in words, then the foot.
   **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`), its head a dark 28 px repo `GlyphTile`, the short repo name (`repoShortName`), the
   `N open` pill and `polled <age>` at the trailing edge, the cards flowing two-up in `.prs-cards-grid` (one column under ~1100 px of pane), its rows the same `PrRow` Inbox draws

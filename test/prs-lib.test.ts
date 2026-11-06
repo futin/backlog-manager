@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
+  checkTally,
   applyUpdateOutcome,
   defaultMethod,
   findPr,
@@ -45,6 +46,7 @@ function pr(over: Partial<PullRequestRow> = {}): PullRequestRow {
     mergeState: 'clean',
     review: null,
     checks: 'none',
+    checkCounts: null,
     autoMerge: null,
     canUpdateBranch: true,
     ...over
@@ -102,6 +104,27 @@ describe('prChips', () => {
       { label: 'review required', tone: 'warn' },
       { label: 'checks pending', tone: 'warn', glyph: 'clock' }
     ]);
+  });
+
+  it('sizes the checks chip with GitHub\'s counts: the failing part, the running part, or all of them', () => {
+    const counts = (total: number, failing: number, running: number) => ({ checkCounts: { total, failing, running } });
+    expect(prChips(pr({ checks: 'failure', ...counts(7, 2, 3) }))).toEqual([{ label: '2 of 7 checks failing', tone: 'bad', glyph: 'cross' }]);
+    expect(prChips(pr({ checks: 'pending', ...counts(7, 0, 3) }))).toEqual([{ label: '3 of 7 checks running', tone: 'warn', glyph: 'clock' }]);
+    expect(prChips(pr({ checks: 'success', ...counts(7, 0, 0) }))).toEqual([{ label: '7 checks passing', tone: 'done', glyph: 'tick' }]);
+    // The part that is the whole drops the `of`, and one check is singular.
+    expect(prChips(pr({ checks: 'failure', ...counts(2, 2, 0) }))[0].label).toBe('2 checks failing');
+    expect(prChips(pr({ checks: 'success', ...counts(1, 0, 0) }))[0].label).toBe('1 check passing');
+    expect(prChips(pr({ checks: 'failure', ...counts(1, 1, 0) }))[0].label).toBe('1 check failing');
+  });
+
+  it('says the bare word when the counts are missing or do not back it', () => {
+    expect(checkTally(pr({ checks: 'failure', checkCounts: null }))).toBeNull();
+    // A rollup PENDING on a required check that does not exist yet: nothing is running, so `0 of 3 running` would contradict the word.
+    expect(prChips(pr({ checks: 'pending', checkCounts: { total: 3, failing: 0, running: 0 } }))[0].label).toBe('checks pending');
+    expect(prChips(pr({ checks: 'failure', checkCounts: { total: 3, failing: 0, running: 1 } }))[0].label).toBe('checks failing');
+    expect(prChips(pr({ checks: 'success', checkCounts: { total: 0, failing: 0, running: 0 } }))[0].label).toBe('checks passing');
+    expect(checkTally(pr({ checks: 'none', checkCounts: { total: 3, failing: 1, running: 0 } }))).toBeNull();
+    expect(checkTally(pr({ checks: 'unknown', checkCounts: { total: 3, failing: 1, running: 0 } }))).toBeNull();
   });
 
   it('checks the token may not read are a neutral chip — said, because silence would read as "no checks"', () => {
