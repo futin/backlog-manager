@@ -4,6 +4,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
+import { useRef, useState } from 'react';
 
 import { SessionOpen } from '../client/src/components/jira/SessionOpen';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
@@ -35,6 +36,32 @@ function mount(over: Partial<Parameters<typeof SessionOpen>[0]> = {}, state: Jir
     ...over
   };
   return { props, ...render(<SettingsProvider><SessionOpen {...props} /></SettingsProvider>) };
+}
+/**
+ * The card around the control, as `JiraSessionCard` draws it: an `article` that can take focus, handed down as `cardRef`, and the parent's Stop that turns
+ * `busy` on — which is what disables the chevron, and so what made an accepted Stop drop the focus to the page (#475).
+ */
+function InCard(props: Omit<Parameters<typeof SessionOpen>[0], 'busy' | 'onStop' | 'cardRef'> & { onStop: (id: string) => void }) {
+  const card = useRef<HTMLElement>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <article ref={card} tabIndex={-1} aria-label="Session s1">
+      <SessionOpen
+        {...props}
+        cardRef={card}
+        busy={busy}
+        onStop={(id) => {
+          setBusy(true);
+          props.onStop(id);
+        }}
+      />
+    </article>
+  );
+}
+function mountInCard(buttons: OpenButtons = BOTH) {
+  const onStop = jest.fn();
+  const props = { issueKey: 'PAY-1', sessionId: 's1', row: RESTING, launch: 'dashboard' as const, state: 'working' as const, buttons, onHandover: jest.fn(), onStop };
+  return { onStop, ...render(<SettingsProvider><InCard {...props} /></SettingsProvider>) };
 }
 const more = (): HTMLElement => screen.getByRole('button', { name: 'More for PAY-1' });
 const menu = (): HTMLElement => screen.getByRole('dialog', { name: 'Session actions' });
@@ -102,6 +129,16 @@ describe('SessionOpen', () => {
     expect(onStop.mock.calls).toEqual([['s1']]);
   });
 
+  it('an accepted Stop leaves the chevron disabled and puts the focus on the card, not the page (#475)', async () => {
+    const { onStop } = mountInCard();
+    await userEvent.click(more());
+    await userEvent.click(within(menu()).getByRole('button', { name: 'Stop session' }));
+    await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
+    expect(onStop.mock.calls).toEqual([['s1']]);
+    expect(more()).toBeDisabled();
+    expect(screen.getByRole('article', { name: 'Session s1' })).toHaveFocus();
+  });
+
   it('focuses the first enabled row on open, and Escape closes the menu and focuses the chevron', async () => {
     mount({ row: LIVE, onUnlink: jest.fn() });
     await userEvent.click(more());
@@ -154,6 +191,15 @@ describe('SessionOpen', () => {
       expect(onStop.mock.calls).toEqual([['s1']]);
       first.unmount();
       expect(mount({ buttons: DESKTOP_ONLY }).container).toBeEmptyDOMElement();
+    });
+
+    it('an accepted Stop puts the focus on the card, since the Stop chip it replaced is disabled by then (#475)', async () => {
+      const { onStop } = mountInCard(DESKTOP_ONLY);
+      await userEvent.click(screen.getByRole('button', { name: 'Stop session' }));
+      await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
+      expect(onStop.mock.calls).toEqual([['s1']]);
+      expect(screen.getByRole('button', { name: 'Stop session' })).toBeDisabled();
+      expect(screen.getByRole('article', { name: 'Session s1' })).toHaveFocus();
     });
   });
 });
