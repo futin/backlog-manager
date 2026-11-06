@@ -273,6 +273,7 @@ Three faces — Barlow, Barlow Condensed and IBM Plex Mono — left behind 80 `-
 |---|---|
 | `--board` / `--steel` / `--strip` / `--strip-hi` | `#f4f4f3` / `#ededec` / `#ffffff` / `#f2f2f1` |
 | `--tile-hover` | `#e8e8e6` |
+| `--card-hover` / `--card-hover-steel` | `var(--steel)` / `#f6f6f5` — a board card's hover fill on `--board`, and inside a `--steel` column (`.board-col[data-ground]` re-points the first at the second); both `--strip-hi` on the dark palettes |
 | `--frame` | `#e8e8e6` — the rail and the shell strip; on the dark palettes a step darker than their `--board` (`test/daylight-contrast.test.ts` holds it ≥ 1.04:1 off the board and on the dark side of it) |
 | `--edge` / `--hairline` / `--hairline2` | `rgba(0,0,0,.03)` / `#eaeae8` / `#dcdcda` |
 | `--ink` / `--ink2` / `--ink3` | `#131313` / `#525252` / `#6b6b6b` |
@@ -324,7 +325,7 @@ Its `Dot` takes the worst state present: `--fill-progress` for live, `--fill-liv
 
 **Columns.** `repeat(4, minmax(0, 1fr))` at 16 px gaps: two columns under 1100 px, one under 700 px, the steps explicit rather than a fluid `auto-fit`. Each `BoardColumn` header is an 8 px ramp `Dot` (§8.2's four column hues), the name at 15/500, then a `Pill` (`tone: neutral`) sized 22×20 at 11/500 on `--strip-hi`, pushed right. No rule is drawn under the header — the cards' own ground gap is the only separation. Each column sits on its own `--steel` ground (radius 16, 12 px padding, the header inside it; the `ground` prop, `.board-col[data-ground]` — user override of restyle spec §4.3, 2026-11-06, which gave the ground to Jira alone), cards white on it; Archive's columns pass no `ground`, because its sticky `.archive-month` paints `--board` and would read as a white band across it. The grid stretches its items and the board fills the well down to its foot (`.board > .board-columns { flex: 1 }`), so every column is one height and an empty one is a full-height ground with its head, never a strip.
 
-**The card.** `ItemCard` is `--strip`, 12 px radius, no stroke and no shadow. Hover changes only the cursor and nothing else — a card is a button by role (§5), and this design marks nothing by hover. Face padding is 14/16/12 with a 10 px internal gap.
+**The card.** `ItemCard` is `--strip`, 12 px radius, no stroke and no shadow. Hover fills it with `--card-hover` — `--strip-hi` on the dark themes, so the card lifts. On daylight it is `--steel` on the bare board, a step darker than the board (anything between white paper and the board dissolves the card into the page, and `--tile-hover` would drop `--ink3` below 4.5:1), and `#f6f6f5` inside a `--steel` column, halfway between paper and column. The Jira board's `JiraCard` and the archive compose `.board-card`, so they hover the same way. Face padding is 14/16/12 with a 10 px internal gap.
 
 - Title 14/500, 1.35, wraps.
 - Foot row: an 8 px `Dot` in `--proj-N` plus the project name at 12/400 `--ink2`, ellipsised, then `id · date` at 12/400 `--ink3` pushed right, `flex: none`.
