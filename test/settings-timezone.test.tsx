@@ -75,8 +75,11 @@ describe('TimeZoneGroup', () => {
     expect(select.value).toBe('');
     expect(select.selectedOptions[0]).toHaveTextContent(`Each browser's own (${browserTimeZone()})`);
     expect(document.querySelector('.ui-sheet-title')).toHaveTextContent('Time zone');
-    expect(document.querySelector('.ui-sheet-sub')).toHaveTextContent('this server');
+    expect(document.querySelector('.ui-pill-neutral')).toHaveTextContent('this machine');
     expect([...select.options].map((o) => o.value)).toEqual(expect.arrayContaining(['', 'UTC', 'Europe/Belgrade']));
+    // Labels carry the zone's offset, and a zero offset reads `UTC` (the value stays the bare id).
+    expect((select.querySelector('option[value="UTC"]') as HTMLOptionElement).textContent).toBe('UTC · UTC');
+    expect((select.querySelector('option[value="Europe/Belgrade"]') as HTMLOptionElement).textContent).toMatch(/^Europe\/Belgrade · UTC\+[12]$/);
   });
 
   it('posts exactly {"timeZone":"Europe/Belgrade"} and shows the answer', async () => {

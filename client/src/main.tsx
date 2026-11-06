@@ -17,7 +17,7 @@ import '@fontsource/hanken-grotesk/600.css';
 import '@fontsource/hanken-grotesk/700.css';
 
 // ui-kit's one stylesheet (the version chip and the What's new drawer), imported here and never from a component, so a Jest suite over its CommonJS build
-// never meets a `.css` import. Before ours, because `styles.css` themes it through `--uk-*` and places the chip with `.rail-release`, which wins on order.
+// never meets a `.css` import. Before ours, because `styles.css` themes it through `--uk-*` and places the chip with `.rail-foot`, which wins on order.
 import 'ui-kit/styles.css';
 import './styles.css';
 import { App } from './App';

@@ -1,7 +1,9 @@
 import { useWatchdog } from '../../hooks/useWatchdog';
 import { formatSpanCompact } from '../../lib/run-time';
+import { stateWord } from '../../lib/run-watchdog';
+import { Dot } from '../ui/Dot';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
-import { Select } from '../ui/Select';
+import { NumberField } from '../ui/NumberField';
 import { Switch } from '../ui/Switch';
 import type { WatchdogConfig } from '../../../../shared/types';
 
@@ -27,26 +29,12 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * `useWatchdog({ live: false })` below: this group renders no text that
  * changes on a clock, so a poll here would redraw identical output forever.
  *
- * The card's scope subtitle says "this server", deliberately, against the
- * "this device" the Local page's cards carry and against the "this machine" of
- * `Claude Agents`, which since task-42 is the card beside this one on Settings'
- * Shared page. (It sat under `Orchestrator · this device` until then, the two
- * being one subject at two scopes; the Local/Shared split traded that adjacency
- * for a page that is honestly one backend throughout, and this card went with
- * the server it writes to.) `this device` really is per-device: `useSettings`
- * writes those to THIS browser's `localStorage`, so opening the board on a
- * phone shows different values than the laptop that set them. `WatchdogConfig` cannot be that — the sweeper it configures
- * runs once, on the API host, with no browser open at all (design §5.1), so
- * `~/.backlog-manager/settings/watchdog.json` is the only copy that exists,
- * read fresh on every tick and every GET. A phone opening this same board
- * reads and writes the identical file the laptop just touched. Naming that
- * plainly in the card's own subtitle — rather than reusing the "this machine"
- * of the card beside it, and letting a reader carry over a meaning it does not
- * have — is the whole point: silently reusing that
- * phrase would be a second thing this group gets wrong for free, on top of
- * the clamp problem the selects below exist to solve.
+ * The card's pill says `this machine`, like every card on Settings' Shared page: `WatchdogConfig` is not per-device the way the Local page's settings are
+ * (`useSettings` writes those to THIS browser's `localStorage`, so a phone shows different values than the laptop that set them). The sweeper it configures
+ * runs once, on the API host, with no browser open at all (design §5.1), so `~/.backlog-manager/settings/watchdog.json` is the only copy that exists, read
+ * fresh on every tick and every GET. A phone opening this same board reads and writes the identical file the laptop just touched.
  *
- * Selects, not number fields, for the three numeric rows. `WATCHDOG_LIMITS`
+ * Ladder steppers (`NumberField` ladder mode), not free number fields, for the three numeric rows. `WATCHDOG_LIMITS`
  * (shared/types.ts) clamps every one of these server-side to `[min, max]`
  * on the NEAREST bound — quietly, no error, no dialog. A free-text or
  * `<input type="number">` field would let someone type `5000` for "Check
@@ -58,7 +46,7 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * outright was equally silent until `saveError` below got a render site of
  * its own, because the only `error` render here sits behind `status ===
  * null` — a branch a successful mount GET closes forever.
- * A `<select>` whose options are built from the same `WATCHDOG_LIMITS`
+ * A ladder built from the same `WATCHDOG_LIMITS`
  * triples the server clamps against cannot offer a value the server would
  * ever have to correct — the UI and the clamp read one shared source of
  * truth (`TICK_LADDER`/`GRACE_LADDER`/`ATTEMPT_LADDER` below), so there is
@@ -66,7 +54,7 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * handling is a config value that is NOT on the ladder shown (set by an
  * older build, a hand-edited file, or a future ladder change) — see
  * `ladderWithSelected`'s own comment for why that value is rendered as an
- * extra option instead of the picker silently jumping to a neighbour, which
+ * extra rung instead of the stepper silently jumping to a neighbour, which
  * would be exactly the invisible-clamp failure this whole design choice
  * exists to avoid.
  *
@@ -77,9 +65,9 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * when that POST is refused, says so in a row of its own under the control
  * that was changed (`saveErrorSlot`). Rows
  * are not gated on `phase`: a knob is worth setting while nothing is
- * running, so the three selects and the switch render identically whether
- * the sweeper is `off`, `idle` or `armed` — and this group no longer reports
- * which of those it is, so `phase` is now read here for nothing at all.
+ * running, so the three steppers and the switch render identically whether
+ * the sweeper is `off`, `idle` or `armed`. `phase` is read for one thing only, the status line above `Live view in Runs`: a word, drawn from the reading the
+ * mount fetch already made — no poll, no ticking age.
  */
 
 /**
@@ -107,14 +95,14 @@ export const ATTEMPT_LADDER = [1, 2, 3, 4, 5] as const;
 /**
  * A ladder, with the CURRENT config value spliced in and the whole thing
  * numerically sorted — but only when that value is not already one of the
- * ladder's own options. This is the mechanism the whole "selects instead of
+ * ladder's own options. This is the mechanism the whole "steppers instead of
  * number fields" argument above depends on: without it, a `tickMs` of
  * `45_000` (set by an older build, hand-edited into `watchdog.json`, or left
- * over from a ladder that used to include it) would force the `<select>`
+ * over from a ladder that used to include it) would force the stepper
  * to either silently jump its displayed value to the nearest neighbour —
  * exactly the invisible clamp this design rejects — or lose the value
- * entirely by not appearing as a selected option at all. Splicing it in as
- * its own extra option keeps the true current value visible and selected,
+ * entirely by not appearing as a rung at all. Splicing it in as
+ * its own extra rung keeps the true current value visible and current,
  * `formatSpanCompact`/plain-number labelled like every other option, while
  * every OTHER ladder value still exists to be picked.
  */
@@ -123,18 +111,13 @@ function ladderWithSelected(ladder: readonly number[], value: number): number[] 
 }
 
 /**
- * A ladder as `Select`'s options (task-39): the numbers above, stringified,
- * each labelled by `label`.
- *
- * The stringifying is the primitive's requirement rather than a preference —
- * `Select` is generic over `T extends string` because a native `<option>`'s
- * value IS a string and a component that pretended otherwise would hand every
- * caller back `"30000"` typed as `number`. Doing the conversion here, once,
- * next to the ladder it converts, is what keeps each of the three call sites
- * below to one `Number(...)` on the way out and no cast on the way in.
+ * One ladder as a stepper (`NumberField` ladder mode): `−` / `+` move one rung and commit at once, the value is shown as text, and there is no textbox —
+ * which is how the clamp argument above survives the restyle. `ladderWithSelected` still splices the stored figure in, so an off-ladder value is shown as it
+ * is and steps to its neighbours instead of the control jumping to a rung nobody chose.
  */
-function ladderOptions(ladder: readonly number[], value: number, label: (v: number) => string): { value: string; label: string }[] {
-  return ladderWithSelected(ladder, value).map((v) => ({ value: String(v), label: label(v) }));
+function ladderField(label: string, ladder: readonly number[], value: number, format: (v: number) => string, onCommit: (v: number) => void) {
+  const rungs = ladderWithSelected(ladder, value);
+  return <NumberField label={label} value={value} min={rungs[0]} max={rungs[rungs.length - 1]} ladder={rungs} format={format} onCommit={onCommit} />;
 }
 
 /** Where a refused save's message goes: the row for the field that was
@@ -195,14 +178,14 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
   // stale-but-real status is kept on a LATER failure while `null` is kept
   // on the FIRST one). A failed SAVE lands in `saveError` instead and is
   // rendered below, with `status` intact — the two failures are two fields
-  // because they need two places on screen. There is no `config` to bind three selects and a
-  // checkbox to in that state, so this group renders a one-line notice and
+  // because they need two places on screen. There is no `config` to bind three steppers and a
+  // switch to in that state, so this group renders a one-line notice and
   // nothing else — never a half-built row reading off a value that does
   // not exist, and never a thrown error from dereferencing `status.config`
   // on a `null` status.
   if (status === null) {
     return (
-      <SettingsGroup title="Orchestrator watchdog" scope="this server">
+      <SettingsGroup title="Orchestrator watchdog" pill="this machine">
         <div className="set-row set-row-stacked">
           <div className="set-label">
             <span className="set-name">Unavailable</span>
@@ -234,8 +217,54 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
       </div>
     ) : null;
 
+  // Each row's hint is the mock's one line; the paragraph that used to be the hint is its `ⓘ more` (spec §4.10 — text longer than a line moves behind the
+  // toggle). Five paragraph hints made this card the tallest on the page (ui-verify 2026-11-05).
   return (
-    <SettingsGroup title="Orchestrator watchdog" scope="this server">
+    <SettingsGroup title="Orchestrator watchdog" pill="this machine">
+      <SettingsRow
+        name="Enabled"
+        hint="restart a run whose session died"
+        more="Your own switch (design's 'Disabled'), separate from the sweeper's own phase: watching, arming and reporting a crashed run all continue either way. Turning this off only withholds the resume spawn itself."
+      >
+        {/* The pill `Switch` (§8.6), where this was a bare checkbox: a recessed
+            `--steel` track under a raised `--strip` option, so "on" is legible
+            from the geometry before any colour is read — which matters on the
+            amber theme, the one with no second hue to spend on a state. The
+            accessible name and the save call are unchanged; what changed is
+            that the control is now the same 36 px height as the steppers
+            under it, where a UA checkbox was whatever the platform drew. */}
+        <Switch label="Enabled" checked={config.enabled} onChange={(enabled) => void save({ enabled })} />
+      </SettingsRow>
+      {errorRow('enabled')}
+
+      <SettingsRow
+        name="Check every"
+        hint="how often it looks for dead runs"
+        more="How often the sweeper re-reads every project's run file for staleness while armed. Shorter notices a crash sooner; longer costs less on a server watching many projects."
+      >
+        {ladderField('Check every', TICK_LADDER, config.tickMs, formatSpanCompact, (v) => void save({ tickMs: v }))}
+      </SettingsRow>
+      {errorRow('tickMs')}
+
+      <SettingsRow
+        name="Leave a resumed run alone for"
+        hint="grace before it checks that run again"
+        more="How long a crashed run is left alone after any resume attempt or failure before the sweeper tries again. The floor is five minutes: a resume spawned into the same overload that caused the crash can take several minutes just to run its first command."
+      >
+        {ladderField('Leave a resumed run alone for', GRACE_LADDER, config.graceMs, formatSpanCompact, (v) => void save({ graceMs: v }))}
+      </SettingsRow>
+      {errorRow('graceMs')}
+
+      <SettingsRow
+        name="Give up after"
+        hint="resumes before the run is left stopped"
+        more="How many resume spawns one crashed run gets before the sweeper marks it exhausted and stops trying — past that point the crashed strip's own Resume button is the way forward, by hand."
+      >
+        {ladderField('Give up after', ATTEMPT_LADDER, config.maxAttempts, String, (v) => void save({ maxAttempts: v }))}
+      </SettingsRow>
+      {errorRow('maxAttempts')}
+      {errorRow('end')}
+
       {/* A `SettingsRow` since task-39, where this was a control-less div: the
           row now HAS a control, and it is the point of the redraw (DESIGN.md
           §8.6). The sentence used to end by naming Runs › Watchdog and leaving
@@ -244,9 +273,19 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
           describing where it is. One row rather than two because both sentences
           still answer the same question a person arriving here has — where does
           this live, and where do I watch it work. */}
+      {/* The live status line (brief; mock `Idle · checked 12 s ago`): the sweeper's phase as the Runs monitor words it (`stateWord`, one wording for
+          two surfaces). The mock's `checked N s ago` is NOT drawn: no last-check time is served (`WatchdogStatus` carries `nextTickAt`, never a last
+          tick — the monitor's own comment says the same) and a countdown would need the 5 s poll this page deliberately does not have. So this is the
+          phase as of the last read, the mount fetch or the focus refetch, and nothing on it moves. A grey dot for idle/off, the live one only while
+          armed, as the monitor draws it. */}
+      <div className="set-status" data-testid="watchdog-settings-state">
+        {status.phase === 'armed' ? <Dot tone="live" /> : <Dot />}
+        <span>{stateWord(status)}</span>
+      </div>
       <SettingsRow
         name="Live view"
-        hint={
+        hint="the sweeper's state and activity, on Runs › Watchdog"
+        more={
           <>
             These values live on the API host, in <code>~/.backlog-manager/settings/watchdog.json</code> — not this browser's storage. Every device that opens
             this board reads and writes that same one file, unlike the per-device settings on the Local page. The sweeper's state, the runs it is watching and
@@ -258,66 +297,11 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
             this app — the rail switches a React state — so an anchor would be
             an href this page would have to invent and then cancel on click.
             `.set-link` is the same 36 px family member the dashboard link in
-            the card beside it draws. */}
+            the card beside it draws. Last in the card since Task 9: the controls come first, the pointer to where the sweeper is WATCHED comes after. */}
         <button type="button" className="set-link" onClick={() => onOpenWatchdog?.()}>
-          Runs › Watchdog ↗
+          Live view in Runs
         </button>
       </SettingsRow>
-
-      <SettingsRow
-        name="Enabled"
-        hint="Your own switch (design's 'Disabled'), separate from the sweeper's own phase: watching, arming and reporting a crashed run all continue either way. Turning this off only withholds the resume spawn itself."
-      >
-        {/* The pill `Switch` (§8.6), where this was a bare checkbox: a recessed
-            `--steel` track under a raised `--strip` option, so "on" is legible
-            from the geometry before any colour is read — which matters on the
-            amber theme, the one with no second hue to spend on a state. The
-            accessible name and the save call are unchanged; what changed is
-            that the control is now the same 36 px height as the three selects
-            under it, where a UA checkbox was whatever the platform drew. */}
-        <Switch label="Enabled" checked={config.enabled} onChange={(enabled) => void save({ enabled })} />
-      </SettingsRow>
-      {errorRow('enabled')}
-
-      <SettingsRow
-        name="Check every"
-        hint="How often the sweeper re-reads every project's run file for staleness while armed. Shorter notices a crash sooner; longer costs less on a server watching many projects."
-      >
-        <Select
-          label="Check every"
-          value={String(config.tickMs)}
-          options={ladderOptions(TICK_LADDER, config.tickMs, formatSpanCompact)}
-          onChange={(v) => void save({ tickMs: Number(v) })}
-        />
-      </SettingsRow>
-      {errorRow('tickMs')}
-
-      <SettingsRow
-        name="Leave a resumed run alone for"
-        hint="How long a crashed run is left alone after any resume attempt or failure before the sweeper tries again. The floor is five minutes: a resume spawned into the same overload that caused the crash can take several minutes just to run its first command."
-      >
-        <Select
-          label="Leave a resumed run alone for"
-          value={String(config.graceMs)}
-          options={ladderOptions(GRACE_LADDER, config.graceMs, formatSpanCompact)}
-          onChange={(v) => void save({ graceMs: Number(v) })}
-        />
-      </SettingsRow>
-      {errorRow('graceMs')}
-
-      <SettingsRow
-        name="Give up after"
-        hint="How many resume spawns one crashed run gets before the sweeper marks it exhausted and stops trying — past that point the crashed strip's own Resume button is the way forward, by hand."
-      >
-        <Select
-          label="Give up after"
-          value={String(config.maxAttempts)}
-          options={ladderOptions(ATTEMPT_LADDER, config.maxAttempts, String)}
-          onChange={(v) => void save({ maxAttempts: Number(v) })}
-        />
-      </SettingsRow>
-      {errorRow('maxAttempts')}
-      {errorRow('end')}
     </SettingsGroup>
   );
 }

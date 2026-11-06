@@ -51,7 +51,7 @@ export function JiraShelves({
         const rows = open ? shelf.cards : shelf.cards.slice(0, limit);
         const hidden = shelf.cards.length - limit;
         return (
-          <BoardColumn key={shelf.slug} slug={shelf.slug} label={shelf.label} count={shelf.cards.length}>
+          <BoardColumn key={shelf.slug} slug={shelf.slug} tone={shelf.slug} ground label={shelf.label} count={shelf.cards.length}>
             {rows.map((c) => (
               <JiraCard
                 key={c.issue.key}

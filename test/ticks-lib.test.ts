@@ -1,4 +1,4 @@
-import { fetchTicks, resetTicks, sortTickProjects, tickActivity, ticksLast24h, updateTickConfig } from '../client/src/lib/ticks';
+import { fetchTicks, resetTicks, sortTickProjects, tickActivity, tickStrip, ticksLast24h, updateTickConfig } from '../client/src/lib/ticks';
 import type { TickProject, TickRecentEntry, TicksPayload } from '../shared/types';
 
 /**
@@ -78,6 +78,33 @@ describe('tickActivity', () => {
   it('puts an unparseable time last instead of dropping or throwing', () => {
     const a = proj('a', { recent: [{ ...entry(HOUR), at: 'garbage', id: 'bad' }, entry(2 * HOUR, 'ok', 'good')] });
     expect(tickActivity([a]).map((r) => r.id)).toEqual(['good', 'bad']);
+  });
+});
+
+describe('tickStrip', () => {
+  const many = (n: number, outcome = 'ok'): TickProject => proj('p', { recent: Array.from({ length: n }, (_, i) => ({ ...entry(i * HOUR, outcome), id: `t${i}` })) });
+
+  it('takes the newest twelve of fifty, oldest first, so the last cell is the newest entry', () => {
+    const cells = tickStrip(many(50), 'UTC');
+    expect(cells).toHaveLength(12);
+    expect(cells[11].title).toContain('execute t0 ');
+    expect(cells[0].title).toContain('execute t11 ');
+  });
+
+  it('draws only as many cells as there are entries', () => {
+    expect(tickStrip(many(3), 'UTC')).toHaveLength(3);
+    expect(tickStrip(many(0), 'UTC')).toEqual([]);
+  });
+
+  it('maps ok and failed to their tones and everything else to other', () => {
+    const p = proj('p', { recent: [entry(3 * HOUR, 'skipped'), entry(2 * HOUR, 'failed'), entry(1 * HOUR, 'ok')] });
+    expect(tickStrip(p, 'UTC').map((c) => c.tone)).toEqual(['ok', 'failed', 'other']);
+  });
+
+  it('titles a cell `<clock> · <kind> <id> · <outcome>`', () => {
+    const at = '2026-11-05T19:45:00.000Z';
+    const p = proj('p', { recent: [{ at, id: '#49', kind: 'execute', outcome: 'ok', reason: '' }] });
+    expect(tickStrip(p, 'UTC')[0].title).toBe('19:45 · execute #49 · ok');
   });
 });
 

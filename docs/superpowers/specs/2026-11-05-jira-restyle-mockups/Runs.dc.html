@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Runs history</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--board:#f4f4f3;--steel:#ededec;--strip:#fff;--strip-hi:#f2f2f1;--tile-hover:#e8e8e6;--hairline:#eaeae8;--hairline2:#dcdcda;--ink:#131313;--ink2:#525252;--ink3:#6b6b6b;--green:#38631a;--green-solid:#7dc242;--amber:#c4761f;--amber-ink:#8a5214;--red:#b03b28;--magenta:#6b52a8;--cyan:#306c0f;--live:#F5A15C;
+--t-green:#eef6e6;--t-amber:#fbf1e4;--t-red:#fbe9e5;--t-mag:#efecf7}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.ab{background:#fff;padding:36px 44px;display:flex;flex-direction:column;gap:22px;overflow:hidden}
+.ab-h{display:flex;flex-direction:column;gap:4px}
+.ab-t{font-size:20px;font-weight:600;letter-spacing:-.01em}
+.ab-s{font-size:13px;color:var(--ink3);max-width:1100px;line-height:1.45}
+.tag{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3)}
+.tag.g{color:var(--green)}
+.note{font-size:12px;color:var(--ink3);line-height:1.45}
+.note b{color:var(--ink2);font-weight:600}
+.page{background:var(--board);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.ph{display:flex;align-items:flex-end;gap:12px}
+.ph-t{font-size:22px;font-weight:600;letter-spacing:-.01em}
+.ph-s{font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:6px;margin-top:2px}
+.sp{flex:1}
+.row{display:flex;align-items:center;gap:8px}
+.col{display:flex;flex-direction:column;gap:8px}
+.pane{background:var(--strip);border:1px solid var(--hairline);border-radius:14px;padding:16px;min-width:0}
+.pane-h{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.pane-t{font-size:15px;font-weight:600}
+.pane-s{font-size:12px;color:var(--ink3)}
+.chip{height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);font:500 13px 'Hanken Grotesk',sans-serif;color:var(--ink);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip.s{height:28px;padding:0 10px;font-size:12.5px}
+.chip.ghost{border-color:transparent;background:transparent;color:var(--ink2)}
+.chip.ink{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip.ic{width:32px;padding:0;justify-content:center}
+.chip.s.ic{width:28px}
+.split{display:inline-flex;height:32px;border-radius:10px;background:var(--ink);color:#fff;font:500 13px 'Hanken Grotesk',sans-serif;overflow:hidden}
+.split>span{display:inline-flex;align-items:center;gap:6px;padding:0 12px}
+.split>span+span{padding:0 9px;border-left:1px solid rgba(255,255,255,.18)}
+.split.s{height:28px;font-size:12.5px}.split.s>span{padding:0 10px}.split.s>span+span{padding:0 7px}
+.seg{display:inline-flex;background:var(--steel);border-radius:10px;padding:3px;gap:2px}
+.seg>span{height:26px;padding:0 10px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:var(--ink2)}
+.seg>span.on{background:var(--strip);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg .n{font-size:11px;color:var(--ink3);font-weight:600}
+.search{height:32px;width:220px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);display:inline-flex;align-items:center;gap:8px;padding:0 10px;font-size:12.5px;color:var(--ink3)}
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;background:var(--strip-hi);color:var(--ink2);white-space:nowrap}
+.pill.g{background:var(--t-green);color:var(--green)}
+.pill.a{background:var(--t-amber);color:var(--amber-ink)}
+.pill.r{background:var(--t-red);color:var(--red)}
+.pill.m{background:var(--t-mag);color:var(--magenta)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ink3);display:inline-block;flex:none}
+.dot.g{background:var(--green-solid)}.dot.a{background:var(--amber)}.dot.r{background:var(--red)}.dot.l{background:var(--live)}.dot.m{background:var(--magenta)}
+.tile{width:28px;height:28px;border-radius:8px;background:var(--strip-hi);color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.tile.g{background:var(--t-green);color:var(--green)}.tile.a{background:var(--t-amber);color:var(--amber-ink)}.tile.r{background:var(--t-red);color:var(--red)}.tile.m{background:var(--t-mag);color:var(--magenta)}
+.tile.xs{width:18px;height:18px;border-radius:5px}
+.tile.lg{width:40px;height:40px;border-radius:12px}
+.av{width:22px;height:22px;border-radius:50%;background:var(--t-mag);color:var(--magenta);font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.key{font-size:12px;font-weight:600;color:var(--ink)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+.muted{color:var(--ink3)}.ink2{color:var(--ink2)}
+.sm{font-size:12px}.xs{font-size:11px}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.tbl th{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--hairline);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr.hov td{background:var(--strip-hi)}
+.menu{position:absolute;background:var(--strip);border:1px solid var(--hairline);border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.12);padding:8px;z-index:5}
+.mi{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;font-size:13px;font-weight:500}
+.mi.on{background:var(--strip-hi)}
+.mi .sub{font-size:11px;color:var(--ink3);font-weight:400}
+.mh{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3);padding:8px 8px 4px}
+.hr{height:1px;background:var(--hairline);margin:6px 0}
+.bar{height:6px;border-radius:999px;background:var(--steel);overflow:hidden;display:flex}
+.bar>i{display:block;height:100%}
+.kpi{background:var(--strip);border:1px solid var(--hairline);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.kpi-l{font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:6px}
+.kpi-v{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.kpi-s{font-size:11.5px;color:var(--ink3)}
+.toggle{width:32px;height:18px;border-radius:999px;background:var(--hairline2);position:relative;flex:none}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.toggle.on{background:var(--ink)}.toggle.on::after{left:16px}
+.sel{height:32px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);display:inline-flex;align-items:center;gap:8px;padding:0 10px;font-size:13px;font-weight:500;min-width:0}
+.sel .chev{margin-left:auto;color:var(--ink3)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>label{font-size:12px;font-weight:600;color:var(--ink2)}
+.cap{font-size:11px;color:var(--ink3)}
+.strip{height:3px;border-radius:3px 3px 0 0}
+svg.i{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+svg.i16{width:16px;height:16px}
+svg.i18{width:18px;height:18px}
+.cmp{display:grid;gap:28px;align-items:start}
+.now{opacity:1;border:1px dashed var(--hairline2);border-radius:14px;padding:14px;background:#fff}
+</style>
+</helmet>
+<div class="ab" style="width:1280px;height:1020px">
+<div class="ab-h">
+  <div class="ab-t">Runs › History</div>
+  <div class="ab-s">Today: five number tiles, eight identical green bars, a Live list squeezed beside a detail panel whose facts are grey labels over values. Proposed: each tile carries its own breakdown as a small stacked bar. Machine time is one stacked bar with a legend. Live runs are cards with progress. The detail opens on a timeline of its items with the run's controls in its head.</div>
+</div>
+<div class="page" style="gap:14px">
+  <div class="ph"><div><div class="ph-t">Runs</div><div class="ph-s"><span class="dot l"></span>3 live · 118 past</div></div><span class="sp"></span><span class="seg"><span>Today</span><span>This week</span><span>This month</span><span class="on">All</span></span><span class="chip">All projects <svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
+    <div class="kpi"><div class="kpi-l"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M7 5.8v4.4L10.3 8z"/></svg> Runs</div><div class="kpi-v">121</div><div class="bar"><i style="width:83%;background:var(--green-solid)"></i><i style="width:12%;background:var(--hairline2)"></i><i style="width:3%;background:var(--red)"></i><i style="width:2%;background:var(--live)"></i></div><div class="kpi-s">100 done · 15 aborted · 3 failed · 3 live</div></div>
+    <div class="kpi"><div class="kpi-l"><svg class="i" viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg> Completed of queued</div><div class="kpi-v">259<span style="font-size:15px;color:var(--ink3)">/340</span></div><div class="bar"><i style="width:76%;background:var(--green-solid)"></i></div><div class="kpi-s">merged or branched · 76%</div></div>
+    <div class="kpi"><div class="kpi-l"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.3"/></svg> Avg item work</div><div class="kpi-v">45m</div><div class="bar"><i style="width:45%;background:var(--ink3)"></i></div><div class="kpi-s">queue wait excluded</div></div>
+    <div class="kpi"><div class="kpi-l"><svg class="i" viewBox="0 0 16 16"><path d="M9 2 4 9h4l-1 5 5-7H8z"/></svg> Rework</div><div class="kpi-v">0.3</div><div class="bar"><i style="width:30%;background:var(--amber)"></i></div><div class="kpi-s">fix loops per completed item</div></div>
+    <div class="kpi"><div class="kpi-l"><svg class="i" viewBox="0 0 16 16"><path d="M8 2 3 4v4c0 3 2.2 5 5 6 2.8-1 5-3 5-6V4z"/></svg> Verify pass</div><div class="kpi-v">94%</div><div class="bar"><i style="width:94%;background:var(--green-solid)"></i></div><div class="kpi-s">of every verification run</div></div>
+  </div>
+  <div class="pane" style="padding:14px 16px">
+    <div class="pane-h" style="margin-bottom:10px"><span class="pane-t" style="font-size:14px">Machine time by stage</span><span class="pane-s">all runs · queue wait excluded · 270h total</span></div>
+    <div class="bar" style="height:14px;border-radius:6px;gap:2px;background:none"><i style="width:46%;background:#7dc242;border-radius:4px"></i><i style="width:15%;background:#5c9a2e;border-radius:4px"></i><i style="width:9%;background:#c4761f;border-radius:4px"></i><i style="width:6%;background:#e9a24f;border-radius:4px"></i><i style="width:3%;background:#6b52a8;border-radius:4px"></i><i style="width:21%;background:var(--steel);border-radius:4px"></i></div>
+    <div class="row xs" style="gap:16px;margin-top:10px;flex-wrap:wrap"><span class="row"><span class="dot" style="background:#7dc242"></span>dispatched 125h</span><span class="row"><span class="dot" style="background:#5c9a2e"></span>reviewing 39h</span><span class="row"><span class="dot" style="background:#c4761f"></span>fixing 24h</span><span class="row"><span class="dot" style="background:#e9a24f"></span>verifying 16h</span><span class="row"><span class="dot" style="background:#6b52a8"></span>inspecting 2h</span><span class="row muted"><span class="dot" style="background:var(--hairline2)"></span>preflight, merging 3h</span></div>
+  </div>
+  <div style="display:grid;grid-template-columns:330px 1fr;gap:14px;align-items:start">
+    <div class="col" style="gap:10px">
+      <div class="row"><span class="pane-t" style="font-size:14px">Live</span><span class="pill">3</span></div>
+      <div class="pane" style="padding:12px;border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)">
+        <div class="row"><span class="dot l"></span><span style="font-weight:600;font-size:13px">backlog-manager</span><span class="sp"></span><span class="pill a"><svg class="i" viewBox="0 0 16 16"><path d="M6 4v8M10 4v8"/></svg> paused</span></div>
+        <div class="row xs muted" style="margin:6px 0 8px"><span class="mono">run-20261027-094509</span><span class="sp"></span>remote · Linux · 1h 15m</div>
+        <div class="bar"><i style="width:100%;background:var(--green-solid)"></i></div><div class="xs muted" style="margin-top:4px">1 of 1 items</div>
+      </div>
+      <div class="pane" style="padding:12px">
+        <div class="row"><span class="dot l"></span><span style="font-weight:600;font-size:13px">backlog-manager</span><span class="sp"></span><span class="pill a"><svg class="i" viewBox="0 0 16 16"><path d="M6 4v8M10 4v8"/></svg> paused</span></div>
+        <div class="row xs muted" style="margin:6px 0 8px"><span class="mono">run-20261026-182210</span><span class="sp"></span>aj_linux · 1h 05m</div>
+        <div class="bar"><i style="width:100%;background:var(--green-solid)"></i></div><div class="xs muted" style="margin-top:4px">2 of 2 items</div>
+      </div>
+      <div class="pane" style="padding:12px">
+        <div class="row"><span class="dot l"></span><span style="font-weight:600;font-size:13px">brickwright</span><span class="sp"></span><span class="pill a"><svg class="i" viewBox="0 0 16 16"><path d="M6 4v8M10 4v8"/></svg> paused</span></div>
+        <div class="row xs muted" style="margin:6px 0 8px"><span class="mono">run-20261026-101033</span><span class="sp"></span>aj_linux · 21m</div>
+        <div class="bar"><i style="width:100%;background:var(--green-solid)"></i></div><div class="xs muted" style="margin-top:4px">2 of 2 items</div>
+      </div>
+    </div>
+    <div class="pane" style="padding:0;overflow:hidden">
+      <div class="row" style="padding:14px 16px;gap:10px;border-bottom:1px solid var(--hairline)">
+        <span class="dot l"></span><span style="font-weight:600;font-size:16px">backlog-manager</span><span class="mono muted">run-20261027-094509</span><span class="pill a"><svg class="i" viewBox="0 0 16 16"><path d="M6 4v8M10 4v8"/></svg> paused at a boundary</span><span class="sp"></span><span class="xs muted">controls live on the machine that ran it</span><span class="chip s" aria-disabled="true" style="border-style:dashed;color:var(--ink3)"><svg class="i" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5z"/></svg> Resume</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--hairline)">
+        <div style="padding:12px 16px;border-right:1px solid var(--hairline)"><div class="row xs muted"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.3"/></svg> Started</div><div style="font-weight:600;margin-top:3px">10:45 · 1h 15m</div></div>
+        <div style="padding:12px 16px;border-right:1px solid var(--hairline)"><div class="row xs muted"><svg class="i" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6 2v2M10 2v2M6 12v2M10 12v2M2 6h2M2 10h2M12 6h2M12 10h2"/></svg> Machine</div><div style="font-weight:600;margin-top:3px">Linux</div></div>
+        <div style="padding:12px 16px;border-right:1px solid var(--hairline)"><div class="row xs muted"><svg class="i" viewBox="0 0 16 16"><circle cx="5" cy="4" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="11" cy="6" r="1.6"/><path d="M5 5.6v4.8M11 7.6c0 2.4-6 1.6-6 2.8"/></svg> Base · mode</div><div style="font-weight:600;margin-top:3px" class="row">run-2026-10-27-1 <span class="pill m">PR</span></div></div>
+        <div style="padding:12px 16px"><div class="row xs muted"><svg class="i" viewBox="0 0 16 16"><path d="M9 2 4 9h4l-1 5 5-7H8z"/></svg> Cost</div><div style="font-weight:600;margin-top:3px">$4.80 · 77 turns</div></div>
+      </div>
+      <div style="padding:14px 16px">
+        <div class="row" style="margin-bottom:10px"><span style="font-weight:600;font-size:13px">Items</span><span class="pill g">1 merged</span><span class="pill">0 skipped</span><span class="pill">0 attention</span><span class="pill">1 fix loop</span></div>
+        <div style="display:grid;grid-template-columns:16px 1fr;gap:0 10px">
+          <div style="display:flex;flex-direction:column;align-items:center"><span class="dot g" style="width:10px;height:10px"></span><span style="width:2px;flex:1;background:var(--hairline)"></span></div>
+          <div style="padding-bottom:12px"><div class="row"><span class="mono muted">#364</span><span class="sm" style="font-weight:500">Cover untested branches from the 10-24 audit, add a run-state fixture helper</span><span class="sp"></span><span class="pill g"><svg class="i" viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg> merged</span><span class="xs muted">1h 13m</span></div>
+            <div class="bar" style="height:8px;margin-top:8px;gap:2px;background:none"><i style="width:52%;background:#7dc242;border-radius:3px"></i><i style="width:20%;background:#5c9a2e;border-radius:3px"></i><i style="width:12%;background:#c4761f;border-radius:3px"></i><i style="width:14%;background:#e9a24f;border-radius:3px"></i></div>
+            <div class="xs muted" style="margin-top:4px">dispatched 38m · reviewing 15m · fixing 9m · verifying 10m</div></div>
+          <div style="display:flex;flex-direction:column;align-items:center"><span class="dot" style="width:10px;height:10px;background:#fff;border:2px solid var(--ink3)"></span></div>
+          <div class="row sm muted">PR opened · <span class="mono">backlog/run-2026-10-27-1 → main</span> · #462 <svg class="i" viewBox="0 0 16 16"><path d="M6 3.5H3.5v9h9V10M9 3h4v4M13 3 7.5 8.5"/></svg></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+</x-dc>
+</body>
+</html>

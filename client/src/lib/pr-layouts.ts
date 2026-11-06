@@ -1,7 +1,8 @@
 import { elapsedSince } from './item-age';
-import { parsePrKey, prChips, prKey, mergeBlock, updateBlock, type PrOutcome } from './prs';
+import { groupRepos, parsePrKey, prChips, type PrChip, prKey, mergeBlock, updateBlock, type PrOutcome } from './prs';
 import type { DotTone } from '../components/ui/Dot';
-import type { PrRepoView, PullRequestRow } from '../../../shared/types';
+import type { GlyphName } from '../components/ui/Glyphs';
+import type { PrRepoView, PullRequestRow, PullRequestsPayload } from '../../../shared/types';
 
 /**
  * What the GitHub › PRs layouts (Inbox, Matrix, Cards) say about a pull request, derived once (`.claude/DESIGN.md` §8.11; spec
@@ -34,8 +35,8 @@ export const LEVEL_LABEL: Record<PrLevel, string> = {
 };
 
 /**
- * A repo the token cannot read — its last read said `forbidden` or `not-found`. Every layout, the `N open` pill and the toolbar's hidden count read this one
- * function (spec, "Reach of a repo"). A transient failure (`rate-limited`, `error`) is NOT no-access: the repo is still readable, so it stays shown, beside
+ * A repo the token cannot read — its last read said `forbidden` or `not-found`. Every layout, the band's `N open in M repos` and the toolbar's hidden count read
+ * this one function (spec, "Reach of a repo"). A transient failure (`rate-limited`, `error`) is NOT no-access: the repo is still readable, so it stays shown, beside
  * its last answer and a line saying what went wrong.
  */
 export function isNoAccess(repo: PrRepoView): boolean {
@@ -90,6 +91,32 @@ function levelFacts(pr: PullRequestRow): LevelFact[] {
   return facts;
 }
 
+/** The status tile's tone for a PR's checks (spec §4.8): conflicts, changes requested and behind are carried by the pills, never the tile. */
+export function checksTone(checks: PullRequestRow['checks']): 'red' | 'amber' | 'green' | 'neutral' {
+  if (checks === 'failure') return 'red';
+  if (checks === 'pending') return 'amber';
+  if (checks === 'success') return 'green';
+  return 'neutral';
+}
+
+/** The glyph inside that tile; a PR with no (or unreadable) checks shows the plain pull-request mark. */
+export function checksGlyph(checks: PullRequestRow['checks']): GlyphName {
+  if (checks === 'failure') return 'cross';
+  if (checks === 'pending') return 'clock';
+  if (checks === 'success') return 'tick';
+  return 'pull-request';
+}
+
+/**
+ * `prChips` plus the one fact the Inbox verdict line used to carry alone: GitHub's own `blocked` / `unstable` word when nothing else names the reason
+ * (`levelFacts`' unnamed block). The verdict line goes with the restyle, so without this chip that fact would vanish from the row.
+ */
+export function prPills(pr: PullRequestRow): PrChip[] {
+  const chips = prChips(pr);
+  if (levelFacts(pr).some((f) => f.kind === 'blocked')) chips.push({ label: pr.mergeState, tone: 'warn' });
+  return chips;
+}
+
 /** Which of the three levels a PR sits in: a draft is Quiet before anything else is read; otherwise the first level-driving fact decides. */
 export function prLevel(pr: PullRequestRow): PrLevel {
   if (pr.draft) return 'quiet';
@@ -100,37 +127,6 @@ export function prLevel(pr: PullRequestRow): PrLevel {
 export function prSeverity(pr: PullRequestRow): number | null {
   if (pr.draft) return null;
   return levelFacts(pr)[0]?.severity ?? null;
-}
-
-/** One sentence about a PR. `calm` is a step worth reading beside a problem (the run warning, `Approved.`), not one a person has to act on. */
-export interface PrProblem {
-  text: string;
-  calm: boolean;
-}
-
-/**
- * A PR's ordered problems: the level-driving facts (none for a draft — it is Quiet, so nothing about it is a problem yet), then the run-in-progress warning
- * verbatim (`prRunWarning`'s text, which the page derives), then the calm facts worth reading next to a problem. A calm fact is only said when true, and
- * `approved` is listed before `checks passing`, the order `prChips` reads them in.
- */
-export function prProblems(pr: PullRequestRow, warning: string | null): PrProblem[] {
-  const problems: PrProblem[] = pr.draft ? [] : levelFacts(pr).map((f) => ({ text: f.text, calm: false }));
-  if (warning !== null) problems.push({ text: warning, calm: true });
-  if (pr.review === 'approved') problems.push({ text: 'Approved.', calm: true });
-  if (pr.checks === 'success') problems.push({ text: 'Checks are passing.', calm: true });
-  return problems;
-}
-
-/** The first problem as the row's headline and the rest as its steps; no problems is no verdict (a quiet row says its facts instead, `quietFacts`). */
-export function prVerdict(problems: readonly PrProblem[]): { verdict: string | null; steps: PrProblem[] } {
-  return { verdict: problems[0]?.text ?? null, steps: problems.slice(1) };
-}
-
-/** A quiet row's one line: `prChips`' labels, joined. The same words Cards draws as chips — a PR is never described two ways. */
-export function quietFacts(pr: PullRequestRow): string {
-  return prChips(pr)
-    .map((chip) => chip.label)
-    .join(' · ');
 }
 
 /** A PR placed on the page: its key (`<repo>#<number>`, the id outcomes and update marks use), where it lives, and the two numbers the order came from. */
@@ -166,6 +162,16 @@ export function levelCounts(ranked: readonly RankedPr[]): Record<PrLevel, number
   return counts;
 }
 
+/**
+ * The Inbox's `Needs you` number, for the rail's GitHub count (spec §4.9a): the exact pipeline `PullRequestsView` feeds the Inbox — `groupRepos`, then only the
+ * repos the token can read (`splitReach(...).shown`), then `rankPrs` and `levelCounts` — so the rail and the tile can never disagree. A repo the token cannot
+ * read contributes nothing, as on the page. `null` (nothing has answered, or the shell does not read PRs) is 0.
+ */
+export function needsYouCount(data: PullRequestsPayload | null): number {
+  if (data === null) return 0;
+  return levelCounts(rankPrs(splitReach(groupRepos(data.repos)).shown))['needs-you'];
+}
+
 export type PrLayout = 'inbox' | 'matrix' | 'cards';
 
 /** The persisted choice, under the board's `backlog-manager.` prefix like every other per-device setting (`usePersistedState`). */
@@ -193,7 +199,27 @@ export function transientFailures(shown: readonly PrRepoView[]): PrRepoView[] {
   return shown.filter((repo) => repo.access !== 'ok');
 }
 
-/** The most recent successful read across the shown repos — the one `polled … ago` the toolbar draws — or `null` when none has read yet. */
+/**
+ * How many of the shown repos hold at least one open PR — the `M` in the band's `N open in M repos`. Counted on `total`, as `N` is, so a truncated repo and the
+ * count beside it agree; a repo that was read and holds nothing is not "a repo with PRs", which is also what Cards' own `N repos with no open PRs` says.
+ */
+export function openRepoCount(shown: readonly PrRepoView[]): number {
+  return shown.filter((repo) => repo.total > 0).length;
+}
+
+/**
+ * A repo's name as a row says it: the last `/` segment (`futin/backlog-manager` → `backlog-manager`), because the owner is the same on nearly every repo of a
+ * machine and says nothing there. Two shown repos that share the last segment (`acme/ui-kit`, `futin/ui-kit`) would then read as one, so a repo whose segment
+ * another shown repo also has keeps its full `owner/name`. `shown` is the full names on the page (a repo listed twice under one name is not a collision with
+ * itself). The one home of the rule: Inbox's meta line, Cards' head and Matrix's rows all call this, so they cannot shorten one repo three ways.
+ */
+export function repoShortName(repo: string, shown: readonly string[]): string {
+  const segment = (name: string) => name.slice(name.lastIndexOf('/') + 1);
+  const short = segment(repo);
+  return shown.some((other) => other !== repo && segment(other) === short) ? repo : short;
+}
+
+/** The most recent successful read across the shown repos — the one `polled … ago` the band draws — or `null` when none has read yet. */
 export function newestPolledAt(shown: readonly PrRepoView[]): string | null {
   let best: string | null = null;
   for (const repo of shown) {
@@ -373,7 +399,7 @@ export function columnCounts(ranked: readonly RankedPr[]): Record<MatrixColumn, 
 /** A level's `Dot` tone. Quiet is `undefined` on purpose: `Dot` draws no tone as a toneless grey, which is the level's own look. */
 export const LEVEL_DOT: Record<PrLevel, DotTone | undefined> = {
   'needs-you': 'crashed',
-  'worth-a-look': 'paused',
+  'worth-a-look': 'warn',
   quiet: undefined
 };
 

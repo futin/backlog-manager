@@ -3,8 +3,7 @@ import { useMemo, useState } from 'react';
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
-import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
-import { useReportWorking } from '../../hooks/useReportWorking';
+import { useOrchestratorRunsContext } from '../../hooks/OrchestratorRunsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useSettings } from '../../hooks/useSettings';
 import { groupByMonth } from '../../lib/item-month';
@@ -91,12 +90,10 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
 ];
 
 /**
- * `onWorking` is the rail cursor's report (§8.0, `useReportWorking`) — this view's run poll is the one the shell reads, so `App` adds none.
- *
  * `source` (source-sections) is REQUIRED and narrows the fetched index exactly as `BoardView`'s does — items, project picks and warnings, before any other
  * derivation, through `narrowToSource` — so Files › Archive and GitHub › Archive are one component drawing two disjoint sets. The run payload stays machine-wide.
  */
-export default function ArchiveView({ source, onWorking }: { source: SourceSection; onWorking?: (working: boolean) => void }) {
+export default function ArchiveView({ source }: { source: SourceSection }) {
   const { zone } = useTimeZone();
   const { items: fullIndex, projects: fullProjects, loading, error } = useBoard();
   /* BoardView's split: `projects` stays `null` until the first answer, and `index` is `narrowToSource`'s cut (each index error routed to the source it
@@ -140,8 +137,7 @@ export default function ArchiveView({ source, onWorking }: { source: SourceSecti
      dispatchable. The hook already ORs `starting.length > 0` into its own
      live-poll predicate, so the block clears on the 5s poll that lands the
      run file rather than on a window focus. */
-  const { runs, starting } = useOrchestratorRuns();
-  useReportWorking(runs, starting, onWorking);
+  const { runs, starting } = useOrchestratorRunsContext();
 
   const [open, setOpen] = useState<BacklogItem | null>(null);
   const [dispatching, setDispatching] = useState<BacklogItem | null>(null);

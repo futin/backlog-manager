@@ -7,6 +7,7 @@ import {
   runDotTone,
   runStatusChip,
   stageChipClass,
+  stagePillTone,
   stageGlyph
 } from '../client/src/lib/run-stage';
 import { MACHINE_STAGES } from '../client/src/lib/run-stats';
@@ -314,5 +315,22 @@ describe('the stage lists built from PIPELINE_STAGES', () => {
     expect(stages.slice(0, 6)).toEqual(['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging']);
     expect(stages).toHaveLength(7);
     expect(stages[6]).toBe(terminal);
+  });
+});
+
+describe('stagePillTone', () => {
+  it.each([
+    ['fixing', 'live'],
+    ['merged', 'done'],
+    ['failed', 'bad'],
+    ['needs-answers', 'warn'],
+    ['pending', 'neutral'],
+    ['skipped', 'neutral']
+  ] as const)('reads %s as the %s pill', (stage, tone) => {
+    expect(stagePillTone(stage)).toBe(tone);
+  });
+
+  it('answers every stage with one of the five pill tones', () => {
+    for (const stage of ALL_STAGES) expect(['neutral', 'live', 'warn', 'bad', 'done']).toContain(stagePillTone(stage));
   });
 });

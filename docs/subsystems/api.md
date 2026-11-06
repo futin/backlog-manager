@@ -97,17 +97,20 @@ merged into the default branch — the case a `Refs #<n>` PR leaves behind, sinc
 `Refs #<n>` merge into main.
 
 A files item has no label, so its rung is a git read (#427): `plan`/`dispatch` refuse an item whose derived action is `execute` while `refs/heads/execute/<id>` or
-`.worktrees/execute-<id>` exists, right after `inReviewBlock`, with `an execute branch or worktree already holds this item` (`executeHeldBlock`, an uncoded 409 from
+`.worktrees/execute-<id>` exists, right after `inReviewBlock` (`itemLadderBlock`, `shared/agent.ts`, is the one home of the order), with `an execute branch or
+worktree already holds this item` (`executeHeldBlock`, an uncoded 409 from
 `dispatch`). Through `runGit`, per request and memoised nowhere, and a failed read is not held. The orchestrator gate turns such an item `ungroomed` with the same sentence.
 
 `plan-review` is the label a tick's unattended groom leaves on the plan it writes, and it is read as exclusion exactly as `in-review` is: `planReviewBlock`
-(`shared/agent.ts`) makes `plan`/`dispatch` refuse a mapped `planReview` item with `this plan awaits review`, always AFTER `inReviewBlock`, and the orchestrator
+(`shared/agent.ts`) makes `plan`/`dispatch` refuse a mapped `planReview` item with `this plan awaits review`, always AFTER `inReviewBlock` in `itemLadderBlock`,
+and the orchestrator
 gate turns it `ungroomed` with the same sentence. `backlog.mjs plan-review <id> on|off` is the one caller of the route, and `off` is how a person approves.
 
 `unvetted` (#341) is the one rung between those two, and it is no label: `mapIssue` derives `BacklogItem.unvetted` (`true` or absent) for a bug or task whose
 issue author's `author_association` is not `OWNER`/`MEMBER`/`COLLABORATOR` (`trustedAssociation`, `tracker/claim.ts`) and whose body does not hash to the newest
 well-formed `pin` a parsed claim carries. `unvettedBlock` makes `plan`/`dispatch` refuse it with `filed from outside the repo — groom it to vet the plan`, AFTER
-`inReviewBlock` and BEFORE `planReviewBlock`, and the orchestrator gate turns it `ungroomed` with the same sentence. Removing `plan-review` does not lift it;
+`inReviewBlock` and BEFORE `planReviewBlock` in `itemLadderBlock`, and the orchestrator gate turns it `ungroomed` with the same sentence. Removing `plan-review`
+does not lift it;
 only a `body` write by a session holding a live claim does, because that is what writes the pin
 ([invariants.md](invariants.md#an-outsiders-tracker-issue-is-executable-only-while-its-body-matches-a-pin-a-groom-of-ours-wrote)).
 
@@ -202,8 +205,8 @@ The third outbound-calling module (Jira integration phase 1): a `fetch` client o
 keys are set and a board is owed a sweep, the per-board issue caches it fills (the second cache in this server whose age is rendered, as `polledAt`), the
 `jira.json` reader, the ADF converter and the ticket block. Ten read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
 fresh (`?format=text` for the ticket block), the roots search, the project list, the JQL check and (phase 5a) `/prompt`, the composed Run prompt as `text/plain` — and
-eight guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
-since the repo/branch work `/repo-defaults`) and
+nine guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
+since the repo/branch work `/repo-defaults`), `/boards/sweep` (the chip's per-board `now`, which writes nothing and asks the poller for a save's sweep) and
 two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each followed by a re-read of the issue that is spliced into every board cache
 holding it. Since 5a the module also owns `JiraLiveService`, the ticket–session link store (memory over `~/.backlog-manager/settings/jira-links.json`) behind the status
 payload's `live`, an issue's `session` and `GET /sessions`; the two POSTs that

@@ -1,3 +1,4 @@
+import { typeKind } from '../../lib/jira';
 import type { JiraIssue } from '../../../../shared/types';
 
 /**
@@ -11,16 +12,17 @@ import type { JiraIssue } from '../../../../shared/types';
  * in `--ink3`; `aria-hidden`, because the type name is the wrapper's title and a screen reader gets it from the column and the modal.
  */
 export function JiraTypeIcon({ type }: { type: JiraIssue['type'] }) {
-  const name = type.name.toLowerCase();
-  const path = type.subtask
-    ? 'M5 4v10h12M13 10l4 4-4 4'
-    : type.level >= 1
-      ? 'M13 2 3 14h7l-1 8 10-12h-7z'
-      : name === 'bug'
-        ? 'M12 7a6 6 0 1 1 0 12a6 6 0 1 1 0-12M12 7V4M8 9 5 7M16 9l3-2M7 14H4M20 14h-3M8 18l-3 2M16 18l3 2'
-        : name === 'story'
-          ? 'M6 3h12v18l-6-4-6 4z'
-          : 'M5 5h14v14H5zM9 12l2 2 4-4';
+  const kind = typeKind(type);
+  const path =
+    kind === 'subtask'
+      ? 'M5 4v10h12M13 10l4 4-4 4'
+      : kind === 'high'
+        ? 'M13 2 3 14h7l-1 8 10-12h-7z'
+        : kind === 'bug'
+          ? 'M12 7a6 6 0 1 1 0 12a6 6 0 1 1 0-12M12 7V4M8 9 5 7M16 9l3-2M7 14H4M20 14h-3M8 18l-3 2M16 18l3 2'
+          : kind === 'story'
+            ? 'M6 3h12v18l-6-4-6 4z'
+            : 'M5 5h14v14H5zM9 12l2 2 4-4';
   return (
     <svg className="ui-type-icon" viewBox="0 0 24 24" aria-hidden="true">
       <path d={path} />

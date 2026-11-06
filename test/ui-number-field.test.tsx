@@ -80,3 +80,89 @@ describe('NumberField', () => {
     expect(screen.getByText('days')).toHaveClass('ui-number-unit');
   });
 });
+
+describe('NumberField stepper', () => {
+  const base = { min: 1, max: 10, label: 'Retries' };
+
+  it('Increase commits value + 1 once', async () => {
+    const onCommit = jest.fn();
+    render(<NumberField {...base} value={5} onCommit={onCommit} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Retries' }));
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith(6);
+  });
+
+  it('Decrease at min is disabled and commits nothing; Increase at max is disabled', async () => {
+    const onCommit = jest.fn();
+    const { rerender } = render(<NumberField {...base} value={1} onCommit={onCommit} />);
+    const dec = screen.getByRole('button', { name: 'Decrease Retries' });
+    expect(dec).toBeDisabled();
+    await userEvent.click(dec);
+    expect(onCommit).not.toHaveBeenCalled();
+
+    rerender(<NumberField {...base} value={10} onCommit={onCommit} />);
+    expect(screen.getByRole('button', { name: 'Increase Retries' })).toBeDisabled();
+  });
+
+  it('names the buttons plainly without a label', () => {
+    render(<NumberField min={1} max={10} value={5} onCommit={jest.fn()} />);
+    expect(screen.getByRole('button', { name: 'Decrease' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Increase' })).toBeInTheDocument();
+  });
+
+  it('clamps a step to the bound', async () => {
+    const onCommit = jest.fn();
+    render(<NumberField {...base} value={8} step={5} onCommit={onCommit} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Increase Retries' }));
+    expect(onCommit).toHaveBeenCalledWith(10);
+  });
+
+  it('still commits typed text on Enter', async () => {
+    const onCommit = jest.fn();
+    render(<NumberField {...base} value={5} onCommit={onCommit} />);
+    await userEvent.clear(screen.getByRole('spinbutton', { name: 'Retries' }));
+    await userEvent.type(screen.getByRole('spinbutton', { name: 'Retries' }), '7{Enter}');
+    expect(onCommit).toHaveBeenCalledWith(7);
+  });
+
+  it('disables both buttons while disabled', () => {
+    render(<NumberField {...base} value={5} disabled onCommit={jest.fn()} />);
+    expect(screen.getByRole('button', { name: 'Decrease Retries' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Increase Retries' })).toBeDisabled();
+  });
+
+  describe('ladder', () => {
+    const ladder = [30000, 60000, 120000];
+    const fmt = (v: number) => `${v / 60000}m`;
+    const props = { min: 30000, max: 120000, ladder, format: fmt, label: 'Every' };
+
+    it('shows the formatted value as text with no textbox', () => {
+      render(<NumberField {...props} value={60000} onCommit={jest.fn()} />);
+      expect(screen.queryByRole('spinbutton')).toBeNull();
+      expect(screen.getByText('1m')).toBeInTheDocument();
+    });
+
+    it('steps to the neighbouring rungs', async () => {
+      const onCommit = jest.fn();
+      render(<NumberField {...props} value={60000} onCommit={onCommit} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Increase Every' }));
+      expect(onCommit).toHaveBeenLastCalledWith(120000);
+      await userEvent.click(screen.getByRole('button', { name: 'Decrease Every' }));
+      expect(onCommit).toHaveBeenLastCalledWith(30000);
+    });
+
+    it('disables Increase on the top rung', () => {
+      render(<NumberField {...props} value={120000} onCommit={jest.fn()} />);
+      expect(screen.getByRole('button', { name: 'Increase Every' })).toBeDisabled();
+    });
+
+    it('places an off-ladder value in order', async () => {
+      const onCommit = jest.fn();
+      render(<NumberField {...props} value={90000} onCommit={onCommit} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Decrease Every' }));
+      expect(onCommit).toHaveBeenLastCalledWith(60000);
+      await userEvent.click(screen.getByRole('button', { name: 'Increase Every' }));
+      expect(onCommit).toHaveBeenLastCalledWith(120000);
+    });
+  });
+});

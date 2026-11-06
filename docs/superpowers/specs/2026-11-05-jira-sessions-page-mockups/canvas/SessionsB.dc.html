@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sessions option B</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#f4f4f3}
+a{color:#306c0f}a:hover{color:#1f4a08}
+</style>
+</helmet>
+<div style="width: 100%; min-height: 920px; display: flex; flex-wrap: wrap; background: #f4f4f3; font-family: 'Hanken Grotesk', -apple-system, sans-serif; color: #131313; font-size: 13px">
+<dc-import name="Rail" active="sessions" hint-size="220px,920px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 20px 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px">
+<header style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700">Sessions</h1>
+<div style="color: #6b6b6b; font-size: 12px">Payments Q4 · 3 live · read 4 s ago</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<button type="button" style="border: 1px solid #dcdcda; background: #ffffff; border-radius: 7px; padding: 6px 10px; font: inherit">Payments Q4 ▾</button>
+<label style="display: flex; align-items: center; gap: 6px; background: #ffffff; border: 1px solid #dcdcda; border-radius: 7px; padding: 5px 10px; color: #6b6b6b"><span>⌕</span><input type="search" aria-label="Search sessions" placeholder="Search sessions" style="border: 0; outline: 0; font: inherit; width: 200px; background: transparent"></label>
+</div>
+</header>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<div role="group" aria-label="Show" style="display: flex; gap: 4px">
+<button type="button" aria-pressed="true" style="border: 1px solid #131313; background: #131313; color: #ffffff; border-radius: 14px; padding: 4px 11px; font: inherit; font-size: 12px">All 6</button>
+<button type="button" style="border: 1px solid #dcdcda; background: #ffffff; border-radius: 14px; padding: 4px 11px; font: inherit; font-size: 12px; color: #8a5214">Needs you 2</button>
+<button type="button" style="border: 1px solid #dcdcda; background: #ffffff; border-radius: 14px; padding: 4px 11px; font: inherit; font-size: 12px">Working 1</button>
+<button type="button" style="border: 1px solid #dcdcda; background: #ffffff; border-radius: 14px; padding: 4px 11px; font: inherit; font-size: 12px">Ended 3</button>
+</div>
+<span style="width: 1px; height: 20px; background: #dcdcda"></span>
+<button type="button" style="border: 1px solid #dcdcda; background: #ffffff; border-radius: 7px; padding: 5px 10px; font: inherit; font-size: 12px">Repo: any ▾</button>
+<button type="button" style="border: 1px solid #dcdcda; background: #ffffff; border-radius: 7px; padding: 5px 10px; font: inherit; font-size: 12px">Run: any ▾</button>
+<label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #525252; border: 1px dashed #c4761f; border-radius: 7px; padding: 4px 9px"><input type="checkbox" aria-label="All tickets"> All tickets <span style="color: #6b6b6b">(off = this board only)</span></label>
+<div role="group" aria-label="Ended within" style="display: flex; background: #ededec; border-radius: 7px; padding: 2px; margin-left: auto">
+<button type="button" style="border: 0; background: transparent; padding: 4px 10px; border-radius: 5px; font: inherit; font-size: 12px; color: #525252">24 h</button>
+<button type="button" aria-pressed="true" style="border: 0; background: #ffffff; padding: 4px 10px; border-radius: 5px; font: inherit; font-size: 12px; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08)">7 d</button>
+<button type="button" style="border: 0; background: transparent; padding: 4px 10px; border-radius: 5px; font: inherit; font-size: 12px; color: #525252">30 d</button>
+<button type="button" style="border: 0; background: transparent; padding: 4px 10px; border-radius: 5px; font: inherit; font-size: 12px; color: #525252">All</button>
+</div>
+</div>
+<dc-import name="SessionTable" hint-size="100%,640px"></dc-import>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":920}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

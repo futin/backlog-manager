@@ -22,6 +22,10 @@
   --strip:#182238;            /* strip paper — every card surface */
   --strip-hi:#1e2a44;         /* raised/tinted paper (user msgs, active tab) */
   --tile-hover:#1e2a44;       /* a control on --board under the pointer — see the daylight note */
+  /* The app frame: the rail and the shell strip, one surface around the well. A step DARKER than --board on every palette, so the well (--board, with its
+     24 px top-left corner) reads as one sheet set into the frame, and the rail's open row (--strip) stands further from the frame than it would from the
+     well. It used to be split — rail --board, strip --strip — and the well, the same grey as the rail, met a white notch at its corner. */
+  --frame:#060a14;
   --edge:rgba(255,255,255,.05);/* 1px paper catch-light */
   --hairline:#2a3752;         /* printed rule on paper */
   --hairline2:#354463;        /* hover/strong rule */
@@ -89,11 +93,18 @@
    token rather than a `.ui-band .ui-chip:hover` rule because that selector out-specifies the chip's own `[aria-disabled]` and ink hovers and would
    repaint both. Declared here, not in client/src/styles.css, so test/daylight-contrast.test.ts's cascade can resolve the rules that read it. */
 :root{--hover-fill:var(--strip-hi)}
+/* The hover fill of a board card (`.board-card`, which the Files board, the Jira board and the archive all draw). Its own token, not --tile-hover: a card
+   carries --ink3 meta text, and daylight's --tile-hover #e8e8e6 holds that ink at only 4.3:1. A context token like --hover-fill, because a card sits on
+   one of two grounds: straight on --board (the archive), or inside a `.board-col[data-ground]` --steel column (Files, Jira), which re-points --card-hover at
+   --card-hover-steel for its cards. On the dark palettes both are --strip-hi, lighter than either ground, so the card lifts. Daylight needs two greys:
+   on the board, --steel (a step darker than the board, --ink3 at 4.55:1 — anything lighter dissolves the card into the page); in a steel column, a grey
+   halfway between the white paper and the column, because --steel there is the column itself. */
+:root{--card-hover:var(--strip-hi);--card-hover-steel:var(--strip-hi)}
 /* Graphite — the same board with the blue cast taken out. For anyone who finds
    the navy too warm-shifted on a wide-gamut display. */
 [data-theme="graphite"]{
   color-scheme:dark;
-  --board:#111214;--steel:#191b1e;--strip:#1f2124;--strip-hi:#282b2f;--tile-hover:#282b2f;
+  --board:#111214;--steel:#191b1e;--strip:#1f2124;--strip-hi:#282b2f;--tile-hover:#282b2f;--frame:#0a0a0b;
   --edge:rgba(255,255,255,.05);--hairline:#33363b;--hairline2:#43474e;
   --ink:#e4e5e7;--ink2:#a6a9ae;--ink3:#6d7176;
   --green:#5ac98a;--amber:#e6a445;--mustard:#c8b45e;--cyan:#6fc5cf;
@@ -107,7 +118,7 @@
    tints rather than hues, which is the point: a monochrome tube. */
 [data-theme="amber"]{
   color-scheme:dark;
-  --board:#0a0805;--steel:#141009;--strip:#1a150c;--strip-hi:#241d10;--tile-hover:#241d10;
+  --board:#0a0805;--steel:#141009;--strip:#1a150c;--strip-hi:#241d10;--tile-hover:#241d10;--frame:#000000;
   --edge:rgba(255,176,58,.07);--hairline:#3a2f18;--hairline2:#544425;
   --ink:#ffcf7a;--ink2:#c69a4f;--ink3:#8a6a35;
   --green:#c8d24a;--amber:#ffb03a;--mustard:#e0a63c;--cyan:#ffc76b;
@@ -120,7 +131,7 @@
 /* Nightshift — a deep green scope. Easiest of the dark set on a dim room. */
 [data-theme="nightshift"]{
   color-scheme:dark;
-  --board:#07120d;--steel:#0d1c15;--strip:#12251b;--strip-hi:#193225;--tile-hover:#193225;
+  --board:#07120d;--steel:#0d1c15;--strip:#12251b;--strip-hi:#193225;--tile-hover:#193225;--frame:#030a06;
   --edge:rgba(255,255,255,.05);--hairline:#204030;--hairline2:#2d5641;
   --ink:#d7ecdf;--ink2:#94b7a4;--ink3:#5e7e6c;
   --green:#4fe09a;--amber:#ffbe52;--mustard:#cfc55e;--cyan:#54cfba;
@@ -144,6 +155,8 @@
      rule, broken by the hover state alone. A grey a step darker than the board keeps it a control. --strip-hi itself stays: it fills the rail's active
      row, popover rows and pressed chips, which sit on paper and read fine there. test/daylight-contrast.test.ts holds the pair on every palette. */
   --tile-hover:#e8e8e6;
+  --card-hover:var(--steel);--card-hover-steel:#f6f6f5;
+  --frame:#e8e8e6;
   --edge:rgba(0,0,0,.03);--hairline:#eaeae8;--hairline2:#dcdcda;
   --ink:#131313;--ink2:#525252;--ink3:#6b6b6b;
   /* --ink2 and --ink3 are darker than the reference ramp's #6e6e6e / #a0a0a0 (DESIGN.md §2), which measured 4.35:1 and 2.6:1 on paper; these are the

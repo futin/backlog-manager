@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Watchdog and ticks</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--board:#f4f4f3;--steel:#ededec;--strip:#fff;--strip-hi:#f2f2f1;--tile-hover:#e8e8e6;--hairline:#eaeae8;--hairline2:#dcdcda;--ink:#131313;--ink2:#525252;--ink3:#6b6b6b;--green:#38631a;--green-solid:#7dc242;--amber:#c4761f;--amber-ink:#8a5214;--red:#b03b28;--magenta:#6b52a8;--cyan:#306c0f;--live:#F5A15C;
+--t-green:#eef6e6;--t-amber:#fbf1e4;--t-red:#fbe9e5;--t-mag:#efecf7}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.ab{background:#fff;padding:36px 44px;display:flex;flex-direction:column;gap:22px;overflow:hidden}
+.ab-h{display:flex;flex-direction:column;gap:4px}
+.ab-t{font-size:20px;font-weight:600;letter-spacing:-.01em}
+.ab-s{font-size:13px;color:var(--ink3);max-width:1100px;line-height:1.45}
+.tag{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3)}
+.tag.g{color:var(--green)}
+.note{font-size:12px;color:var(--ink3);line-height:1.45}
+.note b{color:var(--ink2);font-weight:600}
+.page{background:var(--board);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.ph{display:flex;align-items:flex-end;gap:12px}
+.ph-t{font-size:22px;font-weight:600;letter-spacing:-.01em}
+.ph-s{font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:6px;margin-top:2px}
+.sp{flex:1}
+.row{display:flex;align-items:center;gap:8px}
+.col{display:flex;flex-direction:column;gap:8px}
+.pane{background:var(--strip);border:1px solid var(--hairline);border-radius:14px;padding:16px;min-width:0}
+.pane-h{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.pane-t{font-size:15px;font-weight:600}
+.pane-s{font-size:12px;color:var(--ink3)}
+.chip{height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);font:500 13px 'Hanken Grotesk',sans-serif;color:var(--ink);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip.s{height:28px;padding:0 10px;font-size:12.5px}
+.chip.ghost{border-color:transparent;background:transparent;color:var(--ink2)}
+.chip.ink{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip.ic{width:32px;padding:0;justify-content:center}
+.chip.s.ic{width:28px}
+.split{display:inline-flex;height:32px;border-radius:10px;background:var(--ink);color:#fff;font:500 13px 'Hanken Grotesk',sans-serif;overflow:hidden}
+.split>span{display:inline-flex;align-items:center;gap:6px;padding:0 12px}
+.split>span+span{padding:0 9px;border-left:1px solid rgba(255,255,255,.18)}
+.split.s{height:28px;font-size:12.5px}.split.s>span{padding:0 10px}.split.s>span+span{padding:0 7px}
+.seg{display:inline-flex;background:var(--steel);border-radius:10px;padding:3px;gap:2px}
+.seg>span{height:26px;padding:0 10px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:var(--ink2)}
+.seg>span.on{background:var(--strip);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg .n{font-size:11px;color:var(--ink3);font-weight:600}
+.search{height:32px;width:220px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);display:inline-flex;align-items:center;gap:8px;padding:0 10px;font-size:12.5px;color:var(--ink3)}
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;background:var(--strip-hi);color:var(--ink2);white-space:nowrap}
+.pill.g{background:var(--t-green);color:var(--green)}
+.pill.a{background:var(--t-amber);color:var(--amber-ink)}
+.pill.r{background:var(--t-red);color:var(--red)}
+.pill.m{background:var(--t-mag);color:var(--magenta)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ink3);display:inline-block;flex:none}
+.dot.g{background:var(--green-solid)}.dot.a{background:var(--amber)}.dot.r{background:var(--red)}.dot.l{background:var(--live)}.dot.m{background:var(--magenta)}
+.tile{width:28px;height:28px;border-radius:8px;background:var(--strip-hi);color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.tile.g{background:var(--t-green);color:var(--green)}.tile.a{background:var(--t-amber);color:var(--amber-ink)}.tile.r{background:var(--t-red);color:var(--red)}.tile.m{background:var(--t-mag);color:var(--magenta)}
+.tile.xs{width:18px;height:18px;border-radius:5px}
+.tile.lg{width:40px;height:40px;border-radius:12px}
+.av{width:22px;height:22px;border-radius:50%;background:var(--t-mag);color:var(--magenta);font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.key{font-size:12px;font-weight:600;color:var(--ink)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+.muted{color:var(--ink3)}.ink2{color:var(--ink2)}
+.sm{font-size:12px}.xs{font-size:11px}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.tbl th{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--hairline);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr.hov td{background:var(--strip-hi)}
+.menu{position:absolute;background:var(--strip);border:1px solid var(--hairline);border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.12);padding:8px;z-index:5}
+.mi{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;font-size:13px;font-weight:500}
+.mi.on{background:var(--strip-hi)}
+.mi .sub{font-size:11px;color:var(--ink3);font-weight:400}
+.mh{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3);padding:8px 8px 4px}
+.hr{height:1px;background:var(--hairline);margin:6px 0}
+.bar{height:6px;border-radius:999px;background:var(--steel);overflow:hidden;display:flex}
+.bar>i{display:block;height:100%}
+.kpi{background:var(--strip);border:1px solid var(--hairline);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.kpi-l{font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:6px}
+.kpi-v{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.kpi-s{font-size:11.5px;color:var(--ink3)}
+.toggle{width:32px;height:18px;border-radius:999px;background:var(--hairline2);position:relative;flex:none}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.toggle.on{background:var(--ink)}.toggle.on::after{left:16px}
+.sel{height:32px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);display:inline-flex;align-items:center;gap:8px;padding:0 10px;font-size:13px;font-weight:500;min-width:0}
+.sel .chev{margin-left:auto;color:var(--ink3)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>label{font-size:12px;font-weight:600;color:var(--ink2)}
+.cap{font-size:11px;color:var(--ink3)}
+.strip{height:3px;border-radius:3px 3px 0 0}
+svg.i{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+svg.i16{width:16px;height:16px}
+svg.i18{width:18px;height:18px}
+.cmp{display:grid;gap:28px;align-items:start}
+.now{opacity:1;border:1px dashed var(--hairline2);border-radius:14px;padding:14px;background:#fff}
+</style>
+</helmet>
+<div class="ab" style="width:1280px;height:720px">
+<div class="ab-h">
+  <div class="ab-t">Runs › Watchdog and Ticks</div>
+  <div class="ab-s">Today Watchdog is a big "idle" word, a facts list and an activity table. Ticks paints a whole failing project pink and lists the rest as text. Proposed: Watchdog opens on a status band with its policy as chips and a timeline. Ticks gives each project a row with a strip of its last 12 ticks, so a failing streak shows at a glance without the pink block.</div>
+</div>
+<div class="cmp" style="grid-template-columns:1fr 1fr">
+  <div class="page">
+    <div class="ph"><div><div class="ph-t">Watchdog</div><div class="ph-s">restarts crashed runs on this machine</div></div><span class="sp"></span><span class="chip s ghost">Policy in Settings <svg class="i" viewBox="0 0 16 16"><path d="M6 3.5H3.5v9h9V10M9 3h4v4M13 3 7.5 8.5"/></svg></span></div>
+    <div class="pane col" style="gap:12px">
+      <div class="row" style="gap:14px">
+        <span class="tile lg" style="background:var(--strip-hi)"><svg class="i" viewBox="0 0 16 16"><path d="M2 8h2.5l1.5-3 2.5 6 1.5-3H14"/></svg></span>
+        <div><div style="font-weight:600;font-size:16px" class="row"><span class="dot g"></span>Idle · nothing to watch</div><div class="sm muted">checked 12 s ago · next in 18 s</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--hairline);padding-top:12px">
+        <div><div class="xs muted">Check every</div><div style="font-weight:600;font-size:13px">30 s</div></div>
+        <div style="border-left:1px solid var(--hairline);padding-left:12px"><div class="xs muted">Leave a resumed run alone</div><div style="font-weight:600;font-size:13px">20 min</div></div>
+        <div style="border-left:1px solid var(--hairline);padding-left:12px"><div class="xs muted">Give up after</div><div style="font-weight:600;font-size:13px">3 resumes</div></div>
+      </div>
+    </div>
+    <div class="pane">
+      <div class="pane-h"><span class="pane-t" style="font-size:14px">Watching</span><span class="pill">0</span></div>
+      <div class="sm muted" style="padding:10px 0">No running run. A run shows here while the sweeper tracks it, with its crash count.</div>
+    </div>
+    <div class="pane">
+      <div class="pane-h"><span class="pane-t" style="font-size:14px">Activity</span><span class="pane-s">last 50, kept in memory</span></div>
+      <div style="display:grid;grid-template-columns:44px 16px 1fr;gap:0 10px;font-size:12.5px">
+        <span class="muted">14:48</span><div style="display:flex;flex-direction:column;align-items:center"><span class="dot" style="background:#fff;border:2px solid var(--ink3)"></span><span style="width:2px;flex:1;background:var(--hairline)"></span></div><div style="padding-bottom:12px"><b style="font-weight:500">Stood down</b> <span class="muted">· no running run</span></div>
+        <span class="muted">14:48</span><div style="display:flex;flex-direction:column;align-items:center"><span class="dot g"></span><span style="width:2px;flex:1;background:var(--hairline)"></span></div><div style="padding-bottom:12px"><b style="font-weight:500">Armed</b> <span class="muted">· watching for crashed runs</span></div>
+        <span class="muted">09:12</span><div style="display:flex;flex-direction:column;align-items:center"><span class="dot a"></span></div><div><b style="font-weight:500">Resumed</b> <span class="muted">· brickwright run-20261026-101033, crash 1 of 3</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="page">
+    <div class="ph"><div><div class="ph-t">Ticks</div><div class="ph-s"><span class="dot r"></span>1 failing · 5 projects with tick history</div></div><span class="sp"></span><span class="chip s ghost">Policy in Settings <svg class="i" viewBox="0 0 16 16"><path d="M6 3.5H3.5v9h9V10M9 3h4v4M13 3 7.5 8.5"/></svg></span></div>
+    <div class="pane" style="padding:6px">
+      <div class="row" style="gap:12px;padding:10px;border-radius:10px;box-shadow:inset 3px 0 0 var(--red)">
+        <div style="flex:1;min-width:0"><div class="row"><span style="font-weight:600;font-size:13px">backlog-manager</span><span class="pill r">3 failures in a row</span></div><div class="xs muted" style="margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">nothing left to execute: all five Fix pieces already shipped in #362 and #370</div></div>
+        <div class="row" style="gap:3px"><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--steel)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--steel)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--red)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--red)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--red)"></i></div>
+        <span class="chip s">Reset</span>
+      </div>
+      <div class="row" style="gap:12px;padding:10px;border-top:1px solid var(--hairline)"><div style="flex:1"><div style="font-weight:600;font-size:13px">brickwright</div><div class="xs muted" style="margin-top:3px">19:45 · execute #49 · ok · plans awaiting review 0/3</div></div><div class="row" style="gap:3px"><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--steel)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--steel)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i></div><span style="width:58px"></span></div>
+      <div class="row" style="gap:12px;padding:10px;border-top:1px solid var(--hairline)"><div style="flex:1"><div style="font-weight:600;font-size:13px">claude-agents-dashboard</div><div class="xs muted" style="margin-top:3px">20:07 · execute #335 · ok · plans awaiting review 0/3</div></div><div class="row" style="gap:3px"><i style="width:8px;height:18px;border-radius:2px;background:var(--steel)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--steel)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i></div><span style="width:58px"></span></div>
+      <div class="row" style="gap:12px;padding:10px;border-top:1px solid var(--hairline)"><div style="flex:1"><div class="row"><span style="font-weight:600;font-size:13px">leray</span><span class="pill a">2 failures in a row</span></div><div class="xs muted" style="margin-top:3px">21:52 · execute #45 · failed</div></div><div class="row" style="gap:3px"><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--steel)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--green-solid)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--red)"></i><i style="width:8px;height:18px;border-radius:2px;background:var(--red)"></i></div><span class="chip s">Reset</span></div>
+    </div>
+    <div class="note"><b>Strip key:</b> green means the tick did its unit, grey means it was idle or skipped, red means it failed. The oldest tick is on the left. Hovering a cell names the tick. The activity table below keeps today's columns, with the outcome as a pill.</div>
+  </div>
+</div>
+
+</div>
+</x-dc>
+</body>
+</html>

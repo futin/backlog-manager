@@ -7,8 +7,8 @@ import { sessionDuration, type SessionLink } from './jira-sessions';
 import { formatZonedClock, startOfZonedDay, zonedParts } from './time-zone';
 
 /**
- * jira-list.ts — what the Board page's List view draws: one row per session, live above ended, filtered and counted (Jira sessions spec §7.2, C7; DESIGN.md
- * §8.9.1). Pure, and the one home of these derivations — `JiraSessionList` draws what `buildListRows` and `applyListFilters` return, so no component holds a
+ * jira-list.ts — what the Sessions page's session table draws: one row per session, live above ended, filtered and counted (Jira sessions spec §7.2, C7; DESIGN.md
+ * §8.9.1). Pure apart from `rowOpens`, which reads DOM nodes, and the one home of these derivations — `JiraSessionList` draws what `buildListRows` and `applyListFilters` return, so no component holds a
  * copy of "which sessions are in scope", "which ended rows the window hides" or "which row comes first".
  *
  * **A row is a session, not a ticket.** The identity is the pair, `${key}:${sessionId}` — the deck's — because one session can be linked to several tickets
@@ -269,16 +269,27 @@ export function applyListFilters(
 }
 
 /**
- * The State column's dot, as a `ui/Dot` tone: amber and breathing for the four states that want a person (the colour every "a human must act" mark in this app
- * is), green for Working, mustard for Quiet and Starting (nothing is wrong, nothing is happening yet), red for Lost contact, and none for Ended — an ended
- * session has no state to be in, so its dot is simply absent and the row reads quiet beside the live ones. The tones are `Dot`'s own member names.
+ * The Sessions page's empty title (spec §4.3): the board it is scoped to and the window ended rows are cut by, so the line says WHICH nothing it found. With
+ * `All tickets` on the scope is every linked ticket, not a board, and the lead says so. `all` has no window phrase.
  */
-export function listDotTone(state: SessionLink['state']): 'live' | 'ramp-tasks' | 'paused' | 'crashed' | null {
-  if (needsYou(state)) return 'live';
-  if (state === 'working') return 'ramp-tasks';
-  if (state === 'quiet' || state === 'starting') return 'paused';
-  if (state === 'lost') return 'crashed';
-  return null;
+export function sessionsEmptyTitle(board: string, window: ListWindow, allTickets: boolean): string {
+  const lead = allTickets ? 'No linked sessions' : `No sessions on ${board}`;
+  const span = window === '24h' ? ' in the last 24 hours' : window === '7d' ? ' in the last 7 days' : window === '30d' ? ' in the last 30 days' : '';
+  return lead + span;
+}
+
+/** Every element inside a row that owns its own click: the Open chips are links, `Run ▾` a button, and its `Popover` panel a `role="dialog"` in the cell. */
+const ROW_OWN_CONTROLS = 'a, button, input, select, textarea, label, [role="dialog"]';
+
+/**
+ * Whether a click on a List row is the row's — opening Detail — rather than a control's. A target inside one of `ROW_OWN_CONTROLS` is that control's (the
+ * summary button included: it opens Detail through its own `onClick`, so the row must not open it a second time); a target outside the row is a React
+ * synthetic event bubbling from somewhere the DOM does not nest; and a click that leaves a text selection behind was someone copying a branch name.
+ */
+export function rowOpens(row: Element, target: EventTarget | null, selection: string): boolean {
+  if (!(target instanceof Element) || !row.contains(target)) return false;
+  if (target.closest(ROW_OWN_CONTROLS) !== null) return false;
+  return selection === '';
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

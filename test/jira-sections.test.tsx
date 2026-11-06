@@ -160,7 +160,7 @@ describe('the Jira rail entry', () => {
 });
 
 describe('the Jira section and its tree', () => {
-  it('opens on the Jira link, with the Board/Setup tree under it, and the tree alone switches pages', async () => {
+  it('opens on the Jira link, with the Board/Sessions/Setup tree under it, and the tree alone switches pages', async () => {
     render(<App />);
     await screen.findByText('board stub');
     await flush();
@@ -173,7 +173,7 @@ describe('the Jira section and its tree', () => {
       within(tree)
         .getAllByRole('button')
         .map((b) => b.textContent)
-    ).toEqual(['Board', 'Setup']);
+    ).toEqual(['Board', 'Sessions', 'Setup']);
     expect(within(tree).getByRole('button', { name: 'Board' })).toHaveAttribute('aria-current', 'true');
 
     await userEvent.click(within(tree).getByRole('button', { name: 'Setup' }));
@@ -292,16 +292,20 @@ describe('Settings › Local › Opens on', () => {
     );
   }
 
-  const options = (): string[] =>
-    within(screen.getByLabelText('Opens on'))
-      .getAllByRole('option')
+  // Opens on is a Segmented since the Task 8 fix round: the group is labelled `Opens on` and each option is a button.
+  const group = (): HTMLElement => screen.getByRole('group', { name: 'Opens on' });
+  const options = (): string[] => within(group()).getAllByRole('button').map((o) => o.textContent ?? '');
+  const pressed = (): string[] =>
+    within(group())
+      .getAllByRole('button')
+      .filter((o) => o.getAttribute('aria-pressed') === 'true')
       .map((o) => o.textContent ?? '');
 
   it('offers Jira, in rail order, while the status says configured', async () => {
     renderSettings();
     await flush();
     expect(options()).toEqual(['Last used', 'Files', 'GitHub', 'Jira', 'Runs', 'Settings']);
-    await userEvent.selectOptions(screen.getByLabelText('Opens on'), 'jira');
+    await userEvent.click(within(group()).getByRole('button', { name: 'Jira' }));
     expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').landing).toBe('jira');
   });
 
@@ -314,12 +318,12 @@ describe('Settings › Local › Opens on', () => {
     expect(options()).toEqual(['Last used', 'Files', 'GitHub', 'Runs', 'Settings']);
   });
 
-  it('keeps a stored jira landing visible on an unconfigured machine rather than drawing a blank select', async () => {
+  it('keeps a stored jira landing visible on an unconfigured machine rather than drawing nothing pressed', async () => {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ landing: 'jira' }));
     jiraAnswer = UNCONFIGURED;
     renderSettings();
     await flush();
     expect(options()).toEqual(['Last used', 'Files', 'GitHub', 'Jira', 'Runs', 'Settings']);
-    expect(screen.getByLabelText('Opens on')).toHaveValue('jira');
+    expect(pressed()).toEqual(['Jira']);
   });
 });

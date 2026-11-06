@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Launch sheet and deck</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--board:#f4f4f3;--steel:#ededec;--strip:#fff;--strip-hi:#f2f2f1;--tile-hover:#e8e8e6;--hairline:#eaeae8;--hairline2:#dcdcda;--ink:#131313;--ink2:#525252;--ink3:#6b6b6b;--green:#38631a;--green-solid:#7dc242;--amber:#c4761f;--amber-ink:#8a5214;--red:#b03b28;--magenta:#6b52a8;--cyan:#306c0f;--live:#F5A15C;
+--t-green:#eef6e6;--t-amber:#fbf1e4;--t-red:#fbe9e5;--t-mag:#efecf7}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+.ab{background:#fff;padding:36px 44px;display:flex;flex-direction:column;gap:22px;overflow:hidden}
+.ab-h{display:flex;flex-direction:column;gap:4px}
+.ab-t{font-size:20px;font-weight:600;letter-spacing:-.01em}
+.ab-s{font-size:13px;color:var(--ink3);max-width:1100px;line-height:1.45}
+.tag{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3)}
+.tag.g{color:var(--green)}
+.note{font-size:12px;color:var(--ink3);line-height:1.45}
+.note b{color:var(--ink2);font-weight:600}
+.page{background:var(--board);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.ph{display:flex;align-items:flex-end;gap:12px}
+.ph-t{font-size:22px;font-weight:600;letter-spacing:-.01em}
+.ph-s{font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:6px;margin-top:2px}
+.sp{flex:1}
+.row{display:flex;align-items:center;gap:8px}
+.col{display:flex;flex-direction:column;gap:8px}
+.pane{background:var(--strip);border:1px solid var(--hairline);border-radius:14px;padding:16px;min-width:0}
+.pane-h{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.pane-t{font-size:15px;font-weight:600}
+.pane-s{font-size:12px;color:var(--ink3)}
+.chip{height:32px;padding:0 12px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);font:500 13px 'Hanken Grotesk',sans-serif;color:var(--ink);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip.s{height:28px;padding:0 10px;font-size:12.5px}
+.chip.ghost{border-color:transparent;background:transparent;color:var(--ink2)}
+.chip.ink{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip.ic{width:32px;padding:0;justify-content:center}
+.chip.s.ic{width:28px}
+.split{display:inline-flex;height:32px;border-radius:10px;background:var(--ink);color:#fff;font:500 13px 'Hanken Grotesk',sans-serif;overflow:hidden}
+.split>span{display:inline-flex;align-items:center;gap:6px;padding:0 12px}
+.split>span+span{padding:0 9px;border-left:1px solid rgba(255,255,255,.18)}
+.split.s{height:28px;font-size:12.5px}.split.s>span{padding:0 10px}.split.s>span+span{padding:0 7px}
+.seg{display:inline-flex;background:var(--steel);border-radius:10px;padding:3px;gap:2px}
+.seg>span{height:26px;padding:0 10px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:var(--ink2)}
+.seg>span.on{background:var(--strip);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg .n{font-size:11px;color:var(--ink3);font-weight:600}
+.search{height:32px;width:220px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);display:inline-flex;align-items:center;gap:8px;padding:0 10px;font-size:12.5px;color:var(--ink3)}
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;background:var(--strip-hi);color:var(--ink2);white-space:nowrap}
+.pill.g{background:var(--t-green);color:var(--green)}
+.pill.a{background:var(--t-amber);color:var(--amber-ink)}
+.pill.r{background:var(--t-red);color:var(--red)}
+.pill.m{background:var(--t-mag);color:var(--magenta)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ink3);display:inline-block;flex:none}
+.dot.g{background:var(--green-solid)}.dot.a{background:var(--amber)}.dot.r{background:var(--red)}.dot.l{background:var(--live)}.dot.m{background:var(--magenta)}
+.tile{width:28px;height:28px;border-radius:8px;background:var(--strip-hi);color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.tile.g{background:var(--t-green);color:var(--green)}.tile.a{background:var(--t-amber);color:var(--amber-ink)}.tile.r{background:var(--t-red);color:var(--red)}.tile.m{background:var(--t-mag);color:var(--magenta)}
+.tile.xs{width:18px;height:18px;border-radius:5px}
+.tile.lg{width:40px;height:40px;border-radius:12px}
+.av{width:22px;height:22px;border-radius:50%;background:var(--t-mag);color:var(--magenta);font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.key{font-size:12px;font-weight:600;color:var(--ink)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+.muted{color:var(--ink3)}.ink2{color:var(--ink2)}
+.sm{font-size:12px}.xs{font-size:11px}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.tbl th{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--hairline);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr.hov td{background:var(--strip-hi)}
+.menu{position:absolute;background:var(--strip);border:1px solid var(--hairline);border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.12);padding:8px;z-index:5}
+.mi{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;font-size:13px;font-weight:500}
+.mi.on{background:var(--strip-hi)}
+.mi .sub{font-size:11px;color:var(--ink3);font-weight:400}
+.mh{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink3);padding:8px 8px 4px}
+.hr{height:1px;background:var(--hairline);margin:6px 0}
+.bar{height:6px;border-radius:999px;background:var(--steel);overflow:hidden;display:flex}
+.bar>i{display:block;height:100%}
+.kpi{background:var(--strip);border:1px solid var(--hairline);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.kpi-l{font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:6px}
+.kpi-v{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.kpi-s{font-size:11.5px;color:var(--ink3)}
+.toggle{width:32px;height:18px;border-radius:999px;background:var(--hairline2);position:relative;flex:none}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.toggle.on{background:var(--ink)}.toggle.on::after{left:16px}
+.sel{height:32px;border-radius:10px;border:1px solid var(--hairline2);background:var(--strip);display:inline-flex;align-items:center;gap:8px;padding:0 10px;font-size:13px;font-weight:500;min-width:0}
+.sel .chev{margin-left:auto;color:var(--ink3)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>label{font-size:12px;font-weight:600;color:var(--ink2)}
+.cap{font-size:11px;color:var(--ink3)}
+.strip{height:3px;border-radius:3px 3px 0 0}
+svg.i{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+svg.i16{width:16px;height:16px}
+svg.i18{width:18px;height:18px}
+.cmp{display:grid;gap:28px;align-items:start}
+.now{opacity:1;border:1px dashed var(--hairline2);border-radius:14px;padding:14px;background:#fff}
+</style>
+</helmet>
+<div class="ab" style="width:1280px;height:860px">
+<div class="ab-h">
+  <div class="ab-t">Launch sheet and agent deck</div>
+  <div class="ab-s">The launch sheet opens on every Run pick. Today it is a stack of selects, all the same weight. Proposed: the action as three picture tiles, the prompt in a code box with Copy, the ticket writes as two toggles, and model, effort and permissions on one row. The deck card on the right gets a state stripe, the split Open, and a context meter.</div>
+</div>
+<div class="cmp" style="grid-template-columns:600px 1fr">
+  <div style="background:rgba(19,19,19,.28);border-radius:16px;padding:22px">
+    <div style="background:#fff;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.2);overflow:hidden">
+      <div class="row" style="gap:10px;padding:16px 18px;border-bottom:1px solid var(--hairline)">
+        <span class="tile xs r"><svg class="i" viewBox="0 0 16 16"><rect x="5" y="5" width="6" height="8" rx="3"/><path d="M8 5V3.5M5 8H3M13 8h-2M5 11H3.5M12.5 11H11M6 3l1 1.5M10 3 9 4.5"/></svg></span><span class="key">TIMFY-27254</span><span class="sm muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:330px">Updated global resource category is not marked as locally…</span><span class="sp"></span><span class="chip s ic ghost"><svg class="i" viewBox="0 0 16 16"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/></svg></span>
+      </div>
+      <div style="padding:16px 18px;display:flex;flex-direction:column;gap:16px">
+        <div class="field"><label>Action</label>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <div style="border:1.5px solid var(--ink);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px"><div class="row"><span class="tile g"><svg class="i" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5z"/></svg></span><span class="sp"></span><span style="color:var(--green)"><svg class="i" viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg></span></div><div style="font-weight:600;font-size:12.5px">End to end</div><div class="xs muted">plan, change, test, PR</div></div>
+            <div style="border:1px solid var(--hairline2);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px"><span class="tile"><svg class="i" viewBox="0 0 16 16"><path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/></svg></span><div style="font-weight:600;font-size:12.5px">Ticket loaded</div><div class="xs muted">you drive</div></div>
+            <div style="border:1px solid var(--hairline2);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px"><span class="tile"><svg class="i" viewBox="0 0 16 16"><path d="M8 2v3M8 11v3M2 8h3M11 8h3M4 4l1.8 1.8M10.2 10.2 12 12M12 4l-1.8 1.8M5.8 10.2 4 12"/></svg></span><div style="font-weight:600;font-size:12.5px">A skill <svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></div><div class="xs muted">3 on this machine</div></div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="field"><label>Repository</label><span class="sel"><svg class="i" viewBox="0 0 16 16"><path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/></svg> microservice<span class="chev"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+          <div class="field"><label>Open in</label><span class="seg" style="width:100%"><span class="on" style="flex:1;justify-content:center">Terminal</span><span style="flex:1;justify-content:center">Desktop app</span></span></div>
+        </div>
+        <div class="field"><label class="row">Prompt<span class="sp"></span><span class="xs muted" style="font-weight:500"><svg class="i" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg> Copy</span></label>
+          <div class="mono" style="background:var(--strip-hi);border-radius:10px;padding:10px 12px;line-height:1.5;color:var(--ink2)">/backlog-manager:jira TIMFY-27254 — work this ticket end to end in ~/Documents/timify-projects/microservice on branch TIMFY-27254-updated-global…</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="row" style="border:1px solid var(--hairline);border-radius:10px;padding:8px 10px;gap:10px"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c.8-2.6 2.7-4 5-4s4.2 1.4 5 4"/></svg><span class="sm" style="font-weight:500">Assign to me</span><span class="sp"></span><span class="toggle on"></span></div>
+          <div class="row" style="border:1px solid var(--hairline);border-radius:10px;padding:8px 10px;gap:10px"><svg class="i" viewBox="0 0 16 16"><path d="M2 8h2.5l1.5-3 2.5 6 1.5-3H14"/></svg><span class="sm" style="font-weight:500">Move to</span><span class="sp"></span><span class="sel" style="height:26px;font-size:12px"><span class="dot a"></span>In Progress <svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          <div class="field"><label>Model</label><span class="sel"><svg class="i" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6 2v2M10 2v2M6 12v2M10 12v2M2 6h2M2 10h2M12 6h2M12 10h2"/></svg> CLI default<span class="chev"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+          <div class="field"><label>Effort</label><span class="sel">CLI default<span class="chev"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+          <div class="field"><label>Permissions</label><span class="sel"><svg class="i" viewBox="0 0 16 16"><path d="M8 2 3 4v4c0 3 2.2 5 5 6 2.8-1 5-3 5-6V4z"/></svg> Auto<span class="chev"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+        </div>
+        <div class="row" style="gap:10px;background:var(--strip-hi);border-radius:10px;padding:10px 12px"><svg class="i" viewBox="0 0 16 16"><rect x="4.5" y="2" width="7" height="12" rx="1.5"/><path d="M7 11.8h2"/></svg><div style="flex:1"><div class="sm" style="font-weight:500">Remote control</div><div class="xs muted">The Claude phone app can see and drive it</div></div><span class="toggle"></span></div>
+      </div>
+      <div class="row" style="padding:12px 18px;border-top:1px solid var(--hairline);background:#fcfcfb"><span class="xs muted">Starts in microservice on a new worktree</span><span class="sp"></span><span class="chip ghost"><svg class="i" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg> Copy prompt</span><span class="chip ink"><svg class="i" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5z"/></svg> Start session</span></div>
+    </div>
+  </div>
+  <div class="col" style="gap:14px">
+    <span class="tag g">Proposed · deck cards (top of the board while sessions are live)</span>
+    <div class="row" style="gap:8px"><span style="font-weight:600;font-size:15px">Agents</span><span class="pill a"><span class="dot a"></span>1 needs you</span><span class="pill g"><span class="dot g"></span>2 working</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <article style="background:#fff;border:1px solid #f0dcc4;border-radius:14px;overflow:hidden">
+        <div class="row" style="background:var(--t-amber);color:var(--amber-ink);padding:6px 12px;font-size:11.5px;font-weight:600;gap:6px"><span class="dot a"></span>Needs you · plan to approve<span class="sp"></span><span style="font-weight:500">3m</span></div>
+        <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
+          <div class="row"><span class="tile xs g"><svg class="i" viewBox="0 0 16 16"><path d="M5 2.5h6v11L8 11l-3 2.5z"/></svg></span><span class="key">TIMFY-25809</span><span class="sp"></span><span class="xs muted">root</span></div>
+          <div style="font-size:13.5px;font-weight:500;line-height:1.35">Move resources to a default category on resource-category deletion</div>
+          <div class="row"><span class="row xs muted"><svg class="i" viewBox="0 0 16 16"><circle cx="5" cy="4" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="11" cy="6" r="1.6"/><path d="M5 5.6v4.8M11 7.6c0 2.4-6 1.6-6 2.8"/></svg> microservice</span><span class="sp"></span><span class="split s"><span>Review plan</span><span><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+        </div>
+      </article>
+      <article style="background:#fff;border:1px solid #d9eac8;border-radius:14px;overflow:hidden">
+        <div class="row" style="background:var(--t-green);color:var(--green);padding:6px 12px;font-size:11.5px;font-weight:600;gap:6px"><span class="dot g"></span>Working · running tests<span class="sp"></span><span style="font-weight:500">12m</span></div>
+        <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
+          <div class="row"><span class="tile xs r"><svg class="i" viewBox="0 0 16 16"><rect x="5" y="5" width="6" height="8" rx="3"/><path d="M8 5V3.5M5 8H3M13 8h-2M5 11H3.5M12.5 11H11M6 3l1 1.5M10 3 9 4.5"/></svg></span><span class="key">TIMFY-27254</span><span class="sp"></span><span class="xs muted">root</span></div>
+          <div style="font-size:13.5px;font-weight:500;line-height:1.35">Updated global resource category is not marked as locally overwritten</div>
+          <div class="row" style="gap:8px"><div style="flex:1"><div class="row xs muted" style="justify-content:space-between"><span>context</span><span>42%</span></div><div class="bar" style="margin-top:4px"><i style="width:42%;background:var(--green-solid)"></i></div></div><span class="split s" style="background:#fff;color:var(--ink);border:1px solid var(--hairline2)"><span>Open</span><span style="border-left-color:var(--hairline2)"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span></div>
+        </div>
+      </article>
+    </div>
+    <div class="pane" style="background:var(--board);border:0;display:flex;flex-direction:column;gap:12px">
+      <div style="font-weight:600;font-size:13px">How you get here: one sheet, two doors</div>
+      <div class="row" style="gap:10px;align-items:flex-start"><span class="split s"><span><svg class="i" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5z"/></svg> Run</span><span><svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></span></span><div class="sm ink2" style="line-height:1.4"><b>Left half</b> opens this sheet with the <b>default action</b> picked (Settings › Jira default action).</div></div>
+      <div class="row" style="gap:10px;align-items:flex-start"><span class="chip s" style="white-space:nowrap"><svg class="i" viewBox="0 0 16 16"><path d="M8 2v3M8 11v3M2 8h3M11 8h3M4 4l1.8 1.8M10.2 10.2 12 12M12 4l-1.8 1.8M5.8 10.2 4 12"/></svg> Validate acceptance…</span><div class="sm ink2" style="line-height:1.4"><b>A row in the menu</b> opens the same sheet with <b>that row</b> picked. A skill row lands on the third tile, named:</div></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px"><div style="border:1px solid var(--hairline2);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:4px;background:#fff"><div class="row"><span class="tile xs g"><svg class="i" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5z"/></svg></span><span class="sp"></span></div><div style="font-weight:600;font-size:12px">End to end</div><div class="xs muted">plan, change, test, PR</div></div><div style="border:1px solid var(--hairline2);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:4px;background:#fff"><div class="row"><span class="tile xs "><svg class="i" viewBox="0 0 16 16"><path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/></svg></span><span class="sp"></span></div><div style="font-weight:600;font-size:12px">Ticket loaded</div><div class="xs muted">you drive</div></div><div style="border:1.5px solid var(--ink);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:4px;background:#fff"><div class="row"><span class="tile xs m"><svg class="i" viewBox="0 0 16 16"><path d="M8 2v3M8 11v3M2 8h3M11 8h3M4 4l1.8 1.8M10.2 10.2 12 12M12 4l-1.8 1.8M5.8 10.2 4 12"/></svg></span><span class="sp"></span><span style="color:var(--green)"><svg class="i" viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg></span></div><div style="font-weight:600;font-size:12px">Validate acceptance criteria <svg class="i" viewBox="0 0 16 16"><path d="M4.5 6.5 8 10l3.5-3.5"/></svg></div><div class="xs muted">skill · /timify-jira:validate…</div></div></div>
+      <div class="xs muted">Nothing starts from the menu itself; Start session in the sheet is always the last click, so a wrong pick costs nothing.</div>
+    </div>
+    <div class="note"><b>Deck rules:</b> the stripe uses the state's colour and word, the same ones as the Sessions table. The primary action is ink only when the session is waiting on you. A working session's Open is outlined, because nothing needs doing. The chevron holds the second way to open it, such as desktop or terminal.</div>
+  </div>
+</div>
+
+</div>
+</x-dc>
+</body>
+</html>

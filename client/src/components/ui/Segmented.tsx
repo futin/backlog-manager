@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 /**
  * Segmented — one of the 36 px control family (.claude/DESIGN.md §8.2, §8.6).
  *
@@ -25,7 +27,19 @@ export function Segmented<T extends string | number>({
 }: {
   value: T;
   /** `readonly`: the component only maps it, so a module-level constant list (GitHub › PRs' `PR_LAYOUT_OPTIONS`) can be handed in as is. */
-  options: readonly { value: T; label: string; disabled?: boolean }[];
+  options: readonly {
+    value: T;
+    label: string;
+    disabled?: boolean;
+    count?: number;
+    title?: string;
+    /**
+     * A node drawn BEFORE the label — GitHub › PRs' triage leads `Needs you` and `Worth a look` with their level's `Dot` (mock `PRs.dc.html`). Wrapped in an
+     * `aria-hidden` span because it is decoration beside a visible word: the accessible name stays `label` + `count`. A prop on the primitive, not a page rule
+     * over `.ui-seg button`, which design guard 7 forbids.
+     */
+    leading?: ReactNode;
+  }[];
   onChange: (v: T) => void;
   /**
    * For a setting the server can't act on — the switch would flip and do nothing. One option can be disabled on its own (`options[].disabled`) for a member
@@ -67,10 +81,23 @@ export function Segmented<T extends string | number>({
           type="button"
           className={o.value === value ? 'on' : undefined}
           aria-pressed={o.value === value}
+          title={o.title}
           disabled={disabled === true || o.disabled === true}
           onClick={() => onChange(o.value)}
         >
+          {o.leading !== undefined && (
+            <span className="ui-seg-lead" aria-hidden="true">
+              {o.leading}
+            </span>
+          )}
           {o.label}
+          {/* A space before the span, so the accessible name reads "Needs you 1"; absent `count` leaves today's markup exactly. */}
+          {o.count !== undefined && (
+            <>
+              {' '}
+              <span className="ui-seg-count">{o.count}</span>
+            </>
+          )}
         </button>
       ))}
     </div>

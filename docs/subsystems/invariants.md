@@ -272,7 +272,8 @@ A person approves by removing it, and there is no `--no-plan-review` anywhere: a
 committing. Every gate that could execute the item reads the one flag and refuses with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON` in
 `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and in the execute skill's text, pinned to it by `test/agents-shared.test.ts`): the board's Run
 button, the server's `plan` and `dispatch` ladder (an uncoded 409), the orchestrator's queue — which turns the item `ungroomed` with that reason, the way
-`in-review` does, so no new verdict reaches the run's stages — and `backlog-execute`'s own refusal. The rung is `planReviewBlock`, always AFTER `inReviewBlock`:
+`in-review` does, so no new verdict reaches the run's stages — and `backlog-execute`'s own refusal. The rung is `planReviewBlock`, always AFTER `inReviewBlock`
+(`itemLadderBlock` is the one home of the order):
 an item carrying both says the PR, the stronger fact, since a PR means the plan was already approved and executed. Between the two sits `unvettedBlock` (#341), on a tracker item an outsider filed whose body no groom has pinned. The mark is read as the tool reads
 `runner-fix:`, by PRESENCE: a `plan-review: yes` that silently did not gate would be the failure the mark exists to prevent. Where it is read matters on a files
 project — the board reads the working tree, so a line deleted but not yet committed still disables Run (the conservative direction), while the tick and the
@@ -1807,7 +1808,8 @@ answer:
 - **A PR for this item is open** — `inReviewBlock` (`shared/agent.ts`), the execute pr-mode spec's decision 9: a tracker issue whose `in-review` label is on,
   mapped to `inReview: true`. Execute in `pr` mode releases its claim once the branch is pushed, and the issue stays open until the PR merges, so without
   this rung the item reads ready and a click starts a second execution of work already waiting on a reviewer. Unlike `progressBlock` it lives in `shared/` and
-  the server reads it too — `plan` and `dispatch()` refuse with the same sentence, `a PR is open for this item` — because the label is on the tracker, where
+  the server reads it too, through `itemLadderBlock`, the one home of the order of these rungs — `plan` and `dispatch()` refuse with the same sentence, `a PR is
+  open for this item` — because the label is on the tracker, where
   any machine's spawn can see it. A files item never carries the flag; its guard is the next entry's. **The guard ends when the work lands, label or
   no label** (#411): a partial fix ships as `Refs #<n>`, which closes nothing, so after #362 merged #266 kept its label and read "a PR is open" with none
   open, until a person noticed. The mapper now drops `inReview` while `TrackerPollerService.reviewLifted` holds — a PR whose body references the issue after a
@@ -1826,7 +1828,8 @@ answer:
 - **An outsider filed this item and no groom has pinned its body** — `unvettedBlock` (`shared/agent.ts`, #341): a tracker bug or task whose author is not
   OWNER, MEMBER or COLLABORATOR, mapped to `unvetted: true` until a live claim of ours carries `pin` equal to the body's hash. It reads `UNVETTED_REASON`, and
   the server's `plan` and `dispatch()` refuse with the same sentence, for the same reason the open PR does: the mark is derived from the tracker, which any
-  machine's spawn can see. It sits after the open PR, which is the stronger fact, and before plan-review, because a groom has to vet the body first.
+  machine's spawn can see. It sits after the open PR, which is the stronger fact, and before plan-review, because a groom has to vet the body first;
+  `itemLadderBlock` holds that order.
 - **An orchestrator run has already claimed this item** — `runClaimBlock` (`shared/agent.ts`), which reads the run payload rather than the item. It has to: a
   run works each item inside its own git worktree and nothing reaches `main` until the item merges, so while a run holds `task-7` at `reviewing` the `task-7`
   file `/api/items` scans on `main` looks untouched — no `started:`, no `phase:`, nothing `isInProgress` could key off. The item is not lying; it is telling the
@@ -2239,10 +2242,10 @@ the Detail dialog's session card `Stop` (in place of the button). It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 
-The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control, seven composers since Jira phase 5: the tracker
+The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control, ten composers since the Runs and GitHub restyle: the tracker
 strip's (`TrackerPopover` in `components/TrackerChip.tsx`), the band's Filters and Sort, the Jira chip's (`JiraPopover` in `components/JiraChip.tsx`), the
 Jira board's picker, the board sheet's roots search, which hangs over that sheet and so is the topmost entry while it is open, and `Run ▾`'s panel
-(`jira/JiraRunMenu.tsx`, one composer drawn on the card and in the modal). It joins for the same reason
+(`jira/JiraRunMenu.tsx`, one composer drawn on the card and in the modal) the Jira Detail's Move-to panel (`jira/JiraDetail.tsx`, the Status chip's) and `SessionOpen`'s `Session actions` menu (`jira/SessionOpen.tsx`, drawn on the deck card and in Detail's session card) and `PrActions`' `Merge menu` (`github/PrActions.tsx`, the split Merge's chevron beside every pull request in Inbox, Matrix and Cards). It joins for the same reason
 and in the same shape: it MOUNTS only while open, calling `useDialogEscape` once, so a popover opened over the item modal takes the key from the modal and hands
 it back when it closes. What it does not take from the stack is click-outside — the stack owns a key, not the pointer, so `Popover` binds its own `pointerdown`
 on `document` while it is open, ignoring a press on its panel and on the control that opened it (that control's click is what toggles it). The dashboard's
@@ -2266,8 +2269,9 @@ The strip's height and the well's gap are one token, `--main-gap`, read by the s
 
 **Why the strip exists at all.** Since the redesign, `.main` carried a 24 px top margin and a 24 px top-left radius so the grey well would curve in where it
 meets the white rail. It never showed: `body` paints `--board` too, so the margin was grey on grey and the corner was invisible. The strip is `.maincol`'s
-paper — `--strip`, the rail's own token rather than a new one, because the point is that the rail and the strip read as ONE white L around the well — and the
-well now begins exactly where the strip ends, so its radius is finally drawn against white. `body` stays `--board`: below the fold and behind a short section
+paper — `--frame` since 2026-11-06, the rail's own token, so the rail and the strip are one surface round the well. Decision 63 had made it `--strip`, the one
+white band beside the rail's `--board`; the well, the rail's own grey, then met that white band at its corner and read as a notch cut between two greys. `--frame`
+is a step darker than `--board` on every palette — and the well begins exactly where the strip ends, so its radius is drawn against the frame. `body` stays `--board`: below the fold and behind a short section
 the page is still the well's colour, which the rail's bottom edge expects.
 
 **Why one token.** The same 50 px is three facts: how tall the strip is, where the well starts, and how much the Runs page must give up to fill the viewport
@@ -3253,7 +3257,8 @@ absent directory, pinned by one case, so an absent directory fails at the guard 
 
 `settingsScope` (`client/src/lib/settings.ts`) is `local | shared | dashboards`, per device, defaulting to `local`. **Local is everything in this browser's
 `localStorage`; Shared and Dashboards are what the API reads off the host** — the watchdog's settings file beside the registry, `dashboards.json`, and the
-environment the server was started with. No card mixes local and host, and the rail's sub-nav tree is the only thing that switches the pages, at every width.
+environment the server was started with. No card mixes local and host. The rail's sub-nav tree switches the pages, and so does the `Local | Shared | Dashboards` `Segmented` in the band (spec §3 of the
+app restyle) — two writers of the one stored `settingsScope`, so they cannot disagree.
 
 ### The rule is "the page is the scope", and one card had to split to satisfy it
 
@@ -3292,25 +3297,27 @@ than no test at all.
 The machine list started as a Shared card, grew a per-machine detail (URLs, the claim `host`, models, efforts, a token fact), then a health dot and two usage
 meters per machine, and a card holding a list beside a detail beside a Suggest control stopped being a card. It is a page of its own, so the pair the first
 split argued from — local against host — is unchanged: Dashboards writes `dashboards.json` on the API host, so its pill reads `this machine` and nothing on it
-is per device. Not a sub-section of Shared, because the rail's tree is the only switch and a second in-page level would be a second wording free to disagree
-with it.
+is per device. Not a sub-section of Shared, because the rail's tree is the first switch and a second in-page level would be a second wording free to disagree
+with it — which spec §3 of the app restyle answered by drawing the band's `Segmented` as a second writer of the same `settingsScope`, not a second state.
 
 What the page reads is two requests that never wait on each other. `GET /api/dashboards` is the file (cheap, no outbound call) and draws the list and the detail
 at once; `GET /api/dashboards/machines` is a health probe of every remote plus each machine's usage, up to two outbound budgets, and only colours the dots and
 fills the meters when it lands (`checking…` until then). Folding the second into the first would let one dead remote hold the config page for 10 s; keeping them
 apart is why a slow machine can only ever leave a dot quiet.
 
-### There is no in-page switch, at any width
+### The in-page switch is Settings' alone, at every width
 
-The dashboard this pattern was ported from draws a pill switch in its Settings band below 700 px. This board does not, and the difference is not an oversight:
-the rail's trees stand open at that width, so the tree is reachable in one tap on the phone exactly as it is on the desktop. Runs' three pages already establish
-the rule — task-38 deleted `runs-mode.ts`'s `MODE_BUTTON` pair along with the in-page control it named — and a second control here would be a second wording
-free to disagree with the tree's. `test/settings-view.test.tsx` pins the absence, because "add a switch on the phone" is exactly the improvement a later reader
-would make without knowing it was already decided against.
+Until the app restyle this board drew no switch in the Settings band, on the argument that the rail's trees stand open at every width and a second control is a
+second wording free to disagree with the tree's. Spec §3 of `docs/superpowers/specs/2026-11-05-app-restyle-design.md` overrides that for this page: the band
+carries a `Segmented` `Local | Shared | Dashboards`, because the page is the one place a reader changes where a setting saves and the switch belongs where the
+question is asked. It is not a second wording — both controls write `settingsScope`, the tree through `setSettingsScope` and the switch through `update` — and
+the override does not travel: Runs' three pages (task-38 deleted `runs-mode.ts`'s `MODE_BUTTON` pair) and Jira's are still switched by the rail's tree or a link
+threaded down from it. `test/settings-view.test.tsx` pins the switch (it used to pin the absence), so "remove the duplicate control" is as much a decision as
+"add one" was.
 
 ### The scope pill is the existing primitive, at `neutral`, on every page
 
-`Band`'s right slot holds one `Pill` — `this browser` on Local, `this machine` on Shared and on Dashboards — and the WORD carries the distinction, not a tone. `PillTone`'s five
+Each card's title row holds one `Pill` (`SettingsGroup`'s `pill`) — `this browser` on Local's cards, `this machine` on Shared's and on the Dashboards page, which saves `on this machine` in the band's sub-line — and the WORD carries the distinction, not a tone. `PillTone`'s five
 members each name a *reading* (`live`, `warn`, `bad`, `done`, `neutral`); none of them means "shared", and minting a sixth look inside the settings block would
 be a second home for a primitive, which `test/design-guards.test.ts`'s guard 7 exists to refuse.
 
@@ -3351,27 +3358,28 @@ Jira › Setup holds `jira.json`'s writes: the control governs one source, and i
 keeps the read-only report of every source this machine reaches, the `Sources` card, alone in its left column, against Watchdog, Tick and Time zone in its
 right; its two links (`GitHub › Settings ↗`, `Jira › Setup ↗`) are the shell's pairs threaded down, and each is drawn only while the section it opens is drawn.
 
-## The Jira section's two pages are switched by the rail's tree, and the section is drawn only when configured
+## The Jira section's three pages are switched by the rail's tree, and the section is drawn only when configured
 
-The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
+The Jira section's three pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
 `GET /api/jira` says configured. The two halves are separate rules that happen to meet in one rail row, and each has a precedent or a failure behind it.
 
 ### The tree rule is Runs' and Settings', applied a third time
 
-Board and Setup are two pages under one rail entry, which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared, Dashboards) already have, and the rule those
+Board, Sessions and Setup are three pages under one rail entry, which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared, Dashboards) already have, and the rule those
 two settled is that the tree is the switch at every width: the rail's trees stand open below 700 px, so a segmented control on the page would be a second
 wording of the same choice, free to drift from the tree's and reached in the same number of taps. Task-38 deleted Runs' in-page pair for that reason and task-42
 never gave Settings one; a Jira page switch would have been the first thing a later reader removed, so it was never drawn.
 
-The two links that DO land on a page — `Open board` on a Setup row, and `Open Setup` on a board page with no boards — are not switches in that sense, because
+The links that DO land on a page — `Open board` on a Setup row, and `Open Setup` on a board or Sessions page with no boards — are not switches in that sense, because
 they are not a second implementation of one. `App` builds `onOpenJiraPage` once, the same pair the tree calls in the same order (`setJiraPage`, then the
 shell's `change`), and hands it down, exactly as Settings' `Live view` link is `onOpenWatchdog`. A link built that way means what the tree entry means by
 construction; a link built inside the page out of its own `localStorage` write and its own section call would mean it only until one of the two changed. The
 page value lives in a module store (`hooks/useJiraPage.ts`, on `hooks/persistedStore.ts`) rather than a `usePersistedState` per caller for the same reason Runs' does:
 the tree and the page are two mounted writers, and a per-caller copy would leave one of them looking at the page the other has just left.
 
-The chip's popover stays a reading with no link at all, for the rule's other face: a `Setup ›` link there would be an in-page switch on a surface that is not
-even in the section. The Sources card's Jira row is the one surface outside the section that links in, and its `Jira › Setup ↗` is not a switch of its own
+The chip's popover was once a reading with no link at all, for the rule's other face: a `Setup ›` link there would be an in-page switch on a surface that is not
+even in the section. Spec §3 of the app restyle overrode that: the popover now carries `Sync now`, per-board sync icons and a `Jira setup ↗` link, and the link is
+not a switch of its own for the reason that follows — it is the shell's pair, not a control that navigates by itself. The Sources card's Jira row is the one surface outside the section that links in, and its `Jira › Setup ↗` is not a switch of its own
 either: it is `onOpenJiraPage`, the shell's pair, threaded down through `SettingsView` and `SharedPage` (the Trackers row before it wrote `Jira › Setup` as
 text), and it is drawn only while configured, since a link into a section the rail does not draw would open a page that falls on arrival.
 
@@ -3564,10 +3572,10 @@ The Jira board cache is the second (`JiraPollerService`, one list per board, `po
 honest the same way; everything below is about the tracker's.
 
 **The pull-request cache is the third, and the only one with no clock of its own** (`PullRequestsService`, Plan B of the source-sections change). It is per
-repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep, because nothing but two
-pages reads pull requests — GitHub › PRs and GitHub › Settings' Access card, both through `usePullRequests`. A background read would spend GraphQL budget on a
-list nobody is drawing, and would keep a poll alive after the page closed, which is exactly what "the poller is armed only while something is connected"
-forbids. Each page's own 60 s fetch is the cadence, and it stops when that page unmounts. It is kept honest the same way as the other two: `polledAt` rides on
+repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep, because the only reader is the shell's one `PullRequestsProvider` — the rail counts PRs that need you on every page, so the read is no longer a page's —
+and GitHub › PRs and GitHub › Settings' Access card read its answer. Its 60 s fetch is the cadence and the only thing that arms the cache, and it is mounted
+only while a GitHub project is registered, so a machine with none spends no GraphQL budget on a list nobody is drawing, which is what "the poller is armed only
+while something is connected" asks of it. It is kept honest the same way as the other two: `polledAt` rides on
 every repo's view and the PRs page renders it, and it moves only on a successful read. A failure keeps the last answer — the previous rows, their `polledAt` —
 beside the failure's `access` and `detail`, because a stale list labelled with its age is more use than an empty one, and an emptied list would read as "no open
 PRs", which is a claim about the repo the cache cannot make.
@@ -3583,7 +3591,7 @@ was out is newer news.
 
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
 board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip
-counts the sweep down on its POLL meter (#228 — the board's band printed `futin/x · polled 12 s ago` before that), the item modal prints it beside the body it drew from that same cache, and the Sources card prints it per repo. A cache
+prints the sweep's age on its status pill (#228 — the board's band printed `futin/x · polled 12 s ago` before that), the item modal prints it beside the body it drew from that same cache, and the Sources card prints it per repo. A cache
 whose staleness is on screen is a different object from one that is not.
 
 **The orchestrator's queue preview is the fourth reader of that age, and a named id gets one retry before it is refused (bug-41).** `trackerCandidates`
@@ -4784,7 +4792,7 @@ The other half of the same incident. While the server was stalled, the client's 
 request had come back, so each one stacked a fresh duplicate on every tick; when the server recovered it had a queue of identical questions to answer, most of
 them git spawns, which amplified the stall. `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure of React and tested directly with fake timers) and its React
 shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog`, `useAgents`, `useTicks` and — since
-#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six — and, since Settings › Dashboards, `useMachines`, a seventh that polls a minute while that page is open, and `usePullRequests`, an eighth on the same terms for GitHub › PRs and for GitHub › Settings' Access card — enters through `hooks/useRefreshing.ts` (#285), which owns the
+#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six — and, since Settings › Dashboards, `useMachines`, a seventh that polls a minute while that page is open, and `usePullRequests`, an eighth on the same terms, mounted once by `PullRequestsProvider` for the rail's count, GitHub › PRs and GitHub › Settings' Access card — enters through `hooks/useRefreshing.ts` (#285), which owns the
 board's mount + window-focus triggers once instead of each hook writing the two effects by hand; `useCoalescedFetch` stays the lower layer, used directly by
 `useJiraBoard`, which triggers on its board id rather than on mount and focus. `TimeZoneProvider` (#241) enters through `useRefreshing` too, with no `armed`
 like `useOrchestratorArchive`: it reads the shared zone on mount and focus and never polls, since the value moves only on a person's pick. `ProjectsProvider`
@@ -4824,13 +4832,13 @@ heard.
 ## ui-kit draws the version chip and the What's new drawer; this board only maps its tokens and places the chip
 
 The version chip and the What's new drawer used to be two things in this repo: ui-kit's markup, and a block of this board's own rules laid over it — a pill drawn by
-`.rail-release`, a drawer width, an edge, a lift, a notes size and a baseline rule restyled under `.uk-*` selectors. Each override was a small, reasoned departure
+`.rail-release` (now `.rail-foot`, the placement wrapper), a drawer width, an edge, a lift, a notes size and a baseline rule restyled under `.uk-*` selectors. Each override was a small, reasoned departure
 from the kit's defaults, and together they made this board's drawer differ from the other two apps' — the opposite of why the surface moved into a shared package.
 ui-kit v0.3.0 took this board's look as its canonical one and moved every shape into the kit, which leaves the host exactly two jobs: map the public `--uk-*`
 tokens onto the board's own, and place the chip.
 
 **What stays here, and why it is enough.** `styles.css`'s `:root` mapping (each token pointed at a theme variable, so all five palettes carry through) and
-`.rail-release`, a wrapper that sinks the chip to the rail's foot and makes it the phone menu's last row. `--uk-chip-bg` is mapped to `--steel` because the
+`.rail-foot`, a wrapper that sinks the chip to the rail's foot and makes it the phone menu's last row. `--uk-chip-bg` is mapped to `--steel` because the
 kit's default is a light well that would show on a dark rail; `--uk-zoom` is mapped to `--font-scale` because `.shell`'s `zoom` leaves `100vw` and `100dvh`
 meaning the unzoomed screen, and the kit divides its drawer's size by it — undivided, the panel overhangs the screen by the text scale. Notes go through the
 kit's own escape-first `renderNotesHtml`, so a PR body is safe to set as HTML with no sanitiser here and a `###` line reads as a heading in every app.

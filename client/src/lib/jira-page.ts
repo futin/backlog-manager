@@ -1,5 +1,5 @@
 /**
- * jira-page.ts — which of the Jira section's two pages this browser last had open (Jira phase 2, spec §6; DESIGN.md §8.0's sub-nav rule).
+ * jira-page.ts — which of the Jira section's three pages this browser last had open (Jira phase 2, spec §6; DESIGN.md §8.0's sub-nav rule).
  *
  * The key, the member list and the guard, and nothing that touches React — `lib/runs-mode.ts`'s split, for its reason: the guard can be tested without
  * rendering a section, and `hooks/useJiraPage.ts` is the one binding over it. The rail's tree and the Board page's own "Set up" link are two mounted
@@ -9,10 +9,10 @@
  * a word this union never had, and the one outcome the Jira section must never have is rendering neither page.
  */
 
-export type JiraPage = 'board' | 'setup';
+export type JiraPage = 'board' | 'sessions' | 'setup';
 
 /** Declaration order is the rail tree's order. */
-export const JIRA_PAGES: readonly JiraPage[] = ['board', 'setup'];
+export const JIRA_PAGES: readonly JiraPage[] = ['board', 'sessions', 'setup'];
 
 export const JIRA_PAGE_KEY = 'backlog-manager.jira-page';
 

@@ -148,75 +148,64 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   flex: 0 0 240px; display: flex; flex-direction: column; gap: 4px;
   align-self: flex-start; position: sticky; top: 0; z-index: 5;
   height: calc(100vh / var(--font-scale, 1)); overflow-y: auto;
-  padding: 24px;
-  background: var(--strip);
+  padding: 24px 12px;
+  background: var(--frame);
 }
-/* The app's only wordmark, in the rail rather than the page: a terminal prompt — the 11/400 kicker stacked 4 px over `› manager▌` at 22/600 (§8.0;
+/* The app's only wordmark, in the rail rather than the page: a terminal prompt — `backlog manager▌` at 14/700 with the 11/400 `this machine` kicker stacked 4 px under it (§8.0;
    the dashboard's own, from its design handoff "1h"). One face, not a mono (§1 allows exactly one). Left-aligned in a column, because the prompt is a
-   line of text and the kicker labels it from above. The 24 px under it is padding rather than a margin so the phone block's `padding: 0` takes it away
+   line of text and the kicker labels it from below. The 24 px under it is padding rather than a margin so the phone block's `padding: 0` takes it away
    in the same breath. */
 .rail-brand {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
-  line-height: 1; color: var(--ink); padding: 0 12px 24px;
+  display: flex; align-items: center; gap: 10px;
+  line-height: 1; color: var(--ink); padding: 0 6px 16px;
 }
-/* The one rule in this stylesheet allowed to uppercase anything (§8.1). */
+.rail-brand-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; line-height: 1.15 }
+/* The one rule in this stylesheet allowed to uppercase anything (§8.1): the sub-line under the wordmark, `this machine`. */
 .rail-kicker {
   display: block;
   font-size: 11px; font-weight: 400;
   text-transform: uppercase; letter-spacing: .16em; color: var(--ink3);
 }
-.rail-prompt { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 600; letter-spacing: -.03em }
-/* The caret and the cursor share `--green-solid`, the mark colour of a live thing (theme.css): a prompt's two marks, never text, so the AA split between
-   a hue's mark and its text (dashboard-redesign-ports task 1) puts them on the mark side. */
-.rail-caret { color: var(--green-solid) }
+.rail-prompt { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; letter-spacing: -.01em }
 /* Solid by default. It blinks — 530 ms on, 530 ms off, a terminal's own rate — while a run on this machine is working; `SideRail` picks the class from
    `working`, and nothing else about the wordmark moves. A hint, never the record: RunChip and the Runs page say it in words. */
-.rail-cursor { flex: none; width: 10px; height: 22px; border-radius: 1px; background: var(--green-solid) }
+.rail-cursor { flex: none; width: 7px; height: 14px; border-radius: 1px; background: var(--green-solid) }
 .rail-cursor.blink { animation: cursor-blink 1.06s steps(1) infinite }
 @keyframes cursor-blink { 0% { opacity: 1 } 50% { opacity: 0 } }
 /* §8.8: cancelled outright rather than left to the blanket rule, which runs an animation once, instantly, and so parks it on whichever frame it ends
    on — a cursor frozen at `opacity: 0` would read as no wordmark at all. Same selector as the rule above and after it, so no `!important`. */
 @media (prefers-reduced-motion: reduce) { .rail-cursor.blink { animation: none } }
 
+/* A row: 28 px tile, label, and (as a sibling `.rail-count`) the count pill. The open row is `--strip` paper on the `--frame` rail with the tile gone ink —
+   a white row against the grey rail, never a colour change in the label (§5). Hover darkens the LABEL only, so a hovered row and a selected one never read as one fill. */
 .rail-link {
-  position: relative; display: flex; align-items: center; gap: 12px;
-  min-height: 36px; padding: 0 16px; border-radius: 16px;
-  font-size: 14px; font-weight: 500; text-align: left;
+  position: relative; display: flex; align-items: center; gap: 10px; width: 100%;
+  min-height: 40px; padding: 6px; border-radius: 10px;
+  font-size: 13px; font-weight: 500; text-align: left;
   color: var(--ink2); background: none; border: 0;
   cursor: pointer; transition: color .15s, background .15s;
 }
-/* Hover darkens the LABEL and nothing else. The fill stays reserved for the
-   active row, so a hovered row and a selected row read as two different things
-   rather than as one row filled twice (§8.0). */
 .rail-link:hover { color: var(--ink) }
-/* The Jira row's wrapper is the badge's positioning parent (§8.0): the badge is a sibling of the row's button, so it is placed over the button's right end. */
+.rail-link.on { color: var(--ink); font-weight: 600; background: var(--strip); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 8%, transparent) }
+.rail-label { flex: 1; min-width: 0 }
+/* Every row's wrapper is its count's positioning parent: the count is a sibling of the row's button (a button in a button is invalid), placed over the
+   row's right end. The wrapper holds the row and the count only, never the open tree — the tree sits beside it, or the count would centre on both. Without a
+   positioned wrapper per row, the GitHub and Runs counts hung from the sticky `.rail` and landed on one another mid-rail (ui-verify 2026-11-05). The row is
+   `width: 100%` because a `<button>` shrinks to its content, and the open row's white paper must span the rail as the mock's does. Pills keep their
+   primitive look; only the placement is the rail's. */
 .rail-group { position: relative }
-/* The Needs-you count (Jira sessions spec §7.4): the FilterBar funnel's disc — `--ink` fill on `--strip` text, 11/500, tabular, a 16 px circle that widens into a
-   pill for two digits — set on the row's right edge instead of a corner. A real button (it opens the List), so it resets the UA chrome the way `.rail-link`
-   does and keeps the board's focus ring. Vertically centred on the 36 px row; the phone's 44 px row re-centres it below. */
-.rail-badge {
-  position: absolute; top: 10px; right: 12px;
-  display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border: 0; border-radius: 999px;
-  background: var(--ink); color: var(--strip);
-  font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1;
-  cursor: pointer;
+.rail-count {
+  position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+  display: inline-flex; padding: 0; border: 0; background: none; cursor: default;
 }
-/* Active is a 3 px ink bar 16 px tall at the left edge plus the --strip-hi
-   fill — never a colour change in the label (§5). ::before rather than an inset
-   shadow because the bar is 16 px of a 36 px row, not its whole height. */
-.rail-link.on { color: var(--ink); background: var(--strip-hi) }
-.rail-link.on::before {
-  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 16px; border-radius: 999px; background: var(--ink);
-}
-/* Icons name the section, never its state (§6): --ink at every row weight, a
-   16 px box, ~1.5 px outline stroke. */
-.rail-ic { width: 16px; height: 16px; flex: none; color: var(--ink) }
+/* A plain count only states a fact: it lets the click through to the row beneath it. The Jira count is a real button and keeps its own pointer. */
+.rail-count:not(button) { pointer-events: none }
+button.rail-count { cursor: pointer }
 
 /* The sub-nav tree, drawn only for the open section (§8.0). Hung 24 px in — the
    icon's centreline, 16 px of row padding plus half a 16 px icon — so the stem
    falls straight down through the icons above it. */
-.rail-sub { display: flex; flex-direction: column; margin: 2px 0 2px 24px }
+.rail-sub { display: flex; flex-direction: column; gap: 1px; padding: 4px 0 6px 38px }
 /* Stem and tick as two background layers on the row itself rather than a
    border on a wrapper: it is what lets the LAST row stop its stem at its own
    centre, which is the whole shape of an L-tree. A wrapper border would run
@@ -229,31 +218,31 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    vertical padding rather than a min-height, the dashboard's own measure — a
    ~32 px row, since a button's line-height is the UA's `normal` rather than
    body's 1.4, in both apps; the phone block still adds its 40 px floor. */
+/* A quiet sub-list: 28 px rows at 12.5 px, the current page a white row at 600 (the white row replaces the old stem-and-tick dot). */
 .rail-sublink {
   display: flex; align-items: center;
-  padding: 7px 0 7px 20px; border: 0; background: none;
-  font-size: 14px; font-weight: 400; text-align: left;
-  color: var(--ink2); cursor: pointer; transition: color .15s;
-  background-image:
-    linear-gradient(var(--hairline2), var(--hairline2)),
-    linear-gradient(var(--hairline2), var(--hairline2));
-  background-repeat: no-repeat;
-  background-size: 1px 100%, 12px 1px;
-  background-position: 0 0, 0 50%;
+  height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: none;
+  font-size: 12.5px; font-weight: 400; text-align: left;
+  color: var(--ink2); cursor: pointer; transition: color .15s, background .15s;
 }
-.rail-sublink:last-child { background-size: 1px 50%, 12px 1px }
 .rail-sublink:hover { color: var(--ink) }
-.rail-sublink.on { color: var(--ink); font-weight: 500 }
+.rail-sublink.on { color: var(--ink); font-weight: 600; background: var(--strip) }
 
 /* Settings sits under a 1 px rule with 24 px of air either side: it is about
    the board, the rows above it are about the work (§8.0). Inset 4 px at each
    end, as the dashboard's is, so the rule stops short of the rows' fills. */
-.rail-rule { border-top: 1px solid var(--hairline); margin: 24px 4px }
+.rail-rule { border-top: 1px solid var(--hairline2); margin: 10px 6px }
 
 /* The version chip's placement (DESIGN.md §8.10): the wrapper around ui-kit's `VersionChip`, which draws the pill itself (28 px, `--uk-chip-bg` well, hairline,
    cyan dot for an unopened release) — an app may only map its tokens, never restyle it. The wrapper is the rail's last element, sunk to its foot by
    `margin-top: auto` in the rail's column, and in the phone menu its last row. `display: flex` makes the chip a flex item, so no line box adds height under it. */
-.rail-release { display: flex; align-self: flex-start; margin: auto 0 0 8px }
+.rail-foot {
+  display: flex; align-items: center; gap: 8px; margin: auto 0 0;
+  padding: 10px; border-radius: 12px; background: var(--strip); border: 1px solid var(--hairline);
+}
+.rail-api { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 11px; color: var(--ink3) }
+.rail-api-dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--green-solid) }
+.rail-api-dot[data-state='down'] { background: var(--red) }
 
 /* The phone's ☰, and the wordmark row it sits in — both render only under
    useNarrow, so neither is ever in the desktop tree. */
@@ -263,18 +252,19 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   background: none; color: var(--ink); font-size: 15px; cursor: pointer;
 }
 
-/* The column right of the rail: the shell strip over the well. Painted --strip — the rail's paper — so the rail and the strip read as one white L
-   around the well, and so the well's 24 px top-left radius is drawn against white. Before the strip, `.main` carried a 24 px top margin for that
-   curve, but `body` paints --board too, so the margin was grey on grey and the corner never showed (the tracker strip spec, §1). */
-.maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--strip) }
+/* The column right of the rail: the shell strip over the well. Painted --frame, the rail's own token, so the rail and the strip are ONE surface wrapped round
+   the well and its 24 px top-left curve is drawn against that frame. Before the strip, `.main` carried a 24 px top margin for that curve, but `body` paints
+   --board too, so the margin was grey on grey and the corner never showed (the tracker strip spec, §1). Then the strip was --strip while the rail was --board
+   (decision 63): the well, the rail's grey, met a white band at its corner and read as a notch cut between two greys. --frame is a step darker than
+   --board on every palette, so the well is the lighter sheet set into it and the rail's white open row still reads as a card. */
+.maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--frame) }
 /* The shell strip (§8.0): what is true of the machine wherever you stand — the tracker chip and the Jira chip, right-aligned, 8 px apart. Its height is `--main-gap`, and it
    keeps that height when empty, so the well's top edge never moves with whether a tracker is connected. */
 .topstrip {
   height: var(--main-gap); flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   padding: 0 var(--body-pad);
 }
-/* The well: --board with a 24 px top-LEFT radius — the one corner the rail and the strip meet, the design's app-shell inset (§8.0), visible now that
-   the strip above it is white. No top margin: the strip IS the gap, one token (guard 9). `body` stays --board, so below the fold and behind a short
+/* The well: --board with a 24 px top-LEFT radius — the corner against the --frame strip and rail, the design's app-shell inset (§8.0). No top margin: the strip IS the gap, one token (guard 9). `body` stays --board, so below the fold and behind a short
    section the page is still the well's colour, which is what the rail's own bottom edge expects. */
 .main {
   flex: 1; min-width: 0; padding: var(--body-pad);
@@ -300,99 +290,97 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
     overflow-x: hidden; overflow-y: visible;
     border-bottom: 1px solid var(--hairline);
     transition: transform .2s ease;
+    /* The open menu scrolls inside the bar rather than past the viewport. The bar stays sticky, so a menu taller than the screen used to run off its
+       bottom with nothing to scroll it: plan 4's tiles and `.rail-group` gaps grew it from 862 to 889 px at 390 × 844 (1024 px with Files projects, which
+       outgrows even 600 × 1000), and the version chip and `API connected` row in `.rail-foot` could not be reached until the page itself ran out. The cap
+       is the desktop rail's own height, font scale included; `overflow-x: hidden` already turns the y-axis into `auto`, so the cap alone makes it scroll,
+       and `overscroll-behavior` keeps the page behind from scrolling along once the menu reaches its end. A closed bar is ~53 px and never meets it. */
+    max-height: calc(100vh / var(--font-scale, 1));
+    overscroll-behavior: contain;
   }
   .rail[data-hidden="true"] { transform: translateY(-100%) }
-  /* Brand, the tracker chip when there is one, then ☰ — which keeps `margin-left: auto`, so the chip sits beside it and needs no margin of its own. */
+  /* Brand, the status pills when there are any, then ☰ — which keeps `margin-left: auto`, so the pills sit beside it and need no margin of their own. */
   .rail-bar { display: flex; align-items: center; gap: 8px }
-  /* The bar has no slack (#229). At 375 px its content box is 351 px, and brand 83.8 + chip 224.3 + ☰ 36 + two gaps came to 360.1: 9 px over. The chip
-     is `flex: none`, its meters are pinned to `max-content` and the brand cannot go below its min-content, so the whole deficit landed on ☰ — measured
-     26.9 px wide, a thumb target already eaten — and once ☰ hit its own min-content the row overflowed the `overflow-x: hidden` rail and ☰ was cut off
-     (POLL `overdue` put it 0.9 px past the edge; a 19-character login, entirely off-screen). So ☰ no longer yields: it stays 36 × 36. */
+  /* The bar has no slack (#229). At 375 px its content box is 351 px: brand 88 + ☰ 36 + two gaps leave ~211 for the pills, and two pills with their ages
+     (`GitHub 12 s`, `Jira 12 s`) measure ~215. Every item but ☰ is `flex: none`, so the deficit would land on ☰ — the phone's only section switch, which
+     DESIGN.md §8.0 says never gives up space — and push it past `.rail`'s `overflow-x: hidden`. So ☰ stays 36 × 36 and the pills drop their age here: the
+     button's `aria-label` still says it, and the popover prints it one tap away. The age is the pill's third span, reached structurally because guard 7
+     forbids restating a `ui-status` token outside the primitives block; a pill with no age has no third span and the rule matches nothing. */
   .rail-menu { flex: none }
-  /* And the variable-width reading leaves the phone's bar instead. The login, not a meter: its width tracks the account (GitHub allows 39 characters),
-     so no fixed trim fixes it, and it is the least load-bearing reading here — the avatar carries its initial, the button's `aria-label` names it, and
-     the popover's `.tracker-pop-who` prints it in full one tap away. Scoped to `.tracker-chip`, the button, because the popover reuses `.tracker-name`;
-     and only when meters follow it, because the no-token chip renders none — it is avatar, label and caret with room to spare, and "no token" is the one
-     login text that is itself the message. With both rules the worst case (POLL `overdue`, API `100%`) leaves 24.5 px of slack, whatever the login — 28.7 until the
-     wordmark took the dashboard's 10 px dot and 9 px gap (2026-10-01), which made the brand 88 px rather than 83.8. The prompt-cursor wordmark that
-     replaced it (2026-10-14) measures 87.8 px in this bar at 375 px, so the slack stands. */
-  .rail-bar .tracker-chip .tracker-name:has(+ .tracker-meters) { display: none }
-  /* Jira phase 2: two chips in the bar — the GitHub tracker and Jira, siblings straight out of `chipSlot`, each a `.tracker-chip-root` — drop their
-     meters too, leaving avatar, pip and caret. The login rule above is not enough: with both chips the row measured ~178 px over the 351 px content box,
-     and since every item but ☰ is `flex: none`, ☰ — the phone's only section switch — was pushed past `.rail`'s `overflow-x: hidden` and clipped, the
-     failure #229 fixed for one chip and DESIGN.md §8.0's rule that ☰ never gives up space forbids. The pip still carries the one reading that must not
-     hide (red = access failing) and the popover prints every meter one tap away. `:has(+ …)` catches the first chip, `+` the second; a lone chip matches
-     neither and keeps its meters, and the desktop strip is outside this block entirely. */
-  .rail-bar .tracker-chip-root:has(+ .tracker-chip-root) .tracker-meters,
-  .rail-bar .tracker-chip-root + .tracker-chip-root .tracker-meters { display: none }
+  .rail-bar .tracker-chip > span > span:nth-child(3) { display: none }
   /* In a bar the wordmark is a label rather than a page heading: the prompt drops to 17 px and the cursor scales with it (8 × 17, 6 px from the
      word). The kicker stays at 11 px where the dashboard's bar draws 10 — guard 3's floor (test/design-guards.test.ts), which this board keeps. */
-  .rail-brand { padding: 0; gap: 3px }
-  .rail-prompt { font-size: 17px; gap: 6px }
-  .rail-cursor { width: 8px; height: 17px }
+  .rail-brand { padding: 0 }
   /* The mock's full 44 px row, kept for the phone alone: here the row is a
      thumb target rather than a pointer one (§8.0's table). */
-  .rail-link { min-height: 44px; border-radius: 12px }
-  .rail-badge { top: 14px }
+  .rail-link { min-height: 44px }
   /* The phone menu's last row: no foot to sink to, so a fixed gap under the rows instead, and the menu's own bottom padding beneath it. The narrow chip's 44 px
      hit area overhangs its pill by 8 px each way, and `.rail` is `overflow-x: hidden` (which makes its y-axis clip too): 12 px above and 8 px + the rail's 8 px
      of padding below keep the overhang inside it. */
-  .rail-release { margin: 12px 0 8px 8px }
-  .rail-sublink { min-height: 40px }
+  .rail-foot { margin: 12px 0 8px }
+  .rail-sublink { min-height: 40px; height: auto }
   .main { border-top-left-radius: 0 }
 }
 
-/* ---------------------------------------------- Tracker chip
-   §8.0's shell strip, and the tracker strip spec §2: the dashboard's `.acct` pill applied to the connected tracker — 36 px bare pill, 26 px avatar,
-   12.5/600 login, two `Meter`s and an 11 px caret (the dashboard's 9 px caret is under guard 3's floor). Transparent at rest, --strip-hi on hover and
-   while its popover is open: the same fill the rail's active row uses, so "this is the thing you are looking at" reads one way across the shell.
-   The meters' look is `Meter`'s, in the primitives block; this section only lays them out. */
+/* ---------------------------------------------- Status pills
+   §8.0's shell strip and the shell mock's top right: GitHub and Jira are each a `StatusPill` (primitives block) inside a bare button, and a popover hangs from
+   it. The button draws nothing of its own — the pill is the look — and only moves the pill's fill while hovered or open, the same "this is the thing you are
+   looking at" the rail's active row gives. The pill is the button's span child, reached with `> span`: guard 7 forbids naming a `ui-status` token here. */
 .tracker-chip-root { position: relative; flex: none }
 .tracker-chip {
-  display: inline-flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px 0 5px;
-  border: 0; border-radius: 999px; background: none; color: var(--ink); cursor: pointer; font: inherit;
-  transition: background .15s;
+  display: inline-flex; align-items: center; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--ink); cursor: pointer; font: inherit;
 }
-.tracker-chip:hover, .tracker-chip[aria-expanded="true"] { background: var(--strip-hi) }
+/* --strip, not --hairline: the pill sits on --frame (the strip, or the phone's rail bar), and on daylight --hairline is #eaeae8 against the frame's #e8e8e6 —
+   a hovered or open pill dissolved into the frame. White paper is the rail's own "open" fill, so the pill you are looking at reads the way the open row does. */
+.tracker-chip:hover > span, .tracker-chip[aria-expanded="true"] > span { background: var(--strip) }
 .tracker-av {
   position: relative; flex: none; width: 26px; height: 26px; border-radius: 999px; background: var(--strip-hi);
   display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--ink);
 }
-/* Two states only: amber for no token, red when some repo's access is not ok. No pip is the "all healthy" reading — a green dot on every healthy
-   screen would be a signal that never changes, which is decoration pretending to be status. The ring is the strip's paper so the pip reads as cut
-   out of the avatar rather than stuck on it. */
-.tracker-pip { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border-radius: 999px; border: 1.5px solid var(--strip) }
-.tracker-pip[data-tone="amber"] { background: var(--amber-solid) }
-.tracker-pip[data-tone="red"] { background: var(--red) }
-.tracker-name { font-size: 12.5px; font-weight: 600; white-space: nowrap }
-/* At guard 3's 11 px label, `POLL overdue` is wider than the meter's 56 px, so the chip's meters grow to their content rather than wrapping — a
-   two-line head would change the pill's height the moment the clock goes overdue. The bar lengthens with them, which is only ever in a warning state.
-   The child combinator, not `.ui-meter`, because guard 7 lets a page lay a primitive out only from the page's own class. */
-.tracker-meters { display: flex; gap: 10px }
-.tracker-meters > * { min-width: max-content }
-/* The caret is `ui/Chevron` (`.chev`, in the primitives block): colour only here. The open state is the component's `dir="up"`, not a rotate rule — a
-   second transform on the same element would turn an `up` chevron back down. */
-.tracker-caret { color: var(--ink3) }
-/* The panel's shell is `ui/Popover`'s (`.ui-popover`, in the primitives block); what follows is only what is drawn inside it. */
-.tracker-pop-id { display: flex; align-items: center; gap: 10px; margin-bottom: 12px }
+/* The panel's shell is `ui/Popover`'s (`.ui-popover`, in the primitives block); what follows is only what is drawn inside it. The head is the initials disc,
+   the name over `● connected · site`, and `Sync now` pushed to the right. */
+.tracker-pop-id { display: flex; align-items: center; gap: 10px; margin-bottom: 10px }
+.tracker-pop-id > button { margin-left: auto; flex: none }
 .tracker-pop-who { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
-.tracker-pop-sub { font-size: 12px; color: var(--ink3) }
+.tracker-pop-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.tracker-pop-sub { display: flex; align-items: flex-start; gap: 5px; font-size: 12px; line-height: 16px; color: var(--ink3); overflow-wrap: anywhere }
+/* The sub WRAPS rather than clipping under `Sync now`: `connected · timify.atlassian.net` is wider than the column beside the button, and the mock breaks it
+   onto two lines. The dot is pinned to the first line's middle, so a wrapped site never drags it down. */
+.tracker-pop-sub > .tracker-dot { margin-top: 5px }
+/* The dot is the pill's, at 6 px: a state in the tone's colour, with the word beside it saying the same thing. */
+.tracker-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--hairline2) }
+.tracker-dot[data-tone="green"] { background: var(--green-solid) }
+.tracker-dot[data-tone="amber"] { background: var(--amber-solid) }
+.tracker-dot[data-tone="red"] { background: var(--red) }
+/* Two figures, each a label over a value on a `--strip-hi` tile, as the mock draws them. They WRAP: `Last sweep` carries its interval, which is the long one. */
+.tracker-pop-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 0 0 10px }
+.tracker-pop-figure { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 8px 10px; border-radius: 10px; background: var(--strip-hi) }
+.tracker-pop-figure-label { font-size: 12px; color: var(--ink3) }
+.tracker-pop-figure-value { font-size: 12.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere }
 .tracker-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) 120px; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px;
   padding: 6px 0; border-top: 1px solid var(--hairline);
 }
 .tracker-row-text { display: flex; flex-direction: column; gap: 1px; min-width: 0 }
 .tracker-row-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .tracker-row-repo { font-size: 12px; color: var(--ink3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.tracker-pop-api {
-  display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding-top: 10px;
-  border-top: 1px solid var(--hairline); font-size: 12px; color: var(--ink2);
+.tracker-row-line { font-size: 12px; color: var(--ink3); overflow-wrap: anywhere }
+/* The per-row sync icon: a 28 px square, bare until hovered, the Glyph's own ink. Disabled reads as faint, as `.ui-chip:disabled` does. */
+.tracker-sync {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 8px; background: none; color: var(--ink2); cursor: pointer;
 }
-.tracker-pop-note { margin: 0; font-size: 13px; color: var(--ink2); line-height: 1.45 }
-/* The Jira chip's popover (§8.9.4) draws one line per board and no timer, so `.tracker-row`'s 120 px second column would be an empty gutter: one column
-   here. The line wraps, unlike `.tracker-row-name`, because a failure's sentence is the thing the row exists to show. */
-.jira-chip-board { grid-template-columns: minmax(0, 1fr) }
-.jira-chip-board-line { font-size: 13px; overflow-wrap: anywhere }
+.tracker-sync:hover:not(:disabled) { background: var(--strip-hi); color: var(--ink) }
+.tracker-sync:disabled { cursor: default; opacity: .45 }
+/* The setup link, bottom of the popover: ink2 with the external glyph, as the mock's `Jira setup ↗`. A button, because the shell sets a section and its page
+   as one pair and a bare `href` could not. */
+.tracker-link {
+  display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 6px; padding: 8px 0 0; border: 0; border-top: 1px solid var(--hairline);
+  background: none; color: var(--ink2); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left;
+}
+.tracker-link:hover { color: var(--ink) }
+.tracker-pop-note { margin: 0 0 6px; font-size: 13px; color: var(--ink2); line-height: 1.45 }
+/* The Jira popover's board row is `.tracker-row` with a sub-line that WRAPS, unlike `.tracker-row-name`, because a failure's sentence is what a person acts on. */
+.jira-chip-board-line { font-size: 12px; color: var(--ink3); overflow-wrap: anywhere }
 
 /* ---------------------------------------------- Board section
    Every registered project's backlog on one board, read via GET /api/projects
@@ -400,6 +388,18 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    toolbar narrows to a project, the columns never do. A card opens the drawer,
    which fetches that one item's body from GET /api/items/body. */
 .board { display: flex; flex-direction: column; gap: var(--group-gap) }
+/* A board of columns fills the well down to its foot, so with few cards the grounds still run full height and every column is one height (mock
+   Board.dc.html: the grid is `flex-grow: 1`). The well is `.main` — already `flex: 1` of `.maincol`, which the shell stretches to the viewport — so the chain
+   is made flex all the way down: `.main` a column, its one child `.wrap` growing, and the `.board` and its `.board-columns` growing in turn. `.wrap` is a flex
+   column ONLY where it holds a board of columns (`:has`), so Runs, Settings, the Sessions table and the rest keep their block layout untouched. Every link
+   is `flex: 1`, never a height, so with many cards the content is simply taller than the well and the page scrolls as it always did; and under 700 px
+   `.maincol` is `display: contents` and the shell is not stretched, so nothing fills there — the columns stack at their own height. Files › Archive renders
+   the same `.board-columns` inside a `.board`, so its toneless, groundless columns stretch too — on purpose, not by accident, and harmless: nothing there paints a
+   column's height, and `.archive-month`'s sticky belongs to its month group, which is not a stretched element. */
+.main { display: flex; flex-direction: column }
+.wrap:has(> .board > .board-columns) { flex: 1; display: flex; flex-direction: column }
+.wrap > .board:has(> .board-columns) { flex: 1 }
+.board > .board-columns { flex: 1 }
 /* Task 13's `.board-orchestrate` — the toolbar's filled cyan "drain this
    project's queue" button — is gone with the toolbar (task-37). The control is
    the page's ONE ink `Chip` now (DESIGN.md §8.3), and both attribute states it
@@ -469,13 +469,16 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   .filter-bar-sep { margin: 0 2px }
 }
 
-/* Inside the panels. The header row, then sections: the heading is 12 px `--ink2` with its hint in `--ink3`, and a section after another opens a 14 px gap. */
+/* Inside the panels. The Sort panel keeps its header row; the Filters panel has none (spec §4.1). Sections are chip groups: the heading is 11/600 `--ink3`,
+   sentence case, and a section after another opens a 12 px gap over a hairline. The foot row ends the Filters panel: `Showing N of M` left, `Clear` right. */
 .filter-bar-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; font-size: 14px; font-weight: 500; color: var(--ink) }
+.filter-bar-footrow { display: flex; align-items: baseline; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--hairline) }
+.filter-bar-showing { font-size: 11px; color: var(--ink3) }
 .filter-bar-clear { margin-left: auto; padding: 0; border: 0; background: none; font-size: 12px; color: var(--ink2); cursor: pointer }
 .filter-bar-clear[aria-disabled='true'] { color: var(--ink3); cursor: default }
-.filter-bar-section + .filter-bar-section { margin-top: 14px }
-.filter-bar-heading { margin-bottom: 8px; font-size: 12px; color: var(--ink2) }
-.filter-bar-hint { color: var(--ink3) }
+.filter-bar-section + .filter-bar-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hairline) }
+.filter-bar-heading { margin-bottom: 8px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ink3) }
+.filter-bar-hint { font-weight: 400 }
 /* `max-width` and `overflow` so a long project name clips inside the panel's content box rather than pushing the panel wider than it was told to be. */
 .filter-bar-picks { display: flex; flex-wrap: wrap; gap: 6px }
 .filter-bar-picks button { max-width: 100%; overflow: hidden }
@@ -585,6 +588,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   background: var(--strip); border-radius: 12px;
   cursor: pointer; overflow: hidden;
 }
+/* Hover fills the card with --card-hover (shared/theme.css says why it is its own token). `.jira-card-match`'s amber ring is a box-shadow, so a hovered
+   matching card keeps it. */
+.board-card:hover { background: var(--card-hover) }
 /* Every padding and gap the card has lives in this one rule, so the
    compact-density retune stays a single block (of variables) rather than a
    hunt through four selectors. 14/16/12 with a 10 px internal gap. */
@@ -659,7 +665,23 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The card's head: the type glyph and the key left, the crumb pushed right and ellipsised — the crumb is the one value on the row that can be long
    (`↳ PAY-120 Refund flows`), and the key is the card's handle, so the crumb is what gives. */
 .jira-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink3) }
-.jira-card-type { display: inline-flex; flex: none }
+/* The type tile (Card mock, spec §4.2): an 18 px radius-5 tile round the glyph. Bug and story are tinted marks; every other type is the neutral tile. The glyph
+   takes the tile's ink through a structural selector (`> svg`), because the glyph's own class is a ui-* family and a page rule may not name one. */
+.jira-card-type { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 5px }
+.jira-card-type > svg { stroke: currentColor }
+.jira-card-type[data-tone="neutral"] { background: var(--strip-hi); color: var(--ink2) }
+.jira-card-type[data-tone="bug"] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
+.jira-card-type[data-tone="story"] { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
+/* The priority pill, pushed right on the head: 18 px, 11/500. Jira's five names fold to three tones; a custom name is the low look with no glyph. */
+.jira-card-prio {
+  display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: auto; height: 18px; padding: 0 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 500; white-space: nowrap;
+}
+.jira-card-prio[data-tone="high"] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
+.jira-card-prio[data-tone="med"] { background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)); color: var(--amber-ink) }
+.jira-card-prio[data-tone="low"], .jira-card-prio[data-tone="other"] { background: var(--strip-hi); color: var(--ink3) }
+/* In Detail's facts the pill is a value in `dd`, which sits at the start of its column like every other value; the head's push-right is the card's alone. */
+.jira-detail-facts .jira-card-prio { margin-left: 0 }
 /* The fold block (grouped-board spec §4, DESIGN.md §8.9.1): after the foot and before the marker row — the line, then the spread bar and its caption,
    which are `SpreadBar`'s own look. The line is 12/500 --ink2: a sub-line of the card, a step quieter than the title and a step louder than the caption. */
 .jira-card-fold { display: flex; flex-direction: column; gap: 6px }
@@ -667,17 +689,27 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* F1's ring (grouped-board spec §5): a top card shown only because an issue folded under it matches the filter. An INSET ring, so the card keeps its
    size and the column does not shift by 4 px when a search starts; `--amber-solid` is the mark, and the `match` marker's word beside it is --amber-text. */
 .jira-card-match { box-shadow: inset 0 0 0 2px var(--amber-solid) }
-.jira-card-key { flex: none; font-weight: 500; color: var(--ink2); white-space: nowrap }
-.jira-card-crumb { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-/* The foot's person: a 20 px initials disc on `--strip-hi` (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
+.jira-card-key { flex: none; font-weight: 600; color: var(--ink); white-space: nowrap }
+.jira-card-crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* The deck face is a 14 px title column, not `.jira-card-head` (12 px, `--ink3`), so the crumb that moved down into it inherited 16 px `--ink` and out-sized the title. */
+.jira-deck-face .jira-card-crumb { font-size: 12px; color: var(--ink3) }
+/* The foot's person: a 22 px initials disc tinted magenta (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
    the Board card's project name. An unassigned issue draws the disc empty and dashed, so the row keeps its shape. */
 .jira-card-who { display: flex; align-items: center; gap: 6px; min-width: 0 }
 .jira-card-av {
-  display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 999px;
-  background: var(--strip-hi); color: var(--ink); font-size: 11px; font-weight: 600;
+  display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 999px;
+  background: color-mix(in srgb, var(--magenta) 14%, var(--strip)); color: var(--magenta); font-size: 11px; font-weight: 600;
 }
 .jira-card-av.none { background: none; border: 1px dashed var(--hairline2) }
-.jira-card-name { font-size: 12px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
+/* The status dot: 6 px, the column's own tone, so the raw status name beside it and the column it sits in agree. */
+.jira-status-dot { flex: none; width: 6px; height: 6px; border-radius: 999px; background: var(--ink3) }
+.jira-status-dot[data-tone="doing"] { background: var(--amber-solid) }
+.jira-status-dot[data-tone="done"] { background: var(--green-solid) }
+.jira-card-status { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-card-name { font-size: 12px; font-weight: 400; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
+/* The repository on the foot: branch glyph and the one path's basename (or `N repos`), quiet ink like the worktree chip beside it. */
+.jira-card-repo { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--ink3) }
+.jira-card-repo > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* The worktree chip on the marker row (DESIGN.md §8.9.1): the branch of the ticket's one tree, or `N worktrees`. Quiet `--ink3`, like a marker, and it
    ellipsises first — the Run chip beside it keeps its width. */
 .jira-card-tree { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink3) }
@@ -902,7 +934,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    second one here would put 32 px between the title and the first card. */
 .set { display: flex; flex-direction: column }
 
-/* Two hand-balanced columns (§8.6). An explicit two-track grid rather than
+/* `.set-cols` is Jira › Setup's two-column grid now (`JiraSetupView`); Settings itself is one `.set-col` since Task 8 (spec §4.10) and no longer reads it.
+   Two hand-balanced columns (§8.6). An explicit two-track grid rather than
    `auto-fit` or a masonry pass: which side a card sits on is a placement this
    page makes once, in `SettingsView`'s markup, so that a reader who learnt
    where `Dashboards` is does not find it on the other side of the page after
@@ -1005,37 +1038,58 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   background: var(--strip); border: 1px solid var(--hairline2); border-radius: 12px;
   cursor: pointer; transition: background .15s;
 }
-.set-link:hover { background: var(--strip-hi) }
+.set-link:hover:not(:disabled) { background: var(--strip-hi) }
+.set-link:disabled { opacity: .4; cursor: default }
+/* The Sources card's foot (Task 9): when the three sources last answered, and the one control that asks again. Hairline above, like a row's. */
+.set-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--ink3);
+}
 
-/* The theme picker (§8.6): the `Switch` primitive's track-and-option ground,
-   restated as this page's own layout because a five-option swatch picker is not
-   in §12.2's table and so has no primitive to compose. A recessed `--steel`
-   track holds raised `--strip` options, and the RAISED one is the selected one
-   — §8's standing rule that a raised control marks a state, never a button.
-   Wraps rather than scrolls: at 1100 px and under, the card is the full width
-   of the page and five options still fit two rows without a sideways scroll a
-   touch device would have to discover. */
-.set-themes {
-  display: flex; flex-wrap: wrap; gap: 3px;
-  padding: 3px; border-radius: 12px;
-  background: var(--steel); border: 1px solid var(--hairline);
-}
+/* The watchdog card's status line (Task 9): the sweeper's phase word, a dot and nothing that moves. Sits above the `Live view` row. */
+.set-status { display: flex; align-items: center; gap: 8px; padding: 12px 0; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--ink2) }
+
+/* The theme picker (spec §4.10): five picture cards, each a mini board. The preview element carries its theme's own `data-theme`, so `--board`, `--strip` and
+   `--cyan` below resolve from THAT theme's `[data-theme]` block in shared/theme.css rather than from the live page — which is the whole point of drawing
+   it as CSS instead of mirroring five palettes in a table (the mirror drifted once, #350). `--cyan` is the accent in every theme (`--accent` is
+   `var(--cyan)`). The picked card is told by an ink outline, not a colour: the amber theme has no second hue to spend on a state. */
+.set-themes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px }
 .set-theme {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 10px 5px 5px; border-radius: 10px;
-  background: none; border: 0; cursor: pointer;
-  transition: background .15s, box-shadow .15s;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 5px; border-radius: 10px; cursor: pointer;
+  background: var(--strip); border: 1px solid var(--hairline2);
+  transition: border-color .15s, box-shadow .15s;
 }
-.set-theme:hover .set-theme-name { color: var(--ink) }
-.set-theme.on { background: var(--strip); box-shadow: 0 1px 2px var(--shadow) }
-/* 24 px at an 8 px radius — this design's own figure (§8.6), where this was a
-   34 px strip at a 2 px corner. Three bands: board, strip, accent, with the
-   accent kept narrow so the two grounds are what the eye compares. */
-.set-swatch { display: flex; width: 24px; height: 24px; flex: none; border-radius: 8px; overflow: hidden }
-.set-swatch i { flex: 1 }
-.set-swatch i:last-child { flex: 0 0 6px }
-.set-theme-name { font-size: 13px; font-weight: 500; color: var(--ink3); text-align: left; white-space: nowrap; transition: color .15s }
-.set-theme.on .set-theme-name { color: var(--ink) }
+.set-theme:hover { border-color: var(--ink3) }
+.set-theme.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink) }
+.set-theme-board { display: flex; gap: 3px; height: 44px; padding: 5px; border-radius: 6px; background: var(--board) }
+.set-theme-board i { flex: 1; border-radius: 3px; background: var(--strip) }
+.set-theme-board i:last-child { background: var(--cyan); max-height: 10px }
+.set-theme-name { font-size: 13px; font-weight: 500; color: var(--ink2); text-align: center; transition: color .15s }
+.set-theme.on .set-theme-name { color: var(--ink); font-weight: 600 }
+@media (max-width: 700px) { .set-themes { grid-template-columns: repeat(3, minmax(0, 1fr)) } }
+
+/* The merge-mode icon cards: three buttons, a glyph tile, a title and one line. Same ink-outline selection as the theme cards. */
+.set-row-stacked > .set-control { display: block; width: 100% }
+.set-merge-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px }
+.set-merge-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left;
+  padding: 10px; border-radius: 12px; cursor: pointer; font-family: inherit;
+  background: var(--strip); border: 1px solid var(--hairline2);
+  transition: border-color .15s, box-shadow .15s;
+}
+.set-merge-card:hover { border-color: var(--ink3) }
+.set-merge-card.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink) }
+.set-merge-card-top { display: flex; align-items: center; justify-content: space-between; width: 100%; color: var(--green) }
+.set-merge-card-title { font-size: 13px; font-weight: 600; color: var(--ink) }
+.set-merge-card-line { font-size: 12px; color: var(--ink2); line-height: 1.4 }
+@media (max-width: 700px) { .set-merge-cards { grid-template-columns: 1fr } }
+
+/* `ⓘ more` beside a row's name: a quiet text button, never a chip — it reveals a paragraph, it does not act. */
+.set-name-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap }
+.set-more { background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 500; color: var(--ink3) }
+.set-more:hover, .set-more[aria-expanded="true"] { color: var(--ink) }
+.set-more-text { max-width: 70ch }
 
 /* Under the phone break a row's control drops below its label and takes the
    full width — a 36 px select beside a 15/500 name and a 13 px hint has nothing
@@ -1085,10 +1139,13 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    would reflow by width alone and drop a column under its neighbour on some
    widths; the type axis is the board's whole point, so the column count is
    stepped explicitly instead. minmax(0, 1fr) keeps a column with a long
-   unbroken title shrinking with the row rather than overflowing it, and
-   align-items:start keeps a short column from stretching to its tallest
-   neighbour. */
-.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--col-gap); align-items: start }
+   unbroken title shrinking with the row rather than overflowing it.
+   No `align-items: start` (it stood here until 2026-11-06): the grid's default
+   `stretch` makes every column the height of the tallest, which is what lets a
+   column's `--steel` ground (`.board-col[data-ground]`) run the full height of
+   the row instead of ending at its last card — with `start`, an empty column's
+   ground was a 40 px strip. */
+.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--col-gap) }
 @media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
 
@@ -1126,6 +1183,18 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    in place of the stack, and any per-column overflow later has to scroll the
    cards without dragging the header off its rule with them. */
 .board-col-cards { display: flex; flex-direction: column; gap: var(--card-gap) }
+/* A column's ground (mock Board.dc.html; restyle spec §4.3 gave it to Jira alone and the user extended it to the GitHub Board, 2026-11-06): a `--steel` well,
+   radius 16, 12 px padding with the header inside it, on `[data-ground]` — which `BoardView` and `JiraShelves` set and Archive does not, because its sticky
+   `.archive-month` paints `--board` and would read as a white band across it. The Jira shelves' toned header (`[data-tone]`) is separate: the dot and
+   the count are page-local spans rather than `.ui-dot` / `.ui-pill` — `Dot` has no todo/doing/done tones and guard 7 forbids a page rule naming a ui-* family
+   token. Plain colours and a solid `--strip` pill, no tint, so nothing joins the daylight-contrast PINNED list; 11/500 `--ink2` on `--strip` is a
+   surface pair the contrast suite already measures. */
+.board-col[data-ground] { background: var(--steel); border-radius: 16px; padding: 12px; --card-hover: var(--card-hover-steel) }
+.board-col-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ink3) }
+.board-col[data-tone='doing'] .board-col-dot { background: var(--amber-solid) }
+.board-col[data-tone='done'] .board-col-dot { background: var(--green-solid) }
+.board-col[data-tone] .board-col-name { font-size: 13px; font-weight: 600; color: var(--ink) }
+.board-col-count { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--strip); font-size: 11px; font-weight: 500; color: var(--ink2) }
 
 /* ---------------------------------------------- archive month groups
    Archive's columns are grouped by the month of `updated ?? created` rather
@@ -1213,6 +1282,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    `.board-card-stage-glyph`'s, whose unconditional rule is two classes deep. */
 @media (prefers-reduced-motion: reduce) { .run-controls-needs-you { animation: none } }
 
+/* The head's right column (spec §4.6): the state pill and its note on one line, the controls (or the remote sentence) under them, both flush right to
+   match `SheetHead`'s own right-hand column. */
+.run-detail-head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px }
+.run-detail-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end }
+.run-detail-id { font-size: 12px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 1px 6px }
+/* The closing line of a pr-mode run: quiet ink like the sheet's other sub lines, with the number as the link. */
+.run-detail-outcome { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--ink2) }
+
 /* The slot the fade lands in, reserved by each host rather than by the control
    (§8.8): `RunControls` renders `null` for most run states, so a slot sized by
    its own content would be no slot at all. 28 px is the `Chip` size both
@@ -1279,33 +1356,42 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-modal-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
 .jira-modal-error { margin: 0; font-size: 12px; line-height: 1.45; color: var(--red) }
 
-/* Run ▾ (Jira phase 5, DESIGN.md §8.9.1): the chip's wrapper is the Popover's positioning parent, the panel hanging `100% + 8px` under it. On a card the
+/* The split Run (restyle §4.1, DESIGN.md §8.9.1): the wrapper is the Popover's positioning parent, the panel hanging `100% + 8px` under it. On a card the
    wrapper is the marker row's last item, pushed right; in the modal's controls row it sits in the flow. `data-state` is the wrapper's reading of the
-   chip (`Chip` takes no className and guard 7 keeps `.ui-chip` out of any selector but the primitives block), so the dashed no-repository look is an
-   attribute selector on the button inside it. */
+   control; the primitive carries the dashed no-repository look itself, and the live tint below reaches the group by structure (`> [role='group']`) because
+   guard 7 keeps every `ui-*` family token out of a selector outside the primitives block. */
 .jira-run { position: relative; flex: none }
 .board-card-markers .jira-run { margin-left: auto }
-.jira-run[data-state='no-repo'] > button { border-style: dashed }
-/* In the modal the facts column is a scroll container 290 px wide, and a 320 px panel right-aligned under a mid-row chip ran out past its left edge and was
-   cut there. So the ROW is the positioning parent: the panel hangs under the whole row, its right edge the row's, at the column's width (`JiraRunMenu`'s
-   `MODAL_PANEL_WIDTH`) — inside the details view. A tall menu lengthens the column's scroll rather than spilling out of it. */
+/* A running session: the whole pill goes green-on-tint, its dot steady (a pulse is the live strip's job, not the button's). The group's own ink background
+   and the halves' ink fill are overridden together, since the halves paint over the group. */
+.jira-run[data-state='live'] > [role='group'] { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); border-color: var(--hairline2); color: var(--green) }
+.jira-run[data-state='live'] > [role='group'] > button { background: transparent; color: var(--green) }
+.jira-run[data-state='live'] > [role='group'] > button:last-child::before { background: var(--green); opacity: .35 }
+.jira-run-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-solid) }
+/* In the modal the facts column is a scroll container 290 px wide, so the ROW is the positioning parent: the panel hangs under the whole row, its right edge
+   the row's — inside the details view. A tall menu lengthens the column's scroll rather than spilling out of it. */
 .jira-modal-controls { position: relative }
 .jira-modal-controls .jira-run { position: static }
 /* The card clips its content for the radius, which would clip the absolute panel with it: while the panel is open the card overflows, and the live
    strip, which no longer has the card's clip to round it, takes the top radius itself. */
 .board-card:has(.jira-run-open) { overflow: visible }
 .board-card:has(.jira-run-open) > .board-card-live:first-child { border-radius: 12px 12px 0 0 }
-/* The panel's rows are the picker's rows (the Sort panel's shape) with a quiet right-hand hint — the skill's slash command, or the built-in's one line. */
+/* Menu: group headers (sentence case, 11 px floor), 40 px rows with a 28 px tile, label over a quiet sub-line, the preferred row marked at its right end. */
+.jira-run-head { padding: 8px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ink3) }
 .jira-run-opt {
-  display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px;
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 40px; padding: 0 10px;
   border: 0; border-radius: 8px; background: none; text-align: left;
   font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer;
 }
 .jira-run-opt:hover { background: var(--strip-hi) }
-.jira-run-opt > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.jira-run-hint { flex: none; margin-left: auto; font-size: 12px; font-weight: 400; color: var(--ink3) }
+.jira-run-tile { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: var(--strip-hi); color: var(--ink2) }
+.jira-run-opt-default .jira-run-tile { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
+.jira-run-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px }
+.jira-run-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2 }
+.jira-run-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 400; line-height: 1.2; color: var(--ink3) }
+.jira-run-mark { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 500; color: var(--green) }
 .jira-run-rule { margin: 6px 0; border: 0; border-top: 1px solid var(--hairline2) }
-.jira-run-note { padding: 2px 10px 4px; font-size: 12px; color: var(--ink2) }
+.jira-run-note { padding: 2px 8px 4px; font-size: 11px; color: var(--ink2) }
 /* A long session label ellipsises inside the strip; the elapsed mark keeps its width. This rule is global, so it applies to the Board's own live strip too
    (`ItemCard` draws the same `ui/LiveStrip`), not only to the Jira card's. */
 .board-card-live > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
@@ -1326,7 +1412,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    branch never — then `Remove`. The copied command, when the clipboard refused, takes a row of its own under them. */
 .jira-wt-list { list-style: none; padding-left: 0; margin: 8px 0 0 }
 .jira-wt-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 5px 6px; font-size: 13px }
-.jira-wt-branch { font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-wt-branch { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-weight: 500; color: var(--ink2); white-space: nowrap }
 .jira-wt-path { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink3) }
 .jira-wt-repo { font-size: 12px; color: var(--ink3); white-space: nowrap }
 .jira-wt-cmd { flex: 1 0 100%; font-size: 12px; color: var(--ink2); user-select: all; overflow-wrap: anywhere }
@@ -1366,18 +1452,54 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-detail-pane > :first-child { margin-top: 0 }
 .jira-detail-none { margin: 0; font-size: 13px; color: var(--ink3) }
 /* The ticket's facts: a 110 px label column, each value a wrapping row so a status pill and its Move to, or a name and its Assign to me, sit on one line. */
-.jira-detail-facts { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 12px; align-items: center; margin: 0; font-size: 13px }
+.jira-detail-facts { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px 12px; align-items: center; margin: 0; font-size: 13px }
 .jira-detail-facts > .item-fact { display: contents }
-.jira-detail-facts dt { font-size: 12px; color: var(--ink3) }
+.jira-detail-facts dt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink3) }
+.jira-detail-facts dt > svg { flex: none }
 .jira-detail-facts dd { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; color: var(--ink); overflow-wrap: anywhere }
-.jira-detail-cat { color: var(--ink3) }
+/* The Status chip and its Move-to popover (`Modal.dc.html`). The chip is `ui/Chip`'s 28 px; the wrapper only anchors the panel, which hangs from the chip's left
+   edge as the mock draws it (the base popover is right-anchored, so the structural selector flips it). The flip skips the phone shape: `useNarrow` adds the
+   narrow class from JS, and that rule's `left: 12px; right: 12px` must win there, which a bare `> [role='dialog']` (0,2,0) would beat. `[class*='narrow']`
+   names the shape without naming the family, which guard 7 forbids in a page selector. */
+.jira-detail-status { position: relative; display: inline-flex }
+.jira-detail-status > button { gap: 7px; padding: 0 8px 0 9px; font-size: 12px; font-weight: 500 }
+.jira-detail-status > [role='dialog'] { padding: 6px }
+.jira-detail-status > [role='dialog']:not([class*='narrow']) { left: 0; right: auto }
+.jira-move-head { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ink3) }
+.jira-move-row {
+  display: flex; align-items: center; gap: 9px; width: 100%; height: 36px; padding: 0 10px;
+  border: 0; border-radius: 8px; background: none; text-align: left;
+  font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer;
+}
+.jira-move-row:hover:not([aria-disabled='true']) { background: var(--strip-hi) }
+.jira-move-row[aria-disabled='true'] { cursor: default }
+.jira-move-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.jira-move-row > svg { flex: none; color: var(--green) }
+.jira-move-note { padding: 6px 10px 4px; margin-top: 4px; border-top: 1px solid var(--hairline2); font-size: 11px; color: var(--ink3) }
 .jira-detail-pane .jira-modal-error { margin-top: 12px }
-.jira-detail-run { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink2) }
+/* The Agent band (restyle §4.4): the pane's own ground, 12 px radius, 16 px padding. Its row is the Run menu's positioning parent, so the panel hangs from the
+   row (right edges aligned) and not from the band's foot; the wrapper's own `position: relative` is switched off for it. */
+.jira-detail-agent-band { display: flex; flex-direction: column; gap: 12px; background: var(--strip); border-radius: 12px; padding: 16px; min-width: 0 }
+.jira-detail-agent-row { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0 }
+.jira-detail-agent-row .jira-run { position: static; margin-left: auto }
+.jira-detail-agent-row > .jira-detail-lbl { flex: 1; min-width: 0 }
+.jira-detail-next { font-size: 12px; color: var(--ink2) }
+.jira-detail-agent-tile {
+  display: inline-grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px;
+  border: 1px dashed var(--hairline2); color: var(--ink3)
+}
+.jira-detail-agent-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 }
+.jira-detail-agent-none { font-size: 13px; font-weight: 500; color: var(--ink) }
+.jira-detail-agent-sub { font-size: 12px; color: var(--ink3) }
+.jira-detail-assignee { display: inline-flex; align-items: center; gap: 6px; min-width: 0 }
+.jira-detail-label { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 8px; background: var(--strip-hi); font-size: 11px; font-weight: 500; color: var(--ink2) }
 
 /* One live session's card: the deck card's face, widened to Detail's half. The strip is the board card's own band (`ui/LiveStrip`), clipped to the card's
    radius; under it the facts are a grid of label-over-value cells, four across where the column has the width and fewer where it does not, then the
    buttons on one row with Stop pushed to its end. */
-.jira-sess { background: var(--strip); border-radius: 12px; overflow: hidden; min-width: 0 }
+/* No `overflow: hidden` on the card: `Session actions` hangs 8 px under the chevron at its bottom edge and a clip would cut it. The strip rounds its own top corners instead. */
+.jira-sess { background: var(--strip); border-radius: 12px; min-width: 0 }
+.jira-sess > .board-card-live { border-radius: 12px 12px 0 0 }
 .jira-sess-face { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px }
 .jira-sess-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px 14px; margin: 0 }
 .jira-sess-facts > div { min-width: 0 }
@@ -1386,7 +1508,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* One face everywhere (§8.1): the id and the branch are set apart by ink, not by a monospace. */
 .jira-sess-mono { color: var(--ink2) }
 .jira-sess-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
-.jira-sess-stop { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
 
 /* The agent deck (spec §7.1, DESIGN.md §8.9.1): a heading row with the tally, then a wrapping grid of session cards above the status shelves. A card wears
    `.jira-sess`'s ground, radius and face padding (restated at deck width, not composed: that class also fixes Detail's 290 px column), with the grid, the
@@ -1396,8 +1517,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-deck-head h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink) }
 .jira-deck-need { font-weight: 600; color: var(--amber-text) }
 .jira-deck-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px }
-.jira-deck-card { background: var(--strip); border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden; min-width: 0 }
-.jira-deck-face { display: flex; flex-direction: column; gap: 8px; padding: 10px var(--card-pad-x) 12px }
+/* Not clipped, for the same reason as `.jira-sess`; the stripe is an inset box-shadow, which already follows the radius. */
+.jira-deck-card { background: var(--strip); border: 1px solid var(--hairline); border-radius: 12px; min-width: 0 }
+.jira-deck-face { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px var(--card-pad-x) 12px }
 .jira-deck-title {
   width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer;
   font: inherit; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--ink);
@@ -1405,7 +1527,21 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .jira-deck-title:hover { text-decoration: underline }
 .jira-deck-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
-.jira-deck-ctx { margin-left: auto; font-size: 12px; color: var(--ink3); white-space: nowrap }
+/* The card's first line: the state's dot, its words and how long it has held, in the one small ink3 reading the deck head uses. */
+.jira-deck-state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink3) }
+/* The fold pill: `↳ <top key>`, drawn only when the session's ticket hangs under another card. */
+.jira-deck-fold { flex: none; padding: 1px 7px; border-radius: 8px; border: 1px solid var(--hairline2); font-size: 11px; font-weight: 500; color: var(--ink2); background: var(--strip) }
+/* SessionOpen — the anchor of its `Session actions` panel, and the panel's rows (36 px, `.jira-move-row`'s skin, which a row of links and presses also wears). */
+.jira-open { position: relative; display: inline-flex }
+.jira-open-rows { display: flex; flex-direction: column; gap: 2px; margin: -8px }
+.jira-open-row {
+  display: flex; align-items: center; width: 100%; height: 36px; padding: 0 10px; box-sizing: border-box;
+  border: 0; border-radius: 8px; background: var(--strip); text-align: left; text-decoration: none;
+  font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer;
+}
+.jira-open-row:hover:not([aria-disabled='true']) { background: var(--strip-hi) }
+.jira-open-row[aria-disabled='true'] { cursor: default; color: var(--ink3); background: var(--strip) }
+.jira-open-danger { color: var(--red); background: var(--strip) }
 /* A shelf's `+ N more` / `show fewer`: a quiet row at the foot of the column, left-aligned with the cards' own edge. */
 .jira-shelf-more { display: flex; padding-top: 2px }
 /* The shelf row's extra line (spec §7.1): the newest ended session, or `N sessions`. Quiet, a step under the marker row, and Reopen sits right after the words. */
@@ -1423,35 +1559,38 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-hist-head { font-size: 13px; font-weight: 500; color: var(--ink) }
 .jira-hist-meta { grid-column: 2 / -1; font-size: 12px; color: var(--ink2); overflow-wrap: anywhere }
 
-/* The List view (spec §7.2, DESIGN.md §8.9.1): a bar (chips with counts, the Repo / Run / window selects, All tickets), then ONE table of sessions in two
-   groups, Live then Ended, ten columns, 44 px rows. A row that needs a person washes in amber from its left edge (a gradient over `--strip`, so it reads on
-   every theme without a new token); an ended row is set in `--ink2`. The table scrolls sideways inside its own wrapper under 1120 px rather than squeezing ten
-   columns into a phone. Nothing is under 11 px (guard 3). */
+/* The Sessions page's session table (spec §4.3, DESIGN.md §8.9.1; mock `JiraSessions.dc.html`): a bar (the counted `Show` switch and the Filters popover), then ONE
+   table of sessions in two groups, Live then Ended, ten columns, 44 px rows. A row wears the `ui-stripe` edge in its state's tone (`sessionTone`), so a row that
+   needs a person is the amber one without a wash; an ended row is set in `--ink2`. Nothing is under 11 px (guard 3). */
 .jira-list { display: flex; flex-direction: column; gap: 12px }
-.jira-list-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px }
-.jira-list-chips, .jira-list-picks { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
-.jira-list-count { margin-left: 4px; font-size: 12px; color: var(--ink3) }
-.jira-list-scroll { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
-/* `table-layout: fixed` with every column but Ticket given its width in the head: under `auto`, each column sized to its widest cell — a long run label, a
-   full summary, two open buttons side by side — and at 1440 px the table came to 1544 px in a 1150 px well, with Started, For and Open behind a sideways
-   scroll. Fixed, State and Open wrap onto a second line instead of widening their column.
-   The columns whose content is bounded — State, Run, Context (a 32 px bar and a percentage), Started, For, Open — are px. Ticket, Repo · branch, Where and
-   Model are percentages summing to exactly 100%, so px + % always overflows the table: Chromium then keeps every px column and splits what is left among
-   the four in ratio 32 : 28 : 21 : 19. When Ticket was the one auto column it took all of that leftover, and in full content width on a wide screen the
-   summary held ~740 of 1710 px while Repo, Where and Model ellipsised at 128/92/72. At the 1150 px well of a 1440 screen the ratio lands on 147/128/96/87,
-   no narrower than the old px widths. Do not write these as `calc()` or `max()` mixing px and %: a fixed-layout table reads those as `auto`, and auto
-   columns split the leftover evenly, not by ratio (measured, Chromium). */
-.jira-list-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
-.jira-list-table thead th:nth-child(1) { width: 160px }
-.jira-list-table thead th:nth-child(2) { width: 32% }
-.jira-list-table thead th:nth-child(3) { width: 120px }
-.jira-list-table thead th:nth-child(4) { width: 28% }
-.jira-list-table thead th:nth-child(5) { width: 21% }
-.jira-list-table thead th:nth-child(6) { width: 19% }
+.jira-list-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px }
+/* Overflow is a container query, as the issue List's (`.jira-issues-frame`, below): a scroll box (`overflow-x: auto`) makes overflow-y auto too and clips the
+   `Session actions` menu and the Run menu, which hang below their cell. The table's fixed columns are 974 px and its `min-width` is 1150, so at 1440 px with the
+   rail open (1150 px inside the box border) nothing scrolls; below 1152 px of frame the box scrolls sideways and the page never does. The frame holds nothing but
+   the box, because `container-type` also becomes the containing block of `position: fixed` descendants (the phone shape of a menu panel). */
+.jira-list-frame { container-type: inline-size }
+.jira-list-scroll { border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
+@container (max-width: 1151px) {
+  .jira-list-scroll { overflow-x: auto }
+}
+/* The same fold as the issue table's, for the same reason: no containing block for the Run and `Session actions` bottom sheets but the viewport. */
+@media (max-width: 700px) {
+  .jira-list-frame { container-type: normal }
+  .jira-list-scroll { overflow-x: auto }
+}
+/* `table-layout: fixed` with every column but Ticket given its width in the head: under `auto`, each column sized to its widest cell and the table came to
+   1544 px in a 1150 px well. Ticket is the one auto column and takes what the px columns leave (~176 px at 1150, more as the well widens): the key over a one-line summary
+   that ellipsises. Do not mix px and % or `calc()` here: a fixed-layout table reads those as `auto`. */
+.jira-list-table { width: 100%; min-width: 1150px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
+.jira-list-table thead th:nth-child(2) { width: 190px }
+.jira-list-table thead th:nth-child(3) { width: 88px }
+.jira-list-table thead th:nth-child(4) { width: 104px }
+.jira-list-table thead th:nth-child(5) { width: 88px } /* Where: `Dashboard` is 64 px of text plus the cell's 24 px of padding; 80 clipped it (ui-verify N1). */
+.jira-list-table thead th:nth-child(6) { width: 68px }
 .jira-list-table thead th:nth-child(7) { width: 96px }
-.jira-list-table thead th:nth-child(8) { width: 76px }
-.jira-list-table thead th:nth-child(9) { width: 64px }
-.jira-list-table thead th:nth-child(10) { width: 176px }
+.jira-list-table thead th:nth-child(8) { width: 96px }
+.jira-list-table thead th:nth-child(9) { width: 52px }
+.jira-list-table thead th:nth-child(10) { width: 192px } /* Open: an ended row's Reopen + Run needs about 168 px of content plus the cell's 24 px of padding; 172 stacked its label (ui-verify D13), 124 before that overlapped For. */
 .jira-list-table thead th {
   padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
   color: var(--ink3); border-bottom: 1px solid var(--hairline); white-space: nowrap;
@@ -1462,34 +1601,118 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis
 }
 .jira-list-row[data-ended="true"] td { color: var(--ink2) }
-/* The whole row opens Detail (JiraSessionList's `rowOpens`), so it wears the pointer and a hover fill. The fill is laid on the CELLS and half transparent, so
-   a needs-you row's amber wash — the row's own background — still reads through it under the pointer. */
+/* The whole row opens Detail (`rowOpens` in `lib/jira-list.ts`, used by both tables), so it wears the pointer and a hover fill on the cells. */
 .jira-list-row { cursor: pointer }
 .jira-list-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }
-.jira-list-row[data-state="plan"], .jira-list-row[data-state="permission"], .jira-list-row[data-state="reply"], .jira-list-row[data-state="answer"] {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--amber-solid) 14%, var(--strip)), var(--strip) 55%);
-}
+/* The box rounds at 12 px and clips nothing at wide widths, so the last row's hover fill would paint square past it: its corner cells round to the 11 px inside the 1 px border. Last GROUP only — each group is its own `tbody`. */
+.jira-list-table tbody:last-of-type .jira-list-row:last-child td:first-child { border-bottom-left-radius: 11px }
+.jira-list-table tbody:last-of-type .jira-list-row:last-child td:last-child { border-bottom-right-radius: 11px }
 .jira-list-flex { display: flex; align-items: center; gap: 8px; min-width: 0 }
 .jira-list-state { font-weight: 500 }
-.jira-list-row .jira-list-state, .jira-list-row .jira-list-open { white-space: normal }
-.jira-list-state .jira-list-flex, .jira-list-open .jira-list-flex { flex-wrap: wrap; row-gap: 4px }
+/* State is 200 px so `Waiting for plan approval` (~160 px beside the dot) shows whole; the word still ellipsises as a last resort rather than hard-clipping,
+   and the full text is the cell's title. */
+.jira-list-state .jira-list-flex > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis }
 .jira-list-mark { font-size: 12px; font-weight: 400; color: var(--ink3) }
+/* Ticket: the key over the summary, one line each. */
+.jira-list-key { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis }
 .jira-list-title {
-  min-width: 0; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit;
+  display: block; max-width: 100%; min-width: 0; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; font-size: 12px; color: var(--ink3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .jira-list-title:hover { text-decoration: underline }
+.jira-list-repo { color: var(--ink2) } /* set apart by ink: one face everywhere (§8.1), so the mock's mono is not drawn */
+/* The branch stays under the repository: search matches it, and it is what tells two sessions in one repo apart. */
 .jira-list-repo span { display: block; overflow: hidden; text-overflow: ellipsis }
 .jira-list-branch { font-size: 11px; color: var(--ink3) }
 .jira-list-ctx { color: var(--ink2) }
 .jira-list-ctx-bar { display: inline-block; width: 32px; height: 4px; margin-right: 6px; vertical-align: middle; border-radius: 2px; background: var(--hairline2); overflow: hidden }
 .jira-list-ctx-bar i { display: block; height: 100%; background: var(--ink3) }
-.jira-list-open .jira-list-flex { gap: 6px }
+/* The action cell must not clip its menus (`Session actions`, Run's panel): it is a td, so the selector out-ranks `.jira-list-row td { overflow: hidden }`. */
+.jira-list-row td.jira-list-act { overflow: visible; white-space: normal; text-align: right }
+.jira-list-act .jira-list-flex { gap: 6px; justify-content: flex-end; flex-wrap: wrap; row-gap: 4px }
+/* No rows and nothing filtered: a centred block with two ways out. */
+.jira-list-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 56px 16px; text-align: center }
+.jira-list-empty-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink) }
+.jira-list-empty-line { margin: 0; font-size: 13px; color: var(--ink3) }
+.jira-list-empty-ways { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px }
 .jira-list-foot { margin: 0; font-size: 12px; color: var(--ink3) }
 /* The link store cannot save (`saveError`): `--amber-ink`, the amber that carries the hue on its own — nothing amber stands beside this line (§ marks and
    text). Amber and not red: the rows are still right, they are only not kept. The error's own words follow in the muted ink, so the sentence reads first. */
 .jira-list-warn { margin: 0; font-size: 13px; line-height: 1.45; color: var(--amber-ink) }
 .jira-list-warn-detail { color: var(--ink2); overflow-wrap: anywhere }
+/* Jira › Board › List — the issue table (`JiraIssueList`), the session table's twin: the same scroll box, hairline, row height and header type, so the two
+   List-shaped pages read as one family. Ten columns; Summary is the one auto column and takes what the px columns leave. The fixed columns sum to 922 px
+   and the table's `min-width` is 1120, so at 1440 px with the rail open (a 1152 px well, 1150 inside the box border) nothing scrolls and Summary keeps
+   ~230 px; below 1122 px of frame the BOX scrolls sideways and the page never does. `table-layout: fixed` with widths on the head, for the reason the
+   session table's comment gives: under `auto` a long summary widens its column and pushes Updated off the edge.
+   Overflow is a container query on purpose: a scroll box (`overflow-x: auto`) makes overflow-y auto too and clips the row's Run menu, which hangs below
+   its cell. While the table fits there is no scroll box, so the menu hangs over the page on any row; below that width the box scrolls and a bottom row's
+   menu scrolls inside it (the accepted degraded case). `.jira-issues-frame` is the container and holds nothing but the box: `container-type` makes it the
+   containing block of `position: fixed` descendants (the phone shape of the menu's panel, `.ui-popover-narrow`), and the item modal and the launch sheet
+   render outside it. */
+.jira-issues-frame { container-type: inline-size }
+.jira-issues-scroll { border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
+@container (max-width: 1121px) {
+  .jira-issues-scroll { overflow-x: auto }
+}
+/* Under the fold the box always scrolls (the table is 1120 px) and the frame stops being a container: `container-type` makes it the containing block of the Run
+   menu's FIXED bottom sheet, which would then sit at the foot of the whole table instead of the viewport's. A fixed panel is not clipped by a scroll box. */
+@media (max-width: 700px) {
+  .jira-issues-frame { container-type: normal }
+  .jira-issues-scroll { overflow-x: auto }
+}
+.jira-issues-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
+.jira-issues-table thead th:nth-child(1) { width: 110px } /* Session: the word ellipsises (`Waiting on your answer` is longer); the dot and the age are the reading and never cut. */
+.jira-issues-table thead th:nth-child(2) { width: 108px } /* Key: fits a twelve-character key (TIMIFY-28086) at 13 px. */
+.jira-issues-table thead th:nth-child(4) { width: 100px }
+.jira-issues-table thead th:nth-child(5) { width: 116px }
+.jira-issues-table thead th:nth-child(6) { width: 116px } /* Priority: `Not prioritised` is a 85 px pill and needs 84+ of content. */
+.jira-issues-table thead th:nth-child(7) { width: 124px }
+.jira-issues-table thead th:nth-child(8) { width: 76px }
+.jira-issues-table thead th:nth-child(9) { width: 60px }
+.jira-issues-table thead th:nth-child(10) { width: 164px } /* The unlabelled Run cell: a live ticket's split `Running · 1h` is 135 px (140 of content after 24 px of padding), the ready one 93. Summary pays. */
+.jira-issues-table thead th {
+  padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
+  color: var(--ink3); border-bottom: 1px solid var(--hairline); white-space: nowrap;
+}
+.jira-issues-row td {
+  height: 44px; padding: 6px 12px; vertical-align: middle; border-top: 1px solid var(--hairline);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis
+}
+/* The whole row opens the modal (`rowOpens`), so it wears the pointer and the session table's half-transparent hover fill. */
+.jira-issues-row { cursor: pointer }
+.jira-issues-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }
+/* The box rounds at 12 px and clips nothing at wide widths, so the last row's hover fill would paint square past it: its corner cells round to the 11 px inside
+   the 1 px border. The head's corners too, for a head that ever wears a fill. */
+.jira-issues-row:last-child td:first-child { border-bottom-left-radius: 11px }
+.jira-issues-row:last-child td:last-child { border-bottom-right-radius: 11px }
+.jira-issues-table thead th:first-child { border-top-left-radius: 11px }
+.jira-issues-table thead th:last-child { border-top-right-radius: 11px }
+.jira-issues-flex { display: flex; align-items: center; gap: 8px; min-width: 0 }
+.jira-issues-session { font-weight: 500 }
+/* The session's reading is the word AND its age: the age is `flex: none` and only the word ellipsises. `white-space: pre` keeps the space before ` · ` that a flex item would otherwise drop at its line start. */
+.jira-issues-sess { display: flex; min-width: 0 }
+.jira-issues-age { flex: none; white-space: pre }
+.jira-issues-key a { color: var(--ink2); text-decoration: none }
+.jira-issues-key a:hover { text-decoration: underline }
+.jira-issues-title {
+  flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+}
+.jira-issues-title:hover { text-decoration: underline }
+.jira-issues-under, .jira-issues-muted { color: var(--ink3) }
+.jira-issues-under { flex: none; font-size: 12px } /* The count is never cut: the title takes the ellipsis, in the flex row that holds both. */
+.jira-issues-updated { color: var(--ink3) }
+/* A cell's text beside a mark ellipsises on its own, so the mark keeps its size (the flex row is `min-width: 0`). */
+.jira-issues-cut { min-width: 0; overflow: hidden; text-overflow: ellipsis }
+/* The card's pill sits right on the card head (`margin-left: auto`); in a cell it sits at the start. */
+.jira-issues-prio { margin-left: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis }
+/* The split Run is there for the keyboard and invisible to the eye until the row is pointed at or focused into: `opacity`, never `display` or `visibility`,
+   so it stays in the tab order and `:focus-within` can reveal it. The cell does not clip, or the open menu's panel would be cut at the cell edge. */
+.jira-issues-row td.jira-issues-act { overflow: visible; text-align: right } /* td, to beat `.jira-issues-row td`'s overflow: hidden */
+.jira-issues-act .jira-run { display: inline-block; opacity: 0; transition: opacity .12s }
+.jira-issues-row:hover .jira-issues-act .jira-run, .jira-issues-row:focus-within .jira-issues-act .jira-run { opacity: 1 }
+@media (hover: none) { .jira-issues-act .jira-run { opacity: 1 } }
 
 /* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
    what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px
@@ -1504,18 +1727,59 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The add row: the project Select and `Add` keep their size, the path field takes what is left (the row wraps at Settings' own narrow widths). */
 .jira-setup-add { justify-content: flex-start; gap: 8px }
 .jira-setup-add-path { flex: 1 1 160px; width: auto; min-width: 0 }
-/* A path's defaults line (§8.9.3): two fields and Save in one wrapping row under the path's first row, the hint (branches unavailable / a pattern that cannot
-   name a branch) on a line of its own. The fields share what is left; the base is the narrower, a branch name being shorter than a pattern. */
-.jira-setup-defaults { justify-content: flex-start; flex-wrap: wrap; gap: 8px }
-.jira-setup-defaults-base { flex: 1 1 140px; width: auto; min-width: 0 }
-.jira-setup-defaults-pattern { flex: 2 1 200px; width: auto; min-width: 0 }
+/* Under the fold `.set-row` is a column and a flex-basis becomes a HEIGHT (the hazard Settings' phone block describes): size by content and span the card. */
+@media (max-width: 700px) { .jira-setup-add-path { flex: 1 1 auto; align-self: stretch } }
+/* A mapping's row (spec §4.4): a head line — key pill, the path (the code-span treatment `.set-hint code` has uses; §8.1 has one face, so "mono" is the span),
+   the worktree toggle, the × pushed right — then, under the path's first row only, the two labelled fields and Save, then the expanded tree list. */
+.jira-setup-repo { gap: 10px; flex-wrap: nowrap; align-items: stretch } /* `.set-row` wraps: a wrapping column's line is as wide as its widest item's max-content, not the card, so one long worktree path pushed every child past the card (page 1579 px at 1440). One line = the container's own cross size. `align-items: stretch` re-asserts `.set-row-stacked`: the phone block's `.set-row { align-items: flex-start }` (line ~1079) comes later and
+   won, so under 700 px the tree list sized to its content (542 px in a 489 px row at 600). */
+.jira-setup-repo-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-width: 0 }
+/* The code-span treatment (§8.1 has one face, so "mono" is the span `.set-hint code` / `.item-body code` draw): --ink on --steel, 4 px radius, the face
+   inherited. Setup rows only — the repo path, a worktree's path and a skill's command sub-line carry `jira-setup-code`; the modal's rows and the Run menu do not. */
+.jira-setup-code { color: var(--ink); background: var(--steel); border-radius: 4px; padding: 0 4px }
+.jira-setup-path { flex: 0 1 auto; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 1.45 }
+.jira-setup-skill .jira-run-sub { width: fit-content; max-width: 100% }
+.jira-setup-defaults { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 12px }
+.jira-setup-field { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
+.jira-setup-field-name { font-size: 11px; font-weight: 500; color: var(--ink3) }
+.jira-setup-field .set-text { width: 100%; min-width: 0 }
+.jira-setup-defaults-base { flex: 1 1 140px }
+.jira-setup-defaults-pattern { flex: 2 1 200px }
 .jira-setup-defaults-hint { flex: 1 0 100% }
-/* A path's worktrees (§8.9.3, M7): a stacked row under the defaults line — a small head with its count, then the modal's own `.jira-wt-row`s. */
-.jira-setup-trees { gap: 0 }
-.jira-setup-trees-head { display: flex; align-items: center; gap: 8px }
-.jira-setup-trees .jira-wt-list { margin-top: 4px }
-/* The Connection card's value, in the control slot: 13 px as the mock draws it, `--ink`. */
-.jira-setup-value { font-size: 13px; color: var(--ink) }
+/* A path's open trees: a sub-head, then the modal's own `.jira-wt-row`s, here with the branch at 600 and the path in `--ink3`. */
+.jira-setup-trees { display: flex; flex-direction: column; gap: 4px; min-width: 0 } /* A flex child of a card: `min-width: auto` let a long branch widen it past the card. */
+.jira-setup-trees-head { font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ink3) }
+.jira-setup-trees .jira-wt-list { margin-top: 0 }
+.jira-setup-trees .jira-wt-branch { font-weight: 600; color: var(--ink) }
+/* A skills row (spec §4.4) in the Run menu's shape — tile, text (`.jira-run-text`'s label over sub-line), then `default` or `Make default`, then the ×. */
+.jira-setup-skill { flex-direction: row; align-items: center; justify-content: flex-start; flex-wrap: nowrap; gap: 10px; padding: 8px 0 } /* Row at every width: it is later than Settings' phone `.set-row` column reset, and the same specificity, so it wins. */
+.jira-setup-skill .jira-run-text { flex: 1 1 auto }
+.jira-setup-skill .jira-run-label { font-size: 13px; font-weight: 500; color: var(--ink) }
+.jira-setup-default { flex: none; font-size: 11px; color: var(--ink3) }
+.jira-setup-skill .jira-setup-x { margin-left: 0 }
+/* The connection banner (spec §4.4): one wrapping row — the 40 px initials disc, who is connected, three figures, the status pill — with the server's `detail`
+   on a red line under it when the pill is not Healthy. Page-local classes only (guard 7); one face, 11 px floor. */
+.jira-setup-banner-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px }
+.jira-setup-av {
+  display: inline-grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 999px;
+  background: color-mix(in srgb, var(--magenta) 14%, var(--strip)); color: var(--magenta); font-size: 13px; font-weight: 600;
+}
+.jira-setup-banner-who { flex: 1 1 220px; min-width: 0 }
+.jira-setup-banner-name { font-size: 15px; font-weight: 600; color: var(--ink) }
+.jira-setup-banner-sub { font-size: 12px; color: var(--ink3) }
+.jira-setup-figs { display: flex; gap: 20px }
+.jira-setup-fig { display: flex; flex-direction: column; gap: 2px }
+.jira-setup-fig-label { font-size: 11px; color: var(--ink3) }
+.jira-setup-fig b { font-size: 15px; font-weight: 600; color: var(--ink) }
+.jira-setup-fig-sub { font-size: 11px; color: var(--ink3) }
+.jira-setup-banner-detail { margin-top: 8px; font-size: 12px }
+/* A board row (spec §4.4): name over its fact pills, then the polled age, `Edit` and `Open` on the right. */
+.jira-setup-board { flex-wrap: nowrap; gap: 8px 12px }
+.jira-setup-board-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px }
+.jira-setup-board-main .set-name { font-size: 13px; font-weight: 600 }
+.jira-setup-board-facts { display: flex; flex-wrap: wrap; gap: 6px }
+.jira-setup-board-age { flex: none; font-size: 12px; color: var(--ink3) }
+@media (max-width: 700px) { .jira-setup-board { flex-wrap: wrap } }
 /* The filter row above the rows (from the sixth board): the field left, the sort note pushed right. Not a `.set-label` row, so it has no name to wrap. */
 .jira-setup-filter { justify-content: flex-start }
 .jira-setup-filter .set-hint { margin-left: auto }
@@ -1537,13 +1801,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   font-family: inherit; font-size: 14px; line-height: 1; color: var(--ink3);
 }
 .jira-sheet-x:hover, .jira-setup-x:hover:not(:disabled) { color: var(--ink) }
-/* The Skills card (Jira phase 5, §8.9.3). A skill's template is the row's hint, drawn as a code span (--steel fill, --ink, the card's 4 px radius — §8.1
-   forbids a second face, so "mono" here means the span treatment `.set-hint code` has) and clamped to two lines; the whole text is the `title`, so a long
-   template is read on hover rather than stretching the row. `overflow-wrap: anywhere` because a template is mostly one long slash-command with no spaces. */
-.jira-skill-prompt {
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
-  font-size: 12px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 2px 6px; white-space: pre-wrap;
-}
 /* The add row stacks: name field, template textarea, then `Add` on its own line, left-aligned like the Repositories row's chip. */
 .jira-skill-add { gap: 8px; align-items: flex-start }
 .jira-skill-add-name { width: 100%; max-width: 100% }
@@ -1572,11 +1829,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .dash-page-list { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
 .dash-page-row {
   display: flex; flex-direction: column; gap: 8px; width: 100%; padding: 10px 12px; font-size: 13px; color: var(--ink); text-align: left;
-  background: none; border: 0; border-radius: 12px; cursor: pointer; transition: background .15s
+  background: var(--strip); border: 1px solid var(--hairline); border-radius: 12px; cursor: pointer; transition: background .15s
 }
 .dash-page-row:hover { background: var(--strip-hi) }
-.dash-page-row[aria-pressed="true"] { background: var(--steel) }
+/* The mock's picked card is a 1.5 px ink outline on the same white paper; a 1 px border plus a 0.5 px inset ring gives it without moving the row's content.
+   The rows stand straight on the well, each its own white card — no enclosing Sheet, which had left them no fill of their own (ui-verify 2026-11-05). */
+.dash-page-row[aria-pressed="true"] { background: var(--strip); border-color: var(--ink); box-shadow: inset 0 0 0 .5px var(--ink) }
 .dash-page-ident { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0 }
+.dash-page-account { margin-left: auto; display: inline-flex }
 .dash-page-order {
   display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; font-size: 11px; font-weight: 600; color: var(--ink2);
   border: 1px solid var(--hairline2); border-radius: 6px; font-variant-numeric: tabular-nums
@@ -1589,8 +1849,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .dash-page-detail > .set-row { padding: 0 }
 .dash-page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px }
 .dash-page-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
-.dash-page-usage { display: flex; flex-direction: column; gap: 12px }
-.dash-page-window { display: flex; flex-direction: column; gap: 4px }
+.dash-page-usage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px }
+.dash-page-usage > .dash-page-muted { grid-column: 1 / -1 }
+.dash-page-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px; background: var(--steel); border-radius: 12px }
 .dash-page-facts {
   display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; align-items: baseline; margin: 0; padding-top: 16px;
   border-top: 1px solid var(--hairline)
@@ -1614,6 +1875,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 @media (max-width: 700px) {
   .dash-page-strategies { grid-template-columns: minmax(0, 1fr) }
   .dash-page-controls { flex: 1 0 100% }
+  .dash-page-usage { grid-template-columns: minmax(0, 1fr) }
 }
 
 /* The roots search is its Popover's positioning parent (the panel hangs under it, right edges together), and the field takes the section's full width. */
@@ -1707,11 +1969,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   border-radius: 2px; padding: 8px 10px; margin-bottom: 14px;
 }
 .run-drawer-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px }
-.run-drawer-chip {
-  font-size: 11px; color: var(--ink2);
-  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 4px 9px;
-}
 .run-drawer-chip-num { color: var(--ink); font-weight: 600; margin-right: 3px }
 
 .run-drawer-queue { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px }
@@ -2019,6 +2276,32 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .sheet-link { font-size: 12px; color: var(--cyan) }
 .sheet-note { font-size: 12px; color: var(--ink3); line-height: 1.45 }
 
+/* The Jira launch sheet's action tiles (spec §4.5): three 64 px picture buttons across the sheet. The border is 1.5 px at rest too, in a quiet colour, so a press
+   changes only its colour and nothing under it moves; the pressed tile is `--ink3` on `--strip-hi` and its GlyphTile goes `ink` (set by the component, not here).
+   Text truncates rather than wraps: a skill's name is the only free-length line. 11 px sub-line, the family's floor. */
+.launch-tiles { align-self: stretch; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px }
+/* Under the fold three tiles leave a 35 px text box (`End to …`); one column gives each its width. */
+@media (max-width: 700px) { .launch-tiles { grid-template-columns: minmax(0, 1fr) } }
+.launch-tile {
+  display: flex; align-items: center; gap: 10px; min-height: 64px; min-width: 0; padding: 8px 10px; text-align: left;
+  border: 1.5px solid var(--hairline2); border-radius: 12px; background: var(--strip); color: var(--ink); cursor: pointer; font: inherit
+}
+.launch-tile:hover:not(:disabled):not([aria-pressed='true']) { background: var(--hover-fill) }
+.launch-tile[aria-pressed='true'] { border-color: var(--ink3); background: var(--strip-hi) }
+.launch-tile:disabled { cursor: default; opacity: .5 }
+.launch-tile-text { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
+.launch-tile-title { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.launch-tile-sub { font-size: 11px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+/* The prompt's code box: the textarea keeps `.sheet-prompt` (read-only, selectable) but sits on the box's own `--steel` ground at radius 10, with the Copy chip
+   pinned top-right. The chip is reached structurally (`> button`) — guard 7 forbids restating a `ui-chip` family token here — and the textarea's right padding
+   leaves it room. The focus ring moves to the box, since the textarea's own border is gone. */
+.launch-code { position: relative; align-self: stretch; background: var(--steel); border: 1px solid var(--hairline); border-radius: 10px }
+.launch-code:focus-within { border-color: var(--cyan) }
+.launch-code .sheet-prompt { display: block; box-sizing: border-box; width: 100%; background: none; border: 0; border-radius: 10px; padding: 10px 64px 10px 12px }
+.launch-code > button { position: absolute; top: 6px; right: 6px }
+/* The foot's where-it-starts line: left, 12 px `--ink3`; `margin-right: auto` because the shell's foot is `justify-content: flex-end`. */
+.launch-foot-line { margin-right: auto; font-size: 12px; color: var(--ink3); min-width: 0 }
+
 /* The dispatch control, ONE shape since task-37: `DispatchButton` composes
    `Chip` at 28 px (DESIGN.md §8.3) and this family is what is left of its own
    — the wrapper that pushes it to the right end of a marker row and catches
@@ -2099,7 +2382,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 
 /* Runs › Watchdog — the sweeper's own page (WatchdogMonitor.tsx, task-18,
    rebuilt as a console by task-26, redrawn as a page by task-38). One column:
-   a band, three figures, a Watching sheet, an Activity sheet.
+   a band, the status row, the policy figures, a Watching sheet, an Activity sheet.
 
    task-38 deleted this section's own tile family (`.watchdog-tiles` and the
    five `.runs-tile*` rules both pages shared): the figures are `Figure`/
@@ -2108,31 +2391,22 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    this page's own layout and the readings no primitive owns — the phase lamp,
    the policy table, a watching row, the activity table. */
 .watchdog-monitor { display: flex; flex-direction: column; gap: var(--group-gap); flex: 1 1 auto; min-height: 0 }
+/* Only the Activity sheet gives up height when the board is short; every other child keeps its content height. A flex item's automatic minimum is its
+   content only while its overflow is visible, so the Ticks figure strip — a primitive that clips its rounded corners with overflow: hidden — shrank to
+   5 px at 1440×1000 and its three figures vanished (ui-verify D5, 2026-11-05). Watchdog's strip escaped only because a wrapper sits around it. */
+.watchdog-monitor > :not(.watchdog-activity) { flex-shrink: 0 }
 
-/* The phase word and its lamp share the figure's value row, so the lamp reads
-   as part of the word rather than as a bullet beside it. */
-.watchdog-tile-phase { display: inline-flex; align-items: center; gap: 8px }
-
-/* Cyan and ringed while armed, a flat disc while idle, hollow while off —
-   three phases told apart by fill AND outline, never by colour alone, since
-   the phase word sits right beside it in text either way. Not a `Dot`: a Dot
-   says a status or an identity, and neither of its eight tones is "the
-   sweeper's own phase" — which is a fourth thing, drawn once, here. */
-.watchdog-lamp { flex: none; width: 10px; height: 10px; border-radius: 999px; background: var(--ink3) }
-.watchdog-lamp-armed { background: var(--fill-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--fill-live) 22%, transparent); animation: watchdog-lamp-ring 2.4s ease-in-out infinite }
-.watchdog-lamp-off { background: transparent; border: 1.5px solid var(--ink3) }
-/* The last keyframe is the RESTING appearance on purpose: the quality-floor
-   `prefers-reduced-motion` block runs every animation once, instantly, which
-   lands it here — the same trap `.board-card-stage-glyph`'s own carve-out
-   documents. The carve-out below cancels it outright anyway. */
-@keyframes watchdog-lamp-ring {
-  0% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--fill-live) 30%, transparent) }
-  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--fill-live) 8%, transparent) }
-  100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--fill-live) 22%, transparent) }
-}
-@media (prefers-reduced-motion: reduce) {
-  .watchdog-lamp-armed { animation: none !important }
-}
+/* The status band (§8.4.2, spec §4.7) — one sheet row: ring tile, a body column (phase word, `stateLine`, the sweep meter) and the flat policy chip at the
+   far edge. The word is 16/500 and the sub 12 px, so the row reads as a headline with a caption; the body takes the slack so the chip never wraps under it. */
+.watchdog-status { display: flex; align-items: center; gap: 14px }
+.watchdog-status-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px }
+.watchdog-status-word { display: inline-flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 500; color: var(--ink) }
+.watchdog-status-sub { font-size: 12px; color: var(--ink3) }
+.watchdog-sweep { max-width: 360px; margin-top: 4px }
+/* The policy row under the band: three figures, then the resume-spawns line the old third figure carried under its pairs. */
+.watchdog-policy-block { display: flex; flex-direction: column; gap: 8px }
+/* `Watching` and its count pill share the sheet title's row. */
+.watchdog-watching-title { display: inline-flex; align-items: center; gap: 8px }
 
 .watchdog-hint { font-size: 12px; color: var(--ink3) }
 .watchdog-warn { color: var(--amber-ink) }
@@ -2245,7 +2519,11 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    first four are short tokens whose wrapping would only ever be an accident
    of width, where `detail` is a sentence. */
 .watchdog-table td { padding: 7px 12px 7px 0; border-top: 1px solid var(--hairline); vertical-align: baseline; white-space: nowrap }
-.watchdog-table-detail { white-space: normal; color: var(--ink) }
+/* `.watchdog-table td` (0,1,1) above out-ranked a bare `.watchdog-table-detail` (0,1,0), so the detail computed `nowrap` and never wrapped: a tick's
+   long reason held the Ticks Activity ledger at 1213 px in its 1104 px box at 1440, a sideways scroll at desktop width (ui-verify D6, 2026-11-05 — on main
+   too). The selector now matches that rule's weight and comes after it. `anywhere` rather than `break-word`, because only `anywhere` lowers the cell's
+   min-content, which is what an auto-layout table sizes by, and a reason can carry one long path. */
+.watchdog-table td.watchdog-table-detail { white-space: normal; overflow-wrap: anywhere; color: var(--ink) }
 .watchdog-table time { font-size: 12px; color: var(--ink3) }
 
 /* The stage-chip idiom applied to the kind column. Five tones, each a MEANING
@@ -2266,9 +2544,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    (`.watchdog-table`, `.watchdog-kind-*`) as they stand — only what a tick row has and a watching row does not is declared here. The body is a column
    because a failed Reset's line sits UNDER the row's reading, where the person just clicked, rather than in the page's one shared error slot. */
 .tick-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink2) }
-/* A halted project is the row that needs a hand, so it alone is tinted — the same 14 % `.ui-pill-bad` mixes, one step quieter (8 %) because it fills a
-   whole row rather than a pill. Side padding gives the tint somewhere to sit; without it the text would touch the tint's edge. */
-.tick-row-halted { background: color-mix(in srgb, var(--red) 8%, var(--strip)); padding-left: 12px; padding-right: 12px; border-radius: 8px }
+/* The strip is twelve marks, oldest left: solid fills like a stripe or a bar segment (a mark, not a tint, so none is pinned in the daylight contrast test).
+   `other` is a skipped or idle tick — grey, so only a failure reads as colour. */
+.tick-strip { display: flex; gap: 3px }
+.tick-strip-cell { width: 12px; height: 16px; border-radius: 3px; background: var(--hairline2) }
+.tick-strip-cell[data-tone='ok'] { background: var(--green-solid) }
+.tick-strip-cell[data-tone='failed'] { background: var(--red) }
 .tick-row-error { color: var(--ink3) }
 .tick-row-fail { font-size: 12px; color: var(--red) }
 
@@ -2289,6 +2570,16 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    over keeping the cell's height fixed. */
 .runs-figure-breakdown { display: flex; flex-wrap: wrap; gap: 2px 10px }
 .runs-figure-breakdown-item { white-space: nowrap }
+/* The Runs tile's status bar: one segment per status with runs, 6 px, 2 px gap, width set inline per segment from its share. Flat mark tokens by
+   `runTone` — green running, amber paused, red failed, grey for done and aborted — the same four the stripe and dot use. The 2 px floor keeps a one-in-
+   many status visible. Block-level so the glyph line sits under it rather than beside it. */
+.runs-status-bar { display: flex; gap: 2px; height: 6px; margin: 2px 0 6px; border-radius: 3px; overflow: hidden; background: var(--steel) }
+/* Percent widths plus the 2 px gaps add up to more than 100 %, so the segments shrink (`flex: 0 1 auto`) in proportion to their width rather than letting
+   `overflow: hidden` cut the last one off; `min-width` keeps a status with one run in a big list visible. */
+.runs-status-bar > span { display: block; height: 100%; min-width: 2px; flex: 0 1 auto; background: var(--hairline2) }
+.runs-status-bar > [data-tone='green'] { background: var(--green-solid) }
+.runs-status-bar > [data-tone='amber'] { background: var(--amber-solid) }
+.runs-status-bar > [data-tone='red'] { background: var(--red) }
 /* The project filter's native `<select>`, laid inside the `Chip` that is its
    label — the chip carries every visual decision, so this only strips the
    control's own chrome. */
@@ -2420,6 +2711,31 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .runs-count-done { font-size: 13px; font-weight: 500; color: var(--ink) }
 .runs-count-total { font-size: 13px; color: var(--ink3) }
 .runs-row-wall { flex: none; font-size: 12px; color: var(--ink3); font-variant-numeric: tabular-nums }
+/* The Live card (spec §4.6) is a `.runs-row` wearing the `ui-stripe` edge, so it keeps the row's hairline, padding and hover. Three things differ. Its
+   progress line sits 4 px under the meta line. The stripe and the selection marker both want `box-shadow`, and the selected row's inset 2 px ink rule
+   (`.runs-row[aria-current]`, earlier) would otherwise replace the stripe: the card keeps the stripe and draws the selection as an ink outline inside it.
+   And the stripe's inset 3 px needs 3 px more leading padding than the row's 12 so the project name clears it. The card contains no other stripe, because
+   `--stripe` is inherited and a nested one would repaint from this card's tone. */
+.runs-card { padding-left: 15px; gap: 6px }
+/* Each card is a card of its own, as the mock draws them and as the Jira deck card already is (`.jira-deck-card`): its own `--hairline` stroke and radius,
+   8 px apart, rather than rows that share a hairline. Drawn as touching rows, two stripes in one tone met end to end and read as one long bar down the sheet,
+   and the selected row's outline sat flush against its neighbour's hairline. The inset stripe follows the radius, so nothing needs clipping.
+   No fill on hover or on selection: `--strip-hi` is the neutral pill's own ground, so a filled card swallowed its `remote` tag — the tag vanished from exactly
+   the card being looked at. Hover deepens the stroke instead; selection is the mock's ink stroke plus a 1 px ink ring outside it, which keeps the stripe.
+   `.runs-row.runs-card` is two classes on purpose: `.runs-row:first-child`, `:hover` and `[aria-current]` are two-class rules declared earlier, and a bare
+   `.runs-card` would lose to every one of them. */
+.runs-live-sheet .runs-rows { gap: 8px }
+.runs-row.runs-card { border: 1px solid var(--hairline); border-radius: 10px; padding-top: 12px; padding-bottom: 12px; background: var(--strip) }
+.runs-row.runs-card:hover { background: var(--strip); border-color: var(--hairline2) }
+.runs-row.runs-card[aria-current='true'] {
+  background: var(--strip); border-color: var(--ink);
+  box-shadow: inset 3px 0 0 var(--stripe, transparent), 0 0 0 1px var(--ink);
+}
+.runs-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0 }
+/* The id holds the leading edge and everything after it — the machine tag, then the age — packs to the trailing one, as the mock's card draws it
+   (ui-verify D2, 2026-11-05). The first sibling takes the auto margin, so a local run's lone age lands there too. */
+.runs-card-id + * { margin-left: auto }
+.runs-card-id { flex: none; font-size: 12px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 1px 6px; overflow-wrap: anywhere }
 /* The crashed Live row's second line — all three readings (`no heartbeat for
    <age>`, `last reported <id> at <stage>` or `all items at rest`, and
    `watchdogClause`'s sentence) in one wrapping amber line, because they travel
@@ -2567,11 +2883,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  /* The bars' label and value columns narrow so the track keeps ~140 px at
-     the cell's 280 px inner width — below about 120 px a seven-row chart
-     stops being comparable, which is the only thing the chart is for. The
-     detail sheet's own instance keeps 80/60 (see `.run-detail-rollup`). */
-  .runs-board > .runs-stats .run-bars-row { grid-template-columns: 72px 1fr 56px }
 }
 
 /* ---------------------------------------------- run detail sheet (task-38)
@@ -2596,7 +2907,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   gap: 12px 24px; margin: 16px 0;
 }
 .run-fact { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
-.run-fact-label { font-size: 12px; font-weight: 400; color: var(--ink2) }
+.run-fact-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 400; color: var(--ink2) }
+.run-fact-wall { color: var(--ink2); font-weight: 400 }
 .run-fact-value { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums }
 /* The `status` cell's second reading — `heartbeat live`, `paused after <id>`,
    `pausing · finishes <id>`. Quiet ink and a normal weight: it qualifies the
@@ -2698,13 +3010,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   background: var(--steel); border: 1px solid var(--hairline);
   border-radius: 2px; padding: 10px 12px;
 }
-/* Pinned explicitly rather than left to inherit `.run-bars-row`'s own base
-   rule below (already this exact value today): Task 7 adds a SECOND caller
-   of `.run-bars-row` — a wide toolbar tile summing every run in view, which
-   needs its own column widths for a full-width strip — and this override is
-   what keeps a later change to that shared base rule from silently
-   reflowing this run-scoped instance too. */
-.run-detail-rollup .run-bars-row { grid-template-columns: 80px 1fr 60px }
 
 /* One item card's queue-wait / preflight lead line (Task 6) — printed here
    as CONTEXT between the card's head and its StageTrack, not folded back
@@ -2717,92 +3022,34 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    rather than a new one invented for an item-scoped reading. */
 .run-detail-lead { font-size: 12px; color: var(--ink3) }
 
-/* ---------------------------------------------- run stage bars (Task 4)
-   StageBars.tsx: the seven-row "where did the time go" widget, rendered
-   twice — once per run (inside the detail sheet) and once summed across a
-   whole visible range (the figure strip's wide sixth cell) — so its rules
-   live in their own block rather than folding into either caller's own
-   section.
-
-   TEN PIXELS TALL, up from the 6 px this shipped until task-38. §3 gives a
-   progress bar 10 px, and §8.4.1 states the reason this widget in particular
-   moves: at the figure strip's full width the bar is the cell's SUBJECT
-   rather than a sparkline beside a number, and a 6 px rule read as a hairline
-   at that size. The per-run instance takes the same height rather than
-   keeping the old one, because the two exist to be compared at a glance —
-   `fixing` sits at row 5 of both, every time — and two heights would make the
-   pair read as two different charts.
-
-   ONE SERIES, ONE HUE. Unlike the per-item .run-detail-stagebar (deleted in
-   Task 6; its segments were different STAGES packed into the same bar, and
-   therefore needed one tone per stage to stay legible), every bar here is
-   the same series — one stage's own total on its own row — so there is
-   exactly one thing for colour to distinguish (a filled row from an empty
-   one), not seven.
-   `--fill-progress` is not an arbitrary choice for that one hue: §8.2 gives
-   that token to work that has MOVED — a reached stage node on the track
-   below wears it too — and every millisecond on this chart is work that
-   happened. It is deliberately not `--fill-live`, which means "happening
-   right now": these are totals, including a still-open span, and a chart
-   painted in the live fill would read as seven things in progress.
-   All seven rows share it. `preflight` is not carved out even though the
-   item chip tones it differently, because this widget is answering "how much
-   orchestrator time", not "what stage is this item in", and `runStageTotals`
-   already counts `preflight` as machine time on that basis — one measurement
-   taken seven times.
-
-   THE ROW SET IS FIXED AND ORDERED — always all seven `MACHINE_STAGES`
-   entries, always in that constant's own pipeline order, whether or not a
-   given run/range ever recorded a millisecond in one of them (StageBars.tsx
-   prints `—` for an absent stage rather than omitting its row). This is what
-   keeps the per-run instance and the range-wide instance comparable at a
-   glance: `fixing` sits at row 5 of both, every time, so a reader moving
-   from the card to the tile is never re-scanning a reshuffled list.
-
-   THE VALUE IS INK, NOT THE FILL'S COLOUR. This codebase's colour vocabulary keeps data
-   colour off text on purpose (CONSTRAINTS.md: "text never wears a data
-   colour" — values print in --ink/--ink2/--ink3 regardless of what tone the
-   thing beside them uses). The bar is the data-coloured element; the number
-   restating that same measurement in words is the PRECISE reading a bar's
-   length can only approximate, and colouring it to match would make it read
-   as decoration rather than as the figure to actually trust. `--ink3` for
-   the `-none` modifier is the same muted tone the rest of this app already
-   uses for "nothing recorded" (`.board-card-stage-idle`, `.run-detail-
-   time`), not a new one invented for this widget.
-
-   NO IN-BAR LABEL. A label baked into the fill would
-   have to sit on top of it for a long bar and past its end for a short one —
-   two layouts fighting for the six pixels of height a widget built to
-   summarise seven rows in the space of one has no room to referee. The row's
-   own label/value columns already say both things (which stage, how long)
-   in a fixed place.
-   THE TRACK IS A TRACK, not a hairline baseline. §2 says the remainder of a
-   progress bar is a `--steel` track with no hatch, and the reason the old
-   left-edge rule gave for having no track at all — that an empty track would
-   be indistinguishable from "a value too small to see" — is answered by
-   StageBars.tsx's own `ms > 0` guard instead: an absent stage draws NO fill
-   and reads `—` beside it, where a value too small to see still draws the
-   3 px `min-width` floor. Two different renderings, neither of them an empty
-   track pretending to be a measurement. */
-.run-bars { display: flex; flex-direction: column; gap: 5px }
-.run-bars-row {
-  display: grid; grid-template-columns: 80px 1fr 60px;
-  align-items: center; gap: 8px;
-}
+/* ---------------------------------------------- run stage bars (Task 4, restyled in the runs-and-github plan)
+   StageBars.tsx: rendered twice — per run in the detail sheet, and summed across the visible range in the figure strip's wide sixth cell — so its rules
+   live in their own block. One stacked bar over a seven-entry legend; see the component header for why the legend is always seven and the bar is not. */
+.run-bars { display: flex; flex-direction: column; gap: 8px }
+/* ONE stacked bar, 10 px, segments only for stages that recorded time, widths set inline from each stage's share of the total. Segments touch (no gap) so
+   the whole reads as one length; the `--steel` base shows only when nothing is recorded, and a bar with no segment is still drawn. A stage's colour is a
+   FLAT token keyed by `data-stage`, shared with its legend swatch, never a tint: dispatched is the green mark, reviewing the cyan accent, fixing the amber
+   mark, verifying magenta, inspecting mustard, and the two bookends (preflight, merging) the quiet `--ink3`. */
+.run-bars-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--steel) }
+.run-bars-seg { display: block; height: 100%; flex: none; min-width: 2px }
+.run-bars-seg[data-stage='dispatched'], .run-bars-swatch[data-stage='dispatched'] { background: var(--green-solid) }
+.run-bars-seg[data-stage='reviewing'], .run-bars-swatch[data-stage='reviewing'] { background: var(--cyan) }
+.run-bars-seg[data-stage='fixing'], .run-bars-swatch[data-stage='fixing'] { background: var(--amber-solid) }
+.run-bars-seg[data-stage='verifying'], .run-bars-swatch[data-stage='verifying'] { background: var(--magenta) }
+.run-bars-seg[data-stage='inspecting'], .run-bars-swatch[data-stage='inspecting'] { background: var(--mustard) }
+.run-bars-seg[data-stage='preflight'], .run-bars-swatch[data-stage='preflight'],
+.run-bars-seg[data-stage='merging'], .run-bars-swatch[data-stage='merging'] { background: var(--ink3) }
+/* The legend lists all seven stages whether or not they have a segment, so the widget keeps one shape in both places it renders. Auto-fit columns let it
+   wrap to two rows in the narrower detail rollup without a media query. */
+.run-bars-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 4px 16px }
+.run-bars-item { display: grid; grid-template-columns: 8px auto auto; justify-content: start; align-items: center; gap: 6px }
+.run-bars-swatch { width: 8px; height: 8px; border-radius: 2px; background: var(--steel) }
 .run-bars-label { font-size: 12px; color: var(--ink2) }
-.run-bars-track { position: relative; height: 10px; border-radius: 8px; background: var(--steel) }
-/* The same floor `.run-detail-seg` (deleted in Task 6) used to carry, for
-   the identical reason: a genuinely brief stage (a few seconds) must stay a
-   visible sliver next to one that took most of an hour, not shrink to
-   nothing beside it. */
-.run-bars-fill {
-  position: absolute; left: 0; top: 0; height: 10px;
-  background: var(--fill-progress); border-radius: 8px; min-width: 3px;
-}
-.run-bars-value {
-  font-size: 12px; color: var(--ink);
-  text-align: right; font-variant-numeric: tabular-nums;
-}
+/* THE VALUE IS INK, NOT THE SEGMENT'S COLOUR: text never wears a data colour. The swatch carries the hue, the number is the precise reading. `--ink3` for
+   the `-none` modifier is the app's usual "nothing recorded". */
+/* The value sits beside its word, not at the cell's far edge: right-aligned in a 1fr cell it landed nearer the NEXT column's swatch and read as that
+   stage's number (ui-verify D1, 2026-11-05; the mock draws `dispatched 2h 41m` as one phrase). */
+.run-bars-value { font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums }
 .run-bars-value-none { color: var(--ink3) }
 
 /* ---------------------------------------------- stage track (Task 5)
@@ -3094,20 +3341,53 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-status { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-status-error { color: var(--red) }
 .prs-repo-inner { display: flex; flex-direction: column; min-width: 0 }
-.prs-repo-sub { display: flex; flex-wrap: wrap; gap: 4px 12px }
+/* A card's head (mock `PRsLayouts.dc.html`, Cards): the dark repo tile, the short name and the `N open` pill (with `sync off`) lead as one group in the title, and the
+   poll age is the only thing in the head's right slot, so it sits at the trailing edge. `nowrap` on the trail keeps `polled 12 s ago` one line; the title group
+   wraps its pill under the name instead when a narrow card cannot hold both. */
+.prs-repo-title { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; overflow-wrap: anywhere }
+.prs-repo-pills { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px }
+.prs-repo-trail { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; font-size: 13px; font-weight: 400; color: var(--ink2); white-space: nowrap }
+/* Cards flow two-up where the pane has room for two 520 px cards and one column below that; `min(520px, 100%)` lets a pane narrower than 520 px still take one
+   column without sideways scroll. Top-aligned, because a repo with two PRs beside one with six should not stretch to its neighbour's height. */
+.prs-cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(520px, 100%), 1fr)); gap: 16px; align-items: start; min-width: 0 }
 /* The repo's own note under its head — the sync-off sentence. Readable without hover: on a phone there is none. */
 .prs-note { font-size: 13px; color: var(--ink2); line-height: 1.45; margin-bottom: 12px }
 .prs-list { list-style: none; margin: 0; padding: 0 }
 /* One row anatomy for Inbox and Cards (spec `2026-10-30-prs-page-fixes-design.md`): the text on the left, the four keys and their why-line on the right,
-   top-aligned with the title. The text keeps a 320 px basis, so the keys drop under it whenever the title would get less — the title is never squeezed to
-   make room for keys — and always below the narrow breakpoint, left-aligned there. The foot (Confirm, outcome) lives in the text column, never the keys'. */
+   top-aligned with the title. Inbox's text keeps a 320 px basis, so the keys drop under it whenever the title would get less — the title is never squeezed to
+   make room for keys (Cards overrides that, see `.prs-list .prs-row-main`) — and always below the narrow breakpoint, left-aligned there. The foot (Confirm, outcome) lives in the text column, never the keys'. */
 .prs-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; padding: 16px 0; min-width: 0 }
+/* Cards' rows are the compact ones: the head already says the repo, so each row needs less air between hairlines. */
+.prs-list .prs-row { padding: 12px 0 }
+.prs-list .prs-row:first-child { padding-top: 12px }
+/* Cards only (user override, 2026-11-06, per mock `PRsLayouts.dc.html`): a two-up card is ~480-520 px of inner width, so the 320 px basis below would drop the keys
+   under every row's text. Here the text takes a 240 px basis instead — tile 28 + two 16 px gaps + the ~170 px keys still fit at ~480 — and the title wraps rather than
+   the keys moving. Inbox's rows are not under `.prs-list` and keep the 320 px rule; the narrow block below still sends the keys under the text at 700 px. */
+.prs-list .prs-row-main { flex: 1 1 240px }
 .prs-row + .prs-row { border-top: 1px solid var(--hairline) }
 .prs-row:first-child { padding-top: 0 }
 .prs-row:last-child { padding-bottom: 0 }
 .prs-row-main { display: flex; flex-direction: column; gap: 6px; flex: 1 1 320px; min-width: 0 }
 .prs-keys-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: 0 1 auto; min-width: 0 }
-.prs-keys { display: flex; flex-wrap: wrap; gap: 8px }
+/* The split Merge and the Open link. Structural selectors for the link, because a `ui-*` token outside the primitives block fails design-guards guard 7. */
+.prs-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
+.prs-keys > a { width: 28px; padding: 0; justify-content: center }
+.prs-keys-merge { position: relative; display: inline-flex }
+/* The `Merge menu`'s rows: two lines (label, then what it does — or why it cannot), a 28 px tinted tile leading (mock `.mi`) and the primary's tick trailing. */
+.prs-keys-rows { display: flex; flex-direction: column; gap: 2px; margin: -8px }
+.prs-keys-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 6px 10px; box-sizing: border-box;
+  border: 0; border-radius: 8px; background: var(--strip); text-align: left; cursor: pointer; color: var(--ink);
+}
+.prs-keys-row:hover:not([aria-disabled='true']) { background: var(--strip-hi) }
+/* The primary row — the one the tick marks — rests on the hover ground (mock `.mi.on`); `PrActions` sets the class, never a blocked row. */
+.prs-keys-row-on { background: var(--strip-hi) }
+.prs-keys-row[aria-disabled='true'] { cursor: default; color: var(--ink3) }
+.prs-keys-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0 }
+.prs-keys-label { font-size: 13px; font-weight: 500 }
+.prs-keys-sub { font-size: 11px; color: var(--ink2) }
+.prs-keys-row[aria-disabled='true'] .prs-keys-sub { color: var(--ink3) }
+.prs-keys-tick { display: inline-flex; flex: none; color: var(--ink) }
 .prs-foot { display: flex; flex-direction: column; gap: 8px; margin-top: 8px }
 @media (max-width: 700px) {
   .prs-keys-side { flex: 1 0 100%; align-items: flex-start }
@@ -3118,33 +3398,55 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-title { min-width: 0; overflow-wrap: anywhere }
 .prs-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; color: var(--ink2) }
 .prs-branches { overflow-wrap: anywhere }
+/* The meta line's two lead-ins, from the mock's row (`PRs.dc.html`: `<span class="av">F</span>futin · <branch glyph> head → base`). Each pair is one flex item of
+   `.prs-line`, so the disc never wraps away from its login nor the glyph from its branches. The disc is the Jira card's initials disc (`.jira-card-av`: the
+   magenta tint on `--strip`, 999px, 600 weight) sized for a 13 px line — 16 px, as the mock's inline `.av` — and the 11 px floor is the guard's, so the mock's 8 px
+   letter does not survive; the letter is uppercased in JS, never by `text-transform` (guard 4). */
+.prs-author, .prs-branch-pair { display: inline-flex; align-items: center; gap: 4px; min-width: 0 }
+/* A meta item and its trailing `·` are one flex item of `.prs-line` (`PrRow`), so a wrap breaks between items, never inside a pair: no dot starts a line or
+   sits alone at the end of one. The 6 px before the dot restores the spacing the line's own gap used to give a free-standing separator. */
+.prs-meta-item { display: inline-flex; align-items: center; min-width: 0 }
+.prs-sep { margin-left: 6px }
+.prs-av {
+  display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; border-radius: 999px;
+  background: color-mix(in srgb, var(--magenta) 14%, var(--strip)); color: var(--magenta); font-size: 11px; font-weight: 600; line-height: 1;
+}
+.prs-branch-pair > svg { flex: none }
 .prs-chips { display: flex; flex-wrap: wrap; gap: 6px }
+/* A row's pills and meta are ONE wrapping line (mock `PRs.dc.html`: the pills, then `author · head → base · age`). The two wrappers stay in the markup so the meta's
+   children are still a list, and dissolve here so their items flow in this container; Matrix's own `.prs-meta` is untouched, it is not inside `.prs-line`. */
+.prs-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0 }
+.prs-line > .prs-chips, .prs-line > .prs-meta { display: contents }
 .prs-why { font-size: 12px; color: var(--ink2) }
 .prs-outcome { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-outcome-error { color: var(--red) }
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
 
-/* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The tiles are plain bordered buttons — a selected one takes the ink border, never a fill, so a level's dot stays
-   the only colour on it. Its rows are the shared `.prs-row` above, boxless with a hairline between them.
-   Muted steps use --ink3, the calm ones a step down from the problems, which stay --ink2. Own `.prs-inbox*`, `.prs-tile*` and `.prs-notes*` classes only — a
-   `.ui-*` primitive is never restyled from here (guard 7). */
+/* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The triage is a `Segmented` and each row leads with a `GlyphTile` in its checks tone. Its rows are the shared
+   `.prs-row` above; each is its own card (restyle fixes I1, mock `PRs.dc.html`:109) — `--card` ground, hairline border, 14 px radius, 14 x 16 padding, 10 px
+   between rows and no divider rule. The skin is the LIST's (`.prs-inbox-list > .prs-row`), never the shared `.prs-row`, because Cards draws the same row boxless
+   inside its repo card. Own `.prs-inbox*` and `.prs-notes*` classes only — a `.ui-*` primitive is never restyled from here
+   (guard 7). */
 .prs-inbox { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
-.prs-inbox-tiles { display: flex; flex-wrap: wrap; gap: 8px }
-.prs-tile {
-  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 14px; border-radius: 12px; cursor: pointer;
-  border: 1px solid var(--hairline); background: var(--strip); color: var(--ink2); font-size: 14px
+.prs-inbox-triage { display: flex; min-width: 0 }
+.prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px }
+/* On a phone the 320 px text basis plus the 40 px tile and the 16 px gap is wider than a boxed card's ~306 px inner width, so the text column wrapped under the
+   tile and left it alone on the first line. Under 700 px the basis drops to 0 (the keys already take their own line below), so the text grows into whatever the
+   tile leaves and the tile stays beside the title. Inbox's list only: Cards' rows already have a 240 px basis. */
+@media (max-width: 700px) {
+  .prs-inbox-list > .prs-row > .prs-row-main { flex: 1 1 0 }
 }
-.prs-tile:hover { color: var(--ink) }
-.prs-tile[aria-pressed="true"] { border-color: var(--ink); color: var(--ink) }
-.prs-tile-n { color: var(--ink); font-weight: 600 }
-.prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0 }
-.prs-inbox-heading { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
+/* The shared row's first/last padding resets and its between-rows rule are each as specific as this and earlier in the sheet, so they are restated here for
+   the card: every card is padded the same and the hairline is its border, not a divider. */
+.prs-inbox-list > .prs-row,
+.prs-inbox-list > .prs-row:first-child,
+.prs-inbox-list > .prs-row:last-child {
+  padding: 14px 16px; background: var(--card); border: 1px solid var(--hairline); border-radius: 14px
+}
+/* `Quiet` is a section label, not a bare word between cards: the triage's own 13/500 type, with 8 px on top of `.prs-inbox`'s 16 px gap (24 px above, 16 at
+   least). */
+.prs-inbox-heading { margin: 8px 0 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
 .prs-inbox-repo { flex: none; font-size: 13px; font-weight: 400; color: var(--ink3) }
-.prs-inbox-verdict { font-size: 14px; color: var(--ink); line-height: 1.45 }
-.prs-inbox-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px }
-.prs-inbox-step { font-size: 13px; color: var(--ink2); line-height: 1.45 }
-.prs-inbox-step-calm { color: var(--ink3) }
-.prs-inbox-facts { font-size: 13px; color: var(--ink3) }
 /* One text-link look for the page's inline controls — the toolbar's `GitHub › Settings`. `.set-link` is §8.6's 36 px bordered row control and reads as a
    button inside a sentence, so this page keeps its own (a PRs class, not a restyle of `.set-link`). */
 .prs-textlink {
@@ -3155,11 +3457,25 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-notes-line { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-notes-error { color: var(--red) }
 
-/* GitHub › PRs toolbar (.claude/DESIGN.md §8.11): the layout switcher on the left, the hidden-repos note beside it, the newest read's age pushed to the right.
-   Own classes only — the Segmented's `.ui-*` look is never restyled here (design guard 7); this lays the three out in a row that wraps on a narrow window. */
+/* GitHub › PRs head (.claude/DESIGN.md §8.11; restyle fixes I5): one band for all three layouts. The sub-line leads with a live dot (the mock's 7 px `.dot.g`),
+   and the layout switch rides the band's trailing slot, wrapped in `.prs-switch` so this page owns its width — the `Segmented`'s `.ui-*` look is never restyled
+   here (design guard 7), only laid out through `[role='group']`. On a phone the slot wraps under the title (`.prs-band`'s last child is `.ui-band-right`,
+   reached positionally because guard 7 forbids naming the primitive's class) and the switch takes the full width, its three buttons sharing it, so Inbox,
+   Matrix and Cards are reachable without sideways scroll. */
+.prs-band-sub { display: inline-flex; align-items: center; gap: 6px }
+.prs-band-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green-solid) }
+.prs-switch { display: flex; min-width: 0 }
+@media (max-width: 700px) {
+  .prs-band:has(.prs-switch) > :last-child { flex: 1 0 100%; margin-left: 0 }
+  .prs-switch { flex: 1 1 auto }
+  .prs-switch [role='group'] { display: flex; flex: 1 1 auto; min-width: 0 }
+  .prs-switch [role='group'] button { flex: 1 1 0; min-width: 0 }
+}
+
+/* GitHub › PRs toolbar (.claude/DESIGN.md §8.11): only the notes now — `N repos hidden — no access`, Cards' `N repos with no open PRs` — and the row is not
+   drawn when there are none. Own classes only; it wraps on a narrow window. */
 .prs-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px }
 .prs-toolbar-note { margin: 0; font-size: 13px; color: var(--ink2) }
-.prs-toolbar-age { margin-left: auto; font-size: 13px; color: var(--ink2) }
 
 /* GitHub › PRs, Matrix layout (§8.11; specs 2026-10-29-prs-layouts-design.md and 2026-10-30-prs-page-fixes-design.md, "Matrix"). One `<table>` inside the
    page's own scroll box, one row per PR, one column per check. Colour is for a problem only: ok and na stay in ink (--ink2 / --ink3), bad is --red, meh --amber-ink and live --live-ink — the §8.2 TEXT
@@ -3180,7 +3496,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-matrix-table td { padding: 14px 12px 14px 0; border-top: 1px solid var(--hairline); vertical-align: middle }
 .prs-matrix-table tbody tr:first-child td { border-top: 0 }
 .prs-matrix-table th:last-child, .prs-matrix-table td:last-child { padding-right: 0 }
-.prs-matrix-count { color: var(--ink); font-weight: 600 }
 /* Width as padding, not `width`: a table squeezed below its columns' sum shrinks a cell to its min-content, and a `width` is not min-content — padding is.
    Without this the dot sat flush against `#n` on a window just wide enough to offer Matrix. The left 12 px keeps the dot clear of the open row's ink bar. */
 .prs-matrix-table .prs-matrix-dot { width: 10px; padding-left: 12px; padding-right: 12px }
@@ -3192,24 +3507,44 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-matrix-row { cursor: pointer }
 .prs-matrix-row:hover td { background: var(--strip-hi) }
 .prs-matrix-row:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px }
-/* The open row and its expansion read as one block, as the dashboard's do: one `--strip-hi` ground under both, and an inset ink bar on the left edge — on the
-   expansion it rides the pinned block, so it stays in view while the table is scrolled. */
+/* The open row keeps a pressed ground (`--strip-hi`) and an inset ink bar on its left edge; its expansion is the next table row, on the same ground with the
+   bar riding its pinned block (so it stays in view while the table is scrolled), and the two read as one block (mock `PRsLayouts.dc.html`). */
 .prs-matrix-row[aria-expanded="true"] td, .prs-matrix-expand td { background: var(--strip-hi) }
 .prs-matrix-row[aria-expanded="true"] td:first-child, .prs-matrix-expand .prs-matrix-pinned { box-shadow: inset 3px 0 0 var(--ink) }
 /* The cap is on a block inside the cell, never on the `<td>` — CSS leaves `max-width` on a table cell undefined and Chrome ignores it. The dot and PR cells
    together take at most 60 % of the box (34 px dot, 12 px of the PR cell's padding), and the 200 px floor yields to that cap, so a 375 px phone keeps about
-   120 px of evidence in view; the title wraps inside it rather than ellipsizing. */
+   120 px of evidence in view; the title stays one line and ellipsizes (rule below), its full text in the span's `title`. */
 .prs-matrix-pr-inner { min-width: min(200px, calc(60cqw - 46px)); max-width: calc(60cqw - 46px) }
 .prs-matrix-pr .prs-row-title { font-size: 14px }
+/* Matrix's title is one line with an ellipsis (mock `PRsLayouts.dc.html`; the full title is the span's `title`). `min-width: 0` on this flex item is what lets the
+   ellipsis engage inside `.prs-matrix-pr-inner`'s 60cqw cap, so a long title never widens the table past its columns' natural widths. Inbox and Cards keep
+   `.prs-title`'s wrapping — they are not under `.prs-matrix-pr`. */
+.prs-matrix-pr .prs-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .prs-matrix-pr .prs-meta { margin-top: 3px; font-size: 12px; color: var(--ink3) }
 .prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
 .prs-matrix-outcome td, .prs-matrix-expand td { border-top: 0; padding-top: 0 }
-/* The expansion and a collapsed row's outcome are one cell across every column; their content is pinned to the box's visible width, so the keys, the
-   Confirm and the outcome never sit off-screen while the table is scrolled. 34 px starts them under the PR's `#n` rather than under the dot. */
+/* A collapsed row's outcome, and the open row's expansion, are one cell across every column; the content is pinned to the box's visible width, so it never
+   sits off-screen while the table is scrolled. 34 px starts it under the PR's `#n` rather than under the dot. */
 .prs-matrix-pinned { position: sticky; left: 0; width: 100cqw; box-sizing: border-box; padding-left: 34px }
-.prs-matrix-expand .prs-matrix-pinned { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding-bottom: 6px }
-.prs-matrix-expand .prs-keys-side { align-items: flex-start }
-.prs-matrix-expand .prs-foot { margin-top: 2px }
+/* `min-width: 0` on the sheet so the scroll box still shrinks inside the flex column. */
+.prs-matrix-sheet { min-width: 0 }
+.prs-matrix-expand .prs-matrix-pinned { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-bottom: 12px }
+.prs-matrix-expand .prs-keys-side { align-items: flex-start; flex: none }
+.prs-matrix-expand .prs-foot { margin-top: 0 }
+/* The Merge menu is drawn IN FLOW here, under the split, at every width. The scroll box's `overflow-x: auto` clips both axes, so an absolute menu was cut
+   at the box's edge — which is why #473 drew the whole expansion after the table, where it sat under the LAST row and read as that PR's. The phone shape's
+   `position: fixed` would not escape either: the box is a size container (`container-type`), and its containment pins a fixed descendant to it. So the
+   menu lengthens the row instead. The family is never named, which guard 7 forbids in a page selector; this selector outranks `[class*='narrow']`'s, so one
+   rule covers both shapes, and `100cqw` (the scroll box's width) less the pinned padding keeps it on a phone.
+   The keys become a two-column grid with the merge wrapper dissolved (`display: contents`), so the split and the Open link share row 1 and the menu spans
+   row 2. Inside the wrapper the 280 px menu widened it and pushed the link 280 px right, away from the split it belongs beside; the `1fr` second column
+   takes a spanning menu's extra width, so the link stays next to the split; the first is `max-content`, not `auto`, because on a phone the box is
+   narrower than its contents and an `auto` track shrank to the split's min-content (18 px), laying the link over it. */
+.prs-matrix-expand .prs-keys { display: grid; grid-template-columns: max-content 1fr; justify-items: start; align-items: center }
+.prs-matrix-expand .prs-keys-merge { display: contents }
+.prs-matrix-expand .prs-keys-merge > [role='dialog'] {
+  grid-row: 2; grid-column: 1 / -1; position: static; width: var(--ui-popover-width); max-width: calc(100cqw - 50px); max-height: none; box-shadow: none
+}
 .prs-matrix-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12px }
 .prs-cell-ok { color: var(--ink2) }
 .prs-cell-bad { color: var(--red) }
@@ -3397,6 +3732,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-dot-10 { width: 10px; height: 10px }
 .ui-dot-live { background: var(--fill-live) }
 .ui-dot-paused { background: var(--mustard) }
+/* The amber MARK (`--amber-solid`, DESIGN §8.2's daylight table) — the PRs page's worth-a-look dot. `paused` stays mustard for the runs that use it. */
+.ui-dot-warn { background: var(--amber-solid) }
 .ui-dot-crashed { background: var(--red) }
 .ui-dot-done { background: var(--fill-progress) }
 /* The category ramp read left to right (§8.2), the same four the column heads
@@ -3493,10 +3830,11 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    the clock a second late forever. Tone is the root's `data-tone`, one of the three accents every theme declares. */
 .ui-meter { display: inline-flex; flex-direction: column; gap: 3px; flex: none }
 /* The head may wrap: a popover row's value can be a whole access sentence in a 120 px meter, and it breaks onto its own lines there rather than
-   running out of the track. The chip keeps its meters on one line by letting them grow instead (`.tracker-meters`). */
+   running out of the track. The chip keeps its meters on one line by letting them grow instead (the old meters). */
 .ui-meter-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 6px }
 .ui-meter-label { font-size: 11px; font-weight: 500; color: var(--ink3) }
 .ui-meter-value { font-size: 11px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums }
+.ui-meter[data-height='4'] .ui-meter-track { height: 4px }
 .ui-meter-track { height: 3.5px; border-radius: 4px; background: var(--steel); overflow: hidden }
 .ui-meter-fill { display: block; height: 100%; border-radius: 4px; background: var(--green-solid) }
 .ui-meter[data-tone="amber"] .ui-meter-fill { background: var(--amber-solid) }
@@ -3538,6 +3876,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-seg button:hover:not(:disabled) { color: var(--ink); background: var(--hover-fill) }
 .ui-seg button:disabled { cursor: default; opacity: .4 }
 .ui-seg button.on { color: var(--ink); background: var(--strip-hi); border-color: var(--ink3) }
+/* `Segmented`'s optional `leading` node (a level `Dot` in GitHub › PRs' triage): before the label, centred on its line, 6 px clear of it. */
+.ui-seg-lead { display: inline-block; margin-right: 6px; vertical-align: middle; line-height: 0 }
+/* The optional per-option count (Sessions' state filter): quieter than the label, steadier on the pressed option; tabular so a changing number does not
+   jiggle the segment. */
+.ui-seg-count { font-size: 11px; font-weight: 600; color: var(--ink3); font-variant-numeric: tabular-nums }
+.ui-seg button.on .ui-seg-count { color: var(--ink2) }
 /* The pill variant (§8.6) — `Segmented`'s `pill` prop, a variant on the
    primitive rather than a second family a page declares (§12.1). A recessed
    `--steel` track under a raised `--strip` option: "on" is legible from the
@@ -3578,6 +3922,30 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .ui-number:focus { outline: none; border-color: var(--ink3) }
 .ui-number-unit { font-size: 12px; color: var(--ink3) }
+/* The stepper around it (`− value unit +`): − and + are 36 px squares of the family's fill, the value sits between them. Structural `button` selectors are
+   not needed — the buttons carry the `.ui-number-step` class of this family. */
+.ui-number-stepper { display: inline-flex; align-items: center; gap: 8px }
+.ui-number-stepper .ui-number { width: 64px; text-align: center }
+.ui-number-step {
+  width: 36px; height: 36px; padding: 0; border-radius: 12px; font-size: 16px; line-height: 1; color: var(--ink);
+  background: var(--strip); border: 1px solid var(--hairline2);
+}
+.ui-number-step:hover:not(:disabled) { border-color: var(--ink3) }
+.ui-number-step:disabled { opacity: .4; cursor: default }
+.ui-number-value { min-width: 40px; text-align: center; font-size: 13px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums }
+
+/* StatusPill — the 28 px state chip (Shell mock): dot, word, optional age. Neutral fill, so no tint to pin; the dot reuses `.ui-stripe-dot`'s tone colours at
+   7 px. */
+.ui-status {
+  display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border-radius: 999px; white-space: nowrap;
+  font-size: 12.5px; font-weight: 600; color: var(--ink); background: var(--strip-hi);
+}
+.ui-status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--hairline2) }
+.ui-status-dot[data-tone='green'] { background: var(--green-solid) }
+.ui-status-dot[data-tone='amber'] { background: var(--amber-solid) }
+.ui-status-dot[data-tone='red'] { background: var(--red) }
+.ui-status-dot[data-tone='grey'] { background: var(--hairline2) }
+.ui-status-age { font-weight: 500; color: var(--ink3) }
 
 /* Switch — the family's pill member (§8.6): a recessed --steel track under a
    raised --strip option, so "on" is legible from the geometry before any
@@ -3748,8 +4116,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 /* On a phone the control lives in the rail bar, and the narrow `.rail` is a scroll container (`overflow-x: hidden` computes `overflow-y` to auto), so an
    absolute panel is clipped to the 53 px bar and paints nothing — and right-anchored under a control beside ☰ it would start off-screen besides. Fixed
-   escapes the clip. `top` goes back to auto — the base rule's `100% + 8px` would now resolve against the viewport's height — so the panel keeps its static
-   position just under the control, `margin-top` supplying the 8 px that `top` no longer does, and it spans the viewport less the rail's own 12 px side padding.
+   escapes the clip. It is a BOTTOM SHEET, `bottom: 12px`: a fixed box left at its static position under the control stayed glued to the viewport while the page
+   scrolled (the anchor moved 300 px, the panel did not), covered the anchor when the control sat at a flex start, and on a tall row ran off the screen so the
+   last rows were unreachable. Pinned to the viewport's foot with `top: auto` (the base rule's `100% + 8px` would resolve against the viewport's height) it is
+   the same place wherever the control scrolls to, and it spans the viewport less the rail's own 12 px side padding.
    Its height is capped so a long panel scrolls inside itself.
 
    Nine declarations, one more than the design spec's eight, on purpose: `max-width: none` releases the base rule's viewport cap (viewport less 48 px), which
@@ -3757,7 +4127,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    flush left. The class comes from `useNarrow`, never from an `@media` rule of this family's own: a second copy of the breakpoint, and guard 7 counts the
    bare family selector across the whole sheet. */
 .ui-popover-narrow {
-  position: fixed; top: auto; margin-top: 8px; left: 12px; right: 12px;
+  position: fixed; top: auto; bottom: 12px; left: 12px; right: 12px;
   width: auto; max-width: none; max-height: 70vh; overflow-y: auto;
 }
 
@@ -3804,6 +4174,77 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-run-on-reason { margin: 0; font-size: 12px; font-weight: 400; color: var(--ink2) }
 .ui-run-on-link { flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); text-decoration: underline; text-underline-offset: 2px }
 .ui-run-on-link:hover { color: var(--ink) }
+
+/* SplitChip — one ink pill, two buttons. The divider is a pseudo-element on the chevron half carrying `--on-accent` at reduced `opacity`: a `color-mix`
+   over `transparent` would not be pinned by the daylight-contrast guard, and the line is decoration, not text. Hover lifts only the half under the cursor.
+   No comma lists below: guard 7 locates a rule by its first selector followed by ` {`, so a list reads as outside the block. For the same reason every rule
+   that sets `color` also paints its own `background` — the daylight-contrast guard exempts a rule only by the ground it paints. */
+.ui-split { display: inline-flex; align-items: stretch; height: 32px; border-radius: 10px; overflow: hidden; background: var(--ink); border: 1px solid var(--ink) }
+.ui-split-28 { height: 28px }
+.ui-split-main {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0 10px 0 12px; border: 0; margin: 0; cursor: pointer;
+  font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--on-accent); background: var(--ink); text-decoration: none;
+  transition: background .15s;
+}
+.ui-split-more {
+  position: relative; display: inline-flex; align-items: center; padding: 0 8px; border: 0; margin: 0; cursor: pointer;
+  color: var(--on-accent); background: var(--ink); transition: background .15s;
+}
+.ui-split-more::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 1px; background: var(--on-accent); opacity: .35 }
+.ui-split-icon { display: inline-flex; align-items: center; line-height: 1 }
+/* The ink hover is the solid chip's only: unscoped, its 0,3,0 beat the dashed variant's 0,2,0 ground and left --ink3 text on --ink2. */
+.ui-split:not(.ui-split-dashed):not(.ui-split-outline) .ui-split-main:hover:not(:disabled) { background: var(--ink2) }
+.ui-split:not(.ui-split-dashed):not(.ui-split-outline) .ui-split-more:hover:not(:disabled) { background: var(--ink2) }
+/* The group clips (overflow: hidden) and the halves fill it, so the quality floor's 1px-out ring would be cut off: draw it inside each half. */
+.ui-split-main:focus-visible { outline-offset: -2px }
+.ui-split-more:focus-visible { outline-offset: -2px }
+.ui-split-main:disabled { cursor: default }
+.ui-split-more:disabled { cursor: default }
+/* A blocked main half (mainBlockedBy) stays enabled for focus and the reason, so :disabled never matches: it needs its own no-pointer, no-lift rule. */
+.ui-split-main[aria-disabled='true'] { cursor: default }
+.ui-split:not(.ui-split-dashed):not(.ui-split-outline) .ui-split-main[aria-disabled='true']:hover { background: var(--ink) }
+.ui-split-dashed { background: var(--strip); border: 1px dashed var(--hairline2) }
+.ui-split-dashed .ui-split-main { background: var(--strip); color: var(--ink3) }
+.ui-split-dashed .ui-split-more { background: var(--strip); color: var(--ink3) }
+.ui-split-dashed .ui-split-more::before { background: var(--hairline2); opacity: 1 }
+/* Outline is `Chip`'s outline look on the split: paper ground, a hairline2 stroke, ink type — the primary that is not asking for a person. */
+.ui-split-outline { background: var(--strip); border: 1px solid var(--hairline2) }
+.ui-split-outline .ui-split-main { background: var(--strip); color: var(--ink) }
+.ui-split-outline .ui-split-more { background: var(--strip); color: var(--ink) }
+.ui-split-outline .ui-split-more::before { background: var(--hairline2); opacity: 1 }
+.ui-split-outline .ui-split-main:hover:not(:disabled) { background: var(--hover-fill) }
+.ui-split-outline .ui-split-more:hover:not(:disabled) { background: var(--hover-fill) }
+/* After the outline hover above: both are 0,4,0, so only source order lets the blocked half's no-lift win. */
+.ui-split-outline .ui-split-main[aria-disabled='true']:hover { background: var(--strip) }
+.ui-split-outline .ui-split-main:disabled { opacity: .45 }
+.ui-split-outline .ui-split-more:disabled { opacity: .45 }
+
+/* StateStripe — a state's mark on the left edge of a card or row: a 3 px inset box-shadow, so it takes no layout width and survives the card's own border.
+   A table row cannot carry a box-shadow on the `tr` in every engine, so there the first cell does. `grey` is the rule colour: a quiet row is marked as
+   present, never as an alert. The dot is the same four marks at 6 px for a place a stripe cannot go. */
+.ui-stripe[data-tone='green'] { --stripe: var(--green-solid) }
+.ui-stripe[data-tone='amber'] { --stripe: var(--amber-solid) }
+.ui-stripe[data-tone='red'] { --stripe: var(--red) }
+.ui-stripe[data-tone='grey'] { --stripe: var(--hairline2) }
+.ui-stripe { box-shadow: inset 3px 0 0 var(--stripe, transparent) }
+tr.ui-stripe { box-shadow: none }
+tr.ui-stripe > :first-child { box-shadow: inset 3px 0 0 var(--stripe, transparent) }
+.ui-stripe-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--hairline2) }
+.ui-stripe-dot[data-tone='green'] { background: var(--green-solid) }
+.ui-stripe-dot[data-tone='amber'] { background: var(--amber-solid) }
+.ui-stripe-dot[data-tone='red'] { background: var(--red) }
+.ui-stripe-dot[data-tone='grey'] { background: var(--hairline2) }
+
+/* GlyphTile — a glyph on a tinted square. The tint is the dark themes' own surface mixed 12-14 % toward the hue (daylight keeps the -solid mark), and the glyph
+   takes the text token of its hue so it clears 4.5:1 over it. Radius steps with the box: 5 / 8 / 9. */
+.ui-glyph-tile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--strip-hi); color: var(--ink2) }
+.ui-glyph-tile[data-size='18'] { width: 18px; height: 18px; border-radius: 5px }
+.ui-glyph-tile[data-size='32'] { width: 32px; height: 32px; border-radius: 9px }
+.ui-glyph-tile[data-size='40'] { width: 40px; height: 40px; border-radius: 12px }
+.ui-glyph-tile[data-tone='green'] { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
+.ui-glyph-tile[data-tone='red'] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
+.ui-glyph-tile[data-tone='amber'] { background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)); color: var(--amber-ink) }
+.ui-glyph-tile[data-tone='ink'] { background: var(--ink); color: var(--on-accent) }
 
 /* ── end ui primitives ────────────────────────────────────────────────────────
    A closing marker, not decoration. Guard 7 has to be able to say whether a

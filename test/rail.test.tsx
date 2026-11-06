@@ -1,6 +1,8 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { act, render, renderHook, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
@@ -471,8 +473,8 @@ describe('SideRail · the version chip', () => {
     renderWithReleases({ label: 'v0.2.0+3', dot: false, onOpen: jest.fn() });
     const nav = screen.getByRole('navigation', { name: 'Sections' });
     expect(chip()).toBeInTheDocument();
-    // The chip draws itself (ui-kit takes no className), so the nav's last child is the `.rail-release` wrapper that places it.
-    expect(nav.lastElementChild).toHaveClass('rail-release');
+    // The chip draws itself (ui-kit takes no className), so the nav's last child is the `.rail-foot` card that places it.
+    expect(nav.lastElementChild).toHaveClass('rail-foot');
     expect(nav.lastElementChild).toContainElement(chip());
     expect(nav.querySelector('.uk-chip-dot')).toBeNull();
   });
@@ -496,7 +498,7 @@ describe('SideRail · the version chip', () => {
       expect(chip()).toBeNull();
       await userEvent.click(screen.getByRole('button', { name: 'Menu' }));
       const nav = screen.getByRole('navigation', { name: 'Sections' });
-      expect(nav.lastElementChild).toHaveClass('rail-release');
+      expect(nav.lastElementChild).toHaveClass('rail-foot');
       expect(nav.lastElementChild).toContainElement(chip());
       // The phone shape is ui-kit's: `narrow` is what gives the pill its 44 px hit area.
       expect(chip()).toHaveClass('uk-chip--narrow');
@@ -516,7 +518,7 @@ describe('SideRail · the version chip', () => {
 */
 describe('the Jira row’s Needs-you badge', () => {
   const configured = { data: { configured: true } as unknown as JiraStatusPayload, loading: false, error: false, reload: () => {} };
-  const badge = (): HTMLElement | null => document.querySelector('.rail-badge');
+  const badge = (): HTMLElement | null => document.querySelector('.rail-count');
 
   type Over = { key: string; id: string | null; state: string; endedAt?: string | null };
   const link = (o: Over) => ({
@@ -543,12 +545,12 @@ describe('the Jira row’s Needs-you badge', () => {
   const payload = (links: Over[], reachable = true): JiraSessionsPayload =>
     ({ links: links.map(link), reachable, rowsAt: '2026-11-01T10:00:00.000Z' }) as unknown as JiraSessionsPayload;
 
-  const tree = (data: JiraSessionsPayload | null, onChange: (s: Section) => void = jest.fn()) => (
+  const tree = (data: JiraSessionsPayload | null, onChange: (s: Section) => void = jest.fn(), section: Section = 'runs') => (
     <SettingsProvider>
       <ProjectsContext.Provider value={{ data: null, drawn: BOTH, reload: () => {} }}>
         <JiraContext.Provider value={configured}>
           <JiraSessionsContext.Provider value={{ data, reload: () => Promise.resolve() }}>
-            <SideRail section="runs" onChange={onChange} provisional={false} />
+            <SideRail section={section} onChange={onChange} provisional={false} />
           </JiraSessionsContext.Provider>
         </JiraContext.Provider>
       </ProjectsContext.Provider>
@@ -637,7 +639,7 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(JSON.parse(localStorage.getItem('backlog-manager.jira-view') ?? 'null')).not.toBe('list');
   });
 
-  it('lands on the Board page’s List with Needs you and All tickets set', async () => {
+  it('lands on the Sessions page with Needs you and All tickets set', async () => {
     const onChange = jest.fn();
     setJiraView('board');
     const filters = renderHook(() => useJiraListFilters());
@@ -650,9 +652,30 @@ describe('the Jira row’s Needs-you badge', () => {
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith('jira');
-    expect(page.result.current[0]).toBe('board');
-    expect(view.result.current[0]).toBe('list');
+    expect(page.result.current[0]).toBe('sessions');
+    expect(view.result.current[0]).toBe('board');
     expect(filters.result.current[0]).toMatchObject({ chip: 'needs-you', allTickets: true });
+  });
+
+  it('no longer writes the Board page’s view: a stored List stays List', async () => {
+    setJiraView('list');
+    const view = renderHook(() => useJiraView());
+    render(tree(payload([{ key: 'OFFBOARD-9', id: 's1', state: 'answer' }])));
+    await userEvent.click(screen.getByRole('button', { name: '1 session needs you' }));
+    expect(view.result.current[0]).toBe('list');
+  });
+
+  it('draws Board, Sessions, Setup in the open Jira tree, carries no count on Sessions, and picking Sessions sets the page', async () => {
+    const page = renderHook(() => useJiraPage());
+    act(() => page.result.current[1]('board'));
+    render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }]), jest.fn(), 'jira'));
+    const group = screen.getByRole('group', { name: 'Jira pages' });
+    const buttons = within(group).getAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual(['Board', 'Sessions', 'Setup']);
+    expect(within(buttons[1]).queryByText('1')).toBeNull();
+    expect(group.querySelector('.rail-count')).toBeNull();
+    await userEvent.click(buttons[1]);
+    expect(page.result.current[0]).toBe('sessions');
   });
 
   it('is fed by the shell’s one poll: a read with no `open=1` while the section is closed, none at all while Jira is unconfigured', async () => {
@@ -686,5 +709,73 @@ describe('the Jira row’s Needs-you badge', () => {
     } finally {
       global.fetch = realFetch;
     }
+  });
+});
+
+/*
+  The restyled rail (restyle plan 4, task 6): every row is a glyph tile, a label and — while there is something to say — a count pill. `App` hands GitHub's
+  and Runs' counts in; Jira's is the rail's own read. The footer card says whether the client's reads are answering.
+*/
+describe('the rail rows and footer', () => {
+  beforeEach(() => localStorage.clear());
+
+  const withProps = (props: { counts?: { github?: number; runs?: number }; api?: 'ok' | 'down' | null; working?: boolean }, section: Section = 'files') => (
+    <SettingsProvider>
+      <ProjectsContext.Provider value={{ data: null, drawn: BOTH, reload: () => {} }}>
+        <SideRail section={section} onChange={jest.fn()} provisional={false} {...props} />
+      </ProjectsContext.Provider>
+    </SettingsProvider>
+  );
+  const rowOf = (name: string): HTMLElement => screen.getByRole('button', { name }).closest('div') as HTMLElement;
+
+  it('draws GitHub’s count as an amber pill and nothing at zero', () => {
+    const { rerender } = render(withProps({ counts: { github: 3 } }));
+    const pill = rowOf('GitHub').querySelector('.ui-pill');
+    expect(pill).toHaveTextContent('3');
+    expect(pill).toHaveClass('ui-pill-warn');
+    rerender(withProps({ counts: { github: 0 } }));
+    expect(rowOf('GitHub').querySelector('.ui-pill')).toBeNull();
+  });
+
+  it('names each count by its meaning and lets a click on a plain count through to the row', () => {
+    render(withProps({ counts: { github: 3, runs: 1 } }));
+    expect(screen.getByRole('img', { name: '3 PRs need you' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '1 live run' })).toBeInTheDocument();
+    // jsdom applies no stylesheet, so the pass-through is pinned at its source: the rule that keeps a plain count from swallowing the row's click.
+    const css = readFileSync(join(__dirname, '../client/src/styles.css'), 'utf8');
+    expect(css).toMatch(/\.rail-count:not\(button\)\s*\{\s*pointer-events:\s*none/);
+  });
+
+  it('draws Runs’ count as a neutral pill', () => {
+    render(withProps({ counts: { runs: 2 } }));
+    const pill = rowOf('Runs').querySelector('.ui-pill');
+    expect(pill).toHaveTextContent('2');
+    expect(pill).toHaveClass('ui-pill-neutral');
+  });
+
+  it('puts a tile on every row and keeps the page and item marks apart', () => {
+    render(withProps({}, 'runs'));
+    expect(screen.getByRole('button', { name: 'Runs' }).querySelector('.ui-glyph-tile')).toHaveAttribute('data-tone', 'ink');
+    expect(screen.getByRole('button', { name: 'Files' }).querySelector('.ui-glyph-tile')).toHaveAttribute('data-tone', 'neutral');
+    expect(screen.getByRole('button', { name: 'Runs' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('names the API state in the footer, and draws nothing while it is unknown', () => {
+    const { rerender } = render(withProps({ api: null }));
+    expect(screen.queryByText(/^API /)).toBeNull();
+    rerender(withProps({ api: 'ok' }));
+    expect(screen.getByText('API connected')).toBeInTheDocument();
+    rerender(withProps({ api: 'down' }));
+    expect(screen.getByText('API unreachable')).toBeInTheDocument();
+  });
+
+  it('blinks the cursor only for working === true', () => {
+    const { rerender } = render(withProps({ working: true }));
+    expect(document.querySelector('.rail-cursor')).toHaveClass('blink');
+    rerender(withProps({ working: false }));
+    expect(document.querySelector('.rail-cursor')).not.toHaveClass('blink');
+    rerender(withProps({}));
+    expect(document.querySelector('.rail-cursor')).not.toHaveClass('blink');
   });
 });

@@ -18,9 +18,9 @@ import { WorktreeRow } from './JiraWorktreeRow';
  * Jira › Setup › Repositories (Jira phase 2, spec §6.4; DESIGN.md §8.9.3, and §8.6 for the card language) — which local checkouts a Jira project's tickets
  * are worked in. It is `jira.json`'s `repos` map, one project key to a list of absolute paths, and the only thing on this page that is not about boards.
  *
- * - **One row per mapped path**, the project (`PAY · Payments` on the project's first row, the bare key on its later ones — the name once is enough), the
- *   path through `displayPath` (`$HOME` as `~`, from the status' own `home`), and a `×`. The names come from the STATUS' `projects`, the union of every
- *   key seen on a board and every mapped key, so a mapped project no board shows any more still reads by key.
+ * - **One row per mapped path** (`RepoRow`, restyle spec §4.4): the project key as a `Pill` titled with the project's name, the path through `displayPath`
+ *   (`$HOME` as `~`, from the status' own `home`), a worktree toggle chip under the path's first row, and a `×`. The names come from the STATUS' `projects`,
+ *   the union of every key seen on a board and every mapped key, so a mapped project no board shows any more still reads by key.
  * - **A warning row per `unmappedProjects` entry** — a project with issues on some board and no path — in the words the spec gives, after the mapped rows.
  * - **The add row**: a project `Select` over `/api/jira/projects`, a path field and `Add`. That list is `JiraSetupView`'s ONE read, handed down: this card
  *   never fetches it, so a status reload (a save here, a focus, the poll) costs Jira nothing. A list that could not be read is said under the row, in the
@@ -126,29 +126,22 @@ export function JiraReposGroup({ projects }: { projects: JiraProjectList }) {
       scope="this machine · which local checkouts a Jira project's tickets are worked in · set up front, before any ticket is on a board"
     >
       {mapped.flatMap(({ key, paths }) =>
-        paths.flatMap((p, i) => {
-          const row = (
-            <SettingsRow key={`${key}\n${p}`} name={i === 0 ? projectLabel(key, names) : key} hint={displayPath(p, home)}>
-              <button
-                type="button"
-                className="jira-setup-x"
-                aria-label={`Remove ${displayPath(p, home)}`}
-                disabled={busy}
-                onClick={() => void write(key, paths.filter((q) => q !== p))}
-              >
-                ×
-              </button>
-            </SettingsRow>
-          );
-          // The defaults belong to the PATH: only its first appearance, in project-key order, draws the line.
-          if (shownDefaults.has(p)) return [row];
+        paths.map((p) => {
+          // The defaults and the worktrees belong to the PATH: only its first appearance, in project-key order, draws them (and the toggle that opens them).
+          const first = !shownDefaults.has(p);
           shownDefaults.add(p);
-          const own = kept === null ? [] : repoWorktrees(p, kept);
-          return [
-            row,
-            <RepoDefaultsRow key={`defaults\n${p}`} path={p} home={home} stored={data?.repoDefaults?.[p]} busy={busy} onSave={saveDefaults} />,
-            ...(own.length === 0 ? [] : [<RepoWorktreesRow key={`trees\n${p}`} trees={own} home={home} liveKeys={liveKeys} />])
-          ];
+          return (
+            <RepoRow
+              key={`${key}\n${p}`}
+              projectKey={key}
+              projectName={names.get(key)}
+              path={p}
+              home={home}
+              busy={busy}
+              onRemove={() => void write(key, paths.filter((q) => q !== p))}
+              own={first ? { trees: kept === null ? [] : repoWorktrees(p, kept), liveKeys, stored: data?.repoDefaults?.[p], onSave: saveDefaults } : null}
+            />
+          );
         })
       )}
       {unmapped.map((p) => (
@@ -212,11 +205,75 @@ function defaultsFailure(e: unknown): string {
 }
 
 /**
- * One path's defaults line (see the group's header). The drafts are this row's state, seeded from the stored values at mount and set to what was SENT after a
- * landed save (so a trimmed ` develop ` reads `develop` again); the row is keyed on the path, so another path's row never inherits them. `Save` is off until a
- * draft differs from what is stored, trimmed, and a refused save leaves the drafts as typed.
+ * One mapping's row (restyle spec §4.4): the project key as a `Pill` (the project's name is its title — the name once per row is noise beside a key every
+ * Jira user reads), the path through `displayPath`, a toggle chip `N worktrees` when this is the path's FIRST row and it has trees, and the `×`. Under the
+ * path's first row only (`own` is null on the later ones — the once-per-path rule `shownDefaults` keeps) come the two labelled fields and, expanded, the tree
+ * list. The toggle is collapsed by default and is absent at zero trees; its state is this row's, and the row is keyed on project + path, so it survives the
+ * re-reads that move trees in and out.
  */
-function RepoDefaultsRow({
+function RepoRow({
+  projectKey,
+  projectName,
+  path,
+  home,
+  busy,
+  onRemove,
+  own
+}: {
+  projectKey: string;
+  projectName: string | undefined;
+  path: string;
+  home: string | null;
+  busy: boolean;
+  onRemove: () => void;
+  own: {
+    trees: readonly JiraWorktree[];
+    liveKeys: readonly string[];
+    stored: JiraRepoDefaults | undefined;
+    onSave: (path: string, base: string | null, namePattern: string | null) => Promise<boolean>;
+  } | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const count = own?.trees.length ?? 0;
+  return (
+    <div className="set-row set-row-stacked jira-setup-repo">
+      <div className="jira-setup-repo-head">
+        <Pill title={projectName}>{projectKey}</Pill>
+        <span className="set-hint jira-setup-path jira-setup-code" title={path}>
+          {displayPath(path, home)}
+        </span>
+        {own !== null && count > 0 && (
+          <Chip size={28} aria-expanded={open} onClick={() => setOpen(!open)}>
+            {count === 1 ? '1 worktree' : `${count} worktrees`}
+          </Chip>
+        )}
+        <button type="button" className="jira-setup-x" aria-label={`Remove ${displayPath(path, home)}`} disabled={busy} onClick={onRemove}>
+          ×
+        </button>
+      </div>
+      {own !== null && <RepoDefaults path={path} home={home} stored={own.stored} busy={busy} onSave={own.onSave} />}
+      {own !== null && open && count > 0 && (
+        <div className="jira-setup-trees">
+          <div className="jira-setup-trees-head">Open worktrees beside this checkout</div>
+          <ul className="jira-wt-list">
+            {own.trees.map((t) => (
+              <WorktreeRow key={t.path} tree={t} home={home} liveKey={treeLiveKey(t, own.liveKeys)} showRepo={false} projectKey={projectKey} />
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One path's two fields (see the group's header), each under its name — `Base branch` and `Branch name` — with the default said in the placeholder after
+ * the value an empty field means: the refs read's `defaultBase` when it lists one, else just `(default)`, and `{key}-{slug} (default)` for the pattern. The
+ * drafts are this row's state, seeded from the stored values at mount and set to what was SENT after a landed save (so a trimmed ` develop ` reads `develop`
+ * again); the row is keyed on project + path, and only a path's first row draws the fields, so another path's never inherit them. `Save` is off until a draft differs from what is stored, trimmed, and a
+ * refused save leaves the drafts as typed.
+ */
+function RepoDefaults({
   path,
   home,
   stored,
@@ -258,17 +315,20 @@ function RepoDefaultsRow({
   }
 
   return (
-    <div className="set-row jira-setup-defaults">
-      <input
-        className="set-text jira-setup-defaults-base"
-        type="text"
-        aria-label={`Default base for ${shown}`}
-        placeholder="e.g. develop"
-        list={listed === null ? undefined : listId}
-        value={base}
-        disabled={busy}
-        onChange={(e) => setBase(e.target.value)}
-      />
+    <div className="jira-setup-defaults">
+      <div className="jira-setup-field jira-setup-defaults-base">
+        <span className="jira-setup-field-name">Base branch</span>
+        <input
+          className="set-text"
+          type="text"
+          aria-label={`Default base for ${shown}`}
+          placeholder={listed?.defaultBase ? `${listed.defaultBase} (default)` : '(default)'}
+          list={listed === null ? undefined : listId}
+          value={base}
+          disabled={busy}
+          onChange={(e) => setBase(e.target.value)}
+        />
+      </div>
       {listed !== null && (
         <datalist id={listId}>
           {listed.branches.map((b) => (
@@ -276,38 +336,24 @@ function RepoDefaultsRow({
           ))}
         </datalist>
       )}
-      <input
-        className="set-text jira-setup-defaults-pattern"
-        type="text"
-        aria-label={`Branch name pattern for ${shown}`}
-        placeholder="{key}-{slug}"
-        value={pattern}
-        disabled={busy}
-        onChange={(e) => setPattern(e.target.value)}
-      />
+      <div className="jira-setup-field jira-setup-defaults-pattern">
+        <span className="jira-setup-field-name">Branch name</span>
+        <input
+          className="set-text"
+          type="text"
+          aria-label={`Branch name pattern for ${shown}`}
+          placeholder="{key}-{slug} (default)"
+          value={pattern}
+          disabled={busy}
+          onChange={(e) => setPattern(e.target.value)}
+        />
+      </div>
       <Chip size={28} disabled={busy || !changed} aria-label={`Save defaults for ${shown}`} onClick={() => void save()}>
         Save
       </Chip>
       {baseProblem !== null && <span className="set-hint jira-setup-warn jira-setup-defaults-hint">base {baseProblem}</span>}
       {problem !== null && <span className="set-hint jira-setup-warn jira-setup-defaults-hint">{problem}</span>}
       {unavailable !== null && <span className="set-hint jira-setup-defaults-hint">{unavailable}</span>}
-    </div>
-  );
-}
-
-/** One path's open trees (see the group's header): a `worktrees` head with a count, then the modal's own rows, without the repository — the row above. */
-function RepoWorktreesRow({ trees, home, liveKeys }: { trees: readonly JiraWorktree[]; home: string | null; liveKeys: readonly string[] }) {
-  return (
-    <div className="set-row set-row-stacked jira-setup-trees">
-      <div className="jira-setup-trees-head">
-        <span className="set-hint">worktrees</span>
-        <Pill tone="neutral">{trees.length}</Pill>
-      </div>
-      <ul className="jira-wt-list">
-        {trees.map((t) => (
-          <WorktreeRow key={t.path} tree={t} home={home} liveKey={treeLiveKey(t, liveKeys)} showRepo={false} />
-        ))}
-      </ul>
     </div>
   );
 }

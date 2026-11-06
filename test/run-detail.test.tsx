@@ -839,7 +839,8 @@ describe('RunDetail', () => {
     const summary: OrchestratorArchiveRun = { ...primarySummary(), mergeMode: 'pr', mergeModeEffective: 'pr', prTarget: 'main', prUrl };
     render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
-    const link = screen.getByRole('link', { name: 'PR #275' });
+    const link = screen.getByTestId('run-detail-pr-link');
+    expect(link).toHaveTextContent('#275');
     expect(link).toHaveAttribute('href', prUrl);
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
@@ -851,7 +852,7 @@ describe('RunDetail', () => {
     const summary: OrchestratorArchiveRun = { ...primarySummary(), mergeMode: 'pr', mergeModeEffective: 'pr', prTarget: 'main', prUrl: null };
     render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
-    expect(screen.queryByRole('link', { name: /^PR #/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-pr-link')).not.toBeInTheDocument();
   });
 
   // The server's sanitiser already nulls a bad URL, so this payload cannot arrive; the component refuses it anyway because an href is the one place a
@@ -862,7 +863,7 @@ describe('RunDetail', () => {
     const summary: OrchestratorArchiveRun = { ...primarySummary(), mergeMode: 'pr', mergeModeEffective: 'pr', prUrl: 'javascript:alert(1)' };
     render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
-    expect(screen.queryByRole('link', { name: /^PR #/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-pr-link')).not.toBeInTheDocument();
     expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
   });
 
@@ -1165,7 +1166,7 @@ describe('RunDetail — the machine a remote run is on', () => {
 
     expect(screen.getByTestId('run-detail-on-machine')).toHaveTextContent('Pro');
     expect(screen.getByTestId('run-detail-facts')).toContainElement(screen.getByTestId('run-detail-on-machine'));
-    expect(screen.getByTestId('run-detail-remote')).toHaveTextContent('Remote run: its controls are on the machine that ran it.');
+    expect(screen.getByTestId('run-detail-remote')).toHaveTextContent('controls live on the machine that ran it');
   });
 
   it('draws no machine fact for a local run, nor for a remote run with no machine', () => {
@@ -1175,5 +1176,62 @@ describe('RunDetail — the machine a remote run is on', () => {
 
     rerender(<RunDetail summary={primarySummary()} live={primaryFull()} remote machine={null} {...CONTROL_PROPS} />);
     expect(screen.queryByTestId('run-detail-on-machine')).toBeNull();
+  });
+});
+
+/*
+  Plan 3 task 6 (spec §4.6): the detail is item-first — the head carries the status pill and the controls, the facts are a glyph-labelled grid, each item reads its
+  real stage word as an outcome pill, and a pr-mode run closes on `PR opened · <base> → <target> · #<n>`.
+*/
+describe('RunDetail — item-first restyle', () => {
+  function prSummary(prUrl: string | null): OrchestratorArchiveRun {
+    return { ...primarySummary(), mergeMode: 'pr', mergeModeEffective: 'pr', base: 'backlog/run-1', prTarget: 'main', prUrl };
+  }
+
+  it('closes a pr-mode run on its outcome line, with the number as the link', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+    render(<RunDetail summary={prSummary('https://github.com/acme/widgets/pull/462')} live={null} {...CONTROL_PROPS} />);
+
+    expect(screen.getByTestId('run-detail-pr-outcome')).toHaveTextContent('PR opened · backlog/run-1 → main · #462');
+    expect(screen.getByTestId('run-detail-pr-link')).toHaveAttribute('href', 'https://github.com/acme/widgets/pull/462');
+  });
+
+  it('draws no outcome line without a prUrl', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+    render(<RunDetail summary={prSummary(null)} live={null} {...CONTROL_PROPS} />);
+
+    expect(screen.queryByTestId('run-detail-pr-outcome')).not.toBeInTheDocument();
+  });
+
+  it('reads an item stage as an outcome pill in the stage tone', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+    const summary: OrchestratorArchiveRun = { ...primarySummary(), queue: [archiveItem('m-1', 'merged'), archiveItem('f-1', 'fixing')] };
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
+
+    const pillOf = (id: string) => screen.getByTestId(`run-detail-item-${id}`).querySelector('.run-drawer-item-head .ui-pill');
+    expect(pillOf('m-1')).toHaveTextContent('merged');
+    expect(pillOf('m-1')).toHaveClass('ui-pill-done');
+    expect(pillOf('f-1')).toHaveTextContent('fixing');
+    expect(pillOf('f-1')).toHaveClass('ui-pill-live');
+    expect(document.querySelector('.board-card-stage')).toBeNull();
+  });
+
+  it('keeps every fact testid on the element that holds its reading', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+    render(<RunDetail summary={prSummary(null)} live={null} remote machine="Pro" {...CONTROL_PROPS} />);
+
+    for (const id of ['run-detail-started', 'run-detail-finished', 'run-detail-time', 'run-detail-on-machine', 'run-detail-base', 'run-detail-mode', 'run-detail-questions']) {
+      expect(within(screen.getByTestId('run-detail-facts')).getByTestId(id)).toBeInTheDocument();
+    }
+    expect(screen.getByTestId('run-detail-base')).toHaveTextContent('backlog/run-1');
+  });
+
+  it('puts the status pill and its note in the head, outside the facts', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+    render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
+
+    const status = document.querySelector('.runs-status');
+    expect(status).toHaveTextContent('done');
+    expect(screen.getByTestId('run-detail-facts')).not.toContainElement(status as HTMLElement);
   });
 });

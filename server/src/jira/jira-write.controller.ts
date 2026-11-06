@@ -2,7 +2,7 @@ import { Body, Controller, HttpCode, HttpException, Post, UseGuards } from '@nes
 import { homedir } from 'node:os';
 
 import { isJiraKey } from '../../../shared/types';
-import type { JiraBoard, JiraIssueWriteResult, JiraRepoDefaultsWriteResult, JiraSkill } from '../../../shared/types';
+import type { JiraBoard, JiraIssueWriteResult, JiraRepoDefaultsWriteResult, JiraSkill, JiraStatusPayload } from '../../../shared/types';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import {
   JIRA_TRANSITION_ID_MAX_CHARS,
@@ -27,7 +27,8 @@ import { JiraPollerService } from './poller.service';
 import { jiraWriteOrThrow } from './unwrap.util';
 
 /**
- * The eight write routes under `/api/jira` — six of them config writes (Jira phase 2, spec §5 and §8; the two skill routes, `POST /skills` and
+ * The nine POST routes under `/api/jira` — `POST /boards/sweep` (the chip's per-board `now`, which writes nothing and asks the poller for a board save's
+ * sweep), and eight write routes, six of them config writes (Jira phase 2, spec §5 and §8; the two skill routes, `POST /skills` and
  * `POST /skills/delete`, are phase 5's, and `POST /repo-defaults` the repo/branch work's), `POST /boards`, `POST /boards/delete`, `POST /repos`,
  * `POST /repo-defaults`, `POST /skills` and `POST /skills/delete`, the only callers of the
  * writers in `config.util.ts`, and two of them writes to JIRA itself (phase 3), `POST /issue/assign` and
@@ -93,6 +94,48 @@ export class JiraWriteController {
     this.writing(() => deleteBoard(id));
     this.poller.boardDeleted(id);
     this.poller.arm();
+    return { ok: true };
+  }
+
+  /**
+   * `POST /api/jira/sweep` — the popover head's site-wide `Sync now`. No body is read and no target taken (the per-board button is `boards/sweep`, below).
+   * Guard → `sweepNow`: `not-armed` is a 409, a 429 window a 429 carrying the stored end, anything else a 200 with the same payload `GET /api/jira` answers,
+   * `live` filled from the live map so the client can replace its cache with it. A 401, a 5xx or a transport failure inside the sweep is the poller's to
+   * record (`access`, `detail`) and is a 200 here: the request itself worked.
+   */
+  @Post('sweep')
+  @HttpCode(200)
+  @UseGuards(SameOriginPostGuard)
+  async sweepSite(): Promise<JiraStatusPayload> {
+    const result = await this.poller.sweepNow();
+    if (result.kind === 'not-armed') throw new HttpException({ message: 'Jira is not being polled' }, 409);
+    if (result.kind === 'wait') throw new HttpException({ message: 'rate limited', retryAt: new Date(result.retryAt).toISOString() }, 429);
+    const status = this.poller.status();
+    return status.configured ? { ...status, live: this.live.snapshot() } : status;
+  }
+
+  /**
+   * `POST /api/jira/boards/sweep` — `{ id }`: the chip popover's per-board `now` button. It writes nothing — not `jira.json`, not Jira — and asks the poller
+   * for exactly what a board save asks for after its write: `boardSaved`, which forces THAT board due, sweeps it, and resolves when a sweep including it has
+   * finished or after `JIRA_SAVE_SWEEP_WAIT_MS`. Reusing it rather than adding a second "sweep now" path is the point: the `forced` generation is the one
+   * mechanism that survives a sweep already in flight (that sweep read the file before the ask), a 401, a 5xx or an opened 429 window — the board simply
+   * stays owed and the next tick pays it — so a click inside a 429 window spends no call and is not refused; the status the client re-reads says why.
+   *
+   * The order is the config writes': guard → validate (400) → configured (503) → then the file must be readable (409, the writers' sentence — a board the
+   * file cannot list is not one this route can name) and must hold the id (404 `unknown board`, the read route's words). An `off` board is swept too: a
+   * manual-only board is the one a `now` exists for.
+   */
+  @Post('boards/sweep')
+  @HttpCode(200)
+  @UseGuards(SameOriginPostGuard)
+  async sweepBoard(@Body() body: unknown): Promise<{ ok: true }> {
+    const id = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).id : undefined;
+    if (typeof id !== 'string' || id === '') throw new HttpException({ error: 'id must be a non-empty string' }, 400);
+    this.requireConfigured();
+    const config = readJiraConfig();
+    if (config.unreadable !== null) throw new HttpException({ error: new JiraConfigUnreadableError(jiraConfigFile(), config.unreadable).message }, 409);
+    if (!config.boards.some((b) => b.id === id)) throw new HttpException({ error: 'unknown board' }, 404);
+    await this.poller.boardSaved(id);
     return { ok: true };
   }
 

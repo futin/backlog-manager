@@ -1,11 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { App } from '../client/src/App';
+import runFixture from './fixtures/orchestrator-run.json';
 import { daysAgoDate } from './helpers/dates';
 import { SECTIONS } from '../client/src/lib/sections';
 import { GITHUB_PAGE_KEY, resolveLegacySection } from '../client/src/lib/source-page';
@@ -33,24 +34,10 @@ import { SETTINGS_STORAGE_KEY, clampSettings } from '../client/src/lib/settings'
   `require` inside the factories rather than the imports above, because
   jest.mock is hoisted above them and may not close over module scope.
 */
-/* The Board stub forwards `onWorking` for the same reason the Settings stub below forwards `onOpenWatchdog`: what the wordmark cases assert is what THIS
-   SHELL does with a view's report — hold it, hand it to the rail, drop it on a view change — and a stub that swallowed the prop would leave that wiring,
-   the one thing App owns there, untested. `mockBoardReportsOnMount` makes it report the way the real hook does, from its own effect as it mounts: a child's
-   effect runs BEFORE the shell's, which is the order the shell's reset has to survive. */
-let mockBoardReportsOnMount = false;
+/* The Board stub draws nothing of its own: the cursor reads the shell's one runs poll (spec §4.9a), so no view has anything to report up. */
 jest.mock('../client/src/components/board/BoardView', () => ({
   __esModule: true,
-  default: ({ onWorking }: { onWorking?: (working: boolean) => void }) => {
-    require('react').useEffect(() => {
-      if (mockBoardReportsOnMount) onWorking?.(true);
-    }, []);
-    return require('react').createElement(
-      'div',
-      null,
-      'board stub',
-      require('react').createElement('button', { type: 'button', onClick: () => onWorking?.(true) }, 'report working')
-    );
-  }
+  default: () => require('react').createElement('div', null, 'board stub')
 }));
 /* The stub forwards `onOpenWatchdog`, which is the whole subject of the
    `Live view` case below: what that case asserts is what THIS SHELL hands
@@ -369,99 +356,55 @@ describe('the section rail', () => {
 });
 
 /*
-  The wordmark's cursor (dashboard-redesign-ports task 4). `App` holds the boolean a view reports and polls nothing itself — every
-  `useOrchestratorRuns()` is its own 5 s poller, and the three views already run one each. What `App` owns is the lifetime: a value a view reported must
-  not outlive that view, or the cursor would go on blinking over Settings, which polls nothing, on the strength of a Board nobody is looking at.
+  The wordmark's cursor (dashboard-redesign-ports task 4, spec §4.9a). `App` mounts the one `OrchestratorRunsProvider` above the shell and draws the cursor from
+  its `working` — so the reading is the payload's own, not a view's report: it survives a view switch, and it is there on Settings, which used to poll nothing.
 */
 describe('the wordmark cursor', () => {
   const cursor = (): Element | null => document.querySelector('.rail-cursor');
+  const beta = {
+    name: 'beta',
+    path: '/abs/beta',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+    source: 'github'
+  };
+  /** Answers the registry with one GitHub project (so GitHub stays a drawn row) and the run payload with `runs`. */
+  const stubRuns = (runs: object[]): void => {
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const body = String(input) === '/api/projects' ? [beta] : { runs, starting: [], remote: [], remoteStarting: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
+    }) as jest.Mock;
+  };
+  const liveRun = (over: object): object => ({ ...runFixture, pastRuns: 0, pauseRequested: false, stopRequested: false, ...over });
 
   beforeEach(() => {
     localStorage.clear();
-    mockBoardReportsOnMount = false;
-    global.fetch = jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ runs: [], starting: [], remote: [], remoteStarting: [] }) } as Response)) as jest.Mock;
   });
 
-  it('blinks on the Board’s report and stops the moment the section switches to Settings', async () => {
-    // GitHub, a real section: it is held and drawn while the projects answer is unknown, which this describe's fetch never gives. Only while it is the
-    // section on screen, though — so this case answers the registry, or the GitHub row would be gone once Settings is open and there is no way back.
-    global.fetch = jest.fn((input: RequestInfo | URL) => {
-      const beta = {
-        name: 'beta',
-        path: '/abs/beta',
-        createdAt: '2026-08-26T00:00:00.000Z',
-        missing: false,
-        counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
-        source: 'github'
-      };
-      const body = String(input) === '/api/projects' ? [beta] : { runs: [], starting: [], remote: [], remoteStarting: [] };
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
-    }) as jest.Mock;
+  it('blinks on a working run and keeps blinking when the section switches to Settings and back', async () => {
+    stubRuns([liveRun({ status: 'running', fresh: true })]);
     storeSection('github');
     render(<App />);
-    expect(cursor()).not.toHaveClass('blink');
-
-    await userEvent.click(await screen.findByRole('button', { name: 'report working' }));
-    expect(cursor()).toHaveClass('blink');
+    await waitFor(() => expect(cursor()).toHaveClass('blink'));
 
     await userEvent.click(row('Settings'));
     expect(await screen.findByText('settings stub')).toBeInTheDocument();
-    expect(cursor()).not.toHaveClass('blink');
+    expect(cursor()).toHaveClass('blink');
 
-    // And coming back does not resurrect it: the Board that reported is gone, and the new one has said nothing yet.
     await userEvent.click(row('GitHub'));
     expect(await screen.findByText('board stub')).toBeInTheDocument();
-    expect(cursor()).not.toHaveClass('blink');
-  });
-
-  /* A click on the section already open is not a section change: the view stays mounted, its report effect has no reason to run again, and a reset here
-     would leave the cursor solid over a run that is still working until the next poll happened to change the answer. */
-  it('keeps the report through a click on the section that is already open', async () => {
-    storeSection('github');
-    render(<App />);
-    await userEvent.click(await screen.findByRole('button', { name: 'report working' }));
-
-    await userEvent.click(row('GitHub'));
     expect(cursor()).toHaveClass('blink');
   });
 
-  /* #401. A pick in the GitHub tree swaps the view without a section change. The tag hides the Board's `true` while GitHub › Settings is open, and Settings
-     reports nothing, so without a reset that `true` is still there, under the Board's own tag, when the tree brings a new Board back. */
-  it('does not bring a report back when a page switch inside one source returns to the view that made it', async () => {
+  it('stands solid before the first answer and for a crashed run', async () => {
+    stubRuns([liveRun({ status: 'running', fresh: false })]);
     storeSection('github');
-    localStorage.setItem(GITHUB_PAGE_KEY, JSON.stringify('board'));
     render(<App />);
-    await userEvent.click(await screen.findByRole('button', { name: 'report working' }));
-    expect(cursor()).toHaveClass('blink');
-
-    const tree = (): HTMLElement => screen.getByRole('group', { name: 'GitHub pages' });
-    await userEvent.click(within(tree()).getByRole('button', { name: 'Settings' }));
-    expect(await screen.findByText('Sync')).toBeInTheDocument();
     expect(cursor()).not.toHaveClass('blink');
-
-    await userEvent.click(within(tree()).getByRole('button', { name: 'Board' }));
     expect(await screen.findByText('board stub')).toBeInTheDocument();
+    await waitFor(() => expect((global.fetch as jest.Mock).mock.calls.some(([u]) => String(u) === '/api/orchestrator/runs')).toBe(true));
     expect(cursor()).not.toHaveClass('blink');
-  });
-
-  /* The reset has to spare the new view's own report: a view's report effect runs before the shell's, so an unconditional reset would wipe it, and the hook
-     keys on the boolean and never says it again — a solid cursor over a working run until the answer next changes. */
-  it('keeps the report a view makes as it mounts, on the first load and after a page switch', async () => {
-    mockBoardReportsOnMount = true;
-    storeSection('github');
-    localStorage.setItem(GITHUB_PAGE_KEY, JSON.stringify('board'));
-    render(<App />);
-    expect(await screen.findByText('board stub')).toBeInTheDocument();
-    expect(cursor()).toHaveClass('blink');
-
-    const tree = (): HTMLElement => screen.getByRole('group', { name: 'GitHub pages' });
-    await userEvent.click(within(tree()).getByRole('button', { name: 'Settings' }));
-    expect(await screen.findByText('Sync')).toBeInTheDocument();
-    expect(cursor()).not.toHaveClass('blink');
-
-    await userEvent.click(within(tree()).getByRole('button', { name: 'Board' }));
-    expect(await screen.findByText('board stub')).toBeInTheDocument();
-    expect(cursor()).toHaveClass('blink');
   });
 
   it('leaves exactly one h1 in the document, named Backlog Manager', async () => {

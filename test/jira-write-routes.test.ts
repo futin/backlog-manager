@@ -83,14 +83,14 @@ const post = (path: string, body: unknown) =>
 const status = async (): Promise<JiraStatusPayload> => (await request(app.getHttpServer()).get('/api/jira').expect(200)).body;
 const searches = () => fake.calls.filter((c) => c.url.endsWith('/search/jql')).map((c) => (c.body as { jql: string }).jql);
 
-describe('the guard, on all six config routes', () => {
+describe('the guard, on all six config routes and the board sweep', () => {
   beforeAll(async () => {
     prepare('guard');
     await build();
   });
   afterAll(() => app.close());
 
-  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
+  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
     'POST %s with no content type is 403, and nothing is written',
     async (path) => {
       await request(app.getHttpServer()).post(`/api/jira${path}`).send('{}').expect(403);
@@ -98,12 +98,12 @@ describe('the guard, on all six config routes', () => {
     }
   );
 
-  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])('POST %s from another origin is 403', async (path) => {
+  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])('POST %s from another origin is 403', async (path) => {
     await post(path, {}).set('origin', 'http://evil.test').expect(403);
     expect(existsSync(file)).toBe(false);
   });
 
-  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
+  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
     'POST %s to a Host the allowlist does not know is 403',
     async (path) => {
       await post(path, {}).set('host', 'evil.example:4322').expect(403);
@@ -122,6 +122,7 @@ describe('unconfigured', () => {
   it.each([
     ['/boards', { name: '' }],
     ['/boards/delete', {}],
+    ['/boards/sweep', {}],
     ['/repos', { project: 'pay', paths: [] }],
     ['/repo-defaults', { path: '', base: null, namePattern: null }],
     ['/skills', { name: '', prompt: 'p' }],
@@ -133,6 +134,7 @@ describe('unconfigured', () => {
   it.each([
     ['/boards', BOARD],
     ['/boards/delete', { id: 'b_0123abcd' }],
+    ['/boards/sweep', { id: 'b_0123abcd' }],
     ['/repos', { project: 'PAY', paths: ['/a/b'] }],
     ['/repo-defaults', { path: '/a/b', base: 'develop', namePattern: null }],
     ['/skills', SKILL],
@@ -193,6 +195,32 @@ describe('configured, against a healthy Jira', () => {
     expect((await post('/boards/delete', { id: created.id }).expect(200)).body).toEqual({ ok: true });
     expect((await status()).boards.some((b) => b.id === created.id)).toBe(false);
     expect((await post('/boards/delete', { id: created.id }).expect(404)).body).toEqual({ error: 'unknown board' });
+  });
+
+  describe('POST /boards/sweep', () => {
+    it('sweeps the named board before answering — an off board included — and writes nothing to jira.json', async () => {
+      const created = (await post('/boards', { ...BOARD, name: 'Manual', interval: 'off' }).expect(200)).body;
+      const before = (await status()).boards.find((b) => b.id === created.id)?.polledAt;
+      const fileBefore = readFileSync(file, 'utf8');
+      const searchesBefore = searches().length;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect((await post('/boards/sweep', { id: created.id }).expect(200)).body).toEqual({ ok: true });
+      expect(searches().slice(searchesBefore).some((jql) => jql.includes('PAY-120'))).toBe(true);
+      const after = (await status()).boards.find((b) => b.id === created.id)?.polledAt;
+      expect(Date.parse(after as string)).toBeGreaterThan(Date.parse(before as string));
+      expect(readFileSync(file, 'utf8')).toBe(fileBefore);
+    });
+
+    it.each([['b_0123abcd'], ['x']])('the id %s, which the file does not hold, is 404 unknown board and asks Jira nothing', async (id) => {
+      const callsBefore = fake.calls.length;
+      expect((await post('/boards/sweep', { id }).expect(404)).body).toEqual({ error: 'unknown board' });
+      expect(fake.calls.length).toBe(callsBefore);
+    });
+
+    it.each([[{}], [{ id: '' }], [{ id: 7 }]])('%j is 400 naming id', async (body) => {
+      const res = await post('/boards/sweep', body).expect(400);
+      expect(res.body.error).toContain('id');
+    });
   });
 
   it('POST /boards/delete with {} is 400 naming id', async () => {
@@ -385,6 +413,7 @@ describe('configured, a jira.json that does not parse (Review Focus 2)', () => {
   it.each([
     ['/boards', BOARD],
     ['/boards/delete', { id: 'b_0123abcd' }],
+    ['/boards/sweep', { id: 'b_0123abcd' }],
     ['/repos', { project: 'PAY', paths: ['/a/b'] }],
     ['/repo-defaults', { path: '/a/b', base: 'develop', namePattern: null }],
     ['/skills', SKILL],

@@ -216,7 +216,9 @@ function mount(opts: { initialAction?: JiraAction; status?: Partial<JiraStatusPa
 
 const dialog = (): HTMLElement => screen.getByRole('dialog');
 const promptBox = (): HTMLTextAreaElement => within(dialog()).getByLabelText('Prompt') as HTMLTextAreaElement;
-const startButton = (): HTMLElement => within(dialog()).getByRole('button', { name: 'Start' });
+const startButton = (): HTMLElement => within(dialog()).getByRole('button', { name: 'Start session' });
+const tile = (name: string): HTMLElement => within(within(dialog()).getByRole('group', { name: 'Action' })).getByRole('button', { name });
+const repoPick = (name: string): HTMLElement => within(within(dialog()).getByRole('group', { name: 'Repository' })).getByRole('button', { name });
 const copyButton = (): HTMLElement => within(dialog()).getByRole('button', { name: /^Copy prompt$|^Copied$/ });
 const promptReads = (): URL[] => calls.filter((c) => c.url.startsWith('/api/jira/prompt')).map((c) => new URL(c.url, 'http://x'));
 const dispatchBody = (): Record<string, unknown> => JSON.parse(String(calls.filter((c) => c.url === '/api/agents/dispatch-jira')[0].init?.body));
@@ -233,13 +235,13 @@ describe('JiraLaunchSheet — the gate', () => {
     server.agents = agents({ enabled: false });
     setClipboard({ writeText: jest.fn().mockResolvedValue(undefined) });
     await ready();
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Start session' })).not.toBeInTheDocument());
     expect(copyButton()).toBeEnabled();
   });
 
   it('draws no Start before the dashboard has answered, rather than a dead one', async () => {
     mount();
-    expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start session' })).not.toBeInTheDocument();
     await waitFor(() => expect(startButton()).toBeInTheDocument());
   });
 
@@ -248,8 +250,8 @@ describe('JiraLaunchSheet — the gate', () => {
     setClipboard({ writeText: jest.fn().mockResolvedValue(undefined) });
     mount({ status: { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } } });
     await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/status')).toBe(true));
-    await within(dialog()).findByRole('combobox', { name: 'Repository' });
-    expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument();
+    await within(dialog()).findByRole('group', { name: 'Repository' });
+    expect(screen.queryByRole('button', { name: 'Start session' })).not.toBeInTheDocument();
     expect(copyButton()).toBeInTheDocument();
   });
 
@@ -272,6 +274,7 @@ describe('JiraLaunchSheet — the repository', () => {
     await ready();
     expect(within(dialog()).getByText('~/pay')).toBeInTheDocument();
     expect(within(dialog()).queryByRole('combobox', { name: 'Repository' })).not.toBeInTheDocument();
+    expect(within(dialog()).queryByRole('group', { name: 'Repository' })).not.toBeInTheDocument();
     expect(promptReads()[0].searchParams.get('repo')).toBe('/Users/ada/pay');
   });
 
@@ -285,24 +288,95 @@ describe('JiraLaunchSheet — the repository', () => {
     await waitFor(() => expect(startButton()).toBeEnabled());
   });
 
-  it('offers a select for two paths and previews nothing until one is picked', async () => {
+  it('offers a segmented control of basenames for two paths, none pressed, and previews nothing until one is picked', async () => {
     mount({ status: { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } } });
-    const select = await within(dialog()).findByRole('combobox', { name: 'Repository' });
+    const group = await within(dialog()).findByRole('group', { name: 'Repository' });
+    expect(within(group).getAllByRole('button').map((b) => [b.textContent, b.getAttribute('aria-pressed'), b.getAttribute('title')])).toEqual([
+      ['pay', 'false', '/Users/ada/pay'],
+      ['pay-web', 'false', '/Users/ada/pay-web']
+    ]);
     expect(promptReads()).toHaveLength(0);
     await waitFor(() => expect(startButton()).toBeDisabled());
-    await userEvent.selectOptions(select, '/Users/ada/pay-web');
+    await userEvent.click(repoPick('pay-web'));
+    expect(repoPick('pay-web')).toHaveAttribute('aria-pressed', 'true');
     await waitFor(() => expect(promptBox().value).toContain('/Users/ada/pay-web'));
     await waitFor(() => expect(startButton()).toBeEnabled());
+  });
+});
+
+describe('JiraLaunchSheet — repository control shape', () => {
+  it('falls back to a select when there are five paths', async () => {
+    mount({ status: { repos: { PAY: ['/a/one', '/a/two', '/a/three', '/a/four', '/a/five'] } } });
+    expect(await within(dialog()).findByRole('combobox', { name: 'Repository' })).toBeInTheDocument();
+    expect(within(dialog()).queryByRole('group', { name: 'Repository' })).not.toBeInTheDocument();
+  });
+
+  it('falls back to a select when two paths share a basename, so the labels stay distinguishable', async () => {
+    mount({ status: { repos: { PAY: ['/a/api', '/b/api'] } } });
+    expect(await within(dialog()).findByRole('combobox', { name: 'Repository' })).toBeInTheDocument();
+    expect(within(dialog()).queryByRole('group', { name: 'Repository' })).not.toBeInTheDocument();
+  });
+});
+
+describe('JiraLaunchSheet — the action tiles', () => {
+  it('draws three tiles with their sub-lines, described by them', async () => {
+    await ready();
+    const group = within(dialog()).getByRole('group', { name: 'Action' });
+    expect(within(group).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['End to end', 'Ticket loaded', 'A skill']);
+    expect(tile('End to end')).toHaveAccessibleDescription('plan, change, test, PR');
+    expect(tile('Ticket loaded')).toHaveAccessibleDescription('you drive');
+    expect(tile('A skill')).toHaveAccessibleDescription('1 on this machine');
+    expect(tile('End to end')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dialog()).queryByRole('combobox', { name: 'Skill' })).not.toBeInTheDocument();
+  });
+
+  it('lands a skill launch on the third tile, named, with the Skill select on that skill', async () => {
+    await ready({ initialAction: { skill: SKILL.id } });
+    expect(tile('A skill')).toHaveAttribute('aria-pressed', 'true');
+    expect(tile('A skill')).toHaveAccessibleDescription(SKILL.name);
+    expect(within(dialog()).getByRole('combobox', { name: 'Skill' })).toHaveValue(`skill:${SKILL.id}`);
+  });
+
+  it('keeps the stale skill of a deleted action as the Skill select\'s value', async () => {
+    mount({ initialAction: { skill: 's_deadbeef' } });
+    expect(within(dialog()).getByRole('combobox', { name: 'Skill' })).toHaveValue('skill:s_deadbeef');
+    expect(tile('A skill')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('disables A skill with a reason when the machine has none', async () => {
+    await ready({ status: { skills: [] } });
+    expect(tile('A skill')).toBeDisabled();
+    expect(tile('A skill')).toHaveAttribute('title', 'no skills on this machine');
+  });
+});
+
+describe('JiraLaunchSheet — the foot line and Copy', () => {
+  it('reads where the session starts, for a new worktree', async () => {
+    await ready();
+    expect(within(dialog()).getByText('Starts in pay on a new worktree')).toBeInTheDocument();
+  });
+
+  it('Copy and Copy prompt write the same text', async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    await ready();
+    const text = promptBox().value;
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'Copy' }));
+    await userEvent.click(copyButton());
+    expect(writeText).toHaveBeenNthCalledWith(1, text);
+    expect(writeText).toHaveBeenNthCalledWith(2, text);
   });
 });
 
 describe('JiraLaunchSheet — the action and the preview', () => {
   it('seeds the action from initialAction and refetches the preview, stale answer dropped, when it changes', async () => {
     await ready({ initialAction: 'context' });
-    expect((within(dialog()).getByRole('combobox', { name: 'Action' }) as HTMLSelectElement).value).toBe('context');
+    expect(tile('Ticket loaded')).toHaveAttribute('aria-pressed', 'true');
+    expect(tile('End to end')).toHaveAttribute('aria-pressed', 'false');
     expect(promptReads()[0].searchParams.get('action')).toBe('context');
 
-    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), `skill:${SKILL.id}`);
+    await userEvent.click(tile('A skill'));
+    expect(within(dialog()).getByRole('combobox', { name: 'Skill' })).toHaveValue(`skill:${SKILL.id}`);
     await waitFor(() => expect(promptBox().value).toBe(`prompt for skill:${SKILL.id} in /Users/ada/pay`));
     // The skill is treated as execute by the Branch section: no ticket branch here, so a New one from the default pattern, cut from `develop`.
     expect(calls.map((c) => c.url)).toContain(
@@ -313,7 +387,7 @@ describe('JiraLaunchSheet — the action and the preview', () => {
   it('ignores jiraDefaultAction — the menu reads it, and the sheet opens on exactly the action it was handed', async () => {
     localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction: 'context' }));
     await ready({ initialAction: 'execute' });
-    expect((within(dialog()).getByRole('combobox', { name: 'Action' }) as HTMLSelectElement).value).toBe('execute');
+    expect(tile('End to end')).toHaveAttribute('aria-pressed', 'true');
     expect(promptReads()[0].searchParams.get('action')).toBe('execute');
   });
 
@@ -358,7 +432,7 @@ describe('JiraLaunchSheet — permissions', () => {
     server.agents = agents({ spawnMaxPermission: 'bypassPermissions' });
     await ready({ initialAction: 'context' });
     await waitFor(() => expect(modeSelect().value).toBe('auto'));
-    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), 'execute');
+    await userEvent.click(tile('End to end'));
     expect(modeSelect().value).toBe('auto');
   });
 
@@ -517,7 +591,7 @@ describe('JiraLaunchSheet — Start', () => {
     expect(link).toHaveAttribute('href', 'http://127.0.0.1:5174/?session=sess-9');
     expect(onStarted).toHaveBeenCalledTimes(1);
     // The form is gone on purpose: a second Start would be a second session on the same ticket (409 server side, but never offered).
-    expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start session' })).not.toBeInTheDocument();
   });
 
   it('sends one request for two clicks inside one tick', async () => {
@@ -620,19 +694,19 @@ describe('JiraLaunchSheet — the branch', () => {
         ? { status: 200, body: refsOf(repo, [refBranch('pay-131-a', { ticket: true })]) }
         : { status: 200, body: refsOf(repo, [], { defaultBase: 'main' }) };
     mount({ status: TWO });
-    const repoSelect = await within(dialog()).findByRole('combobox', { name: 'Repository' });
+    await within(dialog()).findByRole('group', { name: 'Repository' });
     expect(modeButton('New')).toBeDisabled();
 
-    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await userEvent.click(repoPick('pay'));
     await waitFor(() => expect(pressed()).toBe('Continue'));
     expect(field('Branch').value).toBe('pay-131-a');
 
-    await userEvent.selectOptions(repoSelect, '/Users/ada/pay-web');
+    await userEvent.click(repoPick('pay-web'));
     await waitFor(() => expect(pressed()).toBe('New'));
     expect(field('Name').value).toBe('pay-131-refund-partial-captures');
     expect(field('Base').value).toBe('main');
 
-    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await userEvent.click(repoPick('pay'));
     await waitFor(() => expect(pressed()).toBe('Continue'));
     expect(field('Branch').value).toBe('pay-131-a');
     const asked = calls.filter((c) => c.url.startsWith('/api/jira/refs')).map((c) => new URL(c.url, 'http://x').searchParams.get('repo'));
@@ -643,26 +717,26 @@ describe('JiraLaunchSheet — the branch', () => {
   it('puts A\'s defaults back after an edit in A and a quick A → B → A, B\'s refs never answering', async () => {
     server.refs = (repo) => (repo === '/Users/ada/pay' ? { status: 200, body: refsOf(repo) } : 'pending');
     mount({ status: TWO });
-    const repoSelect = await within(dialog()).findByRole('combobox', { name: 'Repository' });
-    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await within(dialog()).findByRole('group', { name: 'Repository' });
+    await userEvent.click(repoPick('pay'));
     await waitFor(() => expect(pressed()).toBe('New'));
     await userEvent.clear(field('Name'));
     await userEvent.type(field('Name'), 'pay-131-edited');
-    await userEvent.selectOptions(repoSelect, '/Users/ada/pay-web');
+    await userEvent.click(repoPick('pay-web'));
     expect(within(dialog()).getByText('loading branches…')).toBeInTheDocument();
-    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await userEvent.click(repoPick('pay'));
     await waitFor(() => expect(field('Name').value).toBe('pay-131-refund-partial-captures'));
   });
 
   it('an action change while B is pending does not leave B\'s stored defaults on A', async () => {
     server.refs = (repo) => (repo === '/Users/ada/pay' ? { status: 200, body: refsOf(repo, [refBranch('pay-131-a', { ticket: true })]) } : 'pending');
     mount({ status: { ...TWO, repoDefaults: { '/Users/ada/pay-web': { base: 'main', namePattern: 'feature/{key}-{slug}' } } } });
-    const repoSelect = await within(dialog()).findByRole('combobox', { name: 'Repository' });
-    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await within(dialog()).findByRole('group', { name: 'Repository' });
+    await userEvent.click(repoPick('pay'));
     await waitFor(() => expect(pressed()).toBe('Continue'));
-    await userEvent.selectOptions(repoSelect, '/Users/ada/pay-web');
-    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), `skill:${SKILL.id}`);
-    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await userEvent.click(repoPick('pay-web'));
+    await userEvent.click(tile('A skill'));
+    await userEvent.click(repoPick('pay'));
     await waitFor(() => expect(pressed()).toBe('Continue'));
     expect(field('Branch').value).toBe('pay-131-a');
   });
@@ -702,7 +776,7 @@ describe('JiraLaunchSheet — the branch', () => {
   it('context opens on No branch; execute offers no No branch at all', async () => {
     await ready({ initialAction: 'context' });
     await waitFor(() => expect(pressed()).toBe('No branch'));
-    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), 'execute');
+    await userEvent.click(tile('End to end'));
     await waitFor(() => expect(pressed()).toBe('New'));
     expect(within(within(dialog()).getByRole('group', { name: 'Branch mode' })).queryByRole('button', { name: 'No branch' })).not.toBeInTheDocument();
   });
@@ -849,7 +923,7 @@ describe('JiraLaunchSheet — the branch', () => {
     await userEvent.click(modeButton('New'));
     expect(mrSwitch()).not.toBeInTheDocument();
 
-    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), 'execute');
+    await userEvent.click(tile('End to end'));
     await waitFor(() => expect(pressed()).toBe('Continue'));
     await userEvent.click(modeButton('New'));
     expect(mrSwitch()).not.toBeChecked();

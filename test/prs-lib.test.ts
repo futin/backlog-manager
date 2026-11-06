@@ -8,6 +8,7 @@ import {
   groupRepos,
   autoMergeBlock,
   mergeBlock,
+  mergeMain,
   outcomeLine,
   parsePrKey,
   prChips,
@@ -84,26 +85,38 @@ describe('prChips', () => {
     expect(chips).toEqual([
       { label: 'draft', tone: 'neutral' },
       { label: 'changes requested', tone: 'bad' },
-      { label: 'checks failing', tone: 'bad' },
-      { label: 'conflicts', tone: 'bad' },
+      { label: 'checks failing', tone: 'bad', glyph: 'cross' },
+      { label: 'conflicts', tone: 'bad', glyph: 'cross' },
       { label: 'behind base', tone: 'warn' },
-      { label: 'auto-merge · rebase', tone: 'live' }
+      // The `done` tint, as the mock's `auto-merge on` — not the solid `live` fill, which reads as a running thing.
+      { label: 'auto-merge · rebase', tone: 'done' }
     ]);
   });
 
   it('maps the other review and check values', () => {
     expect(prChips(pr({ review: 'approved', checks: 'success' }))).toEqual([
       { label: 'approved', tone: 'done' },
-      { label: 'checks passing', tone: 'done' }
+      { label: 'checks passing', tone: 'done', glyph: 'tick' }
     ]);
     expect(prChips(pr({ review: 'review-required', checks: 'pending' }))).toEqual([
       { label: 'review required', tone: 'warn' },
-      { label: 'checks pending', tone: 'warn' }
+      { label: 'checks pending', tone: 'warn', glyph: 'clock' }
     ]);
   });
 
   it('checks the token may not read are a neutral chip — said, because silence would read as "no checks"', () => {
     expect(prChips(pr({ checks: 'unknown' }))).toEqual([{ label: 'checks unknown', tone: 'neutral' }]);
+  });
+
+  it('says mergeability pending, neutral with a clock, while GitHub has not computed it — the mock draws it, and Matrix\'s cell already says computing', () => {
+    expect(prChips(pr({ mergeable: 'unknown' }))).toEqual([{ label: 'mergeability pending', tone: 'neutral', glyph: 'clock' }]);
+    // In reading order: after the checks chip, before `behind base` and auto-merge.
+    expect(prChips(pr({ checks: 'success', mergeable: 'unknown', mergeState: 'behind' }))).toEqual([
+      { label: 'checks passing', tone: 'done', glyph: 'tick' },
+      { label: 'mergeability pending', tone: 'neutral', glyph: 'clock' },
+      { label: 'behind base', tone: 'warn' }
+    ]);
+    expect(prChips(pr({ mergeable: 'mergeable' }))).toEqual([]);
   });
 
   it('draws no checks chip for checks: none, and nothing for a clean PR with no review', () => {
@@ -485,5 +498,28 @@ describe('one home for the key and for the head-moved rule', () => {
 
   it('PullRequestsView does not test the head itself', () => {
     expect(readFileSync(join(GITHUB, 'PullRequestsView.tsx'), 'utf8')).not.toContain('headSha !==');
+  });
+});
+
+describe('mergeMain', () => {
+  it('merges a mergeable PR with green checks', () => {
+    expect(mergeMain(pr({ checks: 'success' }), repo())).toEqual({ mode: 'merge', block: null });
+  });
+  it('merges with mergeBlock\'s own reason when checks fail', () => {
+    expect(mergeMain(pr({ checks: 'failure' }), repo())).toEqual({ mode: 'merge', block: 'checks failing' });
+  });
+  it('arms while checks are pending and the repo allows auto-merge', () => {
+    expect(mergeMain(pr({ checks: 'pending' }), repo({ autoMergeAllowed: true }))).toEqual({ mode: 'arm', block: null });
+  });
+  it('falls back to merge when pending but auto-merge is not allowed on the repo', () => {
+    expect(mergeMain(pr({ checks: 'pending' }), repo({ autoMergeAllowed: false }))).toEqual({ mode: 'merge', block: null });
+  });
+  it('disarms an armed PR, and keeps the sync-off reason on it', () => {
+    const armed = pr({ checks: 'pending', autoMerge: { method: 'squash' } as PullRequestRow['autoMerge'] });
+    expect(mergeMain(armed, repo())).toEqual({ mode: 'disarm', block: null });
+    expect(mergeMain(armed, repo({ syncOff: SYNC_OFF }))).toEqual({ mode: 'disarm', block: 'sync off' });
+  });
+  it('a draft with pending checks cannot arm: merge, blocked as a draft', () => {
+    expect(mergeMain(pr({ draft: true, checks: 'pending' }), repo())).toEqual({ mode: 'merge', block: 'draft' });
   });
 });

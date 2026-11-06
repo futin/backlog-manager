@@ -32,7 +32,7 @@ answered; the conditional half is the shell's. The rail's `drawn` skips the Jira
 still unknown while `jira` is the section on screen; `App` falls a `jira` section to the first drawn source row (`firstDrawn`, Runs when there is none) on
 `configured: false` and holds it on anything else, drawn in `JiraView`'s `loading…` or `Jira unavailable` line; and Settings' `Opens on` offers `Jira` only
 while configured. Why each half is the way it is:
-[invariants.md](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
+[invariants.md](invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 
 `files` and `github` are members of the list unconditionally for the same reason, and their conditional half is the projects answer's. `ProjectsProvider`
 (`client/src/hooks/ProjectsContext.tsx`) is the shell's one read of `GET /api/projects` — through `useRefreshing`, mount and focus, no poll — keeping its last
@@ -53,16 +53,17 @@ deleting the chunk an open tab asks for next — rarely gets that far: `installP
 answers Vite's `vite:preloadError` with one page reload, and a second failure within `RELOAD_GUARD_MS` of it (a timestamp in `sessionStorage`) is left to the
 boundary instead, so a chunk a reload cannot bring back never loops.
 
-The wordmark is a prompt, `BACKLOG` over `› manager▌`, whose cursor blinks while a run on this machine is working (`.claude/DESIGN.md` §8.0). The answer is
-`runsWorking` (`client/src/lib/run-pulse.ts`: a `starting` entry, or a local run `running` and not `isCrashed`), and `App` polls nothing to get it — each
-source's Board and Archive, and Runs, already run a `useOrchestratorRuns()` and report it up through `useReportWorking`; `App` keeps the report tagged with the
-view that made it (`files:board`, `github:archive`, `runs`, …) and drops it on a view change, so Settings, which reports nothing, always shows a solid cursor.
+The wordmark is a prompt — a glyph tile and `backlog manager▌` over a `this machine` kicker — whose cursor blinks while a run on this machine is working (`.claude/DESIGN.md` §8.0). The answer is
+`runsWorking` (`client/src/lib/run-pulse.ts`: a `starting` entry, or a local run `running` and not `isCrashed`). There is ONE `useOrchestratorRuns()` per tab,
+called by `OrchestratorRunsProvider` (`hooks/OrchestratorRunsContext.tsx`, mounted in `App` above `AppShell`); the shell and the four views that read the run
+payload (Board, Archive, GitHub › PRs, Runs) take it through `useOrchestratorRunsContext()`. The provider's `working` is `undefined` until the first answer
+(`answered`), so the cursor is solid then and on a crashed run, and a view switch — Settings included — loses nothing. Its `liveCount` (`liveRunCount`) is the Live sheet's row count.
 
 Every section has a sub-nav tree under its row: Files (Board, Archive), GitHub (Board, PRs, Archive, Settings), Jira (Board, Setup), Runs (History, Watchdog, Ticks)
 and Settings (Local, Shared, Dashboards). All five are drawn by one component, `RailTree`, because the markup carries three details that must not drift — the
 `rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone menu on a pick. What each call site supplies is only what
 legitimately differs: the item list, which of them is current, and what a pick writes. In every case the tree is the **only** control that switches between the
-two views — there is no in-page switch at any width (`.claude/DESIGN.md` §8.0).
+two views — there is no in-page switch at any width (`.claude/DESIGN.md` §8.0); Settings' band switch is the one exception (spec §3, below).
 
 The two trees differ in where their value lives, and the difference is not arbitrary. Runs' mode goes through `useRunsMode` (`client/src/hooks/useRunsMode.ts`),
 a module-level value every mounted reader subscribes to, because the rail is not its only writer — the Watchdog page's own rows jump back to History with a run
@@ -70,7 +71,7 @@ selected, and the Settings watchdog card's `Live view` link opens Watchdog — a
 `lib/runs-mode.ts` stays the one home of the key, the member list and the guard. Settings' scope is a field on the settings object instead, because both of its
 readers already sit inside `SettingsProvider` and nothing outside Settings writes it. Jira's page takes Runs' road for Runs' reason: `useJiraPage`
 (`client/src/hooks/useJiraPage.ts`) is a module store over `lib/jira-page.ts`'s `JIRA_PAGES`, key and guard, because the tree is not its only writer either —
-Setup's `Open board` and the empty board's `Open Setup` land on a page too, through `onOpenJiraPage`, the tree's own pair (`setJiraPage`, then the shell's
+Setup's `Open board` and the empty board's (or Sessions page's) `Open Setup` land on a page too, through `onOpenJiraPage`, the tree's own pair (`setJiraPage`, then the shell's
 `change`) built once in `App` and handed down, as the Settings watchdog card's `Live view` is `onOpenWatchdog`. The source rows' pages take the same road:
 `useFilesPage` and `useGithubPage` (`client/src/hooks/useSourcePage.ts`) are module stores over `lib/source-page.ts`'s `FILES_PAGES`/`GITHUB_PAGES`, keys and
 guards, written by the tree, by the shell's legacy-landing initializer and — GitHub's — by the Sources card's `GitHub › Settings ↗`, which is
@@ -87,9 +88,10 @@ sessions answer — `JiraSessionsProvider` (`hooks/JiraSessionsContext.tsx`), ho
 `enabled` = Jira configured (no poll and no badge otherwise) and `open` = Jira is the current section, so with the section closed the request carries no
 `open=1` — and counts `needsYouCount` (`lib/jira-list.ts`): plan, permission, reply and answer across EVERY linked ticket, not the picked board's, each
 session once, by `sessionId`, even when it is linked to two tickets. Zero draws no element. While the dashboard is unreachable (`reachable: false`, every live link reads Lost contact) or a read fails, the
-hook keeps the last count it was sure of. The badge is a `button.rail-badge` beside the row's button, inside `.rail-group` (a button in a button is invalid, and
-the row must still just open Jira); its click sets the Jira page to `board`, the view to `list` and the filters to `{ chip: 'needs-you', allTickets: true }`
-through the three module stores, then `change('jira')`, so the List it lands on shows every session it counted.
+hook keeps the last count it was sure of. The count is a `button.rail-count` beside the row's button, inside the row's `.rail-group` — every row has one, holding the button and its count but never
+the open tree (a button in a button is invalid, and
+the row must still just open Jira); its click sets the Jira page to `sessions` and the filters to `{ chip: 'needs-you', allTickets: true }`
+through the two module stores, then `change('jira')`, so the Sessions page it lands on shows every session it counted; it never touches the Board page's view.
 
 Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it — the version chip is its last row. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
 JavaScript knows that breakpoint; everything else reads it from there or from a media query.
@@ -133,7 +135,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 `label` and `title` are separate props on both overlay shells because a dialog's accessible name and its visible title are different strings on every surface
 that draws one, and `title` is a node — a name cannot be derived from it.
 
-Two entries differ from the design spec's §12.2 table on purpose, and both are code's reading rather than the spec's: `StageBars` draws its own bar rows rather
+Two entries differ from the design spec's §12.2 table on purpose, and both are code's reading rather than the spec's: `StageBars` draws its own stacked bar rather
 than composing `ProgressRow` (the spec listed it as a composer), and `NumberField` has **one composer, and a late one** — the watchdog's three numeric
 policy values are `Select` ladders, and Settings' own numeric rows re-seed on commit with the same idiom rather than the component. It was kept unused because
 the family is part of the 36 px control set guard 7 pins, and because a numeric row was the next Settings addition's obvious control — which is what the
@@ -147,7 +149,7 @@ page's cards — and a component only one directory can import is the drift the 
 left their CSS byte-for-byte where both surfaces already read it. `LiveStrip` followed for the same reason in Jira phase 5: it was `ItemCard`'s inline markup
 until the Jira card needed the same band for a live session, and the component owns the markup while `.board-card-live` stays the stylesheet's, declared once.
 Everything else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`,
-`RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`, `StageBars`, `WatchdogMonitor` (runs); `JiraView`, `JiraBoardView`, `JiraCard`,
+`RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`, `StageBars`, `WatchdogMonitor` (runs); `JiraView`, `JiraBoardView`, `JiraSessionsView`, `JiraIssueList`, `JiraCard`,
 `JiraDetail`, `JiraSetupView`, `JiraBoardSheet`, `JiraReposGroup`, `JiraConnectionGroup`, `JiraSkillsGroup`, `JiraWorktreeRow`, `JiraRunMenu`,
 `JiraLaunchSheet`, `JiraBranchSection` (jira). `JiraChip` sits at the top level of `components/` beside
 `TrackerChip`, because the shell draws it. `FilterBar` sits at the top level of `components/`, like `lib/view-keys.ts`, because more than one lazy chunk
@@ -291,8 +293,8 @@ past. Its band counts all three states at once (`3 live · 1 starting · 28 past
 cell together.
 
 Directly under the band, the **figure strip**: five cells — runs, completed / queued, avg item work, rework / completed, verify pass — each a label, a value and
-a line saying what the figure above it means, all read from what `aggregateRuns` (`lib/run-stats.ts`) returns and nothing else. The sixth cell is full width and
-holds `StageBars`: machine time by stage, always the seven `MACHINE_STAGES` rows in pipeline order, `—` for a stage never recorded, queue wait excluded. The
+a line saying what the figure above it means (the runs cell also carries a 6 px status bar, one `runTone`-toned segment per status with runs), all read from what `aggregateRuns` (`lib/run-stats.ts`) returns and nothing else. The sixth cell is full width and
+holds `StageBars`: machine time by stage as one stacked 10 px bar (a segment only for a stage with time, width its share) over a legend of all seven `MACHINE_STAGES` in pipeline order, `—` for a stage never recorded, queue wait excluded. The
 strip hides with the list when the range or project filter empties it.
 
 Under the strip, the **split**: a 420 px list column carrying the Live sheet over the History sheet, and one always-visible detail sheet beside it. The two
@@ -304,8 +306,9 @@ a media query cannot see the rail, the measure cap, the padding or `.shell`'s `z
 containment would make either the containing block for the fixed overlays rendered inside them. The 1280 px measure cap sits under the threshold, so the
 rail appears only with content width set to full. Watchdog renders no wrapper.
 
-- **The Live sheet** holds one row per run that is `running` or `paused`, plus one per `starting` entry — a dot, the project, `⚠ N` when the run carries
-  attention entries, the two-tone `1 / 5`, elapsed, and a status pill only where one is earned. A starting row reads `starting… · <age>`, carries no controls
+- **The Live sheet** holds one row per run that is `running` or `paused`, plus one per `starting` entry. A run is a **card** wearing the `ui-stripe` edge in its `runTone` (red when
+  crashed): the project, `⚠ N` when the run carries attention entries, a state pill (`running` live, `paused` warn with the pause glyph, `crashed` warn), the
+  run id as a code span, the machine tag and elapsed, and `N of M items` over a 4 px `Meter` fill. A card holds no other stripe — `--stripe` inherits. A starting row reads `starting… · <age>`, carries no controls
   and cannot be selected: there is no run file for the detail sheet to show. A remote orchestrate launch (`remoteStarting`) is a starting row of its own,
   `Starting on <machine>`, equally unselectable; the `remote` pill on a remote run's
   row gains a machine tag naming the dashboard the run is on, and the sheet's head and the page's count line say `N launching elsewhere`. A crashed run —
@@ -318,23 +321,23 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
 - **The History sheet** holds one row per finished run under day kickers, newest first: the dot and the status word from `runStatusChip`, the project, the
   two-tone count, wall time and the cost beside it when usage exists, behind a counted `load more` in pages of 25 — a render decision over a corpus the client
   already holds whole, exactly as the staleness window is. A row **selects**; nothing opens, and there is no run modal anywhere in the app.
-- **The detail sheet** shows the selected run whole: a head with the project, the run id and `RunControls` (Pause, Cancel with its `Pausing after <id>` note,
+- **The detail sheet** shows the selected run whole: a head with the project and the run id as a code span, the status pill (`runs-status`) with its note (`paused at a boundary`) and `RunControls` under them (Pause, Cancel with its `Pausing after <id>` note,
   Stop beside both — and on a crashed run too, which is the run a person most needs to end — Resume for a paused run with Stop beside it (#305, drawn even
   when the environment ladder hides the Resume), and Resume for a crashed one exactly when `watchdogStoodDown` says the sweeper will not. Stop asks first
   (bug-53): the chip is replaced in place by `ui/Confirm` naming the item it abandons and saying the run cannot be resumed — or, with nothing in flight and
   items parked, that the parked items keep their worktree and branch — and only its `Stop run` sends the
   request — `Keep running` and Escape send nothing. A run with a stop on file drops to the
   `Stopping` reading and offers no control at all — no withdrawal, because the `--abort` session has already been spawned, and no Resume in any branch) — and,
-  when the run file carries a `prUrl` that passes `isPrUrl`, a `PR #<n>` link-out in the head's sub line, opened with `rel="noopener noreferrer"`; then the
-  facts strip, the mode and question notes (`mergeModeLabel`'s pill reads `PR mode` for an effective `pr` run and `branch mode (downgraded)` for a degraded
-  one), the chip row, `git merge --no-ff <branch>` per branched item, the items in pipeline order — each with its stage chip, its `RowTime` reading, its
-  seven-node `StageTrack`, its usage line, its assumptions under `decide`, and its last verification as a disclosure, open when failed. Machine time by stage
+  when the run file carries a `prUrl` that passes `isPrUrl`, the sheet closes on `PR opened · <base> → <prTarget> · #<n>`, the number a link-out opened with `rel="noopener noreferrer"`; then the
+  facts grid (glyph-labelled cells: Started with the wall and the finish under it, Machine for a remote run, Base · mode with the question mode under it, Cost), the mode and question notes (`mergeModeLabel`'s pill reads `PR mode` for an effective `pr` run and `branch mode (downgraded)` for a degraded
+  one), the count pills (the same testids as the chips they replaced), `git merge --no-ff <branch>` per branched item, the items in pipeline order — each with
+  an outcome pill reading its real stage word (`stagePillTone`), its `RowTime` reading, a `stage span · stage span` line, its seven-node `StageTrack`, its usage line, its assumptions under `decide`, and its last verification as a disclosure, open when failed. Machine time by stage
   for this run alone comes after the items, and the attention entries last of all — an empty attention list is the common case and the chip row already carries
   its count, so the section earns the screen only when it has something in it. Selection is one run across both sheets: the first live run is selected on
   arrival, and with nothing live the newest History row is, so the Board's run chip lands a reader on the current item's stage track with no second click.
   Every reading in the head, the facts strip, the notes and the chip row is `runDetailModel` (`lib/run-detail.ts`, #271) — a pure function of the three
   tiers and one `now`, unit-tested without a render; the component keeps the fetch, the clock, the rows' own JSX and the machine-time rollup.
-  For a remote run the sheet is read-only: `Remote run: its controls are on the machine that ran it.` stands where `RunControls` would, nothing fetches
+  For a remote run the sheet is read-only: `controls live on the machine that ran it` stands where `RunControls` would, nothing fetches
   `archive/run`, and a line under the items says the ones the run has not claimed yet are not visible from here. A LOCAL run of a tracker project that has
   claimed nothing yet says `Not visible from other machines: this run has not claimed an issue yet.` — `lib/remote-run.ts` holds all three derivations, and
   `hooks/useProjectSources.ts` reads the project sources once on mount.
@@ -344,13 +347,17 @@ Cost rides all three surfaces — the History row's foot line, the detail head's
 rather than zeroed for a run that predates the recording. Empty states are `no runs yet` and `no runs in this range`, the figure strip hidden alongside the
 second.
 
-**Watchdog** — the sweeper's own page (`WatchdogMonitor`), the only surface that additionally mounts `useWatchdog()`. Its band carries `stateLine`'s own
-sentence as its subtitle and a flat `Policy in Settings ›` chip, because the policy is read here and edited there. Three figures: the sweeper's phase as a word
-with a sweep meter under it while armed, the watched count over `⚠ 1 crashed · 2 fresh · 1 not yet watched`, and the three policy values with the enabled
-switch's state as their line. Then the Watching sheet — one row per `running` run, annotated from the sweeper's own set with the skew rendered rather than
-hidden, each with a heartbeat meter against `RUN_STALE_MS`, and on a crashed row the attempt pips, the clause, the session id, the grace remaining and a
-`Resume now` chip drawn only when `watchdogStoodDown` allows. A row jumps to History with that run selected. Last, the activity ledger: the last
-`WATCHDOG_EVENT_CAP` events, held in the API process's memory and emptied by a restart, which its subtitle says rather than buries.
+**Watchdog** — the sweeper's own page (`WatchdogMonitor`), the only surface that additionally mounts `useWatchdog()`. It opens on a `Runs · Watchdog` band, then
+the STATUS BAND — one `Sheet` row (`watchdog-state`): a ring `GlyphTile`, the phase as a word (`stateWord` beside a `Dot`: `Off · <reason>`,
+`Idle · nothing to watch`, `Watching N`), `stateLine`'s own sentence under it (`watchdog-state-line`, the only place the `next check in 42s` countdown is drawn),
+the sweep meter while armed, and a flat `Policy in Settings ›` chip, because the policy is read here and edited there. The policy is its own `FigureStrip`
+BELOW the band — `Check every`, `Leave a resumed run alone`, `Give up after` (`N resumes`) — with the enabled switch's state as a line under it. Then the
+Watching sheet: a count pill beside the title and the `⚠ 1 crashed · 2 fresh · 1 not yet watched` split as its sub, one row per `running` run, annotated from
+the sweeper's own set with the skew rendered rather than hidden, each with a heartbeat meter against `RUN_STALE_MS`, and on a crashed row the attempt pips, the
+clause, the session id, the grace remaining and the Resume control (`RunControls`, the component the run detail's head draws) drawn only when
+`watchdogStoodDown` allows. A row jumps to History with that run selected. Last, the activity ledger: the last `WATCHDOG_EVENT_CAP` events, held in the API
+process's memory and emptied by a restart, which its subtitle says rather than buries. The kind cell is a `Pill` holding the kind's glyph and word (`live`,
+`done`, `bad`, `warn`, and `neutral` for the muted kinds).
 
 **Ticks** — the tick breaker's page (`TickMonitor`, `RunsMode` `'ticks'`), the third Runs page, built as the Watchdog page is and reached only through the
 rail's tree. It mounts `useTicks({ live: true })` — the one source, a 15 s poll while the page is open — and takes no props. Its band (`Runs · Ticks`) carries
@@ -358,31 +365,28 @@ rail's tree. It mounts `useTicks({ live: true })` — the one source, a 15 s pol
 Three figures: the breaker (the halted count in the `bad` tone, naming the projects, or `none` over `after N failures in a row`), the last 24 hours
 (`ticksLast24h`, the one reading that moves with no new payload, so the page's clock ticks at a minute) and the policy (`halt after N failures`; `tick.json
 cannot be read — showing the default` when the server answers `source: "unreadable"`). Then a Projects sheet, one row per project the server listed, halted
-first (`sortTickProjects`) — the streak, the lock, the newest records and a `Reset` button — and an activity ledger of the newest records across projects
-(`tickActivity`). `streak`, `halted` and `haltedSince` arrive derived by the server (the rule is `server/src/tick/tick-breaker.util.ts`, never recomputed in the
+first (`sortTickProjects`) — the name, a `N failures in a row` pill (red on a halted project, with a `since <clock> · last: <reason> on <id>` line; amber on a project with a streak that is not halted), a strip of its newest twelve ticks (`tickStrip`, oldest left, a cell per tick, green ok / red failed / grey other, titled with the clock, kind, id and outcome, summarised once for a screen reader), the lock, the last-tick line and a `Reset` button on a halted row — and an activity ledger of the newest records across projects
+(`tickActivity`, its outcome a `Pill`). `streak`, `halted` and `haltedSince` arrive derived by the server (the rule is `server/src/tick/tick-breaker.util.ts`, never recomputed in the
 browser), so a row prints a verdict rather than computing one. Reset is guarded twice, both in the component: a ref-held in-flight set closes the button before
 the first POST settles, and the refusal (`saveError`, hook-wide) is shown under the one row last asked. A failed first read draws a notice, not an empty list,
 so a page that could not reach the server never says the breaker is quiet.
 
 ### Settings
 
-THREE pages, picked from the rail's tree and from nothing else — `settingsScope` (`local | shared | dashboards`) is the setting, `local` the default. **The page
-is the scope**: Local is everything in this browser's `localStorage`, Shared and Dashboards are what the API reads off the host. The band states which in a
-`Pill` at `neutral` (`this browser` / `this machine`, the latter on both host pages) and its subtitle is the page's own one-line summary; there is no in-page
-switch at any width.
+THREE pages, picked from the rail's tree and from the band's `Local | Shared | Dashboards` `Segmented` (spec §3 of the app restyle; both write the one setting) — `settingsScope` (`local | shared | dashboards`) is the setting, `local` the default. **The page
+is the scope**: Local is everything in this browser's `localStorage`, Shared and Dashboards are what the API reads off the host. The band's sub-line says which
+(`saves in this browser only` / `saved on this machine`) and each card carries a `Pill` at `neutral` (`this browser` / `this machine`, the latter on both host pages).
 
-| Page           | Column 1                            | Column 2                                       |
-| -------------- | ----------------------------------- | ---------------------------------------------- |
-| **Local**      | Display, Board                      | Orchestrator, Dispatch                         |
-| **Shared**     | Sources                             | Orchestrator watchdog, Backlog tick, Time zone |
+| Page           | One column, top to bottom                                          |
+| -------------- | ------------------------------------------------------------------ |
+| **Local**      | Display, Board, Orchestrator, Dispatch                             |
+| **Shared**     | Sources, Orchestrator watchdog, Backlog tick, Time zone            |
 
-**Dashboards** is not a two-column page; it is described below the cards.
+**Dashboards** is not a column of cards; it is described below.
 
 Each card on Local and Shared is still a title plus a scope (`this device`, `this machine`, `this server`) answering a different question from the name: whether
-changing this affects anybody but the person changing it. Both draw the same two hand-placed columns, so a card does not move to the other side of the page when
-its neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones; Shared is the `Sources` report
-alone in its left column, against the watchdog's long card, the `Backlog tick` card and the `Time zone` card in its right (the three machine-wide controls).
-Shared once held `Dashboards` in that column too (task-45 added `Trackers` under `Claude Agents`, multi-dashboard put `Dashboards` between them, and
+changing this affects anybody but the person changing it. Both draw one readable `.set-col` at every width (spec §4.10; the two hand-balanced columns and their 1100 px fold are gone — `.set-cols` survives
+on GitHub › Settings and Jira › Setup). Shared once held `Dashboards` in that column too (task-45 added `Trackers` under `Claude Agents`, multi-dashboard put `Dashboards` between them, and
 `Dashboards` absorbed `Claude Agents`) until the machine list outgrew a card and became its own page; Shared draws no dispatch line now.
 
 Local holds themes, density, text scale, content width, landing section, the staleness window, the two orchestrator run defaults, and `Dispatch` — the default
@@ -406,7 +410,7 @@ card carried (#17) is GitHub › Settings' now (below).
 **Dashboards** is the one page that writes the machine list (`DashboardsPage`, drawn to `.claude/DESIGN.md` §8.6): the Suggest card (`SuggestCard` — the three
 strategies as a radio group, the threshold beneath) on top, then `DashboardsList` (360 px) beside `DashboardDetail`, and a footer, folding to one column at
 1100 px. The list is the machines in prefer order with home first until moved; each row is its place, a health dot, its name, its account and two usage meters.
-The detail is the selected machine's URLs, the `BM_MACHINE_NAME` a claim's `host` must equal, the models and efforts it may run and one token fact. Home's
+The detail is the models and efforts the machine may run, then its facts: Dashboard (URL), the account `Pill` and one token fact, and for a remote Board and the `BM_MACHINE_NAME` a claim's `host` must equal. Home's
 detail also carries the dispatch status line (`DispatchStatus.tsx`, read by `useAgents`, so it draws even while the list has not loaded) and the `Setting it up`
 steps while it is unhealthy. **Two reads, and neither waits on the other.** `useDashboards` reads the file once on mount (no poll, no focus trigger: the file
 changes only when a person edits it) and every write — `POST /api/dashboards/entries`, `/entries/delete`, `/home`, `/settings` — answers the whole fresh view,
@@ -472,16 +476,16 @@ the shell's narrow-Settings exception away.
 One shell-level chip and two item readings (task-45, [spec](../superpowers/specs/2026-09-17-tracker-backed-backlog-design.md) §5.5; the chip since #228,
 [spec](../superpowers/specs/2026-09-28-tracker-header-strip-design.md)), all derived in `lib/tracker.ts` and merely rendered by the components:
 
-- **The tracker chip** (`TrackerChip`) is the connection's one freshness reading, and it belongs to the shell rather than to any page: a poll is a fact about
+- **The tracker status pill** (`TrackerChip`) is the connection's one freshness reading, and it belongs to the shell rather than to any page: a poll is a fact about
   the whole tracker, so it is drawn once, in the strip above the well (`.topstrip`, `var(--main-gap)` tall) — or, below 700 px, where the strip does not exist,
-  in the rail's phone bar beside ☰, through `SideRail`'s `chipSlot` — where CSS alone drops the login whenever meters follow it and pins ☰ at 36 px, since
-  the bar has no slack for a reading whose width tracks the account (#229). `App` builds the one element and hands it to exactly one of those two homes. The chip is
-  drawn only while `hasTracker` finds a github row in the `/api/trackers` payload, and shows a status pip, the platform, and two `Meter`s: POLL (the sweep's
-  countdown, `sweepProgress` — the newest github stamp against `TRACKER_CYCLE_MS`, reading `overdue` past two cycles and the access reason when a row is not
-  `ok`) and API (`apiUsage` — the rate limit's used share, amber from 60 %, red from 90 %). Clicking it opens `TrackerPopover`, a read-only panel with one row
-  per connected repo (its own `pollProgress` countdown) and the API block (`N of M left · resets HH:MM`, `resetClock`), or the `BM_GITHUB_TOKEN` note when no
-  token is set. It has no buttons and no links. The panel is `ui/Popover`'s at 420 px, and its dismissals are `Popover`'s too — Escape through
-  `useDialogEscape`, and a pointerdown outside it and off the chip — beside the section change, the one close the chip keeps for itself.
+  in the rail's phone bar beside ☰, through `SideRail`'s `chipSlot`. `App` builds the one element and hands it to exactly one of those two homes. It is drawn
+  only while `hasTracker` finds a github row in the `/api/trackers` payload, and is a `StatusPill` — a dot, `GitHub`, and the age of the newest sweep — whose tone
+  is `serviceTone`: grey while no repo with sync on has been polled, amber while a repo is `rate-limited` or one is polled more than twice its own interval ago, red when there is no token or every repo's access is neither `ok`, `rate-limited` nor unread (`githubDown`), green on time (`sweepProgress` is not used by the pill). Its accessible name is `GitHub: on time|late|down`, with no
+  age. Below 700 px the pill drops only the age. Clicking it opens `TrackerPopover` (`ui/Popover`, 330 px): a `ServiceHead` (initials disc, name, `connected`,
+  and a `Sync now` chip that takes focus and posts `POST /api/github/sweep`), two figures (`Last sweep`, `Rate limit` — `apiUsage`, `resetClock`), one row per
+  connected repo with its own `pollProgress` countdown and a sync icon (`POST /api/github/sweep { repo }`), a `GitHub page ↗` link, or the `BM_GITHUB_TOKEN`
+  note when no token is set. It replaces "no buttons and no links" (spec §3). Its dismissals are `Popover`'s — Escape through `useDialogEscape`, and a
+  pointerdown outside it and off the pill — beside the section change, the one close the pill keeps for itself.
   Since #17 each repo runs on its own clock, `syncCycleMs(interval)` — one `TRACKER_CYCLE_MS` per server tick the interval spans (`1m` is four, `5m`
   twenty), because the server restamps a slow repo on its n-th tick and every tick carries a sweep's length; `15s` is that constant exactly. POLL follows the newest stamp among the repos on the FASTEST interval present and skips `off` ones; it reads amber `sync off` when every
   repo is off, and `failing` only when every repo still syncing is failing. A popover row reads `sync off` for an off repo, never `overdue`.
@@ -500,23 +504,27 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
 - **The PRs page** (GitHub › PRs, [spec](../superpowers/specs/2026-10-29-source-sections-design.md) Goal 2, reshaped by [the fixes
   spec](../superpowers/specs/2026-10-30-prs-page-fixes-design.md); DESIGN.md §8.11). `PullRequestsView` lists every open pull request of the registered GitHub
   repos — forks and other authors included — drawn as Inbox, Matrix or Cards (below). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
-  last answer, plus mount and focus), mounted by this page and by GitHub › Settings' Access card: the server's PR cache has no timer, so with neither open there
-  are no PR reads at all. A repo the token cannot read (`forbidden` or `not-found`, `splitReach` in `lib/pr-layouts.ts`) is handed to no layout and left out of
-  `N open`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card
+  last answer, plus mount and focus), mounted once by the shell's `PullRequestsProvider` and read here and by GitHub › Settings' Access card through
+  `usePullRequestsContext`: the server's PR cache has no timer, so with no GitHub project registered there are no PR reads at all. A repo the token cannot read (`forbidden` or `not-found`, `splitReach` in `lib/pr-layouts.ts`) is handed to no layout and left out of
+  the band's `N open in M repos · polled <age>`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card
   (`GithubAccessGroup`, the hook's second mount) lists each with GitHub's `detail` and the token fix; a repo the token reads whose checks it may not
   (`checksDetail`, a `FORBIDDEN` on `statusCheckRollup` alone) is drawn like any other with every PR's `checks` `unknown` and listed on that card under
   `Checks not readable`; a rate-limited or `error` repo is transient, keeps its rows and is said once below the list as `Can't read · <repo> — <detail>` in
   every layout, never as a row.
- The layout is a `Segmented` in the toolbar offering
+ The layout is a `Segmented` in the band's trailing slot (`.prs-switch`) offering
   all three at every width (`PR_LAYOUT_OPTIONS`), stored per device (`PR_LAYOUT_KEY`; an unknown word is Inbox). **Inbox** (default) ranks every shown PR across
-  repos (`rankPrs`: level, severity, newest) under three filtering count tiles, every row one `prs-row` — the fact line (a loud row's verdict and steps, a quiet
-  row's `quietFacts`), then `author · head → base · age` with the run warning as a warn pill. **Matrix** is a table, a column per check with a failure count in
-  its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; its row toggles one expansion, pinned to the box's visible width, holding
-  the key strip and the foot. **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`); a repo read cleanly with none is counted in the
-  toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — `Merge`, `Auto-merge`, `Update`, `Open ↗`, one
-  of them filled by `primaryKey` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
-  the method `Select` inside it, then `PrOutcomeLine`. A blocked key is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
-  off` on each for a sync-off repo) as its `title` and its `aria-describedby`; a key is `disabled` outright only while its PR's write runs, because the page
+  repos (`rankPrs`: level, severity, newest) under a `Segmented` labelled `Triage` (a counted option per level, no `all`; the pressed one clears the filter), every row one `prs-row` — a 40 px (28 in
+  Cards) checks `GlyphTile` (`checksTone`, `checksGlyph`), the `#n` and title, then one wrapping line: the pills (`prPills`, the checks and conflicts ones leading with a
+  glyph), then `[repo short name ·] author · head → base · age` (`repoShortName`, Inbox only) with the run warning as a warn pill. **Matrix** is a table, a column per check with a failure count in
+  its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; a problem cell and a header count are pills (red for `bad` and Checks,
+  amber otherwise; a healthy cell is plain text); its row toggles one expansion, a panel that is the `Ledger`'s next sibling inside the sheet (`aria-controls`; a `Popover`
+  portals nothing and the scroll box's and Ledger's overflow would clip the Merge menu), holding the key strip with a blocked Merge's reason in words, then the foot.
+  **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`), its head a dark 28 px repo `GlyphTile`, the short repo name (`repoShortName`), the
+  `N open` pill and `polled <age>` at the trailing edge, the cards flowing two-up in `.prs-cards-grid` (one column under ~1100 px of pane), its rows the same `PrRow` Inbox draws
+  (without the repo name; Cards' text takes a 240 px basis so the keys stay at the right of a two-up card, Inbox keeps 320); a repo read cleanly with none is counted in the
+  toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — the split Merge (main half from `mergeMain`: `Merge`, `Auto-merge` or `Auto-merge on`; its chevron opens `Merge menu`: Merge, Enable/Disable auto-merge, Update branch, the row `primaryKey` names ticked) and an icon link `Open #n on GitHub` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
+  the method `Select` inside it, then `PrOutcomeLine`. A blocked main half (dashed, reading `Blocked`) or menu row is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
+  off` on each for a sync-off repo) as its `title` (the half) and its `aria-describedby` (both; a row's sub-line is the reason); the split is `disabled` outright only while its PR's write runs, because the page
   owns an in-flight set keyed `<repo>#<number>` (`prKey` / `parsePrKey`, `lib/prs.ts`). The page holds ONE `confirming` key, so a second `Merge` moves the Confirm, and a write leaving, a layout
   switch, a re-read that drops the PR or blocks the merge, a filter hiding the row or a collapse closes it, nothing sent. `PrRepoNotes` says the merged
   outcomes, the `sync off` sentence and `showing n of total` once above Inbox and Matrix, then the `Can't read` lines below; Cards says the first three in each
@@ -527,8 +535,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   marks the PR at the head SHA it was asked from (`UpdateMark`): the row reads `updating…` while the mark is present — Matrix in its Base cell only — and a read
   that shows a new head drops it and says `branch updated`; `UPDATING_MS` (30 s, `PR_UPDATING_MS` in `shared/types.ts`) after the update the page re-reads once
   and judges that answer — a read the server answers from GitHub, because the update made the repo due at that same moment — and a same head or a failed read
-  just drops the mark. `updateBlock` reads `no permission to update` for a PR that cannot be updated while behind. The page reports the rail cursor as Board and
-  Archive do (`useReportWorking`).
+  just drops the mark. `updateBlock` reads `no permission to update` for a PR that cannot be updated while behind. Its runs come from the shell's one poll
+  (`useOrchestratorRunsContext`).
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live
@@ -573,26 +581,31 @@ the mapper fills from an unreleased claim and disables the control with its usua
 item's claim at dispatch (`itemClaimBlock`) where it never re-checks a files item's stamp.
 
 **An `in-review` issue keeps its control, disabled with `a PR is open for this item`** (execute `pr` mode). `inReviewBlock` (`shared/agent.ts`) reads the
-mapped `inReview` flag after `progressBlock` and before `runClaimBlock`, and the server's `plan`/`dispatch` read the same helper. The label goes on once execute
+mapped `inReview` flag. It is the first rung of `itemLadderBlock` (`shared/agent.ts`, the one home of the order of those rungs), which `DispatchButton` reads
+after
+`progressBlock` and before `runClaimBlock`, and which the server's `plan`/`dispatch` read too. The label goes on once execute
 has pushed a `pr`-mode branch — the moment its claim is released and the still-open issue would otherwise read ready — and comes off when the PR merges and
 closes the issue, or by `backlog.mjs review <id> off`. A `Refs #<n>` PR closes nothing, so the flag is also lifted without a write once the latest closed
 referencing PR merged into the default branch and none is open (#411, `TrackerPollerService.reviewLifted`) — the label stays, the card reads ready. A files item never carries it.
 
 **A files item an execute branch or tree holds is refused by the launch sheet, and its control stays enabled** (#427). A `--finish pr` execute in a new tree leaves
 `execute/<id>` and `.worktrees/execute-<id>` behind while the item stays in `open/`; one that reused a linked worktree leaves neither, and is not caught. `plan` and `dispatch` refuse it with `an execute branch or worktree already holds this item`
-(`executeHeldBlock`, `server/src/agents/execute-held.util.ts`), right after the in-review rung; `DispatchButton` does not read this one, because the answer is a
+(`executeHeldBlock`, `server/src/agents/execute-held.util.ts`), right after the in-review rung, handed to `itemLadderBlock` as a value; `DispatchButton` passes
+`null` for this one, because the answer is a
 git read the board's payload never carries, so the click opens the sheet and the sheet says why. Execute only — a groom of such an item still opens — and a tracker
 item is not asked. Deleting the branch and tree frees the item on the next plan: nothing is memoised.
 
 **A plan that awaits review keeps the control too, disabled with `this plan awaits review`** (backlog-tick, #330). `planReviewBlock` (`shared/agent.ts`) is the
-next rung, after `inReviewBlock` and before the run claim, so an item carrying both says the PR. It reads `BacklogItem.planReview`, which — unlike `inReview` —
+next rung of `itemLadderBlock`, after `inReviewBlock` and before the run claim, so an item carrying both says the PR. It reads `BacklogItem.planReview`, which —
+unlike `inReview` —
 both sources carry: a tracker issue while its `plan-review` label is on, a files item while its frontmatter has a `plan-review:` line. The tick's groom adds the
 mark in the write that wrote the plan, and a person removes it to approve the plan — the label through `backlog.mjs plan-review <id> off`, the files line by
 deleting it. It reuses the in-review rendering — same disabled state, same reason as title — and, in the item modal, draws nothing of its own.
 
 **An outsider's issue that no groom of ours has pinned keeps its control, disabled with `filed from outside the repo — groom it to vet the plan`** (#341).
 `unvettedBlock` (`shared/agent.ts`) sits between the two rungs above — after `inReviewBlock`, before `planReviewBlock` — because approving the plan does not
-vet it, so an item carrying both must say the reason the approval would not clear; the server's `plan`/`dispatch` read the same helper in the same order. It
+vet it, so an item carrying both must say the reason the approval would not clear; the server's `plan`/`dispatch` read the same order through `itemLadderBlock`.
+It
 reads `BacklogItem.unvetted`, which only a tracker bug or task carries: `mapIssue` sets it when the issue's author is not `OWNER`/`MEMBER`/`COLLABORATOR` and
 the body does not hash to the pin a trusted groom's `body` write left in its claim. A files item never carries it. Same in-review rendering, and while it
 speaks `Review plan` is NOT drawn — reviewing is not the way out, grooming is
@@ -702,7 +715,7 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   `PullRequestsView` (GitHub › PRs) and the three layouts it switches between — `PrInbox`, `PrMatrix`, `PrCards` — over the shared `PrActions` (merge,
   auto-merge, update, open), `PrFoot` (the merge Confirm, then `PrOutcomeLine`) and `PrRepoNotes`; `components/settings/SourcesGroup.tsx` is the Shared report.
 - `lib/prs.ts`, `lib/pr-run.ts`, `lib/prs-api.ts` and `hooks/usePullRequests.ts` — the PRs page's derivations (chips, the three blocks, the default method,
-  `UpdateMark`, `whyLine`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read; `lib/pr-layouts.ts` is the layout key, its
+  `UpdateMark`, `whyLine`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read (mounted once, by the shell); `lib/pr-layouts.ts` is the layout key, its
   options (`PR_LAYOUT_OPTIONS`) and stored choice, `splitReach` (which hides the repos the token cannot read), `cardRepos` and `emptyRepoNote`, and every Inbox
   and Matrix derivation: a PR's level, severity, verdict and rank, `primaryKey`, the Matrix cells, tones and column counts.
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
@@ -716,7 +729,7 @@ The rules this surface is held to — one implementation per derivation, board-v
 click through, the dialog escape stack and its eight dialogs, a crashed run rendering as crashed, "queue wait is not work",
 [Settings being three pages whose page IS the scope](invariants.md#settings-is-three-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
-row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), [the source rows' tree and
+row](invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), [the source rows' tree and
 their registered-only rows](invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree), and [the content-width stamp that
 the CSP hash travels with](invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it) — are in [invariants.md](invariants.md),
 with the failure each one encodes. Not restated here.

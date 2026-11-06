@@ -4,8 +4,7 @@ import { useAgents } from '../../hooks/useAgents';
 import { useDashboards } from '../../hooks/useDashboards';
 import { elapsedSince } from '../../lib/item-age';
 import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
-import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
-import { useReportWorking } from '../../hooks/useReportWorking';
+import { useOrchestratorRunsContext } from '../../hooks/OrchestratorRunsContext';
 import { useProjectSources } from '../../hooks/useProjectSources';
 import { machineLabelByHost } from '../../lib/dashboards';
 import { projectLabel } from '../../lib/project-label';
@@ -14,6 +13,8 @@ import { runInvisibleElsewhere } from '../../lib/remote-run';
 import { startingOnText } from '../../lib/remote-starting';
 import { STATUS_ORDER, freshRunKey, mergeRuns, pickSelected, queueCounts, runKey, scopeRuns, windowHistory } from '../../lib/runs-list';
 import type { MergedRun } from '../../lib/runs-list';
+import { runTone } from '../../lib/tones';
+import type { StateTone } from '../../lib/tones';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES } from '../../lib/run-range';
 import { RUN_STATUS_GLYPH, runDotTone, runStatusChip } from '../../lib/run-stage';
 import { useRunsMode } from '../../hooks/useRunsMode';
@@ -25,6 +26,8 @@ import { Chip } from '../ui/Chip';
 import { DayKicker } from '../ui/Ledger';
 import { Dot } from '../ui/Dot';
 import { Figure, FigureStrip } from '../ui/Figure';
+import { Glyph } from '../ui/Glyphs';
+import { Meter } from '../ui/Meter';
 import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';
 import { Sheet, SheetHead } from '../ui/Sheet';
@@ -188,7 +191,7 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
 /**
  * The two-tone count §7 gives every "spent over a ceiling" reading on this
  * board — `1 / 5`, the completed figure in `--ink` and the queue length in
- * `--ink3` at the same size. One component because both row kinds draw it and
+ * `--ink3` at the same size. One component because more than one row kind drew it (the Live card now draws `N of M items` over a meter instead) and
  * §12.1's rule is that a shape more than one surface draws has one home; a
  * page-level composition rather than a `ui/` primitive because §12.2's table
  * does not list it and a task may not add one without amending that section.
@@ -203,19 +206,13 @@ function CountPair({ completed, total }: { completed: number; total: number }): 
 }
 
 /**
- * One LIVE row (task-38, DESIGN.md §8.4.1) — a run this payload still lists as
- * `running` or `paused`, drawn as a **row, not a card**, compact enough for the
- * 420 px list column.
+ * One LIVE card (spec §4.6; task-38's row before it) — a run this payload still lists as `running` or `paused`, drawn as a button card with a
+ * `ui-stripe` edge in the run's tone (`runTone`, red when crashed), compact enough for the 420 px list column.
  *
- * What it carries, and nothing more: a `Dot`, the project at 14/500, `⚠ N` in
- * amber when the run has attention entries, the two-tone count, the elapsed
- * reading, and a status pill **only where one is earned** — `‖ paused`,
- * `⚠ crashed`, and nothing at all on a running, fresh run, whose state the
- * breathing dot and the elapsed reading already carry. Everything C's live
- * card carried that no longer fits this width — the run id and start clock,
- * the heartbeat word, `$ · turns · sessions`, the mode pill, `paused after
- * <id>`, the current item's stage track — is in the detail sheet, which is
- * beside this list rather than behind a click.
+ * What it carries: the project at 14/500, `⚠ N` in amber when the run has attention entries, a state pill (`running` live, `paused` warn with the pause
+ * glyph, `crashed` warn), the run id as a code span, the machine tag and the elapsed reading, and `N of M items` over a 4 px progress fill. What the
+ * detail sheet beside it holds and this card does not: the start clock, the heartbeat word, `$ · turns · sessions`, the mode pill, `paused after <id>`
+ * and the current item's stage track.
  *
  * **A crashed run's three readings travel together or this row says less than
  * the strip it replaces did** (§8.4.1's moved-rules table): a `--red` dot, a
@@ -239,7 +236,6 @@ function LiveRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: numb
   // `fresh` field. See `runStatusChip` (lib/run-stage.ts) for why `crashed`
   // stays derived rather than becoming a sixth `RunStatus`.
   const status = runStatusChip(authority.status, row.live);
-  const tone = runDotTone(authority.status, row.live);
   const crashed = row.live !== null && isCrashed(row.live);
   const { completed, total } = queueCounts(authority);
   const wall = runWallMs(authority, now);
@@ -254,41 +250,52 @@ function LiveRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: numb
   const reported = row.live === null ? null : lastReportedEntry(row.live.queue);
   const clause = crashed && row.live !== null ? watchdogClause(row.live.watchdog, now, zone) : '';
 
+  // The card's one tone, for the stripe and the progress fill alike. A crashed run is `running` on disk, so `runTone` alone would draw it green; red is the
+  // crashed reading everywhere else on this board. A finished run's `grey` has no meter tone, and the fill borrows green for a bar that is just a count.
+  const edge: StateTone = crashed ? 'red' : runTone(authority.status);
+
   return (
-    <button type="button" className="runs-row" data-testid={`runs-row-${run.runId}`} aria-current={isSelected ? 'true' : undefined} onClick={onSelect}>
+    <button
+      type="button"
+      className="runs-row runs-card ui-stripe"
+      data-tone={edge}
+      data-testid={`runs-row-${run.runId}`}
+      aria-current={isSelected ? 'true' : undefined}
+      onClick={onSelect}
+    >
       <span className="runs-row-head">
-        {/* `breathe` only while this board is actually hearing from the
-            process (§8.8): a ring pulsing around a crashed or paused run
-            would be an animation asserting something false. */}
-        {tone === undefined ? <Dot size={10} /> : <Dot size={10} tone={tone} breathe={row.isLive} />}
         <span className="runs-row-project">{projectLabel(run.project)}</span>
-        {row.remote && <RemoteTag runId={run.runId} machine={row.machine} />}
         {attention > 0 && (
           <span className="runs-row-attn" data-testid={`runs-row-attn-${run.runId}`}>
             <span aria-hidden="true">⚠ </span>
             {attention}
           </span>
         )}
-        <CountPair completed={completed} total={total} />
-        <span className="runs-row-wall">{wall === null ? '—' : formatSpanCompact(wall)}</span>
-        {/* Earned, never decorative: a running, fresh run draws no pill at
-            all. `crashed` is `warn`, not `bad` — the run may still be
-            recovered unattended, which is the same call the old strip made
-            for its amber border. */}
+        {/* The state pill (spec §4.6): `running` live, `paused` warn with the pause glyph, `crashed` as before. `crashed` is `warn`, not `bad` — the run may
+            still be recovered unattended, the same call the old strip made for its amber border. The pulse the old dot carried is gone with the dot: the
+            stripe says the state and the pill says the word. */}
         {crashed ? (
           <Pill tone="warn">
             <span aria-hidden="true">⚠ </span>
             {status.label}
           </Pill>
+        ) : authority.status === 'paused' ? (
+          <Pill tone="warn">
+            <Glyph name="pause" size={10} />
+            paused
+          </Pill>
         ) : (
-          authority.status === 'paused' && (
-            <Pill tone="neutral">
-              <span aria-hidden="true">‖ </span>
-              paused
-            </Pill>
-          )
+          authority.status === 'running' && <Pill tone="live">running</Pill>
         )}
       </span>
+      <span className="runs-card-meta">
+        <code className="runs-card-id">{run.runId}</code>
+        {row.remote && <RemoteTag runId={run.runId} machine={row.machine} />}
+        <span className="runs-row-wall">{wall === null ? '—' : formatSpanCompact(wall)}</span>
+      </span>
+      {/* `N of M items` over the 4 px fill. The words ride in the Meter's label slot and its value stays empty: the Meter's head is a space-between flex row, so
+          a label-only head keeps the sentence at the leading edge. A queue of none has nothing to be a fraction of, and draws the empty track. */}
+      <Meter label={`${completed} of ${total} items`} value="" fraction={total === 0 ? null : completed / total} tone={edge === 'grey' ? 'green' : edge} width="fill" height={4} />
       {crashed && (
         <span className="runs-row-crashed" data-testid={`runs-live-crashed-${run.runId}`}>
           {[
@@ -486,8 +493,7 @@ interface Selection {
  */
 export const RUNS_PAGE_SIZE = 25;
 
-/** `onWorking` is the rail cursor's report (§8.0, `useReportWorking`) — this page's live poll is the one the shell reads, so `App` adds none. */
-export default function RunsView({ onWorking }: { onWorking?: (working: boolean) => void } = {}) {
+export default function RunsView() {
   const { zone } = useTimeZone();
   const { runs: archiveRuns, refresh: refreshArchive } = useOrchestratorArchive();
   // task-21: `starting` rides the same payload and the same poll `liveRuns`
@@ -502,12 +508,11 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
   // second expression agreeing with the first — the shape `watchdogStoodDown`
   // and `isStale` are each one function to avoid, and the one this repo has
   // already been bitten by twice.
-  const { runs: liveRuns, starting, remote: remoteRuns, remoteStarting, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
+  const { runs: liveRuns, starting, remote: remoteRuns, remoteStarting, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRunsContext();
   // Multi-dashboard task 10: the remotes' names, for a remote row's machine and a remote launch's `Starting on <machine>`. `null` until the first answer, which
   // both read as "no remote owns it" — a raw host or machine id is printed rather than nothing.
   const { view: dashboards } = useDashboards();
   // `liveRuns`, never the merged rows below: those fold remote runs in, and another machine's run is not this cursor's to blink for.
-  useReportWorking(liveRuns, starting, onWorking);
   // task-48: which projects are tracker-backed, for the one line a local run
   // that has not claimed an issue yet carries in its detail sheet.
   const projectSources = useProjectSources();
@@ -818,6 +823,18 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
                   label="runs"
                   value={aggregates.runs}
                   line={
+                    <>
+                    {/* One segment per status with runs, in STATUS_ORDER, width = its share of the runs, toned by `runTone`. Decoration over the glyph line
+                        below, which states the same counts in words. Width is the `style` prop (CSSOM), never a markup attribute. */}
+                    <span className="runs-status-bar" aria-hidden="true">
+                      {STATUS_ORDER.filter((status) => aggregates.byStatus[status] > 0).map((status) => (
+                        <span
+                          key={status}
+                          data-tone={runTone(status)}
+                          style={{ width: `${((aggregates.byStatus[status] / Math.max(1, aggregates.runs)) * 100).toFixed(1)}%` }}
+                        />
+                      ))}
+                    </span>
                     <span className="runs-figure-breakdown" data-testid="runs-figure-runs-line">
                       {STATUS_ORDER.map((status) => (
                         <span key={status} className="runs-figure-breakdown-item">
@@ -825,6 +842,7 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
                         </span>
                       ))}
                     </span>
+                    </>
                   }
                 />
                 {/* "completed", not "merged": `itemsMerged` counts `branched`

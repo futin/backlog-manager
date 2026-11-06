@@ -66,6 +66,12 @@ describe('Segmented', () => {
     await userEvent.click(screen.getByRole('button', { name: OPTIONS[0].label }));
     expect(onChange).toHaveBeenCalledWith(OPTIONS[0].value);
   });
+  // The launch sheet's Repository shows basenames and keeps the full path one hover away; an option without a title draws none.
+  it('puts an option\'s title on its button and draws none otherwise', () => {
+    render(<Segmented value="cosy" options={[{ ...OPTIONS[0], title: '/Users/ada/pay' }, OPTIONS[1]]} onChange={jest.fn()} />);
+    expect(screen.getByRole('button', { name: OPTIONS[0].label })).toHaveAttribute('title', '/Users/ada/pay');
+    expect(screen.getByRole('button', { name: OPTIONS[1].label })).not.toHaveAttribute('title');
+  });
   /**
    * The `pill` variant (DESIGN.md §8.6) — a recessed track under a raised
    * option, the shape `Switch` draws. A prop rather than a second class family
@@ -98,5 +104,49 @@ describe('Segmented', () => {
     rerender(<Segmented value="cosy" options={OPTIONS} onChange={jest.fn()} label="Layout" track pill />);
     expect(screen.getByRole('group', { name: 'Layout' })).toHaveClass('ui-seg-pill');
     expect(screen.getByRole('group', { name: 'Layout' })).not.toHaveClass('ui-seg-track');
+  });
+
+  // Task 6's state filter reads "Needs you 1": the count rides inside the button, after a space, so the accessible name carries it.
+  it('draws an optional count after the label, inside the button', () => {
+    render(
+      <Segmented
+        value="a"
+        options={[
+          { value: 'a', label: 'Needs you', count: 1 },
+          { value: 'b', label: 'Zero', count: 0 },
+          { value: 'c', label: 'Plain' }
+        ]}
+        onChange={jest.fn()}
+      />
+    );
+
+    const needs = screen.getByRole('button', { name: 'Needs you 1' });
+    expect(needs.querySelector('.ui-seg-count')).toHaveTextContent('1');
+    expect(needs).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Zero 0' }).querySelector('.ui-seg-count')).toHaveTextContent('0');
+    const plain = screen.getByRole('button', { name: 'Plain' });
+    expect(plain.querySelector('.ui-seg-count')).toBeNull();
+    expect(plain).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  // The Inbox triage leads two of its options with a level `Dot`: an optional node before the label, decorative, so the accessible name is still label + count.
+  it('draws an optional leading node before the label, hidden from the accessible name', () => {
+    render(
+      <Segmented
+        value="a"
+        options={[
+          { value: 'a', label: 'Needs you', count: 1, leading: <i data-testid="lead" /> },
+          { value: 'b', label: 'Plain', count: 0 }
+        ]}
+        onChange={jest.fn()}
+      />
+    );
+
+    const needs = screen.getByRole('button', { name: 'Needs you 1' });
+    const lead = screen.getByTestId('lead');
+    expect(lead.parentElement).toHaveAttribute('aria-hidden', 'true');
+    expect(needs.firstElementChild).toBe(lead.parentElement);
+    expect(needs.firstElementChild).toHaveClass('ui-seg-lead');
+    expect(screen.getByRole('button', { name: 'Plain 0' }).querySelector('.ui-seg-lead')).toBeNull();
   });
 });

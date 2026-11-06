@@ -25,61 +25,57 @@ import { MACHINE_STAGES } from '../client/src/lib/run-stats';
  * second literal to prove the point twice.
  */
 describe('StageBars', () => {
-  it('renders exactly seven rows, in MACHINE_STAGES order, each labelled with its own stage name', () => {
+  const segments = (root: HTMLElement) => Array.from(root.querySelectorAll<HTMLElement>('.run-bars-seg'));
+
+  it('renders a legend of seven entries, in MACHINE_STAGES order, each labelled with its own stage name', () => {
     render(<StageBars totals={{ dispatched: 1_000, merging: 500 }} testId="stage-bars" />);
 
-    const rows = screen.getAllByTestId(/^stage-bars-/);
-    expect(rows).toHaveLength(7);
-    // Order is asserted structurally, not just by count: a widget rendered
-    // twice on the same screen (a run's own card, the range-wide tile) only
-    // stays comparable at a glance if `fixing` sits at the same position in
-    // both, which this pins by checking the exact id sequence, not just that
-    // the seven expected ids exist somewhere in the document.
-    expect(rows.map((row) => row.getAttribute('data-testid'))).toEqual(MACHINE_STAGES.map((stage) => `stage-bars-${stage}`));
-
-    rows.forEach((row, i) => {
-      expect(row).toHaveClass('run-bars-row');
-      expect(row.querySelector('.run-bars-label')).toHaveTextContent(MACHINE_STAGES[i]);
+    const items = screen.getAllByTestId(/^stage-bars-/);
+    expect(items).toHaveLength(7);
+    // Order is pinned by the exact id sequence: the widget is rendered twice on one screen (a run's own card, the range tile) and only stays comparable
+    // at a glance if `fixing` sits at the same position in both.
+    expect(items.map((item) => item.getAttribute('data-testid'))).toEqual(MACHINE_STAGES.map((stage) => `stage-bars-${stage}`));
+    items.forEach((item, i) => {
+      expect(item.querySelector('.run-bars-label')).toHaveTextContent(MACHINE_STAGES[i]);
+      expect(item.querySelector('.run-bars-swatch')).toHaveAttribute('data-stage', MACHINE_STAGES[i]);
     });
   });
 
-  it('formats a present value with formatSpanCompact', () => {
+  it('formats a present value with formatSpanCompact and an absent one as an em dash', () => {
     render(<StageBars totals={{ dispatched: 26_760_000, merging: 23_000 }} testId="stage-bars" />);
 
     expect(screen.getByTestId('stage-bars-dispatched')).toHaveTextContent('7h 26m');
     expect(screen.getByTestId('stage-bars-merging')).toHaveTextContent('23s');
+    const absent = screen.getByTestId('stage-bars-fixing').querySelector('.run-bars-value');
+    expect(absent).toHaveTextContent('—');
+    expect(absent).toHaveClass('run-bars-value-none');
   });
 
-  it('prints an em dash with the -none modifier and no fill for an absent stage', () => {
-    render(<StageBars totals={{ dispatched: 1_000 }} testId="stage-bars" />);
+  it('draws a segment only for a stage with time, and the widths sum to 100 %', () => {
+    render(<StageBars totals={{ dispatched: 1_000, fixing: 500, merging: 250, verifying: 0 }} testId="stage-bars" />);
 
-    const row = screen.getByTestId('stage-bars-fixing');
-    const value = row.querySelector('.run-bars-value');
-    expect(value).toHaveTextContent('—');
-    expect(value).toHaveClass('run-bars-value-none');
-    expect(row.querySelector('.run-bars-fill')).not.toBeInTheDocument();
+    const segs = segments(screen.getByTestId('stage-bars'));
+    expect(segs.map((seg) => seg.getAttribute('data-stage'))).toEqual(['dispatched', 'fixing', 'merging']);
+    const sum = segs.reduce((acc, seg) => acc + parseFloat(seg.style.width), 0);
+    expect(sum).toBeCloseTo(100, 0);
   });
 
-  // The fixture's two present values are 2:1, so the widths must land on
-  // exactly 100.0% and 50.0% — not merely "the first bigger than the
-  // second" — which is what actually proves `pct`'s one-decimal formatting
-  // and its `ms / max` arithmetic rather than just its direction.
-  it('scales bar widths to the largest value in the set', () => {
-    render(<StageBars totals={{ dispatched: 1_000, fixing: 500 }} testId="stage-bars" />);
+  it('sizes segments by share of the total: 3h and 1h is 75 % and 25 %', () => {
+    const hour = 3_600_000;
+    render(<StageBars totals={{ dispatched: 3 * hour, fixing: hour }} testId="stage-bars" />);
 
-    const dispatchedFill = screen.getByTestId('stage-bars-dispatched').querySelector('.run-bars-fill') as HTMLElement;
-    const fixingFill = screen.getByTestId('stage-bars-fixing').querySelector('.run-bars-fill') as HTMLElement;
-    expect(dispatchedFill.style.width).toBe('100.0%');
-    expect(fixingFill.style.width).toBe('50.0%');
+    const segs = segments(screen.getByTestId('stage-bars'));
+    expect(segs.map((seg) => seg.style.width)).toEqual(['75.0%', '25.0%']);
   });
 
-  it('renders seven dashes and zero fills for empty totals — the widget never hides', () => {
+  it('renders seven dashes and no segment for empty totals — the bar is still drawn', () => {
     render(<StageBars totals={{}} testId="stage-bars" />);
 
     const root = screen.getByTestId('stage-bars');
     expect(root).toHaveClass('run-bars');
-    expect(root.querySelectorAll('.run-bars-row')).toHaveLength(7);
-    expect(root.querySelectorAll('.run-bars-fill')).toHaveLength(0);
+    expect(root.querySelector('.run-bars-bar')).toBeInTheDocument();
+    expect(segments(root)).toHaveLength(0);
     expect(root.querySelectorAll('.run-bars-value-none')).toHaveLength(7);
+    expect(root.querySelectorAll('.run-bars-value')).toHaveLength(7);
   });
 });

@@ -25,3 +25,13 @@ export function runsWorking(runs: ReadonlyArray<{ status: OrchestratorRun['statu
   if (starting.length > 0) return true;
   return runs.some((run) => !isRemoteRun(run) && run.status === 'running' && !isCrashed(run));
 }
+
+/**
+ * How many runs the Runs page's Live sheet holds, which is what the rail's Runs badge counts (spec §4.9a): local runs whose status is `running` or `paused`
+ * (the same two `splitLive` keeps — a crashed run is still `running`, and a paused one is still going) plus every remote run, which the server only ever lists
+ * while it is going. Not `runsWorking`: that one asks "is something moving", this one "how many rows are live", and paused counts here and not there.
+ */
+export function liveRunCount(runs: ReadonlyArray<{ status: OrchestratorRun['status'] }>, remote: ReadonlyArray<{ status: OrchestratorRun['status'] }>): number {
+  const going = (r: { status: OrchestratorRun['status'] }): boolean => r.status === 'running' || r.status === 'paused';
+  return runs.filter(going).length + remote.filter(going).length;
+}

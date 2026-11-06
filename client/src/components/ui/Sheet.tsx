@@ -13,8 +13,13 @@ import type { ElementType, ReactNode } from 'react';
  * is a plain `<div>`. Defaulting to `<div>` and letting the composer name the
  * element keeps the semantics with the page that knows them.
  */
-export function Sheet({ children, as: As = 'div', className }: { children: ReactNode; as?: ElementType; className?: string }) {
-  return <As className={className ? `ui-sheet ${className}` : 'ui-sheet'}>{children}</As>;
+export function Sheet({ children, as: As = 'div', className, label }: { children: ReactNode; as?: ElementType; className?: string; label?: string }) {
+  // `label` names a headless sheet (Jira Setup's connection banner has no title) so its `<section>` is still a landmark.
+  return (
+    <As className={className ? `ui-sheet ${className}` : 'ui-sheet'} aria-label={label}>
+      {children}
+    </As>
+  );
 }
 
 /**

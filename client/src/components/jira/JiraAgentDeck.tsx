@@ -4,12 +4,13 @@ import { useNarrow } from '../../hooks/useNarrow';
 import { openDesktopJira } from '../../lib/jira';
 import { deckCrumb, deckTally, type DeckEntry } from '../../lib/jira-deck';
 import { openButtons, stripTitle } from '../../lib/jira-sessions';
+import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
 import { STATE_LABEL } from '../../../../shared/jira-sessions';
 import type { JiraIssue } from '../../../../shared/types';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
-import { LiveStrip } from '../ui/LiveStrip';
-import { OpenChip } from './JiraSessionCard';
+import { Meter } from '../ui/Meter';
+import { SessionOpen } from './SessionOpen';
 
 /**
  * JiraAgentDeck — the live sessions on the picked board, one card each, above the status shelves (Jira sessions spec §7.1; DESIGN.md §8.9.1).
@@ -19,14 +20,13 @@ import { OpenChip } from './JiraSessionCard';
  * the deck and the shelves answer one filter. With nothing live the section is not drawn at all: an empty "Agents" heading on every quiet board would be a
  * line of furniture, and the band's switch already says where the sessions are.
  *
- * **The card is a session's face, not a ticket's.** A state strip across the top (`ui/LiveStrip`, the band a board card wears for "somebody is on this"), its
- * label spec §6's words for the state and its mark how long THIS server has seen the session in that state; the head — type glyph, the session's OWN key and
- * the crumb `run · repo · surface · model`, which leads with `↳ <top>` when the session runs on a ticket folded under another card; the summary, a button that
- * opens Detail on that ticket; the two open buttons; and the context %. The card is not a `role="button"` the way a shelf row is: it has buttons of its own,
+ * **The card is a session's face, not a ticket's.** It wears `.ui-stripe` in the state's tone (`sessionTone`); its first line is the tone's dot, spec §6's
+ * words for the state and how long THIS server has seen the session in it (no phase: none is served); the head — type glyph, the session's OWN key and, only
+ * when the session runs on a ticket folded under another card, a `↳ <top>` pill; the summary, a button that opens Detail on that ticket; the crumb
+ * `run · repo · surface · model`; a 4 px context `Meter`; and `SessionOpen`, the split Open. The card is not a `role="button"` the way a shelf row is: it has buttons of its own,
  * and a card that is itself one would nest them.
  *
- * **Buttons are `openButtons`' (§7.5), the deck's narrow reading** (`wide: false`: `Desktop`, where Detail says `Open in Desktop`). They are drawn by Detail's own
- * `OpenChip`, so C2's Desktop rule (hidden on a phone, disabled with its title while a hand-over could fork a live transcript, the guarded `jira-open-desktop`
+ * **Buttons are `openButtons`' (§7.5), the deck's narrow reading** (`wide: false`: `Desktop`, where Detail says `Open in Desktop`). They are drawn by `SessionOpen`, which reads `openTarget` as `OpenChip` does, so C2's Desktop rule (hidden on a phone, disabled with its title while a hand-over could fork a live transcript, the guarded `jira-open-desktop`
  * POST for a dashboard session at rest) lives in one place. That POST's refusal draws under the buttons in the card's own alert line. A Starting card has none:
  * every button needs the session's id, and a reservation has no id yet.
  */
@@ -55,35 +55,46 @@ function DeckCard({ entry, now, onOpenIssue }: { entry: DeckEntry; now: number; 
   const handover = useAction();
   const { issue, link, state } = entry;
   const row = link?.row ?? null;
-  const crumb = deckCrumb(entry, data?.skills ?? []);
+  const crumb = deckCrumb(entry, data?.skills ?? [], { lead: false });
   const pct = row?.contextPct;
   const sessionId = link?.sessionId ?? null;
   const buttons = link !== null && sessionId !== null ? openButtons(link, row, state, { phone, wide: false }) : null;
-  const go = (id: string): void => handover.run(() => openDesktopJira(id));
+  const tone = sessionTone(state);
+  const age = pollAge(entry.since, now);
+  const folded = issue.key !== entry.top.key;
 
   return (
-    <article className="jira-deck-card" aria-label={`Session on ${issue.key}`} data-state={state} data-key={issue.key}>
-      <LiveStrip tone={state} label={STATE_LABEL[state]} mark={pollAge(entry.since, now)} title={stripTitle(state)} />
+    <article className="jira-deck-card ui-stripe" aria-label={`Session on ${issue.key}`} data-state={state} data-key={issue.key} data-tone={tone}>
       <div className="jira-deck-face">
+        <div className="jira-deck-state" title={stripTitle(state)}>
+          <i className="ui-stripe-dot" data-tone={tone} aria-hidden="true" />
+          {age === null ? STATE_LABEL[state] : `${STATE_LABEL[state]} · ${age}`}
+        </div>
         <div className="jira-card-head">
           <span className="jira-card-type" title={issue.type.name}>
             <JiraTypeIcon type={issue.type} />
           </span>
           <span className="jira-card-key">{issue.key}</span>
-          {crumb !== '' && <span className="jira-card-crumb">{crumb}</span>}
+          {folded && <span className="jira-deck-fold">{`↳ ${entry.top.key}`}</span>}
         </div>
         <button type="button" className="jira-deck-title" onClick={() => onOpenIssue(issue)}>
           {issue.summary}
         </button>
-        {(buttons !== null || pct !== undefined) && (
+        {crumb !== '' && <span className="jira-card-crumb">{crumb}</span>}
+        {pct !== undefined && (
+          <Meter label="context" value={`${Math.round(pct)}%`} fraction={pct / 100} tone={pct >= 90 ? 'red' : pct >= 70 ? 'amber' : 'green'} width="fill" height={4} />
+        )}
+        {buttons !== null && sessionId !== null && (
           <div className="jira-deck-acts">
-            {buttons !== null && sessionId !== null && (
-              <>
-                <OpenChip button={buttons.primary} sessionId={sessionId} row={row} launch={link?.surface ?? null} primary onHandover={go} />
-                {buttons.secondary !== null && <OpenChip button={buttons.secondary} sessionId={sessionId} row={row} launch={link?.surface ?? null} primary={false} onHandover={go} />}
-              </>
-            )}
-            {pct !== undefined && <span className="jira-deck-ctx">ctx {Math.round(pct)}%</span>}
+            <SessionOpen
+              issueKey={issue.key}
+              sessionId={sessionId}
+              row={row}
+              launch={link?.surface ?? null}
+              state={state}
+              buttons={buttons}
+              onHandover={(id) => handover.run(() => openDesktopJira(id))}
+            />
           </div>
         )}
         {handover.error !== null && (

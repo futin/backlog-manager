@@ -20,7 +20,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   route answers as a 409 carrying its message (`… nothing was written`) with the file byte-identical; an update or delete naming an id the file does not hold
   throws `JiraUnknownIdError`, which carries the entry kind and is a 404 `unknown board` or `unknown skill`. A handler runs guard (`SameOriginPostGuard`) → validate (400) → configured (503) → write → re-aim, and
   config writes stay open under `access: unauthorized`, because they touch only `jira.json`. A saved board then awaits `boardSaved` (sweeps that board,
-  bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer); a deleted one calls `boardDeleted` and `arm()`; repos and skills re-aim
+  bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer) — and so does `POST /api/jira/boards/sweep` `{ id }`, the chip's
+  per-board `now`, which writes nothing: guard → 400 → 503 → 409 for an unreadable file → 404 `unknown board` → `boardSaved`, never a second sweep path; a deleted one calls `boardDeleted` and `arm()`; repos and skills re-aim
   no poller work, since no sweep reads them (a repos save only calls `JiraLiveService.reposChanged`, which arms the session reconciler). `repoDefaults` (absolute normalised path → `{ base?, namePattern? }`) falls back per VALUE: a base failing
   `defaultBaseProblem` (Table A, then `is a branch name, without origin/`) or a pattern failing `patternProblem` costs only itself;
   `/repo-defaults` takes `null` for unset (both `null` deletes the entry) and adds
