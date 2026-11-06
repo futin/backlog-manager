@@ -73,7 +73,7 @@ import {
   statusTone
 } from '../client/src/lib/jira';
 import type { JiraFold } from '../client/src/lib/jira';
-import { NO_JIRA_FILTERS, boardFilterOptions, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../client/src/lib/jira';
+import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
 import { SHELF_LIMIT, boardAgents, boardShelves, childSessions, deckCrumb, deckGroup, deckTally, endedLine, topSessionCell } from '../client/src/lib/jira-deck';
@@ -554,6 +554,29 @@ describe('pickBoard', () => {
     const boards = [beta, alpha];
     pickBoard(null, boards);
     expect(boards.map((b) => b.id)).toEqual(['b_b', 'b_a']);
+  });
+});
+
+describe('clampJiraPanelFilters', () => {
+  it('keeps every well-shaped field, `no sprint` (null) included', () => {
+    expect(clampJiraPanelFilters({ type: 'Bug', assignee: 'unassigned', sprint: null, statuses: ['To Do'] })).toEqual({
+      type: 'Bug',
+      assignee: 'unassigned',
+      sprint: null,
+      statuses: ['To Do']
+    });
+  });
+
+  it('reads each wrong-shaped field as its any, without costing the others', () => {
+    expect(clampJiraPanelFilters({ type: 7, assignee: 'boss', sprint: 3, statuses: ['To Do', 5, null] })).toEqual({
+      ...NO_JIRA_PANEL_FILTERS,
+      statuses: ['To Do']
+    });
+    expect(clampJiraPanelFilters({ statuses: 'To Do', sprint: 'Sprint 9' })).toEqual({ ...NO_JIRA_PANEL_FILTERS, sprint: 'Sprint 9' });
+  });
+
+  it.each([[null], [undefined], ['banana'], [42], [['To Do']]])('reads %p as no filter at all', (v) => {
+    expect(clampJiraPanelFilters(v)).toEqual(NO_JIRA_PANEL_FILTERS);
   });
 });
 

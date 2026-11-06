@@ -13,7 +13,7 @@ import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { setJiraView } from '../client/src/hooks/useJiraView';
 import { elapsedSince } from '../client/src/lib/item-age';
-import { JIRA_BOARD_KEY, bandSub } from '../client/src/lib/jira';
+import { JIRA_BOARD_KEY, JIRA_FILTERS_KEY, bandSub } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
 import { daysAgoStamp } from './helpers/dates';
 import { JIRA_BUILTIN_LABELS, type AgentsStatus, type DashboardRow, type JiraBoardStatus, type JiraIssue, type JiraLiveSession, type JiraStatusPayload } from '../shared/types';
@@ -573,15 +573,42 @@ describe('filters and search', () => {
     expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
   });
 
-  it('writes nothing to localStorage — filters and the search are per mount', async () => {
+  // The panel filters survive a reload (a remount over the same localStorage); the search does not, and `Clear all` clears what is stored too.
+  it('the panel filters survive a remount; the search does not', async () => {
     await renderAlpha();
-    const before = { ...localStorage };
-    // The spread does enumerate the store: the page's own pick key is in it (written on mount, as `usePersistedState` does), so `{}` is not a free pass.
-    expect(Object.keys(before)).toContain(JIRA_BOARD_KEY);
     await pick('Assignee', 'me');
-    await pick('Type', 'Story');
+    await pick('Status', 'Backlog');
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'refund');
-    expect({ ...localStorage }).toEqual(before);
+    expect(JSON.parse(localStorage.getItem(JIRA_FILTERS_KEY) ?? 'null')).toEqual({ assignee: 'me', statuses: ['Backlog'] });
+    cleanup();
+
+    // Not `renderAlpha`: the card it waits for is one the restored filters hide. The badge counts the APPLIED filters, so it lights only once the list
+    // has loaded and offers the picks — which is the wait this case needs.
+    renderPage();
+    await screen.findByRole('button', { name: 'Filters, 2 set' });
+    expect(screen.getByRole('searchbox', { name: 'Search issues' })).toHaveValue('');
+    expect(shown()).toEqual(['Rounding wrong on invoices over 1,000']);
+    await userEvent.click(within(await openFilters()).getByRole('button', { name: 'Clear all' }));
+    expect(shown()).toEqual(ALL);
+    cleanup();
+
+    await renderAlpha();
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
+  });
+
+  it('a `no sprint` pick round-trips as null, not as any', async () => {
+    localStorage.setItem(JIRA_FILTERS_KEY, JSON.stringify({ sprint: null }));
+    renderPage();
+    await screen.findByRole('button', { name: 'Filters, 1 set' });
+    expect(shown()).toEqual(['Refund flows']);
+  });
+
+  // localStorage hands back whatever was written: a wrong-shaped value must read as no filter, never crash the page.
+  it.each([['"banana"'], ['42'], ['{"statuses":"To Do","assignee":"boss","type":7}'], ['not json']])('a stored %s reads as no filter', async (raw) => {
+    localStorage.setItem(JIRA_FILTERS_KEY, raw);
+    await renderAlpha();
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
+    expect(shown()).toEqual(ALL);
   });
 });
 
