@@ -10,7 +10,7 @@ import '@testing-library/jest-dom';
 import { BoardColumn } from '../client/src/components/board/BoardColumn';
 import BoardView from '../client/src/components/board/BoardView';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
-import { readStyles, ruleBlock } from './helpers/css-rule';
+import { readStyles, ruleBlock, ruleBlocks } from './helpers/css-rule';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
 import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
@@ -266,7 +266,11 @@ describe('BoardColumn', () => {
    */
   it('lets the grid stretch its columns and the board fill the well', () => {
     const css = readStyles();
-    expect(ruleBlock(css, '.board-columns') as string).not.toMatch(/align-items:\s*start/);
+    // `ruleBlock` returns only the FIRST rule naming `.board-columns`, which is the `.board > .board-columns` fill rule, not the grid's own — so every rule
+    // that names it is checked, and there must be several (the grid, the fill, the two width steps).
+    const blocks = ruleBlocks(css, '.board-columns');
+    expect(blocks.length).toBeGreaterThan(2);
+    for (const block of blocks) expect(block).not.toMatch(/align-items:\s*start/);
     expect(ruleBlock(css, '.board > .board-columns') as string).toMatch(/flex:\s*1/);
   });
 });
