@@ -42,7 +42,8 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
   directory that already exists on a machine without `~/Documents/timify-projects`.
 - **Per browser**: `backlog-manager.jira-board` (the board pick, `usePersistedState`) and `backlog-manager.jira-page` (`board | sessions | setup`, a module store) since
   phase 2; `jiraDefaultAction` (a `Settings` key, capped at 64 characters) since phase 5b, and `jiraDefaultPermission` (`''` per action, or one of the four
-  modes) beside it. The Board page's filters and summary search are per mount and never persisted.
+  modes) beside it. The Board page's four panel filters persist under `backlog-manager.jira-filters` (one value for every board); its summary search is per
+  mount.
 
 ## The module, file by file
 
@@ -299,7 +300,8 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
 - **Jira › Board** (`components/jira/JiraBoardView.tsx`, `JiraCard.tsx`). The board pick and its load are shared with Jira › Sessions: `usePickedJiraBoard(nudge)`
   (`hooks/usePickedJiraBoard.ts`) and the `JiraBoardPicker` chip, one stored pick for both pages. The stored pick is a preference: `pickBoard` resolves it against the status's live
   list on every render, and `useJiraBoard` is handed only the id that resolution returns — a deleted or hand-edited pick falls to the first board by name and
-  never becomes a request for `/boards/<that id>/issues`. Filters (type, assignee, sprint, the summary search) are read off the loaded list, per mount.
+  never becomes a request for `/boards/<that id>/issues`. Filters (type, status, assignee, sprint) are read off the loaded list and
+  stored per browser — a stored pick the list does not offer reads as any; the summary search is per mount.
   `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. The board draws the fold's tops only, each column sorted by
   `sortTops` and counting cards, and a filter that matches only a folded issue still shows its top, ringed. A card click lands in `JiraView`'s open-issue
   slot with the fold's `childrenOf` beside the issue. The band's `Board | List` switch (`JiraViewSwitch`, `hooks/useJiraView.ts`) picks the deck over the shelves or
