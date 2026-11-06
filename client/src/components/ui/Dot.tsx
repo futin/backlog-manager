@@ -1,4 +1,4 @@
-export type DotTone = 'live' | 'paused' | 'crashed' | 'done' | 'ramp-refactors' | 'ramp-ideas' | 'ramp-bugs' | 'ramp-tasks';
+export type DotTone = 'live' | 'paused' | 'warn' | 'crashed' | 'done' | 'ramp-refactors' | 'ramp-ideas' | 'ramp-bugs' | 'ramp-tasks';
 
 /**
  * Dot — §7's legend dot (.claude/DESIGN.md §7, §8.2, §8.3, §8.8).
@@ -21,6 +21,9 @@ export type DotTone = 'live' | 'paused' | 'crashed' | 'done' | 'ramp-refactors' 
  * family's own explicit `animation: none` in the stylesheet — not by the
  * blanket rule, which freezes an animation on its LAST keyframe rather than
  * cancelling it.
+ *
+ * **`warn` is the amber mark, `paused` is the mustard run status.** `paused` paints `--mustard` and the runs surfaces use it; a dot that says "worth a look" (the PRs
+ * page's triage and Matrix rows) is DESIGN §8.2's amber mark, `--amber-solid`, so it has its own tone rather than borrowing the olive one (ui-verify D1).
  *
  * **No tone is a reading, not a missing prop** (task-37). `.ui-dot`'s base rule
  * paints `--ink3`, and that quiet grey is the honest answer for a dot whose

@@ -6,11 +6,17 @@ import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
+import { Glyph, type GlyphName } from '../client/src/components/ui/Glyphs';
 import { PrInbox } from '../client/src/components/github/PrInbox';
 import type { PrLayoutProps } from '../client/src/components/github/pr-layout-props';
 import { prRunWarning } from '../client/src/lib/pr-run';
 import { mainOf, moreOf, openOf, menuRow } from './helpers/pr-keys';
+import { readStyles, ruleBlock, ruleBlocks } from './helpers/css-rule';
+import { PrCards } from '../client/src/components/github/PrCards';
 import type { OrchestratorRun, ProjectSummary, PrRepoView, PullRequestRow, RunQueueItem } from '../shared/types';
+
+/** A glyph's markup, rendered into a detached container (`Glyph` carries no name attribute, and `react-dom/server` needs TextEncoder, which jsdom lacks). */
+const glyphSvg = (name: GlyphName): string => render(<Glyph name={name} />, { container: document.createElement('div') }).container.innerHTML;
 
 /**
  * GitHub › PRs, Inbox layout (`.claude/DESIGN.md` §8.11; specs `2026-10-29-prs-layouts-design.md`, "Inbox" and "Writes and outcomes", and
@@ -176,6 +182,37 @@ describe('PrInbox — items', () => {
     expect(screen.getByTestId('pr-row-a/x#4')).toHaveTextContent('ghost');
   });
 
+  /*
+    The mock's meta line (`PRs.dc.html`: `<span class="av">F</span>futin · <branch glyph> execute/468 → main`): a 16 px initials disc before the author and the branch
+    glyph before the branches (ui-verify D3, D4). Both decoration — the login and the branches are written beside them. Cards draws the same `PrRow`.
+  */
+  it('leads the author with an aria-hidden one-letter disc, uppercased in JS, and the branches with the branch glyph', () => {
+    render(<PrInbox {...props([repo('a/x', [pr({ number: 51, author: 'futin' }), pr({ number: 52, author: null })])])} />);
+    const meta = (n: number) => screen.getByTestId(`pr-row-a/x#${n}`).querySelector('.prs-meta') as HTMLElement;
+    const disc = meta(51).querySelector('.prs-av') as HTMLElement;
+    expect(disc).toHaveTextContent(/^F$/);
+    expect(disc).toHaveAttribute('aria-hidden', 'true');
+    // The login stays beside the disc, as its own text.
+    expect(within(meta(51)).getByText('futin')).toBeInTheDocument();
+    // A deleted account reads `ghost`, so its disc is `G`.
+    expect(meta(52).querySelector('.prs-av')).toHaveTextContent(/^G$/);
+    const branches = meta(51).querySelector('.prs-branches') as HTMLElement;
+    const glyph = branches.previousElementSibling as HTMLElement;
+    expect(glyph.tagName.toLowerCase()).toBe('svg');
+    expect(glyph).toHaveAttribute('aria-hidden', 'true');
+    expect(glyph.outerHTML).toBe(glyphSvg('branch'));
+  });
+
+  it('sizes the author disc for the meta line: 16 px, round, the board\'s magenta tint, a letter at the 11 px floor, and no text-transform', () => {
+    const disc = ruleBlock(readStyles(), '.prs-av') as string;
+    expect(disc).toMatch(/width: 16px/);
+    expect(disc).toMatch(/height: 16px/);
+    expect(disc).toMatch(/border-radius: 999px/);
+    expect(disc).toMatch(/color-mix\(in srgb, var\(--magenta\) 14%, var\(--strip\)\)/);
+    expect(disc).toMatch(/font-size: 11px/);
+    expect(disc).not.toMatch(/text-transform/);
+  });
+
   it('draws the checks tile in the checks tone, the neutral one when there are none', () => {
     const rows = [
       pr({ number: 11, checks: 'failure' }),
@@ -189,7 +226,7 @@ describe('PrInbox — items', () => {
     expect(tone(12)).toHaveAttribute('data-tone', 'amber');
     expect(tone(13)).toHaveAttribute('data-tone', 'green');
     expect(tone(14)).toHaveAttribute('data-tone', 'neutral');
-    expect(tone(11)).toHaveAttribute('data-size', '32');
+    expect(tone(11)).toHaveAttribute('data-size', '40');
   });
 
   it('draws the facts as pills and no verdict, steps or quiet-facts line', () => {
@@ -199,6 +236,53 @@ describe('PrInbox — items', () => {
     for (const label of ['checks failing', 'behind base', 'approved']) expect(pills.getByText(label)).toBeInTheDocument();
     expect(item.querySelector('.prs-inbox-verdict, .prs-inbox-steps, .prs-inbox-facts')).toBeNull();
     expect(within(item).queryByText('Checks are failing.')).not.toBeInTheDocument();
+  });
+
+  it('leads the checks and mergeability pills with a glyph, and draws none on a pill that is only text', () => {
+    const rows = [
+      pr({ number: 21, checks: 'failure' }),
+      pr({ number: 22, checks: 'success' }),
+      pr({ number: 23, checks: 'pending' }),
+      pr({ number: 24, mergeable: 'conflicting' }),
+      pr({ number: 25, mergeState: 'behind' })
+    ];
+    render(<PrInbox {...props([repo('a/x', rows)])} />);
+    const pill = (n: number, label: string) => within(screen.getByTestId(`pr-row-a/x#${n}`)).getByText(label, { selector: '.ui-pill' });
+    expect(pill(21, 'checks failing').querySelector('svg')).not.toBeNull();
+    expect(pill(22, 'checks passing').querySelector('svg')).not.toBeNull();
+    expect(pill(23, 'checks pending').querySelector('svg')).not.toBeNull();
+    expect(pill(24, 'conflicts').querySelector('svg')).not.toBeNull();
+    expect(pill(25, 'behind base').querySelector('svg')).toBeNull();
+  });
+
+  it('puts the pills and the meta in one container, so they wrap as one line, and the run warning stays at its end', () => {
+    render(<PrInbox {...props([repo('a/x', [pr({ number: 31, checks: 'failure' })])])} />);
+    const line = screen.getByTestId('pr-row-a/x#31').querySelector('.prs-line') as HTMLElement;
+    expect(line.querySelector('.prs-chips')).not.toBeNull();
+    expect(line.querySelector('.prs-meta')).not.toBeNull();
+    // Pills first, then the meta: the order the eye reads, and the only DOM order that wraps them as one flow.
+    expect(Array.from(line.children).map((el) => el.className)).toEqual(['prs-chips', 'prs-meta']);
+  });
+
+  it('names a PR\'s repo at the start of the meta line, short, and the full owner/name only where two shown repos share a short one', () => {
+    const { unmount } = render(<PrInbox {...props([repo('futin/backlog-manager', [pr({ number: 41 })]), repo('futin/timify-web', [pr({ number: 42 })])])} />);
+    const meta = (n: number, name: string) => screen.getByTestId(`pr-row-${name}#${n}`).querySelector('.prs-meta') as HTMLElement;
+    expect(meta(41, 'futin/backlog-manager').querySelector('.prs-inbox-repo')).toHaveTextContent(/^backlog-manager$/);
+    expect(meta(42, 'futin/timify-web').querySelector('.prs-inbox-repo')).toHaveTextContent(/^timify-web$/);
+    // The name is no longer beside the title.
+    expect(screen.getByTestId('pr-row-futin/timify-web#42').querySelector('.prs-row-title .prs-inbox-repo')).toBeNull();
+    unmount();
+
+    render(<PrInbox {...props([repo('acme/ui-kit', [pr({ number: 43 })]), repo('futin/ui-kit', [pr({ number: 43 })])])} />);
+    expect(meta(43, 'acme/ui-kit').querySelector('.prs-inbox-repo')).toHaveTextContent(/^acme\/ui-kit$/);
+    expect(meta(43, 'futin/ui-kit').querySelector('.prs-inbox-repo')).toHaveTextContent(/^futin\/ui-kit$/);
+  });
+
+  it('draws an armed auto-merge as a tinted done pill, not the solid live fill', () => {
+    render(<PrInbox {...props([repo('a/x', [pr({ number: 51, autoMerge: { method: 'squash', enabledAt: '2026-10-29T09:00:00Z' } })])])} />);
+    const pill = within(screen.getByTestId('pr-row-a/x#51')).getByText('auto-merge · squash');
+    expect(pill).toHaveClass('ui-pill-done');
+    expect(pill).not.toHaveClass('ui-pill-live');
   });
 
   it('draws two repos each with #7, keyed apart', () => {
@@ -312,15 +396,24 @@ describe('PrInbox — one row vocabulary', () => {
     render(<PrInbox {...props([repo('a/x', [runPr])], { ctx: runCtx })} />);
     const row = screen.getByTestId('pr-row-a/x#9');
     const meta = row.querySelector('.prs-meta') as HTMLElement;
-    // The separators are their own spans, spaced by the flex gap, so the line is read part by part.
+    // Each item carries its own trailing `·`, so a wrap can never strand one; the last item has none, and the warning pill is not an item of the dotted run.
     expect(Array.from(meta.children).map((el) => el.textContent)).toEqual([
-      'futin',
-      '·',
-      'backlog/42 → main',
-      '·',
+      'x·',
+      // The author is the disc's letter and the login in one flex item (`.prs-author`); the glyph before the branches has no text.
+      'Ffutin·',
+      'backlog/42 → main·',
       '2h ago',
       'run in progress on this machine'
     ]);
+    // No child of the wrapping line is a bare separator, and every dot is decoration the screen reader skips.
+    const line = row.querySelector('.prs-line') as HTMLElement;
+    for (const el of [...Array.from(line.children), ...Array.from(meta.children)]) expect(el.textContent).not.toBe('·');
+    for (const dot of Array.from(meta.querySelectorAll('.prs-sep'))) {
+      expect(dot).toHaveAttribute('aria-hidden', 'true');
+      expect(dot.parentElement).toHaveClass('prs-meta-item');
+      expect(dot.parentElement?.lastElementChild).toBe(dot);
+    }
+    expect(meta.querySelectorAll('.prs-sep')).toHaveLength(3);
     expect(within(row).getAllByText('run in progress on this machine')).toHaveLength(1);
   });
 
@@ -398,6 +491,73 @@ describe('PrInbox — one row vocabulary', () => {
     expect(row.querySelector('.prs-meta')).toHaveTextContent(warning as string);
     expect(row).toHaveTextContent('approved');
     expect(screen.getByRole('button', { name: 'Quiet 1' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * Restyle fixes I1, I6, I7 (mock `PRs.dc.html`:108-109): every Inbox row is its own card, the two loud triage options lead with their level's dot, and `Quiet`
+ * is a section label with room above it. The card skin belongs to the Inbox LIST (`.prs-inbox-list`), not to `PrRow`, which Cards draws boxless inside its
+ * repo card — so what is pinned is the list that holds the row, and that Cards has no such list.
+ */
+describe('PrInbox — cards, triage dots and the Quiet section', () => {
+  const css = readStyles();
+
+  it('puts every loud and every quiet row in an Inbox list, and a Cards row in none', () => {
+    render(<PrInbox {...props([trio()])} />);
+    for (const id of ['pr-row-a/x#1', 'pr-row-a/x#2', 'pr-row-a/x#3']) {
+      expect(screen.getByTestId(id).closest('ul')).toHaveClass('prs-inbox-list');
+    }
+  });
+
+  it('draws no Inbox list around a Cards row', () => {
+    render(<PrCards {...props([trio()])} />);
+    const row = screen.getByTestId('pr-row-a/x#1');
+    expect(row).toHaveClass('prs-row');
+    expect(row.closest('.prs-inbox-list')).toBeNull();
+    expect(row.closest('.prs-inbox')).toBeNull();
+  });
+
+  it('skins the Inbox list item as a card (--card, hairline, radius 14, 14 x 16) with 10 px between, and never the shared .prs-row', () => {
+    const list = ruleBlock(css, '.prs-inbox-list') as string;
+    expect(list).toMatch(/display\s*:\s*flex/);
+    expect(list).toMatch(/flex-direction\s*:\s*column/);
+    expect(list).toMatch(/gap\s*:\s*10px/);
+    const card = ruleBlocks(css, '.prs-inbox-list > .prs-row').join('\n');
+    expect(card).toMatch(/background\s*:\s*var\(--card\)/);
+    expect(card).toMatch(/border\s*:\s*1px solid var\(--hairline\)/);
+    expect(card).toMatch(/border-radius\s*:\s*14px/);
+    expect(card).toMatch(/padding\s*:\s*14px 16px/);
+    // Cards' rows keep their own boxless rule: the shared one carries no ground and no radius.
+    const shared = ruleBlock(css, '.prs-row') as string;
+    expect(shared).not.toMatch(/background|border-radius/);
+  });
+
+  it('leads Needs you with a red dot and Worth a look with an amber one, and Quiet with none', () => {
+    render(<PrInbox {...props([trio()])} />);
+    const needs = screen.getByRole('button', { name: 'Needs you 1' });
+    const worth = screen.getByRole('button', { name: 'Worth a look 1' });
+    const quiet = screen.getByRole('button', { name: 'Quiet 1' });
+    expect(needs.querySelector('.ui-dot')).toHaveClass('ui-dot-crashed');
+    expect(worth.querySelector('.ui-dot')).toHaveClass('ui-dot-warn');
+    expect(quiet.querySelector('.ui-dot')).toBeNull();
+    // Before the label, and decorative: the accessible names above still read as the words and the count.
+    expect(needs.firstElementChild).toContainElement(needs.querySelector('.ui-dot') as HTMLElement);
+    expect(needs.querySelector('.ui-dot')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('keeps Quiet an h3 over the quiet rows, with space above it, and draws none when no PR is quiet', () => {
+    const { rerender } = render(<PrInbox {...props([trio()])} />);
+    expect(screen.getByRole('heading', { level: 3, name: 'Quiet' })).toBeInTheDocument();
+    const heading = ruleBlock(css, '.prs-inbox-heading') as string;
+    expect(heading).toMatch(/margin\s*:\s*(8|12|16)px 0 0/);
+    // The list gap is 16 px (`.prs-inbox`); the margin comes on top, so the space above is at least 16.
+    expect(ruleBlock(css, '.prs-inbox') as string).toMatch(/gap\s*:\s*16px/);
+    // Matches the triage's type: 13 px / 500.
+    expect(heading).toMatch(/font-size\s*:\s*13px/);
+    expect(heading).toMatch(/font-weight\s*:\s*500/);
+
+    rerender(<PrInbox {...props([repo('a/x', [failing, behind])])} />);
+    expect(screen.queryByRole('heading', { name: 'Quiet' })).toBeNull();
   });
 });
 

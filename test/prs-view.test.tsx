@@ -262,14 +262,71 @@ describe('PullRequestsView — grouping and the rows', () => {
     expect(within(r7).getByText('draft', { selector: '.ui-pill' })).toBeInTheDocument();
   });
 
-  it('heads each card with a tile in its worst checks tone, the repo, an `N open` pill and the age', async () => {
+  it('heads each card with a dark 28 px repo tile, the short repo name, the `N open` pill, then the age at the trailing edge', async () => {
     payload.repos[0] = repo({ repo: 'futin/x', prs: [PR7, { ...PR9, checks: 'failure' }] });
     await mount();
     const head = screen.getByTestId('pr-head-futin/x');
-    expect(head).toHaveTextContent('futin/x');
-    expect(within(head).getByText('2 open')).toHaveClass('ui-pill');
-    expect(head.querySelector('.ui-glyph-tile')).toHaveAttribute('data-tone', 'red');
-    expect(head).toHaveTextContent('polled 12 s ago');
+    const tile = head.querySelector('.ui-glyph-tile') as HTMLElement;
+    const name = head.querySelector('.prs-repo-name') as HTMLElement;
+    const pill = within(head).getByText('2 open');
+    const age = within(head).getByText('polled 12 s ago');
+    // The tile is the repo's mark, not a checks reading: dark, 28 px — the worst row's red lives on that row's own tile.
+    expect(tile).toHaveAttribute('data-tone', 'ink');
+    expect(tile).toHaveAttribute('data-size', '28');
+    expect(name).toHaveTextContent(/^x$/);
+    // The short name drops the owner, so the full `owner/name` is on hover, as Inbox's repo label has it.
+    expect(name).toHaveAttribute('title', 'futin/x');
+    expect(pill).toHaveClass('ui-pill');
+    expect(head.querySelectorAll('.ui-glyph-tile')).toHaveLength(1);
+    const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(tile, name)).toBe(true);
+    expect(follows(name, pill)).toBe(true);
+    expect(follows(pill, age)).toBe(true);
+    // The age is not inside the title group with the pill: it sits in the head's trailing slot, so a wide card pushes it to the edge.
+    expect(age.closest('.ui-sheet-head-right')).not.toBeNull();
+    expect(pill.closest('.ui-sheet-head-right')).toBeNull();
+  });
+
+  it('keeps the full owner/name in a head when another shown repo shares the short name (repoShortName)', async () => {
+    payload.repos.push(repo({ repo: 'acme/x', prs: [pr({ number: 31, headSha: 'c'.repeat(40) })], total: 1 }));
+    await mount();
+    expect(screen.getByTestId('pr-head-futin/x').querySelector('.prs-repo-name')).toHaveTextContent('futin/x');
+    expect(screen.getByTestId('pr-head-acme/x').querySelector('.prs-repo-name')).toHaveTextContent('acme/x');
+    expect(screen.getByTestId('pr-head-futin/y').querySelector('.prs-repo-name')).toHaveTextContent(/^y$/);
+  });
+
+  it('shortens against every shown repo, drawn or not, so Cards agrees with Inbox and Matrix', async () => {
+    payload.repos.push(
+      repo({ repo: 'acme/ui-kit', prs: [pr({ number: 41, headSha: 'c'.repeat(40) })], total: 1 }),
+      repo({ repo: 'futin/ui-kit', prs: [], total: 0 })
+    );
+    await mount();
+    // `futin/ui-kit` has no card, but it is shown, so `acme/ui-kit` must keep its owner here just as it does in Inbox's meta line and Matrix's rows.
+    expect(screen.queryByTestId('pr-head-futin/ui-kit')).toBeNull();
+    expect(screen.getByTestId('pr-head-acme/ui-kit').querySelector('.prs-repo-name')).toHaveTextContent(/^acme\/ui-kit$/);
+  });
+
+  it('flows the repo sheets in a `.prs-cards-grid` and keeps the `Can\'t read` notes outside it', async () => {
+    payload.repos.push(repo({ repo: 'futin/z', access: 'rate-limited', detail: 'rate limited — retrying at 12:30', prs: [], total: 0 }));
+    await mount();
+    const grid = document.querySelector('.prs-cards-grid') as HTMLElement;
+    expect(grid).not.toBeNull();
+    const sheets = Array.from(document.querySelectorAll('[data-testid^="pr-repo-"]')).map((el) => el.parentElement);
+    expect(sheets).toHaveLength(2);
+    for (const sheet of sheets) expect(sheet?.parentElement).toBe(grid);
+    expect(grid.children).toHaveLength(2);
+    const note = screen.getByTestId('pr-cantread-futin/z');
+    expect(grid.contains(note)).toBe(false);
+    expect(note.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it('draws each card row with a 28 px tile, one pills-and-meta line and no repo name — the head already says it', async () => {
+    await mount();
+    const r = row('futin/y#12');
+    expect(r.querySelector('.ui-glyph-tile')).toHaveAttribute('data-size', '28');
+    const line = r.querySelector('.prs-line') as HTMLElement;
+    expect(line.querySelector('.prs-meta')).not.toBeNull();
+    expect(r.querySelector('.prs-inbox-repo')).toBeNull();
   });
 
   it('draws each card row with its checks tile, the pills and the split Merge', async () => {
@@ -747,6 +804,8 @@ describe('PullRequestsView — run-in-progress warning', () => {
    ------------------------------------------------------------------------------------------------------------------------------------------------------- */
 
 const switcher = (): HTMLElement => screen.getByRole('group', { name: 'Layout' });
+/** The band's sub-line: the one place the page counts and dates itself. */
+const bandSub = (): HTMLElement => screen.getByRole('banner').querySelector<HTMLElement>('.ui-band-sub')!;
 const stored = (): unknown => JSON.parse(localStorage.getItem(PR_LAYOUT_KEY) ?? 'null');
 const FORBIDDEN_Z = repo({
   repo: 'futin/z',
@@ -818,21 +877,71 @@ describe('PullRequestsView — the layout switcher', () => {
     expect(screen.getByTestId('pr-inbox')).toBeInTheDocument();
   });
 
-  it("states the toolbar's polled age from the newest shown repo", async () => {
+  it("states the band's polled age from the newest shown repo, and draws it nowhere else", async () => {
     await mount();
-    expect(screen.getByTestId('pr-toolbar')).toHaveTextContent('polled 12 s ago');
+    expect(bandSub()).toHaveTextContent('polled 12 s ago');
+    expect(document.querySelector('.prs-toolbar-age')).toBeNull();
+  });
+});
+
+/* The shared head (restyle fixes I5; mocks `PRs.dc.html` and `PRsLayouts.dc.html`): one band for all three layouts — a live dot and `N open in M repos ·
+   polled <age>` under the title, the layout switch in the band's trailing slot, and no `N open` pill. */
+describe('PullRequestsView — the band', () => {
+  it.each(['inbox', 'matrix', 'cards'] as const)('reads `3 open in 2 repos` led by a live dot, in %s', async (layout) => {
+    storeLayout(layout);
+    await mount();
+    expect(bandSub()).toHaveTextContent(/^3 open in 2 repos · polled 12 s ago$/);
+    expect(bandSub().querySelector('.prs-band-dot')).not.toBeNull();
+  });
+
+  it('says `in 1 repo` for one repo', async () => {
+    payload.repos = [payload.repos[0]];
+    await mount();
+    expect(bandSub()).toHaveTextContent(/^2 open in 1 repo · polled 12 s ago$/);
+  });
+
+  it('counts only the shown repos that hold an open PR in M', async () => {
+    payload.repos.push(repo({ repo: 'futin/w', prs: [], total: 0 }), FORBIDDEN_Z);
+    await mount();
+    expect(bandSub()).toHaveTextContent(/^3 open in 2 repos/);
+  });
+
+  it('drops the polled reading when no shown repo has been read', async () => {
+    payload.repos = [repo({ repo: 'futin/x', polledAt: null, prs: [PR7], total: 1 })];
+    await mount();
+    expect(bandSub()).toHaveTextContent(/^1 open in 1 repo$/);
+  });
+
+  it.each(['inbox', 'matrix', 'cards'] as const)('holds the layout switch inside the band, not the toolbar, in %s', async (layout) => {
+    storeLayout(layout);
+    await mount();
+    expect(screen.getByRole('banner')).toContainElement(switcher());
+    expect(screen.queryByTestId('pr-toolbar')).toBeNull();
+  });
+
+  it('draws no `N open` pill in the band', async () => {
+    await mount();
+    expect(within(screen.getByRole('banner')).queryByText(/^\d+ open$/)).toBeNull();
+    expect(screen.getByRole('banner').querySelector('.ui-pill')).toBeNull();
+  });
+
+  it('keeps the old static sub-line until there is a read to count', async () => {
+    payload = { token: false, repos: [] };
+    await mount();
+    expect(screen.getByRole('banner')).toHaveTextContent("open pull requests on this machine's GitHub repos");
+    expect(screen.queryByRole('group', { name: 'Layout' })).toBeNull();
   });
 });
 
 describe('PullRequestsView — repos the token cannot read', () => {
-  it.each(['inbox', 'matrix', 'cards'] as const)('keeps a no-access repo out of %s, out of N open, and says so in the toolbar', async (layout) => {
+  it.each(['inbox', 'matrix', 'cards'] as const)('keeps a no-access repo out of %s, out of the band count, and says so in the toolbar', async (layout) => {
     storeLayout(layout);
     payload.repos.push(FORBIDDEN_Z);
     const onOpenSettings = jest.fn();
     const { user } = await mount({ onOpenSettings });
     expect(document.body).not.toHaveTextContent('futin/z');
     expect(document.body).not.toHaveTextContent('Hidden by reach');
-    expect(screen.getByText('3 open')).toBeInTheDocument();
+    expect(bandSub()).toHaveTextContent(/^3 open in 2 repos/);
     const toolbar = screen.getByTestId('pr-toolbar');
     expect(toolbar).toHaveTextContent('1 repo hidden — no access');
     expect(toolbar).not.toHaveTextContent('polled 5 s ago');
@@ -852,7 +961,7 @@ describe('PullRequestsView — repos the token cannot read', () => {
     await mount();
     expect(screen.getByTestId('pr-repo-futin/y')).toBeInTheDocument();
     expect(screen.getByTestId('pr-cantread-futin/y')).toHaveTextContent('rate limited — retrying at 12:30');
-    expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('hidden');
+    expect(screen.queryByTestId('pr-toolbar')).toBeNull();
   });
 
   it('brings a hidden repo back on the next read that says ok, and drops the note', async () => {
@@ -866,9 +975,9 @@ describe('PullRequestsView — repos the token cannot read', () => {
       window.dispatchEvent(new Event('focus'));
     });
     await flush();
-    expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('hidden');
+    expect(screen.queryByTestId('pr-toolbar')).toBeNull();
     expect(document.body).toHaveTextContent('Hidden by reach');
-    expect(screen.getByText('7 open')).toBeInTheDocument();
+    expect(bandSub()).toHaveTextContent(/^7 open in 3 repos/);
   });
 
   it('says no repo this token can read when every repo is hidden, and still offers the way to Settings', async () => {
@@ -877,7 +986,7 @@ describe('PullRequestsView — repos the token cannot read', () => {
     expect(screen.getByText('no repo this token can read')).toBeInTheDocument();
     expect(screen.queryByText('no GitHub repo registered')).toBeNull();
     expect(screen.getByTestId('pr-toolbar')).toHaveTextContent('2 repos hidden — no access');
-    expect(screen.getByText('0 open')).toBeInTheDocument();
+    expect(bandSub()).toHaveTextContent(/^0 open in 0 repos/);
   });
 
   it('says no GitHub repo registered when the payload has none', async () => {
@@ -885,6 +994,11 @@ describe('PullRequestsView — repos the token cannot read', () => {
     await mount();
     expect(screen.getByText('no GitHub repo registered')).toBeInTheDocument();
     expect(screen.queryByText('no repo this token can read')).toBeNull();
+  });
+
+  it('draws no toolbar when no repo is hidden and none is counted empty', async () => {
+    await mount();
+    expect(screen.queryByTestId('pr-toolbar')).toBeNull();
   });
 
   it('draws no toolbar for a server with no token', async () => {
@@ -900,11 +1014,11 @@ describe('PullRequestsView — the Cards toolbar count', () => {
   /** The toolbar's own parts after the switcher, by class, in document order. */
   const parts = (): string[] => [...screen.getByTestId('pr-toolbar').children].map((el) => el.className).filter((c) => c.startsWith('prs-toolbar-'));
 
-  it('counts one ok empty repo, after the hidden-repos note and before the age', async () => {
+  it('counts one ok empty repo, after the hidden-repos note', async () => {
     storeLayout('cards');
     payload.repos.push(EMPTY_W, FORBIDDEN_Z);
     await mount({ onOpenSettings: () => {} });
-    expect(parts()).toEqual(['prs-toolbar-note', 'prs-toolbar-note', 'prs-toolbar-age']);
+    expect(parts()).toEqual(['prs-toolbar-note', 'prs-toolbar-note']);
     const notes = screen.getByTestId('pr-toolbar').querySelectorAll('.prs-toolbar-note');
     expect(notes[0]).toHaveTextContent('1 repo hidden — no access');
     expect(notes[1]).toHaveTextContent(/^1 repo with no open PRs$/);
@@ -914,7 +1028,7 @@ describe('PullRequestsView — the Cards toolbar count', () => {
     storeLayout('cards');
     payload.repos.push(EMPTY_W, repo({ repo: 'futin/v', prs: [], total: 0 }));
     await mount();
-    expect(parts()).toEqual(['prs-toolbar-note', 'prs-toolbar-age']);
+    expect(parts()).toEqual(['prs-toolbar-note']);
     expect(screen.getByTestId('pr-toolbar')).toHaveTextContent('2 repos with no open PRs');
   });
 
@@ -922,14 +1036,14 @@ describe('PullRequestsView — the Cards toolbar count', () => {
     storeLayout(layout);
     payload.repos.push(EMPTY_W);
     await mount();
-    expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('with no open PRs');
+    expect(document.body).not.toHaveTextContent('with no open PRs');
   });
 
   it('draws no count when every shown repo lists nothing', async () => {
     storeLayout('cards');
     payload = { ...basePayload(), repos: [repo({ repo: 'futin/x', prs: [], total: 0 }), EMPTY_W] };
     await mount();
-    expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('with no open PRs');
+    expect(document.body).not.toHaveTextContent('with no open PRs');
     expect(screen.getAllByText('no open pull requests')).toHaveLength(1);
   });
 
@@ -937,7 +1051,7 @@ describe('PullRequestsView — the Cards toolbar count', () => {
     storeLayout('cards');
     payload.repos.push(repo({ repo: 'futin/w', polledAt: null, prs: [], total: 0 }));
     await mount();
-    expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('with no open PRs');
+    expect(document.body).not.toHaveTextContent('with no open PRs');
   });
 });
 

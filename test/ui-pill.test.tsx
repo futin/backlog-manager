@@ -63,4 +63,28 @@ describe('Pill', () => {
 
     expect(screen.queryByRole('button')).toBeNull();
   });
+
+  /*
+    A pill's glyph leads its text and is decorative, like every Glyph: the words carry the claim. Absent unless passed, so a count or a mode pill draws
+    exactly the one text node it always did.
+  */
+  it('draws a leading aria-hidden glyph when given one', () => {
+    render(
+      <Pill tone="bad" glyph="cross">
+        checks failing
+      </Pill>
+    );
+
+    const pill = screen.getByText('checks failing');
+    const svg = pill.querySelector('svg');
+    expect(svg).not.toBeNull();
+    expect(svg).toHaveAttribute('aria-hidden', 'true');
+    expect(pill.firstElementChild).toBe(svg);
+  });
+
+  it('draws no svg without a glyph', () => {
+    render(<Pill>7</Pill>);
+
+    expect(screen.getByText('7').querySelector('svg')).toBeNull();
+  });
 });

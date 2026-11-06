@@ -14,6 +14,7 @@ import {
   MATRIX_LABEL,
   matrixCells,
   newestPolledAt,
+  openRepoCount,
   parseLayout,
   PR_LAYOUT_OPTIONS,
   prLevel,
@@ -21,6 +22,7 @@ import {
   primaryKey,
   prSeverity,
   rankPrs,
+  repoShortName,
   splitReach,
   transientFailures
 } from '../client/src/lib/pr-layouts';
@@ -205,6 +207,26 @@ describe('page-level readings', () => {
   it('transientFailures keeps rate-limited and error repos, and drops ok ones', () => {
     const shown = [repo({ repo: 'a/1' }), repo({ repo: 'a/2', access: 'rate-limited' }), repo({ repo: 'a/3', access: 'error' })];
     expect(transientFailures(shown).map((r) => r.repo)).toEqual(['a/2', 'a/3']);
+  });
+
+  it('repoShortName is the last segment of the owner/name, and the full name only where two shown repos share that segment', () => {
+    expect(repoShortName('futin/backlog-manager', ['futin/backlog-manager', 'futin/timify-web'])).toBe('backlog-manager');
+    expect(repoShortName('futin/timify-web', ['futin/backlog-manager', 'futin/timify-web'])).toBe('timify-web');
+    // Two `ui-kit`s under different owners: each says which it is, and the one that is unique stays short.
+    const shown = ['acme/ui-kit', 'futin/ui-kit', 'futin/backlog-manager'];
+    expect(repoShortName('acme/ui-kit', shown)).toBe('acme/ui-kit');
+    expect(repoShortName('futin/ui-kit', shown)).toBe('futin/ui-kit');
+    expect(repoShortName('futin/backlog-manager', shown)).toBe('backlog-manager');
+  });
+
+  it('repoShortName keeps a repo short when it is the only one shown, or listed twice under the same full name', () => {
+    expect(repoShortName('futin/x', ['futin/x'])).toBe('x');
+    expect(repoShortName('futin/x', ['futin/x', 'futin/x'])).toBe('x');
+  });
+
+  it('openRepoCount counts the shown repos whose total is above zero', () => {
+    expect(openRepoCount([repo({ total: 2 }), repo({ total: 0, prs: [] }), repo({ total: 100 })])).toBe(2);
+    expect(openRepoCount([])).toBe(0);
   });
 
   it('newestPolledAt ignores nulls and is null when there is nothing to read', () => {
@@ -462,7 +484,7 @@ describe('columnCounts', () => {
 
 describe('LEVEL_DOT', () => {
   it('maps the two loud levels to Dot tones and leaves Quiet toneless', () => {
-    expect(LEVEL_DOT).toEqual({ 'needs-you': 'crashed', 'worth-a-look': 'paused', quiet: undefined });
+    expect(LEVEL_DOT).toEqual({ 'needs-you': 'crashed', 'worth-a-look': 'warn', quiet: undefined });
   });
 });
 

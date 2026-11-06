@@ -504,21 +504,22 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   repos — forks and other authors included — drawn as Inbox, Matrix or Cards (below). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
   last answer, plus mount and focus), mounted once by the shell's `PullRequestsProvider` and read here and by GitHub › Settings' Access card through
   `usePullRequestsContext`: the server's PR cache has no timer, so with no GitHub project registered there are no PR reads at all. A repo the token cannot read (`forbidden` or `not-found`, `splitReach` in `lib/pr-layouts.ts`) is handed to no layout and left out of
-  `N open`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card
+  the band's `N open in M repos · polled <age>`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card
   (`GithubAccessGroup`, the hook's second mount) lists each with GitHub's `detail` and the token fix; a repo the token reads whose checks it may not
   (`checksDetail`, a `FORBIDDEN` on `statusCheckRollup` alone) is drawn like any other with every PR's `checks` `unknown` and listed on that card under
   `Checks not readable`; a rate-limited or `error` repo is transient, keeps its rows and is said once below the list as `Can't read · <repo> — <detail>` in
   every layout, never as a row.
- The layout is a `Segmented` in the toolbar offering
+ The layout is a `Segmented` in the band's trailing slot (`.prs-switch`) offering
   all three at every width (`PR_LAYOUT_OPTIONS`), stored per device (`PR_LAYOUT_KEY`; an unknown word is Inbox). **Inbox** (default) ranks every shown PR across
-  repos (`rankPrs`: level, severity, newest) under a `Segmented` labelled `Triage` (a counted option per level, no `all`; the pressed one clears the filter), every row one `prs-row` — a 32 px
-  checks `GlyphTile` (`checksTone`, `checksGlyph`), the `#n` and title, the pill row (`prPills`), then `author · head → base · age` with the run warning as a warn
-  pill. **Matrix** is a table, a column per check with a failure count in
+  repos (`rankPrs`: level, severity, newest) under a `Segmented` labelled `Triage` (a counted option per level, no `all`; the pressed one clears the filter), every row one `prs-row` — a 40 px (28 in
+  Cards) checks `GlyphTile` (`checksTone`, `checksGlyph`), the `#n` and title, then one wrapping line: the pills (`prPills`, the checks and conflicts ones leading with a
+  glyph), then `[repo short name ·] author · head → base · age` (`repoShortName`, Inbox only) with the run warning as a warn pill. **Matrix** is a table, a column per check with a failure count in
   its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; a problem cell and a header count are pills (red for `bad` and Checks,
   amber otherwise; a healthy cell is plain text); its row toggles one expansion, a panel that is the `Ledger`'s next sibling inside the sheet (`aria-controls`; a `Popover`
   portals nothing and the scroll box's and Ledger's overflow would clip the Merge menu), holding the key strip with a blocked Merge's reason in words, then the foot.
-  **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`), its head a `GlyphTile` in the worst row's checks tone, the repo and an
-  `N open` pill, its rows the same `PrRow` Inbox draws (without the repo name); a repo read cleanly with none is counted in the
+  **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`), its head a dark 28 px repo `GlyphTile`, the short repo name (`repoShortName`), the
+  `N open` pill and `polled <age>` at the trailing edge, the cards flowing two-up in `.prs-cards-grid` (one column under ~1100 px of pane), its rows the same `PrRow` Inbox draws
+  (without the repo name; Cards' text takes a 240 px basis so the keys stay at the right of a two-up card, Inbox keeps 320); a repo read cleanly with none is counted in the
   toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — the split Merge (main half from `mergeMain`: `Merge`, `Auto-merge` or `Auto-merge on`; its chevron opens `Merge menu`: Merge, Enable/Disable auto-merge, Update branch, the row `primaryKey` names ticked) and an icon link `Open #n on GitHub` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
   the method `Select` inside it, then `PrOutcomeLine`. A blocked main half (dashed, reading `Blocked`) or menu row is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
   off` on each for a sync-off repo) as its `title` (the half) and its `aria-describedby` (both; a row's sub-line is the reason); the split is `disabled` outright only while its PR's write runs, because the page

@@ -35,8 +35,8 @@ export const LEVEL_LABEL: Record<PrLevel, string> = {
 };
 
 /**
- * A repo the token cannot read — its last read said `forbidden` or `not-found`. Every layout, the `N open` pill and the toolbar's hidden count read this one
- * function (spec, "Reach of a repo"). A transient failure (`rate-limited`, `error`) is NOT no-access: the repo is still readable, so it stays shown, beside
+ * A repo the token cannot read — its last read said `forbidden` or `not-found`. Every layout, the band's `N open in M repos` and the toolbar's hidden count read
+ * this one function (spec, "Reach of a repo"). A transient failure (`rate-limited`, `error`) is NOT no-access: the repo is still readable, so it stays shown, beside
  * its last answer and a line saying what went wrong.
  */
 export function isNoAccess(repo: PrRepoView): boolean {
@@ -199,7 +199,27 @@ export function transientFailures(shown: readonly PrRepoView[]): PrRepoView[] {
   return shown.filter((repo) => repo.access !== 'ok');
 }
 
-/** The most recent successful read across the shown repos — the one `polled … ago` the toolbar draws — or `null` when none has read yet. */
+/**
+ * How many of the shown repos hold at least one open PR — the `M` in the band's `N open in M repos`. Counted on `total`, as `N` is, so a truncated repo and the
+ * count beside it agree; a repo that was read and holds nothing is not "a repo with PRs", which is also what Cards' own `N repos with no open PRs` says.
+ */
+export function openRepoCount(shown: readonly PrRepoView[]): number {
+  return shown.filter((repo) => repo.total > 0).length;
+}
+
+/**
+ * A repo's name as a row says it: the last `/` segment (`futin/backlog-manager` → `backlog-manager`), because the owner is the same on nearly every repo of a
+ * machine and says nothing there. Two shown repos that share the last segment (`acme/ui-kit`, `futin/ui-kit`) would then read as one, so a repo whose segment
+ * another shown repo also has keeps its full `owner/name`. `shown` is the full names on the page (a repo listed twice under one name is not a collision with
+ * itself). The one home of the rule: Inbox's meta line, Cards' head and Matrix's rows all call this, so they cannot shorten one repo three ways.
+ */
+export function repoShortName(repo: string, shown: readonly string[]): string {
+  const segment = (name: string) => name.slice(name.lastIndexOf('/') + 1);
+  const short = segment(repo);
+  return shown.some((other) => other !== repo && segment(other) === short) ? repo : short;
+}
+
+/** The most recent successful read across the shown repos — the one `polled … ago` the band draws — or `null` when none has read yet. */
 export function newestPolledAt(shown: readonly PrRepoView[]): string | null {
   let best: string | null = null;
   for (const repo of shown) {
@@ -379,7 +399,7 @@ export function columnCounts(ranked: readonly RankedPr[]): Record<MatrixColumn, 
 /** A level's `Dot` tone. Quiet is `undefined` on purpose: `Dot` draws no tone as a toneless grey, which is the level's own look. */
 export const LEVEL_DOT: Record<PrLevel, DotTone | undefined> = {
   'needs-you': 'crashed',
-  'worth-a-look': 'paused',
+  'worth-a-look': 'warn',
   quiet: undefined
 };
 

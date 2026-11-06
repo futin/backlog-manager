@@ -18,6 +18,7 @@ import {
   columnCounts,
   matrixCells,
   rankPrs,
+  repoShortName,
   transientFailures,
   type CellTone,
   type RankedPr
@@ -137,10 +138,13 @@ function MatrixRow({
   props,
   open,
   panelId,
+  shownNames,
   onToggle
 }: {
   r: RankedPr;
   props: PrLayoutProps;
+  /** The full names of the repos on the page, for `repoShortName`'s collision rule. */
+  shownNames: readonly string[];
   open: boolean;
   panelId: string;
   onToggle: () => void;
@@ -187,11 +191,13 @@ function MatrixRow({
               <a className="prs-num" href={pr.url} target="_blank" rel="noreferrer noopener">
                 #{pr.number}
               </a>
-              <span className="prs-title">{pr.title}</span>
+              <span className="prs-title" title={pr.title}>
+                {pr.title}
+              </span>
               {pr.draft && <Pill>draft</Pill>}
             </div>
             <div className="prs-meta">
-              <span className="prs-branches">{`${repo.repo} · ${pr.head} → ${pr.base}`}</span>
+              <span className="prs-branches">{`${repoShortName(repo.repo, shownNames)} · ${pr.head} → ${pr.base}`}</span>
               {warning !== null && <Pill tone="warn">{warning}</Pill>}
             </div>
           </div>
@@ -221,6 +227,7 @@ export function PrMatrix(props: PrLayoutProps) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const panelId = `${useId()}-expand`;
   const ranked = useMemo(() => rankPrs(repos), [repos]);
+  const shownNames = useMemo(() => repos.map((x) => x.repo), [repos]);
   const failures = transientFailures(repos);
   const counts = useMemo(() => columnCounts(ranked), [ranked]);
   const { confirming, setConfirming } = props;
@@ -266,7 +273,7 @@ export function PrMatrix(props: PrLayoutProps) {
                   </thead>
                   <tbody>
                     {ranked.map((r) => (
-                      <MatrixRow key={r.key} r={r} props={props} open={openKey === r.key} panelId={panelId} onToggle={() => toggle(r.key)} />
+                      <MatrixRow key={r.key} r={r} props={props} shownNames={shownNames} open={openKey === r.key} panelId={panelId} onToggle={() => toggle(r.key)} />
                     ))}
                   </tbody>
                 </table>

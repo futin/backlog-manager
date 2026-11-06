@@ -384,6 +384,18 @@ button.rail-count { cursor: pointer }
    toolbar narrows to a project, the columns never do. A card opens the drawer,
    which fetches that one item's body from GET /api/items/body. */
 .board { display: flex; flex-direction: column; gap: var(--group-gap) }
+/* A board of columns fills the well down to its foot, so with few cards the grounds still run full height and every column is one height (mock
+   Board.dc.html: the grid is `flex-grow: 1`). The well is `.main` — already `flex: 1` of `.maincol`, which the shell stretches to the viewport — so the chain
+   is made flex all the way down: `.main` a column, its one child `.wrap` growing, and the `.board` and its `.board-columns` growing in turn. `.wrap` is a flex
+   column ONLY where it holds a board of columns (`:has`), so Runs, Settings, the Sessions table and the rest keep their block layout untouched. Every link
+   is `flex: 1`, never a height, so with many cards the content is simply taller than the well and the page scrolls as it always did; and under 700 px
+   `.maincol` is `display: contents` and the shell is not stretched, so nothing fills there — the columns stack at their own height. Files › Archive renders
+   the same `.board-columns` inside a `.board`, so its toneless, groundless columns stretch too — on purpose, not by accident, and harmless: nothing there paints a
+   column's height, and `.archive-month`'s sticky belongs to its month group, which is not a stretched element. */
+.main { display: flex; flex-direction: column }
+.wrap:has(> .board > .board-columns) { flex: 1; display: flex; flex-direction: column }
+.wrap > .board:has(> .board-columns) { flex: 1 }
+.board > .board-columns { flex: 1 }
 /* Task 13's `.board-orchestrate` — the toolbar's filled cyan "drain this
    project's queue" button — is gone with the toolbar (task-37). The control is
    the page's ONE ink `Chip` now (DESIGN.md §8.3), and both attribute states it
@@ -1120,10 +1132,13 @@ button.rail-count { cursor: pointer }
    would reflow by width alone and drop a column under its neighbour on some
    widths; the type axis is the board's whole point, so the column count is
    stepped explicitly instead. minmax(0, 1fr) keeps a column with a long
-   unbroken title shrinking with the row rather than overflowing it, and
-   align-items:start keeps a short column from stretching to its tallest
-   neighbour. */
-.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--col-gap); align-items: start }
+   unbroken title shrinking with the row rather than overflowing it.
+   No `align-items: start` (it stood here until 2026-11-06): the grid's default
+   `stretch` makes every column the height of the tallest, which is what lets a
+   column's `--steel` ground (`.board-col[data-ground]`) run the full height of
+   the row instead of ending at its last card — with `start`, an empty column's
+   ground was a 40 px strip. */
+.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--col-gap) }
 @media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
 
@@ -1161,11 +1176,13 @@ button.rail-count { cursor: pointer }
    in place of the stack, and any per-column overflow later has to scroll the
    cards without dragging the header off its rule with them. */
 .board-col-cards { display: flex; flex-direction: column; gap: var(--card-gap) }
-/* The Jira shelves' toned column (restyle spec §4.3, mock Board.dc.html): a `--steel` well, radius 16, 12 px padding with the header inside it. The dot and
+/* A column's ground (mock Board.dc.html; restyle spec §4.3 gave it to Jira alone and the user extended it to the GitHub Board, 2026-11-06): a `--steel` well,
+   radius 16, 12 px padding with the header inside it, on `[data-ground]` — which `BoardView` and `JiraShelves` set and Archive does not, because its sticky
+   `.archive-month` paints `--board` and would read as a white band across it. The Jira shelves' toned header (`[data-tone]`) is separate: the dot and
    the count are page-local spans rather than `.ui-dot` / `.ui-pill` — `Dot` has no todo/doing/done tones and guard 7 forbids a page rule naming a ui-* family
    token. Plain colours and a solid `--strip` pill, no tint, so nothing joins the daylight-contrast PINNED list; 11/500 `--ink2` on `--strip` is a
    surface pair the contrast suite already measures. */
-.board-col[data-tone] { background: var(--steel); border-radius: 16px; padding: 12px }
+.board-col[data-ground] { background: var(--steel); border-radius: 16px; padding: 12px }
 .board-col-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ink3) }
 .board-col[data-tone='doing'] .board-col-dot { background: var(--amber-solid) }
 .board-col[data-tone='done'] .board-col-dot { background: var(--green-solid) }
@@ -3304,20 +3321,29 @@ button.rail-count { cursor: pointer }
 .prs-status { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-status-error { color: var(--red) }
 .prs-repo-inner { display: flex; flex-direction: column; min-width: 0 }
-.prs-repo-sub { display: flex; flex-wrap: wrap; gap: 4px 12px }
-/* A card's head: the tile leads the repo name inside the title, and the `N open` pill (with `sync off`) sits in the head's right slot. */
-.prs-repo-title { display: inline-flex; align-items: center; gap: 12px; min-width: 0; overflow-wrap: anywhere }
+/* A card's head (mock `PRsLayouts.dc.html`, Cards): the dark repo tile, the short name and the `N open` pill (with `sync off`) lead as one group in the title, and the
+   poll age is the only thing in the head's right slot, so it sits at the trailing edge. `nowrap` on the trail keeps `polled 12 s ago` one line; the title group
+   wraps its pill under the name instead when a narrow card cannot hold both. */
+.prs-repo-title { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; overflow-wrap: anywhere }
 .prs-repo-pills { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px }
+.prs-repo-trail { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; font-size: 13px; font-weight: 400; color: var(--ink2); white-space: nowrap }
+/* Cards flow two-up where the pane has room for two 520 px cards and one column below that; `min(520px, 100%)` lets a pane narrower than 520 px still take one
+   column without sideways scroll. Top-aligned, because a repo with two PRs beside one with six should not stretch to its neighbour's height. */
+.prs-cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(520px, 100%), 1fr)); gap: 16px; align-items: start; min-width: 0 }
 /* The repo's own note under its head — the sync-off sentence. Readable without hover: on a phone there is none. */
 .prs-note { font-size: 13px; color: var(--ink2); line-height: 1.45; margin-bottom: 12px }
 .prs-list { list-style: none; margin: 0; padding: 0 }
 /* One row anatomy for Inbox and Cards (spec `2026-10-30-prs-page-fixes-design.md`): the text on the left, the four keys and their why-line on the right,
-   top-aligned with the title. The text keeps a 320 px basis, so the keys drop under it whenever the title would get less — the title is never squeezed to
-   make room for keys — and always below the narrow breakpoint, left-aligned there. The foot (Confirm, outcome) lives in the text column, never the keys'. */
+   top-aligned with the title. Inbox's text keeps a 320 px basis, so the keys drop under it whenever the title would get less — the title is never squeezed to
+   make room for keys (Cards overrides that, see `.prs-list .prs-row-main`) — and always below the narrow breakpoint, left-aligned there. The foot (Confirm, outcome) lives in the text column, never the keys'. */
 .prs-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; padding: 16px 0; min-width: 0 }
 /* Cards' rows are the compact ones: the head already says the repo, so each row needs less air between hairlines. */
 .prs-list .prs-row { padding: 12px 0 }
 .prs-list .prs-row:first-child { padding-top: 12px }
+/* Cards only (user override, 2026-11-06, per mock `PRsLayouts.dc.html`): a two-up card is ~480-520 px of inner width, so the 320 px basis below would drop the keys
+   under every row's text. Here the text takes a 240 px basis instead — tile 28 + two 16 px gaps + the ~170 px keys still fit at ~480 — and the title wraps rather than
+   the keys moving. Inbox's rows are not under `.prs-list` and keep the 320 px rule; the narrow block below still sends the keys under the text at 700 px. */
+.prs-list .prs-row-main { flex: 1 1 240px }
 .prs-row + .prs-row { border-top: 1px solid var(--hairline) }
 .prs-row:first-child { padding-top: 0 }
 .prs-row:last-child { padding-bottom: 0 }
@@ -3327,13 +3353,15 @@ button.rail-count { cursor: pointer }
 .prs-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
 .prs-keys > a { width: 28px; padding: 0; justify-content: center }
 .prs-keys-merge { position: relative; display: inline-flex }
-/* The `Merge menu`'s rows: two lines (label, then what it does — or why it cannot), an 18 px tile leading and the primary's tick trailing. */
+/* The `Merge menu`'s rows: two lines (label, then what it does — or why it cannot), a 28 px tinted tile leading (mock `.mi`) and the primary's tick trailing. */
 .prs-keys-rows { display: flex; flex-direction: column; gap: 2px; margin: -8px }
 .prs-keys-row {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 6px 10px; box-sizing: border-box;
   border: 0; border-radius: 8px; background: var(--strip); text-align: left; cursor: pointer; color: var(--ink);
 }
 .prs-keys-row:hover:not([aria-disabled='true']) { background: var(--strip-hi) }
+/* The primary row — the one the tick marks — rests on the hover ground (mock `.mi.on`); `PrActions` sets the class, never a blocked row. */
+.prs-keys-row-on { background: var(--strip-hi) }
 .prs-keys-row[aria-disabled='true'] { cursor: default; color: var(--ink3) }
 .prs-keys-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0 }
 .prs-keys-label { font-size: 13px; font-weight: 500 }
@@ -3350,19 +3378,54 @@ button.rail-count { cursor: pointer }
 .prs-title { min-width: 0; overflow-wrap: anywhere }
 .prs-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; color: var(--ink2) }
 .prs-branches { overflow-wrap: anywhere }
+/* The meta line's two lead-ins, from the mock's row (`PRs.dc.html`: `<span class="av">F</span>futin · <branch glyph> head → base`). Each pair is one flex item of
+   `.prs-line`, so the disc never wraps away from its login nor the glyph from its branches. The disc is the Jira card's initials disc (`.jira-card-av`: the
+   magenta tint on `--strip`, 999px, 600 weight) sized for a 13 px line — 16 px, as the mock's inline `.av` — and the 11 px floor is the guard's, so the mock's 8 px
+   letter does not survive; the letter is uppercased in JS, never by `text-transform` (guard 4). */
+.prs-author, .prs-branch-pair { display: inline-flex; align-items: center; gap: 4px; min-width: 0 }
+/* A meta item and its trailing `·` are one flex item of `.prs-line` (`PrRow`), so a wrap breaks between items, never inside a pair: no dot starts a line or
+   sits alone at the end of one. The 6 px before the dot restores the spacing the line's own gap used to give a free-standing separator. */
+.prs-meta-item { display: inline-flex; align-items: center; min-width: 0 }
+.prs-sep { margin-left: 6px }
+.prs-av {
+  display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; border-radius: 999px;
+  background: color-mix(in srgb, var(--magenta) 14%, var(--strip)); color: var(--magenta); font-size: 11px; font-weight: 600; line-height: 1;
+}
+.prs-branch-pair > svg { flex: none }
 .prs-chips { display: flex; flex-wrap: wrap; gap: 6px }
+/* A row's pills and meta are ONE wrapping line (mock `PRs.dc.html`: the pills, then `author · head → base · age`). The two wrappers stay in the markup so the meta's
+   children are still a list, and dissolve here so their items flow in this container; Matrix's own `.prs-meta` is untouched, it is not inside `.prs-line`. */
+.prs-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0 }
+.prs-line > .prs-chips, .prs-line > .prs-meta { display: contents }
 .prs-why { font-size: 12px; color: var(--ink2) }
 .prs-outcome { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-outcome-error { color: var(--red) }
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
 
 /* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The triage is a `Segmented` and each row leads with a `GlyphTile` in its checks tone. Its rows are the shared
-   `.prs-row` above, boxless with a hairline between them. Own `.prs-inbox*` and `.prs-notes*` classes only — a `.ui-*` primitive is never restyled from here
+   `.prs-row` above; each is its own card (restyle fixes I1, mock `PRs.dc.html`:109) — `--card` ground, hairline border, 14 px radius, 14 x 16 padding, 10 px
+   between rows and no divider rule. The skin is the LIST's (`.prs-inbox-list > .prs-row`), never the shared `.prs-row`, because Cards draws the same row boxless
+   inside its repo card. Own `.prs-inbox*` and `.prs-notes*` classes only — a `.ui-*` primitive is never restyled from here
    (guard 7). */
 .prs-inbox { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
 .prs-inbox-triage { display: flex; min-width: 0 }
-.prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0 }
-.prs-inbox-heading { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
+.prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px }
+/* On a phone the 320 px text basis plus the 40 px tile and the 16 px gap is wider than a boxed card's ~306 px inner width, so the text column wrapped under the
+   tile and left it alone on the first line. Under 700 px the basis drops to 0 (the keys already take their own line below), so the text grows into whatever the
+   tile leaves and the tile stays beside the title. Inbox's list only: Cards' rows already have a 240 px basis. */
+@media (max-width: 700px) {
+  .prs-inbox-list > .prs-row > .prs-row-main { flex: 1 1 0 }
+}
+/* The shared row's first/last padding resets and its between-rows rule are each as specific as this and earlier in the sheet, so they are restated here for
+   the card: every card is padded the same and the hairline is its border, not a divider. */
+.prs-inbox-list > .prs-row,
+.prs-inbox-list > .prs-row:first-child,
+.prs-inbox-list > .prs-row:last-child {
+  padding: 14px 16px; background: var(--card); border: 1px solid var(--hairline); border-radius: 14px
+}
+/* `Quiet` is a section label, not a bare word between cards: the triage's own 13/500 type, with 8 px on top of `.prs-inbox`'s 16 px gap (24 px above, 16 at
+   least). */
+.prs-inbox-heading { margin: 8px 0 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
 .prs-inbox-repo { flex: none; font-size: 13px; font-weight: 400; color: var(--ink3) }
 /* One text-link look for the page's inline controls — the toolbar's `GitHub › Settings`. `.set-link` is §8.6's 36 px bordered row control and reads as a
    button inside a sentence, so this page keeps its own (a PRs class, not a restyle of `.set-link`). */
@@ -3374,11 +3437,25 @@ button.rail-count { cursor: pointer }
 .prs-notes-line { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-notes-error { color: var(--red) }
 
-/* GitHub › PRs toolbar (.claude/DESIGN.md §8.11): the layout switcher on the left, the hidden-repos note beside it, the newest read's age pushed to the right.
-   Own classes only — the Segmented's `.ui-*` look is never restyled here (design guard 7); this lays the three out in a row that wraps on a narrow window. */
+/* GitHub › PRs head (.claude/DESIGN.md §8.11; restyle fixes I5): one band for all three layouts. The sub-line leads with a live dot (the mock's 7 px `.dot.g`),
+   and the layout switch rides the band's trailing slot, wrapped in `.prs-switch` so this page owns its width — the `Segmented`'s `.ui-*` look is never restyled
+   here (design guard 7), only laid out through `[role='group']`. On a phone the slot wraps under the title (`.prs-band`'s last child is `.ui-band-right`,
+   reached positionally because guard 7 forbids naming the primitive's class) and the switch takes the full width, its three buttons sharing it, so Inbox,
+   Matrix and Cards are reachable without sideways scroll. */
+.prs-band-sub { display: inline-flex; align-items: center; gap: 6px }
+.prs-band-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green-solid) }
+.prs-switch { display: flex; min-width: 0 }
+@media (max-width: 700px) {
+  .prs-band:has(.prs-switch) > :last-child { flex: 1 0 100%; margin-left: 0 }
+  .prs-switch { flex: 1 1 auto }
+  .prs-switch [role='group'] { display: flex; flex: 1 1 auto; min-width: 0 }
+  .prs-switch [role='group'] button { flex: 1 1 0; min-width: 0 }
+}
+
+/* GitHub › PRs toolbar (.claude/DESIGN.md §8.11): only the notes now — `N repos hidden — no access`, Cards' `N repos with no open PRs` — and the row is not
+   drawn when there are none. Own classes only; it wraps on a narrow window. */
 .prs-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px }
 .prs-toolbar-note { margin: 0; font-size: 13px; color: var(--ink2) }
-.prs-toolbar-age { margin-left: auto; font-size: 13px; color: var(--ink2) }
 
 /* GitHub › PRs, Matrix layout (§8.11; specs 2026-10-29-prs-layouts-design.md and 2026-10-30-prs-page-fixes-design.md, "Matrix"). One `<table>` inside the
    page's own scroll box, one row per PR, one column per check. Colour is for a problem only: ok and na stay in ink (--ink2 / --ink3), bad is --red, meh --amber-ink and live --live-ink — the §8.2 TEXT
@@ -3416,9 +3493,13 @@ button.rail-count { cursor: pointer }
 .prs-matrix-row[aria-expanded="true"] td:first-child { box-shadow: inset 3px 0 0 var(--ink) }
 /* The cap is on a block inside the cell, never on the `<td>` — CSS leaves `max-width` on a table cell undefined and Chrome ignores it. The dot and PR cells
    together take at most 60 % of the box (34 px dot, 12 px of the PR cell's padding), and the 200 px floor yields to that cap, so a 375 px phone keeps about
-   120 px of evidence in view; the title wraps inside it rather than ellipsizing. */
+   120 px of evidence in view; the title stays one line and ellipsizes (rule below), its full text in the span's `title`. */
 .prs-matrix-pr-inner { min-width: min(200px, calc(60cqw - 46px)); max-width: calc(60cqw - 46px) }
 .prs-matrix-pr .prs-row-title { font-size: 14px }
+/* Matrix's title is one line with an ellipsis (mock `PRsLayouts.dc.html`; the full title is the span's `title`). `min-width: 0` on this flex item is what lets the
+   ellipsis engage inside `.prs-matrix-pr-inner`'s 60cqw cap, so a long title never widens the table past its columns' natural widths. Inbox and Cards keep
+   `.prs-title`'s wrapping — they are not under `.prs-matrix-pr`. */
+.prs-matrix-pr .prs-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .prs-matrix-pr .prs-meta { margin-top: 3px; font-size: 12px; color: var(--ink3) }
 .prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
 .prs-matrix-outcome td { border-top: 0; padding-top: 0 }
@@ -3625,6 +3706,8 @@ button.rail-count { cursor: pointer }
 .ui-dot-10 { width: 10px; height: 10px }
 .ui-dot-live { background: var(--fill-live) }
 .ui-dot-paused { background: var(--mustard) }
+/* The amber MARK (`--amber-solid`, DESIGN §8.2's daylight table) — the PRs page's worth-a-look dot. `paused` stays mustard for the runs that use it. */
+.ui-dot-warn { background: var(--amber-solid) }
 .ui-dot-crashed { background: var(--red) }
 .ui-dot-done { background: var(--fill-progress) }
 /* The category ramp read left to right (§8.2), the same four the column heads
@@ -3767,6 +3850,8 @@ button.rail-count { cursor: pointer }
 .ui-seg button:hover:not(:disabled) { color: var(--ink); background: var(--hover-fill) }
 .ui-seg button:disabled { cursor: default; opacity: .4 }
 .ui-seg button.on { color: var(--ink); background: var(--strip-hi); border-color: var(--ink3) }
+/* `Segmented`'s optional `leading` node (a level `Dot` in GitHub › PRs' triage): before the label, centred on its line, 6 px clear of it. */
+.ui-seg-lead { display: inline-block; margin-right: 6px; vertical-align: middle; line-height: 0 }
 /* The optional per-option count (Sessions' state filter): quieter than the label, steadier on the pressed option; tabular so a changing number does not
    jiggle the segment. */
 .ui-seg-count { font-size: 11px; font-weight: 600; color: var(--ink3); font-variant-numeric: tabular-nums }
@@ -4129,6 +4214,7 @@ tr.ui-stripe > :first-child { box-shadow: inset 3px 0 0 var(--stripe, transparen
 .ui-glyph-tile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--strip-hi); color: var(--ink2) }
 .ui-glyph-tile[data-size='18'] { width: 18px; height: 18px; border-radius: 5px }
 .ui-glyph-tile[data-size='32'] { width: 32px; height: 32px; border-radius: 9px }
+.ui-glyph-tile[data-size='40'] { width: 40px; height: 40px; border-radius: 12px }
 .ui-glyph-tile[data-tone='green'] { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
 .ui-glyph-tile[data-tone='red'] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
 .ui-glyph-tile[data-tone='amber'] { background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)); color: var(--amber-ink) }

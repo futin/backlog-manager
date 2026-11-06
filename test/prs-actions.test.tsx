@@ -6,12 +6,16 @@ import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
+import { Glyph, type GlyphName } from '../client/src/components/ui/Glyphs';
 import { PrActions } from '../client/src/components/github/PrActions';
 import { PrFoot } from '../client/src/components/github/PrFoot';
 import { PrOutcomeLine } from '../client/src/components/github/PrOutcomeLine';
 import type { PrOutcome } from '../client/src/lib/prs';
 import { mainOf, moreOf, openOf, type MenuRowName } from './helpers/pr-keys';
 import type { PrRepoView, PrWriteResult, PullRequestRow } from '../shared/types';
+
+/** A glyph's markup, rendered into a detached container (`Glyph` carries no name attribute, and `react-dom/server` needs TextEncoder, which jsdom lacks). */
+const glyphSvg = (name: GlyphName): string => render(<Glyph name={name} />, { container: document.createElement('div') }).container.innerHTML;
 
 /**
  * The one key strip and the foot under a PR row (`.claude/DESIGN.md` §8.11; spec `2026-10-30-prs-page-fixes-design.md`, "One key strip, one foot").
@@ -208,6 +212,34 @@ describe('PrActions — the split Merge', () => {
     expect(strip('futin/y#6').querySelector('.ui-split')).toHaveClass('ui-split-dashed');
     // Dashed alone: the outline skin's later rules would repaint the border solid and the word in ink.
     expect(strip('futin/y#6').querySelector('.ui-split')).not.toHaveClass('ui-split-outline');
+  });
+
+  it('draws each menu row\'s mark as a 28 px tile — Merge green, auto-merge and Update neutral — and only the primary row carries the at-rest ground', async () => {
+    const user = userEvent.setup();
+    render(<Harness rows={[x5({ mergeState: 'behind' }), { ...x5(), repo: repo('futin/z') }, y6({ checks: 'failure' })]} />);
+    const tile = (k: string, row: MenuRowName) => within(menu(k)).getByRole('button', { name: row }).querySelector('.ui-glyph-tile');
+    await user.click(more('futin/z#5'));
+    expect(tile('futin/z#5', 'Merge')).toHaveAttribute('data-size', '28');
+    expect(tile('futin/z#5', 'Merge')).toHaveAttribute('data-tone', 'green');
+    expect(tile('futin/z#5', 'Enable auto-merge')).toHaveAttribute('data-size', '28');
+    expect(tile('futin/z#5', 'Enable auto-merge')).toHaveAttribute('data-tone', 'neutral');
+    expect(tile('futin/z#5', 'Update branch')).toHaveAttribute('data-size', '28');
+    expect(tile('futin/z#5', 'Update branch')).toHaveAttribute('data-tone', 'neutral');
+    // The mock draws an up arrow for Update branch (ui-verify D5), not the refresh mark: compared by markup, since `Glyph` carries no name attribute.
+    expect(tile('futin/z#5', 'Update branch')?.querySelector('svg')?.outerHTML).toBe(glyphSvg('up'));
+    expect(tile('futin/z#5', 'Update branch')?.querySelector('svg')?.outerHTML).not.toBe(glyphSvg('refresh'));
+    // The mock's `.mi.on`: the primary row sits on the `--strip-hi` ground at rest, beside its tick — and no other row does.
+    const on = (k: string) => [...menu(k).querySelectorAll('.prs-keys-row-on')].map((el) => el.textContent);
+    expect(on('futin/z#5')).toHaveLength(1);
+    expect(within(menu('futin/z#5')).getByRole('button', { name: 'Merge' })).toHaveClass('prs-keys-row-on');
+    await user.click(more('futin/x#5'));
+    expect(within(menu('futin/x#5')).getByRole('button', { name: 'Update branch' })).toHaveClass('prs-keys-row-on');
+    expect(on('futin/x#5')).toHaveLength(1);
+    // A failing PR has no primary (no tick), so no row is on, and the blocked rows are still aria-disabled.
+    await user.click(more('futin/y#6'));
+    expect(on('futin/y#6')).toHaveLength(0);
+    expect(within(menu('futin/y#6')).getByRole('button', { name: 'Merge' })).toHaveAttribute('aria-disabled', 'true');
+    expect(within(menu('futin/y#6')).getByRole('button', { name: 'Merge' }).querySelector('.ui-glyph-tile')).toHaveAttribute('data-size', '28');
   });
 
   it('names the main half by its mode: Merge #12, Auto-merge #12 while checks run, Auto-merge on #12 once armed', () => {

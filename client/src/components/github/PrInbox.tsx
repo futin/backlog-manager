@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { Dot } from '../ui/Dot';
 import { Segmented } from '../ui/Segmented';
 import { PrRow } from './PrRow';
 import { PrRepoNotes } from './PrRepoNotes';
 import type { PrLayoutProps } from './pr-layout-props';
 import {
   LEVELS,
+  LEVEL_DOT,
   LEVEL_LABEL,
   levelCounts,
   rankPrs,
+  repoShortName,
   transientFailures,
   type PrLevel
 } from '../../lib/pr-layouts';
@@ -26,12 +29,16 @@ import {
  * the person who selected it can see why the list is empty and click it off. A filter that hides the row whose Confirm is open closes that Confirm: a row out
  * of the list is out of the list, whatever took it, and a Confirm nothing draws would still hold the Escape stack.
  *
+ * **Each row is its own card** — a rule of the list (`.prs-inbox-list > .prs-row`), not of `PrRow`, so Cards' rows stay boxless inside their repo card. The triage's
+ * `Needs you` and `Worth a look` lead with their level `Dot` (Quiet none, as the mock), and `Quiet` is a section label with room above it.
+ *
  * **Every row is keyed by `<repo>#<number>`, never by index.** Two repos can each have a `#7`, and a re-read reorders the list; a row that remounted because
  * its position changed would lose its place under the person's eye. The open Confirm is the page's (`PrLayoutProps.confirming`), so it follows the key, not
  * the position.
  *
- * **One row, loud or quiet.** `PrRow` (shared with Cards, which draws it without the repo name): a 32 px checks `GlyphTile`, the `#n` link, title and repo, the
- * pill row, the meta line with the run warning as one warn pill, then the foot; the keys and their why-line are the row's right-hand side, top-aligned with the
+ * **One row, loud or quiet.** `PrRow` (shared with Cards, which draws it at 28 px and without the repo name): a 40 px checks `GlyphTile`, the `#n` link and title, then ONE
+ * wrapping line — the pills, then the meta that opens with the repo's short name (`repoShortName`: the last segment, the full `owner/name` only where two shown
+ * repos share it) and carries the run warning as one warn pill — then the foot; the keys and their why-line are the row's right-hand side, top-aligned with the
  * title, and wrap under the text when the title would get less than 320 px — and always below the narrow breakpoint. A quiet row carries the same keys as every
  * other row and its `#n` is a link and nothing more.
  *
@@ -46,6 +53,7 @@ export function PrInbox(props: PrLayoutProps) {
   const ranked = useMemo(() => rankPrs(repos), [repos]);
   const counts = levelCounts(ranked);
   const failures = transientFailures(repos);
+  const shownNames = useMemo(() => repos.map((r) => r.repo), [repos]);
 
   const visible = filter === null ? ranked : ranked.filter((r) => r.level === filter);
   const loud = visible.filter((r) => r.level !== 'quiet');
@@ -74,7 +82,13 @@ export function PrInbox(props: PrLayoutProps) {
               track
               label="Triage"
               value={filter ?? 'all'}
-              options={LEVELS.map((level) => ({ value: level, label: LEVEL_LABEL[level], count: counts[level] }))}
+              options={LEVELS.map((level) => ({
+                value: level,
+                label: LEVEL_LABEL[level],
+                count: counts[level],
+                // The level's own dot, the one Matrix's rows lead with (`LEVEL_DOT`); Quiet's is `undefined` and the mock draws none there.
+                leading: LEVEL_DOT[level] ? <Dot tone={LEVEL_DOT[level]} /> : undefined
+              }))}
               onChange={(v) => setFilter((current) => (v === 'all' || current === v ? null : v))}
             />
           </div>
@@ -82,7 +96,7 @@ export function PrInbox(props: PrLayoutProps) {
           {loud.length > 0 && (
             <ul className="prs-inbox-list">
               {loud.map((r) => (
-                <PrRow key={r.key} repo={r.repo} pr={r.pr} props={props} showRepo />
+                <PrRow key={r.key} repo={r.repo} pr={r.pr} props={props} tileSize={40} repoLabel={repoShortName(r.repo.repo, shownNames)} />
               ))}
             </ul>
           )}
@@ -91,7 +105,7 @@ export function PrInbox(props: PrLayoutProps) {
               <h3 className="prs-inbox-heading">Quiet</h3>
               <ul className="prs-inbox-list">
                 {quiet.map((r) => (
-                  <PrRow key={r.key} repo={r.repo} pr={r.pr} props={props} showRepo />
+                  <PrRow key={r.key} repo={r.repo} pr={r.pr} props={props} tileSize={40} repoLabel={repoShortName(r.repo.repo, shownNames)} />
                 ))}
               </ul>
             </>

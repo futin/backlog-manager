@@ -1,4 +1,5 @@
 import { MERGE_METHODS, PR_UPDATING_MS } from '../../../shared/types';
+import type { GlyphName } from '../components/ui/Glyphs';
 import type { PillTone } from '../components/ui/Pill';
 import type { MergeMethod, PrRepoView, PrWriteResult, PullRequestRow } from '../../../shared/types';
 
@@ -56,18 +57,23 @@ export function findPr(repos: readonly PrRepoView[], key: string): { repo: PrRep
   return repo === undefined || pr === undefined ? undefined : { repo, pr };
 }
 
-/** A chip a row draws: the label is the whole claim, the tone is `Pill`'s vocabulary. */
+/**
+ * A chip a row draws: the label is the whole claim, the tone is `Pill`'s vocabulary. `glyph` is the mark that LEADS the label — only on the two facts the mock
+ * (`PRs.dc.html`, a row) draws one for, the checks and the mergeability — so a glance down a column of rows finds the red ✕ before reading a word. It is
+ * decoration beside the label, never instead of it.
+ */
 export interface PrChip {
   label: string;
   tone: PillTone;
+  glyph?: GlyphName;
 }
 
 /**
  * The chips of one row, in the order a person reads a PR: is it a draft, what do reviewers say, what do the checks say, can it merge, is it behind, is
  * auto-merge armed. `checks: 'none'` draws nothing — a repo with no checks has nothing to say, and `checks passing` there would be a claim GitHub never made.
  * `checks: 'unknown'` DOES draw, neutral: the token may not read this repo's checks (`PrRepoView.checksDetail`), and a row that said nothing would read as a
- * repo without checks, which is the one thing the page does not know. `mergeable: 'unknown'` draws nothing: GitHub is still computing it, which is a
- * moment, not a state worth a chip.
+ * repo without checks, which is the one thing the page does not know. `mergeable: 'unknown'` draws a neutral `mergeability pending` with a clock (the mock's pill, ui-verify D2): GitHub is still
+ * computing it, so the chip claims no verdict, only that there is none yet — a row that said nothing read as mergeable.
  */
 export function prChips(pr: PullRequestRow): PrChip[] {
   const chips: PrChip[] = [];
@@ -75,13 +81,17 @@ export function prChips(pr: PullRequestRow): PrChip[] {
   if (pr.review === 'approved') chips.push({ label: 'approved', tone: 'done' });
   else if (pr.review === 'changes-requested') chips.push({ label: 'changes requested', tone: 'bad' });
   else if (pr.review === 'review-required') chips.push({ label: 'review required', tone: 'warn' });
-  if (pr.checks === 'success') chips.push({ label: 'checks passing', tone: 'done' });
-  else if (pr.checks === 'failure') chips.push({ label: 'checks failing', tone: 'bad' });
-  else if (pr.checks === 'pending') chips.push({ label: 'checks pending', tone: 'warn' });
+  if (pr.checks === 'success') chips.push({ label: 'checks passing', tone: 'done', glyph: 'tick' });
+  else if (pr.checks === 'failure') chips.push({ label: 'checks failing', tone: 'bad', glyph: 'cross' });
+  else if (pr.checks === 'pending') chips.push({ label: 'checks pending', tone: 'warn', glyph: 'clock' });
   else if (pr.checks === 'unknown') chips.push({ label: 'checks unknown', tone: 'neutral' });
-  if (pr.mergeable === 'conflicting') chips.push({ label: 'conflicts', tone: 'bad' });
+  if (pr.mergeable === 'conflicting') chips.push({ label: 'conflicts', tone: 'bad', glyph: 'cross' });
+  // Neutral, not a warn: it is a moment, not a problem. Matrix's Mergeable cell says `computing` for the same fact.
+  if (pr.mergeable === 'unknown') chips.push({ label: 'mergeability pending', tone: 'neutral', glyph: 'clock' });
   if (pr.mergeState === 'behind') chips.push({ label: 'behind base', tone: 'warn' });
-  if (pr.autoMerge !== null) chips.push({ label: `auto-merge · ${pr.autoMerge.method}`, tone: 'live' });
+  // `done`, the tint the mock gives `auto-merge on`: an armed PR is a thing GitHub will finish by itself, not something running, and the solid `live` fill
+  // made it the loudest pill on the row.
+  if (pr.autoMerge !== null) chips.push({ label: `auto-merge · ${pr.autoMerge.method}`, tone: 'done' });
   return chips;
 }
 

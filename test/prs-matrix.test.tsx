@@ -135,9 +135,27 @@ describe('PrMatrix — header, cells and order', () => {
     const r = row('a/x#5');
     expect(within(r).getByRole('link', { name: '#5' })).toHaveAttribute('href', 'https://github.com/a/x/pull/1');
     expect(r).toHaveTextContent('a draft');
-    expect(r).toHaveTextContent('a/x · feature/1 → main');
+    // The sub-line opens with the SHORT repo name (`repoShortName`), as Inbox's meta and Cards' head do — the owner is the same on every repo of a machine.
+    expect(r).toHaveTextContent('x · feature/1 → main');
+    expect(r).not.toHaveTextContent('a/x · feature/1');
     expect(within(r).getByText('draft')).toBeInTheDocument();
     expect(r).toHaveTextContent('1h ago');
+  });
+
+  it('keeps the title on one line: the full title rides the truncating element as its title attribute, and the sub-line names the short repo', () => {
+    const long = 'refactor(agents): one ordered item-block ladder in shared/agent.ts for plan, dispatch and DispatchButton';
+    render(<PrMatrix {...props([repo('a/x', [pr({ number: 5, title: long })])])} />);
+    const title = within(row('a/x#5')).getByText(long);
+    expect(title).toHaveAttribute('title', long);
+    expect(title).toHaveClass('prs-title');
+    const sub = row('a/x#5').querySelector('.prs-matrix-pr .prs-meta');
+    expect(sub?.textContent?.startsWith('x · ')).toBe(true);
+  });
+
+  it('keeps the full owner/name on the sub-line where two shown repos share a short name', () => {
+    render(<PrMatrix {...props([repo('a/ui-kit', [pr({ number: 5 })]), repo('b/ui-kit', [pr({ number: 6 })])])} />);
+    expect(row('a/ui-kit#5').querySelector('.prs-meta')?.textContent?.startsWith('a/ui-kit · ')).toBe(true);
+    expect(row('b/ui-kit#6').querySelector('.prs-meta')?.textContent?.startsWith('b/ui-kit · ')).toBe(true);
   });
 
   it('gives a draft with failing checks a failing cell while it stays ranked with the quiet rows', () => {
