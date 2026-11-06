@@ -517,8 +517,9 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; a problem cell and a header count are pills (red for `bad` and Checks,
   amber otherwise; a healthy cell is plain text); its row toggles one expansion, a panel that is the `Ledger`'s next sibling inside the sheet (`aria-controls`; a `Popover`
   portals nothing and the scroll box's and Ledger's overflow would clip the Merge menu), holding the key strip with a blocked Merge's reason in words, then the foot.
-  **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`), its head a `GlyphTile` in the worst row's checks tone, the repo and an
-  `N open` pill, its rows the same `PrRow` Inbox draws (without the repo name); a repo read cleanly with none is counted in the
+  **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`), its head a dark 28 px repo `GlyphTile`, the short repo name (`repoShortName`), the
+  `N open` pill and `polled <age>` at the trailing edge, the cards flowing two-up in `.prs-cards-grid` (one column under ~1100 px of pane), its rows the same `PrRow` Inbox draws
+  (without the repo name; Cards' text takes a 240 px basis so the keys stay at the right of a two-up card, Inbox keeps 320); a repo read cleanly with none is counted in the
   toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — the split Merge (main half from `mergeMain`: `Merge`, `Auto-merge` or `Auto-merge on`; its chevron opens `Merge menu`: Merge, Enable/Disable auto-merge, Update branch, the row `primaryKey` names ticked) and an icon link `Open #n on GitHub` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
   the method `Select` inside it, then `PrOutcomeLine`. A blocked main half (dashed, reading `Blocked`) or menu row is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
   off` on each for a sync-off repo) as its `title` (the half) and its `aria-describedby` (both; a row's sub-line is the reason); the split is `disabled` outright only while its PR's write runs, because the page

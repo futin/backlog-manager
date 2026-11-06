@@ -722,8 +722,9 @@ meta opens with the repo's short name at 13 px `--ink3` (`repoShortName`: the la
 draw no repo in an Inbox row, but the list mixes repos). Branch names stay in the body face — the mock's mono loses to design guard 2. Then the foot. The
 verdict sentence and the steps under it (`prVerdict`, `quietFacts`) are gone: the tile and the pills state the same facts without a sentence to read, and
 ranking, which still sorts by level and severity, is what puts the loud rows first. The key strip sits at the row's right, top-aligned with the tile. The text
-keeps a `flex: 1 1 320px` basis, so the strip drops under it whenever the title would get less than 320 px — the title is never squeezed to make room for the
-Merge — and always below the narrow breakpoint (700 px, `NARROW_QUERY`), left-aligned there. Everything is keyed `<repo>#<number>`, never by index
+keeps a `flex: 1 1 320px` basis in Inbox, so the strip drops under it whenever the title would get less than 320 px — the title is never squeezed to make room for the
+Merge — except in Cards, whose rows (under `.prs-list`) take `flex: 1 1 240px` so the strip stays at the right in a two-up card down to ~480 px of inner width and the
+title wraps instead (user override, 2026-11-06, per the mock's Cards) — and always below the narrow breakpoint (700 px, `NARROW_QUERY`), left-aligned there. Everything is keyed `<repo>#<number>`, never by index
 (`pr-row-<key>`).
 
 **The key strip.** `PrActions` (`pr-keys-<key>`, `.prs-keys-side`), the one strip every layout draws, is a **split Merge** and an `Open on GitHub` icon (restyle

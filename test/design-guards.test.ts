@@ -502,6 +502,18 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
   });
 
   /**
+   * GitHub PRs ui-verify (2026-11-06): in a two-up Cards card (~480-520 px inner) the keys must stay at each row's right, as the mock draws them, so Cards' text
+   * takes a basis under 320 px (the title wraps instead); Inbox keeps the 320 px rule that never squeezes a title.
+   */
+  it('lets a Cards row keep its keys beside the text, and Inbox keep its 320 px basis', () => {
+    const body = (selector: string): string => styleRules.find((r) => r.selector === selector)?.body ?? '';
+    const basis = (text: string): number => Number(/flex:\s*1 1 (\d+)px/.exec(text)?.[1] ?? NaN);
+    expect(basis(body('.prs-row-main'))).toBe(320);
+    expect(basis(body('.prs-list .prs-row-main'))).toBeLessThan(320);
+    expect(basis(body('.prs-list .prs-row-main'))).toBeGreaterThan(0);
+  });
+
+  /**
    * The Jira ui-verify fixes that are pure geometry, pinned as the rule text that carries them (jsdom measures nothing; the browser re-measure is the proof):
    * D9 the Detail fact's pill is not pushed right, D16 the deck's crumb is the 12 px ink3 line, D19 the setup tree list and its branch can shrink, D20 a skill row
    * stays a row under the phone fold, D21 the add-path field sizes by content there, D18 the launch tiles are one column there.

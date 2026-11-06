@@ -3332,12 +3332,16 @@ button.rail-count { cursor: pointer }
 .prs-note { font-size: 13px; color: var(--ink2); line-height: 1.45; margin-bottom: 12px }
 .prs-list { list-style: none; margin: 0; padding: 0 }
 /* One row anatomy for Inbox and Cards (spec `2026-10-30-prs-page-fixes-design.md`): the text on the left, the four keys and their why-line on the right,
-   top-aligned with the title. The text keeps a 320 px basis, so the keys drop under it whenever the title would get less — the title is never squeezed to
-   make room for keys — and always below the narrow breakpoint, left-aligned there. The foot (Confirm, outcome) lives in the text column, never the keys'. */
+   top-aligned with the title. Inbox's text keeps a 320 px basis, so the keys drop under it whenever the title would get less — the title is never squeezed to
+   make room for keys (Cards overrides that, see `.prs-list .prs-row-main`) — and always below the narrow breakpoint, left-aligned there. The foot (Confirm, outcome) lives in the text column, never the keys'. */
 .prs-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; padding: 16px 0; min-width: 0 }
 /* Cards' rows are the compact ones: the head already says the repo, so each row needs less air between hairlines. */
 .prs-list .prs-row { padding: 12px 0 }
 .prs-list .prs-row:first-child { padding-top: 12px }
+/* Cards only (user override, 2026-11-06, per mock `PRsLayouts.dc.html`): a two-up card is ~480-520 px of inner width, so the 320 px basis below would drop the keys
+   under every row's text. Here the text takes a 240 px basis instead — tile 28 + two 16 px gaps + the ~170 px keys still fit at ~480 — and the title wraps rather than
+   the keys moving. Inbox's rows are not under `.prs-list` and keep the 320 px rule; the narrow block below still sends the keys under the text at 700 px. */
+.prs-list .prs-row-main { flex: 1 1 240px }
 .prs-row + .prs-row { border-top: 1px solid var(--hairline) }
 .prs-row:first-child { padding-top: 0 }
 .prs-row:last-child { padding-bottom: 0 }
