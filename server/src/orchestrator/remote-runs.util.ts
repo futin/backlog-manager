@@ -231,6 +231,28 @@ function stageOf(record: ClaimRecord, state: ClaimState): RunStage {
   return state.stage ?? 'preflight';
 }
 
+/**
+ * The item's `stageAt`, plus the arrival `stageOf` read off a terminal release.
+ *
+ * The same missing heartbeat `stageOf` works around leaves `state.stageAt` one
+ * stage short: it stops at `merging` on an item `stageOf` calls `merged`. Every
+ * reader of `stageAt` takes a key's presence as "the item arrived here"
+ * (`stepperDots`) and the next key's stamp as the end of the previous stage's
+ * span (`itemStageSpans`), so without this a remote merged item drew `merged`
+ * hollow and `merging` with no duration while its row said `merged`.
+ * `released.at` is when the driver let go at that stage — the closest instant
+ * another machine can know. A stamp the state already carries wins: it is the
+ * driver's own clock, and a newer build may publish the final heartbeat.
+ */
+function stageAtOf(record: ClaimRecord, state: ClaimState): Partial<Record<RunStage, string>> {
+  const stageAt = { ...(state.stageAt ?? {}) };
+  const released = record.released;
+  if (released !== undefined && isRunStage(released.reason) && !(released.reason in stageAt) && ms(released.at) !== null) {
+    stageAt[released.reason] = released.at;
+  }
+  return stageAt;
+}
+
 /** A queue item from an issue's newest claim in the group, defaulted the way
  *  `makeQueueItem` defaults a fresh one. */
 function queueItemOf(issueNumber: number, claim: ParsedClaim, title: string | null): RunQueueItem {
@@ -252,7 +274,7 @@ function queueItemOf(issueNumber: number, claim: ParsedClaim, title: string | nu
     // run at all — it reads this machine's own run file.
     pid: null,
     fixLoops: state.fixLoops ?? 0,
-    stageAt: state.stageAt ?? {},
+    stageAt: stageAtOf(claim.record, state),
     verification: state.verification ?? [],
     questions: [],
     note: state.note ?? null,

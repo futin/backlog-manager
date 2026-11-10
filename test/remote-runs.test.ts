@@ -94,6 +94,23 @@ describe('deriveRemoteRuns', () => {
     expect(runs[0].queue[0].stage).toBe('merged');
   });
 
+  it('R-3b: a terminal release stamps its own stage at released.at, so the stepper reaches it', () => {
+    // The last state heartbeat predates the merge, so `state.stageAt` stops at
+    // `merging`; without a `merged` stamp the Runs page drew `merged` hollow
+    // and `merging` with no span, on an item that reads `merged`.
+    const stageAt = { dispatched: ago(20), merging: ago(4) };
+    const runs = derive([claimComment(3, { released: { at: ago(3), reason: 'merged', by: 'd' }, state: { stage: 'merging', stageAt } })]);
+    expect(runs[0].queue[0].stageAt).toEqual({ ...stageAt, merged: ago(3) });
+  });
+
+  it('R-3c: a stage the state already stamped keeps its own stamp; a non-stage reason adds none', () => {
+    const own = { merging: ago(5), merged: ago(4) };
+    const kept = derive([claimComment(3, { released: { at: ago(3), reason: 'merged', by: 'd' }, state: { stage: 'merged', stageAt: own } })]);
+    expect(kept[0].queue[0].stageAt).toEqual(own);
+    const stale = derive([claimComment(3, { released: { at: ago(3), reason: 'stale', by: 'd' }, state: { stage: 'dispatched', stageAt: { dispatched: ago(9) } } })]);
+    expect(stale[0].queue[0].stageAt).toEqual({ dispatched: ago(9) });
+  });
+
   it('R-3: the finished claim’s OWN heartbeat, moved by the stamp itself, does not un-finish the run', () => {
     // `finish` on an unreleased (needs-answers) claim moves its heartbeat to
     // the server clock, just after the CLI's `finished.at`.
