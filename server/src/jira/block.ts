@@ -2,9 +2,9 @@
  * block.ts — the ticket block: one Jira issue as a plain-text document (Jira phase 1; spec §3). Pure — no I/O, no module state, no clock — so every reader
  * gets byte-identical text for the same `JiraIssueDetail`.
  *
- * ONE renderer, and three readers: `GET /api/jira/issue/:key?format=text`, `jira.mjs show` (which prints that body verbatim) and the Run prompt
- * (`prompt.util.ts`, which ends with it). The modal does NOT use it — it draws the structured payload. The children cap lives here so no reader grows a second
- * list renderer with a second number; only the description's drawing varies by reader (`TicketBlockOptions`).
+ * ONE renderer, and two readers: `GET /api/jira/issue/:key?format=text` and `jira.mjs show`, which prints that body verbatim — and is how a Jira Run session
+ * reads its ticket, since the Run prompt carries no copy of it (`prompt.util.ts`). The modal does NOT use it — it draws the structured payload. The children
+ * cap lives here so no reader grows a second list renderer with a second number.
  *
  * Four decisions carry the design.
  *
@@ -26,7 +26,7 @@
 import type { JiraIssue, JiraIssueDetail, JiraStatusCategory } from '../../../shared/types';
 import { ADF_PLACEHOLDER_RE } from './adf';
 
-/** Subtasks listed before `+N more`. One home: the prompt composer and `jira.mjs show` read the block, they do not count children themselves. */
+/** Subtasks listed before `+N more`. One home: `jira.mjs show` reads the block, it does not count children itself. */
 export const JIRA_BLOCK_CHILDREN_CAP = 30;
 
 const SEP = ' · ';
@@ -50,38 +50,20 @@ function childLine(child: JiraIssue): string {
   return `- ${child.key} ${child.summary}${SEP}${child.status.name}${SEP}${orDash(child.assignee?.name)}`;
 }
 
-/** What the prompt composer says after a description it cut. Here, beside the note it is drawn like, so the block is the one place that decides where server text goes. */
-export const JIRA_TRUNCATED_MARKER = '[description truncated — open in Jira]';
-
 /**
- * The description's own lines: `(no description)` for an empty one, else the text — between two `fence` lines when a fence is given — and, when it holds an
- * ADF placeholder, the omitted-content note — and, for a description the prompt composer had to cut, `JIRA_TRUNCATED_MARKER`. The note and the marker stay
- * OUTSIDE the closing fence: they and `(no description)` are this server's words, and fencing them would present them as the ticket's. `typeof` rather than a truthiness test: the type says `string`, but a `null` that slips past the mapper must still never print
- * as the word.
+ * The description's own lines: `(no description)` for an empty one, else the text, and, when it holds an ADF placeholder, the omitted-content note — this
+ * server's words, after the ticket's. `typeof` rather than a truthiness test: the type says `string`, but a `null` that slips past the mapper must still never
+ * print as the word.
  */
-function descriptionLines(detail: JiraIssueDetail, fence: string | null, truncated: boolean): string[] {
+function descriptionLines(detail: JiraIssueDetail): string[] {
   const description = typeof detail.description === 'string' ? detail.description : '';
   if (description.trim() === '') return ['(no description)'];
-  const lines = fence === null ? [description] : [fence, description, fence];
-  // The trim marker is server text like the note below it, so it sits after the closing fence: inside, a ticket whose own last line read the same would be
-  // indistinguishable from a real trim.
-  if (truncated) lines.push(JIRA_TRUNCATED_MARKER);
+  const lines = [description];
   if (ADF_PLACEHOLDER_RE.test(description)) lines.push(`(something was omitted — open in Jira: ${detail.url})`);
   return lines;
 }
 
-/**
- * How the description is drawn. `'as-is'` (the default) is the only thing `?format=text` and `jira.mjs show` ever ask for, and its output is byte-identical to
- * what this renderer produced before the option existed. `{ fence }` wraps a non-empty description between two lines of that fence, for the prompt composer,
- * which has measured the description's backtick runs and knows how long a fence it needs; `truncated` adds the trim marker. The omitted-content note and the marker stay OUTSIDE the closing fence, since they are this
- * server's text, not the ticket's.
- */
-export interface TicketBlockOptions {
-  description?: 'as-is' | { fence: string; truncated?: boolean };
-}
-
-export function renderTicketBlock(detail: JiraIssueDetail, opts: TicketBlockOptions = {}): string {
-  const mode = opts.description ?? 'as-is';
+export function renderTicketBlock(detail: JiraIssueDetail): string {
   const parent = detail.parent ? `${detail.parent.key} ${detail.parent.summary}` : ABSENT;
   const labels = detail.labels.length > 0 ? detail.labels.join(', ') : ABSENT;
   const lines = [
@@ -93,7 +75,7 @@ export function renderTicketBlock(detail: JiraIssueDetail, opts: TicketBlockOpti
     `url: ${detail.url}`
   ];
 
-  lines.push('', ...descriptionLines(detail, typeof mode === 'object' ? mode.fence : null, typeof mode === 'object' && mode.truncated === true));
+  lines.push('', ...descriptionLines(detail));
 
   if (detail.children.length > 0) {
     lines.push('', `Subtasks (${detail.children.length}):`);

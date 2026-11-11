@@ -295,7 +295,8 @@ the machine is `home`.
 - `POST /api/agents/dispatch-jira` — a Jira ticket's Run (`jira-agents.controller.ts` → `JiraDispatchService.dispatch`): reserve the key in the link store,
   optionally
   assign and transition in Jira, then spawn a session in the mapped repository. The action is a pick from the body, never derived; the prompt is composed server-side
-  by `composeJiraPrompt`. A failure after a Jira write says the write stands. Since the repo/branch work the body also carries the branch choice (`mode`,
+  by `composeJiraPrompt` — unless the body carries the launch sheet's edited `prompt` (a non-empty string of at most 4 000, else a 400 before any write), which
+  is spawned as written. A failure after a Jira write says the write stands. Since the repo/branch work the body also carries the branch choice (`mode`,
   `branch`, `base`, `openMr`, `target`, above), checked before anything is reserved or written. An optional `surface` (`dashboard` | `desktop`) is item
   dispatch's, for any action: forwarded to the spawn as it came, `desktop` a 409 unless home's dashboard says `desktopAvailable`. → [jira.md](jira.md#run-phase-5a)
 - `POST /api/agents/jira-stop` `{ key, sessionId }` — stops ONE live session of the key through the dashboard (`session-stop.util.ts`, shared with the item

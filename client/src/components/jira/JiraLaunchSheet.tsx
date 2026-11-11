@@ -11,6 +11,7 @@ import {
   defaultModeFor,
   displayPath,
   dispatchJira,
+  editedPromptProblem,
   fetchJiraDetail,
   fetchJiraPrompt,
   jiraWritesStand,
@@ -18,7 +19,7 @@ import {
   transitionOptions
 } from '../../lib/jira';
 import { clampMode, modesUpTo, projectDispatchGate } from '../../../../shared/agent';
-import { JIRA_BUILTIN_LABELS, jiraActionParam } from '../../../../shared/types';
+import { JIRA_BUILTIN_LABELS, JIRA_PROMPT_MAX, jiraActionParam } from '../../../../shared/types';
 import type { JiraAction, JiraDispatchResult, JiraIssue, LaunchSurface, PermissionMode } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
@@ -42,6 +43,11 @@ export const PREVIEW_SETTLE_MS = 350;
  * where the prompt is read before it is sent, where the permission mode is chosen inside the ceiling the host allows, and where "the dashboard cannot see this
  * repository" surfaces before anything spawns. It is composed from `FormSheet`, so Escape and the scrim are the shell's and nothing here binds a key (Escape
  * has one owner).
+ *
+ * **The prompt box is editable, and only an edit is sent.** Untouched, Start sends no `prompt` and the server composes it after its writes, exactly as the
+ * preview did; once the reader types, the box holds their text (`edited`), Start sends it as `prompt` and Copy copies it, a `Reset` puts the generated text
+ * back, and a later preview never overwrites the edit — the meta line says the generated prompt changed instead. The session stays the ticket's either way:
+ * the link, the worktree choice and both writes follow the other fields, not the text. Start's last reason is then the route's own refusal of that text.
  *
  * **The preview is the server's prompt, not this file's.** `GET /api/jira/prompt` composes what Start sends (and what Copy prompt copies) — one
  * composition behind three readers — so the sheet never builds a prompt, and a refusal (`unknown skill s_…` for a skill deleted since the menu was drawn,
@@ -151,6 +157,18 @@ export function JiraLaunchSheet({
 
   const promptText = preview.status === 'ok' ? preview.value : null;
   const promptRefusal = preview.status === 'failed' ? (preview.error instanceof Error ? preview.error.message : String(preview.error)) : null;
+  // The reader's own prompt, once they typed in the box: `text` is what Start sends and Copy copies, `base` the generated text the edit started from. `null`
+  // is "not edited" — the server composes the prompt itself, as before the box was editable. A later preview (another repository, branch or
+  // action) never overwrites an edit: it lands in `promptText`, and the box says the generated text moved on, with Reset one click away. Typing the edit back
+  // to the generated text exactly drops it, so an untouched-looking box is never sent as a custom prompt.
+  const [edited, setEdited] = useState<{ text: string; base: string } | null>(null);
+  const editPrompt = (text: string): void => {
+    const base = edited?.base ?? promptText ?? '';
+    setEdited(text === base ? null : { text, base });
+  };
+  const sentText = edited?.text ?? promptText;
+  // Compared as text: the composition is deterministic for one choice, so only a different repository, branch or action moves it.
+  const promptMoved = edited !== null && promptText !== null && promptText !== edited.base;
 
   const ceiling = agents?.spawnMaxPermission ?? null;
   const modes = modesUpTo(ceiling);
@@ -177,9 +195,11 @@ export function JiraLaunchSheet({
           ? 'the branches have not loaded'
           : branch.refusal !== null
             ? branch.refusal.text
-            : promptText === null
-              ? (promptRefusal ?? 'the prompt has not loaded')
-              : null;
+            : edited !== null
+              ? editedPromptProblem(edited.text)
+              : promptText === null
+                ? (promptRefusal ?? 'the prompt has not loaded')
+                : null;
   // What the Switch DISPLAYS is what Start sends: a ticket that turns out to be the reader's already (the detail lands after a toggle) reads Off.
   const assignNow = assign && assignBlock === null;
 
@@ -195,8 +215,8 @@ export function JiraLaunchSheet({
     []
   );
   const copy = (): void => {
-    if (promptText === null) return;
-    navigator.clipboard.writeText(promptText).then(
+    if (sentText === null) return;
+    navigator.clipboard.writeText(sentText).then(
       () => {
         setCopyFailed(false);
         setCopied(true);
@@ -223,7 +243,9 @@ export function JiraLaunchSheet({
           permissionMode: mode,
           // What the Switch DISPLAYS: disabled and Off under Desktop, where the dashboard would force it off anyway.
           remoteControl: remoteControl && !desktop,
-          ...(offersDesktop && pickedSurface !== null ? { surface: pickedSurface } : {})
+          ...(offersDesktop && pickedSurface !== null ? { surface: pickedSurface } : {}),
+          // Only an edit is sent: without one the server composes the prompt AFTER its writes, so the session reads the status the ticket now has.
+          ...(edited !== null ? { prompt: edited.text } : {})
         }),
       {
         onSuccess: (result) => {
@@ -284,7 +306,7 @@ export function JiraLaunchSheet({
     <>
       {footLine !== null && <span className="launch-foot-line">{footLine}</span>}
       {canCopy && (
-        <Chip size={28} variant="flat" disabled={promptText === null} onClick={copy}>
+        <Chip size={28} variant="flat" disabled={sentText === null} onClick={copy}>
           {copied ? 'Copied' : 'Copy prompt'}
         </Chip>
       )}
@@ -413,9 +435,9 @@ export function JiraLaunchSheet({
           {/* A div, not a label: the Copy chip is a second control inside it, and a label would hand its click to the first one. The textarea names itself. */}
           <div className="sheet-field">
             <span className="set-name">Prompt</span>
-            {promptText !== null ? (
+            {sentText !== null ? (
               <div className="launch-code">
-                <textarea aria-label="Prompt" className="sheet-prompt" rows={8} readOnly value={promptText} />
+                <textarea aria-label="Prompt" className="sheet-prompt" rows={8} value={sentText} onChange={(e) => editPrompt(e.target.value)} />
                 {canCopy && (
                   // Same handler as the foot's Copy prompt. A fixed accessible name: the foot's chip carries the `Copied` state for a screen reader, and two
                   // buttons announcing it would be one fact said twice.
@@ -429,6 +451,22 @@ export function JiraLaunchSheet({
             ) : (
               <div className="sheet-note">
                 {repo === '' ? 'choose a repository to see the prompt' : branch.refusal !== null ? 'fix the branch above to see the prompt' : 'loading…'}
+              </div>
+            )}
+            {edited !== null && (
+              // Drawn only for an edit: an untouched box is the server's text, which the server already holds to the cap. The count is the route's `.length`.
+              <div className="launch-prompt-meta">
+                <span className={edited.text.length > JIRA_PROMPT_MAX ? 'launch-prompt-count over' : 'launch-prompt-count'}>
+                  edited · {edited.text.length} / {JIRA_PROMPT_MAX}
+                </span>
+                {promptMoved ? (
+                  <span className="sheet-note">the generated prompt changed — Reset to take it</span>
+                ) : promptRefusal !== null ? (
+                  <span className="sheet-note">the generated prompt is refused ({promptRefusal}) — yours is sent as written</span>
+                ) : null}
+                <Chip size={28} variant="flat" onClick={() => setEdited(null)} disabled={promptText === null} title={promptText === null ? 'the generated prompt has not loaded' : undefined}>
+                  Reset
+                </Chip>
               </div>
             )}
           </div>

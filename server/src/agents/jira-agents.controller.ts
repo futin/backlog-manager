@@ -4,6 +4,7 @@ import { isJiraKey, parseJiraAction } from '../../../shared/types';
 import type { JiraDispatchRequest, JiraDispatchResult } from '../../../shared/types';
 import { parseBranchChoice } from '../jira/branch-choice.util';
 import { JIRA_TRANSITION_ID_MAX_CHARS } from '../jira/config.util';
+import { JIRA_PROMPT_MAX } from '../jira/prompt.util';
 import { JiraDispatchService } from './jira-dispatch.service';
 import { SameOriginPostGuard } from './origin.guard';
 
@@ -68,6 +69,15 @@ export class JiraAgentsController {
     if (surface !== undefined && surface !== 'dashboard' && surface !== 'desktop') {
       throw new HttpException({ error: 'surface must be dashboard or desktop' }, 400);
     }
+    // The launch sheet's EDITED prompt, taken outright as item dispatch takes its own: a person read the composed text, changed it, and pressed Start, so the
+    // text is theirs — the composer's fence exists to keep a ticket's author from steering the session, not the person launching it. Absent (the sheet sends it
+    // only once the textarea was edited) is today's server-composed launch, byte for byte. Shape only here: non-empty after trimming and within the same
+    // `JIRA_PROMPT_MAX` the composer holds itself to (the dashboard's own cap), refused before any Jira write so a 400 never follows a landed assign.
+    const prompt = body.prompt;
+    if (prompt !== undefined && (typeof prompt !== 'string' || prompt.trim() === '')) {
+      throw new HttpException({ error: 'prompt must be a non-empty string' }, 400);
+    }
+    if (typeof prompt === 'string' && prompt.length > JIRA_PROMPT_MAX) throw new HttpException({ error: 'prompt too long' }, 400);
     return this.dispatcher.dispatch({
       key,
       repo,
@@ -80,7 +90,8 @@ export class JiraAgentsController {
       model: body.model as string | undefined,
       effort: body.effort as string | undefined,
       remoteControl: body.remoteControl === true,
-      ...(surface === undefined ? {} : { surface })
+      ...(surface === undefined ? {} : { surface }),
+      ...(typeof prompt === 'string' ? { prompt } : {})
     });
   }
 

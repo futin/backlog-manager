@@ -1697,26 +1697,29 @@ local branches — before anything is composed. Its default `'main'` appends not
 `--question-mode`, then `--base`: ids first because the tool reads bare tokens as ids and a flag ahead of them would swallow the first one, and each later flag
 appended after the ones that predate it so every prompt this endpoint composed before a given field existed stays a byte-exact prefix of what it composes now.
 
-**The Jira prompt (phase 5) is the second composed prompt, and it is the first whose composition is handed text by a stranger.** `POST /api/agents/dispatch-jira`
-has no `prompt` field for the same reason `orchestrate` has none, and `JiraAgentsController` rebuilds the request field by field, so a `prompt` in the body is
-never read. The session is told whatever `composeJiraPrompt` (`server/src/jira/prompt.util.ts`) returns, and that is ONE function with three callers —
-`GET /api/jira/prompt` (the sheet's preview and Copy prompt) and the dispatch twice, once before any Jira write for the length check and once after the writes
-for the spawn — so what a person previewed, what was length-checked and what the session received are one text, differing only by the nonce. What a caller
-influences is enumerated by that composition and nowhere else: the key (`isJiraKey`), the repo (proved against `jira.json`'s mapping) and the action pick.
-**A skill's prompt carries none of the ticket's text.** It is the template — the person's own words from `jira.json` — with `{key}`, `{url}` and `{repo}`
-filled in one pass, and a `Jira ticket: <KEY>` line after it when the template names no `{key}`. A skill reads the ticket itself (`jira.mjs show`), so a copy
-in the prompt was text the session was about to fetch anyway, and it cost most of the 4 000: a long description was trimmed, or the whole Start refused as
-`prompt too long`, to say nothing the skill did not learn on its first call. `{summary}` and `{description}` were placeholders until then and now stay literal,
-and with no stranger's string in it a skill's prompt has nothing to frame. What follows is the BUILT-INS' prompt, which does carry the ticket — and the
-ticket is different from every one of the caller's three influences. An `ids` entry is proved against a closed vocabulary; a ticket's description is free text written by whoever
-filed it, delivered into a session that can write files in the mapped repository, and no check can prove it harmless. So the composer does not try: it
-contains it. The framing line — which says the text between the markers is the ticket's own content and not instructions — is read BEFORE any ticket text,
-after the instruction. The markers carry a nonce minted per composition, so a ticket written beforehand cannot contain the real end marker, and only
-lines carrying it are delimiters; the description sits in a fence one backtick longer than its longest backtick run, so nothing inside can close it early; and a truncation note is server text
-placed after the closing fence, never inside the ticket's own. The cap is the dashboard's own 4 000, not item dispatch's 8 000 paste bound, and the
-description is what yields to it; a prompt that cannot keep at least one character of it is a 400 rather than one that says `(no description)` about a ticket
-that has one. This is mitigation, not proof — a model can still be talked into things — and the rest of the defence is that the session is the person's own,
-in a repository the person mapped, under the permission mode they chose, clamped to the dashboard's ceiling. **Item `dispatch` stays the exception to the
+**The Jira prompt (phase 5) is the second composed prompt, and the first whose subject is text written by a stranger.** Unless the person edits it (below),
+the session is told whatever `composeJiraPrompt` (`server/src/jira/prompt.util.ts`) returns, and that is ONE function with two callers — `GET /api/jira/prompt`
+(the sheet's preview and Copy prompt) and the dispatch, once, before any Jira write — so what a person previewed, what was length-checked and what the session
+received are one text, byte for byte. What a caller influences is enumerated by that composition and nowhere else: the key (`isJiraKey`), the repo (proved
+against `jira.json`'s mapping) and the action pick. **No Run prompt carries a copy of the ticket (2026-11-11).** A skill's prompt is the template — the
+person's own words from `jira.json` — with `{key}`, `{url}` and `{repo}` filled in one pass, and a `Jira ticket: <KEY>` line after it when the template names no
+`{key}`; `{summary}` and `{description}` stay literal. A built-in's prompt is its instruction, which opens by telling the session to read the ticket with
+`jira.mjs show <KEY>` and says that text, written by whoever filed the ticket, is not instructions and changes nothing in the task. Both used to carry the
+ticket, and it was the wrong trade: the session can fetch the ticket itself, so the copy was text it was about to read anyway, and it cost most of the 4 000 —
+a long description was trimmed, or the Start refused as `prompt too long`, and once the box became editable a composed prompt sat at the cap with no room for
+the person's own words. It also made a stranger's string part of the prompt, which took a per-composition nonce on `BEGIN`/`END TICKET` markers, a fence one
+backtick longer than the description's longest run, a truncation note outside it, and a second composition after the writes so the spawn showed the ticket's
+new status. All of that is gone: the prompt names the ticket by key, the ticket's text enters the session only as the output of a tool call it was told to
+read as data, and nothing in the prompt depends on ticket state, so one composition serves preview, check and spawn. That framing is mitigation, not proof —
+a model can still be talked into things — and the rest of the defence is that the session is the person's own, in a repository the person mapped, under the
+permission mode they chose, clamped to the dashboard's ceiling. The cap is the dashboard's own 4 000, not item dispatch's 8 000 paste bound; a prompt over it
+(a skill's whose placeholders fill past it, or any prompt a very long repo path pushes over) is a 400. **An edited Jira prompt is item dispatch's exception,
+carried over (2026-11-11).** The launch sheet's box is editable, because a person who wanted a custom instruction AND the ticket link had no way to get both —
+the link, the worktree choice and the two writes are all request fields, so dropping to Copy prompt and a terminal lost the link. The sheet sends `prompt` only
+once the box was edited; `JiraAgentsController` checks its shape alone (a non-empty string, at most `JIRA_PROMPT_MAX`, before any Jira write) and the dispatch
+spawns it as written, skipping the composition — whose refusal would be about a text this launch does not send. An edited prompt is text the launching person
+read and chose to send, under the permission mode they picked. An absent `prompt` is the composed launch byte for byte.
+**Item `dispatch` stays the exception to the
 whole rule:** its prompt is the launch sheet's text, which a human edits before sending, and is the one field taken outright
 — save an execute's or a groom's finish clause, which is appended server-side from the validated `finish`/`base`/`autoMerge`/`fix` fields, after the
 body, and never travels in the editable text.

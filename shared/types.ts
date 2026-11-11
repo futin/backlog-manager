@@ -1372,6 +1372,12 @@ export interface AgentBranchesPayload {
 }
 
 /**
+ * The dashboard's `PROMPT_CAP` (`claude-agents-dashboard/server/lib/spawn.ts:66`, which answers a longer prompt with a 400 and does not publish the number):
+ * the cap `composeJiraPrompt` holds a composed Jira prompt to, and the cap the launch sheet counts an edited one against before the dispatch route refuses it.
+ */
+export const JIRA_PROMPT_MAX = 4000;
+
+/**
  * Body of `POST /api/agents/dispatch-jira` (Jira phase 5; spec §5, §7) — the launch sheet's Start. `repo` is one of the paths `jira.json` maps to the key's
  * project, in any spelling `normaliseRepoPath` accepts; `transitionId` is `null` for "leave as is", else an id from the transitions the sheet was drawn from,
  * checked again against a fresh read before anything is written. `permissionMode`, `model` and `effort` are treated exactly as `AgentDispatchRequest`'s: clamped
@@ -1400,6 +1406,12 @@ export interface JiraDispatchRequest {
   permissionMode: PermissionMode;
   remoteControl: boolean;
   surface?: LaunchSurface;
+  /**
+   * The launch sheet's edited prompt, sent only once the person changed the textarea; absent is the server-composed prompt, as before the field existed. When
+   * present it is spawned as written — no ticket fence, no recomposition after the assign or transition — and only its shape is checked (non-empty, at most
+   * `JIRA_PROMPT_MAX`). The link, worktree choice and every write still follow the other fields.
+   */
+  prompt?: string;
 }
 
 /**
