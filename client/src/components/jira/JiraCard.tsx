@@ -176,7 +176,7 @@ export function JiraCard({
               {trees.length === 1 ? (trees[0].branch ?? '') : `${trees.length} worktrees`}
             </span>
           )}
-          <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />
+          <JiraRunMenu issue={issue} onPick={onRun} />
         </div>
         {last !== null && (
           <div className="jira-card-ended" data-testid="ended-line">

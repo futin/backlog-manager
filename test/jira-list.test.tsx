@@ -117,7 +117,7 @@ function link(o: LinkOver) {
     surface: 'dashboard',
     model: 'opus',
     effort: null,
-    snapshot: { summary: o.summary ?? `Snapshot of ${o.key}`, type: 'Task', parentKey: null },
+    snapshot: { summary: o.summary ?? `Snapshot of ${o.key}`, type: 'Task', parentKey: null as string | null },
     startedAt: o.startedAt,
     endedAt: ended ? o.endedAt : null,
     endReason: ended ? ('stopped' as JiraEndReason) : null,
@@ -587,5 +587,34 @@ describe('sessionsEmptyTitle', () => {
     expect(sessionsEmptyTitle('Alpha', '7d', true)).toBe('No linked sessions in the last 7 days');
     expect(sessionsEmptyTitle('Alpha', '30d', true)).toBe('No linked sessions in the last 30 days');
     expect(sessionsEmptyTitle('Alpha', 'all', true)).toBe('No linked sessions');
+  });
+});
+
+/*
+  `Run on` on a Sessions row (spec `2026-11-11-jira-run-on-parent-design.md` §4.2, §6 case 13): an off-board sub-task's row holds a `stubIssue` built from the
+  link's snapshot, whose parent summary is `''`. The toggle needs only the key; the parent read supplies the rest, and the row's closure must hand the menu's
+  issue (the read parent) to the sheet, not the stub it closed over.
+*/
+describe('Run on: a Sessions row runs its sub-task\'s parent', () => {
+  it("an off-board sub-task row, All tickets on: parent segment, read lands, Work it end to end → the sheet opens as the parent's", async () => {
+    links = [{ ...link({ key: 'ZZ-9', id: 'e9', state: 'ended', startedAt: daysAgo(2), endedAt: daysAgo(1), summary: 'Off board sub-task' }), snapshot: { summary: 'Off board sub-task', type: 'Sub-task', parentKey: 'ZZ-1' } }];
+    statusAnswer = status({ repos: { PAY: ['/home/ada/pay'], ZZ: ['/home/ada/zz'] } });
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/jira/issue/ZZ-1') return ok({ ...issue('ZZ-1', 'Parent story'), description: '', children: [], transitions: [], boards: [], session: null });
+      return base(input, init);
+    }) as unknown as typeof fetch;
+    await renderList();
+    await userEvent.click(within(await filters()).getByRole('button', { name: 'All tickets' }));
+    await screen.findByText('Off board sub-task');
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(screen.getByRole('button', { name: 'Run options for ZZ-9' }));
+    const menu = await screen.findByRole('dialog', { name: 'Run menu' });
+    await userEvent.click(within(within(menu).getByRole('group', { name: 'Run on' })).getByRole('button', { name: /^ZZ-1\b/ }));
+    const work = within(menu).getByRole('button', { name: /Work it end to end/ });
+    await waitFor(() => expect(work).toBeEnabled());
+    await userEvent.click(work);
+    expect(await screen.findByRole('dialog', { name: 'run ZZ-1' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'run ZZ-9' })).toBeNull();
   });
 });

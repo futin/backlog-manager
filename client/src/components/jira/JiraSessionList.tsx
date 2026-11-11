@@ -369,7 +369,7 @@ function ListRowView({
           {buttons !== null && sessionId !== null && (
             <SessionOpen issueKey={row.key} sessionId={sessionId} row={sessionRow} launch={link?.surface ?? null} state={state} buttons={buttons} onHandover={onHandover} />
           )}
-          {canRun && <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />}
+          {canRun && <JiraRunMenu issue={issue} onPick={onRun} />}
         </div>
       </td>
     </tr>

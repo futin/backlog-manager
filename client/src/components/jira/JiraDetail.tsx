@@ -303,7 +303,7 @@ export function JiraDetail({
   const defaultLabel = typeof defaultAction === 'string' ? JIRA_BUILTIN_LABELS[defaultAction] : (data?.skills.find((k) => k.id === defaultAction.skill)?.name ?? '');
   const lastRun = ended.length > 0 ? pollAge(ended[0].endedAt, now) : null;
   const bandSub = `default: ${defaultLabel}${lastRun === null ? '' : ` · last run ${lastRun}`}`;
-  const runControl = <JiraRunMenu issue={issue} home="modal" onPick={(action) => onRun(issue, action)} />;
+  const runControl = <JiraRunMenu issue={issue} home="modal" onPick={onRun} />;
 
   // The agent column — `Modal`'s facts slot. Cards newest first; the reservation, being newest of all, leads.
   const agent = (

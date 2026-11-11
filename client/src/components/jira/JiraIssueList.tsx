@@ -174,7 +174,7 @@ function IssueRow({
       <td className={top.sprint === null ? 'jira-issues-muted' : undefined}>{top.sprint ?? '—'}</td>
       <td className="jira-issues-updated">{updated ?? ''}</td>
       <td className="jira-issues-act">
-        <JiraRunMenu issue={top} onPick={(a) => onRun(top, a)} />
+        <JiraRunMenu issue={top} onPick={onRun} />
       </td>
     </tr>
   );

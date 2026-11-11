@@ -1394,6 +1394,20 @@ button.rail-count { cursor: pointer }
 .jira-run-mark { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 500; color: var(--green) }
 .jira-run-rule { margin: 6px 0; border: 0; border-top: 1px solid var(--hairline2) }
 .jira-run-note { padding: 2px 8px 4px; font-size: 11px; color: var(--ink2) }
+/* A blocked row — a parent still loading, failed, live or unmapped under `Run on` (spec 2026-11-11-jira-run-on-parent §4.2): the title says why. */
+.jira-run-opt:disabled { cursor: default; opacity: .45 }
+.jira-run-opt:disabled:hover { background: none }
+/* `Run on` — the menu's own two-segment toggle, key over sub-line (`run-on-toggle.png`). Its own family, not `.ui-seg`: Segmented's label is one string, and
+   guard 7 forbids page rules over `.ui-seg button`. The well is §8.6's pill track — recessed `--steel` under a raised `--strip` option. */
+.jira-run-target { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 8px 4px; padding: 4px; border-radius: 10px; background: var(--steel) }
+.jira-run-target-seg {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 6px 10px;
+  border: 0; border-radius: 8px; background: none; text-align: left; color: var(--ink2); cursor: pointer;
+}
+.jira-run-target-seg[aria-pressed='true'] { background: var(--strip); color: var(--ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent) }
+.jira-run-target-key { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; line-height: 1.2 }
+.jira-run-target-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1.2; color: var(--ink3) }
+.jira-run-target-note { margin: 0 8px 4px; font-size: 11px; color: var(--red) }
 /* A long session label ellipsises inside the strip; the elapsed mark keeps its width. This rule is global, so it applies to the Board's own live strip too
    (`ItemCard` draws the same `ui/LiveStrip`), not only to the Jira card's. */
 .board-card-live > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
