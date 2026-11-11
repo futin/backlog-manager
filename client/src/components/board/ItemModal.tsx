@@ -211,9 +211,19 @@ export function ItemModal({
         {item.executeElapsed > 0 && <Fact label="worked for">{formatSeconds(item.executeElapsed)}</Fact>}
         {item.groomTokens > 0 && <Fact label="groom tokens">{groupDigits(item.groomTokens)}</Fact>}
         {item.executeTokens > 0 && <Fact label="execute tokens">{groupDigits(item.executeTokens)}</Fact>}
-        <Fact label="file">
-          <span className="item-facts-path">{item.path}</span>
-        </Fact>
+        {/* A tracker row's `path` is a `gh:<owner>/<repo>#<n>` URN, not a file — a person cannot open it, but the issue it names has a page, so the row
+            links there and says `issue`. A files row has no `url` (`BacklogItem.url`) and keeps its on-disk path as plain text. */}
+        {item.url === null ? (
+          <Fact label="file">
+            <span className="item-facts-path">{item.path}</span>
+          </Fact>
+        ) : (
+          <Fact label="issue">
+            <a className="item-facts-path item-facts-link" href={item.url} target="_blank" rel="noreferrer">
+              {item.path}
+            </a>
+          </Fact>
+        )}
       </dl>
       {onDispatch && (
         <div className="item-facts-dispatch">
