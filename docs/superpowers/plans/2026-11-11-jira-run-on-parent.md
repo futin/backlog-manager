@@ -93,7 +93,7 @@ lead = `live[0]` (newest start), `more = live.length - 1` — or `null` when non
 **Files:**
 - Modify: `client/src/components/jira/JiraRunMenu.tsx` (props at ~:60, rows at :83-86, panel at :156-164, header comment)
 - Modify: the four callers' closures — `JiraDetail.tsx:306`, `JiraCard.tsx:179`, `JiraIssueList.tsx:177`, `JiraSessionList.tsx:372`
-- Modify: `test/jira-board.test.tsx` (spec §6 case 12)
+- Modify: `test/jira-board.test.tsx` (spec §6 case 12; List-cell closure case), `test/jira-list.test.tsx` (Sessions-row closure case)
 - Modify: `client/src/styles.css` (toggle classes, beside the `.jira-run-*` family)
 - Modify: `.claude/DESIGN.md` §8.9.1 (the Run menu paragraph: the toggle, when it draws, its copy)
 - Test: `test/jira-run-menu.test.tsx` (new; copy the provider harness from `test/jira-board.test.tsx`)
@@ -122,15 +122,16 @@ picking it again while `failed` asks again and clears the note. Parent rows' gat
   - card home: rendering 3 sub-task cards fetches nothing; only picking the parent segment fetches.
   - a `stubIssue('S-9', { summary: 's', type: 'Sub-task', parentKey: 'P-9' }, '')` row → toggle shows `P-9`; pick → fetch `/api/jira/issue/P-9`; it lands
     → `Work it end to end` → `onPick` receives the read `P-9` issue (not the stub `S-9`).
-  - caller closures (spec §6 case 13, anti-goal 1): one case in `test/jira-list.test.tsx` (a sub-task's List cell) and one in the suite that renders Sessions
-    rows (`grep -l JiraSessionList test/`): parent segment, read lands, `Work it end to end` → the page's `onRun` receives the parent issue. A closure that
+  - caller closures (spec §6 case 13, anti-goal 1): the List cell (`JiraIssueList`, drawn by `JiraBoardView.tsx:246`) → one case in
+    `test/jira-board.test.tsx`; the Sessions `stubIssue` row (`All tickets` on) → one case in `test/jira-list.test.tsx` (the Sessions-page suite, its header
+    at :18): parent segment, read lands, `Work it end to end` → the launch sheet opens on the parent issue. A closure that
     drops the issue argument (`(_i, a) => onRun(top, a)`) must fail these.
   - menu re-read after close: card home, pick `P-1`, read lands, close, reopen, pick `P-1` → second fetch.
   - parent read 500 `{ error: 'boom' }` → rows titled `boom`, note `boom`; click the `P-1` segment again → note gone, second fetch; it lands → rows enabled.
   - spec §6 case 12, in `test/jira-board.test.tsx` beside the existing Run cases (rendered through `JiraView`, ~:1045): a sub-task card's menu, parent
     segment, `Work it end to end` → the launch sheet's title names `P-1` (not the sub-task), and with no stored name pattern for the repo the new-branch
     default is `p-1-<slug of P-1's summary>`.
-- [ ] **Step 2: Run** `pnpm exec jest test/jira-run-menu.test.tsx` — FAIL.
+- [ ] **Step 2: Run** `pnpm exec jest test/jira-run-menu.test.tsx test/jira-board.test.tsx test/jira-list.test.tsx` — the new cases FAIL, the old ones pass.
 - [ ] **Step 3: Implement** the toggle, the `onPick` signature, the four closures, the CSS and the DESIGN.md paragraph. Match `run-on-toggle.png`.
 - [ ] **Step 4: Run** the new suite plus `test/jira-board.test.tsx test/jira-list.test.tsx test/jira-detail.test.tsx test/jira-setup.test.tsx
   test/design-guards.test.ts` (every current `JiraRunMenu` / `Run menu` hit) — PASS; `pnpm run typecheck` — clean.
