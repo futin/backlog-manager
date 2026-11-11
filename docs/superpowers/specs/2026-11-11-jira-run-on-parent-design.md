@@ -12,8 +12,9 @@ There is no way to open the parent's Detail and press Run there. The only route 
 launch sheet accepts as **off-ticket** (`continueOffTicket`, `JiraBranchSection.tsx`): a session filed under TIMIFY-28028 working on TIMIFY-27763's branch,
 whose worktree does not show on either card. The user rejected that path explicitly: "it creates confusion".
 
-What they want: from the sub-task, get to the **parent** and start the parent's own session — the parent's card, branch, worktree and link — with the
-sub-task as nothing more than the doorway.
+What they want: from the sub-task, get to the **parent** and start the parent's own session — the parent's link, branch and worktree — with the sub-task as
+nothing more than the doorway. The parent is usually on no board, so its session shows on no board card (the deck and shelves draw on-board tickets only,
+DESIGN.md §8.9): it is seen in the parent's Detail, in the sub-task's parent-live line (§4.3), and on the Sessions page.
 
 ## 2. Goals, non-goals, anti-goals
 
@@ -31,8 +32,8 @@ Non-goals
 - Not for stories under an epic, or any issue whose parent is not the branch owner: the toggle appears on sub-tasks only (§4.2).
 
 Anti-goals — it fails even if it works when:
-- a session started through the toggle lands on the sub-task's card, link, or the sub-task's `{key}-{slug}` branch default — the whole point is that it is
-  the parent's;
+- a session started through the toggle lands on the sub-task's link, the sub-task's card or the sub-task's `{key}-{slug}` branch default — the whole point
+  is that it is the parent's;
 - the parent's one-run gate can be bypassed from the sub-task (two `run` sessions on TIMIFY-27763 because one was started from a sub-task);
 - the sub-task's own Run gets harder: its left `Run` half, its menu rows and its default keep working exactly as today.
 
@@ -59,9 +60,11 @@ A click swaps the open Detail to the parent the way a Children row does: it **pu
 `← <SUB-TASK-KEY>` and Escape/close behave as for a child. The board's `childrenOf` snapshot is carried forward unchanged.
 
 The walk holds a `JiraIssue`, and the sub-task only knows `{ key, summary }` of its parent. The parent is read with `GET /api/jira/issue/:key` (its answer is a
-`JiraIssueDetail`, which is a `JiraIssue`). While that read is out the link is inert (no second read on a double click) and marked busy; a failure is shown in
-the Detail's existing `role="alert"` line under the ticket's write row, with `failureOf`'s sentence, and the Detail stays on the sub-task. A parent already
-held in a loaded board's cache may be used instead of the read — builder's call (§7).
+`JiraIssueDetail`, which is a `JiraIssue`). While that read is out the link is inert (no second read on a double click) and marked busy. A failure is the
+read's own state, NOT `useAction`'s `writeError`: it draws its own `role="alert"` line with `failureOf`'s sentence, in the same slot under the ticket's write
+row and after the write error when both are present (two lines, neither hides the other); the Detail stays on the sub-task. The read failure clears on the
+next click of the link (which reads again — a failed read is never cached) and when the Detail swaps to another key. A parent already held in a loaded
+board's cache may be used instead of the read — builder's call (§7).
 
 This applies to every issue with a parent (a story's epic link too): a link to the parent is harmless everywhere and plain text was the gap.
 
@@ -74,27 +77,34 @@ Story; the type name lower-cased otherwise; `parent` alone until the parent's ty
 - Opening the menu always starts on the sub-task segment (§3.4). Closing and reopening resets it.
 - With the sub-task picked, the menu is exactly today's.
 - With the parent picked, every row — `Built in` and `Skills on this machine` — acts on the parent: a pick calls `onPick` with the **parent's `JiraIssue`**,
-  so the launch sheet opens as the parent's (its title, its project's repos, its `{key}-{slug}` branch default, its link). This needs `onPick` (and
-  `onRun` above it) to carry the issue, not only the action, wherever the menu currently closes over its own `issue`. The default row's sub-line names the
-  target (`Work TIMIFY-27763 end to end`, as mocked); the `default` mark stays on the same row.
+  so the launch sheet opens as the parent's (its title, its project's repos, its `{key}-{slug}` branch default, its link). `onRun` is already
+  `(issue, action)` (`JiraView.tsx`); only `JiraRunMenu`'s `onPick` changes to carry the issue, and with it the four callers' closures, which today close
+  over their own issue: `JiraDetail.tsx` (`runControl`), `JiraCard.tsx`, `JiraIssueList.tsx` and `JiraSessionList.tsx`. With the parent picked, the
+  `execute` row's sub-line reads `Work <PARENT-KEY> end to end` (today `Work the ticket end to end`) whichever row is the default; every other row's
+  sub-line is unchanged, and the `default` mark stays where the setting puts it. The mock's ellipsis on that sub-line is the row's existing truncation.
 - Picking the parent segment reads the parent (§4.1's read, shared — one read per parent key per open Detail/menu, not one per click). Until it lands the
   rows are disabled with the title `loading TIMIFY-27763…`; a failed read disables them with the failure sentence as the title and in a one-line note under
   the toggle.
 - The parent's gate is the parent's: `runChipState(parent, status, sessions)`. `live` disables every row, titled `a session is running on <PARENT-KEY>`;
   `no-repo` disables every row, titled as today's no-repo title for the parent's project. The sub-task's own gate does not apply to parent rows, and the
   parent's does not apply to sub-task rows.
-- The toggle is drawn in both homes of `JiraRunMenu` (the card and the Detail): the component is one control on purpose (its header), and a sub-task card's
-  menu is the shortest route. On a card the parent read happens only when the parent segment is picked — a board of sub-tasks must not fan out N reads.
+- The toggle is drawn wherever `JiraRunMenu` is — all four homes: the Detail, the board card, the List's row cell and the Sessions row. The component is one
+  control on purpose (its header). A Sessions row may hold a `stubIssue` (`lib/jira-list.ts`) for an off-board ticket: its `type.subtask` is a guess from
+  the snapshot's type name and its parent summary is `''` — the toggle needs only the parent's key, so it draws on a stub too, and the parent read supplies
+  the rest. Outside the Detail the parent read happens only when the parent segment is picked — a board or list of sub-tasks must not fan out N reads.
 - The whole split is disabled only by the sub-task's own `live` / `no-repo` state as today. Known consequence, accepted: while the sub-task itself has a live
   `run`, its menu cannot open, so the parent is reached through Doorway 1 instead.
 
 ### 4.3 The parent-live line
 
-In a sub-task's Detail Agent band, when the sessions payload holds a live session on the parent key, draw one line under the band's sub-line:
-`Parent <PARENT-KEY> · <state> · <elapsed> · <repo basename> →` (`parent-live-line.png`). It reuses `ChildSessionLine`'s look and tone dot — the
-mirror of the existing "a child is underway" line on a parent. A click is Doorway 1 (open the parent's Detail). The sessions payload already carries every
-key's links, so this line needs no parent read; it is drawn whether or not the parent is on a board. With several live sessions on the parent, show the
-newest and `+N`, as `ChildSessionLine` does.
+In a sub-task's Detail Agent band, when the sessions payload holds a live session on the parent key, draw one line. In the empty band it sits under the
+band's sub-line, beside where `ChildSessionLine` sits (`parent-live-line.png`); in the live band (the sub-task has sessions of its own) it sits directly
+under the label row, above the session cards. Copy: `Parent <PARENT-KEY> · <STATE_LABEL[state]> · <repo basename> →`, e.g.
+`Parent TIMIFY-27763 · Working · microservice →`, and `+N more` beside it when the parent has N further live sessions. The lead is the parent's newest live
+session by start time. Dot: `ui-stripe-dot` with `sessionTone(state)`, as `ChildSessionLine`. Differences from the mock, on purpose: the mock's `Running`
+is not a state word (the `STATE_LABEL` word replaces it), its elapsed `12m` is dropped (parity with `ChildSessionLine`), and its grey dot becomes the tone
+dot. A click is Doorway 1 (open the parent's Detail). The sessions payload already carries every key's links, so this line needs no parent read; it is drawn
+whether or not the parent is on a board.
 
 ## 5. Constraints
 
@@ -124,7 +134,13 @@ Jest, flat in `test/`, against the components and `lib/jira.ts` helpers:
 9. Close and reopen the menu: back on the sub-task segment.
 10. On a card: no read until the parent segment is picked.
 11. Parent-live line: sessions payload with a live session on `P-1` → the line shows key, state, repo basename; click → Doorway 1. No live session → no line.
-12. Launch sheet opened through the parent segment has the parent's key in its title and `P-1-<slug>` as the new-branch default.
+12. Launch sheet opened through the parent segment, with no stored name pattern for the repo: the parent's key in its title and `p-1-<slug>` (the
+    `{key}` placeholder renders lower-cased) as the new-branch default.
+13. Toggle draws on a sub-task in the List cell and on a Sessions row whose issue is a `stubIssue` with `type: 'Sub-task'` and a `parentKey`; a pick there
+    calls `onPick(parentIssue, action)` after the read.
+14. Parent-live line in the live band: the sub-task has its own live session AND the parent has one → the line is under the label row; with two live
+    parent sessions it shows the newer one and `+1 more`.
+15. Parent read fails, then a write is refused: both alert lines show, write first; clicking the link again clears the read's line and reads again.
 
 Before pushing, `grep -l` each symbol whose callers the diff adds (`JiraRunMenu`, `onRun`, `useJiraSessionsContext`, …) in `test/` and run every hit
 (project CLAUDE.md). The last task is `/ui-verify` against the two picked mocks at 1440 px, daylight theme.
@@ -132,7 +148,7 @@ Before pushing, `grep -l` each symbol whose callers the diff adds (`JiraRunMenu`
 ## 7. Calls I made (the user can overturn any)
 
 - Toggle only on `type.subtask` issues; the link (Doorway 1) on every issue with a parent.
-- Toggle in both homes (card and Detail); lazy parent read on a card.
+- Toggle in all four `JiraRunMenu` homes; lazy parent read outside the Detail.
 - Parent read on demand through the existing route; reusing a board-cache hit instead is the builder's choice.
 - The parent-live line shows only LIVE parent sessions, not ended history.
 - The off-ticket `Continue` path is left as is.
