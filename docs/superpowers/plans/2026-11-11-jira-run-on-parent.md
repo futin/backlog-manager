@@ -27,6 +27,8 @@ think a stated test value is wrong, check the spec and the code and say so in yo
   parent-live line `Parent <PARENT-KEY> · <STATE_LABEL[state]> · <repo basename> →` plus `+N more`.
 - Tests are flat in `test/` (jest). Before pushing, `grep -l` in `test/` for every symbol this diff adds a caller of — at least `JiraRunMenu`, `fetchJiraDetail`,
   `ticketSessions`, `sessionTone`, `Popover`, `Segmented`, `useJiraSessionsContext` — and run every hit, plus `pnpm run typecheck`.
+- Fixture dates (`created`, `updated`, …) in a `.tsx` suite use `daysAgoStamp` / `daysAgoDate` (`test/helpers/dates.ts`), never date literals
+  (`.claude/rules/tests.md`). `test/fixture-clock.test.ts` scans every `test/*.test.tsx`: run it in Step 4 of every task that creates or extends one.
 - Picked mocks: `docs/superpowers/specs/2026-11-11-jira-run-on-parent-mockups/run-on-toggle.png` (menu) and `parent-live-line.png` (band + link). The mock's
   inline styles and its `Running · 12m` / grey dot are drawing aids; the spec's §4.3 lists the intended differences.
 
@@ -61,8 +63,11 @@ think a stated test value is wrong, check the spec and the code and say so in yo
 
 Behaviour (spec §4.1, §4.2, §7): a module-level map of in-flight and landed reads keyed by parent key; a pending read is joined, never repeated; a failed one
 is removed at once (never cached); a landed one is kept while at least one mounted `useParentRead` for that key is alive (reference count by mount) and dropped
-when the last unmounts. `ask` never runs on mount — only when called. Each hook instance holds its own `read` state (per-surface failure display, spec
-§4.2). `parentLiveLine` returns `null` unless `issue.type.subtask && issue.parent !== null`, else the parent key's live links via `ticketSessions` —
+when the last unmounts. Because a card's `JiraRunMenu` stays mounted as long as the card is drawn, the menu's hook must live in the OPEN panel only (a child
+rendered while the menu is open), so closing the menu releases it (spec §7: "while the Detail or menu that asked is open"); the Detail's hook lives with the
+Detail. `ask` never runs on mount — only when called. Each hook instance holds its own `read` state (per-surface failure display, spec §4.2). `JiraView`
+renders `JiraDetail` without a React `key`, so a walk reuses the instance: on a `parentKey` change the instance's `read` resets to `idle` and its reference
+moves to the new key. `parentLiveLine` returns `null` unless `issue.type.subtask && issue.parent !== null`, else the parent key's live links via `ticketSessions` —
 lead = `live[0]` (newest start), `more = live.length - 1` — or `null` when none are live. `parentLineText` is `Parent <KEY> · <STATE_LABEL[lead.state]> ·
 <basename of lead.repo> →`.
 
@@ -72,6 +77,9 @@ lead = `live[0]` (newest start), `more = live.length - 1` — or `null` when non
   - mount A, `ask()` lands; mount B, `ask()` → no new fetch; unmount both; mount C, `ask()` → fetches again.
   - a hook that never calls `ask` → no fetch, `read.state` `idle`.
   - `useParentRead(null)` → `ask()` resolves `null` without fetching.
+  - two keys at once: hook on `P-1` and hook on `P-2` both `ask()` while pending → two fetches; each resolves to its own issue (distinct summaries).
+  - rerender one hook `P-1` → `P-2` after `P-1` landed → `read.state` `idle`; `ask()` fetches `/api/jira/issue/P-2` and lands `P-2`, not `P-1`.
+  - per-surface failure: hooks A and B on `P-1`; only A asks, read 500 `{ error: 'boom' }` → A `failed` `boom`, B still `idle`.
   - `parentLiveLine`: sub-task with parent `P-1`, payload with two live links on `P-1` started 10:00 and 10:05 and one ended → lead is the 10:05 link,
     `more === 1`; same payload on a story with epic parent `P-1` → `null`; sub-task with no live parent link → `null`.
   - `parentLineText('P-1', { state: 'working', repo: '/x/y/microservice', … })` → `Parent P-1 · Working · microservice →`.
@@ -104,14 +112,20 @@ picking it again while `failed` asks again and clears the note. Parent rows' gat
   - story with an epic parent → no `Run on` group.
   - sub-task `S-1` (parent `P-1`): menu opens with `S-1` segment pressed; `Work it end to end` → `onPick(S-1 issue, 'execute')`.
   - pick `P-1` segment, fetch pending → every row disabled, title `loading P-1…`; resolve with a `P-1` detail (type `Story`) → segment sub-line `parent story`;
-    `Work it end to end` → `onPick(P-1 issue, 'execute')`; a skill row `/x` → `onPick(P-1 issue, { skill: '/x' })`; execute row's sub-line
+    `Work it end to end` → `onPick(P-1 issue, 'execute')`; a skill with distinct id, name and prompt (`{ id: 'sk-review', name: 'Review',
+    prompt: '/review-it' }`, cf. `test/jira-board.test.tsx:887`) → its row `Review` → `onPick(P-1 issue, { skill: 'sk-review' })`; execute row's sub-line
     `Work P-1 end to end`.
   - sessions payload holding a live `run` link on `P-1` → parent rows disabled, title `a session is running on P-1`; switch back to `S-1` → rows enabled.
   - `P-1` detail's `project.key` is `OTHER`, which has no repo in status `repos` while `S-1`'s project has one → parent rows disabled with the no-repo title
     naming `OTHER`; `S-1` rows enabled.
   - close and reopen → `S-1` segment pressed again. Render a second sub-task's menu after picking `P-1` in the first → it opens on its own sub-task segment.
   - card home: rendering 3 sub-task cards fetches nothing; only picking the parent segment fetches.
-  - a `stubIssue('S-9', { summary: 's', type: 'Sub-task', parentKey: 'P-9' }, '')` row → toggle shows `P-9`; pick → fetch `/api/jira/issue/P-9`.
+  - a `stubIssue('S-9', { summary: 's', type: 'Sub-task', parentKey: 'P-9' }, '')` row → toggle shows `P-9`; pick → fetch `/api/jira/issue/P-9`; it lands
+    → `Work it end to end` → `onPick` receives the read `P-9` issue (not the stub `S-9`).
+  - caller closures (spec §6 case 13, anti-goal 1): one case in `test/jira-list.test.tsx` (a sub-task's List cell) and one in the suite that renders Sessions
+    rows (`grep -l JiraSessionList test/`): parent segment, read lands, `Work it end to end` → the page's `onRun` receives the parent issue. A closure that
+    drops the issue argument (`(_i, a) => onRun(top, a)`) must fail these.
+  - menu re-read after close: card home, pick `P-1`, read lands, close, reopen, pick `P-1` → second fetch.
   - parent read 500 `{ error: 'boom' }` → rows titled `boom`, note `boom`; click the `P-1` segment again → note gone, second fetch; it lands → rows enabled.
   - spec §6 case 12, in `test/jira-board.test.tsx` beside the existing Run cases (rendered through `JiraView`, ~:1045): a sub-task card's menu, parent
     segment, `Work it end to end` → the launch sheet's title names `P-1` (not the sub-task), and with no stored name pattern for the repo the new-branch
@@ -149,9 +163,12 @@ live band; its click is the same as the link's; `ui-stripe-dot` toned by `sessio
   - click the link, then open the Detail's `Run ▾` and pick the `P-1` segment while pending → still one fetch.
   - sessions payload with a live link on `P-1` (state `working`, repo `/r/microservice`), sub-task has none → `Parent P-1 · Working · microservice →`
     under the empty band's sub-line; click → `onOpenIssue` with the read P-1.
-  - sub-task has its own live session AND `P-1` has two live ones → the line sits in the live band right after the label row, text for the newer `P-1`
-    session, and `+1 more`.
+  - sub-task has its own live session (state `plan`, repo `/r/web`) AND `P-1` has two live ones (older: `quiet`, `/r/api`, started 10:00; newer: `working`,
+    `/r/microservice`, started 10:05) → the line sits in the live band right after the label row and reads exactly `Parent P-1 · Working · microservice →`,
+    with `+1 more`.
   - parent read fails, then an Assign is refused → two alerts, write first; click the link again → the read alert is gone.
+  - per-surface failure (spec §4.2, §6 case 16): the Detail's menu picks `P-1`, read 500 `boom` → note in the menu, NO alert line in the Detail; separately,
+    the link's read fails → alert in the Detail, and opening `Run ▾` and picking `P-1` shows no pre-filled `boom` note before its own read answers.
   - story whose epic `E-1` has a live session → no parent line.
 - [ ] **Step 2: Run** `pnpm exec jest test/jira-detail.test.tsx` — the new cases FAIL, the old ones pass.
 - [ ] **Step 3: Implement**, matching `parent-live-line.png` (link look) and the spec's §4.3 copy.
