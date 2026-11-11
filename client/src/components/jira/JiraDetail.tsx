@@ -427,8 +427,8 @@ export function JiraDetail({
         <span className="jira-detail-key">{src.key}</span>
         {src.type.name !== '' && <span>{`· ${src.type.name}`}</span>}
         {parentLink !== null && (
-          <span>
-            {'· in '}
+          <span className="jira-detail-crumb-parent">
+            <span className="jira-detail-crumb-in">{'· in '}</span>
             {parentLink}
           </span>
         )}

@@ -1463,6 +1463,10 @@ button.rail-count { cursor: pointer }
   text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere
 }
 .jira-detail-parent[aria-busy='true'] { cursor: progress; opacity: .7 }
+/* `· in` and its link as one crumb that keeps them on one line: a button is an atomic inline box, so as plain inline content a long parent summary pushed the
+   whole link under an orphaned `· in` at phone width. As a flex row the link's own text wraps beside the words instead (ui-verify, 375 px). */
+.jira-detail-crumb-parent { display: inline-flex; align-items: baseline; gap: .25em; min-width: 0 }
+.jira-detail-crumb-in { flex: none; white-space: nowrap }
 .jira-detail-out {
   margin-left: auto; display: inline-flex; align-items: center; height: 28px; padding: 0 10px;
   border: 1px solid var(--hairline2); border-radius: 9px; font-size: 12px; font-weight: 500; color: var(--ink); text-decoration: none; white-space: nowrap
