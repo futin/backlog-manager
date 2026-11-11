@@ -173,6 +173,7 @@ describe('ItemModal', () => {
     expect(factValue('groom tokens')).toBe('1,234,567');
     expect(factValue('execute tokens')).toBe('42');
     expect(factValue('file')).toBe(ITEM.path);
+    expect(factValue('issue')).toBeNull();
     // Lets the mocked fetch's state update land inside act() before the test
     // ends — otherwise React logs an act() warning on every run because
     // nothing above this line waits on the body fetch this component always
@@ -568,6 +569,25 @@ function doubleClick(el: HTMLElement): void {
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
 }
+
+describe('ItemModal issue link', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve('body') } as Response)) as jest.Mock;
+  });
+
+  // A tracker row's path is a URN nobody can open; the issue's own page is where it lives, so the fact links there instead of printing static text.
+  it("links a tracker item's issue in place of the file fact, opening a new tab", async () => {
+    const item: BacklogItem = { ...ITEM, id: '#58', path: 'gh:futin/ixray#58', source: 'github', url: 'https://github.com/futin/ixray/issues/58' };
+    render(<ItemModal item={item} hues={HUES} onClose={() => {}} />);
+    expect(factValue('file')).toBeNull();
+    const link = screen.getByRole('link', { name: 'gh:futin/ixray#58' });
+    expect(link.getAttribute('href')).toBe('https://github.com/futin/ixray/issues/58');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noreferrer');
+    expect(factValue('issue')).toBe('gh:futin/ixray#58');
+    await screen.findByText('body');
+  });
+});
 
 describe('ItemModal claim control', () => {
   const TRACKER: BacklogItem = {
