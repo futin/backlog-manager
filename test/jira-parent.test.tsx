@@ -182,6 +182,30 @@ describe('useParentRead — one read per parent key', () => {
     expect(read.state === 'ready' ? read.issue.key : null).toBe('P-2');
   });
 
+  it('resolves null for a read that lands after the surface unmounted, so a closed surface acts on nothing (final review)', async () => {
+    const a = renderHook(() => useParentRead('P-1'));
+    let r: Promise<JiraIssue | null> = Promise.resolve(null);
+    act(() => {
+      r = a.result.current.ask();
+    });
+    a.unmount();
+    await land(0, json(detail('P-1')));
+    expect(await r).toBeNull();
+  });
+
+  it('does not strand a loading read: P-1 asked, swapped to P-2, landed, swapped back reads idle (final review)', async () => {
+    const h = renderHook(({ k }: { k: string }) => useParentRead(k), { initialProps: { k: 'P-1' } });
+    let r: Promise<JiraIssue | null> = Promise.resolve(null);
+    act(() => {
+      r = h.result.current.ask();
+    });
+    h.rerender({ k: 'P-2' });
+    await land(0, json(detail('P-1')));
+    expect(await r).toBeNull();
+    h.rerender({ k: 'P-1' });
+    expect(h.result.current.read).toEqual({ state: 'idle' });
+  });
+
   it('shows a failure on the surface that asked only: A fails, B (same key, never asked) stays idle', async () => {
     const a = renderHook(() => useParentRead('P-1'));
     const b = renderHook(() => useParentRead('P-1'));

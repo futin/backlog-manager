@@ -20,7 +20,8 @@ const IDLE: ParentRead = { state: 'idle' };
  * - **A key change resets.** `JiraView` renders `JiraDetail` without a React `key`, so a walk reuses one instance across issues: the stored `read` is stamped
  *   with the key it belongs to, and a different `parentKey` reads `idle` until it is asked for. A read that lands for the old key is dropped by the same
  *   stamp, and the hold moves with the key through the effect's cleanup.
- * - **`ask()` resolves the issue, or `null`** (no parent key, or a failed read), so a caller acts on the answer without racing its own state.
+ * - **`ask()` resolves the issue, or `null`** (no parent key, a failed read, or a surface that left the key — unmounted or moved to another parent — before
+ *   the read landed), so a caller acts on the answer without racing its own state, and never acts at all once it is gone.
  */
 export function useParentRead(parentKey: string | null): { read: ParentRead; ask: () => Promise<JiraIssue | null> } {
   const [held, setHeld] = useState<{ key: string | null; read: ParentRead }>({ key: parentKey, read: IDLE });
@@ -42,14 +43,23 @@ export function useParentRead(parentKey: string | null): { read: ParentRead; ask
     const key = parentKey;
     if (key === null) return null;
     setHeld({ key, read: { state: 'loading' } });
+    let settled: ParentRead;
+    let issue: JiraIssue | null = null;
     try {
-      const issue = await askParent(key);
-      if (current.current === key) setHeld({ key, read: { state: 'ready', issue } });
-      return issue;
+      issue = await askParent(key);
+      settled = { state: 'ready', issue };
     } catch (err) {
-      if (current.current === key) setHeld({ key, read: { state: 'failed', error: err instanceof Error ? err.message : String(err) } });
-      return null;
+      settled = { state: 'failed', error: err instanceof Error ? err.message : String(err) };
     }
+    if (current.current === key) {
+      setHeld({ key, read: settled });
+      return issue;
+    }
+    // The surface left this key while the read was out — unmounted (`current` is null) or moved to another parent. Its `loading` stamp for `key` is
+    // cleared, not left behind: a walk back to an issue under `key` would otherwise find it and read busy forever, with no ask left in flight to settle
+    // it. And the caller gets `null`, so a closed Detail never pushes a parent onto a walk it no longer owns.
+    setHeld((h) => (h.key === key ? { key: null, read: IDLE } : h));
+    return null;
   }, [parentKey]);
 
   return { read: held.key === parentKey ? held.read : IDLE, ask };

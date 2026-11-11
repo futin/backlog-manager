@@ -1616,6 +1616,18 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
     expect(onOpenIssue).not.toHaveBeenCalled();
   });
 
+  it('opens nothing when the parent read lands after the Detail closed (final review)', async () => {
+    const pending = held();
+    parentAnswer = () => pending.promise;
+    const view = mount({ issue: SUB });
+    await screen.findByText(/not/);
+    await userEvent.click(parentLink('crumb'));
+    view.unmount();
+    await act(async () => pending.release(json(PARENT)));
+    await act(async () => {});
+    expect(onOpenIssue).not.toHaveBeenCalled();
+  });
+
   it("joins the link's pending read when the Detail's Run menu picks the parent (Review Focus 3)", async () => {
     const pending = held();
     parentAnswer = () => pending.promise;
