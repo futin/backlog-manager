@@ -40,12 +40,12 @@ import { HttpException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { COMMIT_RULE, oneLine } from '../../../shared/agent';
 import { shellQuote } from '../../../shared/jira-branch';
-import { isJiraKey } from '../../../shared/types';
+import { JIRA_PROMPT_MAX, isJiraKey } from '../../../shared/types';
 import type { JiraAction, JiraIssueDetail, JiraSkill, JiraWorkspace } from '../../../shared/types';
 import { renderTicketBlock } from './block';
 
-/** The dashboard's `PROMPT_CAP` (`claude-agents-dashboard/server/lib/spawn.ts:66`, which answers a longer prompt with a 400 and does not publish the number). */
-export const JIRA_PROMPT_MAX = 4000;
+/** Declared in `shared/types.ts` since the launch sheet's edited prompt counts against it too; re-exported so this module stays its server-side home. */
+export { JIRA_PROMPT_MAX };
 
 export type JiraComposeAction = { kind: 'execute' | 'context' } | { kind: 'skill'; skill: JiraSkill };
 

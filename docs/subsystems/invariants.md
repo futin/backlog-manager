@@ -1697,9 +1697,8 @@ local branches — before anything is composed. Its default `'main'` appends not
 `--question-mode`, then `--base`: ids first because the tool reads bare tokens as ids and a flag ahead of them would swallow the first one, and each later flag
 appended after the ones that predate it so every prompt this endpoint composed before a given field existed stays a byte-exact prefix of what it composes now.
 
-**The Jira prompt (phase 5) is the second composed prompt, and it is the first whose composition is handed text by a stranger.** `POST /api/agents/dispatch-jira`
-has no `prompt` field for the same reason `orchestrate` has none, and `JiraAgentsController` rebuilds the request field by field, so a `prompt` in the body is
-never read. The session is told whatever `composeJiraPrompt` (`server/src/jira/prompt.util.ts`) returns, and that is ONE function with three callers —
+**The Jira prompt (phase 5) is the second composed prompt, and it is the first whose composition is handed text by a stranger.** Unless the person edits it
+(below), the session is told whatever `composeJiraPrompt` (`server/src/jira/prompt.util.ts`) returns, and that is ONE function with three callers —
 `GET /api/jira/prompt` (the sheet's preview and Copy prompt) and the dispatch twice, once before any Jira write for the length check and once after the writes
 for the spawn — so what a person previewed, what was length-checked and what the session received are one text, differing only by the nonce. What a caller
 influences is enumerated by that composition and nowhere else: the key (`isJiraKey`), the repo (proved against `jira.json`'s mapping) and the action pick.
@@ -1716,7 +1715,14 @@ lines carrying it are delimiters; the description sits in a fence one backtick l
 placed after the closing fence, never inside the ticket's own. The cap is the dashboard's own 4 000, not item dispatch's 8 000 paste bound, and the
 description is what yields to it; a prompt that cannot keep at least one character of it is a 400 rather than one that says `(no description)` about a ticket
 that has one. This is mitigation, not proof — a model can still be talked into things — and the rest of the defence is that the session is the person's own,
-in a repository the person mapped, under the permission mode they chose, clamped to the dashboard's ceiling. **Item `dispatch` stays the exception to the
+in a repository the person mapped, under the permission mode they chose, clamped to the dashboard's ceiling. **An edited Jira prompt is item dispatch's exception, carried
+over (2026-11-11).** The launch sheet's box is editable, because a person who wanted a custom instruction AND the ticket link had no way to get both — the
+link, the worktree choice and the two writes are all request fields, so dropping to Copy prompt and a terminal lost the link. The sheet sends `prompt` only
+once the box was edited; `JiraAgentsController` checks its shape alone (a non-empty string, at most `JIRA_PROMPT_MAX`, before any Jira write) and the
+dispatch spawns it as written, skipping BOTH compositions — the first's refusal is about a text this launch does not send, and the second would throw the
+edit away, so an edited prompt keeps the status the preview showed. The fence is not lost by this: it guards against the ticket's author, and an edited prompt
+is text the launching person read and chose to send, under the permission mode they picked. An absent `prompt` is the composed launch byte for byte.
+**Item `dispatch` stays the exception to the
 whole rule:** its prompt is the launch sheet's text, which a human edits before sending, and is the one field taken outright
 — save an execute's or a groom's finish clause, which is appended server-side from the validated `finish`/`base`/`autoMerge`/`fix` fields, after the
 body, and never travels in the editable text.

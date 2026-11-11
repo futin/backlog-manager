@@ -44,8 +44,10 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   then ` --base <ref>`. Each is appended only off its guard and each default appends
   nothing. **They are not all the same kind of safe**: the two mode flags append compile-time literals, so no caller character reaches the prompt, while `base`
   is the one member whose caller text is appended verbatim and is therefore *proved* (`resolveBase`) rather than clamped. Do not restore any claim that every
-  appended flag is a literal. **The Jira prompt is the same shape, widened:** `POST /api/agents/dispatch-jira`'s body (`JiraAgentsController`, which rebuilds it
-  field by field) has no `prompt` field, and the session is handed `composeJiraPrompt`'s text (`server/src/jira/prompt.util.ts`), the one function behind
+  appended flag is a literal. **The Jira prompt is the same shape, widened:** unless `POST /api/agents/dispatch-jira`'s body (`JiraAgentsController`, which rebuilds it
+  field by field) carries the launch sheet's EDITED `prompt` — sent only once the box was edited, shape-checked alone (a non-empty string, at most
+  `JIRA_PROMPT_MAX`, else 400 `prompt must be a non-empty string` / `prompt too long` before any Jira write), and spawned as written with neither composition
+  run, the link, worktree choice and writes still following the other fields — the session is handed `composeJiraPrompt`'s text (`server/src/jira/prompt.util.ts`), the one function behind
   `GET /api/jira/prompt` and the dispatch's two compositions — so a preview, a length check and a spawn cannot disagree. What a caller can influence is
   `key` (`isJiraKey`), the `repo` (proved against the mapping) and the action pick above. A SKILL's prompt is its template — the person's own text from
   `jira.json` — with `{key}`, `{url}` and `{repo}` filled in ONE pass by a replacement function, plus a `Jira ticket: <KEY>` line when the template names no

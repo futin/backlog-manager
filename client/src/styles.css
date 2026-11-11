@@ -2318,6 +2318,12 @@ button.rail-count { cursor: pointer }
 .launch-code:focus-within { border-color: var(--cyan) }
 .launch-code .sheet-prompt { display: block; box-sizing: border-box; width: 100%; background: none; border: 0; border-radius: 10px; padding: 10px 64px 10px 12px }
 .launch-code > button { position: absolute; top: 6px; right: 6px }
+/* Under an EDITED prompt box only: the count against the dispatch cap (red once over it — Start is disabled with the same sentence), the note that the generated
+   prompt moved on, and Reset at the end of the line. Wraps rather than squeezing on a phone. */
+.launch-prompt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px }
+.launch-prompt-meta > button { margin-left: auto }
+.launch-prompt-count { font-size: 12px; color: var(--ink3); font-variant-numeric: tabular-nums }
+.launch-prompt-count.over { color: var(--red) }
 /* The foot's where-it-starts line: left, 12 px `--ink3`; `margin-right: auto` because the shell's foot is `justify-content: flex-end`. */
 .launch-foot-line { margin-right: auto; font-size: 12px; color: var(--ink3); min-width: 0 }
 

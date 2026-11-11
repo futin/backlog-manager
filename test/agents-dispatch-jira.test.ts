@@ -200,7 +200,10 @@ describe('refusals before the reservation — no Jira write, no spawn, nothing r
     ['a new branch that does not carry the key', { branch: 'export' }, 'branch must carry PAY-1'],
     ['a base with continue', { mode: 'continue' }, 'base is only for a new branch'],
     ['an MR for context', { action: 'context', openMr: true }, 'openMr is only for execute with a branch'],
-    ['an unknown surface', { surface: 'terminal' }, 'surface must be dashboard or desktop']
+    ['an unknown surface', { surface: 'terminal' }, 'surface must be dashboard or desktop'],
+    ['a numeric prompt', { prompt: 42 }, 'prompt must be a non-empty string'],
+    ['a blank prompt', { prompt: ' \n ' }, 'prompt must be a non-empty string'],
+    ['a prompt over the 4 000 cap', { prompt: 'x'.repeat(4001) }, 'prompt too long']
   ])('400 for %s', async (_label, over, error) => {
     expect((await post({ ...BODY, ...over }).expect(400)).body).toEqual({ error });
     untouched();
@@ -579,6 +582,28 @@ describe('Start', () => {
     const sent = stubDashboard();
     await post({ ...BODY, ...NONE, action: { skill: SKILL.id }, assign: false, transitionId: null }).expect(200);
     expect(sent.spawns[0].prompt).toBe(`Review PAY-1 in ${REPO}, then stop.`);
+  });
+
+  // The launch sheet's edited prompt: spawned as written, after both writes, never recomposed — and the session is still the ticket's, linked and named as
+  // a composed launch would be. A 4 000-character prompt is at the cap, not over it.
+  it('an edited prompt is spawned verbatim after the writes, and the session is still linked to the ticket', async () => {
+    await build();
+    const sent = stubDashboard();
+    const custom = `Look at PAY-1 and only write a summary.${'.'.repeat(4000 - 39)}`;
+    expect(custom).toHaveLength(4000);
+    await post({ ...BODY, prompt: custom }).expect(200);
+    expect(sent.writesAtSpawn[0]).toEqual(['PUT /issue/PAY-1/assignee', 'POST /issue/PAY-1/transitions']);
+    expect(sent.spawns[0]).toMatchObject({ name: 'jira PAY-1', prompt: custom });
+    expect(live.get('PAY-1')).toMatchObject({ sessionId: 'sess-1' });
+  });
+
+  it('an edited prompt skips the composer, so a ticket whose composed prompt would be too long still starts', async () => {
+    writeConfig({ skills: [{ ...SKILL, prompt: '{url}'.repeat(300) }] });
+    await build();
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1', fields: { summary: 'S'.repeat(300) } }));
+    const sent = stubDashboard();
+    await post({ ...BODY, ...NONE, action: { skill: SKILL.id }, prompt: 'Just review it.' }).expect(200);
+    expect(sent.spawns[0].prompt).toBe('Just review it.');
   });
 
   it('two Starts on one key in the same moment (Review Focus 2): one 200, one 409, one spawn', async () => {

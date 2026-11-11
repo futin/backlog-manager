@@ -368,6 +368,74 @@ describe('JiraLaunchSheet — the foot line and Copy', () => {
   });
 });
 
+// The prompt box is editable: only an edit is sent (absent, the server composes after its writes), a later preview never overwrites it, Reset takes the
+// generated text back, and Start's last reason is the dispatch route's own refusal of the edited text.
+describe('JiraLaunchSheet — the editable prompt', () => {
+  const resetButton = (): HTMLElement | null => within(dialog()).queryByRole('button', { name: 'Reset' });
+  const edit = (text: string): void => {
+    fireEvent.change(promptBox(), { target: { value: text } });
+  };
+
+  it('an untouched box sends no prompt and draws no Reset', async () => {
+    await ready();
+    expect(promptBox()).not.toHaveAttribute('readonly');
+    expect(resetButton()).toBeNull();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).not.toHaveProperty('prompt');
+  });
+
+  it('an edit is what Start sends and both Copy chips copy, counted against the cap', async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    await ready();
+    edit('Only summarise PAY-131, change nothing.');
+    expect(within(dialog()).getByText('edited · 39 / 4000')).toBeInTheDocument();
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'Copy' }));
+    await userEvent.click(copyButton());
+    expect(writeText).toHaveBeenNthCalledWith(1, 'Only summarise PAY-131, change nothing.');
+    expect(writeText).toHaveBeenNthCalledWith(2, 'Only summarise PAY-131, change nothing.');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toMatchObject({ key: 'PAY-131', repo: '/Users/ada/pay', action: 'execute', prompt: 'Only summarise PAY-131, change nothing.' });
+  });
+
+  it('a new preview keeps the edit and says so; Reset takes the new generated text', async () => {
+    await ready();
+    expect(promptBox().value).toBe('prompt for execute in /Users/ada/pay');
+    edit('my own words');
+    await userEvent.click(tile('Ticket loaded'));
+    await waitFor(() => expect(promptReads().at(-1)?.searchParams.get('action')).toBe('context'));
+    await waitFor(() => expect(within(dialog()).getByText('the generated prompt changed — Reset to take it')).toBeInTheDocument());
+    expect(promptBox().value).toBe('my own words');
+    await userEvent.click(resetButton() as HTMLElement);
+    expect(promptBox().value).toBe('prompt for context in /Users/ada/pay');
+    expect(resetButton()).toBeNull();
+  });
+
+  it('typing the generated text back drops the edit', async () => {
+    await ready();
+    const generated = promptBox().value;
+    edit(`${generated} and more`);
+    expect(resetButton()).not.toBeNull();
+    edit(generated);
+    expect(resetButton()).toBeNull();
+  });
+
+  it.each([
+    ['a blank edit', ' \n ', 'the prompt is empty'],
+    ['an edit over the cap', 'x'.repeat(4001), 'prompt too long']
+  ])('%s disables Start with the route\'s sentence', async (_label, text, reason) => {
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    edit(text);
+    expect(startButton()).toBeDisabled();
+    expect(startButton()).toHaveAttribute('title', reason);
+  });
+});
+
 describe('JiraLaunchSheet — the action and the preview', () => {
   it('seeds the action from initialAction and refetches the preview, stale answer dropped, when it changes', async () => {
     await ready({ initialAction: 'context' });
@@ -398,11 +466,6 @@ describe('JiraLaunchSheet — the action and the preview', () => {
     expect(within(dialog()).queryByLabelText('Prompt')).not.toBeInTheDocument();
     await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/status')).toBe(true));
     await waitFor(() => expect(startButton()).toBeDisabled());
-  });
-
-  it('makes the preview read-only', async () => {
-    await ready();
-    expect(promptBox()).toHaveAttribute('readonly');
   });
 });
 

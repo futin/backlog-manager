@@ -53,11 +53,12 @@ const OPEN_DESKTOP_TIMEOUT_MS = 10_000;
  *     nothing and so releases nothing: releasing would drop the OTHER request's starting entry.
  *  5. after the reservation, still before any write: `no identity` (503) when an assign is asked and the poller has no `me`; a fresh detail read (§8's mapping);
  *     the transition offered by that read (400 `transition not offered` — the sheet's list can be minutes old); the first composition fits (400
- *     `prompt too long`). Refusing these before the assign is what makes "an assign that landed" only ever mean one the request needed.
+ *     `prompt too long`) — or, for an edited `prompt`, no composition at all: the person's text is spawned as written. Refusing these before the assign is what makes "an assign that landed" only ever mean one the request needed.
  *  6. assign → transition, each through `jiraWriteOrThrow` (the two write routes' own mapping), its sentence prefixed with the step and — after a landed
  *     assign — suffixed with ASSIGN_STANDS. An assign the ticket already carries is skipped (`assigned: false`): sending it would be a write that changes
  *     nothing and still bumps `updated`.
- *  7. the spawn, with the prompt composed AFTER the writes, so the session reads the status and assignee the ticket now has. Any failure from here — the
+ *  7. the spawn, with the prompt composed AFTER the writes, so the session reads the status and assignee the ticket now has (an edited prompt is not
+ *     recomposed: that would discard the edit). Any failure from here — the
  *     re-read, the re-composition, the spawn — keeps its status and gains WRITES_STAND when a write landed.
  *  8. `live.confirm`, `reconciler.arm()` and the answer — or, for a desktop answer with no id, `live.release` and a `session: null` answer.
  *
@@ -136,8 +137,16 @@ export class JiraDispatchService {
     const detail = unwrapJira(await this.poller.issueDetail(req.key));
     const transition = req.transitionId === null ? null : detail.transitions.find((t) => t.id === req.transitionId);
     if (transition === undefined) throw new HttpException({ error: 'transition not offered' }, 400);
-    const first = composeJiraPrompt(detail, action, repo, workspace);
-    if (!first.ok) throw new HttpException({ error: first.error }, 400);
+    // An edited prompt (the controller proved its shape) replaces BOTH compositions: the person's text is what spawns, so the composer is not asked — its
+    // refusals (`prompt too long` for a description that cannot fit) are about a text this launch no longer sends. Still before any write, as before.
+    const custom = req.prompt ?? null;
+    let prompt: string;
+    if (custom !== null) prompt = custom;
+    else {
+      const first = composeJiraPrompt(detail, action, repo, workspace);
+      if (!first.ok) throw new HttpException({ error: first.error }, 400);
+      prompt = first.prompt;
+    }
 
     let assigned = false;
     if (req.assign && detail.assignee?.accountId !== me?.accountId) {
@@ -149,12 +158,12 @@ export class JiraDispatchService {
     }
     const wrote = assigned || transition !== null;
 
-    let prompt = first.prompt;
     let spawned: ItemDispatchResult;
     try {
       // Nothing written, nothing changed by us: the first composition already holds the ticket as it is, and re-reading it would spend three more Jira
-      // calls of the 429 budget to learn nothing.
-      if (wrote) prompt = this.composeAfterWrites(unwrapJira(await this.poller.issueDetail(req.key)), action, repo, workspace);
+      // calls of the 429 budget to learn nothing. An edited prompt is never recomposed: doing so would throw the person's edit away, so it keeps the status
+      // and assignee the ticket had when the sheet previewed it.
+      if (wrote && custom === null) prompt = this.composeAfterWrites(unwrapJira(await this.poller.issueDetail(req.key)), action, repo, workspace);
       // `launchInProject`, not `spawnInProject`: only it carries a `surface`, and only it lets a desktop answer with no id through.
       spawned = await this.agents.launchInProject(repo, {
         prompt,

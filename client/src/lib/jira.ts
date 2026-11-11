@@ -2,7 +2,7 @@ import { errorOf } from './http';
 import { elapsedSince, formatCreated } from './item-age';
 import { countdownReading, pollAge, pollProgress, type PollReading } from './tracker';
 import { DEFAULT_NAME_PATTERN, branchCarriesKey, branchNameProblem, renderBranchPattern, shellQuote, slugOf } from '../../../shared/jira-branch';
-import { SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
+import { JIRA_PROMPT_MAX, SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
 import type {
   JiraAccess,
   JiraAction,
@@ -1288,6 +1288,16 @@ async function postAgents<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(await failureOf(res));
   return (await res.json()) as T;
+}
+
+/**
+ * Why the launch sheet's EDITED prompt cannot be sent, or `null` when it can — the dispatch route's own two refusals in its words, so Start is disabled with
+ * the sentence the server would answer. Blank is whitespace only (the route trims before it checks); the cap counts UTF-16 units, as the route's `.length` does.
+ */
+export function editedPromptProblem(text: string): string | null {
+  if (text.trim() === '') return 'the prompt is empty';
+  if (text.length > JIRA_PROMPT_MAX) return 'prompt too long';
+  return null;
 }
 
 /** `POST /api/agents/dispatch-jira` — the launch sheet's Start. Rejects with the server's sentence (a 409 for a key that already has a live session, say). */
