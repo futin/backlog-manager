@@ -540,19 +540,19 @@ describe('GET /api/jira/prompt', () => {
     expect((await get(q({ ...ok, key: 'ZED-1', branch: 'zed-1-export' })).expect(400)).body).toEqual({ error: `${REPO} is not mapped to ZED` });
   });
 
-  it('200 text/plain for a mapped repo: the execute text first, then the framed ticket block', async () => {
+  it('200 text/plain for a mapped repo: the workspace block first, then the execute text, and no copy of the ticket', async () => {
     const res = await get(q(ok)).expect(200);
     expect(res.headers['content-type']).toBe('text/plain; charset=utf-8');
     // The workspace block leads (Task 6); with refs the server cannot read the worktree is the conventional path.
     expect(res.text.startsWith(`Workspace: repository ${REPO}, mode new, branch pay-131-export cut from develop, expected worktree ${REPO}/.worktrees/pay-131-export. `)).toBe(true);
     expect(res.text).toContain('Work on Jira ticket PAY-131 in this repository, end to end');
-    expect(res.text).toContain('BEGIN TICKET');
-    expect(res.text).toContain('END TICKET');
+    expect(res.text).toContain('`jira.mjs show PAY-131`');
+    expect(res.text).not.toContain('TICKET');
   });
 
   it('the context built-in answers its own text', async () => {
     const res = await get(q({ ...NONE, action: 'context' })).expect(200);
-    expect(res.text.startsWith('Read Jira ticket PAY-131 below, then wait')).toBe(true);
+    expect(res.text.startsWith('Read Jira ticket PAY-131 first')).toBe(true);
   });
 
   it("skill:<id> answers the template's text with its placeholders filled, and no ticket block", async () => {
@@ -565,7 +565,7 @@ describe('GET /api/jira/prompt', () => {
     ['surrounding whitespace', `  ${REPO} `]
   ])('matches the stored path after normalising %s', async (_label, repo) => {
     const res = await get(q({ ...ok, repo })).expect(200);
-    expect(res.text).toContain('BEGIN TICKET');
+    expect(res.text).toContain('Work on Jira ticket PAY-131');
   });
 
   it('matches a ~ spelling against the absolute path stored for it, and quotes the caller\'s spelling when it does not match', async () => {

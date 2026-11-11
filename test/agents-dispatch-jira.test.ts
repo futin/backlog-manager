@@ -374,21 +374,20 @@ describe('refusals after the reservation — released, so a retry is not a 409',
     expect(sent.spawns).toHaveLength(1);
   });
 
-  it('a re-read that fails after the writes keeps its §8 status, says the writes stand, and spawns nothing', async () => {
+  // The prompt carries no ticket text, so nothing is recomposed after the writes: the only issue read after them is the poller's splice, whose failure a write
+  // survives (`reread: false`). It must not turn a landed launch into a 502.
+  it('an issue read that fails after the writes does not stop the spawn: the prompt is not recomposed', async () => {
     await build();
     const sent = stubDashboard();
-    // Every issue read after the transition lands fails: the splice's (which a write survives — `reread: false`) and then the dispatch's own re-read.
     let posted = false;
     fake.failNext = (call) => {
       if (call.method === 'POST' && call.url.endsWith('/transitions')) posted = true;
       else if (posted && call.method === 'GET' && /\/issue\/PAY-1(\?|$)/.test(call.url)) return { status: 500 };
       return null;
     };
-    const res = await post(BODY).expect(502);
-    expect(res.body.error).toBe('Jira answered 500 — the Jira writes stand');
+    await post(BODY).expect(200);
     expect(writes()).toEqual(['PUT /issue/PAY-1/assignee', 'POST /issue/PAY-1/transitions']);
-    expect(sent.spawns).toEqual([]);
-    expect(live.get('PAY-1')).toBeNull();
+    expect(sent.spawns).toHaveLength(1);
   });
 
   it('a spawn refusal with no write keeps its status and its sentence verbatim', async () => {
@@ -489,15 +488,14 @@ describe('the branch choice', () => {
     expect(sent.spawns[0].prompt).toContain(`expected worktree ${REPO}/.worktrees/pay-1-export. `);
   });
 
-  it('the spawned prompt is the preview for the same choice, but for the nonce', async () => {
+  it('the spawned prompt is the preview for the same choice, byte for byte', async () => {
     await build();
     const sent = stubDashboard();
     const choice = { ...BODY, assign: false, transitionId: null };
     await post(choice).expect(200);
     const query = new URLSearchParams({ key: 'PAY-1', action: 'execute', repo: REPO, mode: 'new', branch: 'pay-1-export', base: 'develop' });
     const preview = (await request(app.getHttpServer()).get(`/api/jira/prompt?${query.toString()}`).expect(200)).text;
-    const nonce = (text: string) => text.replace(/\b[0-9a-f]{12}\b/g, 'NONCE');
-    expect(nonce(sent.spawns[0].prompt as string)).toBe(nonce(preview));
+    expect(sent.spawns[0].prompt).toBe(preview);
     expect(preview).toContain('Workspace: repository');
   });
 });
@@ -520,14 +518,14 @@ describe('Start', () => {
 
     const spawn = sent.spawns[0];
     expect(spawn).toMatchObject({ project: '-dir-0', name: 'jira PAY-1', permissionMode: 'acceptEdits', model: DEFAULT_MODEL, remoteControl: false });
-    // Composed AFTER the writes: the ticket block shows the new status and assignee, not the ones the sheet was opened on.
+    // No copy of the ticket: the session reads it with `jira.mjs show`, so its status and assignee are whatever the writes left.
     const prompt = spawn.prompt as string;
     expect(
       prompt.startsWith(`Workspace: repository ${REPO}, mode new, branch pay-1-export cut from develop, expected worktree ${REPO}/.worktrees/pay-1-export. `)
     ).toBe(true);
     expect(prompt).toContain('Work on Jira ticket PAY-1 in this repository, end to end');
-    expect(prompt).toContain('status: In Progress (in progress)');
-    expect(prompt).toContain('assignee: Ada Lovelace');
+    expect(prompt).toContain('`jira.mjs show PAY-1`');
+    expect(prompt).not.toContain('TICKET');
 
     const status: JiraStatusPayload = (await request(app.getHttpServer()).get('/api/jira').expect(200)).body;
     expect(status.live['PAY-1']).toMatchObject({ name: 'jira PAY-1', repo: REPO, starting: false });
@@ -584,7 +582,7 @@ describe('Start', () => {
     expect(sent.spawns[0].prompt).toBe(`Review PAY-1 in ${REPO}, then stop.`);
   });
 
-  // The launch sheet's edited prompt: spawned as written, after both writes, never recomposed — and the session is still the ticket's, linked and named as
+  // The launch sheet's edited prompt: spawned as written, after both writes — and the session is still the ticket's, linked and named as
   // a composed launch would be. A 4 000-character prompt is at the cap, not over it.
   it('an edited prompt is spawned verbatim after the writes, and the session is still linked to the ticket', async () => {
     await build();

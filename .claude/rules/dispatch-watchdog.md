@@ -46,16 +46,16 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   is the one member whose caller text is appended verbatim and is therefore *proved* (`resolveBase`) rather than clamped. Do not restore any claim that every
   appended flag is a literal. **The Jira prompt is the same shape, widened:** unless `POST /api/agents/dispatch-jira`'s body (`JiraAgentsController`, which rebuilds it
   field by field) carries the launch sheet's EDITED `prompt` — sent only once the box was edited, shape-checked alone (a non-empty string, at most
-  `JIRA_PROMPT_MAX`, else 400 `prompt must be a non-empty string` / `prompt too long` before any Jira write), and spawned as written with neither composition
+  `JIRA_PROMPT_MAX`, else 400 `prompt must be a non-empty string` / `prompt too long` before any Jira write), and spawned as written with no composition
   run, the link, worktree choice and writes still following the other fields — the session is handed `composeJiraPrompt`'s text (`server/src/jira/prompt.util.ts`), the one function behind
-  `GET /api/jira/prompt` and the dispatch's two compositions — so a preview, a length check and a spawn cannot disagree. What a caller can influence is
+  `GET /api/jira/prompt` and the dispatch's one composition, made before any Jira write — so a preview, a length check and a spawn cannot disagree. What a caller can influence is
   `key` (`isJiraKey`), the `repo` (proved against the mapping) and the action pick above. A SKILL's prompt is its template — the person's own text from
   `jira.json` — with `{key}`, `{url}` and `{repo}` filled in ONE pass by a replacement function, plus a `Jira ticket: <KEY>` line when the template names no
-  `{key}`, and nothing of the ticket's own: the skill reads the ticket itself, so no stranger's text is in it. A BUILT-IN's prompt carries the ticket, the one
-  stranger's string, and the composer keeps it from steering the session by construction — framed as data BEFORE any of it is read, between
-  `BEGIN TICKET <nonce>` / `END TICKET <nonce>` lines whose nonce is minted per composition, the description in a fence longer than any backtick run inside it.
-  Either is capped at `JIRA_PROMPT_MAX` (4 000, the dashboard's own cap — a built-in prompt that cannot hold at least one character of the description, or a
-  skill's whose placeholders fill past it, is a 400 `prompt too long`, never one that says `(no description)`). **Item `dispatch` is the exception to both**:
+  `{key}`, and nothing of the ticket's own: the skill reads the ticket itself, so no stranger's text is in it. A BUILT-IN's prompt carries none of the ticket
+  either (2026-11-11): its instruction, the key, and an order to read the ticket first with `jira.mjs show <KEY>` and treat that text as data, not
+  instructions — so it is deterministic, the preview equals the spawn byte for byte, and no nonce, fence or truncation exists. Either is capped at
+  `JIRA_PROMPT_MAX` (4 000, the dashboard's own cap — a skill's whose placeholders fill past it, or any prompt a long repo path pushes over, is a 400
+  `prompt too long`). **Item `dispatch` is the exception to both**:
   its prompt is the launch sheet's, edited by a human, and is taken outright — save an execute's or a groom's finish clause, which dispatch appends from
   validated `finish`/`base`/`autoMerge`/`fix` (a body spelling any of the four flags is a 400; a groom body's one trailing `COMMIT_RULE` is stripped first;
   `autoMerge`/`fix` are accepted only with finish `pr`, and `fix` only with `autoMerge`; a groom sent to another machine has no finish, a 400).

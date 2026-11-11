@@ -158,7 +158,7 @@ export function JiraLaunchSheet({
   const promptText = preview.status === 'ok' ? preview.value : null;
   const promptRefusal = preview.status === 'failed' ? (preview.error instanceof Error ? preview.error.message : String(preview.error)) : null;
   // The reader's own prompt, once they typed in the box: `text` is what Start sends and Copy copies, `base` the generated text the edit started from. `null`
-  // is "not edited" — the server composes the prompt itself, after the writes, as before the box was editable. A later preview (another repository, branch or
+  // is "not edited" — the server composes the prompt itself, as before the box was editable. A later preview (another repository, branch or
   // action) never overwrites an edit: it lands in `promptText`, and the box says the generated text moved on, with Reset one click away. Typing the edit back
   // to the generated text exactly drops it, so an untouched-looking box is never sent as a custom prompt.
   const [edited, setEdited] = useState<{ text: string; base: string } | null>(null);
@@ -167,7 +167,7 @@ export function JiraLaunchSheet({
     setEdited(text === base ? null : { text, base });
   };
   const sentText = edited?.text ?? promptText;
-  // Compared as text, nonce included: a preview re-asked for the same choice mints a new nonce, so it also reads as changed — a Reset then costs nothing.
+  // Compared as text: the composition is deterministic for one choice, so only a different repository, branch or action moves it.
   const promptMoved = edited !== null && promptText !== null && promptText !== edited.base;
 
   const ceiling = agents?.spawnMaxPermission ?? null;

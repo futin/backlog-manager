@@ -56,7 +56,7 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 | `identity.ts`        | `JiraBootState` — the four boot answers, the token kind, the site-level `access`/`detail`, the 429 window and the 15 s → 5 min back-off        |
 | `map-issue.ts`       | `mapJiraIssue`, `pickSprintField`, `categoryOf`, `JIRA_ISSUE_FIELDS` and the Done window (`JIRA_DONE_WINDOW_DAYS`)                             |
 | `adf.ts`             | `adfToMarkdown` — Atlassian Document Format to Markdown, read side only; `ADF_PLACEHOLDER_RE`                                                  |
-| `block.ts`           | `renderTicketBlock` — one issue as plain text: the facts, the description, the subtasks (capped at `JIRA_BLOCK_CHILDREN_CAP`, 30); since phase 5a `TicketBlockOptions` — the prompt composer's fenced description and `JIRA_TRUNCATED_MARKER` after a cut, both outside the fence, while `?format=text` and `jira.mjs show` keep the `as-is` drawing |
+| `block.ts`           | `renderTicketBlock` — one issue as plain text: the facts, the description, the subtasks (capped at `JIRA_BLOCK_CHILDREN_CAP`, 30); read by `?format=text` and `jira.mjs show` — no Run prompt carries it since 2026-11-11 |
 | `poller.service.ts`  | `JiraPollerService` — the ticker, the boot sequence, the per-board caches, every fresh read the routes make, and since phase 3 `assignToMe`, `transitionIssue`, the splice and the sweep's newest-wins rule |
 | `unwrap.util.ts`     | `unwrapJira` — a poller outcome as its value or its §8 error, shared by both controllers so a failure means the same on every route (phase 3); `jiraWriteOrThrow` (phase 5a) — an issue write's outcome with its two own refusals, hoisted out of the write controller so the two write routes and `dispatch-jira` answer a failure in the same words |
 | `prompt.util.ts`     | `composeJiraPrompt` — what a Run session is told, the ticket framed as data (phase 5a); `resolveJiraActionOrThrow`; `JIRA_PROMPT_MAX`; since the repo/branch work `workspaceBlock` and the Open MR closing rule |
@@ -409,14 +409,15 @@ The server half of the Run action: a Jira ticket becomes a Claude session in a m
 
 ### The prompt composer
 
-`composeJiraPrompt(detail, action, repo)` (`prompt.util.ts`) is the only place a Run prompt is built, called by `GET /api/jira/prompt` and by the dispatch (twice —
-before any write, for the length check, and after the writes, for the spawn). A skill's prompt is its template with `{key}`, `{url}` and `{repo}` filled in
+`composeJiraPrompt(detail, action, repo)` (`prompt.util.ts`) is the only place a Run prompt is built, called by `GET /api/jira/prompt` and by the dispatch (once,
+before any write — the prompt depends on nothing the writes change, so the text length-checked is the text spawned). A skill's prompt is its template with `{key}`, `{url}` and `{repo}` filled in
 one pass, plus a `Jira ticket: <KEY>` line when the template names no `{key}`, and nothing else — no ticket block, since the skill reads the ticket itself;
-`{summary}` and `{description}` stay literal. A built-in's prompt is an instruction, one framing line and the ticket block between `BEGIN TICKET <nonce>` /
-`END TICKET <nonce>` lines; the instruction is `execute` (branch, implement, verify, move the issue only when the workflow offers exactly one transition to a
-done category, then `COMMIT_RULE`, imported from `shared/agent.ts`) or `context` (read the ticket and wait). Over `JIRA_PROMPT_MAX` (4 000) a built-in's
-description is cut from the end with a marker line after the closing fence; a built-in prompt that cannot hold one character of it, or a skill's whose
-placeholders fill past the cap, is `prompt too long`. The ticket-as-data framing is the invariant's.
+`{summary}` and `{description}` stay literal. A built-in's prompt carries no ticket text either (2026-11-11): it is an instruction that opens by telling the
+session to read the ticket with `jira.mjs show <KEY>` and to treat that text as data, not instructions; the instruction is `execute` (implement, verify, move
+the issue only when the workflow offers exactly one transition to a done category, then `COMMIT_RULE`, imported from `shared/agent.ts`) or `context` (read the
+ticket and wait). Both are deterministic for one choice and around a thousand characters, which leaves the launch sheet's edit room under `JIRA_PROMPT_MAX`
+(4 000); a prompt over the cap — a skill's whose placeholders fill past it, or one a very long repo path pushes over — is `prompt too long`. The
+ticket-as-data rule is the invariant's.
 
 Since the repo/branch work the composer takes the Run's workspace too, `composeJiraPrompt(detail, action, repo, workspace)`. A workspace (modes `new` and
 `continue`; `none` is `null` and changes nothing) puts `workspaceBlock` FIRST, ahead of a built-in's instruction and a skill's template alike: one line of facts
