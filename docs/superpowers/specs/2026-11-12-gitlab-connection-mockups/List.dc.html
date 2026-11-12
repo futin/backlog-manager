@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>List view with Delivery column</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Hanken Grotesk',sans-serif;color:#131313}
+a{color:#306c0f}a:hover{color:#1f4a09}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font-size:12px;font-weight:600;color:#6b6b6b;text-align:left;padding:10px 12px;border-bottom:1px solid #dcdcda}
+td{padding:11px 12px;border-bottom:1px solid #eaeae8;vertical-align:middle;white-space:nowrap}
+.k{font-weight:600}
+.sd{width:6px;height:6px;border-radius:999px;display:inline-block;margin-right:6px}
+.trk{display:inline-flex;align-items:center;gap:3px;margin-right:8px;vertical-align:middle}
+.p{width:8px;height:8px;border-radius:999px;display:inline-block;box-sizing:border-box}
+.on{background:#7dc242}.off{border:1.5px solid #dcdcda;background:#ffffff}.bad{background:#b03b28}.run{background:#c4761f}.mg{background:#6b52a8}.lt{border:1.5px dashed #dcdcda;background:#ffffff}
+.w{font-size:12px;color:#525252}
+.m{font-size:12px;color:#6b6b6b}
+.seg{display:inline-flex;background:#dcdcda;border-radius:10px;padding:2px}
+.seg span{padding:4px 12px;font-size:12px;font-weight:500;border-radius:8px;color:#525252}
+.seg .sel{background:#ffffff;color:#131313}
+</style>
+</helmet>
+<div style="width:1320px;height:560px;box-sizing:border-box;background:#f4f4f3;padding:24px 28px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;align-items:center;gap:12px">
+    <h2 style="margin:0;font-size:18px;font-weight:600">Team board</h2>
+    <div class="seg"><span>Board</span><span class="sel">List</span></div>
+    <div class="seg" style="margin-left:auto"><span class="sel">All</span><span>Has MR</span><span>Pipeline failing</span><span>Done, not merged</span></div>
+  </div>
+  <div style="background:#ffffff;border:1px solid #eaeae8;border-radius:12px;padding:4px 8px;overflow-x:auto">
+    <table>
+      <thead><tr><th scope="col">Session</th><th scope="col">Key</th><th scope="col">Summary</th><th scope="col">Status</th><th scope="col">Delivery</th><th scope="col">Assignee</th><th scope="col">Updated</th></tr></thead>
+      <tbody>
+        <tr><td class="m">ended · 2h</td><td class="k">TIMIFY-123</td><td>Export bookings widget to CSV</td><td><span class="sd" style="background:#c4761f"></span>In Review</td>
+          <td><span class="trk"><i class="p on"></i><i class="p on"></i><i class="p on"></i><i class="p lt"></i><i class="p off"></i></span><a href="#">!412</a> <span class="w">pipeline passed</span></td><td>Andreja J.</td><td class="m">2h</td></tr>
+        <tr><td><span class="sd" style="background:#7dc242"></span>Working · 12m</td><td class="k">TIMIFY-131</td><td>Timezone offset wrong on reschedule</td><td><span class="sd" style="background:#c4761f"></span>In Progress</td>
+          <td><span class="trk"><i class="p on"></i><i class="p on"></i><i class="p bad"></i><i class="p lt"></i><i class="p off"></i></span><a href="#">!415</a> <span class="w" style="color:#b03b28">pipeline failed</span></td><td>Andreja J.</td><td class="m">40m</td></tr>
+        <tr><td class="m">—</td><td class="k">TIMIFY-140</td><td>Rate-limit the proxy's export query</td><td><span class="sd" style="background:#c4761f"></span>In Progress</td>
+          <td><span class="trk"><i class="p on"></i><i class="p on"></i><i class="p run"></i><i class="p lt"></i><i class="p off"></i></span><a href="#">!417</a> <span class="w">pipeline running</span></td><td>Marko K.</td><td class="m">1d</td></tr>
+        <tr><td class="m">—</td><td class="k">TIMIFY-150</td><td>Split booking service module</td><td><span class="sd" style="background:#6b6b6b"></span>To Do</td>
+          <td><span class="trk"><i class="p on"></i><i class="p off"></i><i class="p off"></i><i class="p lt"></i><i class="p off"></i></span><a href="#">!419</a> <span class="w">draft</span></td><td>Andreja J.</td><td class="m">5h</td></tr>
+        <tr><td class="m">—</td><td class="k">TIMIFY-144</td><td>Bulk cancel from the calendar</td><td><span class="sd" style="background:#6b6b6b"></span>To Do</td>
+          <td class="m">no MR</td><td class="m">unassigned</td><td class="m">3d</td></tr>
+        <tr><td class="m">ended · 1d</td><td class="k">TIMIFY-118</td><td>Proxy drops locale header</td><td><span class="sd" style="background:#7dc242"></span>Done</td>
+          <td><span class="trk"><i class="p mg"></i><i class="p mg"></i><i class="p mg"></i><i class="p mg"></i><i class="p mg"></i></span><a href="#">!398</a> <span class="w">merged</span></td><td>Andreja J.</td><td class="m">1d</td></tr>
+        <tr><td class="m">—</td><td class="k">TIMIFY-112</td><td>Done in Jira, MR still open</td><td><span class="sd" style="background:#7dc242"></span>Done</td>
+          <td><span class="trk"><i class="p on"></i><i class="p on"></i><i class="p on"></i><i class="p lt"></i><i class="p off"></i></span><a href="#">!401</a> <span class="w" style="color:#8a5214">not merged</span> <span class="m">+1 MR</span></td><td>Marko K.</td><td class="m">2d</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="m" style="margin:0">Track dots: pushed · MR open · pipeline · review (dashed until CodeRabbit) · merged</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1320,"height":560}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
