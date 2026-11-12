@@ -186,20 +186,47 @@ Both orchestrate `SKILL.md` §7 and execute `references/pr-mode.md` §7:
   pins the `base` pairing keeps passing.
 - Merge-commit `Reviewed:` line and tracker snapshot handling are unchanged — they already point at `<id>-<k>.md`.
 
-### 5. Reviewer model per group (user's decision: size rule plus an override)
+### 5. Reviewer model and effort per group (user's decision: configurable from Settings, overridable per launch)
 
-Today the model is fixed by the agent file's frontmatter, `model: opus`. That frontmatter stays as the default; the choice moves into the manifest and the
-caller passes it on each dispatch through the Agent tool's `model` parameter.
+Today the model is fixed by the agent file's frontmatter, `model: opus`, and effort is never set. The frontmatter stays as the fallback; the choice moves
+into a run-scoped **reviewer config**, `scope` writes a `model` and an `effort` into each group, and the caller passes both on each dispatch through the
+Agent tool's `model` and `effort` parameters.
 
-- **Size rule, in `scope`.** Each group gets a `model` field. Group 1 is always `opus`: it carries the item-level checks, and on a diff below the grouping
-  threshold it is the only group, so **a small diff keeps exactly today's Opus review**. Every other group is `sonnet` when its changed lines are at or
-  below a threshold (starting value **300**, a soft constant), `opus` above it.
-- **Override.** A `--review-model <opus|sonnet>` flag forces one model for every group. My call on where it lives: a trigger flag on
-  `/backlog-orchestrate` (recorded in the run file like the run's other launch choices, so a `--resume`d driver uses the same model) and on `/backlog-execute`
-  (session-scoped). `scope` takes it as `--model <m>` and writes it into every group. No board UI in this change; a Settings default and a launch-sheet
-  picker are a follow-up.
-- A fix loop's re-review uses the same per-group models as the first round (groups come from the first `scope`).
-- The merged report's `## What I reviewed` names each group's model, so a reader can weigh a Sonnet-reviewed group accordingly.
+**The config.** Shape (names the builder's call):
+
+- `mode`: `same` | `split`.
+- `same`: one `{ model, effort }` pair used for every group.
+- `split`: a `big` pair, a `small` pair and `smallMaxLines` (default **300** changed lines). A group at or below `smallMaxLines` uses `small`; above it,
+  `big`. **Group 1 always uses `big`** — it carries the item-level checks, and on a diff below the grouping threshold it is the only group.
+- Model vocabulary: the Agent tool's (`opus`, `sonnet`, `haiku`, `fable`) plus "agent default" (send no `model`, so the frontmatter's `opus` applies).
+  Effort: `low` … `max` plus "default" (send no `effort`). An unrecognised value falls through to the default, as the existing dispatch `model`/`effort`
+  handling does (`server/src/agents/orchestrate-args.service.ts`).
+- **Default config:** `split`, `big` = agent default (Opus) + default effort, `small` = `sonnet` + default effort, 300 lines. With these defaults a small
+  diff gets exactly today's review.
+
+**Where it is set, and how it travels** — the same path merge mode and question mode already take, end to end (`CLAUDE.md`: "Merge mode is run-scoped:
+chosen per launch, defaulted from Settings, and carried spawn → prompt → `init` → run file"):
+
+1. **Settings → Orchestrator group** (`client/src/components/settings/SettingsView.tsx`, `OrchestratorGroup`, per-device like its siblings): a "Reviewer"
+   block with the `same`/`split` switch, then either one model + effort row or the big pair, the small pair and the line threshold.
+2. **Orchestrate sheet** (`client/src/components/board/orchestrate/`, `useOrchestrateDraft`) seeds its own reviewer picker from Settings and can override
+   per launch. **Execute launch sheet** likewise, for a `--finish pr` launch (the only execute mode that dispatches the reviewer).
+3. **Launch request** (`shared/types.ts`) carries the config; the server validates it the way `resolveMergeMode` validates merge mode, and appends it to the
+   spawned trigger as compile-time-literal flags (the existing rule for `mergeMode`/`questionMode` in `orchestrate-args.service.ts`).
+4. **Trigger flags**: `/backlog-orchestrate` and `/backlog-execute` accept `--review-model`/`--review-effort` (same-mode) or
+   `--review-big`/`--review-small`/`--review-small-max-lines` (split-mode); exact spelling the builder's call. A trigger with none of them uses the default
+   config, so a typed trigger and an older board both keep working.
+5. **Run file**: `orchestrate.mjs init` records the config, so a `--resume`d driver dispatches with the same models. Execute holds it for its session.
+6. `scope --review-config <json>` writes each group's `model` and `effort` into the manifest; the caller reads them from there, never re-derives them.
+
+Also:
+
+- A fix loop's re-review uses each group's model and effort from the first round (groups come from the first `scope`).
+- The merged report's `## What I reviewed` names each group's model and effort, so a reader can weigh a Sonnet-reviewed group accordingly.
+- **Run detail** shows the run's reviewer config beside its merge mode, so a person reading a run can tell which reviewer approved it. My call; the builder
+  places it.
+- The plan's UI tasks end with `/ui-verify` (global rule for UI work); there are no mocks — the new rows follow the existing `SettingsRow` and sheet-picker
+  patterns.
 
 ### 6. Cost note
 
@@ -239,7 +266,9 @@ cheap tool calls.
 - A coverage failure parks the item with the existing `parked` attention kind.
 - The end-to-end hand run is post-merge (after plugin sync and restart); the tool tests gate the merge.
 
-- The model override is a trigger flag (run-file recorded for orchestrate), not a board setting; Sonnet threshold 300 changed lines is a starting guess.
+- Reviewer config defaults (split; big = Opus, small = Sonnet, 300 lines) and showing it on Run detail.
 
 Decided by the user: scope (coverage, anchors, grouping; no self-check filter); the reviewer stays `agents/backlog-reviewer.md`; re-review after a fix
-covers touched groups plus group 1; the reviewer model is chosen per group by a size rule, with an override that forces one model.
+covers touched groups plus group 1; reviewer model **and effort** are configurable in Settings → Orchestrator as either one pair for every group or
+separate big/small pairs with a line threshold, group 1 always on the big pair, seeded into the Orchestrate and execute launch sheets, overridable per
+launch, and recorded in the run file.
