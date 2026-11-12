@@ -60,7 +60,10 @@ widths) are soft targets, never a reason to drop a rule.
 
 **Files:**
 - Create: `server/src/gitlab/env.util.ts`
-- Modify: `docker-compose.yml:109-117` (after the `BM_JIRA_*` lines), `.env.example:139` (new block after the Jira block, before `BM_MACHINE_NAME`)
+- Modify: `docker-compose.yml:109-117` (after the `BM_JIRA_*` lines), `.env.example:139` (new block after the Jira block, before `BM_MACHINE_NAME`),
+  `test/helpers/env.ts:113-115` (set `BM_GITLAB_SITE` and `BM_GITLAB_TOKEN` to `''` — plain `=`, not `||=` — beside the Jira trio, with its comment's
+  reasoning: `ConfigModule.forRoot` loads `.env`, and from Task 6 on every `AppModule` suite's bootstrap would otherwise send the developer's real token to
+  the real site)
 - Test: `test/gitlab-env.test.ts` (new), `test/compose-env.test.ts` (extend, beside `describe('docker-compose BM_JIRA_SITE / …')` at `:119`)
 
 **Interfaces:**
@@ -111,7 +114,8 @@ widths) are soft targets, never a reason to drop a rule.
   - `''`, `not a url`, `https://host-only.example`, `/local/path/repo.git` → `null`.
   - `describe('remoteOnSite')` with site `www.gitlab.timify.io`: true for the scp, ssh-on-2222 (ssh ports are not https ports — any ssh port is on the
     site), https no-port and https `:443` rows; false for `https://www.gitlab.timify.io:8443/ns/r`, `git@gitlab.timify.io:ns/r.git` (no `www.` aliasing),
-    `git@github.com:o/r.git`.
+    `git@github.com:o/r.git`, and `http://www.gitlab.timify.io/ns/r.git` (an `http://` remote is never on the site: the server only speaks https, and
+    ssh/scp remotes on any port and https remotes with no port or 443 are the only ones spec §6.1 admits).
   - `gitlabProjectId('development/backend/microservice')` → `'development%2Fbackend%2Fmicroservice'`.
 - [ ] **Step 2: Run** `pnpm exec jest test/gitlab-remote.test.ts` — FAIL.
 - [ ] **Step 3: Implement.** One comment line on why userinfo is never captured (a remote on this machine can be `https://oauth2:<PAT>@…`, spec §4).
@@ -221,27 +225,33 @@ widths) are soft targets, never a reason to drop a rule.
   - `GitlabPayload = { status: GitlabStatus; jiraProjects: Record<string, GitlabProjectView[]>; mrs: GitlabMr[] }` — `jiraProjects` keyed by Jira project
     key, each the views of the projects that key maps on the site.
   - `GITLAB_POLL_MS = 120_000`, `GITLAB_SWEEP_WAIT_MS = 20_000`, `GITLAB_RATE_LIMIT_DEFAULT_MS = 60_000`, `GITLAB_PAGES_PER_PROJECT = 5`,
-    `GITLAB_FINISHED_DAYS = 30`.
+    `GITLAB_FINISHED_DAYS = 30`, `GITLAB_IDENTITY_RETRY_MS = 60_000`.
   - `class GitlabPollerService implements OnApplicationBootstrap, OnApplicationShutdown` — constructor
     `(client: GitlabClient, live: JiraLiveService, deps?: { repos?: () => Record<string, string[]>; readOrigin?: (p: string) => Promise<string | null>; env?: () => NodeJS.ProcessEnv; now?: () => number })`
     (defaults: `readJiraConfig().repos`, the runGit read, `process.env`, `Date.now`); subscribes `live.onReposChanged(() => this.arm())` in the constructor.
-    Members: `get armed(): boolean`; `arm(): void`; `disarm(): void`; `tick(): Promise<void>`; `sweepNow(): Promise<GitlabSweepResult>` with
+    Members: `get armed(): boolean` (true while a timer is pending **or** a sweep is in flight — unlike the tracker's `timer !== null`, which reads false
+    for the whole of a sweep and would drop every delivery surface during each one); `arm(): void`; `disarm(): void`; `tick(): Promise<void>`; `sweepNow(): Promise<GitlabSweepResult>` with
     `GitlabSweepResult = { kind: 'done' } | { kind: 'not-armed' } | { kind: 'wait'; retryAt: number }`; `payload(): GitlabPayload`.
 
 **Behaviour the tests pin** (spec §5.2, §6.1, §6.3):
 - Identity: read at bootstrap, and again when a **fingerprint** of (site, token) changes — a SHA-256 of the pair held in memory, never the token itself —
   noticed by `payload()` or a sweep; `payload()` then answers `checking` and starts the read without awaiting it. Identity read status → state: 200 →
   working token; 401/403 → `rejected` (`httpStatus`, `reason` = GitLab's message); status 0 (incl. refused 3xx) or 5xx → `unreachable` (`reason`).
-  Independent of arming.
+  Independent of arming. While the identity is unanswered or `unreachable`, it is retried at the top of each sweep and by `payload()` at most once per
+  `GITLAB_IDENTITY_RETRY_MS = 60_000` (the tracker's `IDENTITY_RETRY_MS` precedent, `server/src/tracker/poller.service.ts:95`), un-awaited; a `rejected`
+  identity is re-read only on a fingerprint change or a 401 (spec §5.2).
 - `arm()`: returns if stopped, if unconfigured, if a timer or sweep exists; else starts `tick()`. A sweep re-derives the mapping; zero projects on the
   site → no successor, timer cleared (disarmed), state `idle` once identity is good. A successful identity read with ≥ 1 project → `connected`.
 - Sweep per project, in order, within `GITLAB_PAGES_PER_PROJECT` page requests: `opened` pages until a page shorter than 100; then `merged` and then
   `closed`, each with `updated_after` = now − 30 days. Budget spent while the last page was full → `capped: true`, problem
-  `{ kind: 'capped', path, shown: <rows kept> }`. Then one `mergeRequest` call per kept **opened** MR for `head_pipeline` (none for merged/closed).
-  Each MR's `keys` = `mrKeys(source, title, target.jiraKeys)`; MRs with no keys are dropped.
+  `{ kind: 'capped', path, shown: <rows kept> }`. Each MR's `keys` = `mrKeys(source, title, target.jiraKeys)`; MRs with no keys are dropped. Then one
+  `mergeRequest` call per kept (keyed) **opened** MR for `head_pipeline` (none for merged/closed or keyless ones). A detail call that fails (any non-200
+  other than 401/429, which follow their own rules) leaves that MR's `pipeline` at the last good value for the same project + iid, else `none`; it does
+  not mark the project `failed`.
 - A project's list answering 403/404 → that project `failed: true`, problem `cannot-read`, its previous MRs kept. Any call answering 401 → identity re-read
-  at once (state turns `rejected` within the sweep). Status 0/5xx on a project → `failed: true`, previous MRs and `polledAt` kept. Success → MRs
-  replaced, `polledAt` = now, `failed: false`.
+  at once (state turns `rejected` within the sweep). Status 0 (incl. a refused 3xx) or 5xx on a project → `failed: true`, previous MRs and `polledAt`
+  kept, **and the state turns `unreachable`** with `reason` = the first such call's message (spec §5.2: "the identity read or a sweep gets no HTTP
+  answer"); the next sweep in which no call fails that way restores `connected`. Success → MRs replaced, `polledAt` = now, `failed: false`.
 - 429 anywhere → `retryAt = now + (Retry-After s × 1000 or GITLAB_RATE_LIMIT_DEFAULT_MS)`; the sweep stops; `status.retryAt` is the ISO instant while
   `now < retryAt`, else `null`; `sweepNow()` inside the window → `{ kind: 'wait', retryAt }`; the next timer sweep waits it out.
 - `sweepNow()`: not armed (no timer, no sweep in flight, after `arm()` found nothing) → `not-armed`; otherwise joins or starts `tick()` and awaits it
@@ -250,23 +260,32 @@ widths) are soft targets, never a reason to drop a rule.
 - [ ] **Step 1: Write the failing tests** (`test/gitlab-poller.test.ts`, over `FakeGitlab` and injected `repos`/`readOrigin`/`env`/`now`; a stub
   `JiraLiveService`-shaped object with `onReposChanged`):
   - unconfigured env → `payload().status` = `{ state: 'unconfigured', site: null, armed: false, … }`; `arm()` makes no fetch.
+  - configured with a mapped repo: while the first sweep's list call is pending (fake holds it), `armed` is `true` and `payload().status.armed` is `true`.
   - configured, identity 200, repos map microservice only → after `await svc.tick()`: state `connected`, `user.username` from the fake, `mappedRepos: 1`,
     `armed: true`, `jiraProjects.TIMIFY[0]` `{ path: 'development/backend/microservice', repo: 'microservice', capped: false, failed: false }` with
     `polledAt` = the injected now as ISO.
   - MR fixture with distinct values per field: open `!412` (branch `timify-123-export`, pipeline `success`), open draft `!419` (title `TIMIFY-150 | split`,
     pipeline `failed`), merged `!398` (`fix/timify-118`), closed `!390` (`timify-117`), open `!500` with branch `chore/deps` → `mrs` holds 412, 419, 398,
     390 with keys `['TIMIFY-123']`, `['TIMIFY-150']`, `['TIMIFY-118']`, `['TIMIFY-117']`; 412 `pipeline: 'success'`, 419 `pipeline: 'failed'`, 398 and 390
-    `pipeline: null`; `!500` absent. Detail calls were made for 412, 419, 500 only (opened), none for 398/390.
+    `pipeline: null`; `!500` absent. Detail calls were made for 412 and 419 only — none for 398/390 (finished) or `!500` (keyless).
+  - pipeline survives a failed detail read: second sweep, the detail call for 412 answers 500 → 412 still `pipeline: 'success'`, project `failed: false`;
+    a brand-new opened MR whose detail call answers 500 → `pipeline: 'none'`.
   - the merged/closed list URLs carry `updated_after` = injected now − 30 days.
+  - two Jira keys: repos `{ TIMIFY: [microservice, proxy], PAY: [microservice] }`; proxy holds an open MR on `pay-7` and microservice one on
+    `pay-8-fix` → `jiraProjects.PAY` lists microservice only, `jiraProjects.TIMIFY` both; the microservice MR has keys `['PAY-8']`, and the proxy MR is
+    absent (proxy maps TIMIFY only, so `pay-7` yields no key).
   - cap: the fake answers 100 opened rows on each of pages 1–5 → `capped: true`, problem `{ kind: 'capped', path, shown: 500 }`, and no merged/closed page
     was requested.
   - repos map microservice and proxy; proxy's list answers 404 → microservice `failed: false`, proxy `failed: true`, problem
     `{ kind: 'cannot-read', path: 'development/dev-api-graphql-proxy', status: 404 }`, state still `connected`.
   - identity 401 → `rejected`, `httpStatus: 401`; identity 403 → `rejected`; identity 302 → `unreachable`, `reason: 'redirect refused (302)'`; identity
     503 → `unreachable`.
+  - identity 503 at bootstrap → `unreachable`; the fake then answers 200; with `now` advanced 60 s, a `payload()` call (or the next sweep) re-reads it and
+    the state becomes `connected` (with a mapped repo) or `idle` (without); with `now` advanced only 30 s, no second `/user` call is made by `payload()`.
   - good identity, then a project list answers 401 on the next sweep → identity is re-read during that sweep and state is `rejected` after it.
-  - failure keeps last good: first sweep returns `!412`; second sweep gets status 0 on that project → `mrs` still holds `!412`, `polledAt` unchanged,
-    `failed: true`.
+  - failure keeps last good: first sweep returns `!412`; second sweep gets status 0 (`fetch failed`) on that project → `mrs` still holds `!412`,
+    `polledAt` unchanged, `failed: true`, state `unreachable`, `reason: 'fetch failed'`; a third sweep whose list answers 302 → `unreachable`,
+    `reason: 'redirect refused (302)'`, and the fake saw no call to the `Location` host; a fourth, healthy sweep → `connected`, `failed: false`.
   - 429 with `Retry-After: 30` → `status.retryAt` = now + 30 000 as ISO; `sweepNow()` → `{ kind: 'wait', retryAt }`; with `now` advanced past it,
     `status.retryAt` is `null`.
   - no repo on the site (only github remote) and identity 200 → state `idle`, `armed: false`, `foundHosts: ['github.com']`; a later `onReposChanged`
@@ -302,9 +321,13 @@ widths) are soft targets, never a reason to drop a rule.
   - unconfigured: `GET /api/gitlab` → 200, `status.state: 'unconfigured'`, `mrs: []`; `POST /api/gitlab/sweep` (same-origin headers as the GitHub test) →
     409 `{ message: 'GitLab is not being polled' }`.
   - a cross-origin `POST /api/gitlab/sweep` → 403 (the guard).
-  - with `BM_GITLAB_TOKEN=glpat-SECRET-123` and `BM_GITLAB_SITE` set, and the client's fetch overridden to a `FakeGitlab` (override the `GitlabClient`
-    provider), `GET /api/gitlab` body text contains neither `glpat-SECRET-123` nor `oauth2`, whatever the fake answers (run it once with identity 200 and
-    once with 401).
+  - with `BM_GITLAB_TOKEN=glpat-SECRET-123` and `BM_GITLAB_SITE=www.gitlab.example.com` set, the `GitlabClient` provider overridden with one on a
+    `FakeGitlab`, and `BM_JIRA_FILE` pointed at a temp `jira.json` (the shape `readJiraConfig` reads) mapping `TIMIFY` to a temp repo made with `git init` +
+    `git remote add origin https://oauth2:glpat-abc@www.gitlab.example.com/ns/repo.git`: after `POST /api/gitlab/sweep`, the `GET /api/gitlab` body text
+    contains none of `glpat-SECRET-123`, `glpat-abc`, `oauth2` — run once with identity 200 (and assert `jiraProjects.TIMIFY[0].path === 'ns/repo'`, so
+    the remote really was read) and once with identity 401.
+  - armed, healthy: `POST /api/gitlab/sweep` → 200 `{ ok: true }`; inside a 429 window (`Retry-After: 30`) → 429 `{ message: 'rate limited', retryAt }`
+    with `retryAt` an ISO string.
 - [ ] **Step 2: Run** `pnpm exec jest test/gitlab-routes.test.ts` — FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** it plus `test/vite-proxy.test.ts` and `test/github-sweep-route.test.ts` — PASS.
@@ -315,7 +338,7 @@ widths) are soft targets, never a reason to drop a rule.
 **Files:**
 - Create: `client/src/hooks/useGitlab.ts`, `client/src/hooks/GitlabContext.tsx`
 - Modify: `client/src/App.tsx:84-99` (mount `GitlabProvider` inside `JiraProvider`, wrapping what `PullRequestsProvider` wraps), `client/src/lib/sweep.ts`
-  (`SweepService` gains `'gitlab'`: URL `/api/gitlab/sweep`, name `GitLab`), `test/poll-coalescing.test.tsx:95-133` (`SUBJECTS` entry)
+  (`SweepService` gains `'gitlab'`: URL `/api/gitlab/sweep`, name `GitLab`), `test/poll-coalescing.test.tsx:88-140` (`SUBJECTS` entry appended last, `GATED` exclusion)
 - Test: `test/gitlab-context.test.tsx`, `test/poll-coalescing.test.tsx`
 
 **Interfaces:**
@@ -327,7 +350,9 @@ widths) are soft targets, never a reason to drop a rule.
 
 - [ ] **Step 1: Write the failing tests** — `test/gitlab-context.test.tsx` (jsdom, mocked `fetch`): a 200 payload reaches a consumer's `data`; a 500 or a
   network error leaves `data: null` and sets `error`, and a consumer rendered beside it still renders its own content (Review Focus 4); `useGitlabContext`
-  outside the provider throws. `poll-coalescing`: add `useGitlab` to `SUBJECTS` with the same assertions the `usePullRequests` entry gets.
+  outside the provider throws. `poll-coalescing`: append a `useGitlab` entry **last** in `SUBJECTS` (index lookups below it must keep pointing at their
+  hooks), modelled on the `useTicks` entry (`:126-131`) — a POLLER with nothing in its answer that disarms it — and add it to the `GATED` exclusion
+  (`:140`) beside `useWatchdog` and `useTicks`, with a comment saying why (the Sources row needs the status whatever GitLab answers).
 - [ ] **Step 2: Run** `pnpm exec jest test/gitlab-context.test.tsx test/poll-coalescing.test.tsx` — FAIL.
 - [ ] **Step 3: Implement.** Then `grep -l 'useRefreshing\|postSweep\|SweepService' test/` and add each hit to the run.
 - [ ] **Step 4: Run** — PASS.
@@ -371,7 +396,8 @@ widths) are soft targets, never a reason to drop a rule.
   - `ticketDelivery`: own MRs; sub-task (`subtask: true`, parent `TIMIFY-100`) with none of its own → parent's lead, `via: 'TIMIFY-100'`; sub-task with
     its own → own, `via: null`; a story under an epic (`subtask: false`, parent set) with none → `none`, not the epic's; grandparent never consulted;
     project `PAY` with no mapped project → `hidden`; mapped project `polledAt: null` → `unknown`/`not-read`; `failed` and never read → `unknown`/`failed`;
-    capped and no MR → `unknown`/`capped`; read and none → `{ kind: 'none', repos: ['microservice'] }`; `done` + own opened → `notMerged: true`; `done` +
+    capped and no MR → `unknown`/`capped`; `failed: true` but `polledAt` set
+    (read once, failing now) and no MR → `none`, not `unknown` (spec §7: a known ticket stays known); read and none → `{ kind: 'none', repos: ['microservice'] }`; `done` + own opened → `notMerged: true`; `done` +
     inherited opened → `notMerged: false`; `done` + own merged → `false`.
   - key boundary through the index: an MR keyed `TIMIFY-1234` never appears for `TIMIFY-123`.
   - `bandTotals` over tops: leads `!412` opened/success, `!415` opened/failed, `!419` draft/failed, `!398` merged, `!390` closed, and two tops both
@@ -438,7 +464,8 @@ widths) are soft targets, never a reason to drop a rule.
   - merged MR → Merged step carries the merged-at age; Pipeline has no word.
   - also MRs `!415`, `!420` → an `Also:` line with both links, each with its state word and `<repo> · <age>`.
   - inherited → `via TIMIFY-100` after the link.
-  - known none → `no merge request for TIMIFY-144 in microservice in the last 30 days`; `unknown/not-read` → `GitLab not read yet`; `unknown/failed` →
+  - known none, TIMIFY mapping both repos → `no merge request for TIMIFY-144 in microservice, dev-api-graphql-proxy in the last 30 days` (basenames joined
+    with `, ` in `jiraProjects` order — by project path); with one repo → `… in microservice in the last 30 days`; `unknown/not-read` → `GitLab not read yet`; `unknown/failed` →
     `GitLab could not be read — Settings › Shared › Sources`; `unknown/capped` → `more merge requests than were read — some may be missing`.
   - `hidden` or `deliveryShown` false → renders nothing.
 - [ ] **Step 2: Run** `pnpm exec jest test/jira-delivery-pane.test.tsx` — FAIL.
@@ -519,7 +546,10 @@ widths) are soft targets, never a reason to drop a rule.
   table, `:108` headline, outbound-modules bullet `:159`, new GitLab headline beside the GitHub token's), `.claude/rules/tracker.md:84,121`,
   `.claude/rules/security.md:2` (add `"server/src/gitlab/**"` to `paths:`), `docs/overview.md:88,93,171` and its API bullets `:66-93` and seams `:152-171`,
   `docs/subsystems/api.md:131,207,494`, `docs/subsystems/jira.md:26`, `.claude/DESIGN.md` (§8.6 Sources `:479-519`, §8.9.1 `:580-596` table widths and
-  chip, §8.9.2 `:616` Delivery pane; a new `#### 8.9.6 Delivery` subsection), `.env.example` (already done in Task 1 — check only)
+  chip, §8.9.2 `:616` Delivery pane; a new `#### 8.9.6 Delivery` subsection), `.env.example` (already done in Task 1 — check only),
+  `.claude/rules/jira.md:24` (a repos save now also re-arms the GitLab poller through `onReposChanged` — the "re-aims no poller work" wording becomes false),
+  `.claude/rules/board.md:153-155` (the `useRefreshing` poller list gains `useGitlab`), `CLAUDE.md:44-45` (Layout's module list gains `gitlab/`; counts
+  against the byte budget below)
 - Test: `test/claude-rules.test.ts`, `test/design-guards.test.ts`, `test/dialog-count-docs.test.ts`
 
 **Behaviour:**
