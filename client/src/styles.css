@@ -1753,6 +1753,8 @@ button.rail-count { cursor: pointer }
    menu scrolls inside it (the accepted degraded case). `.jira-issues-frame` is the container and holds nothing but the box: `container-type` makes it the
    containing block of `position: fixed` descendants (the phone shape of the menu's panel, `.ui-popover-narrow`), and the item modal and the launch sheet
    render outside it. */
+/* The List's delivery quick filter (spec §7.4): a row of its own above the table, right-aligned as in the mock. */
+.jira-issues-quick { display: flex; justify-content: flex-end }
 .jira-issues-frame { container-type: inline-size }
 .jira-issues-scroll { border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
 @container (max-width: 1121px) {

@@ -4,6 +4,7 @@ import { useFetched } from '../../hooks/useFetched';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useJiraView } from '../../hooks/useJiraView';
+import { useDeliveryIndex } from '../../hooks/useDeliveryIndex';
 import { useNow } from '../../hooks/useNow';
 import { usePickedJiraBoard } from '../../hooks/usePickedJiraBoard';
 import { usePersistedState } from '../../hooks/usePersistedState';
@@ -24,12 +25,14 @@ import {
   type JiraChildrenIndex,
   type JiraPanelFilters
 } from '../../lib/jira';
+import { DELIVERY_FILTER_LABELS, effectiveDeliveryFilter, matchesDelivery, ticketDelivery, type DeliveryFilter } from '../../lib/delivery';
 import { boardAgents, boardShelves, topSessionCell } from '../../lib/jira-deck';
 import type { JiraPage } from '../../lib/jira-page';
 import type { JiraAction, JiraIssue, JiraLiveSession, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { FilterBar, FilterSection } from '../FilterBar';
 import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
+import { Segmented } from '../ui/Segmented';
 import { GitlabBandLine } from './GitlabBandLine';
 import { JiraAgentDeck } from './JiraAgentDeck';
 import { JiraBandSub } from './JiraBandSub';
@@ -37,6 +40,9 @@ import { JiraBoardPicker } from './JiraBoardPicker';
 import { JiraIssueList } from './JiraIssueList';
 import { JiraShelves } from './JiraShelves';
 import { JiraViewSwitch } from './JiraViewSwitch';
+
+/** The quick filter's options, in the mock's order (`List.dc.html`): one list for the panel's chips and the List's segmented control. */
+const DELIVERY_OPTIONS = (Object.keys(DELIVERY_FILTER_LABELS) as DeliveryFilter[]).map((value) => ({ value, label: DELIVERY_FILTER_LABELS[value] }));
 
 /** The status while it is unknown: no sessions. One object, so `live` is not a fresh `{}` per render. */
 const NO_LIVE: Readonly<Record<string, JiraLiveSession>> = {};
@@ -141,7 +147,13 @@ export function JiraBoardView({
   else if (worktrees.status === 'failed') lastTrees.current = null;
   const treesOf = (key: string): readonly JiraWorktree[] => (lastTrees.current === null ? NO_TREES : ticketWorktrees(key, lastTrees.current));
   const options = useMemo(() => boardFilterOptions(list.issues), [list.issues]);
-  const applied = useMemo(() => effectiveBoardFilters(filters, options, me), [filters, options, me]);
+  // GitLab's index, or null while delivery is not shown. Both delivery controls and the filter's effect hang on it: a stored value reads as `all` when it is
+  // null, so a filter the reader cannot see or clear never empties the board or lights the badge (spec §7.4, Review Focus 5).
+  const deliveryIndex = useDeliveryIndex();
+  const applied = useMemo(() => {
+    const f = effectiveBoardFilters(filters, options, me);
+    return { ...f, delivery: effectiveDeliveryFilter(f.delivery, deliveryIndex !== null) };
+  }, [filters, options, me, deliveryIndex]);
   const sessions = useJiraSessionsContext();
   const [view] = useJiraView();
   // Memoised on the fold, the filters and the sessions answer — never on `now`, so the minute tick re-ages the cards without re-folding or re-filtering up
@@ -149,7 +161,10 @@ export function JiraBoardView({
   // The deck and the shelves read the same `kept`, so one filter answers for both; which tops a live session took OFF the shelves is `boardAgents`' call on
   // the UNFILTERED fold, so a filter never puts a ticket on a shelf and on the deck at once.
   const { deck, shelves, rows, cellStates } = useMemo(() => {
-    const kept = foldMatches(fold, (i) => matchesBoardFilters(i, applied, me));
+    // The delivery filter ANDs in here, per issue, so F1 reaches it: a top with no MR is kept when a folded child's own MR matches (`ticketDelivery` reads each
+    // issue on its own, a sub-task falling back to its parent's MRs exactly as its card does).
+    const byDelivery = applied.delivery === 'all' || deliveryIndex === null ? null : (i: JiraIssue) => matchesDelivery(applied.delivery, ticketDelivery(i, deliveryIndex));
+    const kept = foldMatches(fold, (i) => matchesBoardFilters(i, applied, me) && (byDelivery === null || byDelivery(i)));
     const agents = boardAgents(fold, sessions.data, live);
     return {
       deck: agents.filter((e) => kept.has(e.top.key)),
@@ -159,7 +174,7 @@ export function JiraBoardView({
       rows: sortTops(fold.tops.filter((t) => kept.has(t.key)), fold.under),
       cellStates: topSessionCell(agents, sessions.data?.links ?? [], fold)
     };
-  }, [fold, applied, me, sessions.data, live]);
+  }, [fold, applied, me, sessions.data, live, deliveryIndex]);
 
   if (unreadable !== null || board === null || shown === null) {
     return (
@@ -247,20 +262,40 @@ export function JiraBoardView({
               none={options.noSprint ? 'no sprint' : undefined}
               onPick={(v) => set('sprint', v)}
             />
+            {deliveryIndex !== null && (
+              <FilterSection title="Delivery">
+                <div className="filter-bar-picks" role="group" aria-label="Delivery">
+                  {DELIVERY_OPTIONS.map((o) => (
+                    <Chip key={o.value} size={28} pressed={applied.delivery === o.value} onClick={() => set('delivery', o.value)}>
+                      {o.label}
+                    </Chip>
+                  ))}
+                </div>
+              </FilterSection>
+            )}
         </FilterBar>
       </Band>
 
       {loaded ? (
         view === 'list' ? (
-          <JiraIssueList
-            tops={rows}
-            fold={fold}
-            sessions={cellStates}
-            now={now}
-            filtered={boardFilterCount(applied) > 0 || filters.search.trim() !== ''}
-            onOpenIssue={onOpenIssue}
-            onRun={onRun}
-          />
+          <>
+            {/* The same value as the panel's Delivery section, drawn again above the table (spec §7.4, mock `List.dc.html`): one filter, two controls. Kept
+                outside `JiraIssueList` so it stays while the filter empties the table — the way back to `All` must not vanish with the rows. */}
+            {deliveryIndex !== null && (
+              <div className="jira-issues-quick">
+                <Segmented<DeliveryFilter> label="Delivery" value={applied.delivery} options={DELIVERY_OPTIONS} onChange={(v) => set('delivery', v)} />
+              </div>
+            )}
+            <JiraIssueList
+              tops={rows}
+              fold={fold}
+              sessions={cellStates}
+              now={now}
+              filtered={boardFilterCount(applied) > 0 || filters.search.trim() !== ''}
+              onOpenIssue={onOpenIssue}
+              onRun={onRun}
+            />
+          </>
         ) : (
           <>
             <JiraAgentDeck entries={deck} now={now} onOpenIssue={(issue) => onOpenIssue(issue, fold.childrenOf)} />

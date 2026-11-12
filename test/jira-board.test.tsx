@@ -656,7 +656,7 @@ describe('filters and search', () => {
     await pick('Assignee', 'me');
     await pick('Status', 'Backlog');
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'refund');
-    expect(JSON.parse(localStorage.getItem(JIRA_FILTERS_KEY) ?? 'null')).toEqual({ assignee: 'me', statuses: ['Backlog'] });
+    expect(JSON.parse(localStorage.getItem(JIRA_FILTERS_KEY) ?? 'null')).toEqual({ assignee: 'me', statuses: ['Backlog'], delivery: 'all' });
     cleanup();
 
     // Not `renderAlpha`: the card it waits for is one the restored filters hide. The badge counts the APPLIED filters, so it lights only once the list
@@ -1869,5 +1869,137 @@ describe('Run on: a sub-task runs its parent from the card and the List cell', (
     await runParentFrom(row);
     expect(await screen.findByRole('dialog', { name: 'run PAY-99' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'run PAY-175' })).toBeNull();
+  });
+});
+
+/*
+  The Delivery quick filter (GitLab connection spec §7.4; mock `List.dc.html`): one stored value, drawn twice — a `Delivery` section in the Filters panel and a
+  segmented control above the List. PAY-131 leads with an open MR whose pipeline failed, PAY-140 with a merged one (the same payload the band line reads).
+*/
+describe('the Delivery quick filter', () => {
+  const MR = (over: Partial<GitlabMr>): GitlabMr => ({
+    project: 'payments/api',
+    iid: 415,
+    title: 'PAY-131 | refund partial captures',
+    webUrl: 'https://gitlab.example.test/payments/api/-/merge_requests/415',
+    state: 'opened',
+    draft: false,
+    sourceBranch: 'pay-131-refunds',
+    targetBranch: 'develop',
+    createdAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+    mergedAt: null,
+    pipeline: 'failed',
+    keys: ['PAY-131'],
+    ...over
+  });
+  const payload = (state: 'connected' | 'unconfigured' = 'connected', mrs: GitlabMr[] = [MR({}), MR({ iid: 398, state: 'merged', pipeline: null, keys: ['PAY-140'], mergedAt: new Date(Date.now() - 86_400_000).toISOString() })]): GitlabPayload => ({
+    status: {
+      state,
+      site: state === 'connected' ? 'gitlab.example.test' : null,
+      malformedSite: false,
+      user: state === 'connected' ? { username: 'ada', name: 'Ada' } : null,
+      httpStatus: null,
+      reason: null,
+      armed: state === 'connected',
+      retryAt: null,
+      mappedRepos: 1,
+      foundHosts: [],
+      problems: []
+    },
+    jiraProjects: state === 'connected' ? { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false }] } : {},
+    mrs: state === 'connected' ? mrs : []
+  });
+
+  function mount(data: GitlabPayload, view: 'board' | 'list'): void {
+    setJiraView(view);
+    setJiraPage('board');
+    render(
+      <GitlabContext.Provider value={{ data, error: null, refresh: () => Promise.resolve(data) }}>
+        <SettingsProvider>
+          <JiraProvider>
+            <JiraSessionsProvider open>
+              <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={jest.fn()} onRun={jest.fn()} nudge={0} />
+            </JiraSessionsProvider>
+          </JiraProvider>
+        </SettingsProvider>
+      </GitlabContext.Provider>
+    );
+  }
+  afterEach(() => act(() => setJiraView('board')));
+
+  const seg = (): HTMLElement => screen.getByRole('group', { name: 'Delivery' });
+  const rowSummaries = (): string[] => Array.from(document.querySelectorAll('.jira-issues-table tbody tr')).map((r) => r.querySelector('td:nth-child(3)')?.textContent ?? '');
+
+  it('picks Pipeline failing in the panel: only the failing top stays, and the List control shows the same value', async () => {
+    mount(payload(), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    expect(rowSummaries()).toHaveLength(4);
+    const panel = await openFilters();
+    await userEvent.click(within(within(panel).getByRole('group', { name: 'Delivery' })).getByRole('button', { name: 'Pipeline failing' }));
+    expect(rowSummaries()).toEqual([expect.stringContaining('Refund partial captures')]);
+    expect(screen.getByRole('button', { name: 'Filters, 1 set' })).toBeInTheDocument();
+    // Two groups carry the name (panel and List): the control above the table is the one outside the dialog.
+    const controls = screen.getAllByRole('group', { name: 'Delivery' });
+    const listControl = controls.find((c) => !panel.contains(c)) as HTMLElement;
+    expect(within(listControl).getByRole('button', { name: 'Pipeline failing' })).toHaveAttribute('aria-pressed', 'true');
+
+    await userEvent.click(within(listControl).getByRole('button', { name: 'All' }));
+    expect(rowSummaries()).toHaveLength(4);
+    // The click outside shut the panel (its own pointerdown listener); reopened, it reads the value the List control set.
+    const reopened = await openFilters();
+    expect(within(within(reopened).getByRole('group', { name: 'Delivery' })).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('the segmented control drives the value, and it survives a remount through JIRA_FILTERS_KEY', async () => {
+    mount(payload(), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    await userEvent.click(within(seg()).getByRole('button', { name: 'Has MR' }));
+    expect(rowSummaries().sort()).toEqual([expect.stringContaining('Currency symbol'), expect.stringContaining('Refund partial captures')]);
+    expect(JSON.parse(localStorage.getItem(JIRA_FILTERS_KEY) ?? 'null')).toMatchObject({ delivery: 'has-mr' });
+    cleanup();
+
+    mount(payload(), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    expect(within(seg()).getByRole('button', { name: 'Has MR' })).toHaveAttribute('aria-pressed', 'true');
+    expect(rowSummaries()).toHaveLength(2);
+  });
+
+  // F1 (grouped-board spec §5): the top is kept when anything folded under it matches, so a story with no MR stays while its sub-task's own MR fails.
+  it('keeps a top with no MR when a folded child’s own MR fails', async () => {
+    const STORY = issue({ key: 'PAY-60', summary: 'Story without an MR', type: { name: 'Story', level: 0, subtask: false }, subtasks: 1, updated: daysAgoStamp(0) });
+    const CHILD = issue({
+      key: 'PAY-61',
+      summary: 'Child with a failing MR',
+      type: { name: 'Sub-task', level: -1, subtask: true },
+      parent: { key: 'PAY-60', summary: 'Story without an MR' },
+      updated: daysAgoStamp(0)
+    });
+    lists[ALPHA.id] = [STORY, CHILD, PAY_140];
+    mount(payload('connected', [MR({ iid: 500, keys: ['PAY-61'], title: 'PAY-61 | child' })]), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    await userEvent.click(within(seg()).getByRole('button', { name: 'Pipeline failing' }));
+    expect(rowSummaries()).toEqual([expect.stringContaining('Story without an MR')]);
+  });
+
+  // Review Focus 5: a stored filter for a GitLab that is no longer shown is not a filter — nothing hides, nothing counts, and nothing offers it.
+  it('reads a stored Pipeline failing as All when GitLab is unconfigured: every ticket, no control, no badge', async () => {
+    localStorage.setItem(JIRA_FILTERS_KEY, JSON.stringify({ delivery: 'failing' }));
+    mount(payload('unconfigured'), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    expect(rowSummaries()).toHaveLength(4);
+    expect(screen.queryByRole('group', { name: 'Delivery' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
+    await openFilters();
+    expect(screen.queryByRole('group', { name: 'Delivery' })).toBeNull();
+    expect(screen.queryByText('Delivery')).toBeNull();
+  });
+
+  it('draws the panel section but no List control in Board view', async () => {
+    mount(payload(), 'board');
+    await screen.findByText('Refund partial captures');
+    expect(screen.queryByRole('group', { name: 'Delivery' })).toBeNull();
+    await openFilters();
+    expect(screen.getAllByRole('group', { name: 'Delivery' })).toHaveLength(1);
   });
 });

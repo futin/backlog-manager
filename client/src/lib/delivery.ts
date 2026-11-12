@@ -256,6 +256,14 @@ export const DELIVERY_FILTER_LABELS: Record<DeliveryFilter, string> = {
 };
 
 /**
+ * The stored filter as it applies: `all` whenever delivery is not shown (`deliveryShown`), so a `Pipeline failing` stored before GitLab was unconfigured or
+ * unarmed neither empties the board nor lights the filter badge — the user has no control to see or clear it (spec §7.4, Review Focus 5).
+ */
+export function effectiveDeliveryFilter(stored: DeliveryFilter, shown: boolean): DeliveryFilter {
+  return shown ? stored : 'all';
+}
+
+/**
  * Does a ticket's delivery match a filter value (spec §7.4)? `all` always does. A `hidden` or `unknown` ticket matches no other value — an unknown one may
  * well have an MR the list did not reach, and a filter that claimed otherwise would be guessing. `has-mr` is any opened or merged MR, own or inherited —
  * since the lead is the newest opened, else merged, else closed, that is "the lead is not closed". `failing` reads the lead only, own or inherited, through
