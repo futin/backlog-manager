@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -9,9 +9,9 @@ import { LaunchSheet } from '../client/src/components/board/LaunchSheet';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { daysAgoDate } from './helpers/dates';
 import { homeOffer, homeOnly, proOffer, proSuggested } from './helpers/offers';
-import { COMMIT_RULE, finishClause } from '../shared/agent';
+import { COMMIT_RULE, DEFAULT_REVIEW_CONFIG, finishClause } from '../shared/agent';
 import { NO_MACHINE_TEXT } from '../client/src/lib/dashboards';
-import type { AgentPlan, BacklogItem, ProjectOffers } from '../shared/types';
+import type { AgentPlan, BacklogItem, ProjectOffers, ReviewSetting } from '../shared/types';
 
 const AUTO_MERGE_NOTE = 'Needs Allow auto-merge on the GitHub repo; checked when the PR opens.';
 
@@ -52,13 +52,15 @@ const PLAN: AgentPlan = {
 /**
  * `branches` is the list `GET /api/agents/branches` answers with, or `'reject'` for a network failure; absent, the route answers an empty list. `offers` is what
  * `GET /api/dashboards/offers` answers — home alone when absent, which is what every server without a remote configured says — or `'reject'` for a network
- * failure, or `'pending'` for an answer that never comes.
+ * failure, or `'pending'` for an answer that never comes. `review` is what `GET /api/settings/review` answers (reviewer coverage task 11); absent, the
+ * route falls through to the dispatch answer below, which is no config, so the sheet draws no Reviewer section — every case written before it is untouched.
  */
 function stub(handlers: {
   plan?: unknown;
   dispatch?: { ok: boolean; body: unknown };
   branches?: string[] | 'reject';
   offers?: ProjectOffers | 'reject' | 'pending';
+  review?: ReviewSetting;
 }) {
   const calls: { url: string; body: unknown }[] = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -72,6 +74,9 @@ function stub(handlers: {
       if (handlers.offers === 'reject') return Promise.reject(new Error('NetworkError'));
       if (handlers.offers === 'pending') return new Promise(() => {});
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(handlers.offers ?? homeOnly()) } as Response);
+    }
+    if (url.endsWith('/api/settings/review') && handlers.review !== undefined) {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(handlers.review) } as Response);
     }
     if (url.includes('/api/agents/branches')) {
       if (handlers.branches === 'reject') return Promise.reject(new Error('NetworkError'));
@@ -444,6 +449,47 @@ describe('LaunchSheet', () => {
       await userEvent.selectOptions(screen.getByLabelText('Finish'), 'in-place');
       expect(screen.getByLabelText('Prompt')).toHaveValue('my own words');
       expect(calls.filter((c) => c.url.endsWith('/plan'))).toHaveLength(1);
+    });
+
+    /*
+     * Reviewer coverage task 11: an execute PR finish runs the skill's own review, so the sheet offers the reviewer under it, seeded from Settings' saved
+     * config. Untouched, nothing rides along (ruling R11: the server 400s a `review: null`, so "no override" is the key's absence); edited, the request carries
+     * the whole config and the clause preview shows the `--review-*` flags the server will append.
+     */
+    it('a PR finish draws the Reviewer section, and untouched sends no review and previews no review flag', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr' }));
+      const calls = stub({ review: DEFAULT_REVIEW_CONFIG });
+      await openSheet();
+      const section = await screen.findByRole('group', { name: 'Reviewer' });
+      expect((within(section).getByRole('combobox', { name: 'Small groups — model' }) as HTMLSelectElement).value).toBe('sonnet');
+      expect(screen.getByText(finishClause('execute', 'pr', 'main'))).toBeInTheDocument();
+      expect(screen.queryByText(/--review-/)).toBeNull();
+      const body = await launchNow(calls);
+      expect(body.finish).toBe('pr');
+      expect('review' in body).toBe(false);
+    });
+
+    it('a changed small model sends the edited config as review and previews --review-mode', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr' }));
+      const calls = stub({ review: DEFAULT_REVIEW_CONFIG });
+      await openSheet();
+      const section = await screen.findByRole('group', { name: 'Reviewer' });
+      await userEvent.selectOptions(within(section).getByRole('combobox', { name: 'Small groups — model' }), 'haiku');
+      const edited = { ...DEFAULT_REVIEW_CONFIG, small: { model: 'haiku' as const, effort: null } };
+      const clause = finishClause('execute', 'pr', 'main', { review: edited });
+      expect(clause).toContain('--review-mode');
+      expect(screen.getByText(clause)).toBeInTheDocument();
+      const body = await launchNow(calls);
+      expect(body.review).toEqual(edited);
+    });
+
+    it('an in-place finish draws no Reviewer section and never reads the setting', async () => {
+      const calls = stub({ review: DEFAULT_REVIEW_CONFIG });
+      await openSheet();
+      expect(screen.queryByRole('group', { name: 'Reviewer' })).toBeNull();
+      expect(calls.some((c) => c.url.endsWith('/api/settings/review'))).toBe(false);
+      const body = await launchNow(calls);
+      expect('review' in body).toBe(false);
     });
 
     // Task 4: a groom on the home machine takes a finish too, seeded from its own Settings default — never from execute's.

@@ -6,6 +6,7 @@ import type { RunDetailLive } from '../client/src/lib/run-detail';
 import { mergeModeLabel } from '../client/src/lib/run-stage';
 import { formatTurns, formatUsd } from '../client/src/lib/run-stats';
 import { formatClock, runClockMs } from '../client/src/lib/run-time';
+import { DEFAULT_REVIEW_CONFIG, reviewerLabel } from '../shared/agent';
 import type { ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage } from '../shared/types';
 
 /**
@@ -251,6 +252,26 @@ describe('runDetailModel — the head and the facts strip', () => {
       NOW, ZONE
     );
     expect(both.noteLine).toBe(`classifier denied the merge of task-4 · ${decideNote}`);
+  });
+
+  // Reviewer coverage task 11: the reviewer the run recorded, beside its merge mode. A run file is remote input on a Pro dashboard, so a malformed value goes
+  // through `parseReviewConfig` and reads as the default rather than throwing mid-render.
+  it('10b. the reviewer line is the recorded config\'s label, and default for an older run or a malformed value', () => {
+    const recorded = { ...DEFAULT_REVIEW_CONFIG, mode: 'same' as const, same: { model: 'opus' as const, effort: 'high' as const } };
+    const withConfig = runDetailModel({ summary: summary([], { reviewConfig: recorded }), live: null, fetchedRun: null }, NOW, ZONE);
+    expect(withConfig.reviewerLine).toBe(reviewerLabel(recorded));
+    expect(withConfig.reviewerLine).toBe('Reviewer: Opus · High');
+
+    const older = runDetailModel({ summary: summary([]), live: null, fetchedRun: null }, NOW, ZONE);
+    expect(older.reviewerLine).toBe('Reviewer: default');
+
+    for (const bad of [{}, { mode: 'x' }]) {
+      const malformed = runDetailModel(
+        { summary: summary([], { reviewConfig: bad as unknown as OrchestratorRun['reviewConfig'] }), live: null, fetchedRun: null },
+        NOW, ZONE
+      );
+      expect(malformed.reviewerLine).toBe('Reviewer: default');
+    }
   });
 
   it('11. the cost line sums the queue, pluralises sessions, and is null with no usage at all', () => {

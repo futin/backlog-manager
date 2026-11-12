@@ -15,6 +15,9 @@ import type {
   OrchestratorRun,
   OrchestratorRunsPayload,
   PauseResult,
+  ReviewConfig,
+  ReviewEffort,
+  ReviewModel,
   StartOrchestrateRequest,
   StartingRun,
   StopResult,
@@ -23,7 +26,7 @@ import type {
   WatchdogConfig,
   WatchdogStatus
 } from '../../../shared/types';
-import { EFFORTS, MODELS } from '../../../shared/agent';
+import { EFFORTS, MODELS, REVIEW_EFFORTS, REVIEW_MODELS, REVIEW_SMALL_MAX_LINES_MAX, REVIEW_SMALL_MAX_LINES_MIN, reviewFlags } from '../../../shared/agent';
 import { errorOf } from './http';
 import { EXECUTE_FINISHES } from '../../../shared/types';
 
@@ -456,6 +459,51 @@ export const LAUNCH_SURFACE_OPTIONS: { value: LaunchSurface; label: string }[] =
  */
 export function modelEffortFlags(model: string, effort: string): { model?: string; effort?: string } {
   return { ...(model === '' ? {} : { model }), ...(effort === '' ? {} : { effort }) };
+}
+
+/**
+ * The Reviewer pickers' words (spec §7), one home for the Settings card and both launch sheets. `''` is the unset member of each select — `null` on the wire,
+ * which `ReviewerFields` translates at the select — because a native select's value is a string. The unset model names what the agent runs
+ * without a flag (Opus) so a reader can see what "default" will mean.
+ */
+const REVIEW_WORD: Record<string, string> = { xhigh: 'XHigh' };
+const reviewWord = (x: string): string => REVIEW_WORD[x] ?? x.charAt(0).toUpperCase() + x.slice(1);
+export const REVIEW_MODEL_OPTIONS: { value: '' | ReviewModel; label: string }[] = [
+  { value: '', label: 'Agent default (Opus)' },
+  ...REVIEW_MODELS.map((m) => ({ value: m, label: reviewWord(m) }))
+];
+export const REVIEW_EFFORT_OPTIONS: { value: '' | ReviewEffort; label: string }[] = [
+  { value: '', label: 'Default' },
+  ...REVIEW_EFFORTS.map((e) => ({ value: e, label: reviewWord(e) }))
+];
+export const REVIEW_MODE_OPTIONS: { value: ReviewConfig['mode']; label: string }[] = [
+  { value: 'same', label: 'Same for all groups' },
+  { value: 'split', label: 'Big and small groups' }
+];
+
+/**
+ * The small-group limit as typed, or `null` when it is not one the server would take: digits only (no sign, no decimal, no exponent — a number input lets all
+ * three through) and within `REVIEW_SMALL_MAX_LINES_MIN`..`MAX`, the bounds `parseReviewConfig` enforces. `null` draws the field invalid and sends nothing.
+ */
+export function parseSmallMaxLines(text: string): number | null {
+  if (!/^\d+$/.test(text.trim())) return null;
+  const n = Number(text.trim());
+  return n >= REVIEW_SMALL_MAX_LINES_MIN && n <= REVIEW_SMALL_MAX_LINES_MAX ? n : null;
+}
+
+/**
+ * The reviewer override a launch body carries (reviewer coverage task 11), spreadable the way `modelEffortFlags` is: `{ review: pick }` only when the sheet's
+ * pick differs from the saved setting it was seeded from, otherwise no key at all. Never `review: null` — the server answers that with a 400 (ruling R11),
+ * and "same as Settings" needs no override, because the skill reads `review.json` itself when no `--review-*` flag is passed.
+ *
+ * Compared by EFFECT, through `reviewFlags`, not by object identity or a deep-equal: the flags are what the skill receives, so two configs that hand it the
+ * same flags are the same pick. That keeps a mode flipped away and back, or an edit undone by hand, from sending an override that changes nothing — while a
+ * mode switch with every pair untouched still counts, because `--review-mode` itself differs. No seed (the read is still loading or failed) is no override:
+ * the sheet draws no section then, so there is no pick to send.
+ */
+export function reviewOverride(seed: ReviewConfig | null, pick: ReviewConfig | null): { review?: ReviewConfig } {
+  if (seed === null || pick === null) return {};
+  return reviewFlags(seed).join(' ') === reviewFlags(pick).join(' ') ? {} : { review: pick };
 }
 
 /**

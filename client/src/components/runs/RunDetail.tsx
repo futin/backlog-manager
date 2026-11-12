@@ -216,6 +216,7 @@ export function RunDetail({
     prNumber,
     questionMode,
     noteLine,
+    reviewerLine,
     usageLine,
     itemCount,
     dotTone,
@@ -328,7 +329,8 @@ export function RunDetail({
             read as an anomaly on the runs that had it rather than as ordinary metadata. Unrecoverable from anything else after the fact — the merge commits
             are on the base, not in any file this app keeps. `source.base` is total for every run: the server's reader resolves an older run file's absent
             `base` to `'main'` once (`sanitizeMergeFields`), so there is no `?? 'main'` to re-implement here. The question mode sits under it as the run's
-            other configuration reading. */}
+            other configuration reading, and since reviewer coverage task 11 the reviewer the run recorded sits under that — `Reviewer: default` for a run
+            recorded before the setting existed, or one whose value would not parse. */}
         <FactCell glyph="branch" label="Base · mode">
           <span className="run-fact-value">
             <span data-testid="run-detail-base">
@@ -342,6 +344,9 @@ export function RunDetail({
           </span>
           <span className="run-fact-note">
             questions <span data-testid="run-detail-questions">{questionMode}</span>
+          </span>
+          <span className="run-fact-note" data-testid="run-detail-reviewer">
+            {reviewerLine}
           </span>
         </FactCell>
         {/* task-27: what the whole run cost, summed off the per-transcript entries `orchestrate.mjs usage` wrote. `runUsageTotals` returns `null` for every

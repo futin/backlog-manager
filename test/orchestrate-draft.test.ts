@@ -11,6 +11,7 @@ import {
   withoutIds,
   type StartInputs
 } from '../client/src/lib/orchestrate-draft';
+import { DEFAULT_REVIEW_CONFIG } from '../shared/agent';
 import type { BacklogItem } from '../shared/types';
 
 /**
@@ -176,6 +177,8 @@ describe('buildStartRequest', () => {
     order: null,
     arranged: ['a', 'b'],
     mode: 'auto',
+    reviewSeed: null,
+    review: null,
     ...over
   });
 
@@ -196,5 +199,20 @@ describe('buildStartRequest', () => {
     const body = buildStartRequest(inputs({ narrowed: true, arranged: ['a'], machine: { machine: 'Pro' } }));
     expect(body.ids).toEqual(['a']);
     expect(body.machine).toBe('Pro');
+  });
+
+  // Reviewer coverage task 11, ruling R11: the server answers `review: null` with a 400, so "no override" is the key's absence, never a null.
+  it('sends no review key with no seed yet, or with a pick equal to the seed', () => {
+    expect('review' in buildStartRequest(inputs())).toBe(false);
+    expect('review' in buildStartRequest(inputs({ reviewSeed: null, review: DEFAULT_REVIEW_CONFIG }))).toBe(false);
+    expect('review' in buildStartRequest(inputs({ reviewSeed: DEFAULT_REVIEW_CONFIG, review: { ...DEFAULT_REVIEW_CONFIG } }))).toBe(false);
+  });
+
+  it('sends the whole edited config as review once the pick differs from the seed', () => {
+    const edited = { ...DEFAULT_REVIEW_CONFIG, small: { model: 'haiku' as const, effort: null } };
+    expect(buildStartRequest(inputs({ reviewSeed: DEFAULT_REVIEW_CONFIG, review: edited })).review).toEqual(edited);
+    // A mode switch is a change even with every pair untouched: the flags it hands the skill differ.
+    const same = { ...DEFAULT_REVIEW_CONFIG, mode: 'same' as const };
+    expect(buildStartRequest(inputs({ reviewSeed: DEFAULT_REVIEW_CONFIG, review: same })).review).toEqual(same);
   });
 });

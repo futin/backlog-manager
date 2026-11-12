@@ -1,6 +1,15 @@
 import { deriveAction, type AgentAction } from '../../../shared/agent';
-import type { BacklogItem, MergeMode, PermissionMode, ProjectSummary, QuestionMode, StartOrchestrateRequest, UncommittedItems } from '../../../shared/types';
-import { modelEffortFlags } from './agents';
+import type {
+  BacklogItem,
+  MergeMode,
+  PermissionMode,
+  ProjectSummary,
+  QuestionMode,
+  ReviewConfig,
+  StartOrchestrateRequest,
+  UncommittedItems
+} from '../../../shared/types';
+import { modelEffortFlags, reviewOverride } from './agents';
 
 /**
  * orchestrate-draft.ts — the Orchestrate sheet's derivations, pure (#306). Every value here used to be computed inline in `OrchestrateSheet`'s render body;
@@ -256,11 +265,15 @@ export interface StartInputs {
   order: string[] | null;
   arranged: string[];
   mode: PermissionMode;
+  /** The saved reviewer config the sheet's pick was seeded from (`useReviewPick`), `null` until the read lands or when it failed. */
+  reviewSeed: ReviewConfig | null;
+  /** The sheet's Reviewer pick; sent as `review` only when it differs from `reviewSeed` (`reviewOverride`). */
+  review: ReviewConfig | null;
 }
 
 /** The body `start` (hooks/useOrchestrateDraft.ts) posts to `POST /api/agents/orchestrate`. */
 export function buildStartRequest(input: StartInputs): StartOrchestrateRequest {
-  const { project, model, effort, mergeMode, machine, questionMode, base, narrowed, order, arranged, mode } = input;
+  const { project, model, effort, mergeMode, machine, questionMode, base, narrowed, order, arranged, mode, reviewSeed, review } = input;
   return {
     project,
     // Absent-not-empty, the convention every launch sheet shares — see `modelEffortFlags`.
@@ -290,6 +303,9 @@ export function buildStartRequest(input: StartInputs): StartOrchestrateRequest {
     // landed. `'main'` is sent explicitly and the server appends no flag
     // for it, so the prompt is byte-identical to a pre-task-44 one.
     base,
+    // Reviewer coverage task 11: the reviewer override, absent unless the pick differs from the saved setting — never `review: null`, which the server
+    // answers with a 400 (ruling R11). Untouched, the run's review reads review.json itself, which is what the pick was seeded from.
+    ...reviewOverride(reviewSeed, review),
     // The same absent-not-empty convention, for the field it matters most
     // on: `ids` rides along ONLY for a strict subset. A full list would be
     // a different instruction from no list at all (see `selected` in hooks/useOrchestrateDraft.ts and

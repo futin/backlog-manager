@@ -2,6 +2,7 @@ import { mergeAllowRules } from '../../../../../shared/agent';
 import { MERGE_MODES, QUESTION_MODES } from '../../../../../shared/types';
 import type { MergeMode, PermissionMode, QuestionMode } from '../../../../../shared/types';
 import { prRequiredText } from '../../../lib/dashboards';
+import { ReviewerFields } from '../../settings/ReviewerFields';
 import { RunOn } from '../../ui/RunOn';
 import { Select } from '../../ui/Select';
 import type { StepProps } from './types';
@@ -57,7 +58,9 @@ export function ModesStep({ draft }: StepProps) {
     branches,
     mergeCoverage,
     project,
-    error
+    error,
+    review,
+    setReview
   } = draft;
   const { model, setModel, effort, setEffort } = runOn;
   return (
@@ -128,6 +131,10 @@ export function ModesStep({ draft }: StepProps) {
           <Select label="Base branch" value={base} onChange={setBase} options={branches.map((b) => ({ value: b, label: b }))} />
         </label>
       </div>
+
+      {/* Reviewer coverage task 11: who reviews each item, seeded from Settings' Reviewer card and sent only when changed here. Drawn only once that read
+          has landed — with no seed there is nothing to compare a pick against, and a pick the request would then drop must never be offered. */}
+      {review !== null && <ReviewerFields layout="sheet" value={review} onChange={setReview} />}
 
       {/* Shown only for a base that is not `main`, unlike the question-
           mode note above it, and the asymmetry is the point: that note

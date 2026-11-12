@@ -9,6 +9,7 @@ import { OrchestrateSheet } from '../client/src/components/board/OrchestrateShee
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { daysAgoDate } from './helpers/dates';
 import { homeOnly } from './helpers/offers';
+import { DEFAULT_REVIEW_CONFIG } from '../shared/agent';
 import type { BacklogItem } from '../shared/types';
 
 /**
@@ -132,6 +133,10 @@ function stub(answer: UncommittedAnswer): { url: string; body: unknown }[] {
     // Multi-dashboard task 9's on-mount read, home-only, kept out of `calls` for the same reason.
     if (url.includes('/api/dashboards/offers')) {
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(homeOnly()) } as Response);
+    }
+    // Reviewer coverage task 11's on-open read of the saved reviewer, kept out of `calls` for the same reason.
+    if (url.endsWith('/api/settings/review')) {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(DEFAULT_REVIEW_CONFIG) } as Response);
     }
     if (url.includes('/api/agents/merge-check')) {
       return Promise.resolve({

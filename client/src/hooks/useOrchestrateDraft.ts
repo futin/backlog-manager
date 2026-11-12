@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useAction } from './useAction';
 import { useFetched } from './useFetched';
 import { useRunOn, type RunOnState } from './useRunOn';
+import { useReviewPick } from './useReviewSetting';
 import { useSettings } from './useSettings';
 import { ApiError, fetchBranches, fetchMergeCheck, fetchUncommitted, startOrchestrate } from '../lib/agents';
 import { mergeModeOptionLabels } from '../lib/merge-mode';
@@ -23,7 +24,7 @@ import {
 } from '../lib/orchestrate-draft';
 import { clampMode, modesUpTo } from '../../../shared/agent';
 import { RUN_IN_PROGRESS_CODE } from '../../../shared/types';
-import type { BacklogItem, MergeCheckResult, MergeMode, PermissionMode, ProjectSummary, QuestionMode } from '../../../shared/types';
+import type { BacklogItem, MergeCheckResult, MergeMode, PermissionMode, ProjectSummary, QuestionMode, ReviewConfig } from '../../../shared/types';
 
 /**
  * Everything the Orchestrate sheet's three step views and its footer read (#306) — one props currency, so each view renders alone from a hand-built one
@@ -72,6 +73,9 @@ export interface OrchestrateDraft {
   busy: boolean;
   error: string | null;
   start: () => void;
+  /** The Reviewer pick, seeded once from the saved setting; `null` until that read lands (forever if it fails), and the step draws no section while it is. */
+  review: ReviewConfig | null;
+  setReview: (config: ReviewConfig) => void;
 }
 
 export interface OrchestrateDraftInput {
@@ -91,6 +95,9 @@ export interface OrchestrateDraftInput {
  */
 export function useOrchestrateDraft({ project, source, items, spawnMaxPermission, refresh, onClose }: OrchestrateDraftInput): OrchestrateDraft {
   const { settings } = useSettings();
+  // Reviewer coverage task 11. Every run reviews each item whatever its merge mode, so the sheet always reads the setting; the start body carries `review`
+  // only when the pick differs from it (`buildStartRequest`).
+  const { seed: reviewSeed, pick: review, setPick: setReview } = useReviewPick(true);
   const allowedModes = modesUpTo(spawnMaxPermission);
   // Same rule LaunchSheet's own defaultMode gets from the server
   // (`clampMode('auto', status.spawnMaxPermission)`, agents.service.ts's
@@ -357,7 +364,21 @@ export function useOrchestrateDraft({ project, source, items, spawnMaxPermission
     run(
       () =>
         startOrchestrate(
-          buildStartRequest({ project, model, effort, mergeMode, machine: runOn.request, questionMode, base, narrowed, order, arranged, mode })
+          buildStartRequest({
+            project,
+            model,
+            effort,
+            mergeMode,
+            machine: runOn.request,
+            questionMode,
+            base,
+            narrowed,
+            order,
+            arranged,
+            mode,
+            reviewSeed,
+            review
+          })
         ),
       {
         onSuccess: () => {
@@ -455,6 +476,8 @@ export function useOrchestrateDraft({ project, source, items, spawnMaxPermission
     resetOrder: () => setOrder(null),
     busy,
     error,
-    start
+    start,
+    review,
+    setReview
   };
 }
