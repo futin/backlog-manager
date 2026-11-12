@@ -30,14 +30,24 @@ function defaultConfig() {
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-// Twin of `parseReviewConfig` in `shared/agent.ts`. Returns the normalised config (all five keys, in a fixed order, extras dropped) or throws an Error
+function exactKeys(object, keys, where) {
+  const extra = Object.keys(object).filter((k) => !keys.includes(k));
+  const missing = keys.filter((k) => !Object.hasOwn(object, k));
+  if (extra.length) throw new Error(`${where} has unknown key ${extra.join(', ')}`);
+  if (missing.length) throw new Error(`${where} is missing ${missing.join(', ')}`);
+}
+
+// Twin of `parseReviewConfig` in `shared/agent.ts`. Returns the normalised config (all five keys, in a fixed order) or throws an Error
 // whose message says what is wrong; the caller decides whether that is a warning (a file) or an exit 1 (an argument).
 function validateConfig(value) {
   if (!isObject(value)) throw new Error('not an object');
+  // Exactly the five keys, pairs exactly model/effort: the TS twin rejects anything else, so the CLI must not honour what the server would refuse.
+  exactKeys(value, ['mode', 'same', 'big', 'small', 'smallMaxLines'], 'config');
   if (value.mode !== 'same' && value.mode !== 'split') throw new Error('mode must be "same" or "split"');
   const pair = (name) => {
     const p = value[name];
     if (!isObject(p)) throw new Error(`${name} must be an object with model and effort`);
+    exactKeys(p, ['model', 'effort'], name);
     if (p.model !== null && !MODELS.includes(p.model)) throw new Error(`${name}.model must be null or one of ${MODELS.join(', ')}`);
     if (p.effort !== null && !EFFORTS.includes(p.effort)) throw new Error(`${name}.effort must be null or one of ${EFFORTS.join(', ')}`);
     return { model: p.model, effort: p.effort };

@@ -138,3 +138,29 @@ test('an unknown subcommand exits 1', () => {
   assert.equal(r.status, 1);
   assert.ok(r.stderr.includes('unknown command: zzz-nope'), r.stderr);
 });
+
+// The TS twin rejects extra keys and a pair without both members, so the CLI must too — in the file (warn + defaults) and in --review-config (exit 1).
+const SHAPE_BAD = {
+  'an extra top-level key': { ...DEFAULTS, extra: 1 },
+  'an extra pair key': { ...DEFAULTS, big: { model: null, effort: null, extra: 1 } },
+  'a pair missing effort': { ...DEFAULTS, big: { model: null } },
+};
+
+test('review.json with extra or missing keys warns once and prints defaults', () => {
+  for (const [name, bad] of Object.entries(SHAPE_BAD)) {
+    const r = run(['config'], bad);
+    assert.equal(r.status, 0, name);
+    assert.equal(r.stderr.trim().split('\n').length, 1, `${name}: ${r.stderr}`);
+    assert.ok(r.stderr.includes('review.json'), name);
+    assert.deepEqual(JSON.parse(r.stdout), DEFAULTS, name);
+  }
+});
+
+test('--review-config with extra or missing keys exits 1 naming it', () => {
+  for (const [name, bad] of Object.entries(SHAPE_BAD)) {
+    const r = run(['config', '--review-config', JSON.stringify(bad)]);
+    assert.equal(r.status, 1, name);
+    assert.ok(r.stderr.includes('--review-config'), `${name}: ${r.stderr}`);
+    assert.equal(r.stdout, '', name);
+  }
+});
