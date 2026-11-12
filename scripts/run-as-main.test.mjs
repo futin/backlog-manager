@@ -22,19 +22,20 @@ after(() => fs.rmSync(work, { recursive: true, force: true }))
 const PROBE = path.join(work, 'probe.test.mjs')
 fs.writeFileSync(PROBE, "import { test } from 'node:test'\ntest('probe-through-a-link', () => {})\n")
 
-// `sync-plugin.mjs` is the ninth copy and has no row: its main() reinstalls the plugin, so no test may ever start it. The source guards below are its coverage.
+// `sync-plugin.mjs` is the tenth copy and has no row: its main() reinstalls the plugin, so no test may ever start it. The source guards below are its coverage.
 const ROWS = [
   { script: 'skills/backlog/tools/backlog.mjs', args: ['zzz-nope'], status: 1, output: 'unknown command: zzz-nope' },
   { script: 'skills/backlog-orchestrate/tools/orchestrate.mjs', args: ['zzz-nope'], status: 1, output: 'unknown command: zzz-nope' },
   { script: 'skills/backlog-retro/tools/retro.mjs', args: ['zzz-nope'], status: 1, output: 'unknown command: zzz-nope' },
   { script: 'skills/jira/tools/jira.mjs', args: ['zzz-nope'], status: 1, output: 'unknown command: zzz-nope' },
+  { script: 'skills/backlog-review/tools/review.mjs', args: ['zzz-nope'], status: 1, output: 'unknown command: zzz-nope' },
   { script: 'scripts/tailnet.mjs', args: ['nope'], status: 2, output: 'unknown command: nope' },
   { script: 'skills/backlog-orchestrate/tools/api-call.mjs', args: [], status: 3, output: 'usage: api-call.mjs' },
   { script: 'scripts/ci-scope.mjs', args: ['--dry-run', '--files', 'README.md'], status: 0, output: 'ci-scope: docs-only' },
   { script: 'scripts/test-tmpdir.mjs', args: [PROBE], status: 0, output: 'probe-through-a-link' }
 ]
 
-const NINE = [...ROWS.map((row) => row.script), 'scripts/sync-plugin.mjs'].sort()
+const TEN = [...ROWS.map((row) => row.script), 'scripts/sync-plugin.mjs'].sort()
 
 function run(argv) {
   const result = spawnSync(process.execPath, argv, { encoding: 'utf8', cwd: work, env: { ...cleanEnv, TMPDIR: work } })
@@ -105,13 +106,13 @@ test('no script still compares an unresolved argv[1] with its own module path', 
   assert.deepEqual(stale, [])
 })
 
-test('exactly the nine scripts guard with isMain(import.meta.url)', () => {
+test('exactly the ten scripts guard with isMain(import.meta.url)', () => {
   const using = everySource().filter((file) => fs.readFileSync(path.join(REPO, file), 'utf8').includes('isMain(import.meta.url)'))
-  assert.deepEqual(using.sort(), NINE)
+  assert.deepEqual(using.sort(), TEN)
 })
 
 test('every isMain resolves both sides and treats a failure as not main', () => {
-  for (const file of NINE) {
+  for (const file of TEN) {
     const source = fs.readFileSync(path.join(REPO, file), 'utf8')
     const body = source.slice(source.indexOf('function isMain(url)'), source.indexOf('isMain(import.meta.url)'))
     assert.match(body, /realpathSync\(process\.argv\[1\]\) === (fs\.)?realpathSync\(fileURLToPath\(url\)\)/, file)
