@@ -91,6 +91,12 @@ trigger, once, before `show`:
   without the PR. With either present the mode line names them — `finish mode: pr → PR into <base>, auto-merge, fix`, each flag only when present — and
   `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` is read in full where pr-mode.md §8 says, never earlier. Generic "merge" wording
   in a prompt arms nothing.
+- **The `--review-*` flags are read in the same pass**, from the same place — typed, or inside the backticks of a board prompt's closing sentence — and only
+  beside `--finish pr`: `--review-mode same|split` and the model, effort and line-limit flags that follow it (`--review-model`, `--review-effort`,
+  `--review-big-model`, `--review-big-effort`, `--review-small-model`, `--review-small-effort`, `--review-small-max-lines`, the value `default` meaning the
+  agent's own) configure the reviewer pr-mode.md §7 dispatches. Any `--review-…` without `--finish pr` → stop and name that rule; never
+  ignore it and never fall back to a mode without the review. They are passed to §7 exactly as typed and are not part of the mode line. With none, the
+  review uses Settings' `review.json`, else the defaults.
 
 ## Pick an item
 

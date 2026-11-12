@@ -207,22 +207,34 @@ becomes the PR's title in §8.
 
 ## 7. Review
 
-Dispatch `backlog-manager:backlog-reviewer` with all five inputs its contract requires — a missing one makes it stop:
+**Review through `skills/backlog-review/references/procedure.md`, and never describe the dispatch yourself** — read that file in full before this session's
+first review (a reference file, so replace `${CLAUDE_PLUGIN_ROOT}` in its commands as above), and follow it with these parameters:
 
-- `worktree` — `<tree>`
-- `branch` — `execute/<id>`, or the reused tree's branch
-- `base` — `<base>`; it diffs `<base>...<branch>`
-- `item file path` — files: the item's absolute path inside `<tree>` (`show <id>` prints it, now under `done/`). Tracker: `<tmp>/item.md`, which this
-  session writes — the issue body (`show <id> --json`, its `body`) followed by the contents of `<tmp>/outcome.md` — beside the report.
-- `report path` — `<tmp>/review-<k>.md`, `<k>` counting reviews from `1`. Outside the repo, so the commit can never carry it.
+- `tree` — `<tree>`
+- `base` — `<base>`. Every diff the review takes is measured against it.
+- `item` — files: the item's absolute path inside `<tree>` (`show <id>` prints it, now under `done/`). Tracker: `<tmp>/item.md`, which this session writes —
+  the issue body (`show <id> --json`, its `body`) followed by the contents of `<tmp>/outcome.md` — beside the report.
+- `mode` — `full`: a gate reviews the commit's whole diff, never an increment since an earlier review.
+- `report` — `<tmp>/review-<k>.md`, `<k>` counting reviews from `1`; `group report pattern` — `<tmp>/review-<k>.g<n>.md`; `manifest path` —
+  `<tmp>/review-<k>.manifest.json`. Outside the repo, so the commit can never carry them.
+- `config` — the `--review-*` flags SKILL.md's Finish mode section read, exactly as typed; with none, nothing, and `scope` reads `review.json`.
+- `outcome` — `present`: §5 wrote the Outcome before this commit.
 
-Wait for its verdict inside the same turn, and never end a turn waiting on it: a board-dispatched session is `claude -p` and exits when its turn ends. It
-returns `verdict: approve` or `verdict: fix` plus one line per Critical/Important finding.
+The procedure hands back `merge`'s stdout — one JSON line, then one `<path>:<line> — <Severity>: <text>` line per Critical/Important finding — and the merged
+report path. That stdout is the review's whole result: never read a report into context, and never re-derive the verdict from one. Wait for every reviewer
+inside the same turn, and never end a turn waiting on one: a board-dispatched session is `claude -p` and exits when its turn ends.
 
-**`verdict: fix` → a fix round, at most two.** Fix exactly what the findings name; run the two pre-review checks over what the fix changed; **re-run the
+- **`"verdict":"approve"`** → §8.
+- **`merge` prints `"verdict":"incomplete"` after the procedure's one coverage retry, or `scope` prints `"files":0`** → **do not push.** An incomplete review
+  proved nothing about the files it names, and an empty diff means the commit holds no change to publish. Report it the way §4 reports a failure: what is
+  uncovered (or that the diff is empty), the report path, the tree and the branch. Tracker: comment and release as the "Do not push" paragraph below does.
+- **`"verdict":"fix"`** → a fix round, below.
+
+**`"verdict":"fix"` → a fix round, at most two.** Fix exactly what the findings name; run the two pre-review checks over what the fix changed; **re-run the
 Outcome's verification commands** and append a `### Fix loop <n>` record — what changed and their real output — under `## Outcome` (files: the item file in
 `<tree>`; tracker: `<tmp>/outcome.md`, rewriting `<tmp>/item.md` from it). Commit again in `<tree>` (`git add -A`, a conventional subject naming the
-round), then review again with the next report path.
+round), then review again with the next `<k>` through the procedure's re-review branch: `scope --previous <the latest manifest>`
+(`<tmp>/review-<k-1>.manifest.json`), dispatch only the groups it marks `rerun`, and pass the others' latest reports to `merge` as `--carried`.
 
 **Do not push** when verification is red after a fix (commit nothing more), or when the review after the second fix round still says `fix`. Report it the way
 §4 reports a failure: what failed, the findings, the report paths, the tree and the branch, and the §8 commands for the person who decides the findings are
@@ -236,7 +248,7 @@ cd <tree> && git push -u origin <branch>
 cd <tree> && gh pr create --base <base> --title "$(git log -1 --format=%s)" --body-file <tmp>/pr.md
 ```
 
-`<branch>` is §7's. **Never force-push**, in any spelling. A push the remote rejects stops here and is reported with git's own words — nothing after it runs
+`<branch>` is the tree's branch — `execute/<id>`, or the reused tree's own. **Never force-push**, in any spelling. A push the remote rejects stops here and is reported with git's own words — nothing after it runs
 except the tracker release in §7's shape (comment, plain `stop`), because there is still no pushed work to guard.
 
 The PR body, written to `<tmp>/pr.md`:

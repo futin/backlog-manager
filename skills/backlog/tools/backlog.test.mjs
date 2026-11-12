@@ -3149,6 +3149,36 @@ const prModeSection = (heading) => {
   return raw.slice(at, end ? end.index : raw.length).replace(/\s+/g, ' ')
 }
 
+// task: the reviewer config flags ride the finish clause. `--review-*` are read in the same pass as `--auto-merge`/`--fix` and are meaningful only beside
+// `--finish pr`, because the review they configure is pr-mode §7's. Without the refusal a bare `--review-mode split` would be silently ignored.
+test('backlog-execute reads review flags only beside --finish pr', () => {
+  const text = flat(EXECUTE_SKILL_MD)
+  const at = text.indexOf('## Finish mode')
+  assert.notEqual(at, -1, 'backlog-execute/SKILL.md lost its Finish mode section')
+  const next = text.indexOf(' ## ', at + 5)
+  const section = text.slice(at, next === -1 ? text.length : next)
+  assert.ok(section.includes('--review-mode'), 'Finish mode no longer names --review-mode')
+  assert.ok(/`--review-\*` flags? (?:are|is) read in the same pass[^.]*only beside `--finish pr`/.test(section), 'Finish mode lost the beside---finish-pr rule for review flags')
+  assert.ok(/`--review-[^`]*` without `--finish pr`[^.]*stop and name that rule/.test(section), 'Finish mode no longer refuses a review flag without --finish pr')
+})
+
+// pr-mode §7 hands the review to the shared procedure rather than describing the dispatch: a third copy of the steps is a third, drifting, review.
+test('pr-mode §7 follows the review procedure', () => {
+  const raw = fs.readFileSync(PR_MODE_MD, 'utf8')
+  const section = prModeSection('## 7. Review')
+  assert.ok(section.includes('skills/backlog-review/references/procedure.md'), 'pr-mode §7 no longer follows the review procedure')
+  assert.ok(section.includes('scope --previous'), 'pr-mode §7 fix rounds no longer re-review through scope --previous')
+  assert.ok(!raw.includes('it diffs `<base>...<branch>`'), 'pr-mode.md describes the reviewer dispatch itself again')
+})
+
+// An incomplete review and an empty diff are both "nothing was proven", and a push after either would publish unreviewed work.
+test('pr-mode §7 does not push on incomplete coverage or an empty diff', () => {
+  const section = prModeSection('## 7. Review')
+  assert.ok(section.includes('"verdict":"incomplete"'), 'pr-mode §7 no longer names the incomplete verdict')
+  assert.ok(section.includes('"files":0'), 'pr-mode §7 no longer names the empty-diff scope result')
+  assert.ok(/do not push/i.test(section), 'pr-mode §7 no longer says do not push')
+})
+
 test('pr mode reuses only a clean linked worktree on a named branch that is not the base', () => {
   const section = prModeSection('### Reuse the tree you started in')
   const RULES = [
