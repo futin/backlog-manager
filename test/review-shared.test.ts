@@ -1,4 +1,10 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { DEFAULT_REVIEW_CONFIG, REVIEW_FLAG, parseReviewConfig, reviewFlags, reviewerLabel } from '../shared/agent';
+import type { ReviewConfig } from '../shared/types';
 
 /** The reviewer config's shared helpers. `skills/backlog-review/tools/review.test.mjs` pins the twin in `review.mjs` against the same source. */
 describe('parseReviewConfig', () => {
@@ -55,6 +61,45 @@ describe('reviewFlags', () => {
 
   it('spells null as default', () => {
     expect(reviewFlags(null)).toEqual(['default']);
+  });
+});
+
+/**
+ * The seam between the two halves of the reviewer config: the board spells a config as flags with `reviewFlags`, and `backlog-review`'s `review.mjs config`
+ * reads them back. Nothing else pins that the two agree on the flag NAMES — the twin-parity test in `review.test.mjs` pins the lists and the defaults — so a
+ * flag renamed on one side only would pass every other suite and fail every pr-mode execute with an override at `scope` (final review M5).
+ *
+ * `BM_REVIEW_FILE` points at a path that does not exist, so no review.json on this machine leaks in (flags beat the file anyway; this makes it certain), and
+ * `BM_REVIEW_HOME` at the same temp dir for the same reason. Flags carry only the active mode's members — `reviewFlags` writes no `same` pair in split mode and
+ * no split members in same mode — and `review.mjs` fills the rest from its defaults, so each config below keeps its inactive members at the defaults: that is
+ * the whole of what a round trip can carry.
+ */
+describe('reviewFlags → review.mjs config', () => {
+  const REVIEW_MJS = join(__dirname, '..', 'skills', 'backlog-review', 'tools', 'review.mjs');
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'bm-review-roundtrip-'));
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  const configs: [string, ReviewConfig][] = [
+    ['same mode with a model and an effort', { ...DEFAULT_REVIEW_CONFIG, mode: 'same', same: { model: 'fable', effort: 'xhigh' } }],
+    [
+      'split mode with nulls in big and a non-default limit',
+      { ...DEFAULT_REVIEW_CONFIG, big: { model: null, effort: null }, small: { model: 'haiku', effort: 'low' }, smallMaxLines: 75 }
+    ],
+    [
+      'split mode with every field set',
+      { ...DEFAULT_REVIEW_CONFIG, big: { model: 'opus', effort: 'max' }, small: { model: 'sonnet', effort: 'medium' }, smallMaxLines: 10000 }
+    ]
+  ];
+
+  it.each(configs)('reads %s back unchanged', (_name, config) => {
+    const out = execFileSync(process.execPath, [REVIEW_MJS, 'config', ...reviewFlags(config)], {
+      encoding: 'utf8',
+      env: { ...process.env, BM_REVIEW_FILE: join(dir, 'absent', 'review.json'), BM_REVIEW_HOME: join(dir, 'reviews') }
+    });
+    expect(JSON.parse(out)).toEqual(config);
   });
 });
 

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -146,6 +146,90 @@ describe('ReviewerGroup', () => {
 
     await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Small groups — model' }), 'haiku');
     expect(await screen.findByRole('alert')).toHaveTextContent('Not saved — invalid review config: small.model');
+  });
+
+  /**
+   * The POSTs held open until the test releases them, so two edits can be made while the first is in flight and the answers settled in any order. Each
+   * `pending` entry is one POST: its body, and `answer(status, body?)` — the body defaults to an echo, as the server answers a valid config.
+   */
+  function stubHeldPosts(get: ReviewSetting): { pending: { body: ReviewConfig; answer: (status?: number, body?: unknown) => void }[] } {
+    const pending: { body: ReviewConfig; answer: (status?: number, body?: unknown) => void }[] = [];
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/api/settings/review') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as ReviewConfig;
+        return new Promise<Response>((resolve) => {
+          pending.push({ body, answer: (status = 200, answer: unknown = body) => void respond(status, answer).then(resolve) });
+        });
+      }
+      return respond(200, get);
+    }) as jest.Mock;
+    return { pending };
+  }
+
+  const select = (name: string) => screen.getByRole('combobox', { name }) as HTMLSelectElement;
+
+  it('builds a second edit made while the first save is in flight on the first, so its POST carries both changes', async () => {
+    const { pending } = stubHeldPosts(DEFAULT_REVIEW_CONFIG);
+    render(<ReviewerGroup />);
+
+    const limit = await screen.findByRole('spinbutton', { name: 'Small group limit' });
+    await userEvent.clear(limit);
+    await userEvent.type(limit, '450');
+    await userEvent.tab();
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await userEvent.selectOptions(select('Big groups — model'), 'fable');
+    await waitFor(() => expect(pending).toHaveLength(2));
+
+    expect(pending[1].body).toEqual({ ...DEFAULT_REVIEW_CONFIG, big: { model: 'fable', effort: null }, smallMaxLines: 450 });
+  });
+
+  it('shows the newest save’s answer when an older one settles after it', async () => {
+    const { pending } = stubHeldPosts(DEFAULT_REVIEW_CONFIG);
+    render(<ReviewerGroup />);
+
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Small groups — model' }), 'haiku');
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await userEvent.selectOptions(select('Big groups — effort'), 'max');
+    await waitFor(() => expect(pending).toHaveLength(2));
+
+    // The server's answers, not the posted bodies: what the card ends on must be the newest answer, whichever order they land in.
+    const second: ReviewConfig = { ...DEFAULT_REVIEW_CONFIG, big: { model: null, effort: 'max' }, small: { model: 'haiku', effort: null } };
+    pending[1].answer(200, second);
+    await waitFor(() => expect(select('Big groups — effort').value).toBe('max'));
+    // Settled inside `act`, so whatever the stale answer would render has rendered before the assertions read the card.
+    await act(async () => {
+      pending[0].answer(200, { ...DEFAULT_REVIEW_CONFIG, small: { model: 'haiku', effort: null } });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(select('Big groups — effort').value).toBe('max');
+    expect(select('Small groups — model').value).toBe('haiku');
+  });
+
+  it('puts the server’s value back on a refused save — the limit field included — and says so in the error row', async () => {
+    const { pending } = stubHeldPosts(DEFAULT_REVIEW_CONFIG);
+    render(<ReviewerGroup />);
+
+    const limit = await screen.findByRole('spinbutton', { name: 'Small group limit' });
+    await userEvent.clear(limit);
+    await userEvent.type(limit, '450');
+    await userEvent.tab();
+    await waitFor(() => expect(pending).toHaveLength(1));
+    pending[0].answer(400, { error: 'invalid review config: smallMaxLines' });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Not saved — invalid review config: smallMaxLines. The value shown is the one still on the server.'
+    );
+    expect(limit).toHaveValue(300);
+    expect(limit).not.toHaveAttribute('aria-invalid', 'true');
+
+    // A select edit that is refused is shown at once and taken back on the answer, the same way.
+    await userEvent.selectOptions(select('Small groups — model'), 'haiku');
+    expect(select('Small groups — model').value).toBe('haiku');
+    await waitFor(() => expect(pending).toHaveLength(2));
+    pending[1].answer(400, { error: 'invalid review config: small.model' });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Not saved — invalid review config: small.model'));
+    expect(select('Small groups — model').value).toBe('sonnet');
   });
 });
 
