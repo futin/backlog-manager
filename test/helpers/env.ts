@@ -115,6 +115,15 @@ process.env.BM_JIRA_EMAIL = '';
 process.env.BM_JIRA_TOKEN = '';
 
 /**
+ * `BM_GITLAB_SITE`, `BM_GITLAB_TOKEN` — the GitLab pair (`server/src/gitlab/env.util.ts`), blanked with `=` for the Jira trio's reason above: `ConfigModule.forRoot`
+ * loads `.env` and never overrides a key that already exists, so a key set to `''` here, before any import, keeps the developer's real values out of the
+ * process. From the GitLab poller on, every `AppModule` suite's bootstrap would otherwise send the developer's real token to the real site. An empty string is
+ * "absent" to `gitlabEnv`, so `configured: false` follows without a suite doing anything; a suite that wants GitLab on passes `gitlabEnv` an object.
+ */
+process.env.BM_GITLAB_SITE = '';
+process.env.BM_GITLAB_TOKEN = '';
+
+/**
  * `BM_JIRA_FILE` — the board list and repo mappings (`~/.backlog-manager/settings/jira.json`), defaulted so no suite reads the developer's real boards. Phase 1
  * only reads it, but a real board list on a machine would change what `GET /api/jira` answers (and what the poller sweeps, once a suite arms it). A file under
  * a fresh temp directory that does not exist yet reads as no boards and no mappings, which is what every suite that is not about Jira assumes. `||=`, like

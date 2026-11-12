@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { readAgentsConfig } from '../server/src/agents/config.util';
+import { GITLAB_ENV } from '../server/src/gitlab/env.util';
 import { JIRA_ENV, REPO_ROOTS_ENV } from '../server/src/jira/env.util';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 
@@ -131,6 +132,23 @@ describe('docker-compose BM_JIRA_SITE / BM_JIRA_EMAIL / BM_JIRA_TOKEN', () => {
 
   it('spells the three variables the way the server reads them', () => {
     expect(JIRA_ENV).toEqual({ site: 'BM_JIRA_SITE', email: 'BM_JIRA_EMAIL', token: 'BM_JIRA_TOKEN' });
+  });
+});
+
+/** The GitLab pair — the Jira describe's three assertions, through `GITLAB_ENV`, the server's own spellings. */
+describe('docker-compose BM_GITLAB_SITE / BM_GITLAB_TOKEN', () => {
+  it.each(Object.values(GITLAB_ENV))('passes %s through with an empty default', (key) => {
+    expect(assignments(key)).toEqual([`\${${key}:-}`]);
+  });
+
+  it.each(Object.values(GITLAB_ENV))('holds no literal value for %s', (key) => {
+    const found = assignments(key);
+    expect(found.length).toBeGreaterThan(0);
+    for (const value of found) expect(value.startsWith('${')).toBe(true);
+  });
+
+  it('spells the two variables the way the server reads them', () => {
+    expect(GITLAB_ENV).toEqual({ site: 'BM_GITLAB_SITE', token: 'BM_GITLAB_TOKEN' });
   });
 });
 

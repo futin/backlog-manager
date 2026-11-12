@@ -115,6 +115,12 @@ services:
       BM_JIRA_SITE: '${BM_JIRA_SITE:-}'
       BM_JIRA_EMAIL: '${BM_JIRA_EMAIL:-}'
       BM_JIRA_TOKEN: '${BM_JIRA_TOKEN:-}'
+      # The GitLab pair (GitLab connection, read-only delivery marks). bug-25's rule once more: an interpolation with an empty default, NEVER a literal — the
+      # site is the host the token is sent to, and a literal token can only be undone by revoking it. `:-` so an empty value reads as absent, which the server
+      # reports as not configured (the board simply has no delivery marks) rather than sending a blank credential. Pinned through the server's own spellings
+      # (`GITLAB_ENV`) by test/compose-env.test.ts.
+      BM_GITLAB_SITE: '${BM_GITLAB_SITE:-}'
+      BM_GITLAB_TOKEN: '${BM_GITLAB_TOKEN:-}'
       # The name this machine's tracker claims record (#225). backlog.mjs and
       # orchestrate.mjs read it on the host; the server reads it only for the
       # board's Release claim on a session it did not dispatch, which releases
