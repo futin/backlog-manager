@@ -642,6 +642,10 @@ button.rail-count { cursor: pointer }
 /* The sub-line's failing reading: red while the last sweep could not read a root or a query (`bandSub`'s `failing`). The class, never an inline colour, so
    each theme's `--red` is the red. */
 .jira-band-sub.failing { color: var(--red) }
+/* The band's GitLab line (GitLab connection spec §7.2, `GitlabBandLine`): a second line under the Jira sub-line, not a run-on of it. `Band` renders `sub` in one
+   `<p className="ui-band-sub">`, so the two are adjacent inline spans — a block box is what puts this one on its own line (a `<div>` inside the `<p>` would be
+   invalid markup). */
+.jira-band-gitlab { display: block }
 
 /* The picker is its Popover's positioning parent (the panel hangs `100% + 8px` under it, right edges together) and does not shrink in the band's wrapping
    right slot. The board's name ellipsises inside the chip, so a long name cannot push the search and the filter track off the line. */

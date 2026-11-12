@@ -3,6 +3,8 @@
  */
 import { cleanup, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import type { ReactNode } from 'react';
 
 import { JiraAgentDeck } from '../client/src/components/jira/JiraAgentDeck';
@@ -285,5 +287,14 @@ describe('the List’s Delivery column', () => {
     expect(cell('TIMIFY-123').textContent).toBe('—');
     expect(cell('TIMIFY-124').textContent).toBe('—');
     expect(cell('PAY-120').textContent).toBe('');
+  });
+});
+
+// jsdom never applies the stylesheet, so the band line's own-line rule is pinned in source: `Band` puts `sub` in one `<p>`, and without a block box the
+// GitLab span runs on from `JiraBandSub`'s span ("…polled 4s agoGitLab: …") instead of sitting on the second line spec §7.2 draws.
+describe('the band’s GitLab line', () => {
+  it('is a block box, so it sits on its own line under the Jira sub-line', () => {
+    const css = readFileSync(join(__dirname, '../client/src/styles.css'), 'utf8');
+    expect(css).toMatch(/^\.jira-band-gitlab\s*\{[^}]*display:\s*block/m);
   });
 });
