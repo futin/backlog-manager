@@ -895,7 +895,8 @@ export interface JiraTransition {
 
 /**
  * One row of the dashboard's `/api/sessions` list, as the Jira reconciler keeps it. Only `id` and `status` are always there; every other field is the dashboard's
- * and may be absent. `desktopOwned` and `processLive` are `true` or absent, never `false` — the dashboard does not send `false` — and `stopState` is absent
+ * and may be absent. `desktopOwned` (the desktop app lists the session — a `dashboard` row it was handed, or a `local` one started or continued there) and
+ * `processLive` are `true` or absent, never `false` — the dashboard does not send `false` — and `stopState` is absent
  * unless a stop is possible (`ready`) or underway (`stopping`).
  */
 export interface DashboardRow {
