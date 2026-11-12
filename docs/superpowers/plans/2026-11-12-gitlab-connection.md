@@ -238,7 +238,8 @@ widths) are soft targets, never a reason to drop a rule.
   noticed by `payload()` or a sweep; `payload()` then answers `checking` and starts the read without awaiting it. Identity read status → state: 200 →
   working token; 401/403 → `rejected` (`httpStatus`, `reason` = GitLab's message); status 0 (incl. refused 3xx) or 5xx → `unreachable` (`reason`).
   Independent of arming. While the identity is unanswered or `unreachable`, it is retried at the top of each sweep and by `payload()` at most once per
-  `GITLAB_IDENTITY_RETRY_MS = 60_000` (the tracker's `IDENTITY_RETRY_MS` precedent, `server/src/tracker/poller.service.ts:95`), un-awaited; a `rejected`
+  `GITLAB_IDENTITY_RETRY_MS = 60_000` (the tracker's `IDENTITY_RETRY_MS` precedent, `server/src/tracker/poller.service.ts:95`), un-awaited. Both callers
+  share one pace, measured from the last identity read's start, and an identity read in flight is never duplicated (callers join it). A `rejected`
   identity is re-read only on a fingerprint change or a 401 (spec §5.2).
 - `arm()`: returns if stopped, if unconfigured, if a timer or sweep exists; else starts `tick()`. A sweep re-derives the mapping; zero projects on the
   site → no successor, timer cleared (disarmed), state `idle` once identity is good. A successful identity read with ≥ 1 project → `connected`.
@@ -251,7 +252,11 @@ widths) are soft targets, never a reason to drop a rule.
 - A project's list answering 403/404 → that project `failed: true`, problem `cannot-read`, its previous MRs kept. Any call answering 401 → identity re-read
   at once (state turns `rejected` within the sweep). Status 0 (incl. a refused 3xx) or 5xx on a project → `failed: true`, previous MRs and `polledAt`
   kept, **and the state turns `unreachable`** with `reason` = the first such call's message (spec §5.2: "the identity read or a sweep gets no HTTP
-  answer"); the next sweep in which no call fails that way restores `connected`. Success → MRs replaced, `polledAt` = now, `failed: false`.
+  answer"); the next sweep in which no call fails that way restores `connected`. Success → MRs replaced, `polledAt` = now, `failed: false`. A
+  **detail** call answering 0/5xx/3xx also turns the state `unreachable` (the project stays `failed: false`); a detail 403/404 does neither.
+- **State precedence** (one function, read by `payload()`): `unconfigured` if the env is; else the identity verdict while it is not a working token
+  (`checking`, `rejected`, or `unreachable` from the identity read); else `unreachable` while the last finished sweep had a 0/5xx/3xx call; else `idle`
+  (no project on the site) or `connected`.
 - 429 anywhere → `retryAt = now + (Retry-After s × 1000 or GITLAB_RATE_LIMIT_DEFAULT_MS)`; the sweep stops; `status.retryAt` is the ISO instant while
   `now < retryAt`, else `null`; `sweepNow()` inside the window → `{ kind: 'wait', retryAt }`; the next timer sweep waits it out.
 - `sweepNow()`: not armed (no timer, no sweep in flight, after `arm()` found nothing) → `not-armed`; otherwise joins or starts `tick()` and awaits it
@@ -269,7 +274,8 @@ widths) are soft targets, never a reason to drop a rule.
     390 with keys `['TIMIFY-123']`, `['TIMIFY-150']`, `['TIMIFY-118']`, `['TIMIFY-117']`; 412 `pipeline: 'success'`, 419 `pipeline: 'failed'`, 398 and 390
     `pipeline: null`; `!500` absent. Detail calls were made for 412 and 419 only — none for 398/390 (finished) or `!500` (keyless).
   - pipeline survives a failed detail read: second sweep, the detail call for 412 answers 500 → 412 still `pipeline: 'success'`, project `failed: false`;
-    a brand-new opened MR whose detail call answers 500 → `pipeline: 'none'`.
+    a brand-new opened MR whose detail call answers 500 → `pipeline: 'none'`; in both, state `unreachable` after that sweep (precedence rule), and a detail
+    call answering 404 instead leaves the state `connected`.
   - the merged/closed list URLs carry `updated_after` = injected now − 30 days.
   - two Jira keys: repos `{ TIMIFY: [microservice, proxy], PAY: [microservice] }`; proxy holds an open MR on `pay-7` and microservice one on
     `pay-8-fix` → `jiraProjects.PAY` lists microservice only, `jiraProjects.TIMIFY` both; the microservice MR has keys `['PAY-8']`, and the proxy MR is
@@ -280,8 +286,12 @@ widths) are soft targets, never a reason to drop a rule.
     `{ kind: 'cannot-read', path: 'development/dev-api-graphql-proxy', status: 404 }`, state still `connected`.
   - identity 401 → `rejected`, `httpStatus: 401`; identity 403 → `rejected`; identity 302 → `unreachable`, `reason: 'redirect refused (302)'`; identity
     503 → `unreachable`.
-  - identity 503 at bootstrap → `unreachable`; the fake then answers 200; with `now` advanced 60 s, a `payload()` call (or the next sweep) re-reads it and
-    the state becomes `connected` (with a mapped repo) or `idle` (without); with `now` advanced only 30 s, no second `/user` call is made by `payload()`.
+  - bootstrap with a healthy identity and a mapped repo → after the first sweep, exactly one `/user` call was made.
+  - identity 503 at bootstrap with a mapped repo, first sweep's MR calls healthy → still `unreachable`, `user: null` (precedence).
+  - `payload()` retry: identity 503 → `unreachable`; the fake then answers 200; `now` + 30 s → `payload()` makes no `/user` call; `now` + 60 s →
+    `payload()` re-reads it and the state becomes `connected`.
+  - sweep retry: identity 503, no `payload()` calls; `now` + 60 s and a sweep → the sweep re-reads `/user` and the state becomes `connected`; a repo-less
+    variant ends `idle`.
   - good identity, then a project list answers 401 on the next sweep → identity is re-read during that sweep and state is `rejected` after it.
   - failure keeps last good: first sweep returns `!412`; second sweep gets status 0 (`fetch failed`) on that project → `mrs` still holds `!412`,
     `polledAt` unchanged, `failed: true`, state `unreachable`, `reason: 'fetch failed'`; a third sweep whose list answers 302 → `unreachable`,
