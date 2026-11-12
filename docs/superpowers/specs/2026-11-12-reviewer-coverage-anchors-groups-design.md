@@ -34,7 +34,7 @@ Explicitly not carried over (the user chose against it): OCR's comment filter / 
 
 - No self-check / finding filter (user's call).
 - No LLM in grouping or anchoring. Both are deterministic code, unit-tested.
-- No change to severity definitions, the mechanical verdict rule, the fix-loop budget (two), or who commits.
+- No change to severity definitions, the mechanical verdict rule, the fix-loop budget (two), or who commits. (The reviewer model does change — §5.)
 - No change to what the reviewer checks or its order (correctness, invariants, tests, Outcome lines).
 - No new language rule docs.
 
@@ -186,7 +186,22 @@ Both orchestrate `SKILL.md` §7 and execute `references/pr-mode.md` §7:
   pins the `base` pairing keeps passing.
 - Merge-commit `Reviewed:` line and tracker snapshot handling are unchanged — they already point at `<id>-<k>.md`.
 
-### 5. Cost note
+### 5. Reviewer model per group (user's decision: size rule plus an override)
+
+Today the model is fixed by the agent file's frontmatter, `model: opus`. That frontmatter stays as the default; the choice moves into the manifest and the
+caller passes it on each dispatch through the Agent tool's `model` parameter.
+
+- **Size rule, in `scope`.** Each group gets a `model` field. Group 1 is always `opus`: it carries the item-level checks, and on a diff below the grouping
+  threshold it is the only group, so **a small diff keeps exactly today's Opus review**. Every other group is `sonnet` when its changed lines are at or
+  below a threshold (starting value **300**, a soft constant), `opus` above it.
+- **Override.** A `--review-model <opus|sonnet>` flag forces one model for every group. My call on where it lives: a trigger flag on
+  `/backlog-orchestrate` (recorded in the run file like the run's other launch choices, so a `--resume`d driver uses the same model) and on `/backlog-execute`
+  (session-scoped). `scope` takes it as `--model <m>` and writes it into every group. No board UI in this change; a Settings default and a launch-sheet
+  picker are a follow-up.
+- A fix loop's re-review uses the same per-group models as the first round (groups come from the first `scope`).
+- The merged report's `## What I reviewed` names each group's model, so a reader can weigh a Sonnet-reviewed group accordingly.
+
+### 6. Cost note
 
 Above the threshold a review becomes N Opus dispatches instead of one. That is accepted for big diffs (OCR's own numbers show the isolated-context approach
 costs fewer tokens overall than one agent wading through a large diff, but that is their benchmark, not ours). Below it, cost is unchanged apart from two
@@ -224,5 +239,7 @@ cheap tool calls.
 - A coverage failure parks the item with the existing `parked` attention kind.
 - The end-to-end hand run is post-merge (after plugin sync and restart); the tool tests gate the merge.
 
+- The model override is a trigger flag (run-file recorded for orchestrate), not a board setting; Sonnet threshold 300 changed lines is a starting guess.
+
 Decided by the user: scope (coverage, anchors, grouping; no self-check filter); the reviewer stays `agents/backlog-reviewer.md`; re-review after a fix
-covers touched groups plus group 1.
+covers touched groups plus group 1; the reviewer model is chosen per group by a size rule, with an override that forces one model.
