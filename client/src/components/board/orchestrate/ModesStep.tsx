@@ -132,10 +132,6 @@ export function ModesStep({ draft }: StepProps) {
         </label>
       </div>
 
-      {/* Reviewer coverage task 11: who reviews each item, seeded from Settings' Reviewer card and sent only when changed here. Drawn only once that read
-          has landed — with no seed there is nothing to compare a pick against, and a pick the request would then drop must never be offered. */}
-      {review !== null && <ReviewerFields layout="sheet" value={review} onChange={setReview} />}
-
       {/* Shown only for a base that is not `main`, unlike the question-
           mode note above it, and the asymmetry is the point: that note
           is about a CHOICE and so is true of both its values, while
@@ -199,6 +195,12 @@ export function ModesStep({ draft }: StepProps) {
           <pre className="orchestrate-merge-hint-json">{mergeAllowSnippet(project)}</pre>
         </div>
       )}
+
+      {/* Reviewer coverage task 11: who reviews each item, seeded from Settings' Reviewer card and sent only when changed here. Drawn only once that read
+          has landed — with no seed there is nothing to compare a pick against, and a pick the request would then drop must never be offered. Placed after
+          every note above rather than under the selects row: those notes (base, question mode, merge hint) each explain a select in that row, and
+          /ui-verify found the section drawn between the Question mode select and its own note, which read as the note describing the reviewer. */}
+      {review !== null && <ReviewerFields layout="sheet" value={review} onChange={setReview} />}
 
       {error !== null && <div className="sheet-error">{error}</div>}
     </div>
