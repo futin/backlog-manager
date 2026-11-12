@@ -678,6 +678,91 @@ export interface PullRequestsPayload {
   repos: PrRepoView[];
 }
 
+// ── GitLab connection (Jira › delivery) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Spec: docs/superpowers/specs/2026-11-12-gitlab-connection-design.md §5–§6. Read-only, in memory, keyed by GitLab project; `server/src/gitlab/poller.service.ts`
+// is the one writer of everything below.
+
+/** One sweep every two minutes (spec §6.3), plus an immediate one when the poller arms. A `setTimeout` chain, never a `setInterval`. */
+export const GITLAB_POLL_MS = 120_000;
+/** How long the sweep route waits on the sweep it joined or started before answering anyway; the `JIRA_SAVE_SWEEP_WAIT_MS` precedent. */
+export const GITLAB_SWEEP_WAIT_MS = 20_000;
+/** The 429 window when GitLab sends no `Retry-After`. */
+export const GITLAB_RATE_LIMIT_DEFAULT_MS = 60_000;
+/** Page requests one project may spend per sweep, across all three states; past it the project is `capped` and says `first N shown`. */
+export const GITLAB_PAGES_PER_PROJECT = 5;
+/** Merged and closed MRs are read when updated within this many days; an older finished MR reads as no MR (spec §6.3, §7's `in the last 30 days`). */
+export const GITLAB_FINISHED_DAYS = 30;
+/** How long an unanswered or `unreachable` identity read waits before it is asked again — the tracker's `IDENTITY_RETRY_MS`, for the same reason. */
+export const GITLAB_IDENTITY_RETRY_MS = 60_000;
+
+/**
+ * One merge request, as the board draws it. `project` is the GitLab namespace path it lives in. `pipeline` is the head pipeline folded to five, read only
+ * for an OPEN MR — a merged or closed one carries `null` (not read), never `none` (read, and there is no pipeline). `keys` are the Jira keys its source
+ * branch and title carry, over the keys `jira.json` maps its project to; never empty, because an MR that names no ticket is not kept.
+ */
+export interface GitlabMr {
+  project: string;
+  iid: number;
+  title: string;
+  webUrl: string;
+  state: 'opened' | 'merged' | 'closed';
+  draft: boolean;
+  sourceBranch: string;
+  targetBranch: string;
+  createdAt: string;
+  updatedAt: string;
+  mergedAt: string | null;
+  pipeline: GitlabPipeline | null;
+  keys: string[];
+}
+
+/**
+ * One mapped GitLab project as a Jira project key sees it. `polledAt` moves only on a successful read of its MR lists (`null` until one), `failed` is the
+ * last sweep's verdict on it, and `capped` says its MRs stopped at the page budget — so a ticket with no MR in a capped project is unknown, not none.
+ */
+export interface GitlabProjectView {
+  path: string;
+  repo: string;
+  polledAt: string | null;
+  capped: boolean;
+  failed: boolean;
+}
+
+/** A per-repository line under a `connected` Sources row (spec §5.2). Paths and basenames only — never a remote URL, which can carry a PAT. */
+export type GitlabRepoProblem =
+  | { kind: 'cannot-read'; path: string; status: 403 | 404 }
+  | { kind: 'origin'; repo: string }
+  | { kind: 'capped'; path: string; shown: number };
+
+/** The connection state (spec §5.2). `rate-limited` is not one of them: it is `connected` with `retryAt` set. */
+export type GitlabState = 'unconfigured' | 'checking' | 'rejected' | 'unreachable' | 'idle' | 'connected';
+
+/**
+ * The Sources row's facts, answered from memory and env with no outbound call. `site` is the configured hostname (`null` unconfigured), `user` the identity
+ * read's answer, never the token. `httpStatus`/`reason` explain a `rejected` or `unreachable` state. `mappedRepos` counts distinct GitLab projects on the
+ * site; `foundHosts` the other hosts mapped repos' remotes named; `retryAt` the 429 window's end as ISO while it is still ahead.
+ */
+export interface GitlabStatus {
+  state: GitlabState;
+  site: string | null;
+  malformedSite: boolean;
+  user: { username: string; name: string } | null;
+  httpStatus: number | null;
+  reason: string | null;
+  armed: boolean;
+  retryAt: string | null;
+  mappedRepos: number;
+  foundHosts: string[];
+  problems: GitlabRepoProblem[];
+}
+
+/** `GET /api/gitlab`. `jiraProjects` is keyed by Jira project key — each the views of the GitLab projects that key maps on the site. */
+export interface GitlabPayload {
+  status: GitlabStatus;
+  jiraProjects: Record<string, GitlabProjectView[]>;
+  mrs: GitlabMr[];
+}
+
 /** `POST /api/prs/merge`. `headSha` is the head the page read (40 lowercase hex); GitHub refuses the merge with a 409 if the head has moved since. */
 export interface PrMergeRequest {
   repo: string;
