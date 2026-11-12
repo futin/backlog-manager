@@ -30,12 +30,14 @@ Two things make this skill different from its three siblings, and both are worth
   rather than block, never `reset --hard` — is there because the failure it prevents would otherwise happen silently, hours after anyone could have caught it.
 
 The trigger carries the whole invocation surface:
-`/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch|pr] [--question-mode decide] [--resume] [--abort]`.
+`/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch|pr] [--question-mode decide] [--review-mode same|split --review-… <value>…] [--resume] [--abort]`.
 Ids and `--max` shape the queue (section 1); `--base` names the branch this run gates at, cuts worktrees from and merges into, defaulting to `main`
 (section 2); `--merge-mode` decides whether a verified item is merged into that base or stops at its reviewed branch (section 2), and `pr` merges it into a
 run branch cut from that base and opens one pull request at the end (sections 2 and 10);
 `--question-mode` decides what happens to an item whose open questions nobody is there to answer — `park` (the default: record them, skip the item, keep
-draining) or `decide` (answer them yourself, write the answers into the item, record what you assumed, and execute it), section 3; `--resume` takes over a run
+draining) or `decide` (answer them yourself, write the answers into the item, record what you assumed, and execute it), section 3; the review flags —
+`--review-mode` and the `--review-…` model, effort and line-limit flags beside it, spelled as `review.mjs config` takes them — pick the models and efforts §7's
+reviewers run on, recorded once at `init` (section 2); `--resume` takes over a run
 that was interrupted and `--abort` ends one (section 10). With none of them, the run is every ready item in the project's backlog, in the board's own order,
 merged into `main`, parking anything it cannot get an answer for.
 
@@ -255,6 +257,19 @@ What the base changes, in one list, so a run reading this on turn 300 does not h
 
 What it does **not** change: nothing is pushed, on any branch; the base is never merged into anything else — landing `feature/x` on `main` when the experiment
 is proven is a human act, not this run's; and `branch` mode is unaffected, since it writes to no tree at all.
+
+### The reviewer config
+
+**Before `init`, run `review.mjs config` with every review flag the trigger carries, exactly as typed (or with none), and add its one stdout line to the
+`init` above as `--review-config '<that line>'`.** Exit `1` names a bad flag: refuse the run with that line, before `init`, with nothing written.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-review/tools/review.mjs" config --review-mode split --review-big-model opus
+```
+
+With no review flags it prints the machine's Settings config, or the defaults. The line is the tool's own JSON — closed-list values and one integer, never
+prose — so it rides a command line single-quoted. `init` records it as `reviewConfig`, and `status --json` carries it, which is where §7 and a resumed session
+read it.
 
 ### Merge mode, and the probe before item 1
 
@@ -789,23 +804,30 @@ list is what keeps that scaffolding out of this `add -A`. A run that adds a new 
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> reviewing
 ```
 
-Dispatch the plugin's own reviewer, `backlog-manager:backlog-reviewer`, with the four fields its input contract requires and nothing else:
+**Review through `skills/backlog-review/references/procedure.md`, and never describe the dispatch yourself** — read that file in full before this run's
+first review (a reference file, so replace `${CLAUDE_PLUGIN_ROOT}` in its commands as above), and follow it with these parameters:
 
-- `worktree` — `"$PWD/.worktrees/<id>"`
-- `branch` — `backlog/<id>`
-- `base` — this run's base branch (`main` unless `--base` said otherwise). The reviewer takes every diff against it, so handing `main` to a `--base` run would
-  have it review that branch's whole divergence instead of this item's work — a much larger diff that still looks legitimate. Both halves of this pair are
-  pinned by a test; change neither alone.
-- `item file path` — the item's absolute path _inside the worktree_. Tracker: `<dir>/items/<n>.md`, the snapshot §5 wrote (`references/tracker.md` §7).
-- `report path` — `<dir>/reviews/<id>-1.md` (`-2` on the second loop)
+- `tree` — `"$PWD/.worktrees/<id>"`
+- `base` — this run's base branch (`main` unless `--base` said otherwise). Every diff the review takes is measured against it, so handing `main` to a `--base`
+  run would have it review that branch's whole divergence instead of this item's work — a much larger diff that still looks legitimate. Both halves of this
+  pair are pinned by a test; change neither alone.
+- `item` — the item's absolute path _inside the worktree_. Tracker: `<dir>/items/<n>.md`, the snapshot §5 wrote (`references/tracker.md` §7).
+- `mode` — `full`: a gate reviews the item's whole committed diff, never an increment since an earlier review.
+- `report` — `<dir>/reviews/<id>-<k>.md`, `<k>` counting this item's reviews from `1`; `group report pattern` — `<dir>/reviews/<id>-<k>.g<n>.md`;
+  `manifest path` — `<dir>/reviews/<id>-<k>.manifest.json`.
+- `config` — `--review-config '<reviewConfig>'`, the run file's value as `status --json` prints it, on every `scope` this run makes.
+- `outcome` — `present`: §5 sends an item with no `## Outcome` to its failure shapes, never here.
 
-That agent writes its full report to the report path and returns only `verdict: approve` or `verdict: fix` plus its Critical/Important findings, one line each.
-Do not re-state that contract in the dispatch prompt as if it were optional, and do not ask for a summary in the message — the contract lives in the agent
-definition precisely because prompt-side copies of it have historically lost to generic reviewer templates, and a run of ten items cannot afford ten full
-reports in this session's context.
+**When `status --json` shows no `reviewConfig` (a run file written before the reviewer config was recorded), run `review.mjs config --defaults` and pass its
+line as `--review-config` instead** — the default config, never the current `review.json`, which may have changed since the run began.
 
-- **`verdict: approve`** → straight to Verify.
-- **`verdict: fix`** → one fix loop. Spend it on the run file first, and read the count back:
+The procedure hands back `merge`'s stdout — one JSON line, then one `<path>:<line> — <Severity>: <text>` line per Critical/Important finding — and the merged
+report path. That stdout is the review's whole result in this session: never read a report into context, and never re-derive the verdict from one.
+
+- **`"verdict":"approve"`** → straight to Verify.
+- **`merge` prints `"verdict":"incomplete"` after the procedure's one coverage retry, or `scope` prints `"files":0`** → read `references/check-failures.md` in
+  full: neither is reviewed again, fixed or merged.
+- **`"verdict":"fix"`** → one fix loop. Spend it on the run file first, and read the count back:
 
   ```bash
   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> fixing --fix-loop
@@ -821,7 +843,10 @@ reports in this session's context.
   `fix-mode` decides fresh or resume, and the decision is the tool's so that a `--resume`d driver reaches the answer the crashed one would have, from the run file
   alone (`references/rationale.md`, §7).
 
-  **`mode: "resume"`** → **write the reviewer's findings, verbatim, to `<dir>/prompts/<id>-fix-<n>.txt` with the Write tool** —
+  **The fix prompt file carries `merge`'s finding lines, verbatim, and the merged report path** — the lines the procedure handed back, resolved to the line
+  each finding's anchor quotes, never a group report's own text.
+
+  **`mode: "resume"`** → **write those findings and the merged report path to `<dir>/prompts/<id>-fix-<n>.txt` with the Write tool** —
   `<n>` being the `fixLoops` value that line just echoed back, so a second loop keeps the first one's prompt beside its own rather than over it — and resume the
   session `fix-mode` named with step 5's retry line, its `<sessionId>` taken from the `fix-mode` line rather than from `status --json`: that is the session
   whose peak `fix-mode` just judged, so the id resumed is always the id the decision was about. Unchanged but for the names that carry this loop's `<n>`, and
@@ -833,8 +858,8 @@ reports in this session's context.
 
   **`mode: "fresh"`** → a new headless session, not a resumed one, that starts from the findings instead of from the executor's whole context. Write
   `<dir>/prompts/<id>-fix-<n>.txt` with the Write tool, holding, in this order: one sentence saying this is a fix loop dispatched by `backlog-orchestrate` in an
-  unattended run, with no user to ask; "Never commit, push or merge."; the reviewer's findings, verbatim; the full report path (`<dir>/reviews/<id>-<k>.md`, the
-  one this verdict came from); the item file path the reviewer read (the worktree item file; Tracker: `<dir>/items/<n>.md`); this run's base
+  unattended run, with no user to ask; "Never commit, push or merge."; `merge`'s finding lines, as above; the merged report path (`<dir>/reviews/<id>-<k>.md`,
+  the one this verdict came from); the item file path the reviewer read (the worktree item file; Tracker: `<dir>/items/<n>.md`); this run's base
   branch, with the instruction to read `git diff <base>...HEAD` and the files the findings name before changing anything, and nothing wider; the verification
   commands to re-run, copied from the item's `## Outcome`; where to append a `### Fix loop <n>` record of what it changed and the command output that proves it
   (the worktree item file's `## Outcome`; Tracker: `<dir>/outcomes/<n>.md`); "Anything you cannot resolve goes in your final message, not to a
@@ -853,9 +878,11 @@ reports in this session's context.
   session id with the fixer's — which is what the next loop's `fix-mode`, and `references/recovery.md`'s `resume-session`, then resume.
 
   **Both modes continue identically.** `watch` it out as in step 4, **check that transcript for denials before committing anything**, commit again (step 6), in
-  a tracker project re-run §5's `snapshot <n>`, and review again with a fresh report path (`<dir>/reviews/<id>-2.md`).
+  a tracker project re-run §5's `snapshot <n>`, and review again with the next `<k>` through the procedure's re-review branch:
+  `scope --previous <the latest manifest>` (`<dir>/reviews/<id>-<k-1>.manifest.json`), dispatch only the groups it marks `rerun`, and pass the others' latest
+  reports to `merge` as `--carried`.
 
-  **The findings reach that file as the reviewer wrote them** — they name `file:line`, and paraphrasing them into "fix the review comments" hands the session a
+  **The findings reach that file as `merge` printed them** — they name `file:line`, and paraphrasing them into "fix the review comments" hands the session a
   puzzle instead of a task. That verbatim copy is the whole reason the prompt is a file rather than an argument: reviewer prose is the text most certain to carry
   the backticks, `$(…)` and apostrophes §4's rule is about.
 

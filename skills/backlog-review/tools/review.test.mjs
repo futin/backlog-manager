@@ -134,6 +134,31 @@ test('an invalid --review-config exits 1 naming it', () => {
   }
 });
 
+// `--defaults` is what a resumed orchestrate run whose run file predates the reviewer config passes on: the config the run would have had then, never a
+// review.json someone has edited since the run began — so it must not read the file even when the file is valid and different.
+test('config --defaults ignores review.json', () => {
+  for (const file of [{ ...DEFAULTS, mode: 'same', same: { model: 'haiku', effort: 'low' } }, '{not json']) {
+    const r = run(['config', '--defaults'], file);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, `${JSON.stringify(DEFAULTS)}\n`);
+    assert.equal(r.stderr, '', 'an unreadable review.json was read — --defaults must not open it');
+  }
+});
+
+// Ruling R2: `--defaults` says "no config but the defaults", so any other source of a config beside it is a contradiction, refused like flags beside
+// `--review-config` are.
+test('config --defaults with a review flag or --review-config exits 1 naming both', () => {
+  for (const [extra, name] of [
+    [['--review-mode', 'same'], '--review-mode'],
+    [['--review-config', JSON.stringify(DEFAULTS)], '--review-config'],
+  ]) {
+    const r = run(['config', '--defaults', ...extra]);
+    assert.equal(r.status, 1, extra.join(' '));
+    assert.ok(r.stderr.includes('--defaults') && r.stderr.includes(name), r.stderr);
+    assert.equal(r.stdout, '');
+  }
+});
+
 test('an unknown subcommand exits 1', () => {
   const r = run(['zzz-nope']);
   assert.equal(r.status, 1);

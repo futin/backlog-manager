@@ -1,12 +1,41 @@
-# backlog-orchestrate — when a check fails: a second review says `fix`, or `verify` exits non-zero
+# backlog-orchestrate — when a check fails: a review reaches no verdict, a second review says `fix`, or `verify` exits non-zero
 
-Read this file **in full** when either happens: a second review says `verdict: fix` (the item's `fixLoops` is now `2`), or `verify` exits non-zero (`1`, red
-rows; `5`, nothing to verify with; `11`, a tracker item's `## Done when` names a command the gate never saw and no allowlist approves). Both are observable results inside the loop, so a fresh run and a `--resume`d one reach it the same way. The ceiling itself
+Read this file **in full** when any of these happens: `merge` prints `"verdict":"incomplete"` after the review procedure's one coverage retry, `scope`
+prints `"files":0`, a second review says `verdict: fix` (the item's `fixLoops` is now `2`), or `verify` exits non-zero (`1`, red
+rows; `5`, nothing to verify with; `11`, a tracker item's `## Done when` names a command the gate never saw and no allowlist approves). All are observable results inside the loop, so a fresh run and a `--resume`d one reach it the same way. The ceiling itself
 — at most two fix loops per item, **shared** between review and verify and counted in the run file — stays in `SKILL.md` §7, with `fix-mode` and both launchers.
 A red command is not an opinion: nothing green-lights a merge except the commands passing.
 
 Section and step numbers below name sections of `SKILL.md`. A reference file is read with the Read tool and never has `${CLAUDE_PLUGIN_ROOT}` filled in: replace
 `${CLAUDE_PLUGIN_ROOT}` with the plugin root the body was loaded with before running any command here.
+
+## The review reaches no verdict (§7)
+
+Two results of `skills/backlog-review/references/procedure.md` end an item's review with nothing to act on. Neither is reviewed again, fixed or merged, and
+neither spends a fix loop: a fix loop answers findings, and these two carry none. Both park, with a channel or without one — there is no judgement here for a
+person to make on the spot, only a gap they have to look at.
+
+- **`merge` prints `"verdict":"incomplete"` after the procedure's one coverage retry** — some changed files are still in no group report's coverage, so no
+  reviewer has read them and an `approve` could not mean what it says. `merge` has already written the merged report, and it lists those files under
+  its coverage line. **Park it**:
+
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "review incomplete — uncovered files are listed in the merged review report"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+  ```
+
+  The detail is that fixed sentence. The file list stays in the report and in `merge`'s `uncovered` array: paths come from the branch, and a branch is
+  text this run did not compose.
+
+- **`scope` prints `"files":0`** — the item's branch has no committed change against `<base>`, so there is nothing to review and nothing to merge. Reaching
+  §7 that way means the commit in §6 recorded nothing the reviewer can see, and a person has to say why before the item runs again. **Park it**:
+
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "review not run — the item's committed diff is empty"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+  ```
+
+  Keep the branch and the worktree for them, as every park does.
 
 ## A second review says `fix` (§7)
 

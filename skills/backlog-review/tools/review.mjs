@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const USAGE = [
-  'usage: review.mjs config [--review-mode same|split] [--review-config <json>] [--review-model|--review-effort ...]',
+  'usage: review.mjs config [--review-mode same|split] [--review-config <json>] [--review-model|--review-effort ...] | config --defaults',
   '       review.mjs scope --tree <dir> --base <ref> --out <manifest.json> [--item <path>] [--mode full|incremental] [--state <file>]',
   '                        [--previous <manifest.json>] [--review-config <json> | review flags]',
   '       review.mjs merge --manifest <manifest.json> --out <report.md> [--reports <g.md>…] [--carried <g.md>…] [--retry <r.md>]',
@@ -172,6 +172,20 @@ export function resolveConfig({ flags = new Map(), reviewConfigJson, file, warn 
 }
 
 function configCommand(args) {
+  // `--defaults` prints the default config and opens no file. backlog-orchestrate passes it on for a run file written before the reviewer config was
+  // recorded: that run began on the defaults' era, and the review.json of today may have been edited since, so reading it would change a resumed run's
+  // models under it. Valueless, so it is taken out before parseArgs, which reads every flag as `--flag value`. Any other config source beside it is a
+  // contradiction and exits 1 naming both, as `--review-config` beside flags does.
+  if (args.includes('--defaults')) {
+    const rest = args.filter((arg) => arg !== '--defaults');
+    if (rest.length > 0) {
+      const { flags, reviewConfigJson } = parseArgs(rest);
+      const others = [...(reviewConfigJson !== undefined ? ['--review-config'] : []), ...flags.keys()];
+      throw new Error(`--defaults and ${others.join(', ')} are mutually exclusive`);
+    }
+    process.stdout.write(`${JSON.stringify(defaultConfig())}\n`);
+    return 0;
+  }
   const { flags, reviewConfigJson } = parseArgs(args);
   const config = resolveConfig({ flags, reviewConfigJson, file: reviewFilePath(), warn: (line) => process.stderr.write(`${line}\n`) });
   process.stdout.write(`${JSON.stringify(config)}\n`);
