@@ -36,10 +36,13 @@ export interface DesktopButton {
 /**
  * Whether the desktop app holds this session, so `claude://resume` only brings its own window forward and cannot start a second process on the transcript.
  *
- * Two sources say so. The dashboard's `desktopOwned`, for a session it handed over. And this repo's own launch: a `local` row whose link says Run ▾ started it
- * in Desktop (`launch === 'desktop'`). The dashboard reports that session as plain `local`, the same word it uses for a terminal, so without the link the
- * board read an app session mid-turn as a possible terminal and disabled the very button that leads back to it. Only Run ▾ stamps `desktop`; a detected or
- * hand-made link carries `null` and keeps the stricter `local` reading. A `dashboard` or `cloud` row outranks the launch: the row says where it runs now.
+ * Two sources say so. The dashboard's `desktopOwned`, for any session the app lists: one it handed over, and — from claude-agents-dashboard's
+ * `fix(scan): flag a local row the desktop app lists` on — a `local` one started or continued in the app, which is how a branch-found or hand-linked app
+ * session reads as Desktop. And this repo's own launch: a `local` row whose link says Run ▾ started it
+ * in Desktop (`launch === 'desktop'`), kept for a dashboard older than that fix or one whose read of the app's registry failed: without either, `local` is
+ * the word the dashboard uses for a terminal too, and the board would read an app session mid-turn as a possible terminal and disable the very button that
+ * leads back to it. Only Run ▾ stamps `desktop`; a detected or hand-made link carries `null`, and without `desktopOwned` keeps the stricter `local` reading.
+ * A `dashboard` or `cloud` row outranks the launch: the row says where it runs now.
  *
  * The one gap is a person resuming that app session in a terminal by hand; the dashboard cannot report that, and `desktopOwned` has the same gap.
  */

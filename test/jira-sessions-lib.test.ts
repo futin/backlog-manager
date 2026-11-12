@@ -122,6 +122,15 @@ describe('appOwned: a local row Run ▾ launched in Desktop', () => {
     expect(desktopButton(local({ status: 'working' }), null, false)).toMatchObject({ enabled: false, title: LOCAL_TITLE });
   });
 
+  // A session started in the desktop app and found by its branch (or linked by hand) carries no launch. The dashboard flags a `local` row the app lists
+  // `desktopOwned`, so it reads as Desktop on its own — the Where line, the primary and an enabled Open in Desktop mid-turn.
+  it.each(['working', 'question', 'idle', 'incomplete'])('a local %s row the app lists (desktopOwned) is Desktop with no launch', (status) => {
+    const row = local({ status, desktopOwned: true });
+    expect(desktopButton(row, null, false)).toEqual({ show: true, enabled: true, via: 'href', title: null });
+    expect(primaryIsDesktop(row, null)).toBe(true);
+    expect(surfaceWord(link({ how: 'branch', surface: null }), row)).toBe('Desktop');
+  });
+
   it('the row outranks the launch: a dashboard row is judged by the dashboard rules whatever Run ▾ launched', () => {
     expect(desktopButton(dash({ status: 'working' }), 'desktop', false)).toMatchObject({ enabled: false, title: DASH_TITLE });
     expect(primaryIsDesktop(dash(), 'desktop')).toBe(false);
