@@ -21,7 +21,7 @@ the foundation project 2 hangs the review loop on.
 ## 2. Goals
 
 1. **Connect** this machine's board to one GitLab site with a read-only token, configured like Jira and GitHub: per-machine env, never committed, status in
-   Settings › Sources.
+   Settings › Shared › Sources.
 2. **Link tickets to MRs with no new configuration**: ticket key → the repos `jira.json` maps for its project → each repo's `origin` → the GitLab project →
    the MRs that carry the key.
 3. **Show every ticket's delivery state** in three places:
@@ -87,15 +87,20 @@ the foundation project 2 hangs the review loop on.
   | not configured | site or token absent, or site not a bare hostname | grey → `not configured` | `set BM_GITLAB_SITE and BM_GITLAB_TOKEN in .env and restart`; for a malformed site, `BM_GITLAB_SITE must be a hostname, like gitlab.example.com` instead |
   | rejected | the identity read answers 401, or 403 (GitLab's answer to a token whose scope cannot read the user) | red → `down` | `<site> refused the token (<status>) — <GitLab's message, if any>` |
   | unreachable | the identity read or a sweep gets no HTTP answer (DNS, TLS, timeout), a 5xx, or a 3xx (refused, §4) | red → `down` | `<site> did not answer — <short reason>` |
-  | idle | identity read, but no `jira.json` repo resolves to the site; the poller does not arm | grey → `not polled yet` | `<username> · <site> · read_api`; `no mapped repository is on <site>` plus, when repos resolved elsewhere, ` — found <host>, <host>` |
-  | connected | identity read and at least one repo resolves | green → `connected` | `<username> · <site> · read_api`; `N repos mapped via Jira › Repositories`; then one line per repo problem (below) |
+  | checking | configured, identity read not answered yet (boot, or just after a config change) | grey → `checking…` | `<site>` |
+  | idle | identity read, but no `jira.json` repo resolves to the site; the poller does not arm | grey → `not polled yet` | `<username> · <site>`; `no mapped repository is on <site>` plus, when repos resolved elsewhere, ` — found <host>, <host>` |
+  | connected | identity read and at least one repo resolves | green → `connected` | `<username> · <site>`; `N repos mapped via Jira › Setup › Repositories`; then one line per repo problem (below) |
+  | rate-limited | connected, inside a stored 429 window | amber → `late` | the connected lines, then `rate limited — next read in <age>` |
 
-  Per-repo problem lines, under a `connected` row only (the pill stays green — one unreadable project does not make the source down): `cannot read
-  <namespace/path> (<403|404>)` when that project's MR list answers 403 or 404; `<repo basename>: no origin remote` or `<repo basename>: could not read
-  origin` for §6.1's git failures; `<namespace/path>: first <N> shown` past the page cap (§6.3).
-- Which call decides what: the **identity read** (current-user endpoint) alone decides `rejected` versus a working token; a **project's MR list** call
-  decides that project's `cannot read` line. A 403 on the identity read is `rejected`; a 403 on a project call is that project's line. The server does not
-  guess scopes.
+  The hint names no scope: the server never reads a token's scopes, and the Jira banner's rule is that scopes are not served and not drawn (DESIGN.md
+  §8.9). The mock's `· read_api` and `Jira › Repositories` are mock differences. Per-repo problem lines, under a `connected` row only (the pill stays green — one unreadable project
+  does not make the source down): `cannot read <namespace/path> (<403|404>)` when that project's MR list answers 403 or 404; `<repo basename>: could not
+  read origin` for every §6.1 git failure — `runGit` answers `null` for a missing remote, a failed read and a timeout alike, and the server adds no branch
+  to tell them apart; `<namespace/path>: first <N> shown` past the page cap (§6.3).
+- Which call decides what: the **identity read** (current-user endpoint) decides `rejected` versus a working token; a **project's MR list** call decides
+  that project's `cannot read` line. A 403 on the identity read is `rejected`; a 403 on a project call is that project's line. A **401 on any call** — a
+  token revoked after a good identity read — re-runs the identity read at once, so the row turns `rejected` within one sweep rather than waiting for a
+  restart. The server does not guess scopes.
 - **Read again** (the card's foot) sweeps GitLab too, beside GitHub and Jira (my call): its sweep route answers 409 when the poller is not armed, which the
   foot already treats as "nothing to sweep", not an error.
 
@@ -135,11 +140,19 @@ the foundation project 2 hangs the review loop on.
 - **Which MRs**: per mapped GitLab project, every MR in state `opened`, plus `merged` and `closed` ones updated in the last 30 days (my call — enough to
   show a recently finished ticket as merged without paging all history). Paged until done; a cap with a visible `first N shown` note if a project exceeds it.
   So a ticket whose MR merged or closed more than 30 days ago reads as having no MR; §7's no-MR copy says `in the last 30 days` for that reason.
-- **Per MR**: iid, title, web URL, state, draft flag, source and target branch, updated-at, merged-at, and the **head pipeline status** (`success`, `failed`,
-  `running`/`pending`, `canceled`, none). Pipeline status is read only for open MRs; how (MR detail vs pipelines endpoint) is the builder's call, bounded so
-  one sweep's request count grows with open MRs, not all MRs.
-- **Cadence**: one sweep every 2 minutes by default (my call), plus an immediate sweep when the poller arms. Respect `429` / `Retry-After` the way the Jira
-  poller does (one stored window every caller checks).
+  **Read order**: opened MRs first, then merged and closed, each by `updated_at` descending — so the cap cuts the oldest finished MRs, never an open one
+  while finished ones are kept. A project that hit the cap is **capped**: §7 treats a no-MR ticket in a capped project as unknown, not none.
+- **Per MR**: iid, title, web URL, state, draft flag, source and target branch, created-at, updated-at, merged-at, and the **head pipeline status**.
+  GitLab's MR state `locked` reads as `opened`. Pipeline statuses fold into five: `success`; `failed`; **running** = `running`, `pending`, `created`,
+  `waiting_for_resource`, `preparing`, `canceling`; `canceled`; and **none** = no pipeline, `skipped`, `manual`, `scheduled`, and any other value GitLab
+  adds later. Pipeline status is read only for open MRs; how (MR detail vs pipelines endpoint) is the builder's call, bounded so one sweep's request count
+  grows with open MRs, not all MRs.
+- **Cadence**: one sweep every 2 minutes by default (my call), plus an immediate sweep when the poller arms. A `setTimeout` chain in the tracker poller's
+  shape, never a `setInterval`. Respect `429` / `Retry-After` the way the Jira poller does (one stored window every caller checks).
+- **One sweep in flight.** The timer, Read again's route and an `arm()` after a repos save all go through one sweep function; a call while a sweep runs
+  starts nothing and joins the running sweep's promise, so an older sweep can never write the cache after a newer one. The sweep route awaits that promise,
+  bounded (the Jira sweep route's `JIRA_SAVE_SWEEP_WAIT_MS` precedent), so the foot's re-read sees the fresh answer; past the bound it answers anyway and
+  the sweep finishes behind it.
 - **Armed only while** the connection is configured **and** at least one `jira.json` repo resolves to the site. Otherwise no timer runs and nothing is
   asked of GitLab (the identity read of §5.2 aside). It does **not** depend on the Jira boards or the Jira poller (my call): the payload is keyed by every
   ticket key found in the mapped projects' MRs, not by the keys on a board, so Detail works for an off-board ticket (Sessions › All tickets, a parent
@@ -159,7 +172,10 @@ the foundation project 2 hangs the review loop on.
   CLAUDE.md, its rule-file copy in `.claude/rules/tracker.md` (pinned byte-equal to CLAUDE.md's by `test/claude-rules.test.ts`), and the heading of
   `docs/subsystems/invariants.md` — whose heading is also the anchor every `Why:` link uses, so the anchor rename is followed in every link to it. The
   GitLab cache's own mechanism rules go in a new rule file, `.claude/rules/gitlab.md` (`paths:` `server/src/gitlab/**`), added to CLAUDE.md's rule-file
-  table.
+  table. `test/claude-rules.test.ts` allows one rule-file home per anchor (`.claude/rules/tests.md`), and the four-caches anchor's home stays
+  `tracker.md`; so each `gitlab.md` bullet cites its own anchor — a new `invariants.md` section, **"The GitLab token never leaves the server, never
+  follows a redirect, and the poller is armed only while a mapped repo is on the site"** — or stays unanchored and under 80 words. CLAUDE.md gets that new
+  section's headline in its Invariants list, the GitHub token's headline beside it.
 - **Module**: a new `server/src/gitlab/` module (my call — GitLab may later serve more than Jira, and burying it in `jira/` would make that a move). That
   makes a fourth outbound-calling module: the CLAUDE.md invariant "`agents/`, `tracker/` and `jira/` are the server's only outbound-calling modules" and
   its text in `invariants.md` (no `test/` guard pins that list today) are updated in the same change. `security.md`'s rule file applies to the new env
@@ -175,13 +191,14 @@ Common vocabulary, used by all three surfaces:
 - **Lead MR** of a ticket: the newest `opened` MR, else the newest `merged`, else the newest `closed`, among the ticket's MRs as §6.2 resolves them (its
   own, or its parent's for a sub-task with none). "Newest" is the latest `updated_at`; a tie goes to the project path, then the higher iid, so the pick
   is stable across sweeps. Others are "also" MRs.
-- **Known versus none.** A ticket's MRs are *known* once every GitLab project its Jira project maps has had at least one successful sweep. Until then —
-  before the first sweep, or when a project has never been read (`cannot read`, `rejected`, `unreachable` from the start) — a ticket with no MR found is
-  *unknown*, not *none*: Detail draws `GitLab not read yet` (or `GitLab could not be read — Settings › Sources` once a sweep has failed), the List cell
-  draws `—` at `--ink3`, and a card draws nothing. Only a known ticket draws the no-MR copy. A later failed sweep keeps the last good answer (§6.3), so a
-  known ticket stays known.
-- **Which tickets draw delivery at all.** The surfaces exist (band line, List column, filters, Sources row) while GitLab is configured and the poller is
-  armed. Per ticket, delivery is drawn only when the ticket's Jira project maps at least one repo on the site: for any other ticket the List cell is
+- **Known versus none.** A ticket's MRs are *known* once every GitLab project its Jira project maps has had at least one successful sweep and none of
+  them is capped (§6.3). Until then — before the first sweep, when a project has never been read (`cannot read`, `rejected`, `unreachable` from the
+  start), or when a project is capped — a ticket with no MR found is *unknown*, not *none*: Detail draws `GitLab not read yet` (or `GitLab could not be
+  read — Settings › Shared › Sources` once a sweep has failed, or `more merge requests than were read — some may be missing` for a capped project), the
+  List cell draws `—` at `--ink3`, and a card draws nothing. Only a known ticket draws the no-MR copy. A later failed sweep keeps the last good answer
+  (§6.3), so a known ticket stays known.
+- **Which tickets draw delivery at all.** The surfaces exist (band line, List column, both filter controls, and their stored value's effect) while GitLab
+  is configured and the poller is armed; the Sources row always exists. Per ticket, delivery is drawn only when the ticket's Jira project maps at least one repo on the site: for any other ticket the List cell is
   empty, Detail has no Delivery pane, and its card gets nothing. One rule for all four surfaces.
 - **A folded top shows its own lead MR only** (the user's pick): the chip, the List cell and the band totals use the top issue's lead MR, never one picked
   across the issues folded under it. A folded sub-task's MR shows on that sub-task and in Detail.
@@ -191,8 +208,10 @@ Common vocabulary, used by all three surfaces:
 - **Tones**, from the existing palette and DESIGN.md: pipeline passed = green, failed = red, running/pending = amber, merged = magenta, draft and no
   pipeline = neutral grey. Uppercase stays out (design guard 4); the mocks' type sizes give way to DESIGN.md where they differ.
 - **The one table** every surface reads its words, tone and track from (the lead MR's state × its head pipeline). Track steps are Pushed · MR open ·
-  Pipeline · Merged, each `on` (done), `off` (not reached), or toned. Pipeline status is not read for merged or closed MRs (§6.3), so their Pipeline step
-  is drawn as reached without a word.
+  Pipeline · Merged, each `on` (done), `off` (not reached), or toned. Pipeline status is not read for merged or closed MRs (§6.3): a merged MR's
+  Pipeline step is drawn as reached without a word; a closed MR's is `off`.
+- **A draft is never failing.** A draft MR draws grey `draft` whatever its pipeline, and counts in neither the band's `failing` nor the `Pipeline
+  failing` filter (my call — a draft's red pipeline is work in progress, not a signal).
 
   | MR state | Head pipeline | Card chip | List / Detail word | Tone | Track |
   | -------- | ------------- | --------- | ------------------ | ---- | ----- |
@@ -211,12 +230,13 @@ Common vocabulary, used by all three surfaces:
 ### 7.1 Detail — the Delivery band (`OptionC.dc.html`)
 
 - A `Delivery` pane in the Agent column, under the sessions band and above History. Head: `Delivery`, the lead MR's `!iid ↗` link (new tab, no referrer),
-  `<repo basename> → <target branch>`, and `polled <age>` pushed right.
-- The track with each step's word and, where known, its age or pipeline word.
+  `<repo basename> → <target branch>`, and `polled <age>` pushed right — the `polledAt` of the lead MR's project.
+- The track with each step's word and, where known, its age or pipeline word: Pushed and MR open carry the MR's created-at age, Merged its merged-at
+  age, Pipeline its word from §7's table.
 - An `Also:` line listing the other MRs: `!iid ↗`, state pill, `<repo basename> · <age>`.
 - On a sub-task showing its parent's MRs (§6.2), the head reads `via <PARENT-KEY>` after the link.
-- No MR (known, §7): one line, `no merge request for <KEY> in <repo basenames> in the last 30 days`. Unknown: §7's `GitLab not read yet` /
-  `GitLab could not be read — Settings › Sources`. A ticket that draws no delivery (§7, "Which tickets draw delivery at all"): the pane is not drawn.
+- No MR (known, §7): one line, `no merge request for <KEY> in <repo basenames> in the last 30 days`. Unknown: §7's unknown lines. A ticket that draws
+  no delivery (§7, "Which tickets draw delivery at all"): the pane is not drawn.
 - The mock's widened Agent column (480 px) is a mock artefact; the column width follows the existing Detail layout unless the band genuinely needs more —
   the builder checks it at 1440 px with `/ui-verify`.
 
@@ -235,10 +255,11 @@ Common vocabulary, used by all three surfaces:
 - No MR: nothing extra (the mock's `· no MR` text is not drawn — an empty foot already says it; my call).
 - Board band line gains `GitLab: N open · N failing · N merged · polled <age>`. Counts are over the **tops** on the board (shelves and deck alike, after
   the panel filters), each top's lead MR as §7 resolves it — inherited ones included — with each distinct MR counted once however many tops lead with it:
-  `open` counts opened MRs (drafts and failing ones included), `failing` the opened ones whose pipeline failed (a subset of `open`, so the numbers do not
-  add up to a total), `merged` the merged ones; closed MRs are not counted. A zero part is omitted, the existing band-line rule; when all three are zero the
-  line reads `GitLab: no merge requests · polled <age>`. `<age>` is the age of the **oldest** `polledAt` among the projects the board's tickets map, so
-  the line never claims fresher data than its stalest part. Not drawn while the poller is not armed (§7).
+  `open` counts opened MRs (drafts and failing ones included), `failing` the opened, non-draft ones whose pipeline failed (a subset of `open`, so the
+  numbers do not add up to a total), `merged` the merged ones; closed MRs are not counted. A zero part is omitted, the existing band-line rule; when all
+  three are zero the line reads `GitLab: no merge requests · polled <age>`. `<age>` is the age of the **oldest** `polledAt` among the projects the board's
+  tickets map, so the line never claims fresher data than its stalest part; while any of those projects has never been read the line reads
+  `GitLab: not read yet` instead. Not drawn while the poller is not armed (§7).
 
 ### 7.3 List — the Delivery column (`List.dc.html`)
 
@@ -251,16 +272,17 @@ Common vocabulary, used by all three surfaces:
 
 - Three filters, each over the ticket's MRs as §6.2 resolves them:
   - `Has MR` — the ticket has at least one opened or merged MR, its own or inherited; a closed-only ticket does not match;
-  - `Pipeline failing` — the lead MR, own or inherited, is opened with a failed pipeline;
+  - `Pipeline failing` — the lead MR, own or inherited, is opened, not a draft, with a failed pipeline;
   - `Done, not merged` — §7.2's rule exactly: Jira category `done` and the lead MR opened and the ticket's **own** (inherited never matches).
   An unknown ticket (§7) matches none of the three.
 - One filter value, `all` by default, single-select, added to the panel filters and **persisted with them** under `JIRA_FILTERS_KEY` (clamped on read like
   the rest), since the board and list share that state. It is drawn twice, both controls driving the same value (my call): a `Delivery` section in the
   existing Filters panel, and in List the segmented control above the table as drawn in `List.dc.html`, because the user picked quick filters as a surface
-  of their own. Not drawn while GitLab is not configured; a stored value then reads as `all`.
+  of their own. Both controls are drawn under §7's condition (configured and armed); whenever they are not drawn, a stored value reads as `all`, so a
+  filter the user cannot see or clear never empties the board.
 - A filter reaches folded issues the way F1 does today: a top is shown when it, or anything folded under it, matches.
 
-### 7.5 Settings › Sources
+### 7.5 Settings › Shared › Sources
 
 - A `GitLab` row in the Sources card, in the states and the live row shape of §5.2's table (`Settings.dc.html` for the words; the `new` tag in the mock
   is not drawn).
