@@ -16,6 +16,8 @@ const USAGE = [
   'usage: review.mjs config [--review-mode same|split] [--review-config <json>] [--review-model|--review-effort ...]',
   '       review.mjs scope --tree <dir> --base <ref> --out <manifest.json> [--item <path>] [--mode full|incremental] [--state <file>]',
   '                        [--previous <manifest.json>] [--review-config <json> | review flags]',
+  '       review.mjs merge --manifest <manifest.json> --out <report.md> [--reports <g.md>…] [--carried <g.md>…] [--retry <r.md>]',
+  '                        [--fallback <n>:<model|effort>]… [--state <file>]',
 ].join('\n');
 
 // Closed lists. `null` (unset) means "the agent's own default" and is accepted everywhere a pair member is.
@@ -493,9 +495,9 @@ const FALLBACK = {
 };
 
 // `--state` when given; else `<BM_REVIEW_HOME or ~/.backlog-manager/reviews>/<repo key>/<branch>.json`, or null on a detached HEAD, which has no branch to
-// remember a review by. The repo key is the main checkout's directory name plus 8 hex of the sha1 of its absolute path: readable in a listing, and two
-// clones with the same name never share a state. The main checkout, not `top`, so a linked worktree and the main tree see one state per branch — a
-// branch is checked out in at most one of them at a time. `/` in a branch becomes `__`, so `feature/x` is a file name, not a directory.
+// remember a review by. The repo key is the main checkout's directory name plus 8 hex of the sha1 of the absolute git common dir: readable in a listing, and
+// two clones with the same name never share a state. The common dir, not `top`, so a linked worktree and the main tree see one state per branch — a
+// branch is checked out in at most one of them at a time — and it is hashed itself (not its parent) so a bare repo and a checkout named alike stay apart. `/` in a branch becomes `__`, so `feature/x` is a file name, not a directory.
 export function statePath(top, explicit, env = process.env) {
   if (explicit !== undefined) return path.resolve(explicit);
   let branch;
@@ -504,8 +506,8 @@ export function statePath(top, explicit, env = process.env) {
   } catch {
     return null;
   }
-  const main = path.dirname(git(top, ['rev-parse', '--path-format=absolute', '--git-common-dir']).trim());
-  const key = `${path.basename(main)}-${createHash('sha1').update(main).digest('hex').slice(0, 8)}`;
+  const common = git(top, ['rev-parse', '--path-format=absolute', '--git-common-dir']).trim();
+  const key = `${path.basename(path.dirname(common))}-${createHash('sha1').update(common).digest('hex').slice(0, 8)}`;
   const home = env.BM_REVIEW_HOME || path.join(os.homedir(), '.backlog-manager', 'reviews');
   return path.join(home, key, `${branch.replaceAll('/', '__')}.json`);
 }
@@ -626,10 +628,12 @@ function scopeCommand(args) {
     // `merge-base` exits 1 with no output when the histories share nothing; a bad ref says so on stderr itself.
     throw error.stderr ? error : new Error(`${base} and HEAD have no merge base`);
   }
+  // Resolved once and recorded in the manifest, so `merge` writes the state exactly where this scope looked for it (null on a detached HEAD).
+  const stateFile = statePath(top, options.get('--state'));
   let state = null;
   let modeReason = null;
   if (previous === null && asked !== 'full') {
-    state = readState(statePath(top, options.get('--state')));
+    state = readState(stateFile);
     modeReason = selectMode(top, state, base, head, mergeBase);
   }
   const mode = state !== null && modeReason === null ? 'incremental' : 'full';
@@ -643,7 +647,7 @@ function scopeCommand(args) {
   if (modeReason !== null) process.stderr.write(`full review: ${modeReason}\n`);
   if (mode === 'incremental' && from === to) {
     // Printed here, not by the three callers, so the sentence cannot be worded three ways.
-    writeManifest(out, { tree: top, base, mode, modeReason, from, to, mergeBase, head, item, config, files: [], groups: [] });
+    writeManifest(out, { tree: top, base, mode, modeReason, from, to, mergeBase, head, item, config, statePath: stateFile, files: [], groups: [] });
     process.stderr.write(`no changes since the last review (${state.report}) — its verdict stands: ${state.verdict}\n`);
     process.stdout.write(`${JSON.stringify({ ...summary([], []), noChange: true })}\n`);
     return 0;
@@ -657,13 +661,266 @@ function scopeCommand(args) {
     groups = groupFiles(files, item !== null, config);
     if (mode === 'incremental') groups = assignEarlier(groups, state.open, config);
   }
-  writeManifest(out, { tree: top, base, mode, modeReason, from, to, mergeBase, head, item, config, files, groups });
+  writeManifest(out, { tree: top, base, mode, modeReason, from, to, mergeBase, head, item, config, statePath: stateFile, files, groups });
   process.stdout.write(`${JSON.stringify(summary(files, groups))}\n`);
   return 0;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// merge
+//
+// Reads the group reports the reviewers wrote and answers three questions the caller must not guess at: was every reviewable file covered, what is the
+// verdict, and what is still open. It writes the merged report, the findings file `scope --previous` reads, and — only when coverage is complete — the
+// branch's state. Exit 0 for every verdict; 1 only for bad arguments or an unreadable manifest.
+
+const MERGE_OPTIONS = ['--manifest', '--out', '--state', '--retry'];
+const MERGE_LISTS = ['--reports', '--carried', '--fallback'];
+
+// `--reports a b c` takes every value up to the next `--flag` (a caller expands a glob there); `--fallback` repeats. Everything else is one value.
+function parseMergeArgs(args) {
+  const options = new Map();
+  const lists = new Map(MERGE_LISTS.map((name) => [name, []]));
+  for (let i = 0; i < args.length; ) {
+    let name = args[i++];
+    let inline;
+    const eq = name.indexOf('=');
+    if (name.startsWith('--') && eq > 0) {
+      inline = name.slice(eq + 1);
+      name = name.slice(0, eq);
+    }
+    if (lists.has(name)) {
+      const values = inline !== undefined ? [inline] : [];
+      while (inline === undefined && i < args.length && !args[i].startsWith('--')) values.push(args[i++]);
+      if (values.length === 0) throw new Error(`${name} needs a value`);
+      lists.get(name).push(...values);
+    } else if (MERGE_OPTIONS.includes(name)) {
+      const value = inline ?? args[i++];
+      if (value === undefined) throw new Error(`${name} needs a value`);
+      options.set(name, value);
+    } else {
+      throw new Error(`unknown argument: ${name}`);
+    }
+  }
+  for (const name of ['--manifest', '--out']) if (!options.has(name)) throw new Error(`merge needs ${name}`);
+  return { options, lists };
+}
+
+function readManifest(file) {
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`--manifest: cannot read ${file}: ${error.message}`);
+  }
+  const shaped = isObject(manifest) && Array.isArray(manifest.files) && Array.isArray(manifest.groups) && typeof manifest.to === 'string';
+  if (!shaped || !manifest.groups.every((grp) => isObject(grp) && Number.isInteger(grp.n) && Array.isArray(grp.files))) {
+    throw new Error(`--manifest: ${file} is not a scope manifest`);
+  }
+  return manifest;
+}
+
+// `<id>-<k>.g<n>.md` is group n's report. The suffix, not the position on the command line, names the group: a caller passing a glob cannot misalign it.
+function groupNumber(file) {
+  const match = /\.g(\d+)\.md$/.exec(file);
+  if (!match) throw new Error(`${file} is not a group report: expected a name ending in .g<n>.md`);
+  return Number(match[1]);
+}
+
+const SECTION = /^##\s+(.+?)\s*$/;
+const NONE_ENTRY = /^(?:none|n\/a|nothing|—|-)\.?$/i;
+
+// A report split at its `## ` headings, keyed by lower-cased heading. Text before the first heading is under ''.
+function sections(text) {
+  const out = new Map([['', []]]);
+  let current = '';
+  for (const line of text.split('\n')) {
+    const heading = SECTION.exec(line);
+    if (heading) {
+      current = heading[1].toLowerCase();
+      if (!out.has(current)) out.set(current, []);
+    } else out.get(current).push(line);
+  }
+  return out;
+}
+
+// Entries of a list section: a line starting `- ` opens one, indented lines after it belong to it.
+function entries(lines) {
+  const out = [];
+  for (const line of lines) {
+    if (line.startsWith('- ')) out.push([line.slice(2).trim()]);
+    else if (out.length && /^\s+\S/.test(line)) out[out.length - 1].push(line.trim());
+  }
+  return out;
+}
+
+const unquote = (s) => s.replace(/^`+|`+$/g, '');
+const SEPARATOR = String.raw`\s[—–]\s|\s-\s`;
+const CLAIM = new RegExp(`^(\`?[^\\s\`]+?\`?):(\\d+)(?:${SEPARATOR})(.*)$`, 's');
+
+// One Critical/Important/Minor entry. `path:line — text` leads when the reviewer claimed a location; an `anchor: <path> | <code>` line follows. The anchor
+// is kept as written — resolving it against the tree is a later step; here a finding keeps its claimed location, and falls back to the anchor's path with no
+// line when it claimed none. No claim and no anchor is an item-level finding (path null).
+function parseFinding(lines, severity) {
+  const body = [];
+  let anchor = null;
+  for (const line of lines) {
+    const match = /^anchor:\s*(.+)$/i.exec(line);
+    if (match) anchor ??= match[1].trim();
+    else body.push(line);
+  }
+  const first = body.join(' ');
+  if (NONE_ENTRY.test(first)) return null;
+  const claim = CLAIM.exec(first);
+  let [p, line, text] = claim ? [unquote(claim[1]), Number(claim[2]), claim[3].trim()] : [null, null, first];
+  if (p === null && anchor !== null && anchor.includes('|')) p = unquote(anchor.slice(0, anchor.indexOf('|')).trim()) || null;
+  return { severity, path: p, line, text, anchor };
+}
+
+// What one report says. `covered` is every path its `## Coverage` lists as clean or findings (an honest `not reviewed` is NOT coverage).
+function parseReport(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+  const secs = sections(text);
+  const covered = new Set();
+  const line = new RegExp(`^- (.+?)(?:${SEPARATOR})(clean|findings)\\b`, 'i');
+  for (const l of secs.get('coverage') ?? []) {
+    const match = line.exec(l);
+    if (match) covered.add(unquote(match[1].trim()));
+  }
+  const verdict = /^verdict:\s*(\S+)\s*$/im.exec(text)?.[1].toLowerCase() ?? null;
+  const found = (heading, severity) => entries(secs.get(heading) ?? []).map((e) => parseFinding(e, severity)).filter(Boolean);
+  const marks = new Map();
+  for (const e of entries(secs.get('earlier findings') ?? [])) {
+    const match = new RegExp(`^(\\S+)(?:${SEPARATOR})(resolved|open)\\b`, 'i').exec(e[0]);
+    if (match) marks.set(unquote(match[1]), match[2].toLowerCase());
+  }
+  return { covered, verdict, critical: found('critical', 'Critical'), important: found('important', 'Important'), minor: found('minor', 'Minor'), marks };
+}
+
+const where = (f) => (f.path === null ? '' : f.line === null ? f.path : `${f.path}:${f.line}`);
+const oneLine = (f) => `${where(f) || '(no location)'} — ${f.severity}: ${f.text}`;
+
+// Temp file + rename in the target's own directory, so a reader never sees half a file.
+function writeAtomic(target, text) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const temp = `${target}.tmp-${process.pid}`;
+  fs.writeFileSync(temp, text);
+  fs.renameSync(temp, target);
+}
+
+function mergeCommand(args) {
+  const { options, lists } = parseMergeArgs(args);
+  const manifestFile = path.resolve(options.get('--manifest'));
+  const manifest = readManifest(manifestFile);
+  const fallbacks = lists.get('--fallback').map((spec) => {
+    const match = /^(\d+):(model|effort)$/.exec(spec);
+    if (!match) throw new Error(`--fallback must be <n>:model or <n>:effort, got "${spec}"`);
+    return { n: Number(match[1]), field: match[2] };
+  });
+  const byGroup = (files) => {
+    const map = new Map();
+    for (const file of files) {
+      const n = groupNumber(file);
+      if (!manifest.groups.some((grp) => grp.n === n)) throw new Error(`${file}: the manifest has no group ${n}`);
+      map.set(n, parseReport(file));
+    }
+    return map;
+  };
+  const reports = byGroup(lists.get('--reports'));
+  const carried = byGroup(lists.get('--carried'));
+  const retry = options.has('--retry') ? parseReport(options.get('--retry')) : null;
+
+  // Coverage: a file is covered by its own group's report, by that group's carried report, or by the one retry report. A report that does not exist
+  // covers nothing, so a group whose reviewer died shows up as all its files uncovered rather than as an error.
+  const reviewFiles = manifest.files.filter((f) => f.decision === 'review').map((f) => f.path);
+  const uncovered = [];
+  for (const grp of manifest.groups) {
+    const own = [reports.get(grp.n), carried.get(grp.n)];
+    for (const p of grp.files) if (![...own, retry].some((r) => r?.covered.has(p))) uncovered.push(p);
+  }
+  uncovered.sort(byPath);
+
+  // New findings: only from reports of groups that RE-RAN (a `--carried` report's findings reach this round as earlier findings, never twice), plus the retry.
+  const rerunGroups = new Set(manifest.groups.filter((grp) => grp.rerun !== false).map((grp) => grp.n));
+  const live = [...reports].filter(([n]) => rerunGroups.has(n)).map(([, r]) => r).concat(retry ? [retry] : []).filter(Boolean);
+  const earlier = new Map();
+  for (const grp of manifest.groups) for (const f of grp.earlier ?? []) earlier.set(f.id, f);
+  let next = Math.max(0, ...[...earlier.keys()].map((id) => Number(/(\d+)$/.exec(id)?.[1] ?? 0))) + 1;
+  const fresh = [];
+  for (const r of live) for (const f of [...r.critical, ...r.important]) fresh.push({ id: `F${next++}`, ...f });
+  const minor = live.reduce((sum, r) => sum + r.minor.length, 0);
+
+  // An earlier finding stays open unless a report marks it resolved; one report saying `open` beats another saying `resolved`, because a finding closed
+  // by a reviewer who did not look at the right code is the costlier mistake.
+  const verdictOf = (id) => {
+    const says = live.map((r) => r.marks.get(id)).filter(Boolean);
+    return says.includes('open') || says.length === 0 ? 'open' : 'resolved';
+  };
+  const marked = [...earlier.values()].map((f) => ({ finding: f, status: verdictOf(f.id) }));
+  const stillOpen = marked.filter((m) => m.status === 'open').map((m) => m.finding);
+
+  const rerunSaysFix = live.some((r) => r.verdict === 'fix');
+  const verdict = uncovered.length ? 'incomplete' : rerunSaysFix || fresh.length || stillOpen.length ? 'fix' : 'approve';
+
+  const open = [...stillOpen, ...fresh];
+  const report = renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorEntries: live.flatMap((r) => r.minor), fallbacks });
+  const out = path.resolve(options.get('--out'));
+  writeAtomic(out, report);
+  writeAtomic(findingsPath(manifestFile), `${JSON.stringify(open, null, 2)}\n`);
+
+  // The state only ever records a COMPLETE review: after an incomplete one the files nobody read must still be in the next increment.
+  const stateFile = options.has('--state') ? path.resolve(options.get('--state')) : manifest.statePath ?? null;
+  if (uncovered.length === 0 && stateFile !== null) {
+    const state = { base: manifest.base, head: manifest.head, mergeBase: manifest.mergeBase, to: manifest.to, report: out, at: new Date().toISOString(), verdict, open };
+    writeAtomic(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  }
+
+  const unanchored = fresh.filter((f) => f.anchor === null).length;
+  process.stdout.write(`${JSON.stringify({ verdict, mode: manifest.mode, uncovered, unanchored, stillOpen: stillOpen.length, minor })}\n`);
+  for (const f of fresh) process.stdout.write(`${oneLine(f)}\n`);
+  for (const f of stillOpen) process.stdout.write(`${oneLine(f)} (earlier)\n`);
+  return 0;
+}
+
+// The merged report, in the shape retro and the agent file already agree on: a `verdict:` line, then `## Critical` / `## Important`. The `## Coverage`
+// section of this report is for the person reading it; it is never parsed back.
+function renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorEntries, fallbacks }) {
+  const out = [`verdict: ${verdict}`, ''];
+  out.push(`mode: ${manifest.mode} (from ${manifest.from ?? 'n/a'} to ${manifest.to})`);
+  if (manifest.modeReason) out.push(`modeReason: ${manifest.modeReason}`);
+  out.push('', '## Groups', '');
+  if (manifest.groups.length === 0) out.push('no groups');
+  else {
+    out.push('| n | label | files | model | effort | rerun |', '| --- | --- | --- | --- | --- | --- |');
+    for (const grp of manifest.groups) {
+      out.push(`| ${grp.n} | ${grp.label} | ${grp.files.length} | ${grp.model ?? 'default'} | ${grp.effort ?? 'default'} | ${grp.rerun === false ? 'no' : 'yes'} |`);
+    }
+  }
+  for (const fb of fallbacks) out.push('', `group ${fb.n} ran without its ${fb.field}`);
+  out.push('', '## Coverage', '');
+  if (uncovered.length === 0) out.push(`all ${reviewFiles.length} files covered`);
+  else out.push(`${uncovered.length} of ${reviewFiles.length} files not covered:`, ...uncovered.map((p) => `- ${p}`));
+  const skipped = manifest.files.filter((f) => f.decision === 'skip');
+  if (skipped.length) out.push('', 'skipped:', ...skipped.map((f) => `- ${f.path} — ${f.reason}`));
+  const list = (severity) => {
+    const mine = fresh.filter((f) => f.severity === severity);
+    if (mine.length === 0) return ['none'];
+    return mine.flatMap((f) => [`- ${where(f) ? `${where(f)} — ` : ''}${f.text}`, ...(f.anchor ? [`  anchor: ${f.anchor}`] : [])]);
+  };
+  out.push('', '## Critical', '', ...list('Critical'), '', '## Important', '', ...list('Important'));
+  out.push('', '## Minor', '', ...(minorEntries.length ? minorEntries.map((f) => `- ${where(f) ? `${where(f)} — ` : ''}${f.text}`) : ['none']));
+  out.push('', '## Earlier findings', '');
+  if (marked.length === 0) out.push('none');
+  for (const { finding: f, status } of marked) out.push(`- ${f.id} — ${status} — ${oneLine(f)}`);
+  return `${out.join('\n')}\n`;
+}
+
 // Subcommand table: a later task adds a row, never a branch in `main`.
-const COMMANDS = { config: configCommand, scope: scopeCommand };
+const COMMANDS = { config: configCommand, scope: scopeCommand, merge: mergeCommand };
 
 export function main(argv) {
   const [command, ...rest] = argv;

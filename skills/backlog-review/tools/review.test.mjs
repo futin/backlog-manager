@@ -696,13 +696,13 @@ test('incremental with no change prints the no-change line', () => {
 });
 
 test('detached HEAD is always full', () => {
-  // The default state path: BM_REVIEW_HOME/<basename of the common dir's parent>-<sha1 of that path, 8 hex>/<branch, / as __>.json.
+  // The default state path: BM_REVIEW_HOME/<basename of the common dir's parent>-<sha1 of the common dir itself, 8 hex>/<branch, / as __>.json.
   const repo = repoWith({}, { 'x.mjs': 'x\n' });
   g(repo, 'checkout', '-q', '-b', 'topic/x');
   const home = fs.mkdtempSync(path.join(root, `home${counter++}-`));
   const first = scope(repo, ['--mode', 'full'], undefined, home);
-  const top = path.dirname(g(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir').trim());
-  const key = `${path.basename(top)}-${createHash('sha1').update(top).digest('hex').slice(0, 8)}`;
+  const common = g(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir').trim();
+  const key = `${path.basename(path.dirname(common))}-${createHash('sha1').update(common).digest('hex').slice(0, 8)}`;
   writeJson(path.join(home, key, 'topic__x.json'), stateFrom(first.manifest));
   write(repo, 'y.mjs', 'y\n');
   commitAll(repo, 'second');
@@ -826,4 +826,210 @@ test('an unreadable --previous exits 1 and writes no manifest', () => {
     assert.equal(r.manifest, null, args.join(' '));
     assert.equal(r.stdout, '');
   }
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// merge. Manifests and group reports are hand-written in a temp dir; the one case that needs a real `scope` says so.
+
+// The retro filename shape, which no group, retry or merged-by-name file of ours may match for any group file.
+const RETRO_NAME = /^((?:[a-z]+-)?\d+)-(\d+)\.md$/;
+
+// A hand-written manifest: `groups` is [{ files, rerun?, earlier? }]; every file is a `review` file, `skipped` adds skipped ones. Returns the dir and paths.
+function mergeFixture({ groups, skipped = [], extra = {} }) {
+  const dir = fs.mkdtempSync(path.join(root, `merge${counter++}-`));
+  const manifestPath = path.join(dir, 'manifest.json');
+  const hex = (c) => c.repeat(40);
+  const files = [
+    ...groups.flatMap((grp) => grp.files).map((p) => ({ path: p, oldPath: null, status: 'M', added: 1, deleted: 0, decision: 'review', reason: null })),
+    ...skipped.map(([p, reason]) => ({ path: p, oldPath: null, status: 'M', added: 1, deleted: 0, decision: 'skip', reason })),
+  ];
+  const manifest = {
+    tree: dir, base: 'main', mode: 'full', modeReason: null, from: hex('a'), to: hex('b'), mergeBase: hex('a'), head: hex('c'), item: null, config: DEFAULTS, files,
+    groups: groups.map((grp, i) => ({ n: i + 1, label: `grp${i + 1}`, files: grp.files, lines: 1, model: null, effort: null, rerun: grp.rerun ?? true, earlier: grp.earlier ?? [] })),
+    ...extra,
+  };
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  return { dir, manifestPath, manifest, out: path.join(dir, 'task-1-1.md'), state: path.join(dir, 'state', 'branch.json') };
+}
+
+// A group report as a reviewer writes it. `coverage` lines are written verbatim after `- `.
+function reportFile(dir, name, { verdict = 'approve', coverage = [], critical = [], important = [], minor = [], earlier = null } = {}) {
+  const lines = [`verdict: ${verdict}`, '', '## Coverage', ...coverage.map((c) => `- ${c}`), '', '## Critical', ...critical, '', '## Important', ...important, '', '## Minor', ...minor];
+  if (earlier) lines.push('', '## Earlier findings', ...earlier.map((e) => `- ${e}`));
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, `${lines.join('\n')}\n`);
+  return file;
+}
+
+function merge(fx, args = [], { state = true } = {}) {
+  const r = spawnSync(process.execPath, [SCRIPT, 'merge', '--manifest', fx.manifestPath, '--out', fx.out, ...(state ? ['--state', fx.state] : []), ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, BM_REVIEW_HOME: fx.dir, BM_REVIEW_FILE: path.join(fx.dir, 'review.json') },
+  });
+  const [first, ...rest] = r.stdout.split('\n').filter(Boolean);
+  return { status: r.status, stderr: r.stderr, stdout: r.stdout, summary: first ? JSON.parse(first) : null, lines: rest };
+}
+
+const clean = (...p) => p.map((x) => `${x} — clean`);
+const importantEntry = (p, line, text) => [`- ${p}:${line} — ${text}`, `  anchor: ${p} | const x = ${line};`];
+
+test('coverage complete gives an empty uncovered list', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs', 'b.mjs'] }, { files: ['c.mjs'] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: [...clean('a.mjs'), 'b.mjs — findings'] });
+  const g2 = reportFile(fx.dir, 'task-1-1.g2.md', { coverage: clean('c.mjs') });
+  const r = merge(fx, ['--reports', g1, g2]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.summary, { verdict: 'approve', mode: 'full', uncovered: [], unanchored: 0, stillOpen: 0, minor: 0 });
+  assert.match(fs.readFileSync(fx.out, 'utf8'), /all 3 files covered/);
+});
+
+test('missing line, not reviewed, and missing report file are uncovered', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs', 'b.mjs'] }, { files: ['c.mjs'] }, { files: ['d.mjs'] }] });
+  fs.mkdirSync(path.dirname(fx.state), { recursive: true });
+  fs.writeFileSync(fx.state, 'previous state bytes');
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs') });
+  const g2 = reportFile(fx.dir, 'task-1-1.g2.md', { coverage: ['c.mjs — not reviewed: ran out of budget'] });
+  const g3 = path.join(fx.dir, 'task-1-1.g3.md');
+  const r = merge(fx, ['--reports', g1, g2, g3]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.summary.verdict, r.summary.uncovered], ['incomplete', ['b.mjs', 'c.mjs', 'd.mjs']]);
+  assert.match(fs.readFileSync(fx.out, 'utf8'), /^verdict: incomplete$/m);
+  assert.equal(fs.readFileSync(fx.state, 'utf8'), 'previous state bytes');
+});
+
+test('a retry report\'s coverage counts for any file', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }, { files: ['b.mjs'] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs') });
+  const retry = reportFile(fx.dir, 'task-1-1.retry.md', { coverage: clean('b.mjs') });
+  const r = merge(fx, ['--reports', g1, path.join(fx.dir, 'task-1-1.g2.md'), '--retry', retry]);
+  assert.deepEqual([r.summary.verdict, r.summary.uncovered], ['approve', []]);
+});
+
+test('a carried report counts for coverage only', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }, { files: ['b.mjs'], rerun: false }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs') });
+  const carried = reportFile(fx.dir, 'task-1-1.g2.md', { verdict: 'fix', coverage: ['b.mjs — findings'], critical: importantEntry('b.mjs', 4, 'old critical') });
+  const r = merge(fx, ['--reports', g1, '--carried', carried]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.summary.verdict, r.summary.uncovered, r.lines], ['approve', [], []]);
+});
+
+test('earlier finding marks', () => {
+  const earlier = [finding('E1', 'a.mjs'), finding('E2', 'a.mjs', { severity: 'Critical' })];
+  const run = (marks) => {
+    const fx = mergeFixture({ groups: [{ files: ['a.mjs'], earlier }] });
+    const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), earlier: marks });
+    return { fx, ...merge(fx, ['--reports', g1]) };
+  };
+  const resolved = run(['E1 — resolved — fixed in a test', 'E2 — resolved — gone']);
+  assert.deepEqual([resolved.summary.verdict, resolved.summary.stillOpen], ['approve', 0]);
+  const open = run(['E1 — resolved — fixed', 'E2 — open — still wrong']);
+  assert.deepEqual([open.summary.verdict, open.summary.stillOpen], ['fix', 1]);
+  assert.deepEqual(open.lines, ['a.mjs:1 — Critical: finding E2 (earlier)']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(`${open.fx.manifestPath}.findings.json`, 'utf8')).map((f) => f.id), ['E2']);
+  const unmarked = run(['E1 — resolved — fixed']);
+  assert.deepEqual([unmarked.summary.verdict, unmarked.summary.stillOpen], ['fix', 1]);
+  assert.deepEqual(unmarked.lines, ['a.mjs:1 — Critical: finding E2 (earlier)']);
+});
+
+test('verdict fix on a re-run group\'s fix, on a new Important, approve otherwise', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }, { files: ['b.mjs'] }] });
+  const cov = (n, f, extra = {}) => reportFile(fx.dir, `task-1-1.g${n}.md`, { coverage: clean(f), ...extra });
+  assert.equal(merge(fx, ['--reports', cov(1, 'a.mjs'), cov(2, 'b.mjs', { verdict: 'fix' })]).summary.verdict, 'fix');
+  const imp = merge(fx, ['--reports', cov(1, 'a.mjs'), cov(2, 'b.mjs', { important: importantEntry('b.mjs', 9, 'bad thing') })]);
+  assert.deepEqual([imp.summary.verdict, imp.lines], ['fix', ['b.mjs:9 — Important: bad thing']]);
+  assert.equal(merge(fx, ['--reports', cov(1, 'a.mjs'), cov(2, 'b.mjs')]).summary.verdict, 'approve');
+});
+
+test('a finding keeps its claimed location and its anchor text', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), critical: ['- a.mjs:7 — it breaks', '  anchor: a.mjs | return null;', '- no location here'] });
+  const r = merge(fx, ['--reports', g1]);
+  assert.deepEqual(r.lines, ['a.mjs:7 — Critical: it breaks', '(no location) — Critical: no location here']);
+  assert.equal(r.summary.unanchored, 1);
+  const open = JSON.parse(fs.readFileSync(`${fx.manifestPath}.findings.json`, 'utf8'));
+  assert.deepEqual(open.map((f) => [f.severity, f.path, f.line, f.anchor]), [['Critical', 'a.mjs', 7, 'a.mjs | return null;'], ['Critical', null, null, null]]);
+  assert.equal(new Set(open.map((f) => f.id)).size, 2);
+});
+
+test('minor is counted, never printed', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), minor: ['- a.mjs:2 — rename zebra', '- a.mjs:3 — tidy giraffe'] });
+  const r = merge(fx, ['--reports', g1]);
+  assert.deepEqual([r.summary.minor, r.summary.verdict, r.lines], [2, 'approve', []]);
+  assert.doesNotMatch(r.stdout, /zebra|giraffe/);
+  assert.match(fs.readFileSync(fx.out, 'utf8'), /## Minor\n\n- a\.mjs:2 — rename zebra/);
+});
+
+test('merged report keeps the retro shape', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), critical: importantEntry('a.mjs', 1, 'boom') });
+  const r = merge(fx, ['--reports', g1]);
+  const text = fs.readFileSync(fx.out, 'utf8');
+  assert.equal(/^verdict:\s*(\S+)\s*$/im.exec(text)[1], r.summary.verdict);
+  assert.match(text, /^## Critical$/m);
+  assert.match(text, /^## Important$/m);
+  assert.match(text, /^\| 1 \| grp1 \| 1 \| default \| default \| yes \|$/m);
+  for (const name of ['task-1-1.g1.md', 'task-1-1.g12.md', 'task-1-1.retry.md']) assert.doesNotMatch(name, RETRO_NAME);
+  assert.match(path.basename(fx.out), RETRO_NAME);
+});
+
+test('state is rewritten with head and merge-base', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), important: importantEntry('a.mjs', 3, 'wrong') });
+  const r = merge(fx, ['--reports', g1]);
+  assert.equal(r.status, 0, r.stderr);
+  const state = JSON.parse(fs.readFileSync(fx.state, 'utf8'));
+  const { head, mergeBase, to, base } = fx.manifest;
+  assert.deepEqual([state.head, state.mergeBase, state.to, state.base, state.verdict, state.report], [head, mergeBase, to, base, 'fix', fx.out]);
+  assert.deepEqual(state.open.map((f) => [f.severity, f.path, f.line]), [['Important', 'a.mjs', 3]]);
+  assert.ok(!Number.isNaN(Date.parse(state.at)));
+  assert.deepEqual(fs.readdirSync(path.dirname(fx.state)), ['branch.json']);
+});
+
+test('fallbacks are listed', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs') });
+  const r = merge(fx, ['--reports', g1, '--fallback', '2:model', '--fallback', '3:effort']);
+  assert.equal(r.status, 0, r.stderr);
+  const text = fs.readFileSync(fx.out, 'utf8');
+  assert.match(text, /group 2 ran without its model/);
+  assert.match(text, /group 3 ran without its effort/);
+  assert.equal(merge(fx, ['--reports', g1, '--fallback', '2:speed']).status, 1);
+});
+
+test('no groups and no reports', () => {
+  const fx = mergeFixture({ groups: [], skipped: [['pnpm-lock.yaml', 'lockfile']] });
+  const r = merge(fx);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.summary.verdict, r.summary.uncovered], ['approve', []]);
+  const text = fs.readFileSync(fx.out, 'utf8');
+  assert.match(text, /pnpm-lock\.yaml — lockfile/);
+  assert.equal(JSON.parse(fs.readFileSync(fx.state, 'utf8')).verdict, 'approve');
+});
+
+test('scope --state X then merge without --state writes X', () => {
+  const repo = repoWith({}, { 'x.mjs': 'x\n' });
+  const state = stateFile();
+  const s = scope(repo, ['--state', state]);
+  assert.equal(s.status, 0, s.stderr);
+  assert.equal(s.manifest.statePath, path.resolve(state));
+  const dir = path.dirname(s.out);
+  const g1 = reportFile(dir, 'task-1-1.g1.md', { coverage: clean('x.mjs') });
+  const r = spawnSync(process.execPath, [SCRIPT, 'merge', '--manifest', s.out, '--out', path.join(dir, 'task-1-1.md'), '--reports', g1], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(state, 'utf8')).to, s.manifest.to);
+  // With neither --state nor a recorded path (a detached HEAD), no state is written.
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }], extra: { statePath: null } });
+  const none = merge(fx, ['--reports', reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs') })], { state: false });
+  assert.equal(none.status, 0, none.stderr);
+  assert.ok(!fs.existsSync(fx.state));
+});
+
+test('merge exits 1 on bad arguments and an unreadable manifest', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }] });
+  assert.equal(merge(fx, ['--reports', path.join(fx.dir, 'oops.md')]).status, 1);
+  assert.equal(merge(fx, ['--bogus', 'x']).status, 1);
+  fs.writeFileSync(fx.manifestPath, '{nope');
+  assert.equal(merge(fx).status, 1);
 });
