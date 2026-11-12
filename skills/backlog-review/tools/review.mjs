@@ -814,6 +814,73 @@ function writeAtomic(target, text) {
   fs.renameSync(temp, target);
 }
 
+// The content of `<rev>:<path>` split into lines, or null when git cannot show it (path absent in that revision, or the revision is gone).
+function linesAt(tree, rev, file) {
+  try {
+    return git(tree, ['show', `${rev}:${file}`]).split('\n');
+  } catch {
+    return null;
+  }
+}
+
+// Pin each finding to the line its quoted anchor names, so the `path:line` a fixer reads cannot drift from the code the reviewer meant. Lines compare
+// `.trim()`med on both sides (which also drops a CRLF file's `\r`). One match is the line; several, the one nearest the claimed line (a tie goes to the lower
+// one, because `});` recurs); none keeps the claimed line and marks the entry `(unanchored)`. A path absent from `to` is code the branch removed, so it resolves
+// against `from` and says so. A finding is NEVER dropped or downgraded here — an unresolvable quote costs it only its precision. Minor findings need no
+// anchor and are left alone.
+function resolveAnchors(manifest, findings) {
+  const cache = new Map();
+  const read = (rev, file) => {
+    const key = `${rev}\0${file}`;
+    if (!cache.has(key)) cache.set(key, rev ? linesAt(manifest.tree, rev, file) : null);
+    return cache.get(key);
+  };
+  return findings.map((f) => {
+    const bar = f.anchor === null ? -1 : f.anchor.indexOf('|');
+    const file = bar < 0 ? '' : unquote(f.anchor.slice(0, bar).trim());
+    const quote = bar < 0 ? '' : f.anchor.slice(bar + 1).trim();
+    let removed = false;
+    let lines = file && quote ? read(manifest.to, file) : null;
+    if (lines === null && file && quote) {
+      lines = read(manifest.from, file);
+      removed = lines !== null;
+    }
+    const hits = [];
+    if (lines !== null) lines.forEach((l, i) => l.trim() === quote && hits.push(i + 1));
+    if (hits.length === 0) {
+      return { ...f, text: `${f.text} (unanchored)`, unanchored: true };
+    }
+    const claimed = f.line ?? 0;
+    const line = hits.reduce((best, n) => (Math.abs(n - claimed) < Math.abs(best - claimed) ? n : best));
+    return { ...f, path: file, line, text: removed ? `${f.text} (removed code)` : f.text, removed };
+  });
+}
+
+// One entry per resolved `path:line` (removed-code lines are `from` lines, so they key apart from `to` lines of the same number): the highest severity, and
+// every distinct text joined ` / `. Keyed on the resolved line, never the quoted text, because identical lines recur. Unanchored entries pass through
+// untouched — their claimed line is a guess, and two guesses agreeing is not evidence of one defect.
+function dedupe(findings) {
+  const out = [];
+  const byLine = new Map();
+  for (const f of findings) {
+    if (f.unanchored) {
+      out.push(f);
+      continue;
+    }
+    const key = `${f.removed ? 'from' : 'to'}\0${f.path}:${f.line}`;
+    const seen = byLine.get(key);
+    if (!seen) {
+      const entry = { ...f, texts: [f.text] };
+      byLine.set(key, entry);
+      out.push(entry);
+      continue;
+    }
+    if (f.severity === 'Critical') seen.severity = 'Critical';
+    if (!seen.texts.includes(f.text)) seen.texts.push(f.text);
+  }
+  return out.map(({ texts, removed, ...f }) => (texts ? { ...f, text: texts.join(' / ') } : f));
+}
+
 function mergeCommand(args) {
   const { options, lists } = parseMergeArgs(args);
   const manifestFile = path.resolve(options.get('--manifest'));
@@ -856,7 +923,9 @@ function mergeCommand(args) {
   for (const grp of manifest.groups) for (const f of grp.earlier ?? []) earlier.set(f.id, f);
   let next = Math.max(0, ...[...earlier.keys()].map((id) => Number(/(\d+)$/.exec(id)?.[1] ?? 0))) + 1;
   const fresh = [];
-  for (const r of live) for (const f of [...r.critical, ...r.important]) fresh.push({ id: `F${next++}`, ...f });
+  const found = [];
+  for (const r of live) for (const f of [...r.critical, ...r.important]) found.push(f);
+  for (const f of dedupe(resolveAnchors(manifest, found))) fresh.push({ id: `F${next++}`, ...f });
   const minor = live.reduce((sum, r) => sum + r.minor.length, 0);
 
   // An earlier finding stays open unless a report marks it resolved; one report saying `open` beats another saying `resolved`, because a finding closed
@@ -884,7 +953,7 @@ function mergeCommand(args) {
     writeAtomic(stateFile, `${JSON.stringify(state, null, 2)}\n`);
   }
 
-  const unanchored = fresh.filter((f) => f.anchor === null).length;
+  const unanchored = fresh.filter((f) => f.unanchored).length;
   process.stdout.write(`${JSON.stringify({ verdict, mode: manifest.mode, uncovered, unanchored, stillOpen: stillOpen.length, minor })}\n`);
   for (const f of fresh) process.stdout.write(`${oneLine(f)}\n`);
   for (const f of stillOpen) process.stdout.write(`${oneLine(f)} (earlier)\n`);

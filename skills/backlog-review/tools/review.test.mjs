@@ -835,16 +835,35 @@ test('an unreadable --previous exits 1 and writes no manifest', () => {
 const RETRO_NAME = /^((?:[a-z]+-)?\d+)-(\d+)\.md$/;
 
 // A hand-written manifest: `groups` is [{ files, rerun?, earlier? }]; every file is a `review` file, `skipped` adds skipped ones. Returns the dir and paths.
-function mergeFixture({ groups, skipped = [], extra = {} }) {
+// `toFiles` / `fromFiles` ({ path: content }) seed a real repo the anchors resolve against: `from` is a commit of `fromFiles`, `to` a commit of `toFiles`. By
+// default every group file holds `const x = 1;` … `const x = 100;`, so an anchor `const x = N;` resolves to line N.
+function mergeFixture({ groups, skipped = [], extra = {}, toFiles = null, fromFiles = {} }) {
   const dir = fs.mkdtempSync(path.join(root, `merge${counter++}-`));
   const manifestPath = path.join(dir, 'manifest.json');
+  const repo = path.join(dir, 'repo');
+  fs.mkdirSync(repo);
+  const sh = (...a) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' }).trim();
+  const numbered = Array.from({ length: 100 }, (_, i) => `const x = ${i + 1};`).join('\n');
+  const commitAll = (files) => {
+    for (const f of fs.readdirSync(repo)) if (f !== '.git') fs.rmSync(path.join(repo, f), { recursive: true });
+    for (const [p, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(repo, p)), { recursive: true });
+      fs.writeFileSync(path.join(repo, p), content);
+    }
+    sh('add', '-A');
+    sh('commit', '-q', '--allow-empty', '-m', 'c');
+    return sh('rev-parse', 'HEAD');
+  };
+  sh('init', '-q');
+  const fromId = commitAll(fromFiles);
+  const toId = commitAll(toFiles ?? Object.fromEntries(groups.flatMap((grp) => grp.files).map((p) => [p, numbered])));
   const hex = (c) => c.repeat(40);
   const files = [
     ...groups.flatMap((grp) => grp.files).map((p) => ({ path: p, oldPath: null, status: 'M', added: 1, deleted: 0, decision: 'review', reason: null })),
     ...skipped.map(([p, reason]) => ({ path: p, oldPath: null, status: 'M', added: 1, deleted: 0, decision: 'skip', reason })),
   ];
   const manifest = {
-    tree: dir, base: 'main', mode: 'full', modeReason: null, from: hex('a'), to: hex('b'), mergeBase: hex('a'), head: hex('c'), item: null, config: DEFAULTS, files,
+    tree: repo, base: 'main', mode: 'full', modeReason: null, from: fromId, to: toId, mergeBase: hex('a'), head: hex('c'), item: null, config: DEFAULTS, files,
     groups: groups.map((grp, i) => ({ n: i + 1, label: `grp${i + 1}`, files: grp.files, lines: 1, model: null, effort: null, rerun: grp.rerun ?? true, earlier: grp.earlier ?? [] })),
     ...extra,
   };
@@ -943,13 +962,84 @@ test('verdict fix on a re-run group\'s fix, on a new Important, approve otherwis
 
 test('a finding keeps its claimed location and its anchor text', () => {
   const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }] });
-  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), critical: ['- a.mjs:7 — it breaks', '  anchor: a.mjs | return null;', '- no location here'] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), critical: ['- a.mjs:7 — it breaks', '  anchor: a.mjs | const x = 7;', '- no location here'] });
   const r = merge(fx, ['--reports', g1]);
-  assert.deepEqual(r.lines, ['a.mjs:7 — Critical: it breaks', '(no location) — Critical: no location here']);
+  assert.deepEqual(r.lines, ['a.mjs:7 — Critical: it breaks', '(no location) — Critical: no location here (unanchored)']);
   assert.equal(r.summary.unanchored, 1);
   const open = JSON.parse(fs.readFileSync(`${fx.manifestPath}.findings.json`, 'utf8'));
-  assert.deepEqual(open.map((f) => [f.severity, f.path, f.line, f.anchor]), [['Critical', 'a.mjs', 7, 'a.mjs | return null;'], ['Critical', null, null, null]]);
+  assert.deepEqual(open.map((f) => [f.severity, f.path, f.line, f.anchor]), [['Critical', 'a.mjs', 7, 'a.mjs | const x = 7;'], ['Critical', null, null, null]]);
   assert.equal(new Set(open.map((f) => f.id)).size, 2);
+});
+
+// An Important finding claiming `claimed` and quoting `quote` in a.mjs.
+const quoted = (claimed, quote, text = 'bad') => [`- a.mjs:${claimed} — ${text}`, `  anchor: a.mjs | ${quote}`];
+const oneGroup = (extra = {}) => mergeFixture({ groups: [{ files: ['a.mjs'] }], ...extra });
+const mergedA = (fx, important) => merge(fx, ['--reports', reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), important })]);
+const openOf = (fx) => JSON.parse(fs.readFileSync(`${fx.manifestPath}.findings.json`, 'utf8'));
+
+test('exact anchor resolves to its line', () => {
+  const fx = oneGroup();
+  const r = mergedA(fx, quoted(5, 'const x = 20;'));
+  assert.deepEqual([r.summary.unanchored, r.lines], [0, ['a.mjs:20 — Important: bad']]);
+  assert.equal(openOf(fx)[0].line, 20);
+  assert.match(fs.readFileSync(fx.out, 'utf8'), /- a\.mjs:20 — bad/);
+  assert.equal(JSON.parse(fs.readFileSync(fx.state, 'utf8')).open[0].line, 20);
+});
+
+test('anchor with CRLF and surrounding spaces resolves', () => {
+  const crlf = Array.from({ length: 12 }, (_, i) => `  const x = ${i + 1};  `).join('\r\n');
+  const fx = oneGroup({ toFiles: { 'a.mjs': crlf } });
+  const r = mergedA(fx, quoted(1, '   const x = 9;\t'));
+  assert.deepEqual([r.summary.unanchored, r.lines], [0, ['a.mjs:9 — Important: bad']]);
+});
+
+test('nearest of several', () => {
+  const body = Array.from({ length: 100 }, (_, i) => ([10, 40, 90].includes(i + 1) ? '});' : `const x = ${i + 1};`)).join('\n');
+  const fx = oneGroup({ toFiles: { 'a.mjs': body } });
+  assert.deepEqual(mergedA(fx, quoted(42, '});')).lines, ['a.mjs:40 — Important: bad']);
+  const tie = oneGroup({ toFiles: { 'a.mjs': body } });
+  assert.deepEqual(mergedA(tie, quoted(25, '});')).lines, ['a.mjs:10 — Important: bad']);
+});
+
+test('no match is kept and marked unanchored', () => {
+  const fx = oneGroup();
+  const r = mergedA(fx, quoted(33, 'nothing like this'));
+  assert.deepEqual([r.summary.unanchored, r.summary.verdict, r.lines], [1, 'fix', ['a.mjs:33 — Important: bad (unanchored)']]);
+  assert.equal(openOf(fx)[0].line, 33);
+});
+
+test('anchor on a removed file resolves against from', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }], toFiles: {}, fromFiles: { 'a.mjs': 'one\ntwo\nthree\n' } });
+  const r = mergedA(fx, quoted(9, 'three'));
+  assert.deepEqual([r.summary.unanchored, r.lines], [0, ['a.mjs:3 — Important: bad (removed code)']]);
+});
+
+test('de-dup keeps the highest severity and both texts', () => {
+  const fx = oneGroup();
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', {
+    coverage: clean('a.mjs'),
+    critical: quoted(7, 'const x = 8;', 'leaks'),
+    important: [...quoted(8, 'const x = 8;', 'races'), ...quoted(8, 'const x = 8;', 'leaks')],
+  });
+  const r = merge(fx, ['--reports', g1]);
+  assert.deepEqual(r.lines, ['a.mjs:8 — Critical: leaks / races']);
+  assert.deepEqual(openOf(fx).map((f) => [f.severity, f.line, f.text]), [['Critical', 8, 'leaks / races']]);
+  assert.match(fs.readFileSync(fx.out, 'utf8'), /## Critical\n\n- a\.mjs:8 — leaks \/ races/);
+});
+
+test('identical quoted text on different lines stays two findings', () => {
+  const body = Array.from({ length: 30 }, (_, i) => ([5, 25].includes(i + 1) ? '});' : `const x = ${i + 1};`)).join('\n');
+  const fx = oneGroup({ toFiles: { 'a.mjs': body } });
+  const r = mergedA(fx, [...quoted(5, '});', 'first'), ...quoted(25, '});', 'second')]);
+  assert.deepEqual(r.lines, ['a.mjs:5 — Important: first', 'a.mjs:25 — Important: second']);
+});
+
+test('unanchored findings are never merged', () => {
+  const fx = oneGroup();
+  const r = mergedA(fx, [...quoted(4, 'no such line', 'one'), ...quoted(4, 'no such line', 'two'), '- a.mjs:4 — three']);
+  assert.equal(r.summary.unanchored, 3);
+  assert.equal(r.lines.length, 3);
+  assert.equal(openOf(fx).length, 3);
 });
 
 test('minor is counted, never printed', () => {
@@ -1043,7 +1133,7 @@ test('headings at any level or with trailing text still carry findings', () => {
   fs.writeFileSync(file, ['verdict: fix', '', '### Coverage', '- a.mjs — findings', '', '### Critical', '- a.mjs:2 — deep one', '', '## Important (Must Fix)',
     '- a.mjs:3 — trailing text one', '', '#### MINOR', '- a.mjs:4 — small', '', '### Earlier Findings', '- E1 — resolved — done', ''].join('\n'));
   const r = merge(fx, ['--reports', file]);
-  assert.deepEqual(r.lines, ['a.mjs:2 — Critical: deep one', 'a.mjs:3 — Important: trailing text one']);
+  assert.deepEqual(r.lines, ['a.mjs:2 — Critical: deep one (unanchored)', 'a.mjs:3 — Important: trailing text one (unanchored)']);
   assert.deepEqual([r.summary.uncovered, r.summary.minor, r.summary.stillOpen], [[], 1, 0]);
 });
 
