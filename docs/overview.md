@@ -19,7 +19,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [subsystems/board.md](subsystems/board.md)           | the client: the five sections, and what the browser derives rather than fetches                                         |
 | [subsystems/releases.md](subsystems/releases.md)     | the board's own versions: `GET /api/releases` from the checkout's tags, the rail's version chip and the What's new drawer |
 | [.claude/DESIGN.md](../.claude/DESIGN.md)            | the client's visual language: the reference design (§1–7, copied from the dashboard) and how this board applies it (§8) |
-| [subsystems/skills.md](subsystems/skills.md)         | the eight skills, the CLIs beneath them, and the reviewer agent                                                         |
+| [subsystems/skills.md](subsystems/skills.md)         | the nine skills, the CLIs beneath them, and the reviewer agent                                                          |
 | [subsystems/invariants.md](subsystems/invariants.md) | the rationale behind the rules whose "why" outruns one line — most encode a failure that already happened               |
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes                                 |
 | [workflows/publishing.md](workflows/publishing.md)   | getting a skill edit out of the working tree and into the installed plugin                                              |
@@ -128,11 +128,12 @@ rail ends in a version chip that opens a What's new drawer of every release, rea
 
 ### The skills — [full doc](subsystems/skills.md)
 
-Eight skills under `skills/`, five CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
+Nine skills under `skills/`, six CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
 retro home's only writer and the one of the four writers nothing else reads at runtime; `tick.mjs`, the tick home's only writer, which decides one unattended
 unit of work per scheduled tick and is read-only against items, the run state and git; `jira.mjs`, API-only, which writes no file and reaches Jira through
-`/api/jira` — save `worktree`, which is git only and makes a ticket's worktree in a mapped repo), and one agent under `agents/` that the orchestrator
-dispatches to review an item's branch before it merges (and execute, before a `pr`-mode push).
+`/api/jira` — save `worktree`, which is git only and makes a ticket's worktree in a mapped repo; `review.mjs`, which scopes a change into reviewer groups and
+merges their reports), and one agent under `agents/` that the orchestrator dispatches, one per file group, to review an item's branch before it merges (and
+execute, before a `pr`-mode push; and `/backlog-review`, on any checkout).
 `backlog-orchestrate` is the only skill that merges into a base — it works one item per worktree and merges each into the run's base branch (`main` unless the
 run
 was given `--base`), or leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only — merges them onto a run branch of its own and

@@ -491,7 +491,7 @@ Releases are nightly rollups: `.github/workflows/release.yml` runs at 04:17 UTC 
   60 s, fetched on demand) behind `GET /api/prs` and its three guarded writes.
 - [**The board**](docs/subsystems/board.md) — the React SPA: five lazy sections behind a side rail, with most of what you see derived in the browser from whole
   corpora.
-- [**The skills**](docs/subsystems/skills.md) — the eight published skills, their five CLIs, and the reviewer agent the orchestrator dispatches before a merge.
+- [**The skills**](docs/subsystems/skills.md) — the nine published skills, their six CLIs, and the reviewer agent the orchestrator dispatches before a merge.
 - [**Jira**](docs/subsystems/jira.md) — the Jira Cloud integration: a client, a board poller and its caches, ten read routes under `/api/jira`, six guarded
   config writes to `jira.json`, the two writes to Jira itself (`/issue/assign` and `/issue/transition`), the Run half in `agents/` (`POST
   /api/agents/dispatch-jira` and `/jira-stop`) with a persisted store of the sessions linked to each ticket, and the `jira` skill (`jira.mjs`) that reaches those routes from any
@@ -506,7 +506,7 @@ Four workflow docs cover the procedures: [running the app](docs/workflows/develo
 
 | Path       | Contents                                                                                                                                                                                                                                 |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skills/`  | The eight published skills — the plugin's skill root ([doc](docs/subsystems/skills.md))                                                                                                                                                  |
+| `skills/`  | The nine published skills — the plugin's skill root ([doc](docs/subsystems/skills.md))                                                                                                                                                   |
 | `agents/`  | The plugin's own agents; today just the orchestrator's reviewer ([doc](docs/subsystems/skills.md))                                                                                                                                       |
 | `server/`  | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader, the tracker poller, the tick breaker's routes, the release tags reader, the remote dashboards ([doc](docs/subsystems/api.md)), the Jira routes ([doc](docs/subsystems/jira.md))                               |
 | `client/`  | React SPA — side rail, Files and GitHub boards and archives, GitHub › PRs, run chip, runs, Jira, settings, What's new ([doc](docs/subsystems/board.md))                                                                                       |
