@@ -321,6 +321,15 @@ describe('GitlabPollerService — identity', () => {
     expect(await identityAnswering(403, { error: 'insufficient_scope' })).toMatchObject({ state: 'rejected', httpStatus: 403, reason: 'insufficient_scope' });
   });
 
+  it('a token refused from boot leaves every mapped project never read and failed, so a ticket reads “could not be read”, not “not read yet”', async () => {
+    const h = setup();
+    h.fake.script.set('/api/v4/user', { status: 401, body: { message: '401 Unauthorized' } });
+    const p = await boot(h);
+    expect(p.status.state).toBe('rejected');
+    expect(h.paths().filter((x) => x.startsWith(listPath(MS)))).toEqual([]);
+    expect(p.jiraProjects.TIMIFY[0]).toEqual({ path: MS, repo: 'microservice', polledAt: null, capped: false, failed: true });
+  });
+
   it('a refused 302 and a 503 are unreachable', async () => {
     expect(await identityAnswering(302)).toMatchObject({ state: 'unreachable', reason: 'redirect refused (302)', httpStatus: null });
     expect(await identityAnswering(503)).toMatchObject({ state: 'unreachable', httpStatus: 503 });

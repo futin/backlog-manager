@@ -52,7 +52,8 @@ cuts the oldest finished MRs, never an open one. Then one detail read per kept o
 
 **Failure keeps the last answer.** A failed list keeps the project's MRs and `polledAt` and sets `failed` (a 403/404 is `cannot-read`, that project's
 problem line); a failed detail read keeps that MR's last pipeline. One 429 stores one `retryAt` (`Retry-After`, else `GITLAB_RATE_LIMIT_DEFAULT_MS`),
-expired where it is read.
+expired where it is read. A refused token stops a sweep before any project is asked, so while the state is `rejected`, `payload()` marks every project never
+read as `failed` too — its tickets read "could not be read", not "not read yet" (spec §7.2).
 
 **Identity** (`GET /user`) is asked at bootstrap and whenever the SHA-256 fingerprint of (site, token) changes, independent of arming, so a refused token
 shows even when no repo is mapped; a 401 inside a sweep forces a re-read, and an unanswered identity is retried after `GITLAB_IDENTITY_RETRY_MS`.

@@ -251,7 +251,12 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
     const capped: GitlabRepoProblem[] = [];
     for (const p of projects) {
       const c = this.cache.get(p.path);
-      const view: GitlabProjectView = { path: p.path, repo: p.repo, polledAt: c?.polledAt ?? null, capped: c?.capped ?? false, failed: c?.failed ?? false };
+      // A refused token stops the sweep before any project is asked (`sweepOnce`), so a project never read would stay `failed: false` and every ticket
+      // under it would read "not read yet" for as long as the token is wrong. Spec §7.2 counts `rejected` from the start as a failed read: say so, so the
+      // ticket points at Settings › Shared › Sources. A project read before keeps its own flag — its last good answer still stands (§6.3).
+      const polledAt = c?.polledAt ?? null;
+      const failed = (c?.failed ?? false) || (verdict.kind === 'rejected' && polledAt === null);
+      const view: GitlabProjectView = { path: p.path, repo: p.repo, polledAt, capped: c?.capped ?? false, failed };
       for (const key of p.jiraKeys) (jiraProjects[key] ??= []).push({ ...view });
       if (c === undefined) continue;
       mrs.push(...c.mrs.map((m) => ({ ...m, keys: [...m.keys] })));
