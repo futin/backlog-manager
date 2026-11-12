@@ -11,6 +11,7 @@ import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
 import type { AgentsStatus, TicksPayload } from '../shared/types';
+import { NoGitlab } from './helpers/no-gitlab';
 
 /**
  * Task 7 of the tick breaker: the `Backlog tick` card on Settings' Shared page — `haltAfter` 1–10, and since #378 the two tick caps `maxPlans` and `maxPrs`,
@@ -173,7 +174,7 @@ describe('the Backlog tick card, by page', () => {
     render(
       <SettingsProvider>
         <TrackersProvider>
-          <SettingsView />
+          <NoGitlab><SettingsView /></NoGitlab>
         </TrackersProvider>
       </SettingsProvider>
     );

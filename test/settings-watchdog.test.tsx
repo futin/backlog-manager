@@ -12,6 +12,7 @@ import { WATCHDOG_POLL_MS } from '../client/src/hooks/useWatchdog';
 import { formatSpanCompact } from '../client/src/lib/run-time';
 import { DEFAULT_WATCHDOG_CONFIG, WATCHDOG_LIMITS } from '../shared/types';
 import type { AgentsStatus, WatchdogStatus } from '../shared/types';
+import { NoGitlab } from './helpers/no-gitlab';
 
 /**
  * task-7-brief.md's own table, Step 1 — `WatchdogGroup` rendered the same
@@ -120,7 +121,7 @@ function renderView(): void {
   storeSharedPage();
   render(
     <SettingsProvider>
-      <SettingsView />
+      <NoGitlab><SettingsView /></NoGitlab>
     </SettingsProvider>
   );
 }
@@ -505,7 +506,7 @@ describe('WatchdogGroup', () => {
     storeSharedPage();
     const { container } = render(
       <SettingsProvider>
-        <SettingsView />
+        <NoGitlab><SettingsView /></NoGitlab>
       </SettingsProvider>
     );
     await screen.findByLabelText('Enabled');

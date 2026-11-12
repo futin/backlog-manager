@@ -13,6 +13,7 @@ import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
 import { browserTimeZone, formatZonedClock } from '../client/src/lib/time-zone';
 import type { AgentsStatus, TimeZoneSetting } from '../shared/types';
+import { NoGitlab } from './helpers/no-gitlab';
 
 /**
  * #241's Settings card: `Time zone` on the Shared page — one Select over the platform's zones, its first option "unset", writing
@@ -168,7 +169,7 @@ describe('the Time zone card, by page', () => {
       <SettingsProvider>
         <TrackersProvider>
           <TimeZoneProvider>
-            <SettingsView />
+            <NoGitlab><SettingsView /></NoGitlab>
           </TimeZoneProvider>
         </TrackersProvider>
       </SettingsProvider>
