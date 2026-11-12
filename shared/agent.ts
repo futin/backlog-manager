@@ -10,6 +10,9 @@ import type {
   OrchestratorRunsPayload,
   PermissionMode,
   QuestionMode,
+  ReviewConfig,
+  ReviewEffort,
+  ReviewModel,
   RunQueueItem,
   RunStage
 } from './types';
@@ -1057,3 +1060,74 @@ export function defaultBoardUrl(url: string): string | null {
 export function mergeAllowRules(projectPath: string): string[] {
   return ['Bash(git merge --no-ff *)', `Bash(git -C "${projectPath}" merge --no-ff *)`];
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// Reviewer config. `skills/backlog-review/tools/review.mjs` carries the twin of REVIEW_MODELS, REVIEW_EFFORTS, DEFAULT_REVIEW_CONFIG and parseReviewConfig
+// (a skill's tools import nothing from `shared/`); `skills/backlog-review/tools/review.test.mjs` reads this file as text and fails when the two drift.
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+
+export const REVIEW_MODELS = ['opus', 'sonnet', 'haiku', 'fable'] as const satisfies readonly ReviewModel[];
+export const REVIEW_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const satisfies readonly ReviewEffort[];
+export const REVIEW_SMALL_MAX_LINES_MIN = 1;
+export const REVIEW_SMALL_MAX_LINES_MAX = 10000;
+
+/** Split: big groups on the agent's default, small ones on Sonnet, "small" meaning 300 changed lines or fewer. `same` is stored so a mode switch keeps it. */
+export const DEFAULT_REVIEW_CONFIG: ReviewConfig = {
+  mode: 'split',
+  same: { model: null, effort: null },
+  big: { model: null, effort: null },
+  small: { model: 'sonnet', effort: null },
+  smallMaxLines: 300
+};
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+const hasExactKeys = (o: Record<string, unknown>, keys: string[]): boolean => Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
+
+/**
+ * Validates a review.json body or a POSTed config: exactly the five keys, pairs exactly `model` and `effort`, members from the closed lists or `null`, and
+ * `smallMaxLines` an integer in range. Strict on purpose — a lenient parser would let the board store what the skill's twin then refuses. `member` names the
+ * first failure (`smallMaxLines`, `big.model`, `mode`, a pair's own name for a malformed pair, `review` for the object itself).
+ */
+export function parseReviewConfig(value: unknown): { ok: true; config: ReviewConfig } | { ok: false; member: string } {
+  const top = ['mode', 'same', 'big', 'small', 'smallMaxLines'];
+  if (!isPlainObject(value) || !hasExactKeys(value, top)) return { ok: false, member: 'review' };
+  if (value.mode !== 'same' && value.mode !== 'split') return { ok: false, member: 'mode' };
+  const pairs: Record<string, ReviewConfig['same']> = {};
+  for (const name of ['same', 'big', 'small']) {
+    const p = value[name];
+    if (!isPlainObject(p) || !hasExactKeys(p, ['model', 'effort'])) return { ok: false, member: name };
+    if (p.model !== null && !(REVIEW_MODELS as readonly unknown[]).includes(p.model)) return { ok: false, member: `${name}.model` };
+    if (p.effort !== null && !(REVIEW_EFFORTS as readonly unknown[]).includes(p.effort)) return { ok: false, member: `${name}.effort` };
+    pairs[name] = { model: p.model as ReviewModel | null, effort: p.effort as ReviewEffort | null };
+  }
+  const n = value.smallMaxLines;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < REVIEW_SMALL_MAX_LINES_MIN || n > REVIEW_SMALL_MAX_LINES_MAX) return { ok: false, member: 'smallMaxLines' };
+  return { ok: true, config: { mode: value.mode, same: pairs.same, big: pairs.big, small: pairs.small, smallMaxLines: n } };
+}
+
+/** The `--review-*` flags that hand `c` to a skill, in the spelling `review.mjs config` takes; `default` is how a flag says "unset". A `null` config is `default`. */
+export function reviewFlags(c: ReviewConfig | null): string[] {
+  if (c === null) return ['default'];
+  const v = (x: string | null): string => x ?? 'default';
+  if (c.mode === 'same') return ['--review-mode', 'same', '--review-model', v(c.same.model), '--review-effort', v(c.same.effort)];
+  return [
+    '--review-mode', 'split',
+    '--review-big-model', v(c.big.model), '--review-big-effort', v(c.big.effort),
+    '--review-small-model', v(c.small.model), '--review-small-effort', v(c.small.effort),
+    '--review-small-max-lines', String(c.smallMaxLines)
+  ];
+}
+
+const REVIEW_WORDS: Record<string, string> = { xhigh: 'XHigh' };
+const word = (x: string): string => REVIEW_WORDS[x] ?? x.charAt(0).toUpperCase() + x.slice(1);
+const pairLabel = (p: ReviewConfig['same']): string => `${p.model === null ? 'Agent default' : word(p.model)} · ${p.effort === null ? 'Default' : word(p.effort)}`;
+
+/** One line saying who reviews, for a run row or a PR card. An unset config (a run recorded before the setting existed) is `Reviewer: default`. */
+export function reviewerLabel(c: ReviewConfig | null | undefined): string {
+  if (!c) return 'Reviewer: default';
+  if (c.mode === 'same') return `Reviewer: ${pairLabel(c.same)}`;
+  return `Reviewer: big ${pairLabel(c.big)}, small ${pairLabel(c.small)} up to ${c.smallMaxLines} lines`;
+}
+
+/** A prompt or argument string that carries a review flag. Lookbehind keeps `--reviewed` (no letter after `--review-`) and `--preview-x` out. */
+export const REVIEW_FLAG = /(?<![\w-])--review-[a-z]/;

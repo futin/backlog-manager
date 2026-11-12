@@ -3573,3 +3573,37 @@ export interface ReleasesResponse {
   /** Newest first. */
   releases: Release[];
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// Reviewer config (`~/.backlog-manager/settings/review.json`, `/api/settings/review`). Its own block, apart from the pull-request and tracker shapes, because
+// it belongs to the backlog-review skill and not to any board payload. `skills/backlog-review/tools/review.mjs` holds the twin of the validator and
+// defaults that go with these (`parseReviewConfig` / `DEFAULT_REVIEW_CONFIG` in `shared/agent.ts`).
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/** A reviewer's model: one of the four named, or `null` for the agent's own default. */
+export type ReviewModel = 'opus' | 'sonnet' | 'haiku' | 'fable';
+
+/** A reviewer's effort: one of the five named, or `null` for the default. */
+export type ReviewEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** One reviewer's model and effort; `null` in either member is "unset — the agent's default", never a missing key. */
+export interface ReviewPair {
+  model: ReviewModel | null;
+  effort: ReviewEffort | null;
+}
+
+/**
+ * What review.json holds: `same` runs one reviewer on the whole diff, `split` sends groups above `smallMaxLines` changed lines to `big` and the rest to
+ * `small`. All three pairs are always stored, so switching mode in the UI loses nothing the person typed.
+ */
+export interface ReviewConfig {
+  mode: 'same' | 'split';
+  same: ReviewPair;
+  big: ReviewPair;
+  small: ReviewPair;
+  /** An integer, 1–10000. */
+  smallMaxLines: number;
+}
+
+/** `GET /api/settings/review`: the config in force, and `fileError` when review.json exists but could not be used (the defaults are what is shown). */
+export type ReviewSetting = ReviewConfig & { fileError?: true };

@@ -1170,3 +1170,21 @@ test('a re-run group saying fix with no findings is noted in the merged report',
   assert.equal(r.summary.verdict, 'fix');
   assert.match(fs.readFileSync(fx.out, 'utf8'), /group 2 said verdict: fix but its report has no Critical or Important finding/);
 });
+
+// Twin parity: the closed lists, the range and the defaults here must equal `shared/agent.ts`, which the board validates against. Read as TEXT — a skill's
+// test imports nothing from `shared/` — and the same guard `tick-lib.test.mjs` runs on `deriveGroomed`.
+test('review.mjs agrees with shared/agent.ts on the lists, the range and the defaults', () => {
+  const shared = fs.readFileSync(fileURLToPath(new URL('../../../shared/agent.ts', import.meta.url)), 'utf8');
+  const list = (name) => JSON.parse(new RegExp(`export const ${name} = (\\[[^\\]]*\\])`).exec(shared)[1].replaceAll("'", '"'));
+  const num = (name) => Number(new RegExp(`export const ${name} = (\\d+);`).exec(shared)[1]);
+  const defaults = new Function(`return ${/export const DEFAULT_REVIEW_CONFIG: ReviewConfig = (\{[\s\S]*?\n\});/.exec(shared)[1]}`)();
+  const source = fs.readFileSync(SCRIPT, 'utf8');
+  const mjsList = (name) => JSON.parse(new RegExp(`const ${name} = (\\[[^\\]]*\\])`).exec(source)[1].replaceAll("'", '"'));
+  const mjsNum = (name) => Number(new RegExp(`const ${name} = (\\d+);`).exec(source)[1]);
+
+  assert.deepEqual(mjsList('MODELS'), list('REVIEW_MODELS'));
+  assert.deepEqual(mjsList('EFFORTS'), list('REVIEW_EFFORTS'));
+  assert.equal(mjsNum('SMALL_MAX_LINES_MIN'), num('REVIEW_SMALL_MAX_LINES_MIN'));
+  assert.equal(mjsNum('SMALL_MAX_LINES_MAX'), num('REVIEW_SMALL_MAX_LINES_MAX'));
+  assert.deepEqual(defaults, DEFAULTS);
+});
