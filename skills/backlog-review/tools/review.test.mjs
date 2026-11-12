@@ -1016,7 +1016,10 @@ test('scope --state X then merge without --state writes X', () => {
   assert.equal(s.manifest.statePath, path.resolve(state));
   const dir = path.dirname(s.out);
   const g1 = reportFile(dir, 'task-1-1.g1.md', { coverage: clean('x.mjs') });
-  const r = spawnSync(process.execPath, [SCRIPT, 'merge', '--manifest', s.out, '--out', path.join(dir, 'task-1-1.md'), '--reports', g1], { encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [SCRIPT, 'merge', '--manifest', s.out, '--out', path.join(dir, 'task-1-1.md'), '--reports', g1], {
+    encoding: 'utf8',
+    env: { ...process.env, BM_REVIEW_HOME: dir, BM_REVIEW_FILE: path.join(dir, 'review.json') },
+  });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(fs.readFileSync(state, 'utf8')).to, s.manifest.to);
   // With neither --state nor a recorded path (a detached HEAD), no state is written.
@@ -1032,4 +1035,23 @@ test('merge exits 1 on bad arguments and an unreadable manifest', () => {
   assert.equal(merge(fx, ['--bogus', 'x']).status, 1);
   fs.writeFileSync(fx.manifestPath, '{nope');
   assert.equal(merge(fx).status, 1);
+});
+
+test('headings at any level or with trailing text still carry findings', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'], earlier: [finding('E1', 'a.mjs')] }] });
+  const file = path.join(fx.dir, 'task-1-1.g1.md');
+  fs.writeFileSync(file, ['verdict: fix', '', '### Coverage', '- a.mjs — findings', '', '### Critical', '- a.mjs:2 — deep one', '', '## Important (Must Fix)',
+    '- a.mjs:3 — trailing text one', '', '#### MINOR', '- a.mjs:4 — small', '', '### Earlier Findings', '- E1 — resolved — done', ''].join('\n'));
+  const r = merge(fx, ['--reports', file]);
+  assert.deepEqual(r.lines, ['a.mjs:2 — Critical: deep one', 'a.mjs:3 — Important: trailing text one']);
+  assert.deepEqual([r.summary.uncovered, r.summary.minor, r.summary.stillOpen], [[], 1, 0]);
+});
+
+test('a re-run group saying fix with no findings is noted in the merged report', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }, { files: ['b.mjs'] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs') });
+  const g2 = reportFile(fx.dir, 'task-1-1.g2.md', { verdict: 'fix', coverage: clean('b.mjs') });
+  const r = merge(fx, ['--reports', g1, g2]);
+  assert.equal(r.summary.verdict, 'fix');
+  assert.match(fs.readFileSync(fx.out, 'utf8'), /group 2 said verdict: fix but its report has no Critical or Important finding/);
 });

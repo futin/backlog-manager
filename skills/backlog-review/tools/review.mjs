@@ -726,7 +726,9 @@ function groupNumber(file) {
   return Number(match[1]);
 }
 
-const SECTION = /^##\s+(.+?)\s*$/;
+// Any heading level, keyed by its first word: reviewers write `### Critical` and `## Critical (Must Fix)` too, and a finding dropped for its heading would
+// let a later round approve without anyone re-checking it (retro's parser is as lenient). `Earlier findings` is keyed `earlier`.
+const SECTION = /^#{1,6}\s+(\S+)/;
 const NONE_ENTRY = /^(?:none|n\/a|nothing|—|-)\.?$/i;
 
 // A report split at its `## ` headings, keyed by lower-cased heading. Text before the first heading is under ''.
@@ -736,7 +738,7 @@ function sections(text) {
   for (const line of text.split('\n')) {
     const heading = SECTION.exec(line);
     if (heading) {
-      current = heading[1].toLowerCase();
+      current = heading[1].toLowerCase().replace(/[^a-z]/g, '');
       if (!out.has(current)) out.set(current, []);
     } else out.get(current).push(line);
   }
@@ -794,7 +796,7 @@ function parseReport(file) {
   const verdict = /^verdict:\s*(\S+)\s*$/im.exec(text)?.[1].toLowerCase() ?? null;
   const found = (heading, severity) => entries(secs.get(heading) ?? []).map((e) => parseFinding(e, severity)).filter(Boolean);
   const marks = new Map();
-  for (const e of entries(secs.get('earlier findings') ?? [])) {
+  for (const e of entries(secs.get('earlier') ?? [])) {
     const match = new RegExp(`^(\\S+)(?:${SEPARATOR})(resolved|open)\\b`, 'i').exec(e[0]);
     if (match) marks.set(unquote(match[1]), match[2].toLowerCase());
   }
@@ -846,7 +848,10 @@ function mergeCommand(args) {
 
   // New findings: only from reports of groups that RE-RAN (a `--carried` report's findings reach this round as earlier findings, never twice), plus the retry.
   const rerunGroups = new Set(manifest.groups.filter((grp) => grp.rerun !== false).map((grp) => grp.n));
-  const live = [...reports].filter(([n]) => rerunGroups.has(n)).map(([, r]) => r).concat(retry ? [retry] : []).filter(Boolean);
+  const liveNamed = [...reports].filter(([n]) => rerunGroups.has(n)).map(([n, r]) => [`group ${n}`, r]).concat(retry ? [['the retry', retry]] : []).filter(([, r]) => r);
+  const live = liveNamed.map(([, r]) => r);
+  // A `fix` verdict with no Critical/Important entry is a report the parser could not read findings from; the verdict stands, and the report says so.
+  const emptyFix = liveNamed.filter(([, r]) => r.verdict === 'fix' && r.critical.length + r.important.length === 0).map(([name]) => name);
   const earlier = new Map();
   for (const grp of manifest.groups) for (const f of grp.earlier ?? []) earlier.set(f.id, f);
   let next = Math.max(0, ...[...earlier.keys()].map((id) => Number(/(\d+)$/.exec(id)?.[1] ?? 0))) + 1;
@@ -867,7 +872,7 @@ function mergeCommand(args) {
   const verdict = uncovered.length ? 'incomplete' : rerunSaysFix || fresh.length || stillOpen.length ? 'fix' : 'approve';
 
   const open = [...stillOpen, ...fresh];
-  const report = renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorEntries: live.flatMap((r) => r.minor), fallbacks });
+  const report = renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorEntries: live.flatMap((r) => r.minor), fallbacks, emptyFix });
   const out = path.resolve(options.get('--out'));
   writeAtomic(out, report);
   writeAtomic(findingsPath(manifestFile), `${JSON.stringify(open, null, 2)}\n`);
@@ -888,7 +893,7 @@ function mergeCommand(args) {
 
 // The merged report, in the shape retro and the agent file already agree on: a `verdict:` line, then `## Critical` / `## Important`. The `## Coverage`
 // section of this report is for the person reading it; it is never parsed back.
-function renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorEntries, fallbacks }) {
+function renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorEntries, fallbacks, emptyFix }) {
   const out = [`verdict: ${verdict}`, ''];
   out.push(`mode: ${manifest.mode} (from ${manifest.from ?? 'n/a'} to ${manifest.to})`);
   if (manifest.modeReason) out.push(`modeReason: ${manifest.modeReason}`);
@@ -901,6 +906,7 @@ function renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked
     }
   }
   for (const fb of fallbacks) out.push('', `group ${fb.n} ran without its ${fb.field}`);
+  for (const name of emptyFix) out.push('', `${name} said verdict: fix but its report has no Critical or Important finding — read that report`);
   out.push('', '## Coverage', '');
   if (uncovered.length === 0) out.push(`all ${reviewFiles.length} files covered`);
   else out.push(`${uncovered.length} of ${reviewFiles.length} files not covered:`, ...uncovered.map((p) => `- ${p}`));
