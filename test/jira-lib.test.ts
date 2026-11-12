@@ -73,7 +73,7 @@ import {
   statusTone
 } from '../client/src/lib/jira';
 import type { JiraFold } from '../client/src/lib/jira';
-import { effectiveDeliveryFilter } from '../client/src/lib/delivery';
+import { DELIVERY_FILTER_LABELS, effectiveDeliveryFilter } from '../client/src/lib/delivery';
 import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
@@ -1896,5 +1896,13 @@ describe('launchFootLine', () => {
   it('is null without a repository and ends after the basename without a choice', () => {
     expect(launchFootLine(null, { mode: 'none' })).toBeNull();
     expect(launchFootLine('/Users/ada/microservice', null)).toBe('Starts in microservice');
+  });
+});
+
+// `lib/jira.ts` keeps its own copy of the Delivery filter values (DELIVERY_VALUES) because importing them from `lib/delivery.ts` would close an import
+// cycle. This pins the copy to the labels table, the list the UI draws: a value added there and not here would be clamped to `all` on every read.
+describe('clampJiraPanelFilters keeps every Delivery filter value the UI offers', () => {
+  it.each(Object.keys(DELIVERY_FILTER_LABELS))('keeps `%s`', (value) => {
+    expect(clampJiraPanelFilters({ ...NO_JIRA_PANEL_FILTERS, delivery: value }).delivery).toBe(value);
   });
 });
