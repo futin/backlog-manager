@@ -1067,7 +1067,7 @@ had none and relied on the main tree being the cwd, which is true only while the
 git -C "<base tree>" merge --no-ff -m "Merge backlog/<n>: <title>" -m "Fixes #<n>" -m "Reviewed: approve (reviews/<n>-<k>.md)" backlog/<n>
 ```
 
-`<k>` is the loop that approved it, `1` or `2`; the `Reviewed:` line is what shows the classifier the review (Tracker: `references/tracker.md` §9,
+`<k>` is the review that approved it — §7's count, `1` to `3`; the `Reviewed:` line is what shows the classifier the review (Tracker: `references/tracker.md` §9,
 _the merge's shape_).
 
 **The merge is one Bash call of its own: the driver never chains `git merge` with anything else** — not the push, not an `echo`, not the stage. There is one

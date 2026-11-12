@@ -190,8 +190,8 @@ this run's text to publish on the issue either — read it, then park.
 
 The literal call stays in the body, under "`--no-edit` gives way to three `-m` flags". Free provenance: `git log` then names the issue every merge came
 from, and GitHub's own close-on-push is idempotent with the close the tool performs at `stage <n> merged --outcome`, so the two cannot disagree. `--no-edit` is
-dropped because `-m` already supplies the message — no editor can open either way. The `Reviewed:` line names the approving report (`<k>` is the loop that
-approved it, `1` or `2`), so the classifier sees the review inside the command it is judging; without it, "merge into the base" reads as an unreviewed publish
+dropped because `-m` already supplies the message — no editor can open either way. The `Reviewed:` line names the approving report (`<k>` is the review that
+approved it — §7's count, `1` to `3`), so the classifier sees the review inside the command it is judging; without it, "merge into the base" reads as an unreviewed publish
 (#222).
 
 The one-call rule (the driver never chains `git merge` with anything else, the push included) is not tracker-only and stays in the body, beside the merge.
