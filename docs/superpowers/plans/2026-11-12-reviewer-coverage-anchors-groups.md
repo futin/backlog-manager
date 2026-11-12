@@ -19,7 +19,8 @@ it in Settings → Shared and in the two launch sheets.
 "spec §n").
 
 **How to read this plan.** It gives behaviour, signatures, exact values and exact test cases — **not literal code**. Where a test is listed, its name and
-assertions are the contract; write the body yourself. If the plan and the spec disagree, the spec wins and the disagreement is a plan defect to report. Size
+assertions are the contract; write the body yourself. If the plan and the spec disagree, the spec wins and the disagreement is a plan defect to report — except the deliberate deviations listed
+under "Author calls" in the Self-review notes. Size
 budgets anywhere below are soft.
 
 ## Global Constraints
@@ -35,7 +36,8 @@ budgets anywhere below are soft.
 - `review.mjs` exit codes: **0** success (every verdict), **1** bad arguments, an unknown subcommand (`unknown command: <x>`) or an unreadable manifest —
   the same contract as `orchestrate.mjs`, which has no exit 2. Every "exit non-zero" below means exit 1.
 - Every test that spawns `review.mjs` sets both `BM_REVIEW_HOME` and `BM_REVIEW_FILE` under its temp dir, so no test reads or writes the real
-  `~/.backlog-manager`; temp-repo fixtures commit with `-c user.name=t -c user.email=t@t` (CI has no global git identity).
+  `~/.backlog-manager` (the run-as-main `ROWS` row is exempt: its fixed env is safe because an unknown subcommand exits before any file is read);
+  temp-repo fixtures commit with `-c user.name=t -c user.email=t@t` (CI has no global git identity).
 - Node tests sit flat beside the tool (`skills/backlog-review/tools/review.test.mjs`); jest tests flat in `test/`. A test that needs a git repo builds it in a
   temp dir under `os.tmpdir()` (the `scripts/test-tmpdir.mjs` runner gives each child its own root).
 - The server never writes git; `review.mjs` is a skill tool and is allowed to write loose objects through a temporary `GIT_INDEX_FILE` — never a ref, never
@@ -83,7 +85,7 @@ budgets anywhere below are soft.
 | `skills/backlog-orchestrate/references/check-failures.md` | Modify | the `incomplete` and empty-diff park branches |
 | `skills/backlog-orchestrate/tools/orchestrate.mjs` | Modify | `init --review-config <json>`, run-file field `reviewConfig` |
 | `skills/backlog-orchestrate/tools/orchestrate.test.mjs` | Modify | `init --review-config` cases |
-| `skills/backlog-orchestrate/tools/orchestrate-prompts.test.mjs` | Modify | RULES pairs for the new SKILL.md statements and the check-failures triggers |
+| `skills/backlog-orchestrate/tools/orchestrate-prompts.test.mjs` | Modify | `RULES` pairs for the new SKILL.md statements; `RARE_PATH_REFERENCES` gains the check-failures triggers |
 | `skills/backlog-execute/SKILL.md` | Modify | Finish-mode parse accepts `--review-*` beside `--finish pr` only |
 | `skills/backlog-execute/references/pr-mode.md` | Modify | §1 flag list; §7 delegates to the procedure |
 | `shared/types.ts` | Modify | `ReviewPair`, `ReviewConfig`, `ReviewSetting`; `review?` on `StartOrchestrateRequest` and `AgentDispatchRequest`; `reviewConfig?` on `OrchestratorRun` |
@@ -93,7 +95,7 @@ budgets anywhere below are soft.
 | `server/src/settings/settings.module.ts` | Modify | register the controller |
 | `server/src/agents/agents.service.ts` | Modify | validate `review`; append flags to the orchestrate trigger and the execute finish clause; `REVIEW_FLAG` 400 |
 | `server/src/agents/agents.controller.ts` | Modify | forward `review` when it rebuilds the dispatch (≈80–105) and orchestrate (≈170–215) bodies |
-| `server/src/agents/prompt.util.ts`, `shared/agent.ts` (`defuseFinishFlags`) | Modify | a title spelling `--review-…` is defused like `--finish` |
+| `shared/agent.ts` (`defuseFinishFlags`) | Modify | a title spelling `--review-…` is defused like `--finish` (`prompt.util.ts:31` calls it unchanged) |
 | `server/src/orchestrator/orchestrator.service.ts` | Modify | `sanitizeMergeFields` (≈115) drops a `reviewConfig` that fails `parseReviewConfig` |
 | `.claude/rules/dispatch-watchdog.md`, `docs/subsystems/invariants.md` | Modify | prompt composition order; review flags as a second caller-derived value; the refused `--review-` flag |
 | `test/server-write-paths.test.ts` | Modify | `WRITERS` row for `settings/review-config.util.ts` |
@@ -193,6 +195,8 @@ budgets anywhere below are soft.
   - `rename, space in path and work-tree deletion` (Review Focus 2) — `git mv a.mjs "b c.mjs"`, and `rm` of a tracked file without `git rm` → rename has
     `oldPath: 'a.mjs'`, `path: 'b c.mjs'`; the removed file is `skip`/`deleted`.
   - `clean tree to equals HEAD's tree` — `to === git rev-parse HEAD^{tree}`.
+  - `a nested checkout is not listed` — an un-ignored nested git repo in the work tree → its path absent from `files` (neither `review` nor `skip`), and a
+    plain changed file beside it still listed.
   - `full from is the merge base with the given base` — branches `main` ← `develop` ← `feat`; `--base develop` → `from` = `merge-base develop HEAD`, which
     differs from `merge-base main HEAD` in the fixture.
   - `no grouping at both thresholds` — 12 files totalling 1200 lines → one group.
@@ -341,8 +345,8 @@ findings`, `outcome: none`; item checks against `git -C <worktree> diff <merge-b
 `outcome: none`, check 4 is recorded `not checked: no Outcome` and is not a finding — the existing `missing or half-present pair is an Important finding**`
 sentence stays for the case where an Outcome exists; report gains `## Coverage`, an `anchor:` line on every Critical/Important, `## Earlier findings`;
 "never review the main tree" becomes "never read a tree other than the one given" — and every other `<base>`/`<branch>` site goes with it: the helper
-block's `log --oneline <base>..<branch>` and `diff <base>...<branch> -- <path>` (≈109–111) become `log --oneline <from>..HEAD` and `diff <from> <to> --
-<path>`, and the `worktree` bullet's "The main tree is not yours" sentence (≈66) becomes the same "other tree" wording; a **Scope of a group** paragraph
+block's `log --oneline <base>..<branch>` and `diff <base>...<branch> -- <path>` (≈109–111) become `log --oneline <merge-base>..HEAD` (merge-base from the manifest — `from` can be a
+snapshot tree, never a commit, in incremental mode) and `diff <from> <to> -- <path>`, and the `worktree` bullet's "The main tree is not yours" sentence (≈66) becomes the same "other tree" wording; a **Scope of a group** paragraph
 (spec §4): the `## Coverage` duty is the group's own files, while the reviewer may read any file in the tree and the manifest and raise a finding at full
 severity about any file; the tracker snapshot sentence (`SNAPSHOT under the run-state directory`,
 `<dir>/items/<n>.md`) stays; `model: opus` frontmatter stays (`test/default-model.test.ts`).
@@ -353,8 +357,8 @@ sentence on resolving the root. Run `review.mjs scope`; on `"files":0` or `noCha
 `backlog-manager:backlog-reviewer` per `rerun` group **in one message**, each with the five fields, its `group` line, `item checks: yes` for group 1 only,
 its `earlier findings`, `manifest path`, `item file path` when the caller has an item, `outcome: none` when that item has no `## Outcome`, and the group's
 `model`/`effort` as the Agent tool's own parameters (omitted when null); a dispatch refused for its model or effort is re-sent once without that field and
-`merge` gets `--fallback <n>:<field>`; run `merge`; when `uncovered` is non-empty, one retry dispatch on the big pair for all uncovered files →
-`<id>-<k>.retry.md`, `merge` again with `--retry`; read only `merge`'s stdout into context. **Re-review branch** (both callers' fix loops and the standalone
+`merge` gets `--fallback <n>:<field>`; run `merge`; when `uncovered` is non-empty, one retry dispatch on the big pair for all uncovered files → the
+merged report path with `.md` replaced by `.retry.md`, `merge` again with `--retry`; read only `merge`'s stdout into context. **Re-review branch** (both callers' fix loops and the standalone
 re-review after a fix): `scope --previous <the latest manifest>`, dispatch only the `rerun` groups, and pass the other groups' earlier reports to `merge`
 as `--carried`.
 
@@ -363,8 +367,9 @@ key>/<branch>-<n>.md` (branch `/` → `__` as in the state path, detached HEAD �
 one sentence (base not a local branch; id not found; tracker stack down — plus that a review without an id still works); on `"files":0` in full mode it
 prints `nothing to review — no changes against <base>`, dispatches nothing and writes no state; display (mode and fallback reason, verdict, resolved
 lines, earlier resolved/still open, report path — never the body); `incomplete` said plainly with uncovered files; the fix offer (verdict `fix` or `minor`
-> 0): `Fix Critical and Important (Recommended)` / `Fix all, including Minor` / `Don't fix`, and when AskUserQuestion is unavailable or denied the
-Recommended option is taken; this session fixes, runs the repo's verification, commits nothing, offers an incremental re-review (the procedure's re-review
+> 0): `Fix Critical and Important (Recommended)` / `Fix all, including Minor` / `Don't fix`, offered only when AskUserQuestion is available — a headless
+`claude -p` gets no offer and no fix; when the call is denied by an autopilot gate, take the Recommended option and log it with `autopilot decide`
+(spec §5); this session fixes, runs the repo's verification, commits nothing, offers an incremental re-review (the procedure's re-review
 branch); at most two fix rounds.
 
 - [ ] **Step 1: Write the failing tests** in `backlog.test.mjs`:
@@ -377,12 +382,13 @@ branch); at most two fix rounds.
     `review.mjs merge`, `--retry`, `--fallback`, `item file path`, `outcome: none`, `--previous`, `--carried`, and names `model` and `effort` as Agent tool
     parameters.
   - `backlog-review offers to fix and commits nothing` — SKILL.md contains the three option labels above verbatim, `commits nothing`, `at most two`,
-    `unavailable or denied`.
+    `headless` beside `no offer`, and `autopilot decide`.
   - `backlog-review says when there is nothing to review` — SKILL.md contains `nothing to review — no changes against <base>`.
   - `test/skills-plugin-root.test.ts`: `backlog-review` added to the non-vacuity list, so its SKILL.md must call `review.mjs` through
     `${CLAUDE_PLUGIN_ROOT}`.
   - The pairing the rewritten diff-string assertion stood for is pinned by Task 2's `full from is the merge base with the given base`.
-- [ ] **Step 2: Run** `node --test skills/backlog/tools/backlog.test.mjs` — new cases FAIL, the rewritten one FAILS.
+- [ ] **Step 2: Run** `node --test skills/backlog/tools/backlog.test.mjs` and `pnpm exec jest test/skills-plugin-root.test.ts` — new cases FAIL, the
+  rewritten one FAILS (update that suite's "eight skills" comment to nine).
 - [ ] **Step 3: Write** the agent edits, `procedure.md`, `SKILL.md` (frontmatter `name: backlog-review`, a description with its trigger phrases), and update
   the skill count and lists in `plugin.json`, `CLAUDE.md` (keep it under `test/claude-rules.test.ts`'s byte budget), `docs/subsystems/skills.md`,
   `docs/overview.md`.
@@ -464,8 +470,8 @@ Create `server/src/settings/review-config.util.ts`, `server/src/settings/review.
   `ReviewSetting = ReviewConfig & { fileError?: true }`.
 - `shared/agent.ts`: `REVIEW_MODELS`, `REVIEW_EFFORTS` (readonly tuples of the unions), `DEFAULT_REVIEW_CONFIG`, `parseReviewConfig(value: unknown):
   { ok: true; config: ReviewConfig } | { ok: false; member: string }` (exactly the five keys; pairs exactly `model`/`effort`; `smallMaxLines`
-  `Number.isInteger` and 1–10000; `member` names the first failing one — `smallMaxLines`, `big.model`, `mode`, or `review` itself for a non-object or an
-  extra/missing key),
+  `Number.isInteger` and 1–10000; `member` names the first failing one — `smallMaxLines`, `big.model`, `mode`, a pair's name (`big`) for a non-object
+  pair or one with an extra/missing key, or `review` itself for a non-object or an extra/missing top-level key),
   `reviewFlags(c: ReviewConfig): string[]` (Task 1 spelling; `same` → mode, model, effort; `split` → mode, four pair flags, max-lines; `null` → `default`),
   `reviewerLabel(c: ReviewConfig | null | undefined): string` (`Reviewer: <model> · <effort>`; `Reviewer: big <model> · <effort>, small <model> · <effort>
   up to <n> lines`; unset model `Agent default`, unset effort `Default`; capitalised model/effort words `Opus`, `XHigh` etc.; null/undefined → `Reviewer:
@@ -510,7 +516,8 @@ sanitizeMergeFields test/` finds.
   returned `member`; flags from `reviewFlags` appended **after** ids, the mode flags and `--base`. Absent → nothing appended (the prompt stays
   byte-identical to today's).
 - Execute: `review` allowed only when the **derived** finish is `pr` (the same derivation the base rules use — a remote execute derives `pr` with no
-  `req.finish`, `agents.service.ts:438`); otherwise 400 "the reviewer override applies only to an execute that finishes with a PR". `finishClause` places
+  `req.finish`, `agents.service.ts:441`); otherwise 400 "the reviewer override applies only to an execute that finishes with a PR". An allowed `review`
+  then goes through `parseReviewConfig` with the same 400 text as orchestrate, before `finishClause` runs. `finishClause` places
   the flags inside the backticks after `--base <base>` and after `--auto-merge [--fix]`. Groom: `review` → 400.
 - Body guard: an execute or groom prompt matching `REVIEW_FLAG` → 400 "the reviewer is set by the sheet's Reviewer picker — remove --review- flags from the
   prompt", checked beside the `FINISH_FLAG` check. Titles: `defuseFinishFlags` also defuses a `REVIEW_FLAG` token (same U+2011 U+2011 swap), so an item
@@ -528,10 +535,12 @@ sanitizeMergeFields test/` finds.
     existing expectation; invalid `review` (`smallMaxLines: 0`) → 400 with body `{ error: "review: smallMaxLines is not a valid reviewer setting" }`,
     nothing spawned. Execute `finish: 'pr', autoMerge, fix, review` → clause contains
     `` `--finish pr --base main --auto-merge --fix --review-mode split … --review-small-max-lines 300` `` inside one pair of backticks; execute `in-place` +
-    `review` → 400; groom + `review` → 400; execute prompt containing `--review-model opus` → 400; an execute of an item titled `try --review-mode same` →
+    `review` → 400; execute `finish: 'pr'` with `smallMaxLines: "300"`, and separately small model `gpt` → 400 naming `smallMaxLines` / `small.model`,
+    nothing spawned; groom + `review` → 400; execute prompt containing `--review-model opus` → 400; an execute of an item titled `try --review-mode same` →
     200 and the prompt's title carries the defused token, never `--review-mode`; the controller forwards `review` (a request through the HTTP route, not the
     service directly, still gets the flags).
-  - Orchestrator-run suite: a run file with `reviewConfig: {}` → sanitized run has no `reviewConfig`; a valid one → kept byte-equal.
+  - Orchestrator-run suite: a run file with `reviewConfig: {}`, and separately a full config with `smallMaxLines: 0` → sanitized run has no
+    `reviewConfig`; a valid one → kept byte-equal.
   - `agents-dispatch-remote.test.ts`: remote orchestrate with `review` → the forwarded prompt carries the flags; without → none.
   - `agents-prompt.test.ts`: `finishClause('execute','pr','main',{ review })` places the flags inside the backticks and the prose after the colon spells no
     `--review-`; `finishClause` without `review` is unchanged.
@@ -600,4 +609,5 @@ After merge: `pnpm run plugin:sync`, restart Claude Code, then in this repo: a s
 - Author calls made in this plan, beyond the spec: the exact flag spelling (`--review-mode` required with any review flag); the state-path and repo-key
   scheme; `config --defaults` for resuming an older run file; `<manifest>.findings.json` as `--previous`'s source of earlier findings; a `review` override on
   an in-place execute or a groom is a 400; both sheets send `review` only when the pick differs from the Settings seed; `--previous` takes the latest
-  manifest, not the first (spec §6 wording corrected — the first loses round-2 findings); `review.mjs` bad-argument exits are 1, matching `orchestrate.mjs`.
+  manifest, not the first (spec §6 wording corrected — the first loses round-2 findings); `review.mjs` bad-argument exits are 1, matching `orchestrate.mjs`;
+  gitlink (mode `160000`) entries are dropped from the file list, neither reviewed nor skipped — a nested checkout is not part of this repo's diff.
