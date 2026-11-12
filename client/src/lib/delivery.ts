@@ -1,4 +1,4 @@
-import { polledPhrase } from './jira';
+import { polledPhrase, repoBasename } from './jira';
 import type { GitlabMr, GitlabPayload, GitlabProjectView, JiraIssue } from '../../../shared/types';
 
 /**
@@ -120,6 +120,15 @@ export function ticketDelivery(issue: JiraIssue, index: DeliveryIndex): TicketDe
   const { lead, also } = leadMr(mrs);
   const notMerged = issue.status.category === 'done' && lead.state === 'opened' && via === null;
   return { kind: 'mrs', lead, also, via, notMerged, polledAt: index.byPath.get(lead.project)?.polledAt ?? null };
+}
+
+/**
+ * The basename an MR's repository is called by everywhere a surface names it: the mapped repo's own (`GitlabProjectView.repo`, the name the user's checkout
+ * goes by), else the GitLab project path's last segment — `group/sub/repo` reads `repo`, and a bare `repo` reads itself. Detail's head and `Also:` line read
+ * it; it lives here rather than in the pane so a second surface naming an MR's repo cannot call it something else.
+ */
+export function mrRepo(mr: GitlabMr, index: DeliveryIndex): string {
+  return index.byPath.get(mr.project)?.repo ?? repoBasename(mr.project);
 }
 
 /** The palette a delivery look draws from (spec §7, "Tones") — names, not colours: the surfaces map each to `shared/theme.css` tokens. */

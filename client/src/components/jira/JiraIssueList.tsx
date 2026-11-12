@@ -1,17 +1,21 @@
 import type { MouseEvent } from 'react';
 
+import { useDeliveryIndex } from '../../hooks/useDeliveryIndex';
 import { STATE_LABEL } from '../../../../shared/jira-sessions';
 import type { JiraAction, JiraIssue } from '../../../../shared/types';
+import { deliveryLook, ticketDelivery, type DeliveryIndex } from '../../lib/delivery';
 import { elapsedSince } from '../../lib/item-age';
 import { initialsOf, priorityTone, rolledUpdated, statusTone, typeTone, type JiraChildrenIndex, type JiraFold } from '../../lib/jira';
 import type { TopSessionCell } from '../../lib/jira-deck';
 import { rowOpens } from '../../lib/jira-list';
 import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
+import { DeliveryTrack } from '../ui/DeliveryTrack';
 import { FoldMark } from '../ui/FoldMark';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { JiraRunMenu } from './JiraRunMenu';
+import { NotMergedChip } from './MrChip';
 
 /**
  * DESIGN.md §8.9.1 — Jira › Board › List: the picked board's issues as a table (Jira › Sessions plan, Task 4; spec "Jira › Board", D2–D4; mock `Main.dc.html`).
@@ -27,6 +31,14 @@ import { JiraRunMenu } from './JiraRunMenu';
  * The cell is a stripe dot, the state's word and an age, and is not a link — opening a session is the Sessions page's and Detail's job. Type, Status,
  * Priority and Assignee wear the board card's own marks (plan 1's classes), so a row and its card cannot disagree on what a colour means. The last cell is
  * the card's split Run, shown on row hover or focus only (it stays in the DOM and tabbable — the stylesheet fades it, never removes it). **Updated** is `rolledUpdated`, the stamp the rows were sorted on.
+ *
+ * **Delivery** (GitLab connection spec §7.3, mock `List.dc.html`), after Status and drawn only while GitLab is shown at all (`useDeliveryIndex`): the top's
+ * lead MR as the compact `DeliveryTrack` (the same dots Detail draws, in the same marks), its `!iid` link out and `deliveryLook`'s List word in its tone, then
+ * the amber `not merged` chip the card draws, and `+N MR` for the others. A known ticket with no MR reads `no MR` and an unknown one `—`, both `--ink3`, so a
+ * list GitLab has not finished reading never claims a ticket has nothing; a ticket whose project maps no GitLab project gets an empty cell (spec §7, "Which
+ * tickets draw delivery at all"). The top's OWN lead MR only, never one picked across its fold (the user's pick). The link goes out in a new tab with no
+ * referrer, and `rowOpens` already leaves a click on it to the link. The column's presence moves no other column's width: everything after Status is sized
+ * from the END of the row (`nth-last-child`), and the scroll box carries `data-delivery` for the wider minimum.
  *
  * The scroll box and header are `.jira-issues-*`, modelled on the session table's `.jira-list-*`: the box scrolls sideways, the page never does.
  */
@@ -48,10 +60,11 @@ export function JiraIssueList({
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
+  const index = useDeliveryIndex();
   if (tops.length === 0) return <div className="board-empty">{filtered ? 'No issues match' : 'No issues'}</div>;
   return (
     <div className="jira-issues-frame">
-      <div className="jira-issues-scroll" role="region" aria-label="Issues">
+      <div className="jira-issues-scroll" role="region" aria-label="Issues" data-delivery={index === null ? undefined : ''}>
         <table className="jira-issues-table">
           <thead>
             <tr>
@@ -60,6 +73,11 @@ export function JiraIssueList({
               <th scope="col">Summary</th>
               <th scope="col">Type</th>
               <th scope="col">Status</th>
+              {index !== null && (
+                <th scope="col" className="jira-issues-dlv-h">
+                  Delivery
+                </th>
+              )}
               <th scope="col">Priority</th>
               <th scope="col">Assignee</th>
               <th scope="col">Sprint</th>
@@ -69,7 +87,16 @@ export function JiraIssueList({
           </thead>
           <tbody>
             {tops.map((top) => (
-              <IssueRow key={top.key} top={top} fold={fold} cell={sessions.get(top.key) ?? null} now={now} onOpenIssue={onOpenIssue} onRun={onRun} />
+              <IssueRow
+                key={top.key}
+                top={top}
+                fold={fold}
+                cell={sessions.get(top.key) ?? null}
+                index={index}
+                now={now}
+                onOpenIssue={onOpenIssue}
+                onRun={onRun}
+              />
             ))}
           </tbody>
         </table>
@@ -78,10 +105,38 @@ export function JiraIssueList({
   );
 }
 
+/**
+ * The Delivery cell (spec §7.3). Every word, tone and dot is `lib/delivery.ts`'s; the cell only arranges them. The word ellipsises before anything else, so
+ * the link, the `not merged` chip and `+N MR` — the facts a person acts on — keep their width in a narrow column; the full word is still the cell's `title`.
+ */
+function DeliveryCell({ top, index }: { top: JiraIssue; index: DeliveryIndex }) {
+  const d = ticketDelivery(top, index);
+  if (d.kind === 'hidden') return <td />;
+  if (d.kind === 'unknown') return <td className="jira-issues-muted">—</td>;
+  if (d.kind === 'none') return <td className="jira-issues-muted">no MR</td>;
+  const look = deliveryLook(d.lead);
+  return (
+    <td className="jira-issues-dlv" title={d.via === null ? look.word : `${look.word} · via ${d.via}`}>
+      <span className="jira-issues-flex">
+        <DeliveryTrack track={look.track} compact />
+        <a className="jira-issues-dlv-link" href={d.lead.webUrl} target="_blank" rel="noopener noreferrer">
+          {`!${d.lead.iid}`}
+        </a>
+        <span className="jira-issues-dlv-word" data-tone={look.tone}>
+          {look.word}
+        </span>
+        {d.notMerged && <NotMergedChip />}
+        {d.also.length > 0 && <span className="jira-issues-dlv-more">{`+${d.also.length} MR`}</span>}
+      </span>
+    </td>
+  );
+}
+
 function IssueRow({
   top,
   fold,
   cell,
+  index,
   now,
   onOpenIssue,
   onRun
@@ -89,6 +144,8 @@ function IssueRow({
   top: JiraIssue;
   fold: JiraFold;
   cell: TopSessionCell | null;
+  /** `null` while GitLab is not shown at all: then the row has no Delivery cell, as the head has no Delivery column. */
+  index: DeliveryIndex | null;
   now: number;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
@@ -156,6 +213,7 @@ function IssueRow({
           <span className="jira-issues-cut">{top.status.name}</span>
         </span>
       </td>
+      {index !== null && <DeliveryCell top={top} index={index} />}
       <td>
         {/* The card's pill, with the grey `low` look and no glyph for an issue Jira left unprioritised: the cell is never blank, so the column reads as a column. */}
         <span className="jira-card-prio jira-issues-prio" data-tone={prio ?? 'low'} title={`priority ${top.priority ?? 'none'}`}>

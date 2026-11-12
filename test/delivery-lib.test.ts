@@ -6,6 +6,7 @@ import {
   deliveryShown,
   leadMr,
   matchesDelivery,
+  mrRepo,
   ticketDelivery
 } from '../client/src/lib/delivery';
 import type { DeliveryFilter, TicketDelivery, TrackStep } from '../client/src/lib/delivery';
@@ -380,6 +381,23 @@ describe('matchesDelivery', () => {
 
   it('labels are the spec’s', () => {
     expect(DELIVERY_FILTER_LABELS).toEqual({ all: 'All', 'has-mr': 'Has MR', failing: 'Pipeline failing', 'done-not-merged': 'Done, not merged' });
+  });
+});
+
+describe('mrRepo', () => {
+  it("names the mapped repo by its own basename, which may differ from the GitLab path's tail", () => {
+    const index = deliveryIndex(payload([], { TIMIFY: [view({ path: 'development/backend/microservice', repo: 'ms-checkout' })] }));
+    expect(mrRepo(mr({ project: 'development/backend/microservice' }), index)).toBe('ms-checkout');
+  });
+
+  it("falls back to the project path's last segment for a nested path no Jira project maps", () => {
+    const index = deliveryIndex(payload([], { TIMIFY: [view()] }));
+    expect(mrRepo(mr({ project: 'group/sub/repo' }), index)).toBe('repo');
+  });
+
+  it('reads a bare, unmapped project path as itself', () => {
+    const index = deliveryIndex(payload([], { TIMIFY: [view()] }));
+    expect(mrRepo(mr({ project: 'repo' }), index)).toBe('repo');
   });
 });
 

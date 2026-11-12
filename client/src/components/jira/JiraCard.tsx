@@ -1,5 +1,7 @@
+import { useDeliveryIndex } from '../../hooks/useDeliveryIndex';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useNarrow } from '../../hooks/useNarrow';
+import { ticketDelivery } from '../../lib/delivery';
 import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, priorityTone, statusTone, typeTone, type cardFold } from '../../lib/jira';
 import { endedLine } from '../../lib/jira-deck';
 import { openButtons, type SessionLink } from '../../lib/jira-sessions';
@@ -9,6 +11,7 @@ import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Marker } from '../ui/Marker';
 import { SpreadBar } from '../ui/SpreadBar';
 import { JiraRunMenu } from './JiraRunMenu';
+import { MrChip } from './MrChip';
 import { OpenChip } from './JiraSessionCard';
 
 /**
@@ -57,6 +60,13 @@ import { OpenChip } from './JiraSessionCard';
  * with none draws nothing — and so does one whose read failed, which is why this is a prop and not a request: the card has no error state to draw. Only the
  * card's own key counts; a folded issue's tree shows in its own modal, as a folded issue's session shows only in the strip's key.
  *
+ * **The MR chip** (GitLab connection spec §7.2, mock `Cards.dc.html`). After the worktree chip and before `Run ▾`, `MrChip` draws this card's lead merge
+ * request — the TOP's own, or its parent's for a sub-task with none (`ticketDelivery`), never one picked from the issues folded under it (the user's pick: a
+ * folded sub-task's MR shows on that sub-task, in Detail) — plus the amber `not merged` chip when the ticket is done and its own MR still open. A ticket with
+ * no MR, an unknown one, or one whose project maps no GitLab project draws nothing, and so does every card while GitLab is not shown at all
+ * (`useDeliveryIndex` is `null`). The card reads the shell's GitLab answer itself rather than taking a prop, for the reason the worktree chip does not: the
+ * answer is one context value, not a per-page request with an error state the card would need told about.
+ *
  * The whole card is a `role="button"` that opens the issue (`onOpen`, which the page wires to the issue modal's slot), Enter and Space included, exactly as
  * `ItemCard`; the link out stops both the click and those two keys for the reasons `ItemCard`'s own link spells out at length — without it one click opens
  * Jira AND the modal, and the card's `preventDefault()` on Enter would cancel the anchor's own activation.
@@ -94,6 +104,8 @@ export function JiraCard({
   const mapped: unknown = data?.repos[issue.project.key];
   const paths = Array.isArray(mapped) ? (mapped as string[]) : [];
   const prio = priorityTone(issue.priority === '' ? null : issue.priority);
+  const index = useDeliveryIndex();
+  const delivery = index === null ? null : ticketDelivery(issue, index);
 
   return (
     <div
@@ -176,6 +188,7 @@ export function JiraCard({
               {trees.length === 1 ? (trees[0].branch ?? '') : `${trees.length} worktrees`}
             </span>
           )}
+          {delivery !== null && <MrChip delivery={delivery} />}
           <JiraRunMenu issue={issue} onPick={onRun} />
         </div>
         {last !== null && (

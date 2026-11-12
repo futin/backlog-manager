@@ -1,10 +1,13 @@
 import type { TrackStep } from '../../lib/delivery';
-import { Glyph } from '../ui/Glyphs';
+import { Glyph } from './Glyphs';
 
 /**
  * DeliveryTrack — one merge request's delivery track (GitLab connection spec §7, "Delivery track"; DESIGN.md §8.9.2, drawn in §8.4.3's stage-track
  * language): a dot per step joined by a 2 px rail, in the marks `deliveryLook` hands over. It maps over `track` and never names a step position, so project 2
  * inserting a `review` step between Pipeline and Merged changes the array and not this component.
+ *
+ * It lives in `components/ui/` because two surfaces draw it — Jira Detail's Delivery pane and the List's Delivery cell — and `.claude/rules/board.md` gives
+ * every look more than one surface draws one home here, so the List's dots and Detail's track can never disagree on what a mark looks like.
  *
  * Two shapes, one drawing. `compact` (the List's Delivery cell, mock `List.dc.html`) is the dots alone, `aria-hidden`, because the cell's own word beside
  * it already says what the dots say. The full shape (Detail's Delivery pane, mock `OptionC.dc.html`) adds each step's label and, under it, its word — an age

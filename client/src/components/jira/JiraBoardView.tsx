@@ -30,6 +30,7 @@ import type { JiraAction, JiraIssue, JiraLiveSession, JiraWorktree, JiraWorktree
 import { FilterBar, FilterSection } from '../FilterBar';
 import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
+import { GitlabBandLine } from './GitlabBandLine';
 import { JiraAgentDeck } from './JiraAgentDeck';
 import { JiraBandSub } from './JiraBandSub';
 import { JiraBoardPicker } from './JiraBoardPicker';
@@ -54,7 +55,8 @@ const NO_TREES: readonly JiraWorktree[] = [];
  * is the NEWER of the two readings the page holds — the board list's own `polledAt` (read every `BOARD_TRACKER_POLL_MS`) over the status's, when the list
  * has one — and it ticks every second in its own small component, so the clock re-renders one line and not every card. The right slot holds the picker (a
  * `Chip` naming the board, opening a `Popover` of every board by name — pick only: `Edit` and `New` are Setup's, spec §1), the summary search, and the filter
- * track.
+ * track. Under the sub-line, while GitLab is shown, `GitlabBandLine` adds `GitLab: N open · N failing · N merged · polled <age>` over the shown tops
+ * (GitLab connection spec §7.2) — unlike the sub-line's counts, AFTER the filters, because it answers "how is the work I am looking at doing".
  *
  * **The panel filters persist; the search is per mount**: type, status (multi-select, by name), assignee (`anyone` / `me` / `unassigned`; no `me` while
  * the identity is unknown) and sprint, all read off the LOADED list and stored under `JIRA_FILTERS_KEY` (one value for every board — `JiraBoardFilters`
@@ -181,7 +183,14 @@ export function JiraBoardView({
     <div className="board">
       <Band
         title={board.name}
-        sub={<JiraBandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />}
+        sub={
+          <>
+            <JiraBandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />
+            {/* GitLab's line counts the tops the page SHOWS — `rows` is every kept top, the deck's and the shelves' alike — so a filter narrows it with
+                the cards (spec §7.2). Drawn only once the list has loaded: before that `rows` is empty and the line would read `no merge requests`. */}
+            {loaded && <GitlabBandLine tops={rows} />}
+          </>
+        }
       >
         <JiraViewSwitch />
         <JiraBoardPicker boards={boards} current={board} onPick={pick} />

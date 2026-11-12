@@ -1,11 +1,11 @@
 import { useMemo } from 'react';
 
 import { useGitlabContext } from '../../hooks/GitlabContext';
-import { deliveryIndex, deliveryLook, deliveryShown, ticketDelivery, type DeliveryIndex, type TrackStep } from '../../lib/delivery';
-import { polledPhrase, repoBasename } from '../../lib/jira';
+import { deliveryIndex, deliveryLook, deliveryShown, mrRepo, ticketDelivery, type TrackStep } from '../../lib/delivery';
+import { polledPhrase } from '../../lib/jira';
 import { pollAge } from '../../lib/tracker';
 import type { GitlabMr, JiraIssue } from '../../../../shared/types';
-import { DeliveryTrack } from './DeliveryTrack';
+import { DeliveryTrack } from '../ui/DeliveryTrack';
 
 /**
  * DeliveryPane — Jira Detail's Delivery pane (GitLab connection spec §7.1, mock `OptionC.dc.html`; DESIGN.md §8.9.2's Agent column, in its
@@ -25,11 +25,6 @@ import { DeliveryTrack } from './DeliveryTrack';
  * Links go out in a new tab with no referrer, the `Open in Jira ↗` link's rule: the dialog is the board's, and a GitLab page must not learn the board's
  * address from the click.
  */
-
-/** The basename an MR's repository is called by everywhere the pane names it: the mapped repo's own (`GitlabProjectView.repo`), else the project path's tail. */
-function mrRepo(mr: GitlabMr, index: DeliveryIndex): string {
-  return index.byPath.get(mr.project)?.repo ?? repoBasename(mr.project);
-}
 
 /**
  * The word under each step (spec §7.1): Pushed and MR open carry the MR's created-at age — the moment its branch was pushed and the MR opened are one GitLab

@@ -15,9 +15,20 @@ import { setJiraView } from '../client/src/hooks/useJiraView';
 import { elapsedSince } from '../client/src/lib/item-age';
 import { JIRA_BOARD_KEY, JIRA_FILTERS_KEY, bandSub } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
+import { GitlabContext } from '../client/src/hooks/GitlabContext';
 import { NoGitlab } from './helpers/no-gitlab';
 import { daysAgoStamp } from './helpers/dates';
-import { JIRA_BUILTIN_LABELS, type AgentsStatus, type DashboardRow, type JiraBoardStatus, type JiraIssue, type JiraLiveSession, type JiraStatusPayload } from '../shared/types';
+import {
+  JIRA_BUILTIN_LABELS,
+  type AgentsStatus,
+  type DashboardRow,
+  type GitlabMr,
+  type GitlabPayload,
+  type JiraBoardStatus,
+  type JiraIssue,
+  type JiraLiveSession,
+  type JiraStatusPayload
+} from '../shared/types';
 
 /*
   Jira › Board (Jira phase 2; spec §6.2; DESIGN.md §8.9.1) — the real page over a mocked `fetch`, in the style of `tracker-board.test.tsx`: the band
@@ -335,6 +346,70 @@ describe('the band', () => {
     expect(sub.text).toBe('acme.atlassian.net · 4 issues from 1 root and 1 query · polled 10m ago');
     expect(document.querySelector('.ui-band-sub')?.textContent).toBe(sub.text);
     expect(document.querySelector('.jira-band-sub')).not.toHaveClass('failing');
+  });
+
+  /*
+    The GitLab line (GitLab connection spec §7.2): `bandTotals` over the board's shown tops, under the board's own sub-line. The payload is handed in through
+    the raw context, as the shell's one answer would hand it over; PAY maps one GitLab project polled two minutes ago, PAY-131 leads with an open MR whose
+    pipeline failed and PAY-140 with a merged one.
+  */
+  const gitlabMr = (over: Partial<GitlabMr>): GitlabMr => ({
+    project: 'payments/api',
+    iid: 415,
+    title: 'PAY-131 | refund partial captures',
+    webUrl: 'https://gitlab.example.test/payments/api/-/merge_requests/415',
+    state: 'opened',
+    draft: false,
+    sourceBranch: 'pay-131-refunds',
+    targetBranch: 'develop',
+    createdAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+    mergedAt: null,
+    pipeline: 'failed',
+    keys: ['PAY-131'],
+    ...over
+  });
+  const gitlab = (over: Partial<GitlabPayload['status']> = {}): GitlabPayload => ({
+    status: {
+      state: 'connected',
+      site: 'gitlab.example.test',
+      malformedSite: false,
+      user: { username: 'ada', name: 'Ada' },
+      httpStatus: null,
+      reason: null,
+      armed: true,
+      retryAt: null,
+      mappedRepos: 1,
+      foundHosts: [],
+      problems: [],
+      ...over
+    },
+    jiraProjects: { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false }] },
+    mrs: [gitlabMr({}), gitlabMr({ iid: 398, state: 'merged', pipeline: null, keys: ['PAY-140'], mergedAt: new Date(Date.now() - 86_400_000).toISOString() })]
+  });
+  async function renderWithGitlab(data: GitlabPayload): Promise<void> {
+    render(
+      <GitlabContext.Provider value={{ data, error: null, refresh: () => Promise.resolve(data) }}>
+        <JiraProvider>
+          <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={jest.fn()} onRun={jest.fn()} nudge={0} />
+        </JiraProvider>
+      </GitlabContext.Provider>
+    );
+    await screen.findByText('Refund partial captures');
+  }
+
+  it('adds the GitLab line under the sub-line while GitLab is shown, counted over the tops', async () => {
+    await renderWithGitlab(gitlab());
+    const line = document.querySelector('.ui-band-sub .jira-band-gitlab');
+    expect(line?.textContent).toBe('GitLab: 1 open · 1 failing · 1 merged · polled 2m ago');
+    // The board's own sub-line is untouched beside it.
+    expect(document.querySelector('.jira-band-sub')?.textContent).toMatch(/^acme\.atlassian\.net · 4 issues/);
+  });
+
+  it('draws no GitLab text anywhere on the board while GitLab is unconfigured', async () => {
+    await renderWithGitlab({ ...gitlab({ state: 'unconfigured', site: null, user: null, armed: false }), jiraProjects: {}, mrs: [] });
+    expect(document.body.textContent).not.toContain('GitLab:');
+    expect(document.querySelector('.jira-mr-chip')).toBeNull();
   });
 
   it('draws a failing board’s sub with the failing class and Jira’s message', async () => {
