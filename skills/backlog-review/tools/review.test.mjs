@@ -3,6 +3,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -207,7 +208,8 @@ function repoWith(base = {}, feat = {}) {
 }
 
 // Runs `scope` on `repo` against `main` (unless args name a --base); returns the exit, the output and the parsed manifest (null when none was written).
-function scope(repo, args = [], fileContent) {
+// `home` is BM_REVIEW_HOME, a fresh dir per call unless a case needs the default state path to persist between calls.
+function scope(repo, args = [], fileContent, home) {
   const dir = fs.mkdtempSync(path.join(root, `s${counter++}-`));
   const out = path.join(dir, 'manifest.json');
   const file = path.join(dir, 'review.json');
@@ -215,7 +217,7 @@ function scope(repo, args = [], fileContent) {
   const base = args.includes('--base') ? [] : ['--base', 'main'];
   const r = spawnSync(process.execPath, [SCRIPT, 'scope', '--tree', repo, ...base, '--out', out, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, BM_REVIEW_HOME: dir, BM_REVIEW_FILE: file },
+    env: { ...process.env, BM_REVIEW_HOME: home ?? dir, BM_REVIEW_FILE: file },
   });
   const manifest = fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, 'utf8')) : null;
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, manifest, out };
@@ -322,7 +324,7 @@ test('scope lists a rename into a path with a space, and a work-tree deletion as
 
 test("scope on a clean tree takes HEAD's tree as to", () => {
   const repo = repoWith({}, { 'x.mjs': 'x\n' });
-  const r = scope(repo);
+  const r = scope(repo, ['--mode', 'full']);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.manifest.to, g(repo, 'rev-parse', 'HEAD^{tree}').trim());
   assert.equal(r.manifest.head, g(repo, 'rev-parse', 'HEAD').trim());
@@ -534,7 +536,8 @@ test('scope gives each group its model and effort', () => {
   const fromFile = scope(repo, [], { ...DEFAULTS, mode: 'same', same: { model: 'opus', effort: null } });
   assert.ok(fromFile.manifest.groups.every((grp) => grp.model === 'opus'));
 
-  const broken = scope(repo, [], '{not json');
+  // `--mode full` so the one stderr line counted is the warning, not the `full review: no earlier review` an omitted mode prints.
+  const broken = scope(repo, ['--mode', 'full'], '{not json');
   assert.equal(broken.status, 0);
   assert.equal(broken.stderr.trim().split('\n').length, 1, broken.stderr);
   assert.deepEqual(broken.manifest.config, DEFAULTS);
@@ -566,4 +569,261 @@ test('an invalid scope flag exits 1 naming it and writes no manifest', () => {
   assert.equal(badBase.status, 1);
   assert.ok(badBase.stderr.includes('merge-base'), badBase.stderr);
   assert.equal(badBase.manifest, null);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// State file, mode selection, earlier findings, `--previous`. The state is hand-written here from a manifest, in the shape `merge` (a later task) writes.
+
+const FULL_REASON = (reason) => `full review: ${reason}\n`;
+
+function stateFrom(manifest, extra = {}) {
+  const { base, head, mergeBase, to } = manifest;
+  return { base, head, mergeBase, to, report: '/reviews/review-1.md', at: '2026-11-12T10:00:00Z', verdict: 'fix', open: [], ...extra };
+}
+
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
+}
+
+const stateFile = () => path.join(fs.mkdtempSync(path.join(root, `state${counter++}-`)), 'state.json');
+const finding = (id, p, extra = {}) => ({ id, severity: 'Important', path: p, line: p === null ? null : 1, text: `finding ${id}`, anchor: null, ...extra });
+
+// A reviewed branch: `feat` with x.mjs, scoped in full, its state written to a --state file. Returns the repo, the state path and the first manifest.
+function reviewed(feat = { 'x.mjs': 'x\n' }, extra = {}) {
+  const repo = repoWith({}, feat);
+  const first = scope(repo, ['--mode', 'full']);
+  assert.equal(first.status, 0, first.stderr);
+  const state = stateFile();
+  writeJson(state, stateFrom(first.manifest, extra));
+  return { repo, state, first };
+}
+
+test('no state is full with no earlier review', () => {
+  const r = scope(repoWith({}, { 'x.mjs': 'x\n' }), ['--state', stateFile()]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.manifest.mode, r.manifest.modeReason], ['full', 'no earlier review']);
+  assert.equal(r.stderr, FULL_REASON('no earlier review'));
+});
+
+test('all conditions hold is incremental', () => {
+  const { repo, state, first } = reviewed();
+  write(repo, 'y.mjs', 'y\n');
+  commitAll(repo, 'second');
+  const r = scope(repo, ['--state', state]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.manifest.mode, r.manifest.modeReason, r.manifest.from], ['incremental', null, first.manifest.to]);
+  assert.equal(r.manifest.mergeBase, first.manifest.mergeBase);
+  assert.deepEqual(r.manifest.files.map((f) => f.path), ['y.mjs']);
+  assert.equal(r.stderr, '');
+  assert.equal(r.stdout, `${JSON.stringify({ mode: 'incremental', files: 1, review: 1, skip: 0, groups: 1 })}\n`);
+  // An explicit --mode incremental selects the same way as an omitted one.
+  const explicit = scope(repo, ['--state', state, '--mode', 'incremental']);
+  assert.deepEqual([explicit.manifest.mode, explicit.manifest.from], ['incremental', first.manifest.to]);
+});
+
+test('base ref changed', () => {
+  const { repo, state, first } = reviewed();
+  writeJson(state, stateFrom(first.manifest, { base: 'develop' }));
+  const r = scope(repo, ['--state', state]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.manifest.mode, r.manifest.modeReason, r.manifest.from], ['full', 'base changed', first.manifest.mergeBase]);
+  assert.equal(r.stderr, FULL_REASON('base changed'));
+});
+
+test('merge-base moved', () => {
+  const { repo, state } = reviewed();
+  g(repo, 'checkout', '-q', 'main');
+  write(repo, 'main.mjs', 'main\n');
+  commitAll(repo, 'main advances');
+  g(repo, 'checkout', '-q', 'feat');
+  g(repo, 'merge', '-q', '--no-edit', 'main');
+  const r = scope(repo, ['--state', state]);
+  assert.equal(r.status, 0, r.stderr);
+  const reason = 'base moved — merged or rebased onto a newer base';
+  assert.deepEqual([r.manifest.mode, r.manifest.modeReason], ['full', reason]);
+  assert.equal(r.stderr, FULL_REASON(reason));
+});
+
+test('recorded head not an ancestor', () => {
+  const { repo, state } = reviewed();
+  g(repo, 'commit', '-q', '--amend', '-m', 'amended');
+  const r = scope(repo, ['--state', state]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.manifest.mode, r.manifest.modeReason], ['full', 'history rewritten']);
+  assert.equal(r.stderr, FULL_REASON('history rewritten'));
+});
+
+test('snapshot gone', () => {
+  const { repo, state, first } = reviewed();
+  writeJson(state, stateFrom(first.manifest, { to: 'deadbeef'.repeat(5) }));
+  const r = scope(repo, ['--state', state]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.manifest.mode, r.manifest.modeReason], ['full', 'earlier snapshot gone']);
+  assert.equal(r.stderr, FULL_REASON('earlier snapshot gone'));
+});
+
+test('an unparseable state file is treated as no earlier review', () => {
+  const { repo, state, first } = reviewed();
+  // Half-written JSON (a concurrent writer), and whole JSON missing a field the checks read: neither may stop the review.
+  for (const content of ['{"base":"main","he', JSON.stringify({ ...stateFrom(first.manifest), to: undefined }), '[]']) {
+    writeJson(state, content);
+    const r = scope(repo, ['--state', state]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual([r.manifest.mode, r.manifest.modeReason], ['full', 'no earlier review'], content);
+    assert.equal(r.stderr, FULL_REASON('no earlier review'));
+  }
+});
+
+test('full forces full', () => {
+  const { repo, state, first } = reviewed();
+  write(repo, 'y.mjs', 'y\n');
+  commitAll(repo, 'second');
+  const r = scope(repo, ['--state', state, '--mode', 'full']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.manifest.mode, r.manifest.modeReason, r.manifest.from], ['full', null, first.manifest.mergeBase]);
+  assert.deepEqual(r.manifest.files.map((f) => f.path), ['x.mjs', 'y.mjs']);
+  assert.equal(r.stderr, '');
+});
+
+test('incremental with no change prints the no-change line', () => {
+  const { repo, state } = reviewed({ 'x.mjs': 'x\n' }, { report: '/runs/r1/reviews/task-3-1.md', verdict: 'approve', open: [finding('E1', 'x.mjs')] });
+  const r = scope(repo, ['--state', state]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `${JSON.stringify({ mode: 'incremental', files: 0, review: 0, skip: 0, groups: 0, noChange: true })}\n`);
+  assert.equal(r.stderr, 'no changes since the last review (/runs/r1/reviews/task-3-1.md) — its verdict stands: approve\n');
+  assert.deepEqual([r.manifest.mode, r.manifest.files, r.manifest.groups], ['incremental', [], []]);
+});
+
+test('detached HEAD is always full', () => {
+  // The default state path: BM_REVIEW_HOME/<basename of the common dir's parent>-<sha1 of that path, 8 hex>/<branch, / as __>.json.
+  const repo = repoWith({}, { 'x.mjs': 'x\n' });
+  g(repo, 'checkout', '-q', '-b', 'topic/x');
+  const home = fs.mkdtempSync(path.join(root, `home${counter++}-`));
+  const first = scope(repo, ['--mode', 'full'], undefined, home);
+  const top = path.dirname(g(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir').trim());
+  const key = `${path.basename(top)}-${createHash('sha1').update(top).digest('hex').slice(0, 8)}`;
+  writeJson(path.join(home, key, 'topic__x.json'), stateFrom(first.manifest));
+  write(repo, 'y.mjs', 'y\n');
+  commitAll(repo, 'second');
+  const onBranch = scope(repo, [], undefined, home);
+  assert.deepEqual([onBranch.manifest.mode, onBranch.manifest.from], ['incremental', first.manifest.to], onBranch.stderr);
+  g(repo, 'checkout', '-q', '--detach');
+  const detached = scope(repo, [], undefined, home);
+  assert.equal(detached.status, 0, detached.stderr);
+  assert.deepEqual([detached.manifest.mode, detached.manifest.modeReason], ['full', 'no earlier review']);
+  assert.equal(detached.stderr, FULL_REASON('no earlier review'));
+});
+
+const earlierIds = (m) => m.groups.map((grp) => grp.earlier.map((f) => f.id));
+
+test('earlier findings are assigned', () => {
+  const item = 'backlog/open/task-1.md';
+  const { repo, state, first } = reviewed({ 'x.mjs': 'x\n', 'gone.mjs': 'gone\n', [item]: '# item\n' });
+  const open = [
+    finding('IN', 'c/f01.mjs'),
+    finding('OUT', 'x.mjs'),
+    finding('NONE', null),
+    finding('ITEM', item),
+    finding('DEL', 'gone.mjs', { severity: 'Critical' })
+  ];
+  writeJson(state, stateFrom(first.manifest, { open }));
+  // 13 files in the increment, so it partitions: a/ with b/one.mjs folded in, then c/.
+  for (const [rel, content] of Object.entries({ ...many('a', 6, 1), 'b/one.mjs': 'one\n', ...many('c', 6, 1), [item]: '# item, edited\n' })) {
+    write(repo, rel, content);
+  }
+  fs.rmSync(path.join(repo, 'gone.mjs'));
+  commitAll(repo, 'second');
+  const r = scope(repo, ['--state', state, '--item', item]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.manifest.mode, 'incremental');
+  assert.deepEqual(r.manifest.groups.map((grp) => grp.label), ['a/', 'c/']);
+  assert.deepEqual(earlierIds(r.manifest), [['OUT', 'NONE', 'ITEM', 'DEL'], ['IN']]);
+  assert.deepEqual(r.manifest.groups[1].earlier[0], open[0]);
+
+  // Only a lockfile changed, no item, one open finding: group 1 is created with no files of its own to carry it.
+  const lock = reviewed({ 'x.mjs': 'x\n' });
+  writeJson(lock.state, stateFrom(lock.first.manifest, { open: [finding('E1', 'x.mjs')] }));
+  write(lock.repo, 'pnpm-lock.yaml', 'lock\n');
+  commitAll(lock.repo, 'lock');
+  const only = scope(lock.repo, ['--state', lock.state]);
+  assert.equal(only.status, 0, only.stderr);
+  assert.deepEqual(
+    only.manifest.groups.map((grp) => [grp.n, grp.label, grp.files, grp.model, grp.rerun]),
+    [[1, 'all files', [], null, true]]
+  );
+  assert.deepEqual(earlierIds(only.manifest), [['E1']]);
+  assert.equal(only.stdout, `${JSON.stringify({ mode: 'incremental', files: 1, review: 0, skip: 1, groups: 1 })}\n`);
+});
+
+// Three buckets, none foldable — a/ (10 files, 10 lines), b/ (3 files, 30 lines), c/ (3 files, 60 lines) — scoped with a split config whose models differ
+// per group, so a later round that copies them (and passes no config of its own) is visible.
+const PARTITIONED = { ...many('a', 10, 1), ...many('b', 3, 10), ...many('c', 3, 20) };
+const SPLIT_ARGS = ['--review-mode', 'split', '--review-small-max-lines', '50', '--review-big-model', 'opus', '--review-small-effort', 'low'];
+const partitionOf = (m) => m.groups.map((grp) => [grp.n, grp.label, grp.files, grp.model, grp.effort]);
+
+test('--previous keeps the partition', () => {
+  const repo = repoWith({}, PARTITIONED);
+  const first = scope(repo, ['--mode', 'full', ...SPLIT_ARGS]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual(first.manifest.groups.map((grp) => grp.label), ['a/', 'b/', 'c/']);
+  writeJson(`${first.out}.findings.json`, [
+    finding('A', 'a/f01.mjs'),
+    finding('B', 'b/f01.mjs'),
+    finding('C', 'c/f02.mjs'),
+    finding('NONE', null)
+  ]);
+  write(repo, 'c/f01.mjs', lines(21));
+  write(repo, 'd/new.mjs', 'new\n');
+  commitAll(repo, 'fix');
+  const r = scope(repo, ['--previous', first.out]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.manifest.mode, r.manifest.modeReason, r.manifest.from], ['full', null, first.manifest.mergeBase]);
+  assert.equal(r.stderr, '');
+  const expected = partitionOf(first.manifest);
+  expected[0][2] = [...expected[0][2], 'd/new.mjs'];
+  assert.deepEqual(partitionOf(r.manifest), expected);
+  assert.deepEqual(r.manifest.groups.map((grp) => grp.rerun), [true, false, true]);
+  // B's owner (group 2) does not re-run, so group 1 takes it; C's owner does.
+  assert.deepEqual(earlierIds(r.manifest), [['A', 'B', 'NONE'], [], ['C']]);
+  assert.deepEqual(r.manifest.groups.map((grp) => grp.lines), [11, 30, 61]);
+});
+
+test('three rounds carry round-2 findings', () => {
+  const repo = repoWith({}, PARTITIONED);
+  const m1 = scope(repo, ['--mode', 'full', ...SPLIT_ARGS]);
+  writeJson(`${m1.out}.findings.json`, []);
+  write(repo, 'b/f01.mjs', lines(11));
+  commitAll(repo, 'fix 1');
+  const m2 = scope(repo, ['--previous', m1.out]);
+  assert.equal(m2.status, 0, m2.stderr);
+  assert.deepEqual(m2.manifest.groups.map((grp) => grp.rerun), [true, true, false]);
+  const f2 = finding('F2', 'b/f02.mjs');
+  writeJson(`${m2.out}.findings.json`, [f2]);
+  write(repo, 'c/f01.mjs', lines(21));
+  commitAll(repo, 'fix 2');
+  const m3 = scope(repo, ['--previous', m2.out]);
+  assert.equal(m3.status, 0, m3.stderr);
+  assert.deepEqual(partitionOf(m3.manifest), partitionOf(m1.manifest));
+  assert.deepEqual(m3.manifest.groups.map((grp) => grp.rerun), [true, false, true]);
+  assert.deepEqual(m3.manifest.groups.flatMap((grp) => grp.earlier), [f2]);
+  assert.deepEqual(earlierIds(m3.manifest), [['F2'], [], []]);
+});
+
+test('an unreadable --previous exits 1 and writes no manifest', () => {
+  const repo = repoWith({}, { 'x.mjs': 'x\n' });
+  const first = scope(repo, ['--mode', 'full']);
+  const cases = [
+    [['--previous', path.join(root, 'no-such-manifest.json')], 'no-such-manifest.json'],
+    // merge always writes the findings file beside the manifest, so its absence is an error, never "no earlier findings".
+    [['--previous', first.out], '.findings.json'],
+    [['--previous', first.out, '--mode', 'incremental'], '--previous']
+  ];
+  for (const [args, needle] of cases) {
+    const r = scope(repo, args);
+    assert.equal(r.status, 1, args.join(' '));
+    assert.ok(r.stderr.includes(needle), `${args.join(' ')}: ${r.stderr}`);
+    assert.equal(r.manifest, null, args.join(' '));
+    assert.equal(r.stdout, '');
+  }
 });
