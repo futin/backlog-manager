@@ -19,7 +19,11 @@ import { formatZonedClock, startOfZonedDay, zonedParts } from './time-zone';
  *
  * **Scope is the board's keys, or every link.** By default a row belongs to the List when its ticket is on the picked board's LOADED list (a top or anything
  * folded under one — the issues the fold was made from); All tickets widens that to every link, and a ticket the board does not hold is drawn from the link's
- * `snapshot` (`stubIssue`), the ticket as it stood when the link was made — the one reason the store keeps it.
+ * `snapshot` (`stubIssue`), the ticket as it stood when the link was made — the one reason the store keeps it. **One more key is in scope by default: the
+ * parent of a sub-task the board holds** (`via`). `Run on` (#499) starts a session on a sub-task's parent story — the team assigns the sub-task but the story
+ * owns the branch — and links it to the PARENT's key; that story is usually on no board, so without this the person's own running session vanished from a
+ * page scoped to their board. The condition is the toggle's own, `type.subtask` with a parent, so a story's epic does not pull the epic's sessions in. The
+ * row stays the parent's (its key, its snapshot, Detail opens the parent) and carries the sub-task's key only as the `via` mark, kept with All tickets on too.
  *
  * **The window is for the Ended group, and only the Ended group** (§7.2): a live session is never hidden by age, however long ago it started — a session that
  * has been running for ten days is the one a person most needs to see — and an ended row is judged on `endedAt` alone, never on when it started, so a session
@@ -66,6 +70,11 @@ export interface ListRow {
   issue: JiraIssue;
   /** Whether the ticket is on the picked board's loaded list — a stub's Detail has no fold to hand its Children tree. */
   onBoard: boolean;
+  /**
+   * For a ticket NOT on the board: the first sub-task on the board whose parent it is (board order), which is what put the row in scope with All tickets
+   * off. `null` on the board, and for an off-board ticket no board sub-task points up at.
+   */
+  via: string | null;
   link: SessionLink | null;
   starting: JiraLiveSession | null;
   repo: string;
@@ -119,8 +128,20 @@ export function stubIssue(key: string, snapshot: { summary: string; type: string
 }
 
 /**
+ * Parent key → the first sub-task on the board under it, in board order. Only `type.subtask` issues count — `Run on`'s own condition (`JiraRunMenu`) — so a
+ * story's epic is never a parent here; a parent the board itself holds never reaches the lookup, since an on-board key is in scope on its own.
+ */
+function subtaskParents(board: ReadonlyMap<string, JiraIssue>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const i of board.values()) {
+    if (i.type.subtask && i.parent !== null && !out.has(i.parent.key)) out.set(i.parent.key, i.key);
+  }
+  return out;
+}
+
+/**
  * Every session the List could draw, before any filter: the links with an id (ended ones too), then the status's Starting reservations. `board` is the loaded
- * list keyed by ticket (every issue, folded or not); `allTickets` is the scope. Deduped by row id, so a payload that somehow repeats a pair draws it once.
+ * list keyed by ticket (every issue, folded or not); `allTickets` widens the scope past the board and the board's sub-tasks' parents. Deduped by row id, so a payload that somehow repeats a pair draws it once.
  */
 export function buildListRows(
   payload: JiraSessionsPayload | null,
@@ -131,10 +152,12 @@ export function buildListRows(
 ): ListRow[] {
   const seen = new Set<string>();
   const rows: ListRow[] = [];
+  const viaOf = subtaskParents(board);
   for (const link of payload?.links ?? []) {
     if (link.sessionId === null) continue;
     const onBoard = board.has(link.key);
-    if (!onBoard && !allTickets) continue;
+    const via = onBoard ? null : (viaOf.get(link.key) ?? null);
+    if (!onBoard && via === null && !allTickets) continue;
     const id = `${link.key}:${link.sessionId}`;
     if (seen.has(id)) continue;
     seen.add(id);
@@ -146,6 +169,7 @@ export function buildListRows(
       ended: link.endedAt !== null || link.state === 'ended',
       issue: board.get(link.key) ?? stubIssue(link.key, link.snapshot, site),
       onBoard,
+      via,
       link,
       starting: null,
       repo: link.repo,
@@ -158,7 +182,8 @@ export function buildListRows(
   for (const [key, session] of Object.entries(live)) {
     if (!session.starting) continue;
     const onBoard = board.has(key);
-    if (!onBoard && !allTickets) continue;
+    const via = onBoard ? null : (viaOf.get(key) ?? null);
+    if (!onBoard && via === null && !allTickets) continue;
     const id = `starting:${key}`;
     if (seen.has(id)) continue;
     seen.add(id);
@@ -171,6 +196,7 @@ export function buildListRows(
       // A reservation off the board has no snapshot; the session's own name is the only words the status has for it.
       issue: board.get(key) ?? stubIssue(key, { summary: session.name, type: 'Task', parentKey: null }, site),
       onBoard,
+      via,
       link: null,
       starting: session,
       repo: session.repo,

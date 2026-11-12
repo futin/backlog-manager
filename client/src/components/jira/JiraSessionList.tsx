@@ -53,7 +53,9 @@ const CHIP_LABEL: Record<ListChip, string> = { all: 'All', 'needs-you': 'Needs y
  *
  * **The row.** State · Ticket · Run · Repo and branch · Where · Model · Context · Started · For · Open. The ticket cell is the type glyph, the key and the
  * summary as a button that opens Detail (§8.9.2) — with the fold's `childrenOf` for a ticket on the board, and none for one drawn from its link's snapshot,
- * which has no fold to hand the Children tree. **The whole row opens Detail too** (`rowOpens`): a summary-only target read as plain text until hovered, so
+ * which has no fold to hand the Children tree. A row in scope only as the parent of a board sub-task (`row.via`, `lib/jira-list.ts`) adds `· via <SUB-TASK>`
+ * after its key in `jira-list-mark`'s quiet ink, so the person sees why their parent-story session sits on a board that does not hold the story.
+ * **The whole row opens Detail too** (`rowOpens`): a summary-only target read as plain text until hovered, so
  * nobody found it. The summary button stays the keyboard's way in — a `tr` takes no focus — and a click on any control inside the row (`Open`, `Reopen`,
  * `Run ▾` and its panel, which is drawn inside the cell, not in a portal) is that control's alone, as is a click that ends a text selection.
  * A row that needs a person wears the amber wash the deck's strip does; an ended row is set in the quiet ink.
@@ -329,7 +331,10 @@ function ListRowView({
       onClick={onRowClick}
     >
       <td className="jira-list-ticket">
-        <span className="jira-list-key">{row.key}</span>
+        <span className="jira-list-key">
+          {row.key}
+          {row.via !== null && <span className="jira-list-mark">{` · via ${row.via}`}</span>}
+        </span>
         <button type="button" className="jira-list-title" title={issue.summary} onClick={open}>
           {issue.summary}
         </button>
