@@ -303,9 +303,10 @@ function listFiles(top, from, to, item) {
   return files;
 }
 
-// First matching rule wins, in this order: the item is read as the contract, and a deleted file stays visible as context, whatever else it was.
+// First matching rule wins, in this order: the item is read as the contract, and a deleted file stays visible as context, whatever else it was. The item
+// matches by its old path too: a groom or execute that moves `open/x.md` → `done/x.md` is still handed the path it started from.
 function skipReason(file, binary, item) {
-  if (item !== null && file.path === item) return 'item';
+  if (item !== null && (file.path === item || file.oldPath === item)) return 'item';
   if (file.status === 'D') return 'deleted';
   if (binary) return 'binary';
   const segments = file.path.split('/');
@@ -435,10 +436,25 @@ function groupFiles(files, hasItem, config) {
   });
 }
 
-// `--item` is relative to `--tree` (or absolute); the manifest stores it relative to the repo top, the form every diff path has.
+// realpath for a path that may not exist (an item moved or deleted in the work tree): the nearest existing ancestor is resolved and the rest re-joined, so
+// a symlinked prefix — macOS's /var → /private/var above all — never makes an in-tree path look like an outside one.
+function realpathLoose(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch (error) {
+    const parent = path.dirname(p);
+    if (error?.code !== 'ENOENT' || parent === p) throw error;
+    return path.join(realpathLoose(parent), path.basename(p));
+  }
+}
+
+// `--item` is relative to `--tree`, or absolute. Inside the repo it is stored relative to the repo top, the form every diff path has, so the `item` skip
+// rule can match it. Outside — a tracker item's snapshot under the run-state dir or a temp file, which is where every tracker item lives — it is stored as
+// an absolute path: it matches no diff file, but it is still the item group 1 checks the branch against.
 function itemPath(top, tree, item) {
-  const rel = path.relative(top, path.resolve(fs.realpathSync(tree), item));
-  if (rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) throw new Error(`--item ${item} is not inside --tree`);
+  const abs = realpathLoose(path.resolve(fs.realpathSync(tree), item));
+  const rel = path.relative(fs.realpathSync(top), abs);
+  if (rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return abs;
   return rel.split(path.sep).join('/');
 }
 

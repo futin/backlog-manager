@@ -469,6 +469,37 @@ test('scope with every file skipped keeps an empty group 1 only for an item', ()
   assert.equal(without.stdout, `${JSON.stringify({ mode: 'full', files: 1, review: 0, skip: 1, groups: 0 })}\n`);
 });
 
+test('scope accepts an item outside the tree as an absolute path', () => {
+  const repo = repoWith({}, { 'pnpm-lock.yaml': 'lock\n' });
+  const outside = fs.mkdtempSync(path.join(root, `item${counter++}-`));
+  write(outside, 'item.md', '# tracker item\n');
+  const r = scope(repo, ['--item', path.join(outside, 'item.md')]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.manifest.item, path.join(fs.realpathSync(outside), 'item.md'));
+  assert.ok(!r.manifest.files.some((f) => f.reason === 'item'), JSON.stringify(r.manifest.files));
+  assert.deepEqual(r.manifest.groups.map((grp) => [grp.n, grp.files]), [[1, []]]);
+});
+
+test('scope takes an in-tree item through a symlinked absolute path as in the tree', () => {
+  const repo = repoWith({}, { 'backlog/open/task-1.md': '# item\n', 'x.mjs': 'x\n' });
+  const link = path.join(root, `link${counter++}`);
+  fs.symlinkSync(repo, link);
+  const r = scope(repo, ['--item', path.join(link, 'backlog/open/task-1.md')]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.manifest.item, 'backlog/open/task-1.md');
+  assert.equal(fileOf(r.manifest, 'backlog/open/task-1.md').reason, 'item');
+});
+
+test('scope skips a renamed item passed by its old path', () => {
+  const repo = repoWith({ 'backlog/open/task-1.md': lines(10, 'item') }, { 'x.mjs': 'x\n' });
+  fs.mkdirSync(path.join(repo, 'backlog/done'));
+  g(repo, 'mv', 'backlog/open/task-1.md', 'backlog/done/task-1.md');
+  const r = scope(repo, ['--item', 'backlog/open/task-1.md']);
+  assert.equal(r.status, 0, r.stderr);
+  const moved = fileOf(r.manifest, 'backlog/done/task-1.md');
+  assert.deepEqual([moved.oldPath, moved.status, moved.decision, moved.reason], ['backlog/open/task-1.md', 'R', 'skip', 'item']);
+});
+
 test('scope gives each group its model and effort', () => {
   // Three buckets, none foldable: a/ (10 files, 10 lines), b/ (3 files, 30 lines), c/ (3 files, 60 lines) — 16 files, so partitioned.
   const repo = repoWith({}, { ...many('a', 10, 1), ...many('b', 3, 10), ...many('c', 3, 20) });
