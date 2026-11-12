@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 import { DeliveryPane } from '../client/src/components/jira/DeliveryPane';
 import { GitlabContext } from '../client/src/hooks/GitlabContext';
 import type { GitlabMr, GitlabPayload, GitlabProjectView, GitlabStatus, JiraIssue } from '../shared/types';
+import { ruleBlocks, readStyles } from './helpers/css-rule';
 import { daysAgoStamp } from './helpers/dates';
 
 /**
@@ -208,5 +209,18 @@ describe('DeliveryPane', () => {
   ])('draws nothing while delivery is not shown (%s)', (_name, data) => {
     const { container } = draw(data);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+// jsdom paints nothing, so the track's z-order is pinned at the rule: step i+1's positioned rail comes later in the tree than step i's dot and, with no
+// z-index on the dot, painted over its right half — the glyph cut and the rail showing through a hollow ring (ui-verify 2026-11-12). `isolation` keeps the
+// dot's z-index local, so it never rises over the List's sticky header or a menu.
+describe('delivery track paint order', () => {
+  const css = readStyles();
+  it('lifts the dot over the rail', () => {
+    expect(ruleBlocks(css, '.jira-dlv-dot').some((b) => /(^|[;\s])z-index:\s*1\b/.test(b))).toBe(true);
+  });
+  it('keeps that z-index inside the track', () => {
+    expect(ruleBlocks(css, '.jira-dlv-track').some((b) => /isolation:\s*isolate/.test(b))).toBe(true);
   });
 });
