@@ -1530,3 +1530,182 @@ describe('JiraDetail — Worktrees (Jira repo/branch)', () => {
     await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: /^Remove/ })).toBeEnabled());
   });
 });
+
+describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent-live line (spec 2026-11-11-jira-run-on-parent §4.1, §4.3)', () => {
+  /*
+    A sub-task under P-1, a parent that is on no board — the case the feature exists for. `P-1` is answered by `parentAnswer`, which a case may hold open
+    (`held()`) to decide when the read lands relative to a second click, a rerender or the Run menu's own ask; every other issue read answers SUB's detail.
+  */
+  const SUB: JiraIssue = {
+    ...CARD,
+    key: 'PAY-175',
+    summary: 'Prepare refund TODOs',
+    type: { name: 'Sub-task', level: -1, subtask: true },
+    parent: { key: 'P-1', summary: 'S' },
+    assignee: null,
+    subtasks: 0
+  };
+  const PARENT: JiraIssueDetail = detail({ key: 'P-1', id: '1001', summary: 'S', url: 'https://acme.atlassian.net/browse/P-1', project: { key: 'P', name: 'Parent project' }, parent: null });
+  let parentAnswer: () => Response | Promise<Response>;
+  const minutesAgo = (m: number): string => new Date(Date.now() - m * 60_000).toISOString();
+  const parentLink = (where: 'crumb' | 'fact'): HTMLElement =>
+    within(where === 'crumb' ? (document.querySelector('.jira-detail-crumbs') as HTMLElement) : (fact('Parent') as HTMLElement)).getByRole('button', { name: 'P-1 S' });
+  const alerts = (): string[] => within(screen.getByRole('dialog', { name: /PAY-175/ })).queryAllByRole('alert').map((a) => a.textContent ?? '');
+
+  beforeEach(() => {
+    parentAnswer = () => json(PARENT);
+    answer = () => (urls[urls.length - 1] === '/api/jira/issue/P-1' ? parentAnswer() : json(detail({ ...SUB })));
+  });
+
+  it('links the head crumb and the Parent fact; a double click reads P-1 once and pushes it with the same childrenOf', async () => {
+    const pending = held();
+    parentAnswer = () => pending.promise;
+    const index: JiraChildrenIndex = new Map();
+    mount({ issue: SUB, childrenOf: index });
+    await screen.findByText(/not/);
+    expect(document.querySelector('.jira-detail-crumbs')).toHaveTextContent('PAY-175· Sub-task· in P-1 S· Sprint 42');
+    expect(parentLink('fact')).toBeInTheDocument();
+    await userEvent.click(parentLink('crumb'));
+    await userEvent.click(parentLink('fact'));
+    expect(reads('P-1')).toBe(1);
+    expect(parentLink('crumb')).toHaveAttribute('aria-busy', 'true');
+    await act(async () => pending.release(json(PARENT)));
+    await waitFor(() => expect(onOpenIssue).toHaveBeenCalledTimes(1));
+    expect(onOpenIssue.mock.calls[0][0].key).toBe('P-1');
+    expect(onOpenIssue.mock.calls[0][1]).toBe(index);
+  });
+
+  it('a failed read says so in an alert and stays on the sub-task', async () => {
+    parentAnswer = () => json({ error: 'boom' }, { status: 500 });
+    mount({ issue: SUB });
+    await screen.findByText(/not/);
+    await userEvent.click(parentLink('crumb'));
+    await waitFor(() => expect(alerts()).toEqual(['boom']));
+    expect(onOpenIssue).not.toHaveBeenCalled();
+  });
+
+  it('draws no link and no Run on without a parent', async () => {
+    const orphan: JiraIssue = { ...SUB, parent: null };
+    answer = () => json(detail({ ...orphan }));
+    mount({ issue: orphan });
+    await screen.findByText(/not/);
+    expect(within(document.querySelector('.jira-detail-crumbs') as HTMLElement).queryByRole('button', { name: /P-1/ })).toBeNull();
+    expect(fact('Parent')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Run options for PAY-175' }));
+    expect(screen.queryByRole('group', { name: 'Run on' })).toBeNull();
+  });
+
+  it('drops a parent read that lands after the Detail swapped to another issue (Review Focus 1)', async () => {
+    const pending = held();
+    parentAnswer = () => pending.promise;
+    const view = mount({ issue: SUB });
+    await screen.findByText(/not/);
+    await userEvent.click(parentLink('crumb'));
+    const other: JiraIssue = { ...CARD, key: 'PAY-9', summary: 'Another' };
+    view.rerender(
+      <SettingsProvider>
+        <JiraContext.Provider value={{ data: status(), loading: false, error: false, reload }}>
+          <JiraSessionsContext.Provider value={{ data: null, reload: reloadSessions }}>
+            <JiraDetail issue={other} childrenOf={null} onOpenIssue={onOpenIssue} back={null} onBack={onBack} onWrote={onWrote} onRun={onRun} onClose={() => {}} />
+          </JiraSessionsContext.Provider>
+        </JiraContext.Provider>
+      </SettingsProvider>
+    );
+    await act(async () => pending.release(json(PARENT)));
+    await act(async () => {});
+    expect(onOpenIssue).not.toHaveBeenCalled();
+  });
+
+  it('opens nothing when the parent read lands after the Detail closed (final review)', async () => {
+    const pending = held();
+    parentAnswer = () => pending.promise;
+    const view = mount({ issue: SUB });
+    await screen.findByText(/not/);
+    await userEvent.click(parentLink('crumb'));
+    view.unmount();
+    await act(async () => pending.release(json(PARENT)));
+    await act(async () => {});
+    expect(onOpenIssue).not.toHaveBeenCalled();
+  });
+
+  it("joins the link's pending read when the Detail's Run menu picks the parent (Review Focus 3)", async () => {
+    const pending = held();
+    parentAnswer = () => pending.promise;
+    mount({ issue: SUB });
+    await screen.findByText(/not/);
+    await userEvent.click(parentLink('crumb'));
+    await userEvent.click(screen.getByRole('button', { name: 'Run options for PAY-175' }));
+    await userEvent.click(within(screen.getByRole('group', { name: 'Run on' })).getByRole('button', { name: /^P-1\b/ }));
+    expect(reads('P-1')).toBe(1);
+    await act(async () => pending.release(json(PARENT)));
+  });
+
+  it('draws the parent-live line under the empty band\'s sub-line, and its click opens the parent', async () => {
+    mount({ issue: SUB, sessions: payload(link({ key: 'P-1', sessionId: 'p', state: 'working', repo: '/r/microservice' })) });
+    await screen.findByText(/not/);
+    const line = screen.getByRole('button', { name: 'Parent P-1 · Working · microservice →' });
+    expect(line.previousElementSibling).toHaveClass('jira-detail-agent-sub');
+    expect(line.querySelector('.ui-stripe-dot')).toHaveAttribute('data-tone');
+    await userEvent.click(line);
+    await waitFor(() => expect(onOpenIssue).toHaveBeenCalledTimes(1));
+    expect(onOpenIssue.mock.calls[0][0].key).toBe('P-1');
+  });
+
+  it("leads the live band with the parent's newest live session, right under the label row, with +1 more", async () => {
+    mount({
+      issue: SUB,
+      sessions: payload(
+        link({ key: 'PAY-175', sessionId: 'own', state: 'plan', repo: '/r/web', startedAt: minutesAgo(3), stateSince: minutesAgo(3) }),
+        link({ key: 'P-1', sessionId: 'older', state: 'quiet', repo: '/r/api', startedAt: minutesAgo(30), stateSince: minutesAgo(30) }),
+        link({ key: 'P-1', sessionId: 'newer', state: 'working', repo: '/r/microservice', startedAt: minutesAgo(25), stateSince: minutesAgo(25) })
+      )
+    });
+    await screen.findByText(/not/);
+    const line = document.querySelector('.jira-detail-agent-band .jira-detail-parent-line') as HTMLElement;
+    expect(line.previousElementSibling).toHaveClass('jira-detail-agent-row');
+    expect(line.querySelector('.jira-detail-agent-child-text')).toHaveTextContent(/^Parent P-1 · Working · microservice →$/);
+    expect(line).toHaveTextContent('+1 more');
+  });
+
+  it('draws the read alert after the write alert, and the next link click clears only the read one', async () => {
+    parentAnswer = () => json({ error: 'boom' }, { status: 500 });
+    post = () => json({ error: 'Jira refused: nope' }, { status: 502 });
+    mount({ issue: SUB });
+    await screen.findByText(/not/);
+    await userEvent.click(parentLink('crumb'));
+    await waitFor(() => expect(alerts()).toEqual(['boom']));
+    await userEvent.click(assignChip());
+    await waitFor(() => expect(alerts()).toEqual(['Jira refused: nope', 'boom']));
+    const pending = held();
+    parentAnswer = () => pending.promise;
+    await userEvent.click(parentLink('crumb'));
+    expect(alerts()).toEqual(['Jira refused: nope']);
+    await act(async () => pending.release(json(PARENT)));
+  });
+
+  it("shows a menu's failure only in the menu, and a link's failure only in the Detail (spec §4.2)", async () => {
+    parentAnswer = () => json({ error: 'boom' }, { status: 500 });
+    mount({ issue: SUB });
+    await screen.findByText(/not/);
+    await userEvent.click(screen.getByRole('button', { name: 'Run options for PAY-175' }));
+    await userEvent.click(within(screen.getByRole('group', { name: 'Run on' })).getByRole('button', { name: /^P-1\b/ }));
+    await waitFor(() => expect(document.querySelector('.jira-run-target-note')).toHaveTextContent('boom'));
+    expect(alerts()).toEqual([]);
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(parentLink('crumb'));
+    await waitFor(() => expect(alerts()).toEqual(['boom']));
+    const pending = held();
+    parentAnswer = () => pending.promise;
+    await userEvent.click(screen.getByRole('button', { name: 'Run options for PAY-175' }));
+    await userEvent.click(within(screen.getByRole('group', { name: 'Run on' })).getByRole('button', { name: /^P-1\b/ }));
+    expect(document.querySelector('.jira-run-target-note')).toBeNull();
+    await act(async () => pending.release(json(PARENT)));
+  });
+
+  it("draws no parent line for a story whose epic is live — only a sub-task's parent gets one", async () => {
+    mount({ sessions: payload(link({ key: 'PAY-120', sessionId: 'epic' })) });
+    await screen.findByText(/not/);
+    expect(screen.queryByRole('button', { name: /^Parent PAY-120/ })).toBeNull();
+    expect(document.querySelector('.jira-detail-parent-line')).toBeNull();
+  });
+});

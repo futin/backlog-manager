@@ -1394,6 +1394,20 @@ button.rail-count { cursor: pointer }
 .jira-run-mark { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 500; color: var(--green) }
 .jira-run-rule { margin: 6px 0; border: 0; border-top: 1px solid var(--hairline2) }
 .jira-run-note { padding: 2px 8px 4px; font-size: 11px; color: var(--ink2) }
+/* A blocked row — a parent still loading, failed, live or unmapped under `Run on` (spec 2026-11-11-jira-run-on-parent §4.2): the title says why. */
+.jira-run-opt:disabled { cursor: default; opacity: .45 }
+.jira-run-opt:disabled:hover { background: none }
+/* `Run on` — the menu's own two-segment toggle, key over sub-line (`run-on-toggle.png`). Its own family, not `.ui-seg`: Segmented's label is one string, and
+   guard 7 forbids page rules over `.ui-seg button`. The well is §8.6's pill track — recessed `--steel` under a raised `--strip` option. */
+.jira-run-target { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 8px 4px; padding: 4px; border-radius: 10px; background: var(--steel) }
+.jira-run-target-seg {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 6px 10px;
+  border: 0; border-radius: 8px; background: none; text-align: left; color: var(--ink2); cursor: pointer;
+}
+.jira-run-target-seg[aria-pressed='true'] { background: var(--strip); color: var(--ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent) }
+.jira-run-target-key { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; line-height: 1.2 }
+.jira-run-target-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1.2; color: var(--ink3) }
+.jira-run-target-note { margin: 0 8px 4px; font-size: 11px; color: var(--red) }
 /* A long session label ellipsises inside the strip; the elapsed mark keeps its width. This rule is global, so it applies to the Board's own live strip too
    (`ItemCard` draws the same `ui/LiveStrip`), not only to the Jira card's. */
 .board-card-live > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
@@ -1441,6 +1455,18 @@ button.rail-count { cursor: pointer }
 .jira-detail-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0 }
 .jira-detail-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink2) }
 .jira-detail-crumbs .jira-detail-key { font-weight: 600; color: var(--ink) }
+/* The parent link — in the head crumb and as the `Parent` fact's value (spec 2026-11-11-jira-run-on-parent §4.1, `parent-live-line.png`): the comments note's
+   `<KEY> in Jira ↗` look without the arrow, since it navigates inside the board. A button, not an `<a>`: it pushes onto the walk and has no URL. Busy while
+   the parent is read — inert, the pointer says so. */
+.jira-detail-parent {
+  display: inline; min-width: 0; padding: 0; border: 0; background: none; font: inherit; color: var(--cyan); text-align: left; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere
+}
+.jira-detail-parent[aria-busy='true'] { cursor: progress; opacity: .7 }
+/* `· in` and its link as one crumb that keeps them on one line: a button is an atomic inline box, so as plain inline content a long parent summary pushed the
+   whole link under an orphaned `· in` at phone width. As a flex row the link's own text wraps beside the words instead (ui-verify, 375 px). */
+.jira-detail-crumb-parent { display: inline-flex; align-items: baseline; gap: .25em; min-width: 0 }
+.jira-detail-crumb-in { flex: none; white-space: nowrap }
 .jira-detail-out {
   margin-left: auto; display: inline-flex; align-items: center; height: 28px; padding: 0 10px;
   border: 1px solid var(--hairline2); border-radius: 9px; font-size: 12px; font-weight: 500; color: var(--ink); text-decoration: none; white-space: nowrap

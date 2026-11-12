@@ -5,6 +5,7 @@ import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
 import { useNow } from '../../hooks/useNow';
+import { useParentRead } from '../../hooks/useParentRead';
 import { useSettings } from '../../hooks/useSettings';
 import {
   displayPath,
@@ -27,7 +28,8 @@ import {
   type JiraChildrenIndex
 } from '../../lib/jira';
 import { childSessions, type DeckEntry } from '../../lib/jira-deck';
-import { ticketSessions } from '../../lib/jira-sessions';
+import { parentLineText, parentLiveLine } from '../../lib/jira-parent';
+import { ticketSessions, type SessionLink } from '../../lib/jira-sessions';
 import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
 import { elapsedSince } from '../../lib/item-age';
@@ -137,6 +139,23 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * reading the Setup card gives), or the hint that says where to map one. The `created · updated` line (`issueDatesLine`), the session fact and every age on
  * the cards read the one `useNow` clock, a minute's tick.
  *
+ * **The parent is a link, read on demand** (spec `2026-11-11-jira-run-on-parent-design.md` §4.1, §4.3; DESIGN.md §8.9.2). An issue with a parent — a
+ * sub-task's story, a story's epic — draws the head crumb's `<KEY> <summary>` and the `Parent` fact as one link-skinned button, and a click PUSHES the parent
+ * onto `JiraView`'s walk exactly as a Children row does (`onOpenIssue(parent, childrenOf)`, the board's snapshot carried forward). The walk wants a whole
+ * `JiraIssue` and the issue knows only `{ key, summary }` of its parent, so the click reads `GET /api/jira/issue/:key` through `useParentRead` — the read
+ * shared with this dialog's `Run ▾` (one per parent key: a link click then a menu pick is one request) and held while the dialog is open. It is a READ, so
+ * it does not take `useAction`'s guard: a Move or Assign may be out while the parent loads. While it is out the link is inert and `aria-busy`; an answer
+ * that lands after the dialog swapped to another key is dropped (`keyRef`), never pushed; a failure is the read's own `role="alert"` line, under the write
+ * row and after the write error when both show, cleared by the next click (which reads again — a failure is never cached) and by a key swap
+ * (`parentAskedFor`, reset during render with the write error). A failure in the MENU's read draws only the menu's note, never this line: the read is shared,
+ * its failure is shown per surface.
+ *
+ * **The parent-live line.** For a sub-task — `type.subtask` with a parent, the `Run on` toggle's own condition, so a story under a live epic draws none — the
+ * Agent band adds `Parent <KEY> · <state> · <repo> →` (`parentLiveLine`, `parentLineText`) when the sessions payload holds a live session on the parent:
+ * the parent's newest live session leads and the rest are `+N more`. It needs no read (the payload carries every key's links, which is why it draws for a
+ * parent on no board), and its click is the link's. It sits under the empty band's sub-line, before any `ChildSessionLine`, or directly under the live
+ * band's label row, above the cards.
+ *
  * **Children are a tree, and a row swaps THIS dialog's issue** (DESIGN.md §8.9.2; grouped-board spec §6). The detail's `children` are the direct children,
  * fresh; under each hang its descendants from `childrenOf`, the board's fold index as it stood when the card was clicked (`modalTree`). That snapshot is not
  * refreshed by later board polls: the tree costs no Jira call beyond the one read this dialog already makes, and a row a poll moved is at worst one poll old
@@ -198,9 +217,13 @@ export function JiraDetail({
   // The last detail that LANDED — R8's held copy, drawn only while a read for that same key is pending again (a write's re-read). Stored during render on
   // the frame it lands, for the reason `useFetched` tags its answer: an effect would store it one commit late, and that commit would draw `loading…`.
   const [kept, setKept] = useState<JiraIssueDetail | null>(null);
+  // The key whose parent link was last clicked: the parent read's failure line shows only for it, so a swap to a sibling under the same parent (whose hook
+  // read would otherwise carry over) opens clean.
+  const [parentAskedFor, setParentAskedFor] = useState<string | null>(null);
   if (shownKey !== issue.key) {
     setShownKey(issue.key);
     clearError();
+    setParentAskedFor(null);
     // Dropped on a key change too, so a walk back to an issue (A → B → A) opens on `loading…` like any open, not on A's copy from before the walk.
     setKept(null);
   }
@@ -244,10 +267,29 @@ export function JiraDetail({
   const now = useNow(true);
   const boardNames = detail === null || data === null ? [] : data.boards.filter((b) => detail.boards.includes(b.id)).map((b) => b.name);
   const paths = data?.repos[src.project.key] ?? [];
-  // The head's crumbs after the key: the type, the parent it sits in, the sprint — each only when there is one.
-  const crumbs = [src.type.name, src.parent === null ? null : `in ${src.parent.key} ${src.parent.summary}`, src.sprint].filter(
-    (p): p is string => p !== null && p !== ''
-  );
+  // The parent link (see the header): one read shared with the Run menu, a push onto the walk when it lands for the key still shown.
+  const parent = src.parent;
+  const { read: parentRead, ask: askParent } = useParentRead(parent === null ? null : parent.key);
+  const parentBusy = parentRead.state === 'loading';
+  const parentError = parentRead.state === 'failed' && parentAskedFor === issue.key ? parentRead.error : null;
+  const openParent = (): void => {
+    if (parentBusy) return;
+    const asked = issue.key;
+    setParentAskedFor(asked);
+    void askParent().then((p) => {
+      if (p !== null && keyRef.current === asked) onOpenIssue(p, childrenOf);
+    });
+  };
+  // One element drawn twice — the head crumb and the `Parent` fact. A stub's parent summary is `''`, so the label never ends on a stray space.
+  const parentLink =
+    parent === null ? null : (
+      <button type="button" className="jira-detail-parent" aria-busy={parentBusy || undefined} aria-disabled={parentBusy || undefined} onClick={openParent}>
+        {[parent.key, parent.summary].filter((p) => p !== '').join(' ')}
+      </button>
+    );
+  const parentLine = parentLiveLine(src, sessions);
+  const parentLineEl =
+    parentLine === null || parent === null ? null : <ParentSessionLine parentKey={parent.key} lead={parentLine.lead} more={parentLine.more} onOpen={openParent} />;
 
   const me = data?.me ?? null;
   const assignBlock = me === null ? 'no identity' : src.assignee?.accountId === me.accountId ? 'already assigned to you' : null;
@@ -303,7 +345,7 @@ export function JiraDetail({
   const defaultLabel = typeof defaultAction === 'string' ? JIRA_BUILTIN_LABELS[defaultAction] : (data?.skills.find((k) => k.id === defaultAction.skill)?.name ?? '');
   const lastRun = ended.length > 0 ? pollAge(ended[0].endedAt, now) : null;
   const bandSub = `default: ${defaultLabel}${lastRun === null ? '' : ` · last run ${lastRun}`}`;
-  const runControl = <JiraRunMenu issue={issue} home="modal" onPick={(action) => onRun(issue, action)} />;
+  const runControl = <JiraRunMenu issue={issue} home="modal" onPick={onRun} />;
 
   // The agent column — `Modal`'s facts slot. Cards newest first; the reservation, being newest of all, leads.
   const agent = (
@@ -320,6 +362,7 @@ export function JiraDetail({
               <span className="jira-detail-next">Next session takes over once this one ends.</span>
               {runControl}
             </div>
+            {parentLineEl}
             {starting !== null && <JiraStartingCard session={starting} now={now} />}
             {liveLinks.map((link) => (
               <JiraSessionCard
@@ -345,6 +388,7 @@ export function JiraDetail({
               <div className="jira-detail-agent-text">
                 <span className="jira-detail-agent-none">No session on this ticket</span>
                 <span className="jira-detail-agent-sub">{bandSub}</span>
+                {parentLineEl}
                 {underway.length > 0 && (
                   <ChildSessionLine first={underway[0]} more={underway.length - 1} onOpen={() => onOpenIssue(underway[0].issue, childrenOf)} />
                 )}
@@ -381,9 +425,14 @@ export function JiraDetail({
           <JiraTypeIcon type={src.type} />
         </span>
         <span className="jira-detail-key">{src.key}</span>
-        {crumbs.map((c) => (
-          <span key={c}>{`· ${c}`}</span>
-        ))}
+        {src.type.name !== '' && <span>{`· ${src.type.name}`}</span>}
+        {parentLink !== null && (
+          <span className="jira-detail-crumb-parent">
+            <span className="jira-detail-crumb-in">{'· in '}</span>
+            {parentLink}
+          </span>
+        )}
+        {src.sprint !== null && src.sprint !== '' && <span>{`· ${src.sprint}`}</span>}
       </div>
       {/* A plain link, not a `Chip as="a"`: the chip carries no `target`, and this one must open a new tab with no referrer like every link out. */}
       <a className="jira-detail-out" href={src.url} target="_blank" rel="noreferrer">
@@ -450,7 +499,7 @@ export function JiraDetail({
                 </span>
               </Fact>}
             {src.sprint !== null && src.sprint !== '' && <Fact label="Sprint" icon={<Glyph name="calendar" />}>{src.sprint}</Fact>}
-            {src.parent !== null && <Fact label="Parent" icon={<Glyph name="branch" />}>{`${src.parent.key} ${src.parent.summary}`}</Fact>}
+            {parentLink !== null && <Fact label="Parent" icon={<Glyph name="branch" />}>{parentLink}</Fact>}
             {src.labels.length > 0 && <Fact label="Labels" icon={<Glyph name="tag" />}>
                 {src.labels.map((l) => (
                   <span key={l} className="jira-detail-label">
@@ -472,6 +521,12 @@ export function JiraDetail({
           {writeError !== null && (
             <p className="jira-modal-error" role="alert">
               {writeError}
+            </p>
+          )}
+          {/* The parent read's own failure (see the header) — after the write error, so both show and neither hides the other. */}
+          {parentError !== null && (
+            <p className="jira-modal-error" role="alert">
+              {parentError}
             </p>
           )}
         </div>
@@ -654,6 +709,20 @@ function ChildSessionLine({ first, more, onOpen }: { first: DeckEntry; more: num
     <button type="button" className="jira-detail-agent-child" onClick={onOpen}>
       <i className="ui-stripe-dot" data-tone={sessionTone(first.state)} aria-hidden="true" />
       <span className="jira-detail-agent-child-text">{`${STATE_LABEL[first.state]} on ${first.issue.key} →`}</span>
+      {more > 0 && <span className="jira-detail-agent-child-more">{`+${more} more`}</span>}
+    </button>
+  );
+}
+
+/**
+ * The sub-task band's parent-live line (spec §4.3; DESIGN.md §8.9.2): `ChildSessionLine`'s skin — the lead session's tone dot, the words, `+N more` — pointed
+ * UP at the parent, whose newest live session leads. A click opens the parent's Detail, as the head's parent link does.
+ */
+function ParentSessionLine({ parentKey, lead, more, onOpen }: { parentKey: string; lead: SessionLink; more: number; onOpen: () => void }) {
+  return (
+    <button type="button" className="jira-detail-agent-child jira-detail-parent-line" onClick={onOpen}>
+      <i className="ui-stripe-dot" data-tone={sessionTone(lead.state)} aria-hidden="true" />
+      <span className="jira-detail-agent-child-text">{parentLineText(parentKey, lead)}</span>
       {more > 0 && <span className="jira-detail-agent-child-more">{`+${more} more`}</span>}
     </button>
   );

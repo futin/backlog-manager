@@ -1717,3 +1717,72 @@ describe('the issue List', () => {
     expect(await screen.findByText('No issues')).toBeInTheDocument();
   });
 });
+
+/*
+  `Run on` through the real pages (spec `2026-11-11-jira-run-on-parent-design.md` §4.2, §6 cases 12 and 13; anti-goal 1). `jira-run-menu.test.tsx` calls the
+  menu's `onPick` directly, so it cannot see a CALLER that closes over its own issue and drops the one the menu hands it; these go through `JiraView`, whose
+  launch sheet names the issue it was opened on. The sub-task's parent, PAY-99, is on no board — the case the feature exists for — so only the parent read
+  (answered below with a detail) can supply it.
+*/
+describe('Run on: a sub-task runs its parent from the card and the List cell', () => {
+  const SUB = issue({
+    key: 'PAY-175',
+    summary: 'Prepare refund TODOs',
+    type: { name: 'Sub-task', level: -1, subtask: true },
+    parent: { key: 'PAY-99', summary: 'Payments platform' },
+    updated: daysAgoStamp(0)
+  });
+  const PARENT = issue({ key: 'PAY-99', summary: 'Payments platform', type: { name: 'Story', level: 0, subtask: false } });
+
+  async function renderWithParent(view: 'board' | 'list'): Promise<void> {
+    lists[ALPHA.id] = [...ALPHA_ISSUES, SUB];
+    statusAnswer = status({ repos: { PAY: ['/Users/ada/pay'] } });
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/jira/issue/PAY-99') {
+        requested.push(String(input));
+        return ok({ ...PARENT, description: '', children: [], transitions: [], boards: [], session: null });
+      }
+      return base(input, init);
+    }) as unknown as typeof fetch;
+    setJiraView(view);
+    setJiraPage('board');
+    render(
+      <SettingsProvider>
+        <JiraProvider>
+          <JiraSessionsProvider open>
+            <JiraView onOpenJiraPage={jest.fn()} />
+          </JiraSessionsProvider>
+        </JiraProvider>
+      </SettingsProvider>
+    );
+    await screen.findByText('Prepare refund TODOs');
+  }
+  afterEach(() => act(() => setJiraView('board')));
+
+  async function runParentFrom(scope: HTMLElement): Promise<void> {
+    await userEvent.click(within(scope).getByRole('button', { name: 'Run options for PAY-175' }));
+    const menu = screen.getByRole('dialog', { name: 'Run menu' });
+    await userEvent.click(within(within(menu).getByRole('group', { name: 'Run on' })).getByRole('button', { name: /^PAY-99\b/ }));
+    const work = within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute });
+    await waitFor(() => expect(work).toBeEnabled());
+    await userEvent.click(work);
+  }
+
+  it("a card's parent pick opens the sheet as the parent's, with the parent's key-and-slug branch default", async () => {
+    await renderWithParent('board');
+    await runParentFrom(card('Prepare refund TODOs'));
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-99' });
+    expect(screen.queryByRole('dialog', { name: 'run PAY-175' })).toBeNull();
+    const name = (await within(sheet).findByLabelText('Name')) as HTMLInputElement;
+    expect(name.value).toBe('pay-99-payments-platform');
+  });
+
+  it("the List cell's parent pick opens the sheet as the parent's", async () => {
+    await renderWithParent('list');
+    const row = document.querySelector('tr[data-key="PAY-175"]') as HTMLElement;
+    await runParentFrom(row);
+    expect(await screen.findByRole('dialog', { name: 'run PAY-99' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'run PAY-175' })).toBeNull();
+  });
+});
