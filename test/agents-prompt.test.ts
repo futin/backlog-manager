@@ -1,6 +1,6 @@
 import { authHeaders, dashboardError, readAgentsConfig } from '../server/src/agents/config.util';
 import { appendFinishClause, composePrompt, orchestrateSessionName, resumeSessionName, sessionName } from '../server/src/agents/prompt.util';
-import { COMMIT_RULE, FINISH_FLAG, defuseFinishFlags, finishClause } from '../shared/agent';
+import { COMMIT_RULE, DEFAULT_REVIEW_CONFIG, FINISH_FLAG, REVIEW_FLAG, defuseFinishFlags, finishClause } from '../shared/agent';
 import type { BacklogItem } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
@@ -436,5 +436,50 @@ describe('appendFinishClause', () => {
 
   it('capture keeps its own text untouched', () => {
     expect(appendFinishClause(`Capture. ${COMMIT_RULE}`, 'capture', 'in-place', 'main', {})).toBe(`Capture. ${COMMIT_RULE}`);
+  });
+});
+
+/*
+ * The reviewer override rides the finish clause: its flags are composed from a validated ReviewConfig and placed inside the backticks, after `--base` and
+ * after `--auto-merge [--fix]`, so the prose outside them still names no flag. A title spelling one of those tokens is defused the same way a finish flag is,
+ * because the item title is caller-visible text and the `--review-` body guard is the injection boundary.
+ */
+describe('finishClause and the reviewer override', () => {
+  const SPLIT = '--review-mode split --review-big-model default --review-big-effort default --review-small-model sonnet --review-small-effort default --review-small-max-lines 300';
+
+  it('puts the review flags inside the backticks, after --base', () => {
+    const clause = finishClause('execute', 'pr', 'main', { review: DEFAULT_REVIEW_CONFIG });
+    expect(clause).toContain(`\`--finish pr --base main ${SPLIT}\``);
+    const open = clause.indexOf('`');
+    const close = clause.indexOf('`', open + 1);
+    expect(clause.slice(0, open) + clause.slice(close + 1)).not.toContain('--review-');
+  });
+
+  it('puts them after --auto-merge --fix', () => {
+    const clause = finishClause('execute', 'pr', 'develop', { autoMerge: true, fix: true, review: DEFAULT_REVIEW_CONFIG });
+    expect(clause).toContain(`\`--finish pr --base develop --auto-merge --fix ${SPLIT}\``);
+  });
+
+  it('without a review the clause is byte-identical to the one with no flags', () => {
+    expect(finishClause('execute', 'pr', 'main', { review: undefined })).toBe(finishClause('execute', 'pr', 'main'));
+    expect(finishClause('execute', 'pr', 'main', {})).not.toContain('--review-');
+  });
+
+  it('defuseFinishFlags defuses a --review- token too, and the visible words survive', () => {
+    const out = defuseFinishFlags('Try --review-mode same and --base x');
+    expect(REVIEW_FLAG.test(out)).toBe(false);
+    expect(FINISH_FLAG.test(out)).toBe(false);
+    expect(out).toBe('Try \u2011\u2011review-mode same and \u2011\u2011base x');
+    expect(out.replace(/\u2011/g, '-')).toBe('Try --review-mode same and --base x');
+  });
+
+  it('a composed execute prompt whose title spells --review-model never matches REVIEW_FLAG', () => {
+    const p = composePrompt(fakeItem({ id: 'task-3', title: 'Pin --review-model opus', section: 'tasks', groomed: true }), 'execute');
+    expect(REVIEW_FLAG.test(p)).toBe(false);
+    expect(p).toContain('"Pin \u2011\u2011review-model opus"');
+  });
+
+  it('leaves --reviewed and --preview-x alone', () => {
+    expect(defuseFinishFlags('a --reviewed b --preview-x')).toBe('a --reviewed b --preview-x');
   });
 });

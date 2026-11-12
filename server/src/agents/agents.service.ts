@@ -20,6 +20,9 @@ import {
   dispatchBlock,
   FINISH_FLAG,
   isExecuteFinish,
+  parseReviewConfig,
+  REVIEW_FLAG,
+  reviewFlags,
   itemLadderBlock,
   modesUpTo,
   pickFrom,
@@ -46,6 +49,7 @@ import type {
   OrchestratorRun,
   PauseResult,
   PermissionMode,
+  ReviewConfig,
   StartOrchestrateRequest,
   StopResult
 } from '../../../shared/types';
@@ -84,7 +88,7 @@ const PROMPT_MAX = 8_000;
 
 /**
  * The base of every prompt `orchestrate()` will ever send — never accepted
- * from the request body. What a caller can influence is exactly four things,
+ * from the request body. What a caller can influence is exactly five things,
  * enumerated here and composed in `orchestrate()` and nowhere else:
  *
  *   1. **`ids`** — a list `resolveIds` has already proved name open bugs or
@@ -98,10 +102,13 @@ const PROMPT_MAX = 8_000;
  *      (task-19) resolved `questionMode` to `'decide'`.
  *   4. **` --base <ref>`** — appended when `resolveBase` (task-44) resolved
  *      `base` to anything other than `'main'`.
+ *   5. **the `--review-*` flags** — appended last, after `--base`, when the
+ *      request carried a `review` that `parseReviewConfig` accepted; they are
+ *      `reviewFlags` of the VALIDATED config, never the caller's text.
  *
  * Each is appended only off its own guard and each default appends nothing,
  * so a request written before any of these fields existed composes the
- * byte-identical prompt it always did. All four are flags `orchestrate.mjs`
+ * byte-identical prompt it always did. All five are flags `orchestrate.mjs`
  * takes and SKILL.md documents on the trigger, so composing them here is
  * speaking the skill's own invocation surface rather than inventing a
  * channel.
@@ -122,7 +129,10 @@ const PROMPT_MAX = 8_000;
  * comment claimed every appended flag was a compile-time literal; that was
  * true of two of the three flags and is now true of two of four, and a
  * comment that lists some of the influences is worse than one that lists
- * none.
+ * none. The review flags (5) sit with 2 and 3, not with 4: every token is
+ * either a fixed flag name or a member `parseReviewConfig` checked against a
+ * closed list (model, effort, mode) or an integer range (`smallMaxLines`), so
+ * a caller picks among values but never supplies a character.
  *
  * `dispatch`'s prompt varies by design: the action the item needs (groom vs.
  * execute) is derived from the item file, but WHAT to say about it is a
@@ -136,7 +146,7 @@ const PROMPT_MAX = 8_000;
  * for why that is exactly the threat these POST routes exist to prevent). A
  * `prompt` in the body is therefore dropped the same way dispatch drops any
  * field outside AgentDispatchRequest: by never being read. The asymmetry that
- * makes all four members above acceptable where a `prompt` would not be is
+ * makes all five members above acceptable where a `prompt` would not be is
  * the same one in every case: a prompt is free text and there is no check
  * that could make it safe, while each of these is checked against something
  * the server can enumerate for itself.
@@ -188,7 +198,7 @@ const STOP_PROMPT = '/backlog-orchestrate --abort';
 /**
  * Body of `POST /api/agents/orchestrate`, already reduced to exactly the fields that survive the controller's field-by-field rebuild — see
  * AgentsController.orchestrate(). The WIDENED twin of the client's `StartOrchestrateRequest` (shared/types.ts, where every field is documented): the same
- * keys, with the four a body this service cannot trust could hold anything in widened to what it actually might hold. Every other field — `project`,
+ * keys, with the five a body this service cannot trust could hold anything in widened to what it actually might hold. Every other field — `project`,
  * `model`, `effort`, `base`, `machine` — is the shared field itself, so the two cannot drift apart on a field neither side narrows; and
  * `OrchestrateRequestKeysMatch` below fails the typecheck the moment the key sets differ, in either direction.
  */
@@ -212,10 +222,15 @@ export interface AgentOrchestrateRequest extends Omit<StartOrchestrateRequest, O
    * than folded into "everything"; that is the same distinction `parseIdsArg` keeps in orchestrate.mjs, for the same reason, one layer down.
    */
   ids?: unknown;
+  /**
+   * `unknown` rather than `ReviewConfig`, for the reason `ids` is: it arrives straight off a request body, and `parseReviewOverride` — `parseReviewConfig`
+   * behind a 400 — is the only place it becomes a `ReviewConfig`. Present but invalid (`null` included) is a 400 naming the member, never a drop.
+   */
+  review?: unknown;
 }
 
-/** The four fields `AgentOrchestrateRequest` widens. Everything else it takes from `StartOrchestrateRequest` as is. */
-type OrchestrateWidenedKey = 'permissionMode' | 'mergeMode' | 'questionMode' | 'ids';
+/** The five fields `AgentOrchestrateRequest` widens. Everything else it takes from `StartOrchestrateRequest` as is. */
+type OrchestrateWidenedKey = 'permissionMode' | 'mergeMode' | 'questionMode' | 'ids' | 'review';
 
 /**
  * Compile-time only, and required rather than optional: `Omit` alone does not couple the two key sets, because omitting a key the shared type no longer has
@@ -226,6 +241,19 @@ type OrchestrateWidenedKey = 'permissionMode' | 'mergeMode' | 'questionMode' | '
 type SameKeys<A, B> = [Exclude<keyof A, keyof B>, Exclude<keyof B, keyof A>] extends [never, never] ? true : false;
 type Assert<T extends true> = T;
 export type OrchestrateRequestKeysMatch = Assert<SameKeys<AgentOrchestrateRequest, StartOrchestrateRequest>>;
+
+/**
+ * A launch body's `review`, validated: absent is `undefined` (append nothing), anything `parseReviewConfig` accepts is its normalised config, and anything
+ * else — `null`, a partial object, a model off the list — is a 400 naming the first bad member, never a drop. Refused rather than dropped for the reason
+ * `mergeMode` is: a run reviewed by the saved reviewer while the person picked another is worse than being told the pick was malformed. Shared by dispatch
+ * and orchestrate so the two routes cannot word the refusal differently.
+ */
+function parseReviewOverride(raw: unknown): ReviewConfig | undefined {
+  if (raw === undefined) return undefined;
+  const parsed = parseReviewConfig(raw);
+  if (!parsed.ok) throw new HttpException({ error: `review: ${parsed.member} is not a valid reviewer setting` }, 400);
+  return parsed.config;
+}
 
 /** `spawnInProject`'s options — every one-session launch's. `launchInProject` adds the `surface` item dispatch and the Jira Run send. */
 interface LaunchOpts {
@@ -453,6 +481,14 @@ export class AgentsService {
     if (req.fix === true && req.autoMerge !== true) {
       throw new HttpException({ error: 'fix requires autoMerge' }, 400);
     }
+    //   7a. A `review` (the sheet's Reviewer picker) on anything but an execute whose DERIVED finish is `pr` — a remote execute derives `pr` without sending
+    //      `finish`, so it qualifies. Only that path runs `backlog-reviewer` and reads the flags: an in-place execute has no review step the skill's flags
+    //      reach, and a groom has no reviewer at all (`finishClause`'s "reviews" is execute-only for the same reason). Then 7b, the config itself, through
+    //      `parseReviewConfig` — after 7a, so a groom carrying a malformed config hears that it carries one at all, not which member is wrong.
+    if (req.review !== undefined && (req.action !== 'execute' || finish !== 'pr')) {
+      throw new HttpException({ error: 'the reviewer override applies only to an execute that finishes with a PR' }, 400);
+    }
+    const review = parseReviewOverride(req.review);
     // The surface — the sheet's Dashboard | Desktop control, drawn only from `AgentPlan.launchSurface`. Shape rules, so they run here with the others. Refused
     // rather than dropped, the dashboard's own reasoning for its `bad surface`: a headless launch the person believed was opening in the desktop app is
     // worse than a 400. Desktop is an item launch on THIS machine only: `desktopAvailable` describes the Mac that answered, and a remote dashboard from
@@ -480,6 +516,13 @@ export class AgentsService {
         { error: "the finish mode, base, auto-merge and fix are set by the sheet's pickers — remove --finish, --base, --auto-merge and --fix from the prompt" },
         400
       );
+    }
+    //   9. Rule 8's twin for the reviewer: an execute or groom body carrying a `--review-<letter>` token. The picker is the only channel — the clause carries
+    //      `reviewFlags` of a validated config — and the skill reads a `--review-*` flag wherever it sits in the trigger, so a typed `--review-model opus`
+    //      would override the pick (or the saved setting, with no pick at all). `REVIEW_FLAG` leaves `--reviewed` and `--preview-x` alone, and the title is
+    //      defused by `defuseFinishFlags` so the board's own prompt never trips this. A capture body is not refused, as in rule 8.
+    if ((req.action === 'execute' || req.action === 'groom') && REVIEW_FLAG.test(prompt)) {
+      throw new HttpException({ error: "the reviewer is set by the sheet's Reviewer picker — remove --review- flags from the prompt" }, 400);
     }
 
     const item = await this.findItem(req.itemPath);
@@ -603,7 +646,7 @@ export class AgentsService {
       // in `COMMIT_RULE`, so one trailing copy is stripped first: the in-place clause puts the same bytes back, and a PR finish does not end up with a
       // "do not push" the clause then contradicts. An execute is NOT stripped — its existing "doubled, harmless" case stays. Capture keeps its
       // `COMMIT_RULE` inside the text and goes out unchanged.
-      prompt: appendFinishClause(prompt, action, finish, base, { autoMerge: req.autoMerge, fix: req.fix }),
+      prompt: appendFinishClause(prompt, action, finish, base, { autoMerge: req.autoMerge, fix: req.fix, review }),
       name: sessionName(item),
       permissionMode: req.permissionMode,
       maxPermission: status.spawnMaxPermission,
@@ -998,13 +1041,15 @@ export class AgentsService {
     // with what the run should contain, not with whether it may start, so the
     // coded RUN_IN_PROGRESS_CODE 409 must still win over it.
     const base = await this.orchestrateArgs.resolveBase(req.base, req.project);
+    // Last of the resolvers, after the lock for the same reason: a malformed reviewer is a problem with what the run should contain. Absent appends nothing.
+    const review = parseReviewOverride(req.review);
 
     return this.spawn(cfg, {
       project: dirName,
       // The composition, and the whole of what a caller can influence: a
       // bare constant for a full-queue, merge-mode, main-based run, that same
       // constant followed by ids that have each been proved to name an open
-      // bug or task in THIS project, and then up to three flags (the first of them one of two merge-mode literals), each
+      // bug or task in THIS project, and then up to four flag groups (the first of them one of two merge-mode literals, the last the review flags), each
       // appended only off its own guard and each default appending nothing.
       // Nothing a caller sends is ever concatenated in unchecked — see
       // resolveIds, resolveMergeMode, resolveBase, and ORCHESTRATE_PROMPT's
@@ -1032,14 +1077,18 @@ export class AgentsService {
         // compile-time literals selected by a guard, so no caller-supplied
         // character reaches the prompt through this channel either.
         ...(questionMode === 'decide' ? ['--question-mode', 'decide'] : []),
-        // The third and last, and the ONE place caller-supplied text reaches
+        // The third, and the ONE place caller-supplied text reaches
         // this prompt. `resolveBase` has already proved it is a legal ref
         // name AND an existing local branch in this project, which is why it
         // can be appended at all; `'main'` appends nothing, so a request
         // written before this field existed composes the byte-identical
         // prompt it composed then. See resolveBase's doc comment for why
         // proving is the rule here where its two neighbours merely clamp.
-        ...(base === 'main' ? [] : ['--base', base])
+        ...(base === 'main' ? [] : ['--base', base]),
+        // After `--base`, and the second caller-derived value in this prompt: the person picked it, but what is appended is `reviewFlags` of the config
+        // `parseReviewOverride` accepted — fixed flag names and closed-list or integer values — never the body's own text. Absent appends nothing, so a
+        // request without a pick composes the byte-identical prompt it did before.
+        ...(review === undefined ? [] : reviewFlags(review))
       ].join(' '),
       // Unlike dispatch, which names a session after the one item it is
       // working (sessionName, prompt.util.ts), there is no item here to

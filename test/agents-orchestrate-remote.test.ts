@@ -16,7 +16,7 @@ import { GithubClient } from '../server/src/tracker/github.client';
 import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { DEFAULT_MODEL } from '../shared/agent';
-import type { OrchestratorRun, RemoteRun } from '../shared/types';
+import type { OrchestratorRun, RemoteRun, ReviewConfig } from '../shared/types';
 import { FakeGithub, FAKE_REPO } from './helpers/github';
 import { listenLoopback } from './helpers/app';
 import { makeProject, makeRegistry, writeRunFile } from './helpers/store';
@@ -248,6 +248,22 @@ describe('POST /api/agents/orchestrate with a machine', () => {
       await start();
       await post({ project: trackerPath, machine: 'Pro' }).expect(201, { sessionId: 'sess-pro' });
       expect((JSON.parse(spawnsOf(pro)[0].body) as { prompt: string }).prompt).toBe('/backlog-orchestrate --merge-mode pr');
+    });
+
+    // The override is validated HERE and travels to Pro as trigger text; Pro's own review.json applies only when none is sent (the case above).
+    it('a review travels as flags after --merge-mode pr', async () => {
+      await start();
+      const review: ReviewConfig = {
+        mode: 'same',
+        same: { model: 'opus', effort: 'max' },
+        big: { model: null, effort: null },
+        small: { model: 'sonnet', effort: null },
+        smallMaxLines: 300
+      };
+      await post({ project: trackerPath, machine: 'Pro', review }).expect(201, { sessionId: 'sess-pro' });
+      expect((JSON.parse(spawnsOf(pro)[0].body) as { prompt: string }).prompt).toBe(
+        '/backlog-orchestrate --merge-mode pr --review-mode same --review-model opus --review-effort max'
+      );
     });
   });
 

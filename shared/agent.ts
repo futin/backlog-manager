@@ -946,9 +946,15 @@ export const FINISH_FLAG = /(?<![\w-])--(finish|base|auto-merge|fix)(?![\w-])/;
  * is, the board's own untouched execute or groom prompt would trip rule 8 on its quoted title and 400 the default dispatch. The `--` of each flag token (all
  * four `FINISH_FLAG` names, `--auto-merge` and `--fix` included) becomes two U+2011 NON-BREAKING HYPHENs: a person reads the same title, while neither rule 8
  * nor the skill's flag parser sees a flag. Only the title goes through this — a token a person TYPES into the body is still refused.
+ *
+ * A `REVIEW_FLAG` token (`--review-mode`, `--review-small-max-lines`, …) gets the same swap: the reviewer override is refused in a typed body beside the four
+ * finish flags, so a title spelling one would otherwise 400 the board's own untouched prompt — and, unrefused, would reach the skill's parser as a reviewer the
+ * person never picked. The swap keeps everything after the `--`, so the visible words are unchanged.
  */
 export function defuseFinishFlags(text: string): string {
-  return text.replace(new RegExp(FINISH_FLAG.source, 'g'), (_m, flag: string) => `\u2011\u2011${flag}`);
+  return text
+    .replace(new RegExp(FINISH_FLAG.source, 'g'), (_m, flag: string) => `\u2011\u2011${flag}`)
+    .replace(new RegExp(REVIEW_FLAG.source, 'g'), (m: string) => `\u2011\u2011${m.slice(2)}`);
 }
 
 /**
@@ -1007,19 +1013,24 @@ export const COMMIT_RULE =
  * order. "The skill never merges itself" holds because the skill never runs a `gh pr merge` without `--auto`, and arms only once GitHub would gate the merge
  * (`mergeStateStatus` `BLOCKED` or `BEHIND`) or the PR's checks have passed — gh merges an already-mergeable PR at once instead of arming, so on a repository
  * with no branch protection the arming call waits for the checks, and the merge it triggers is still GitHub's, after them.
+ *
+ * `review` (a reviewer override the server has already run through `parseReviewConfig`) appends its `reviewFlags` last inside the same backticks, after
+ * `--base` and after `--auto-merge [--fix]`, so the skill's parser reads them with the rest; the prose never names them. Absent, the clause is byte-identical
+ * to what it was before the override existed.
  */
 export function finishClause(action: FinishAction, finish: ExecuteFinish, base: string, flags: FinishFlags = {}): string {
   if (finish === 'in-place') return COMMIT_RULE;
   const autoMerge = flags.autoMerge === true;
   const fix = autoMerge && flags.fix === true;
   const reviews = action === 'execute' ? 'reviews, ' : '';
+  const reviewText = flags.review ? ` ${reviewFlags(flags.review).join(' ')}` : '';
   if (!autoMerge) {
-    return `Finish with \`--finish pr --base ${base}\`: the skill commits, ${reviews}pushes and opens the PR into ${base}, and never merges.`;
+    return `Finish with \`--finish pr --base ${base}${reviewText}\`: the skill commits, ${reviews}pushes and opens the PR into ${base}, and never merges.`;
   }
   const flagText = fix ? ' --auto-merge --fix' : ' --auto-merge';
   const meanwhile = fix ? `, fixing failing checks and conflicts with ${base} meanwhile` : '';
   return (
-    `Finish with \`--finish pr --base ${base}${flagText}\`: the skill commits, ${reviews}pushes, opens the PR into ${base} and arms GitHub auto-merge if the ` +
+    `Finish with \`--finish pr --base ${base}${flagText}${reviewText}\`: the skill commits, ${reviews}pushes, opens the PR into ${base} and arms GitHub auto-merge if the ` +
     `repository allows it, then waits for GitHub to merge it${meanwhile}; the skill never merges itself.`
   );
 }

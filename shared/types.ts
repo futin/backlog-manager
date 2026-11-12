@@ -1269,6 +1269,12 @@ export interface AgentDispatchRequest {
   autoMerge?: boolean;
   fix?: boolean;
   /**
+   * The sheet's Reviewer picker, sent only when it differs from the saved setting (`review.json`). Legal only for an `execute` whose DERIVED finish is `pr` —
+   * a remote execute derives `pr` without sending `finish` — and a 400 on any other launch, groom included. Validated with `parseReviewConfig` and composed
+   * into the finish clause's backticks by `reviewFlags`, never copied from caller text; absent leaves the clause byte-identical to what it was before.
+   */
+  review?: ReviewConfig;
+  /**
    * The machine to start on: a configured remote's name. Absent or `home` is this machine and produces the spawn request it always has; the client omits it
    * for home. An unknown name is a 400.
    */
@@ -1350,6 +1356,12 @@ export interface StartOrchestrateRequest {
    * request is made.
    */
   machine?: string;
+  /**
+   * The sheet's Reviewer picker, sent only when it differs from the saved setting. The server validates it with `parseReviewConfig` (a 400 naming the bad
+   * member otherwise) and appends `reviewFlags` after the ids, the mode flags and `--base` — the second caller-derived value in the prompt beside `base`, and
+   * like it composed from a validated value, never from caller text. Absent appends nothing, so the prompt is byte-identical to what it was before.
+   */
+  review?: ReviewConfig;
 }
 
 /**
@@ -1591,6 +1603,8 @@ export type FinishAction = 'execute' | 'groom';
 export interface FinishFlags {
   autoMerge?: boolean;
   fix?: boolean;
+  /** A validated reviewer override (`parseReviewConfig`): its `reviewFlags` go inside the clause's backticks, after `--auto-merge [--fix]`. */
+  review?: ReviewConfig;
 }
 
 /**
@@ -2275,6 +2289,12 @@ export interface OrchestratorRun {
    * The server reads the run file but does nothing with this field.
    */
   driver?: { sessionId: string; at: string; aborting?: string } | null;
+  /**
+   * The reviewer this run's reviews used, as `init` recorded it from the run's review flags. Optional: a run file written before reviewer configuration
+   * existed lacks it, and absent renders as "Reviewer: default". The server's run sanitiser keeps it only when `parseReviewConfig` accepts it, so a
+   * hand-edited or half-written record reads back as absent rather than reaching the client in a shape `reviewerLabel` cannot name.
+   */
+  reviewConfig?: ReviewConfig;
   queue: RunQueueItem[];
   attention: RunAttention[];
 }

@@ -1,6 +1,7 @@
 import {
   AGENT_ACTIONS,
   COMMIT_RULE,
+  DEFAULT_REVIEW_CONFIG,
   EFFORTS,
   MODELS,
   PERMISSION_LADDER,
@@ -1158,7 +1159,8 @@ describe('finishClause', () => {
      Asserted on the text outside the backticks — no `--` at all there — so the flagless sets, where a per-match loop would have nothing to iterate, still
      assert something. */
   it('flags only inside the backticks', () => {
-    const flagSets = [{}, { autoMerge: true }, { autoMerge: true, fix: true }, { fix: true }];
+    const review = DEFAULT_REVIEW_CONFIG;
+    const flagSets = [{}, { autoMerge: true }, { autoMerge: true, fix: true }, { fix: true }, { review }, { autoMerge: true, review }, { autoMerge: true, fix: true, review }];
     for (const action of ['execute', 'groom'] as const) {
       for (const flags of flagSets) {
         const clause = finishClause(action, 'pr', 'main', flags);

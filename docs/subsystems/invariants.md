@@ -1642,7 +1642,7 @@ its `trigger:`, so the constant is that declaration, not an invention on the ser
 derived action (groom vs. execute) is a client-editable default the launch sheet composes and a human reader may reword before sending; `orchestrate` has no
 equivalent decision to leave open — it always means the same thing, "hand this project's whole groomed queue to the skill," so there is nothing legitimate for a
 caller to vary. `AgentOrchestrateRequest` (the body shape `POST /api/agents/orchestrate` accepts) has no `prompt` field to begin with, and `AgentsController`'s
-handler rebuilds the service call field by field from `project`, `model`, `effort`, `permissionMode`, `ids`, `mergeMode`, `questionMode` and `base` alone — so a
+handler rebuilds the service call field by field from `project`, `model`, `effort`, `permissionMode`, `ids`, `mergeMode`, `questionMode`, `base` and `review` alone — so a
 `prompt` sent in the request body is not validated and rejected, it is simply never read. That is the same mechanism `dispatch` already relies on for every field outside its own request type,
 applied here to the one field that would otherwise be the sole way an attacker-controlled cross-origin request could make an unattended, headless session do
 anything at all.
@@ -1694,8 +1694,13 @@ check than its sibling: `resolveMergeMode` takes the project and answers a 400 w
 The fourth is `base` (task-44), and it is the loosest of the four in form: it appends the caller's OWN text, ` --base <ref>`, where the other two append
 literals. What makes it acceptable is that `resolveBase` proves it the way `resolveIds` proves an id — a ref-name check, then membership in this project's own
 local branches — before anything is composed. Its default `'main'` appends nothing, like the other two. Order is ids, then `--merge-mode`, then
-`--question-mode`, then `--base`: ids first because the tool reads bare tokens as ids and a flag ahead of them would swallow the first one, and each later flag
-appended after the ones that predate it so every prompt this endpoint composed before a given field existed stays a byte-exact prefix of what it composes now.
+`--question-mode`, then `--base`, then the review flags: ids first because the tool reads bare tokens as ids and a flag ahead of them would swallow the first
+one, and each later flag appended after the ones that predate it so every prompt this endpoint composed before a given field existed stays a byte-exact prefix
+of what it composes now.
+
+The review flags are the second caller-derived value beside `base`. The Reviewer picker sends `review`, a `ReviewConfig`, only when it differs from the saved
+setting; `parseReviewConfig` validates it (a 400 `review: <member> is not a valid reviewer setting` otherwise), and what is appended is `reviewFlags` of the
+validated config — fixed `--review-*` names and values from closed lists or an integer range — never the caller's text. Absent appends nothing.
 
 **The Jira prompt (phase 5) is the second composed prompt, and the first whose subject is text written by a stranger.** Unless the person edits it (below),
 the session is told whatever `composeJiraPrompt` (`server/src/jira/prompt.util.ts`) returns, and that is ONE function with two callers — `GET /api/jira/prompt`
@@ -1721,8 +1726,8 @@ spawns it as written, skipping the composition — whose refusal would be about 
 read and chose to send, under the permission mode they picked. An absent `prompt` is the composed launch byte for byte.
 **Item `dispatch` stays the exception to the
 whole rule:** its prompt is the launch sheet's text, which a human edits before sending, and is the one field taken outright
-— save an execute's or a groom's finish clause, which is appended server-side from the validated `finish`/`base`/`autoMerge`/`fix` fields, after the
-body, and never travels in the editable text.
+— save an execute's or a groom's finish clause, which is appended server-side from the validated `finish`/`base`/`autoMerge`/`fix` fields (and, for an
+execute finishing with a PR, a validated `review`), after the body, and never travels in the editable text.
 
 **An execute's or a groom's finish clause is the third server-composed piece, beside the orchestrate trigger's flags and the Jira prompt.**
 `finishClause(action, finish, base, flags)` (`shared/agent.ts`) is the whole of it: ` --finish pr --base <base>` plus its sentence for `pr` — an execute's says
@@ -1730,11 +1735,16 @@ it reviews, a groom's does not — and today's `COMMIT_RULE` for `in-place`, bui
 proved the way the orchestrate `base` is (`proveBaseBranch`) and only ever sent under `pr`. `flags` is `{ autoMerge, fix }`: `autoMerge` adds ` --auto-merge`
 and an arm-then-wait sentence, `fix` adds ` --fix` and is read only beside `autoMerge`. Both are validated booleans, accepted only with finish `pr` (`fix` only
 with `autoMerge`), so a lone `fix` or a flag under `in-place` is a 400 rather than a clause that lies; `false` is an untouched toggle and is accepted anywhere.
+`flags.review` is the Reviewer picker's override: accepted only for an execute whose DERIVED finish is `pr` (a remote execute's is, with no `finish` sent) —
+any other launch carrying it, groom included, is a 400 — then run through `parseReviewConfig`, and its `reviewFlags` go last inside the backticks, after
+`--base` and `--auto-merge [--fix]`, where the skill's parser reads them; the prose never names one.
 A groom names its finish only on the home machine — one sent to another machine has none, a 400. The plan's execute and groom prompts carry no closing clause at
 all (`composePrompt` no longer appends `COMMIT_RULE` to a groom; `finishClause` does, byte for byte, under `in-place`), so the sheet's textarea holds the body
 alone and the clause sits read-only below it: deleting ` --finish pr` from an editable box would otherwise silently turn a PR run into an in-place one. For
 the same reason an execute or groom body spelling `--finish`, `--base`, `--auto-merge` or `--fix` (bare, quoted or backticked — a word character or hyphen on
-either side is what spares `--finished` and `--base-ref`) is a 400 rather than being merged with the clause. An old client that sends no `finish` is treated as
+either side is what spares `--finished` and `--base-ref`) is a 400 rather than being merged with the clause, and so is one spelling a `--review-` flag
+(`REVIEW_FLAG`, which spares `--reviewed` and `--preview-x`); `defuseFinishFlags` swaps either kind of token in an item title for two U+2011s, so the board's
+own untouched prompt never trips the refusal. An old client that sends no `finish` is treated as
 in-place and gets `COMMIT_RULE` appended even if an execute's prompt already ends with it — a doubled sentence, harmless, and never a 400; a groom body's one
 trailing copy is stripped first, so an old tab's groom sends the bytes it always did.
 

@@ -14,8 +14,10 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   [invariants.md](docs/subsystems/invariants.md#a-board-started-run-is-visible-before-its-run-file-exists)
 - **Dispatch derives the action; it never accepts one.** `deriveAction` (`shared/agent.ts`) is the single implementation for the board's label and the server's
   validation; dispatch re-scans the file and 409s on disagreement. The prompt is the only client field taken outright
-  (one exception: an execute's or a groom's finish clause is appended server-side from the validated `finish`/`base`/`autoMerge`/`fix` fields, and an execute
-  or groom body spelling `--finish`, `--base`, `--auto-merge` or `--fix` is a 400); unknown `model`/`effort` drop rather than
+  (one exception: an execute's or a groom's finish clause is appended server-side from the validated `finish`/`base`/`autoMerge`/`fix` fields — plus, for an
+  execute whose derived finish is `pr` alone, `reviewFlags` of a `review` that `parseReviewConfig` accepted, inside the backticks after `--auto-merge [--fix]`
+  (`review` anywhere else, groom included, is a 400) — and an execute or groom body spelling `--finish`, `--base`, `--auto-merge`, `--fix` or a `--review-`
+  flag (`REVIEW_FLAG`) is a 400; `defuseFinishFlags` swaps both kinds of token in an item title); unknown `model`/`effort` drop rather than
   reject; the controller rebuilds the body field by field and checks `action` with `isAgentAction`, never a hand-written comparison chain. `AgentAction` has
   three members and ONE check runs ahead of all of them: `capture` is derived for an out-of-scope item by SECTION, before the `status !== 'open'` check; a
   `done/` item still derives `null`; capture spawns `backlog-capture` for a **new** item citing `from: <id>`, and `moveItem` still refuses every move out of
@@ -41,10 +43,11 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   else, in this order: `ids` first (each proven by `isItemId` and a per-project scan; 400 for a malformed list, 409 for a disagreeing one; absent means the whole
   queue, explicitly empty is a 400) — ids must stay first, because bare tokens parse as ids and a flag ahead of them swallows the first one — then the
   compile-time literals ` --merge-mode branch` or ` --merge-mode pr` (`pr` a 400 for a project whose source is not `github`) and ` --question-mode decide`,
-  then ` --base <ref>`. Each is appended only off its guard and each default appends
+  then ` --base <ref>`, then the review flags. Each is appended only off its guard and each default appends
   nothing. **They are not all the same kind of safe**: the two mode flags append compile-time literals, so no caller character reaches the prompt, while `base`
-  is the one member whose caller text is appended verbatim and is therefore *proved* (`resolveBase`) rather than clamped. Do not restore any claim that every
-  appended flag is a literal. **The Jira prompt is the same shape, widened:** unless `POST /api/agents/dispatch-jira`'s body (`JiraAgentsController`, which rebuilds it
+  is the one member whose caller text is appended verbatim and is therefore *proved* (`resolveBase`) rather than clamped. The review flags are the second
+  caller-derived value beside `base`: `reviewFlags` of a `ReviewConfig` that `parseReviewConfig` validated (a 400 naming the member otherwise), never caller
+  text — fixed flag names and closed-list or integer values. Do not restore any claim that every appended flag is a literal. **The Jira prompt is the same shape, widened:** unless `POST /api/agents/dispatch-jira`'s body (`JiraAgentsController`, which rebuilds it
   field by field) carries the launch sheet's EDITED `prompt` — sent only once the box was edited, shape-checked alone (a non-empty string, at most
   `JIRA_PROMPT_MAX`, else 400 `prompt must be a non-empty string` / `prompt too long` before any Jira write), and spawned as written with no composition
   run, the link, worktree choice and writes still following the other fields — the session is handed `composeJiraPrompt`'s text (`server/src/jira/prompt.util.ts`), the one function behind

@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Injectable } from '@nestjs/common';
 
-import { isMergeMode, isPrUrl } from '../../../shared/agent';
+import { isMergeMode, isPrUrl, parseReviewConfig } from '../../../shared/agent';
 import { RUN_STALE_MS } from '../../../shared/types';
 import type { OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload } from '../../../shared/types';
 import { pauseRequestEffective, readPauseRequest, stopRequestEffective } from './pause-control.util';
@@ -111,10 +111,18 @@ function isPlausibleRun(value: unknown): value is OrchestratorRun {
  * lying about where that work actually landed. Validating a base against the
  * repository is `POST /api/agents/orchestrate`'s job, on the way in, where the
  * value is still an instruction (`resolveBase`, orchestrate-args.service.ts).
+ *
+ * `reviewConfig` is the seventh and the one that degrades by ABSENCE rather than to a value: the type declares it optional and absent already renders as
+ * "Reviewer: default", so a record `parseReviewConfig` refuses is removed instead of replaced. Held to the same strict parser the launch route uses, because
+ * `reviewerLabel` names its members on the client and a half-written record would read as a reviewer nobody chose. A valid one is kept as the parser's
+ * normalised copy, so no stray key in the file rides along.
  */
 function sanitizeMergeFields(run: OrchestratorRun): OrchestratorRun {
+  const { reviewConfig, ...rest } = run;
+  const parsed = reviewConfig === undefined ? null : parseReviewConfig(reviewConfig);
   return {
-    ...run,
+    ...rest,
+    ...(parsed?.ok ? { reviewConfig: parsed.config } : {}),
     mergeMode: isMergeMode(run.mergeMode) ? run.mergeMode : 'merge',
     mergeModeEffective: isMergeMode(run.mergeModeEffective) ? run.mergeModeEffective : 'merge',
     mergeModeNote: typeof run.mergeModeNote === 'string' ? run.mergeModeNote : null,
