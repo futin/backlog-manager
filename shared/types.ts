@@ -3573,3 +3573,9 @@ export interface ReleasesResponse {
   /** Newest first. */
   releases: Release[];
 }
+
+/**
+ * A merge request's pipeline folded to the five states the board draws (GitLab connection spec §6.3). `none` covers both "no pipeline" and every status the
+ * board has no word for (`skipped`, `manual`, `scheduled`, a status GitLab adds later) — an unknown status must read as absent, never as passing.
+ */
+export type GitlabPipeline = 'success' | 'failed' | 'running' | 'canceled' | 'none';
