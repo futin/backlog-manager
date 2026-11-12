@@ -281,6 +281,33 @@ describe('the Sessions page', () => {
     expect(screen.queryByText(/this board only/)).toBeNull();
   });
 
+  /*
+    A session run on a sub-task's parent story (`Run on`, #499) is linked to the PARENT's key, and the parent is usually on no board — so with All tickets off
+    the person's own running session vanished from Sessions. A parent of a sub-task the board holds is in scope, marked `via <SUB-TASK>`; a story's epic is
+    not (the `Run on` toggle's own condition: only a sub-task's parent owns its branch).
+  */
+  it('a session on the off-board parent of a sub-task on the board is in scope with All tickets off, marked via the sub-task', async () => {
+    const sub: JiraIssue = { ...issue('PAY-160', 'Refund sub-task'), type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-100', summary: 'Refunds story' } };
+    const story: JiraIssue = { ...issue('PAY-170', 'Story under an epic'), parent: { key: 'EP-1', summary: 'Payments epic' } };
+    lists = { ...lists, [ALPHA.id]: [...Object.values(ISSUES), sub, story] };
+    links = [
+      link({ key: 'PAY-100', id: 'par1', state: 'working', startedAt: hoursAgo(1), summary: 'Refunds story' }),
+      link({ key: 'EP-1', id: 'epic1', state: 'working', startedAt: hoursAgo(2), summary: 'Payments epic' })
+    ];
+    await renderList();
+    await waitFor(() => expect(rowTags()).toEqual(['PAY-100:working']));
+    const row = screen.getByRole('row', { name: 'Session on PAY-100' });
+    expect(row).toHaveTextContent('Refunds story');
+    expect(row).toHaveTextContent('via PAY-160');
+    expect(screen.queryByText('Payments epic')).toBeNull();
+
+    // All tickets on: the epic's session joins, unmarked; the parent keeps its mark.
+    await userEvent.click(within(await filters()).getByRole('button', { name: 'All tickets' }));
+    await waitFor(() => expect(rowTags()).toEqual(['PAY-100:working', 'EP-1:working']));
+    expect(screen.getByRole('row', { name: 'Session on EP-1' })).not.toHaveTextContent(/via /);
+    expect(screen.getByRole('row', { name: 'Session on PAY-100' })).toHaveTextContent('via PAY-160');
+  });
+
   it('an ended row gets Reopen, and Run ▾ when the ticket has only a live branch link', async () => {
     links = [
       link({ key: 'PAY-131', id: 'b1', state: 'working', startedAt: hoursAgo(2), how: 'branch', branch: 'feat/refund-partial' }),
