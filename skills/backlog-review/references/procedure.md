@@ -102,7 +102,9 @@ after that is the result — there is no second retry; the caller says so with t
 
 ## 5. Re-review after a fix
 
-Both callers' fix loops, and a standalone re-review after a fix, re-review with the previous round's manifest instead of a fresh partition:
+The two gates' fix loops — `backlog-orchestrate` §7 and `backlog-execute`'s `pr`-mode §7 — re-review with the previous round's manifest instead of a fresh
+partition. A standalone `/backlog-review` never does: its re-review after a fix is a fresh incremental `scope` (§1 with `mode` absent), because after an
+incremental first review `--previous` would put every file of the branch outside that increment into group 1.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-review/tools/review.mjs" scope --tree <tree> --base <base> --out <new manifest path> \

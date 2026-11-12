@@ -273,7 +273,8 @@ parts of this diff have already been looked at.>
 - **Location.** A finding opens with `<path>:<line> — `: the path relative to the tree's root, exactly as the manifest spells it, one line number (no range,
   no `L` prefix), then a spaced em dash. A finding about the item as a whole, with no line to point at, leaves the location out.
 - **`anchor:`** — on every Critical and Important, an indented line `anchor: <path> | <code>`, where `<code>` is **one whole line** copied from
-  `git -C <worktree> show <to>:<path>`. `merge` compares it against every line of that file with surrounding whitespace trimmed, so a fragment of a line
+  `git -C <worktree> show <to>:<path>`, written as the raw line text — never wrapped in backticks or quotes, which `merge` would compare as part of the
+  line. `merge` compares it against every line of that file with surrounding whitespace trimmed, so a fragment of a line
   never matches; a line that occurs several times resolves to the occurrence nearest your `<line>`. The resolved line, not your claimed one, is what a fixer
   is sent to, so a quote that matches nothing leaves the finding marked `(unanchored)` — kept at its severity, but pointing at a guess. For code the change
   deleted, quote the nearest surviving line in `to` and say in the text that the code was removed; for a file deleted outright, quote the line from `from`
