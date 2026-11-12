@@ -15,6 +15,7 @@ import { setJiraView } from '../client/src/hooks/useJiraView';
 import { elapsedSince } from '../client/src/lib/item-age';
 import { JIRA_BOARD_KEY, JIRA_FILTERS_KEY, bandSub } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
+import { NoGitlab } from './helpers/no-gitlab';
 import { daysAgoStamp } from './helpers/dates';
 import { JIRA_BUILTIN_LABELS, type AgentsStatus, type DashboardRow, type JiraBoardStatus, type JiraIssue, type JiraLiveSession, type JiraStatusPayload } from '../shared/types';
 
@@ -225,7 +226,8 @@ function renderPage(): void {
   render(
     <JiraProvider>
       <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={onOpenIssue} onRun={jest.fn()} nudge={0} />
-    </JiraProvider>
+    </JiraProvider>,
+    { wrapper: NoGitlab }
   );
 }
 
@@ -619,7 +621,8 @@ describe('the shapes that are not a board', () => {
     render(
       <JiraProvider>
         <JiraBoardView onOpenJiraPage={setJiraPage} onOpenIssue={onOpenIssue} onRun={jest.fn()} nudge={0} />
-      </JiraProvider>
+      </JiraProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByText('No boards yet');
     expect(screen.queryByRole('button', { name: /Pick a Jira board/ })).toBeNull();
@@ -650,7 +653,8 @@ it('draws no page switch inside main', async () => {
           <JiraView onOpenJiraPage={jest.fn()} />
         </JiraSessionsProvider>
       </JiraProvider>
-    </main>
+    </main>,
+    { wrapper: NoGitlab }
   );
   await screen.findByText('Refund partial captures');
   const main = document.querySelector('main') as HTMLElement;
@@ -899,7 +903,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
             <JiraView onOpenJiraPage={jest.fn()} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByText(firstCard);
   }
@@ -1294,7 +1299,8 @@ describe('worktree chips on the card', () => {
             <JiraView onOpenJiraPage={jest.fn()} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByText('Refund partial captures');
   }
@@ -1384,7 +1390,8 @@ describe('the agent deck and the status shelves', () => {
             <JiraView onOpenJiraPage={jest.fn()} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByText(firstText);
   }
@@ -1560,7 +1567,8 @@ describe('the issue List', () => {
             <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={onOpenIssue} onRun={jest.fn()} nudge={0} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByRole('table');
   }
@@ -1712,7 +1720,8 @@ describe('the issue List', () => {
             <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={jest.fn()} onRun={jest.fn()} nudge={0} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     expect(await screen.findByText('No issues')).toBeInTheDocument();
   });
@@ -1754,7 +1763,8 @@ describe('Run on: a sub-task runs its parent from the card and the List cell', (
             <JiraView onOpenJiraPage={jest.fn()} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByText('Prepare refund TODOs');
   }

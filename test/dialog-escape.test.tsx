@@ -39,6 +39,7 @@ import { JiraContext } from '../client/src/hooks/JiraContext';
 import { useDialogEscape } from '../client/src/hooks/useDialogEscape';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
+import { NoGitlab } from './helpers/no-gitlab';
 import type { AgentsStatus, BacklogItem, ItemsIndex, JiraIssue, JiraStatusPayload, OrchestratorRunsPayload, ProjectSummary, ReleasesResponse } from '../shared/types';
 import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
 
@@ -304,7 +305,9 @@ describe('the six dialogs on the stack', () => {
       render(
         <JiraContext.Provider value={jira}>
           <JiraDetail issue={JIRA_CARD} childrenOf={null} onOpenIssue={() => {}} back={null} onBack={() => {}} onWrote={() => {}} onRun={() => {}} onClose={close[3]} />
-        </JiraContext.Provider>
+        </JiraContext.Provider>,
+        // Detail's Delivery pane reads the shell's GitLab answer; a pending one draws nothing and fetches nothing.
+        { wrapper: NoGitlab }
       ),
       render(
         <JiraContext.Provider value={jira}>

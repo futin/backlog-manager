@@ -16,6 +16,7 @@ import { formatCreated } from '../client/src/lib/item-age';
 import { pollAge } from '../client/src/lib/tracker';
 import type { JiraChildrenIndex } from '../client/src/lib/jira';
 import { daysAgoStamp } from './helpers/dates';
+import { NoGitlab } from './helpers/no-gitlab';
 import { JIRA_BUILTIN_LABELS, type AgentsStatus, type DashboardRow, type JiraLink, type JiraSessionsPayload, type JiraAction, type JiraBoardStatus, type JiraIssue, type JiraIssueDetail, type JiraStatusPayload } from '../shared/types';
 
 /**
@@ -162,7 +163,10 @@ function mount(
           />
         </JiraSessionsContext.Provider>
       </JiraContext.Provider>
-    </SettingsProvider>
+    </SettingsProvider>,
+    // The Delivery pane reads the shell's GitLab answer, which throws outside a provider: a pending one draws no pane and costs no fetch. A `wrapper`, so a
+    // `rerender` keeps it.
+    { wrapper: NoGitlab }
   );
 }
 
@@ -1229,7 +1233,8 @@ describe('JiraView — the open-issue slot draws the modal', () => {
         <JiraSessionsProvider open>
           <JiraView onOpenJiraPage={jest.fn()} />
         </JiraSessionsProvider>
-      </JiraContext.Provider>
+      </JiraContext.Provider>,
+      { wrapper: NoGitlab }
     );
 
     await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
@@ -1259,7 +1264,8 @@ describe('JiraView — the open-issue slot draws the modal', () => {
             <JiraView onOpenJiraPage={jest.fn()} />
           </JiraSessionsProvider>
         </JiraContext.Provider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
 
     await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
@@ -1328,7 +1334,8 @@ describe('JiraView — the open-issue slot draws the modal', () => {
         <JiraSessionsProvider open>
           <JiraView onOpenJiraPage={jest.fn()} />
         </JiraSessionsProvider>
-      </JiraContext.Provider>
+      </JiraContext.Provider>,
+      { wrapper: NoGitlab }
     );
     return requested;
   }
@@ -1423,7 +1430,8 @@ describe('JiraView — the open-issue slot draws the modal', () => {
         <JiraSessionsProvider open>
           <JiraView onOpenJiraPage={jest.fn()} />
         </JiraSessionsProvider>
-      </JiraContext.Provider>
+      </JiraContext.Provider>,
+      { wrapper: NoGitlab }
     );
     await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
     await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' });

@@ -1508,6 +1508,61 @@ button.rail-count { cursor: pointer }
 .jira-move-row > svg { flex: none; color: var(--green) }
 .jira-move-note { padding: 6px 10px 4px; margin-top: 4px; border-top: 1px solid var(--hairline2); font-size: 11px; color: var(--ink3) }
 .jira-detail-pane .jira-modal-error { margin-top: 12px }
+/* The Delivery pane (GitLab connection spec §7.1, `OptionC.dc.html`): a `.jira-detail-pane` in the Agent column holding the head (label, `!iid ↗`, `via`,
+   `<repo> → <target>`, `polled <age>` pushed right — wrapping rather than clipping in the column's width), the track, and the `Also:` line under a hairline.
+   The mock's 480 px column is its own artefact; the column keeps Detail's width (spec §7.1), so the head wraps and the step words wrap under their dots. */
+.jira-dlv { display: flex; flex-direction: column; gap: 14px }
+.jira-dlv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0 }
+.jira-dlv-link { font-size: 13px; font-weight: 600; color: var(--cyan); text-decoration: none; white-space: nowrap }
+.jira-dlv-link:hover { text-decoration: underline }
+.jira-dlv-link.small { font-size: 12px }
+.jira-dlv-via { font-size: 12px; font-weight: 500; color: var(--ink2) }
+.jira-dlv-meta { font-size: 12px; color: var(--ink3) }
+.jira-dlv-target { min-width: 0; overflow-wrap: anywhere }
+.jira-dlv-polled { margin-left: auto; white-space: nowrap }
+.jira-dlv-none { margin: 0; font-size: 13px; color: var(--ink3) }
+/* The track (`DeliveryTrack`), §8.4.3's language at the mock's size: equal columns, a 22 px dot per step on a 2 px rail, the step's label at 12/500 and its
+   word at 12 `--ink3` under it. The rail INTO a step is drawn by that step, from the previous column's centre to its own (`right: 50%`, one column wide),
+   behind the dot. A mark is a fill and a ring together, never a shade alone: reached is `--fill-progress`, the pipeline's verdicts the palette's
+   green/red/amber, merged `--magenta`, draft/canceled/closed `--ink3`, and not reached a hollow `--hairline2` ring. The glyph ink follows the fill: `--on-fill`
+   over the bright fills, `--on-accent` over red and magenta, which are the dark ones in daylight and the light ones in the dark themes — the same flip. That ink is set in the fill's own rule, so
+   `daylight-contrast` reads it as reverse type on the fill and not as a word on the pane. */
+.jira-dlv-track { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr) }
+.jira-dlv-step { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; text-align: center }
+.jira-dlv-step > .jira-dlv-bar { position: absolute; top: 10px; right: 50%; width: 100%; height: 2px }
+.jira-dlv-dot {
+  position: relative; display: grid; place-items: center; flex: none; width: 22px; height: 22px; box-sizing: border-box; border-radius: 50%;
+  color: var(--on-fill)
+}
+.jira-dlv-dot[data-mark='on'], .jira-dlv-bar[data-mark='on'] { background: var(--fill-progress) }
+.jira-dlv-dot[data-mark='green'], .jira-dlv-bar[data-mark='green'] { background: var(--green-solid) }
+.jira-dlv-dot[data-mark='amber'], .jira-dlv-bar[data-mark='amber'] { background: var(--amber-solid) }
+.jira-dlv-dot[data-mark='red'] { background: var(--red); color: var(--on-accent) }
+.jira-dlv-bar[data-mark='red'] { background: var(--red) }
+.jira-dlv-dot[data-mark='magenta'] { background: var(--magenta); color: var(--on-accent) }
+.jira-dlv-bar[data-mark='magenta'] { background: var(--magenta) }
+.jira-dlv-dot[data-mark='grey'], .jira-dlv-bar[data-mark='grey'] { background: var(--ink3) }
+.jira-dlv-dot[data-mark='off'] { background: var(--strip); border: 2px solid var(--hairline2) }
+.jira-dlv-bar[data-mark='off'] { background: var(--hairline2) }
+.jira-dlv-step-label { font-size: 12px; font-weight: 500; color: var(--ink) }
+.jira-dlv-step-label[data-mark='off'] { color: var(--ink3) }
+.jira-dlv-step-word { font-size: 12px; color: var(--ink3); overflow-wrap: anywhere }
+/* The compact track (the List's Delivery cell): the same marks at 8 px dots on 6 px rails, inline, with no labels — the cell's word says them. */
+.jira-dlv-track.compact { display: inline-flex; align-items: center; vertical-align: middle }
+.jira-dlv-cell { display: inline-flex; align-items: center }
+.jira-dlv-track.compact .jira-dlv-dot { width: 8px; height: 8px }
+.jira-dlv-track.compact .jira-dlv-dot[data-mark='off'] { border-width: 1.5px }
+.jira-dlv-track.compact .jira-dlv-bar { width: 6px; height: 2px }
+/* `Also:` — the other MRs, each its link, its state word on a tint of its tone (the `Pill` shape, page-local because `Pill` has no magenta), and
+   `<repo> · <age>`. */
+.jira-dlv-also { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding-top: 10px; border-top: 1px solid var(--hairline) }
+.jira-dlv-also-mr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0 }
+.jira-dlv-word { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 500; white-space: nowrap }
+.jira-dlv-word[data-tone='green'] { color: var(--green); background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)) }
+.jira-dlv-word[data-tone='red'] { color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--strip)) }
+.jira-dlv-word[data-tone='amber'] { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
+.jira-dlv-word[data-tone='magenta'] { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 14%, var(--strip)) }
+.jira-dlv-word[data-tone='grey'] { color: var(--ink2); background: var(--strip-hi) }
 /* The Agent band (restyle §4.4): the pane's own ground, 12 px radius, 16 px padding. Its row is the Run menu's positioning parent, so the panel hangs from the
    row (right edges aligned) and not from the band's foot; the wrapper's own `position: relative` is switched off for it. */
 .jira-detail-agent-band { display: flex; flex-direction: column; gap: 12px; background: var(--strip); border-radius: 12px; padding: 16px; min-width: 0 }
