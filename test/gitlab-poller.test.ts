@@ -442,6 +442,16 @@ describe('GitlabPollerService — rate limit and sweepNow', () => {
     expect(await h.svc.sweepNow()).toEqual({ kind: 'not-armed' });
   });
 
+  it('sweepNow() joins the re-arm sweep an arm() that landed mid-sweep started, rather than answering not-armed', async () => {
+    const h = setup({ repos: {} });
+    h.fake.script.set('/api/v4/user', { delay: 50 });
+    h.svc.arm(); // sweep 1 starts, derives an empty mapping, then waits on the identity read
+    h.setRepos({ TIMIFY: ['/repos/microservice'] });
+    h.svc.arm(); // lands mid-sweep: sweep 1 will disarm, then re-arm itself
+    expect(await h.svc.sweepNow()).toEqual({ kind: 'done' });
+    expect(h.svc.armed).toBe(true);
+  });
+
   it('sweepNow() on an armed poller sweeps again', async () => {
     const h = setup();
     await boot(h);

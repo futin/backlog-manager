@@ -206,10 +206,11 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
     if (retryAt !== null) return { kind: 'wait', retryAt };
     if (this.inFlight !== null) {
       const finished = await this.bounded(this.inFlight);
-      if (finished && this.timer === null) return { kind: 'not-armed' };
+      // `armed`, not `timer === null`: a re-arm sweep an `arm()` that landed mid-sweep starts in the finally is in flight with no timer yet.
+      if (finished && !this.armed) return { kind: 'not-armed' };
       return { kind: 'done' };
     }
-    if (this.stopped || this.timer === null) return { kind: 'not-armed' };
+    if (this.stopped || !this.armed) return { kind: 'not-armed' };
     await this.bounded(this.tick());
     return { kind: 'done' };
   }
