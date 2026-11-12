@@ -49,8 +49,11 @@ matches rules better, from the repo's own `CLAUDE.md` invariants and `.claude/ru
 
 - **A caller's context fills with review prose.** Each reviewer still returns only verdict + one line per Critical/Important; the merge tool prints a compact
   result; report bodies stay in files.
-- **The canonical report path moves.** Orchestrate's merge commit says `Reviewed: <verdict> (reviews/<id>-<k>.md)`; the board and `references/recovery.md`
-  read `<dir>/reviews/<id>-<k>.md`. The merged report is written exactly there.
+- **The canonical report path or shape moves.** Orchestrate's merge commit says `Reviewed: <verdict> (reviews/<id>-<k>.md)`; `references/recovery.md`
+  sweeps the `<dir>/reviews/` directory; and `skills/backlog-retro/tools/lib/reviews.mjs` parses it — file names matching `^((?:[a-z]+-)?\d+)-(\d+)\.md$`,
+  the first `verdict: <word>` line, and the `## Critical` / `## Important` sections. The merged report is written exactly at `<dir>/reviews/<id>-<k>.md` and
+  keeps all three: a `verdict:` line of its own and those two headings. Group and retry reports (`<id>-<k>.g<n>.md`, `<id>-<k>.retry.md`) do not match
+  retro's name pattern, so retro counts each review pass once.
 - **The reviewer writes to the repo.** It stays read-only. The incremental snapshot (below) touches no ref, no index, no working-tree file.
 - **Grouping loses cross-file review.** Every group reviewer sees the full file list, may read any file, and may raise a finding at full severity about any
   file.
@@ -116,25 +119,41 @@ split a pair; bucket by directory prefix (`server/src/<module>/`, `client/src/<a
 one-file bucket into its nearest sibling while the cap allows; order everything by path so the same diff always gives the same groups. All numbers are soft
 constants. Each group: `label`, `files`, `model`, `effort` (§7).
 
+**Edge inputs.**
+
+- **Empty diff** (`from` and `to` the same tree). Standalone: print `nothing to review` and stop, no dispatch, no state written. Orchestrate and execute
+  commit before they review, so an empty diff there means something upstream went wrong: it is a review failure, handled like a coverage failure (§6).
+- **Non-empty diff, zero reviewable files** (every file skipped). One group 1 with no own files, dispatched for the item checks alone (none in a pure code
+  review — then no dispatch and verdict `approve`, the skips listed in the merged report). Coverage is trivially complete.
+- **One file, or one test/source pair, over the 10-file / 800-line cap.** It becomes a group of its own; a file is never split and a pair never broken, so the
+  cap is exceeded rather than the rule.
+
 Prints one line: `{"mode":…,"files":n,"review":r,"skip":s,"groups":g}`.
 
 ### 3. Reviewed-state memory and incremental mode
 
 **State file**, outside the repo: `~/.backlog-manager/reviews/<repo key>/<branch>.json` (repo key and file name the builder's call; a detached HEAD has no
-state and always reviews full). It holds the last review's `to` snapshot, `base`, the merged report's path, a timestamp, and the **open findings** — every
-Critical/Important from that review, with its anchor, not yet shown resolved.
+state and always reviews full). It holds the last review's `to` snapshot, the HEAD **commit** at that review, `base` and the **merge-base commit** of `base`
+and that HEAD, the merged report's path, a timestamp, and the **open findings** — every Critical/Important from that review, with its anchor, not yet shown
+resolved.
 
-`merge` writes it at the end of every review, full or incremental. Orchestrate and execute pr-mode reviews write it too (they review `backlog/<id>` and
+`merge` writes it at the end of every review, full or incremental, **whose coverage is complete**. A review that ends in a coverage failure leaves the state
+file as it was, so the files it never covered are still in the next increment. Orchestrate and execute pr-mode reviews write it too (they review `backlog/<id>` and
 `execute/<id>` branches, so a later `/backlog-review` on that branch is incremental from the gate's review).
 
-**Mode selection** (in `scope`): `full` when asked; otherwise `incremental` when a state file exists for this branch, its `base` matches, and its snapshot
-still resolves in this repo; otherwise `full`, with the reason printed (`no earlier review`, `base changed`, `earlier snapshot gone — history rewritten or
-pruned`). An incremental scope with no changes says so and stops without dispatching anyone; the earlier verdict stands.
+**Mode selection** (in `scope`): `full` when asked; otherwise `incremental` when all of these hold — a state file exists for this branch; its `base` is the
+same ref; the merge-base of `base` and the current HEAD is the recorded merge-base commit; the recorded HEAD commit is an ancestor of the current HEAD
+(`git merge-base --is-ancestor`); and the recorded snapshot still resolves in this repo. Otherwise `full`, with the reason printed (`no earlier review`,
+`base changed`, `base moved — merged or rebased onto a newer base`, `history rewritten`, `earlier snapshot gone`). The merge-base and ancestry checks keep a
+rebase, a merge of the base, or a re-created branch of the same name from putting other people's work into the increment. An incremental scope with no
+changes says so and stops without dispatching anyone; the earlier verdict stands.
 
-**Earlier findings in an incremental review.** Each open finding whose anchored file the incremental diff does not touch is **carried forward unchanged and
-still open** — no LLM needed. Each open finding whose file the diff does touch goes to the group that owns that file, which marks it `resolved` or `open`
-in its report (format §4). The verdict counts every still-open finding: an incremental review returns `approve` only when it finds nothing new at
-Critical/Important **and** every earlier one is resolved.
+**Earlier findings in an incremental review.** Every still-open earlier finding is handed to a dispatched group, which marks it `resolved` or `open` in its
+report (format §4) — a fix often lands in a different file from the finding (a new test, a caller), so a finding is never closed or kept by which files the
+increment touched. Owner: the group holding the finding's anchored file when that file is in this increment; otherwise group 1 (always dispatched).
+Unanchored, item-level and deleted-file findings go to group 1. The verdict is computed by `merge` from those marks plus the new findings, never copied from
+an earlier report's verdict line: an incremental review returns `approve` only when it finds nothing new at Critical/Important **and** every earlier one is
+marked resolved. A finding no report marks (the reviewer skipped it) stays open.
 
 **Item checks in incremental mode.** Group 1's item-level checks (§4) judge the item against the **whole** branch (`<merge-base>` → `to`), not the
 increment — whether the change keeps the item's promise is a property of the branch, not of the last commit.
@@ -148,21 +167,28 @@ increment — whether the change keeps the item's promise is a property of the b
   comparing whitespace-trimmed lines: one match → that line; several → nearest to the claimed line; none → keep the claimed line, mark `(unanchored)`. **Never
   dropped or downgraded by resolution.** Findings about removed code anchor to the nearest surviving line and say so (or the builder resolves them against
   `from`; never drop).
-- **De-duplication.** Findings sharing an anchor (path + quoted line) collapse to one, keeping the highest severity.
-- **Earlier findings.** Carries forward untouched ones; applies the groups' `resolved`/`open` marks to the rest.
+- **De-duplication.** Keyed on the **resolved** `path:line`, not the quoted text (identical lines such as `});` recur). Findings at one `path:line` become
+  one entry at the highest of their severities; when their texts differ, the entry keeps every distinct text. Unanchored findings are never de-duplicated.
+- **Coverage retry report.** `--retry <report.retry.md>` adds the one retry dispatch's report (§1 step 4); a `## Coverage` line in it counts for any file.
+- **Earlier findings.** Applies the groups' `resolved`/`open` marks; a finding no report marks stays open.
 - **Verdict.** `fix` if any group says `fix`, any new Critical/Important exists, or any earlier finding is still open; otherwise `approve`.
 - **Merged report** at `--out`, in the agent file's report structure, plus: mode (`full`/`incremental`, with `from`/`to`), the groups with their model and
   effort, a `## Earlier findings` section (resolved / still open). Group reports stay on disk beside it.
 - **State file** rewritten (§3).
-- **Stdout**, the only thing a caller reads into context: `{"verdict":…,"mode":…,"uncovered":[…],"unanchored":n,"stillOpen":n}`, then one line per
-  Critical/Important in the agent file's message shape (`path:line — Severity: text`), lines resolved, earlier still-open ones marked `(earlier)`.
+- **Stdout**, the only thing a caller reads into context: `{"verdict":…,"mode":…,"uncovered":[…],"unanchored":n,"stillOpen":n,"minor":n}`, then one line
+  per Critical/Important in the agent file's message shape (`path:line — Severity: text`), lines resolved, earlier still-open ones marked `(earlier)`. Minor
+  findings are counted, never printed; a caller reads the merged report's `## Minor` section only when the user chose to fix Minor findings (§5).
+- **Coverage retry**, driven by the caller (§1 step 4): one `backlog-reviewer` dispatch for all uncovered files together, on the `big` pair, report
+  `<report>.retry.md` beside the group reports, then `merge` again with `--retry`.
 
 **`agents/backlog-reviewer.md` changes:**
 
-- **Inputs.** The diff is given as `from` and `to` (from the manifest) instead of being derived from `base` and `branch`; `base` stays for the item-level
-  checks and for orchestrate's tests. `item file path` becomes optional: absent means no item — a pure code review, item checks skipped. New optional
-  inputs: `manifest path`; `group` (`<n> of <N>` and its files); `item checks` (`yes` for group 1 only); `earlier findings` (the open findings whose files
-  this group owns). A dispatch without `manifest path` behaves exactly as today, so an older caller keeps working.
+- **Inputs.** Five required fields, still "Five fields, always": `worktree`, `base`, `from`, `to`, `report path`. The diff is `git -C <worktree> diff <from>
+  <to>` (from the manifest) instead of `<base>...<branch>`; `branch` leaves the required set (the `to` snapshot replaces it); `base` stays for the item-level
+  checks. `item file path` becomes optional: absent means no item — a pure code review, item checks skipped. New optional inputs: `manifest path`; `group`
+  (`<n> of <N>` and its files); `item checks` (`yes` for group 1 only); `earlier findings` (the still-open findings handed to this group, §3); `outcome:
+  none` when the item has no `## Outcome` to read (§5) — then check 4 (`Contract sweep:` / `Red proof:`) is recorded as `not checked: no Outcome` and is
+  **not** an Important finding.
 - **Scope of a group.** Its `## Coverage` duty is its own files. It may read any file in the tree and the full manifest, and may raise a finding at full
   severity about **any** file — another group's, one the diff never touched (a missed call site), the item file, `CLAUDE.md`. Severity follows the defect,
   never which group saw it.
@@ -183,12 +209,14 @@ increment — whether the change keeps the item's promise is a property of the b
 - **Tree:** the current checkout (`git rev-parse --show-toplevel`). **Base:** `--base`, else the remote's default branch, else `main` — execute pr-mode's
   rule.
 - **Item:** with `<id>`, the item file found by the backlog tool wherever it is (`open/` or `done/`; an `in-place` execute archives to `done/`), or, in a
-  tracker project, a temp snapshot of the issue body (pr-mode §7's shape). Without `<id>`: no item, pure code review.
+  tracker project, a temp snapshot of the issue body alone (`show <id> --json`, its `body`). Pr-mode's `<tmp>/outcome.md` exists only inside an execute
+  session, so a standalone tracker review has no `## Outcome`; the dispatch says `outcome: none` and check 4 is skipped (§4). A files item without an
+  `## Outcome` section gets the same. Without `<id>`: no item, pure code review.
 - **Reports** under `<tmpdir>/backlog-review/<repo key>/<branch>-<n>.md` (+ `.g<k>.md`, manifest beside), never in the repo.
 - Runs `references/procedure.md`. Then shows the user: mode (and why, if it fell back to full), the verdict, the resolved finding lines, earlier findings
   resolved / still open, and the report path. Not the report body.
 - **Coverage failure:** said plainly, with the uncovered files and report paths; no verdict is claimed.
-- **Offer to fix** (user's decision): when the verdict is `fix` or there are Minor findings, and the session can ask (AskUserQuestion available — not a
+- **Offer to fix** (user's decision): when the verdict is `fix` or `merge`'s `minor` count is above zero, and the session can ask (AskUserQuestion available — not a
   headless `claude -p`), offer: fix Critical + Important (Recommended), fix all including Minor, or don't fix. On a fix choice, **this session** — never the
   reviewer — fixes exactly the named findings, reading each at its resolved `path:line`; runs the verification the repo's `CLAUDE.md` names (tests,
   typecheck) and shows the real output; **commits nothing** (same as an `in-place` execute — staging is the user's call); then offers an incremental
@@ -203,17 +231,26 @@ Both replace their §7 dispatch text with the procedure, parameterised:
   reports `<dir>/reviews/<id>-<k>.g<n>.md` merged to `<dir>/reviews/<id>-<k>.md` (canonical, unchanged), manifest beside, config from the run file.
 - **Execute pr-mode §7:** tree `<tree>`, base `<base>`, item as today, mode **full**, reports `<tmp>/review-<k>.g<n>.md` merged to `<tmp>/review-<k>.md`,
   config from the session's flags.
-- **Coverage failure.** Orchestrate parks the item with the existing kind — `attention <id> --kind parked --detail "review incomplete — not covered:
-  <paths>"`, then `stage <id> parked` — so no new attention kind (the set is closed across `orchestrate.mjs`, `shared/types.ts`, the server and the
-  client). Execute does not push and reports it in §4's failure shape.
+- **Coverage failure.** Orchestrate parks the item with the existing kind — `attention <id> --kind parked --detail "review incomplete — uncovered files
+  are listed in the merged review report"`, then `stage <id> parked` — so no new attention kind (the set is closed across `orchestrate.mjs`,
+  `shared/types.ts`, the server and the client). The detail is fixed words with no placeholder: file names are session-created text, which SKILL.md's rule
+  keeps off a command line, and `<paths>` left the closed placeholder list in `orchestrate-prompts.test.mjs` on purpose. The uncovered list lives in the
+  merged report's `## Coverage`. Execute does not push and reports it in §4's failure shape.
 - **`verdict: fix`.** The fix loop as today, except the findings copied verbatim into `<dir>/prompts/<id>-fix-<n>.txt` (orchestrate) or acted on (execute)
   are the merge tool's resolved lines, plus the merged report path.
 - **Re-review after a fix loop (user's decision): only the groups whose files the fix changed, plus group 1.** Groups come from the item's first `scope`
-  (never re-partitioned); a fixed file outside that manifest joins group 1; untouched groups' reports are carried forward into `merge` unchanged and their
-  findings still count. A one-group review re-runs its single group, as today. (This is deliberately not the standalone incremental mode: a gate re-reads
+  (never re-partitioned); a fixed file outside that manifest joins group 1. Untouched groups are not re-dispatched, but their Critical/Important findings
+  are not carried as open either: like §3's earlier findings, every finding from the previous round is handed to a re-run group (its owner if that group
+  re-runs, else group 1) to mark `resolved` or `open`, and `merge` computes the verdict from those marks plus the new findings — never from a carried
+  report's verdict line. A finding fixed in another file (a new test) therefore closes, and a correctly fixed item does not burn its second loop. A one-group review re-runs its single group, as today. (This is deliberately not the standalone incremental mode: a gate re-reads
   each touched group's whole files, not just the fix commit's lines.)
-- Orchestrate's dispatch text "the four fields its input contract requires and nothing else" is replaced by the procedure; the test pinning the `base`
-  pairing keeps passing.
+- Orchestrate's dispatch text "the four fields its input contract requires and nothing else" is replaced by the procedure. **The `base` pairing test**
+  (`skills/backlog/tools/backlog.test.mjs`, "backlog-orchestrate hands the reviewer a base and the reviewer diffs against it") is rewritten in part:
+  - kept as is: orchestrate §7 still lists its parameter `` - `base` — this run's base branch ``; the agent still declares `` **`base`** — ``; the agent still
+    says `Five fields, always` / `If any of the five is missing` (§4 keeps five required fields); the two `main`-hardcoding negatives;
+  - rewritten: `git -C <worktree> diff <base>...<branch>` becomes `git -C <worktree> diff <from> <to>`;
+  - added, in `review.test.mjs`: full mode's `from` is the merge base of the given base and HEAD (never `main` when another base is given) — the pairing the
+    old diff-string assertion stood for.
 - Merge-commit `Reviewed:` line, tracker snapshots and `references/recovery.md` unchanged.
 
 ### 7. Reviewer model and effort (user's decisions: configurable from Settings, server-side, overridable per launch)
@@ -227,25 +264,52 @@ Today the model is the agent's frontmatter `model: opus` and effort is never set
 - `same`: one `{ model, effort }` pair for every group.
 - `split`: a `big` pair, a `small` pair, `smallMaxLines` (default **300**). A group at or below `smallMaxLines` uses `small`, above it `big`. **Group 1
   always uses `big`** — it carries the item checks, and on a diff below the grouping threshold it is the only group.
-- Models: the Agent tool's (`opus`, `sonnet`, `haiku`, `fable`) plus "agent default" (send none — the frontmatter's `opus`). Effort: `low` … `max` plus
-  "default" (send none). An unrecognised value falls through to the default, as dispatch `model`/`effort` already do
-  (`server/src/agents/orchestrate-args.service.ts`).
+- Models: the Agent tool's `model` values (`opus`, `sonnet`, `haiku`, `fable`) plus "agent default" (send none — the frontmatter's `opus`). Effort: the
+  Agent tool's `effort` values (`low`, `medium`, `high`, `xhigh`, `max`) plus "default" (send none). Source: the Agent tool schema of the installed Claude
+  Code (checked in the authoring session, 2026-11-12), not the dashboard's lists in `shared/agent.ts`. Fallback: if a dispatch is refused for its `model`
+  or `effort`, the caller re-dispatches that group once without the refused field and the merged report says so.
+- **An invalid value, per surface** (deliberately not one rule — the model/effort drop rule and merge mode's reject rule differ for stated reasons in
+  `orchestrate-args.service.ts`):
+  - `POST /api/settings/review` — **400**, nothing written: it is the file's one writer and must never write a config the tool would have to repair.
+  - Launch request override — **400**: the sheet offers only the closed values, so a bad value is a client bug, and silently reviewing on a model the user
+    did not pick is worse than a refused launch.
+  - Trigger flag on a typed `/backlog-review` — `review.mjs scope` exits non-zero naming the flag, before any dispatch.
+  - `review.json` as read by `review.mjs` (missing, unparseable or invalid) — the default config, with one warning line on stderr; a review never fails
+    because of the settings file.
 - **Default config:** `split`; `big` = agent default (Opus) + default effort; `small` = `sonnet` + default effort; 300 lines. A small diff therefore keeps
   exactly today's review.
 
 **Where it lives and how it travels:**
 
-1. **Server-side** `~/.backlog-manager/settings/review.json`, the server its only writer (the watchdog/timezone precedent). A new **Settings → "Review"**
-   group (`client/src/components/settings/SettingsView.tsx`), marked per-server like the watchdog's: the `same`/`split` switch, then one model + effort row,
-   or the big pair, the small pair and the line threshold. Read and written through a settings route under `/api`.
+1. **Server-side** `~/.backlog-manager/settings/review.json`, the server its only writer (the watchdog/timezone precedent). `GET` and `POST
+   /api/settings/review` in `server/src/settings/`, shaped like `timezone.controller.ts`: GET unguarded; POST behind `SameOriginPostGuard`,
+   `@HttpCode(200)`, answering the config it wrote. An existing `review.json` that is unparseable or invalid: GET answers the default config plus
+   `"fileError": true`, and the next valid POST replaces the file.
+   A new Settings group on the **Shared** page (`SettingsView.tsx`, scope `shared`, beside `TimeZoneGroup`), its own component file. Copy:
+   - Group title `Reviewer`, pill `this machine` (the repo's scope pill for host-file settings).
+   - Row `Models` — segmented control `Same for all groups` / `Big and small groups`.
+   - Same: rows `Model` and `Effort`.
+   - Split: rows `Big groups — model`, `Big groups — effort`, `Small groups — model`, `Small groups — effort`, `Small group limit` (number input, hint
+     `Groups with at most this many changed lines use the small pair. The first group always uses the big pair.`).
+   - Model options `Agent default (Opus)`, `Opus`, `Sonnet`, `Haiku`, `Fable`; effort options `Default`, `Low`, `Medium`, `High`, `XHigh`, `Max`.
+   - On `fileError`, a hint under the title: `review.json could not be read — showing defaults. Saving replaces it.`
 2. **Launch sheets** — the Orchestrate sheet (`client/src/components/board/orchestrate/`, `useOrchestrateDraft`) and execute's launch sheet for a
-   `--finish pr` launch — seed a reviewer picker from it and can override per launch. The launch request (`shared/types.ts`) carries the override; the server
-   validates it as `resolveMergeMode` validates merge mode and appends compile-time-literal flags to the spawned trigger.
+   `--finish pr` launch — seed a `Reviewer` picker (the same rows) from it and can override per launch. The launch request (`shared/types.ts`) carries the
+   override; the server validates it (400 on any invalid member, §7 above) and appends the flags to the spawned trigger:
+   - model and effort values are appended as compile-time literals chosen from the closed lists — no caller character reaches the prompt;
+   - `smallMaxLines` is the one caller-supplied number: **proved** (`Number.isInteger`, 1 ≤ n ≤ 10000; else 400) and then formatted, like `base` is proved
+     by `resolveBase` rather than clamped;
+   - order: after `ids`, the mode flags and ` --base <ref>` — ids stay first, as `dispatch-watchdog.md` requires;
+   - an execute or groom dispatch body that spells a `--review-` flag is a **400**, joining that rule file's `--finish` / `--base` / `--auto-merge` /
+     `--fix` list, so the reviewer flags reach a prompt only from the validated field.
 3. **Trigger flags** on `/backlog-orchestrate`, `/backlog-execute` and `/backlog-review`: present → used; absent → `review.mjs` reads `review.json`;
    missing or invalid file → the default config. So a typed `/backlog-review` honours Settings, and an older board keeps working.
 4. **Orchestrate run file**: `init` records the effective config, so a `--resume`d driver dispatches with the same models. Run detail shows it beside
-   the merge mode (my call; the builder places it).
-5. A fix loop's re-review keeps each group's model and effort from the first round.
+   the merge mode (my call; the builder places it). A run file written before this change has no reviewer config: a `--resume`d driver uses the default
+   config (never the current `review.json`, which may have changed since the run began), and Run detail shows `Reviewer: default`.
+5. **Launch to another machine.** An override is validated by this server against the closed lists above and travels as trigger flags; the target
+   machine's `review.mjs` uses them. With no override, the target machine's own `review.json` applies — the tool runs there.
+6. A fix loop's re-review keeps each group's model and effort from the first round.
 
 The plan's UI tasks end with `/ui-verify` (global rule). No mocks: the new rows and picker follow the existing `SettingsRow` and sheet-picker patterns.
 
@@ -268,7 +332,7 @@ apart from two cheap tool calls. Incremental re-reviews cost less than today's f
     on any group fix / new Critical-Important / still-open earlier, `approve` otherwise; merged report has every section; state file rewritten.
 - Jest (`test/`): the settings route reads/writes `review.json` and rejects an invalid config; the launch request's reviewer override is validated and
   turned into trigger flags; the Settings group and sheet picker render and round-trip.
-- Existing orchestrate tests pass unchanged, including the `base` pairing test.
+- Existing orchestrate tests pass, the `base` pairing test with exactly the rewrite §6 names and no other existing assertion changed.
 - `/ui-verify` on the Settings "Review" group and the two launch-sheet pickers.
 - **After merge, `pnpm run plugin:sync` and a Claude Code restart** (the agent and skills load from the installed plugin), a hand run in this repo: a small
   change → one dispatch, full; a second `/backlog-review` after another edit → incremental, earlier findings reported; one above the threshold (synthetic
@@ -295,6 +359,10 @@ apart from two cheap tool calls. Incremental re-reviews cost less than today's f
   review.
 - The standalone fix commits nothing and is capped at two rounds per invocation.
 - No board button for `/backlog-review` in this change.
+- Incremental mode requires an unchanged merge-base and the last reviewed HEAD as an ancestor; every earlier finding is re-marked by a group, never closed
+  by which files changed.
+- Invalid reviewer values: 400 at the settings route and launch request, a refusal for a typed flag, defaults for an unreadable `review.json`.
+- Settings copy, the Shared page placement and `smallMaxLines` bounds 1–10000.
 - End-to-end hand run is post-merge; tests gate the merge.
 
 ## Decided by the user
@@ -304,7 +372,7 @@ apart from two cheap tool calls. Incremental re-reviews cost less than today's f
 - Re-review after a fix loop in orchestrate/execute: touched groups plus group 1.
 - Reviewer model **and effort** configurable as one pair for all groups or big/small pairs with a line threshold; group 1 on the big pair; seeded into the
   launch sheets and overridable per launch; recorded in the run file.
-- The config lives server-side (Settings → Review), so a typed run honours it.
+- The config lives server-side (Settings → Shared → Reviewer; the name and page are the author's call), so a typed run honours it.
 - Review runnable on its own (`/backlog-review`), e.g. after `/backlog-execute`, covering uncommitted work.
 - CodeRabbit-style incremental re-review by default; `full` reviews the whole branch.
 - Offer to fix after a standalone review.
