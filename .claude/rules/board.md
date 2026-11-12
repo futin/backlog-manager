@@ -89,6 +89,10 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   `no items yet`. Hues come from the whole registry, and the project filter key is per source (`projectKey`, `lib/view-keys.ts`). Settings' `Opens on` offers
   Files and GitHub only while drawn (`landingOptions`), keeping a stored pin's option. Why:
   [invariants.md](docs/subsystems/invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree)
+- **The served build carries a CSP (`server/src/security.ts`); dev does not.** `script-src` pins the pre-paint theme script's sha256 — edit that script and
+  `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows. `style-src` is `'self'` alone: write inline styles through CSSOM, never a `<style>` element
+  or a `style=` attribute in markup. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-served-build-carries-a-csp-dev-does-not)
 - **`contentWidth` is stamped before first paint, and the CSP hash travels with the script that stamps it.** `data-width` on `<html>`, written twice — by
   `client/index.html`'s inline script and by `useSettings`, whose dependency list must carry it or the setting works on reload and not on the click. One CSS
   block releases `.wrap` **and** `.wrap.wide`; the cap goes, the `margin: 0` stays. Editing that script invalidates `THEME_SCRIPT_SHA256`
@@ -152,7 +156,9 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   mid-flight folds into one follow-up (`useTrackers` and `useJira` are the deliberate exceptions, #231).** `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure
   of React) is the one home of poll scheduling and `hooks/useCoalescedFetch.ts` is its React shell; `hooks/useRefreshing.ts` (#285) is the layer every board
   poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useTicks`, `useOrchestratorArchive`, `TimeZoneProvider` (#241) and
-  `ProjectsProvider` (no `armed`: none of the three polls) and `useJiraSessions` (15 s, one instance in `JiraSessionsContext`, mounted by the shell around the rail and the section, `enabled` only while Jira is configured) and `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) and `usePullRequests` (60 s, mounted ONCE by the shell's `PullRequestsProvider` while a GitHub project is registered — same constant `armed`; GitHub › PRs and Settings' Access card read its context. The server's PR cache has no timer, so that one mount is the only thing that ever reads PRs, and the rail counts PRs that need you on every page — spec §4.9a) — owning the
+  `ProjectsProvider` (no `armed`: none of the three polls) and `useJiraSessions` (15 s, one instance in `JiraSessionsContext`, mounted by the shell around the rail and the section, `enabled` only while Jira is configured) and `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) and `usePullRequests` (60 s, mounted ONCE by the shell's `PullRequestsProvider` while a GitHub project is registered — same constant `armed`; GitHub › PRs and Settings' Access card read its context. The server's PR cache has no timer, so that one mount is the only thing that ever reads PRs, and the rail counts PRs that need you on every page — spec §4.9a)
+  and `useGitlab` (30 s, mounted ONCE by the shell's `GitlabProvider` with no enable gate, so its `armed` is constant `true`: the Sources row needs the
+  status whatever it says; the Sources row and every delivery surface read its answer through `useGitlabContext`/`useDeliveryIndex`) — owning the
   mount + window-focus triggers once; no board poller is a `setInterval` (`useNow`'s clock tick is a display, not a request). `trigger()` while idle starts the task; while one is in flight it starts nothing and returns ONE queued follow-up's promise, shared
   by every trigger that arrived meanwhile and run when the flight settles, so its answer was requested after the caller asked. The timer is a `setTimeout`
   re-armed `intervalMs` after the LAST request of a chain settles, at most one pending, cleared the moment `armed` goes false (an in-flight request finishes;

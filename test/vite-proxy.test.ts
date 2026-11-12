@@ -5,6 +5,7 @@ import { HealthController } from '../server/src/health/health.controller';
 import { ItemsController } from '../server/src/items/items.controller';
 import { AgentsController } from '../server/src/agents/agents.controller';
 import { OrchestratorController } from '../server/src/orchestrator/orchestrator.controller';
+import { GitlabController } from '../server/src/gitlab/gitlab.controller';
 
 /**
  * The dev proxy has exactly one entry, /api — which is only safe while every
@@ -15,7 +16,7 @@ import { OrchestratorController } from '../server/src/orchestrator/orchestrator.
  * hand-kept list. Any new controller must be added to CONTROLLERS here —
  * the length assertion is the reminder.
  */
-const CONTROLLERS = [HealthController, ItemsController, AgentsController, OrchestratorController];
+const CONTROLLERS = [HealthController, ItemsController, AgentsController, OrchestratorController, GitlabController];
 
 type ViteServer = { host?: string | boolean; proxy?: Record<string, unknown> };
 const server = (viteConfig as { server?: ViteServer }).server ?? {};
@@ -28,7 +29,7 @@ describe('vite dev proxy', () => {
   });
 
   it('every controller lives under /api', () => {
-    expect(CONTROLLERS).toHaveLength(4);
+    expect(CONTROLLERS).toHaveLength(5);
     for (const ctor of CONTROLLERS) {
       const prefix = Reflect.getMetadata('path', ctor) as string;
       expect(prefix === 'api' || prefix.startsWith('api/')).toBe(true);

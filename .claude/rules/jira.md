@@ -22,7 +22,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   config writes stay open under `access: unauthorized`, because they touch only `jira.json`. A saved board then awaits `boardSaved` (sweeps that board,
   bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer) — and so does `POST /api/jira/boards/sweep` `{ id }`, the chip's
   per-board `now`, which writes nothing: guard → 400 → 503 → 409 for an unreadable file → 404 `unknown board` → `boardSaved`, never a second sweep path; a deleted one calls `boardDeleted` and `arm()`; repos and skills re-aim
-  no poller work, since no sweep reads them (a repos save only calls `JiraLiveService.reposChanged`, which arms the session reconciler). `repoDefaults` (absolute normalised path → `{ base?, namePattern? }`) falls back per VALUE: a base failing
+  no Jira poller work, since no Jira sweep reads them (a repos save only calls `JiraLiveService.reposChanged`, whose `onReposChanged` listeners arm the
+  session reconciler and the GitLab poller, which re-derives its mapping from the saved repos; neither is awaited by the save). `repoDefaults` (absolute normalised path → `{ base?, namePattern? }`) falls back per VALUE: a base failing
   `defaultBaseProblem` (Table A, then `is a branch name, without origin/`) or a pattern failing `patternProblem` costs only itself;
   `/repo-defaults` takes `null` for unset (both `null` deletes the entry) and adds
   one check after the 409, a 400 `<path> is not mapped` unless SOME project maps the path. Why:

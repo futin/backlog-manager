@@ -16,6 +16,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [CLAUDE.md](../CLAUDE.md)                            | the floor every session pays: commands, one line per seam, the rule-file map, the cross-cutting rules                   |
 | [subsystems/api.md](subsystems/api.md)               | the Nest side: what each module owns, which reads are cached and which must never be                                    |
 | [subsystems/jira.md](subsystems/jira.md)             | the Jira integration's server half: the client, the board poller and its caches, the `/api/jira` read routes            |
+| [subsystems/gitlab.md](subsystems/gitlab.md)         | the read-only GitLab connection: the MR poller and its cache, `/api/gitlab`, and the Jira view's delivery surfaces       |
 | [subsystems/board.md](subsystems/board.md)           | the client: the five sections, and what the browser derives rather than fetches                                         |
 | [subsystems/releases.md](subsystems/releases.md)     | the board's own versions: `GET /api/releases` from the checkout's tags, the rail's version chip and the What's new drawer |
 | [.claude/DESIGN.md](../.claude/DESIGN.md)            | the client's visual language: the reference design (§1–7, copied from the dashboard) and how this board applies it (§8) |
@@ -79,14 +80,14 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`orchestrator/`** — a read-only view of the run-state directory, current run and archived runs alike, plus two pieces of in-memory bookkeeping that are lost
   on restart on purpose: what the watchdog has done, and which projects this process has just asked to start a run. Since task-48 it also derives the runs
   other machines drove on a tracker project from the poller's cached claim comments, and serves them in a separate `remote` array, never among the local runs.
-- **`agents/`** — one of the three modules that make an outbound call — to the local claude-agents-dashboard — and the only one that can start a session. Off
+- **`agents/`** — one of the four modules that make an outbound call — to the local claude-agents-dashboard — and the only one that can start a session. Off
   unless `BM_AGENTS` says otherwise; every POST here is additionally guarded by content-type and `Origin`, because loopback is no boundary against a page in
   this machine's own browser (the `Host` allowlist above is what covers the rebinding case those two checks do not). The run watchdog lives here too, armed only
   while some run file says `running`. Its `dashboards/` folder is what lets a launch go to ANOTHER machine's dashboard instead — the outbound destinations are
   then the remote dashboards and the remote boards named in `~/.backlog-manager/settings/dashboards.json`, still this one module, and with no such file nothing
   about a launch changes ([setup](workflows/remote-machine.md)).
-- **`tracker/`** — the second of three outbound-calling modules: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set,
-  the in-memory issue cache the `github` adapter answers from (one of the three caches in this server whose age is rendered, as `polledAt`), the PRs page's
+- **`tracker/`** — the second of four outbound-calling modules: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set,
+  the in-memory issue cache the `github` adapter answers from (one of the four caches in this server whose age is rendered, as `polledAt`), the PRs page's
   per-repo pull-request cache (the third: read on demand with a 60 s TTL, no timer), the eleven-label bootstrap, the claim protocol's pure half (`claim.ts`
   — what a claim IS, and why the lowest live comment id wins), and a read-only `trackers` route for Settings. The token is read per call from the
   environment and reaches no payload.
@@ -100,6 +101,10 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   `~/.backlog-manager/settings/jira-links.json`) sits here too, driven from
   `agents/` by `POST /api/agents/dispatch-jira`, `/jira-stop`, `/jira-link` and `/jira-unlink` — part of the
   [Jira integration](superpowers/specs/2026-10-15-jira-integration-design.md); [full doc](subsystems/jira.md).
+- **`gitlab/`** — the fourth outbound-calling module, and only while `BM_GITLAB_SITE` and `BM_GITLAB_TOKEN` are both set: a read-only GitLab client that
+  never follows a redirect, and a poller armed only while a repo Jira › Setup maps has its `origin` on the site, sweeping those projects' merge requests
+  into an in-memory cache (the fourth cache whose age is rendered); `GET /api/gitlab` and one guarded `POST /api/gitlab/sweep`. It writes nothing, to GitLab
+  or to disk — part of the [GitLab connection](superpowers/specs/2026-11-12-gitlab-connection-design.md); [full doc](subsystems/gitlab.md).
 - **`registry/`** — read-only view of the registry file.
 - **`hub/`** — three read-only Lookout widgets (open work, projects, this machine's run state) at `/api/hub/widgets`, served through the `lookout-widgets`
   package (#249). No actions, so no write path; it reads runs through the pure service read, so a hub poll never arms the watchdog. The run widget opens
@@ -168,7 +173,9 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the two writes to Jira itself,
   `POST /api/jira/issue/assign` and `/issue/transition`, and the persisted link store `JiraLiveService` (every session linked to a ticket key, live and ended,
   kept across a restart),
-  → [docs/subsystems/jira.md](subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three — `orchestrator/` (a read-only
+  → [docs/subsystems/jira.md](subsystems/jira.md)), `gitlab/` (the read-only GitLab client, the MR poller and its cache, `GET /api/gitlab` and
+  `POST /api/gitlab/sweep`, → [docs/subsystems/gitlab.md](subsystems/gitlab.md)) — those four are the outbound-calling modules, and the ONLY four —
+  `orchestrator/` (a read-only
   view of the run-state directory, plus the in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the
   server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (three read-only Lookout widgets at `/api/hub/widgets` via
   `lookout-widgets`, no actions), `releases/` (`GET /api/releases`, this checkout's release tags for the rail's version chip — read-only, git only — not an
