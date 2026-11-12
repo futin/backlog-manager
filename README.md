@@ -373,8 +373,11 @@ on it, and drop the image at `docs/board.png`._
 
 Everything lives in `.env`, and `.env.example` documents each key — except the rows marked "Not in `.env.example`" below (`BM_ORCH_HOME`,
 `BM_ORCH_CONTROL_HOME`, `BM_TRACKER_SYNC_FILE`, `BM_JIRA_FILE`, `BM_TICK_FILE`, `BM_TICK_HOME`, `BM_DASHBOARDS_FILE`, `BM_TIMEZONE_FILE`,
-`BM_JIRA_LINKS_FILE`, `BM_RETRO_HOME`, `BM_CLAUDE_PROJECTS` and `BM_AGENTS_TOKEN_<NAME>`), which are read straight from the process environment. The two that
-only `retro.mjs` reads, `BM_RETRO_HOME` and `BM_CLAUDE_PROJECTS`, come from the shell that runs it, not from `.env`. The tables leave out, on purpose,
+`BM_JIRA_LINKS_FILE`, `BM_REVIEW_FILE`, `BM_REVIEW_HOME`,
+`BM_RETRO_HOME`, `BM_CLAUDE_PROJECTS` and `BM_AGENTS_TOKEN_<NAME>`), which are read straight from the process environment. The two that
+only `retro.mjs` reads, `BM_RETRO_HOME` and `BM_CLAUDE_PROJECTS`, come from the shell that runs it, not from `.env`. So does `BM_REVIEW_HOME`, which only
+`review.mjs` reads; `BM_REVIEW_FILE` moves the file only for the process it is set in, so the server and the skill's shell each need it. The tables leave
+out, on purpose,
 `BM_IMPORT_PACE_MS` (the pace of `backlog.mjs import`, default 1000 ms, documented in `skills/backlog/SKILL.md`) and the seams that exist for the test suites:
 `BM_RELEASES_ROOT`, `BM_ENV_FILE`, `BM_NODETEST_TMP_ROOT`, `BM_RUN_LOCK_TIMEOUT_MS`, `BM_JIRA_FETCH_RETRY_MS` and `BM_JIRA_FETCH_TIMEOUT_MS`.
 
@@ -438,6 +441,8 @@ Paths the tools and the server keep their state in, or read another tool's state
 | `BM_RETRO_HOME`        | `~/.backlog-manager/retro/`                         | The sweep records `retro.mjs record` writes; `sweep` only reads them, to measure against the last one (`skills/backlog-retro/tools/lib/paths.mjs`). Not in `.env.example` |
 | `BM_CLAUDE_PROJECTS`   | `~/.claude/projects`                                | Claude Code's own transcript root, which `retro.mjs` reads, never writes, for a run's driver transcript (same file). Not in `.env.example` |
 | `BM_TIMEZONE_FILE`     | `~/.backlog-manager/settings/timezone.json`         | The board's one shared time zone (Settings › Shared), which every clock, day group and date on the board is drawn in. The server writes it through `POST /api/settings/timezone`; no file, or one that does not parse, means each browser keeps its own zone. Not in `.env.example` |
+| `BM_REVIEW_FILE`       | `~/.backlog-manager/settings/review.json`           | Which model and effort review a change (Settings › Shared › Reviewer). The server is its one writer, through `POST /api/settings/review`; `review.mjs` reads the same path, honouring the same variable, whenever a review is given no `--review-*` flag. No file means the defaults; one that cannot be used means the defaults too, and the card says so. Not in `.env.example` |
+| `BM_REVIEW_HOME`       | `~/.backlog-manager/reviews/`                       | Where `review.mjs` keeps each branch's last review, which an incremental re-review measures from — its one writer and its one reader; the server never touches it. Not in `.env.example` |
 
 </details>
 

@@ -827,6 +827,8 @@ report path. That stdout is the review's whole result in this session: never rea
 - **`"verdict":"approve"`** → straight to Verify.
 - **`merge` prints `"verdict":"incomplete"` after the procedure's one coverage retry, or `scope` prints `"files":0`** → read `references/check-failures.md` in
   full: neither is reviewed again, fixed or merged.
+- **`scope` or `merge` exits `1`, so the procedure hands back its stderr line instead of a verdict** → read `references/check-failures.md` in full: the item
+  parks, and is never reviewed some other way or merged.
 - **`"verdict":"fix"`** → one fix loop. Spend it on the run file first, and read the count back:
 
   ```bash
@@ -907,7 +909,7 @@ report path. That stdout is the review's whole result in this session: never rea
 that was counting is gone and a fresh one takes over an item that has already burned both its loops. A ceiling held in a session's memory silently resets there;
 one held in the run file does not. It is also the number the run drawer renders, so an item that took two loops says so afterwards.
 
-When a second review says `fix` (`fixLoops` is now `2`), stop looping and read `references/check-failures.md` in full: the item is handed to a human, never
+When a review says `fix` with `fixLoops` already at `2`, stop looping and read `references/check-failures.md` in full: the item is handed to a human, never
 merged silently because the loop ran out — "merge anyway" is a decision a person makes, not a default — and that menu belongs to an unresolved review verdict
 and to nothing else.
 

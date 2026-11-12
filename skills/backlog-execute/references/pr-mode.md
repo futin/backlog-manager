@@ -161,7 +161,8 @@ correct: say to commit the groom first, then remove what §2 cut. An item carryi
 session has taken the item: stop right there — commit nothing more, push nothing — and report the branch and the tree. Nothing is lost at either point:
 before §6 the work sits uncommitted in `<tree>`, after it the work is committed on the branch.
 
-The reviewer dispatch in §7 is one blocking call, so no heartbeat lands while it runs. That is accepted: the claim only goes stale (contestable), it is never
+The reviewer dispatch in §7 is one message of parallel reviewer calls — one per group, the review as long as its slowest group — plus at most one coverage
+retry message after `merge`, and no heartbeat lands while either runs. That is accepted: the claim only goes stale (contestable), it is never
 released, and the reviewer is bounded — the same race the orchestrator already accepts. Do not split the dispatch to squeeze one in.
 
 ## 4. Verification fails
@@ -228,6 +229,10 @@ inside the same turn, and never end a turn waiting on one: a board-dispatched se
 - **`merge` prints `"verdict":"incomplete"` after the procedure's one coverage retry, or `scope` prints `"files":0`** → **do not push.** An incomplete review
   proved nothing about the files it names, and an empty diff means the commit holds no change to publish. Report it the way §4 reports a failure: what is
   uncovered (or that the diff is empty), the report path, the tree and the branch. Tracker: comment and release as the "Do not push" paragraph below does.
+- **`scope` or `merge` exits `1`, so the procedure hands back its stderr line instead of a verdict** (a bad `--review-*` flag, an unreadable manifest, a git
+  failure) → **do not push.** No verdict is not an `approve`, and a review dispatched outside the procedure to stand in for it is not one either. Report it
+  the way §4 reports a failure: the line the procedure handed back, the tree and the branch. Tracker: comment and release as the "Do not push" paragraph
+  below does.
 - **`"verdict":"fix"`** → a fix round, below.
 
 **`"verdict":"fix"` → a fix round, at most two.** Fix exactly what the findings name; run the two pre-review checks over what the fix changed; **re-run the

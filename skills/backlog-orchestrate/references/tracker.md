@@ -174,7 +174,8 @@ reading a report that no longer describes the branch.
   The field is the same field and the reviewer reads it the same way; only the path moves.
 - **A fresh fix session's prompt file** names `<dir>/items/<n>.md` as the item file path the reviewer read, and `<dir>/outcomes/<n>.md` as where to append the
   `### Fix loop <k>` record. In those two tracker paths `<n>` is the issue number, as in §5, not this loop's count.
-- **Both fix modes then re-run §5's `snapshot <n>`** before reviewing again with a fresh report path (`<dir>/reviews/<id>-2.md`).
+- **Both fix modes then re-run §5's `snapshot <n>`** before reviewing again with a fresh report path
+  (`<dir>/reviews/<id>-<k>.md`, the next `<k>`, as SKILL.md §7 counts them).
 
 ## §9 Merge — branch mode: the push before the worktree goes
 

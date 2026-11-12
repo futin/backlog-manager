@@ -1,7 +1,7 @@
-# backlog-orchestrate — when a check fails: a review reaches no verdict, a second review says `fix`, or `verify` exits non-zero
+# backlog-orchestrate — when a check fails: a review reaches no verdict, a review says `fix` with both loops spent, or `verify` exits non-zero
 
 Read this file **in full** when any of these happens: `merge` prints `"verdict":"incomplete"` after the review procedure's one coverage retry, `scope`
-prints `"files":0`, a second review says `verdict: fix` (the item's `fixLoops` is now `2`), or `verify` exits non-zero (`1`, red
+prints `"files":0`, `scope` or `merge` exits `1`, a review says `verdict: fix` with the item's `fixLoops` already at `2`, or `verify` exits non-zero (`1`, red
 rows; `5`, nothing to verify with; `11`, a tracker item's `## Done when` names a command the gate never saw and no allowlist approves). All are observable results inside the loop, so a fresh run and a `--resume`d one reach it the same way. The ceiling itself
 — at most two fix loops per item, **shared** between review and verify and counted in the run file — stays in `SKILL.md` §7, with `fix-mode` and both launchers.
 A red command is not an opinion: nothing green-lights a merge except the commands passing.
@@ -11,8 +11,8 @@ Section and step numbers below name sections of `SKILL.md`. A reference file is 
 
 ## The review reaches no verdict (§7)
 
-Two results of `skills/backlog-review/references/procedure.md` end an item's review with nothing to act on. Neither is reviewed again, fixed or merged, and
-neither spends a fix loop: a fix loop answers findings, and these two carry none. Both park, with a channel or without one — there is no judgement here for a
+Three results of `skills/backlog-review/references/procedure.md` end an item's review with nothing to act on. None is reviewed again, fixed or merged, and
+none spends a fix loop: a fix loop answers findings, and these three carry none. All park, with a channel or without one — there is no judgement here for a
 person to make on the spot, only a gap they have to look at.
 
 - **`merge` prints `"verdict":"incomplete"` after the procedure's one coverage retry** — some changed files are still in no group report's coverage, so no
@@ -37,16 +37,32 @@ person to make on the spot, only a gap they have to look at.
 
   Keep the branch and the worktree for them, as every park does.
 
-## A second review says `fix` (§7)
+- **`scope` or `merge` exits `1`** — the procedure stops at a bad argument, an unreadable manifest or a git failure and hands back the one stderr line that
+  names it, with no verdict. A `--previous` manifest that a run resumed across a plugin upgrade never wrote, or a hand-edited `reviewConfig`, both land here.
+  No verdict is not an `approve`: never go on to Verify, never dispatch a reviewer outside the procedure to stand in for it, and never retry `scope` with
+  other arguments to get past the line. **Park it**:
 
-After the second `fix` verdict (`fixLoops` is now `2`), stop looping and hand it to a human:
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "review reached no verdict — the review tool exited 1: <what the review tool refused, your words>"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+  ```
+
+  The detail summarises that stderr line in your words and never pastes it: it can carry git's own stderr and a path the branch named, text this run did not
+  compose (§4's rule, second half). The line itself stays in this session's transcript.
+
+## A review says `fix` with both loops spent (§7)
+
+When a review says `fix` and the item's `fixLoops` is already `2` — both loops spent, by review or by verify, since they share the ceiling — stop looping and
+hand it to a human:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, still: <verdict summary, your words> — report at <dir>/reviews/<id>-2.md"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, still: <verdict summary, your words> — report at <dir>/reviews/<id>-<k>.md"
 ```
 
 `<verdict summary, your words>` is one line of your own on what the reviewer still objects to — never a quote from the report. The report path sitting beside it
 in the same string is the verbatim copy, which is precisely why the entry points at the report rather than carrying it (§4's rule, second half).
+`<k>` is the report this verdict came from — §7's count of this item's reviews — never a fixed `2`: a verify-red loop re-reviews too, so the exhausting
+verdict can be the third review, and the second may be an `approve`.
 
 Then, **with a channel**, ask: merge anyway, keep fixing, skip, or stop the run — their call, on their repo. **With no channel**, `stage <id> parked` and
 continue to the next item, keeping the branch and worktree for them to look at. Never merge unreviewed-through changes silently just because the loop ran out:

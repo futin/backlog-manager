@@ -1650,17 +1650,20 @@ anything at all.
 `ids` was the first thing a caller could put into that string (merge mode, question mode and the base joined it later — see the end of this section), and it is
 not an exception to the rule above so much as the clearest statement of it.
 
-**The four influences are not all the same kind of safe, and the difference has to be stated rather than averaged over.** `mergeMode` and `questionMode` are the
+**The five influences are not all the same kind of safe, and the difference has to be stated rather than averaged over.** `mergeMode` and `questionMode` are the
 tightest: each appends nothing or a compile-time literal selected by a guard, so no caller-supplied character reaches the prompt through either channel
 at all. An `ids` entry is looser — caller text that passed a shape check and was then proved against a closed vocabulary. **`base` is the first and only member
 whose caller-supplied text is appended verbatim**, which is why it is proved the way an id is (a ref-name check, then membership in this project's own local
 branches — see
 [the merge happens in whichever tree holds the base](#the-merge-happens-in-whichever-tree-holds-the-base-and-the-run-removes-only-the-tree-it-made)) rather than
-clamped the way an enum is. Any statement here that every appended flag is a compile-time literal is therefore false and must not be restored: it was
-true of two flags out of three and is true of two out of four. Each is appended only off its own guard, and each default appends nothing, so a request written
+clamped the way an enum is. The review flags sit with `mergeMode` and `questionMode`, not with `base`: appended only when the request carried a `review` that
+`parseReviewConfig` accepted, every token is a fixed `--review-*` name or a value checked against a closed list or an integer range, so a caller picks among
+values but never supplies a character. Any statement here that every appended flag is a compile-time literal is therefore false and must not be restored: it was
+true of two flags out of three, then of two out of four, and the review flags' integer limit keeps it false at five. Each is appended only off its own guard,
+and each default appends nothing, so a request written
 before any of these fields existed composes the byte-identical prompt it always did. The board's Orchestrate sheet can narrow a run to a subset of the queue, which means the
 spawned session has to be told `/backlog-orchestrate task-3 bug-7` rather than the bare trigger — `--ids` is a flag `orchestrate.mjs`'s own `init` and `plan`
-have always taken, and `SKILL.md` documents the trigger as `/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch|pr] [--question-mode decide]`. What makes that safe is that the server never _accepts_
+have always taken, and `SKILL.md` documents the trigger as `/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch|pr] [--question-mode decide] [--review-mode same|split --review-… <value>…]`. What makes that safe is that the server never _accepts_
 prompt text, it _composes_ the prompt out of the constant plus values that have passed two independent checks (`resolveIds`, `orchestrate-args.service.ts`):
 
 1. **Shape** — `isItemId` (`shared/agent.ts`), the same `^[a-z]+-\d+$` `backlog.mjs`'s own `ID_SHAPE` enforces. What survives is a bare identifier: no
@@ -1691,7 +1694,7 @@ and each one's DEFAULT appends
 nothing — `merge` there, `park` here — so a default run's prompt stays byte-identical to what shipped before either field existed. `pr` carries one more
 check than its sibling: `resolveMergeMode` takes the project and answers a 400 when the project's resolved source is not `github`, before anything spawns.
 
-The fourth is `base` (task-44), and it is the loosest of the four in form: it appends the caller's OWN text, ` --base <ref>`, where the other two append
+The fourth is `base` (task-44), and it is the loosest of the five in form: it appends the caller's OWN text, ` --base <ref>`, where the other two append
 literals. What makes it acceptable is that `resolveBase` proves it the way `resolveIds` proves an id — a ref-name check, then membership in this project's own
 local branches — before anything is composed. Its default `'main'` appends nothing, like the other two. Order is ids, then `--merge-mode`, then
 `--question-mode`, then `--base`, then the review flags: ids first because the tool reads bare tokens as ids and a flag ahead of them would swallow the first

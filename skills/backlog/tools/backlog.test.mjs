@@ -3179,6 +3179,13 @@ test('pr-mode §7 does not push on incomplete coverage or an empty diff', () => 
   assert.ok(/do not push/i.test(section), 'pr-mode §7 no longer says do not push')
 })
 
+// review.mjs exiting 1 hands the session an error line and no verdict; without its own branch nothing stopped §8 from pushing an unreviewed commit.
+test('pr-mode §7 does not push when scope or merge exits 1', () => {
+  const section = prModeSection('## 7. Review')
+  assert.ok(section.includes('`scope` or `merge` exits `1`'), 'pr-mode §7 no longer has a branch for scope or merge exiting 1')
+  assert.ok(/exits `1`[^→]*→ \*\*do not push\.\*\*/.test(section), 'pr-mode §7 no longer refuses the push when scope or merge exits 1')
+})
+
 test('pr mode reuses only a clean linked worktree on a named branch that is not the base', () => {
   const section = prModeSection('### Reuse the tree you started in')
   const RULES = [

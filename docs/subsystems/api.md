@@ -4,9 +4,9 @@ Nest, one process, every route under `/api`. It owns nine things: reading the re
 them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, polling the Jira
 boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), deriving the tick breaker's board from the tick home (`tick/`), and — behind a switch that is off
 by default — asking another local process to start a Claude Code session, which since multi-dashboard may be a process on another machine. It writes no item
-file and no run file; the only bytes it owns are seven files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
+file and no run file; the only bytes it owns are eight files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
 `tracker-sync.json`, since Jira phase 2 `jira.json`, for the tick breaker `tick.json`, for the machine list `dashboards.json` and, for the board's one
-time zone, `timezone.json` (`settings/`). Its writes to
+time zone, `timezone.json`, and for the reviewer, `review.json` (both `settings/`). Its writes to
 Jira itself (phase 3's issue assign and transition) are calls, not files.
 
 ## Modules
@@ -469,6 +469,25 @@ platform accepts is canonicalised through `Intl.DateTimeFormat`'s `resolvedOptio
 anything else (an unknown id, a non-string, a missing key, a non-object body) is a `400`, file untouched. Unlike `tick.json` and `jira.json`, a file that
 cannot be read is replaced by the next write: it holds one value and the write replaces that value whole, so there is nothing in it a write could lose. The
 server never formats or buckets a date itself; every reading is the client's (`client/src/lib/time-zone.ts`). Not an outbound-calling module.
+
+### `settings/` — the reviewer
+
+`GET /api/settings/review` answers the `ReviewConfig` in force (`shared/types.ts`'s `ReviewSetting`): which model and effort review a change — `mode` `same`
+(one pair for every group) or `split` (groups above `smallMaxLines` changed lines to the `big` pair, the rest to `small`), all three pairs always stored so a
+mode switch loses nothing. It reads `~/.backlog-manager/settings/review.json` (`$BM_REVIEW_FILE` to override) fresh on every call through `readReview`, which
+never throws: a missing file is the defaults (`DEFAULT_REVIEW_CONFIG`, `shared/agent.ts`), and a file that exists but cannot be read, does not parse or fails
+`parseReviewConfig` is the defaults plus `fileError: true`, so the Settings card can say the file is being ignored. The server is not the file's only reader:
+`skills/backlog-review/tools/review.mjs` reads the same path, honouring the same `$BM_REVIEW_FILE`, whenever a `scope` is handed no `--review-*` flag and no
+`--review-config` — so one file decides who reviews a board-launched execute, an orchestrator run and a standalone `/backlog-review` on this machine.
+
+`POST /api/settings/review` takes a whole `ReviewConfig` as the body, is behind `SameOriginPostGuard`, answers `200` with the config as written, and is the
+file's one writer (`writeReview`, through `writeJsonAtomic`); `review.mjs` only reads it. The body is checked by `parseReviewConfig`, the one validator the
+client's pickers, the launch routes' `review` override and this route share: exactly the five top-level keys and exactly `model`/`effort` in each pair, `mode`
+`same` or `split`, a model from `REVIEW_MODELS` and an effort from `REVIEW_EFFORTS` or `null` (the agent's own default), and `smallMaxLines` an integer
+1–10000 — a number sent as a string is refused, not coerced. Anything else is a `400` `{ error: "invalid review config: <member>" }` naming the first member
+that failed, file untouched. As with `timezone.json`, a file that cannot be read is replaced by the next write: it holds one value and the write replaces it
+whole. The review STATE `review.mjs` keeps per branch is a different directory, `~/.backlog-manager/reviews/` (`$BM_REVIEW_HOME`), which the server neither
+reads nor writes. Not an outbound-calling module.
 
 ### `health/`, `static.ts`, `security.ts`, `allowed-hosts.ts`
 
