@@ -97,7 +97,7 @@ export function SettingsRow({
  * `as="section"` so the card is still a landmark-eligible element, which the
  * `<section>` this replaced already was. `.set-group` rides beside `Sheet`'s own
  * class purely to LAY the card out (the rows' gap) — never to restate its look,
- * which is §12.1's rule and `test/design-guards.test.ts`'s guard 7.
+ * which is §12.1's rule and `test/guards/design-guards.test.ts`'s guard 7.
  */
 /*
   `right` is `SheetHead`'s own right slot, passed through, and was added for Jira › Setup's Boards card (Jira phase 2, spec §6.4): its `New board` chip sits

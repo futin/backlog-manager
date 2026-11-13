@@ -11,7 +11,7 @@ import type { OrchestratorArchivePayload, OrchestratorRun, OrchestratorRunsPaylo
  * Feature-prefixed like AgentsController (`api/agents`), not flat like
  * ItemsController's bare `api` — see ItemsController's own comment for why
  * /api is non-negotiable at all: dev-mode Vite proxies exactly one prefix,
- * and test/vite-proxy.test.ts asserts no controller ever leaves it.
+ * and test/guards/vite-proxy.test.ts asserts no controller ever leaves it.
  */
 @Controller('api/orchestrator')
 export class OrchestratorController {

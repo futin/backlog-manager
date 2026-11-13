@@ -195,7 +195,7 @@ five texts say `usePullRequests` is mounted only by GitHub › PRs and that this
 `useCoalescedFetch` bullet), `docs/subsystems/invariants.md` (same section), the hook's own doc comment (`client/src/hooks/usePullRequests.ts`),
 `PullRequestsView.tsx`'s header comment ("this page is its only mount") and `docs/subsystems/board.md`'s PRs paragraph ("mounted by this page alone"). The
 plan rewrites all five to name both pages
-(GitHub › PRs and GitHub › Settings); the bullet's headline is unchanged, so `test/claude-rules.test.ts` stays green, but the plan must run it. The property
+(GitHub › PRs and GitHub › Settings); the bullet's headline is unchanged, so `test/guards/claude-rules.test.ts` stays green, but the plan must run it. The property
 the sentence protects — the PR cache has no timer, so PRs are read only while a page that shows them is open — still holds.
 
 **No age on the rows** (settled): `PrRepoView` carries only `polledAt` (last *successful* read) and no attempt time, and this work adds no server field, so a
@@ -221,7 +221,7 @@ is mounted only by GitHub › PRs" fact, in the five texts the Access card secti
 - View: no-access repos absent from all three layouts, `N open` excludes them, hidden note shows the right count and its link opens GitHub › Settings; a
   rate-limited repo still shows with its detail in each layout; switching layout persists and survives a reload; tile filter and clear; Matrix row toggle by
   click and by Enter, a click on the `#n` link does not toggle; an `updating…` mark survives a layout switch; empty states (no shown repo, no PR at all).
-- Existing suite: jsdom is wide, so Inbox is drawn by default and `test/prs-view.test.tsx`'s Cards-anatomy cases (`pr-repo-*`, `pr-head-*`, `pr-outcome`
+- Existing suite: jsdom is wide, so Inbox is drawn by default and `test/github/prs-view.test.tsx`'s Cards-anatomy cases (`pr-repo-*`, `pr-head-*`, `pr-outcome`
   inside `pr-row-<key>`, the merged line in the repo card) pin `cards` by writing the layout's storage key before render — they are not expected to pass
   untouched. The write cases (merge confirm `pr-merge-confirm`, auto-merge toggle, update branch, outcome `pr-outcome`) are re-run from Inbox and from Matrix;
   those test ids belong to the shared actions component and the shared outcome line, so they mean the same element in every layout.

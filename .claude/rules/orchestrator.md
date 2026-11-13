@@ -129,7 +129,7 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   with one stderr line, and the exit code never changes. Why:
   [invariants.md](docs/subsystems/invariants.md#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run)
 - **`merged` is no longer the only success exit.** `branched` is its branch-mode sibling and a true exit: out of `RUN_CLAIMED_STAGES`, `ATTENTION_RUN_STAGES`
-  and `MACHINE_STAGES`, in `RECONCILE_TERMINAL_STAGES`, counted as completed by `aggregateRuns`; `test/agents-shared.test.ts`'s `Record<RunStage, true>` literal
+  and `MACHINE_STAGES`, in `RECONCILE_TERMINAL_STAGES`, counted as completed by `aggregateRuns`; `test/agents/agents-shared.test.ts`'s `Record<RunStage, true>` literal
   forces the classification. A `branched` stamp does not prove the run that wrote it executed the item. Why:
   [invariants.md](docs/subsystems/invariants.md#merged-is-not-the-only-success-exit--branched-is-its-branch-mode-sibling)
 - **The tool refuses `stage <id> merged` under branch mode** — exit `1`, nothing written. The converse is deliberately _not_ enforced: `stage <id> branched` is
@@ -209,4 +209,4 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   `watchdog-config.util.ts`) and the third, which `POST /api/trackers/sync` (`tracker-sync.controller.ts`) writes.
 - **A files item an execute branch or tree holds is gated `ungroomed`, never dropped.** `executeHeld` matches `execute/<id>` and `.worktrees/execute-<id>` exactly, and
   `executeHeldGate` sits over `planReviewGate` in both content branches of `buildGatedQueue`, so its reason reads first. `trackerCandidates` never calls it. The
-  sentence is a hand copy of `EXECUTE_HELD_REASON`, pinned by `test/agents-shared.test.ts`; `executeTaken` and `executeHeldBlock` are its twins (#427).
+  sentence is a hand copy of `EXECUTE_HELD_REASON`, pinned by `test/agents/agents-shared.test.ts`; `executeTaken` and `executeHeldBlock` are its twins (#427).

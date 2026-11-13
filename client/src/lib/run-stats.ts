@@ -397,7 +397,7 @@ export interface RunAggregates {
    * way to whatever it did finish, and a caption reading "average fix loops
    * per merge" would understate that cost if the numerator only counted the
    * items that happened to succeed. Pinned against the "merged only"
-   * alternative by a dedicated fixture in `test/run-stats.test.ts`
+   * alternative by a dedicated fixture in `test/runs/run-stats.test.ts`
    * (`aggregateRuns` describe block) where a never-merged item carries fix
    * loops of its own specifically so the two readings diverge — case 8, the
    * main aggregate fixture, cannot tell them apart on its own, because every
@@ -439,7 +439,7 @@ export interface RunAggregates {
  * hide every failure that (correctly) kept an item from merging at all.
  *
  * Both "all items, not just merged" readings are asserted by a dedicated
- * fixture in `test/run-stats.test.ts` where a never-merged item carries its
+ * fixture in `test/runs/run-stats.test.ts` where a never-merged item carries its
  * own nonzero fix loops and verification entries, chosen specifically so the
  * "merged items only" alternative would produce a different number — the
  * main aggregate fixture (case 8) cannot rule that alternative out on its

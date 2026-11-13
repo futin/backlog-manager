@@ -2237,7 +2237,7 @@ function inReviewGate(item, verdict) {
 
 // The plan-review guard's sentence (backlog-tick) — the other HAND-KEPT copy, of `PLAN_REVIEW_REASON` in `shared/agent.ts`, for the same reason as the one
 // above: this file cannot import it. The board's Run button, the server's plan/dispatch ladder, this gate and backlog-tick's own skip reason all say it, and
-// `test/agents-shared.test.ts` pins this line to that constant, so a change there is a change here.
+// `test/agents/agents-shared.test.ts` pins this line to that constant, so a change there is a change here.
 const PLAN_REVIEW_REASON = 'this plan awaits review';
 
 // A groomed item whose plan the tick wrote unattended carries `plan-review` (a tracker label, a files frontmatter line) until a person removes it to approve
@@ -4207,7 +4207,7 @@ const ATTENTION_KINDS = ['needs-answers', 'parked', 'fix-exhausted'];
 // server parses it with `ATTENTION_LINE` (`server/src/orchestrator/
 // remote-runs.util.ts`) to put the entry on the run another machine sees, and
 // this file cannot import that — a plugin skill's `tools/` stands alone — so
-// the two agree through a source-reading guard (`test/remote-runs.test.ts`,
+// the two agree through a source-reading guard (`test/runs/remote-runs.test.ts`,
 // G-1) that substitutes into THIS declaration. Keep it one arrow function
 // returning one template literal, or the guard cannot find it.
 const ATTENTION_MARKER = (kind, runId) => `<!-- bm:attention kind=${kind} run=${runId} -->`;

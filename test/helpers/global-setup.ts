@@ -5,7 +5,7 @@ import { claimTmpRoot } from './tmp-root';
  * unconditionally — and, since #243, claim the run's temp root (see the
  * comment at the call below and `tmp-root.ts`).
  *
- * `test/run-range.test.ts`'s DST block needs a known zone, and the obvious
+ * `test/runs/run-range.test.ts`'s DST block needs a known zone, and the obvious
  * `process.env.TZ = ...` inside a `beforeAll` does not work: jest hands each
  * test file a COPY of `process.env` (a plain object), so the assignment lands
  * on the copy and never reaches the setter Node uses to invalidate its
@@ -34,7 +34,7 @@ import { claimTmpRoot } from './tmp-root';
  * fail. A conditional pin therefore did not "let an explicit TZ win"; it let
  * an explicit TZ turn four passing tests red, in a suite that was green in
  * every zone before the block existed. Reproduced: `TZ=UTC npx jest
- * test/run-range.test.ts` — 4 failures.
+ * test/runs/run-range.test.ts` — 4 failures.
  *
  * The cost is real and is accepted knowingly: `TZ=<anything> pnpm test` can no
  * longer be used to check that the rest of the suite is zone-agnostic, because

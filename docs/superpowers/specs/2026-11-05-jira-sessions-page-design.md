@@ -111,11 +111,11 @@ badge and the rail are the routes to sessions now.
 
 - Repo rules apply: `.claude/rules/board.md` (client), `.claude/DESIGN.md` (§8.0 the rail is the only page switch; §8.9.1 Jira Board), CSP — no inline
   `<style>`/`style=` markup; the rail labels stay the one place a page is named.
-- Suites this touches, to run locally before push (CLAUDE.md, "Touched includes the source guards"): `test/rail.test.tsx` (the badge click asserts page,
-  view and filters), `test/jira-list.test.tsx`, `test/jira-board.test.tsx`, `test/jira-view-store.test.tsx`, `test/filter-bar.test.tsx`,
-  `test/use-jira.test.tsx` (`useJiraBoard`), `test/jira-lib.test.ts` (pins `JIRA_PAGES` to `['board', 'setup']` today, and `sortTops`),
-  `test/jira-setup.test.tsx`, `test/jira-detail.test.tsx`, `test/jira-launch.test.tsx` and `test/jira-sections.test.tsx` (page store), plus
-  `test/design-guards.test.ts` and `test/csp.test.ts` if markup or styles move — and `grep -l` in `test/` for every symbol the diff changes or adds a caller
+- Suites this touches, to run locally before push (CLAUDE.md, "Touched includes the source guards"): `test/ui/rail.test.tsx` (the badge click asserts page,
+  view and filters), `test/jira/jira-list.test.tsx`, `test/jira/jira-board.test.tsx`, `test/jira/jira-view-store.test.tsx`, `test/board/filter-bar.test.tsx`,
+  `test/jira/use-jira.test.tsx` (`useJiraBoard`), `test/jira/jira-lib.test.ts` (pins `JIRA_PAGES` to `['board', 'setup']` today, and `sortTops`),
+  `test/jira/jira-setup.test.tsx`, `test/jira/jira-detail.test.tsx`, `test/jira/jira-launch.test.tsx` and `test/jira/jira-sections.test.tsx` (page store), plus
+  `test/guards/design-guards.test.ts` and `test/server/csp.test.ts` if markup or styles move — and `grep -l` in `test/` for every symbol the diff changes or adds a caller
   of.
 - Row-click-opens-Detail (#458) is on `main`; the moved table keeps it.
 - Docs and comments that describe the old shape must follow: `.claude/rules/board.md` (the Jira section's "two pages … `JIRA_PAGES` (`board | setup`)"

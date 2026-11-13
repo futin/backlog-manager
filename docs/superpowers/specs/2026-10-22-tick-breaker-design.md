@@ -200,7 +200,7 @@ reason"). One line in the skill's notes: a halted project is reset on the board,
 - `docs/subsystems/invariants.md`: the reasoning for both; the existing "`~/.backlog-manager/tick/` has exactly one writer" entry gains that the server
   reads it.
 - `.claude/rules/`: a new `.claude/rules/tick.md` (`paths: ["server/src/tick/**"]`) is the home of the `tick.json` headline's mechanism; the
-  halt-derivation headline's goes in `.claude/rules/skills.md`. One home per anchor (`test/claude-rules.test.ts`); CLAUDE.md's "ten path-scoped files"
+  halt-derivation headline's goes in `.claude/rules/skills.md`. One home per anchor (`test/guards/claude-rules.test.ts`); CLAUDE.md's "ten path-scoped files"
   becomes eleven.
 - `docs/subsystems/api.md` (three routes), `board.md` (the page, the card), `skills.md` (the breaker in `decide`, the `status` line).
 
@@ -231,7 +231,7 @@ Jest (`test/`, flat):
 - Component and file names inside `server/src/tick/` and `client/src/components/runs/`.
 - Exact poll hook shape, as long as it follows `useCoalescedFetch`'s one-in-flight rule.
 - Whether the Activity table shares a component with the Watchdog page's or copies its markup.
-- Where in the `.claude/rules/` files the bullets go, within the `test/claude-rules.test.ts` constraints.
+- Where in the `.claude/rules/` files the bullets go, within the `test/guards/claude-rules.test.ts` constraints.
 
 ## Calls I made (check these)
 

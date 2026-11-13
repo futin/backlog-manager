@@ -7,7 +7,7 @@ paths: ["test/**", ".claude/rules/**"]
 - **Every `.claude/rules/` file carries `paths:` and is the one home of its rules' mechanism — never the reasoning.** `paths:` is mandatory because a rule file
   without one loads at `session_start` in every session — a context-floor increase on all of them, the one failure mode this mechanism can introduce. Every
   Why-linked rule has exactly one rule-file home — an unlinked CLAUDE.md bullet needs none and answers to the 80-word cap alone — and CLAUDE.md keeps a linked
-  headline only for a rule that matters whichever file is touched — byte-equal with its rule-file copy — pinned by `test/claude-rules.test.ts`: a rule file is
+  headline only for a rule that matters whichever file is touched — byte-equal with its rule-file copy — pinned by `test/guards/claude-rules.test.ts`: a rule file is
   bullets and nothing else, each citing at most one anchor, an unanchored one at most 80 words; CLAUDE.md's headlines are a subset of the rule files' bullets,
   with one home per anchor, or per headline for an unanchored bullet; a linked CLAUDE.md bullet is a headline and a link, any other bullet at most 80 words;
   CLAUDE.md's `## Rule files` table equals the rule files' `paths:`, both ways; and CLAUDE.md stays under a byte budget — so mechanism cannot creep back by any
@@ -20,18 +20,20 @@ paths: ["test/**", ".claude/rules/**"]
   request. supertest dials `http://127.0.0.1:<port>` unconditionally while a bare `listen(0)` binds `::`, so any process holding that port on `127.0.0.1`
   answers instead: ~1 request in 1,500 on a loaded machine, which is one false red per `pnpm test` and so a merge-gate defect (bug-33). Not `jest.retryTimes`.
   `watchdog-sweep.test.ts` is the one exception — `createApp({ listen: true })`, opt-in, because its other cases install fake timers first. Pinned by a source
-  guard in `test/supertest-bind.test.ts`: behaviour cannot catch a suite that forgets, since forgetting is green 1,499 runs in 1,500. Why:
+  guard in `test/guards/supertest-bind.test.ts`: behaviour cannot catch a suite that forgets, since forgetting is green 1,499 runs in 1,500. Why:
   [invariants.md](docs/subsystems/invariants.md#a-supertest-suite-listens-once-on-127001-through-listenloopback)
 - **A jsdom suite's fixture dates are relative to the clock the assertion runs under** — `daysAgoDate`/`daysAgoStamp` (`test/helpers/dates.ts`), read at call
   time so a faked clock is honoured, never an absolute literal. `created` is compared against the REAL clock by `leavesBoard` → `isStale` → `lastTouched`, so a
   literal is not a constant but an expiry date: the card renders for `staleDays` and then stops, red on a tree nobody touched (bug-44, three cases, two suites,
-  every orchestrator run parked at `verify`). `test/fixture-clock.test.ts` is the source guard — every `test/*.test.tsx`, the four keys `created`, `updated`,
+  every orchestrator run parked at `verify`). `test/guards/fixture-clock.test.ts` is the source guard — every `test/**/*.test.tsx`, the four keys `created`, `updated`,
   `lastCommit`, `started`, a closed allowlist whose every entry carries its reason — and it reads source because behaviour cannot: a fresh literal is green for
   thirty days. `.ts` suites are out of scope (they pass `now` explicitly), and a literal behind a NAME passes the guard, which `board.test.tsx`'s `CREATED` uses
   deliberately and says so. Why:
   [invariants.md](docs/subsystems/invariants.md#a-fixture-date-is-relative-to-the-clock-the-assertion-runs-under)
-- **Tests are flat in `test/` under jest and beside the tool they cover under node; the node globs do not descend, so a suite one level deeper never runs**
-  — `*.test.ts` / `*.test.tsx` at the top of `test/`, component suites opting into jsdom with a `@jest-environment jsdom` docblock; skill tests next to the
+- **Jest suites sit one level down in `test/<feature>/`; node suites sit beside the tool they cover, and the node globs do not descend, so a node suite one
+  level deeper never runs** — `*.test.ts` / `*.test.tsx` in the feature directory of the code they cover (`agents/`, `board/`, `dashboards/`, `github/`,
+  `gitlab/`, `items/`, `jira/`, `orchestrator/`, `runs/`, `server/`, `settings/`, `tick/`, `tracker/`, `ui/`, `watchdog/`) or in `guards/` when the suite
+  reads source across the repo rather than covering one feature; never at the top of `test/`, where only `helpers/` and `fixtures/` sit. Component suites opting into jsdom with a `@jest-environment jsdom` docblock; skill tests next to the
   tool they cover (`skills/*/tools/*.test.mjs`) under node's own test runner, not jest — but `pnpm test` runs both runners, via `scripts/test-all.mjs`. The
   split is which runner executes a file, not which ones one word covers; that half is the `pnpm test` rule in `.claude/rules/scripts.md`. Cases that pin a
   **skill's prose** rather than a tool live in `skills/backlog/tools/backlog.test.mjs` too (`backlog-groom`'s stamp order and its closing `Groomed on disk only`

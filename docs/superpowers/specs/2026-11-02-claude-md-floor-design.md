@@ -18,7 +18,7 @@ reasoning in `docs/subsystems/invariants.md`). It has regrown to 38 KB in five w
 | 2026-10-21 | 32,578 | 98               |
 | 2026-10-29 | 37,952 | 108              |
 
-The cause is structural, not editorial: `test/claude-rules.test.ts` requires the set of `CLAUDE.md` headlines to EQUAL the set of rule-file headlines,
+The cause is structural, not editorial: `test/guards/claude-rules.test.ts` requires the set of `CLAUDE.md` headlines to EQUAL the set of rule-file headlines,
 so every new rule anywhere in the repo must add a line to the always-paid tier. Of today's file, `## Invariants` is 24,197 bytes (64%), and the
 `Why: [invariants.md](...)` links alone are 11,428 bytes (30% of the whole file) — links the rule files already carry.
 
@@ -113,7 +113,7 @@ records each failure and which way it was fixed; the final keep-list may therefo
   `components/ui/` (:71-72), every component cites its DESIGN.md subsection (:79), `backlog.mjs` / `orchestrate.mjs` are the only writers of the
   registry / run file (:84-85), start orchestrator runs from the board (:91), the `.claude/rules/` contract (:97). Each embedded rule goes through the
   cross-cutting criterion like any `## Invariants` bullet — keep-list, or a rule file whose fence covers what it governs — and only purely descriptive
-  detail moves to `docs/overview.md`. `test/runs-view.test.tsx:2653,2679` cite "CLAUDE.md's `lib/` rule"; they follow wherever that rule lands.
+  detail moves to `docs/overview.md`. `test/runs/runs-view.test.tsx:2653,2679` cite "CLAUDE.md's `lib/` rule"; they follow wherever that rule lands.
 - **A path → rule-file table** (new) — the eleven rule files and their `paths:` globs, plus one rule: before editing a file under a glob through any route
   that does not `Read` it first (`codegraph_explore`, `Write`, a subagent), read that rule file. This replaces the sentence in today's `## Invariants`
   preamble that says the same thing in prose.
@@ -134,7 +134,7 @@ sessions are seen skipping it.
 
 ## Guard tests
 
-`test/claude-rules.test.ts` (with `test/helpers/rule-tiers.ts`) changes contract, not strictness:
+`test/guards/claude-rules.test.ts` (with `test/helpers/rule-tiers.ts`) changes contract, not strictness:
 
 - **Was:** `CLAUDE.md` headlines and rule-file headlines are the same set.
 - **Becomes:** every linked `CLAUDE.md` headline appears byte-equal (on the joined text) as a rule-file headline — tier one is a SUBSET of tier two —
@@ -148,7 +148,7 @@ sessions are seen skipping it.
 - **Kept:** one home per anchor; every rule file has a non-empty `paths:` whose globs each match a tracked file; the fixtures proving each guard bites
   (extend them for the subset and table assertions).
 
-`test/dialog-count-docs.test.ts` asserts `CLAUDE.md keeps the headline` for the Escape rule (#15), which is moving to `board.md` only. That assertion
+`test/guards/dialog-count-docs.test.ts` asserts `CLAUDE.md keeps the headline` for the Escape rule (#15), which is moving to `board.md` only. That assertion
 moves with it: it should pin the headline in `board.md`.
 
 ## Other surfaces that cite `CLAUDE.md`
@@ -157,7 +157,7 @@ moves with it: it should pin the headline in `board.md`.
   the comment should point at its rule file.
 - The same-set contract is stated in prose, and each statement changes to the subset contract: `CLAUDE.md`'s own `## Invariants` preamble, `.claude/rules/tests.md:8-12` (bullet #104's mechanism —
   "one multiset", and itself guarded), `docs/subsystems/invariants.md` (the three-tier entries, around :3093, :3103-3105, :3215-3216, :3223),
-  `docs/overview.md:16,30-32`, `test/helpers/rule-tiers.ts:4-9,124` and `test/claude-rules.test.ts:12-17`.
+  `docs/overview.md:16,30-32`, `test/helpers/rule-tiers.ts:4-9,124` and `test/guards/claude-rules.test.ts:12-17`.
 - `docs/subsystems/invariants.md`, `docs/overview.md` and `.claude/rules/*.md` headers describe the three tiers ("the headline is in CLAUDE.md");
   the rule-file header line says so verbatim. These need rewording to "the headline is in CLAUDE.md for cross-cutting rules, here otherwise".
 - `agents/backlog-reviewer.md` reads `CLAUDE.md`'s Invariants AND the rule file for every file a diff touches; it keeps working unchanged. It is

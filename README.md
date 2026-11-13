@@ -480,7 +480,7 @@ that command, see [Read it from your phone](#8-optional-read-it-from-your-phone)
 | Types (`tsc --noEmit`)                  | `pnpm run typecheck`                            |
 | Production build (nest + vite)          | `pnpm run build`                                |
 
-Jest suites are flat in `test/`; node suites sit beside the tool they cover. Component suites opt into jsdom with a `@jest-environment jsdom` docblock;
+Jest suites sit in `test/<feature>/` (`test/jira/`, `test/runs/`, `test/guards/` …); node suites sit beside the tool they cover. Component suites opt into jsdom with a `@jest-environment jsdom` docblock;
 everything else runs in node.
 
 Ports, binds, what the container mounts and the failure modes each of those has are in [`docs/workflows/development.md`](docs/workflows/development.md).

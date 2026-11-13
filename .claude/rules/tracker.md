@@ -73,7 +73,7 @@ paths: ["server/src/tracker/**"]
 - **The GitHub token never leaves the server, and the poller is armed only while something is connected.** `BM_GITHUB_TOKEN` is read by `githubToken()`
   (`server/src/tracker/token.util.ts`) per call and cached nowhere; no route returns it and the browser never talks to `api.github.com` — the credential's
   sibling of "the browser never talks to the dashboard", stated separately because one is about an origin and the other about a secret. `docker-compose.yml`
-  passes it through as an interpolation with a default, never a literal (bug-25's rule, higher stakes), pinned by `test/compose-env.test.ts`. Outbound calls go
+  passes it through as an interpolation with a default, never a literal (bug-25's rule, higher stakes), pinned by `test/guards/compose-env.test.ts`. Outbound calls go
   to one constant host and `repo` is validated before it is interpolated. `TrackerPollerService` is a `setTimeout` chain in the watchdog's shape, armed only
   while a registered project resolves to `github` AND a token is present, disarmed on the tick that finds either missing; `arm()` is called from the bootstrap
   hook, from `GithubSource.list` and from `POST /api/trackers/sync`. Since #17 "resolves to `github`" means a repo that is not `off` or is still owed its ONE
@@ -102,7 +102,7 @@ paths: ["server/src/tracker/**"]
   `reviewLifted` is what `mapIssue` drops `inReview` on.
   Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The eleven labels
   live in `server/src/tracker/labels.ts`, are created idempotently on a repo's first successful sync — phase 2's one write to GitHub — and agree with
-  `connect`'s issue forms by a source-reading guard (`test/tracker-labels.test.ts`), never an import. **The Jira board caches are the second**
+  `connect`'s issue forms by a source-reading guard (`test/tracker/tracker-labels.test.ts`), never an import. **The Jira board caches are the second**
   (`JiraPollerService`, `server/src/jira/poller.service.ts`): in memory, one `JiraBoardCache` per board, lost on restart, replaced whole by a sweep or not at
   all — a whole-board failure keeps the last good list and its `polledAt` — and that `polledAt` rides on every board in `GET /api/jira` and on `GET
   /api/jira/boards/:id/issues`. The issue detail, the roots search, the project list and the JQL check are fresh reads and never cached. **The PR cache is

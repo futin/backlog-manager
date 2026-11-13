@@ -81,15 +81,15 @@ import type { UncommittedItems } from '../../../shared/types';
  * concurrent callers spawn git twice, because a call that arrives after an
  * edit must not be handed a read that began before it (`git-dates.util.ts`
  * shares a pending spawn precisely because its question has a cheap key that
- * says when sharing is safe; this one has none). `test/git-run.test.ts` pins it.
+ * says when sharing is safe; this one has none). `test/server/git-run.test.ts` pins it.
  */
 
 /**
  * The ref a board-started run gates at when no base was picked. Named rather than inlined because it
  * is a second copy of `orchestrate.mjs`'s `BASE_REF_DEFAULT` in a second
  * language — the `.mjs` tool is not importable into the Nest build — and
- * `test/uncommitted.test.ts` reads that file's SOURCE to pin the two
- * together, the way `test/server-bind.test.ts` reads `main.ts`.
+ * `test/orchestrator/uncommitted.test.ts` reads that file's SOURCE to pin the two
+ * together, the way `test/guards/server-bind.test.ts` reads `main.ts`.
  */
 export const UNCOMMITTED_BASE_REF = 'main';
 

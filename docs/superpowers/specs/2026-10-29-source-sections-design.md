@@ -91,7 +91,7 @@ the Jira rule states them: **unknown** (no answer yet, or every read failed) dra
   through eleven `/api/items/*` routes, Jira assign and transition. PR merge / auto-merge / update-branch are a **new write surface** and must be added to that list and to `invariants.md` as their own entry, in
   the shape of "The board's Jira writes are assign and transition, nothing else": the three writes, nothing else, each re-reads the PR afterwards. Its headline
   lives in three homes, byte-equal: CLAUDE.md, the `invariants.md` heading, and a bullet in `.claude/rules/tracker.md` anchored to that heading —
-  `test/claude-rules.test.ts` holds tier one and tier two to the same multiset of (anchor, headline), so a headline in only two homes fails CI.
+  `test/guards/claude-rules.test.ts` holds tier one and tier two to the same multiset of (anchor, headline), so a headline in only two homes fails CI.
 - **Guarded POSTs.** Every write route is guarded by content-type and origin (the agents-POST guard) and the Host allowlist. The PR writes are serialised per PR
   the way item writes are serialised per item.
 - **The GitHub token never leaves the server** (`BM_GITHUB_TOKEN`, `server/src/tracker/token.util.ts`). The browser asks `/api/...`; the Sources card reports
@@ -105,7 +105,7 @@ the Jira rule states them: **unknown** (no answer yet, or every read failed) dra
   the actions disabled and labelled `sync off`. Reading on demand while the page is open means an `off` repo needs no cadence of its own. `syncOffBlock` is
   keyed by project path and is the ONE server home of the sentence (`.claude/rules/tracker.md`), so a PR write resolves its repo to the registered github
   project's path and calls `syncOffBlock(path)` — no second home of the sentence; its serialisation key is `<repo>#<number>`, not an item urn. The new
-  routes join the guarded set in `test/agents-origin-guard.test.ts`.
+  routes join the guarded set in `test/agents/agents-origin-guard.test.ts`.
 - **Token permissions.** Today's docs (`.env.example`) understate even the current token, which writes issues since task-46. PRs need Pull requests and Contents write (merge, update-branch), Checks and
   Statuses read (the checks chip), and arming auto-merge goes through GraphQL. The person widens the token; `docs/` and `.env.example` say what it needs. A
   fine-grained token's write permissions cannot be read back, so the Sources card reports what it can read and a write that lacks permission fails with

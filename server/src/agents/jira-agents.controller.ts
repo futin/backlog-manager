@@ -26,7 +26,7 @@ export function isSessionId(value: unknown): value is string {
  * services, and a fourth constructor dependency there would put a Jira import into every one of them.
  *
  * `SameOriginPostGuard` like every agents POST — this one starts a session that can write files in a mapped repository and writes to Jira on the way, so a
- * page the developer did not write must not be able to drive it (`origin.guard.ts`). Every POST here belongs in `test/agents-origin-guard.test.ts`'s list.
+ * page the developer did not write must not be able to drive it (`origin.guard.ts`). Every POST here belongs in `test/agents/agents-origin-guard.test.ts`'s list.
  */
 @Controller('api/agents')
 export class JiraAgentsController {

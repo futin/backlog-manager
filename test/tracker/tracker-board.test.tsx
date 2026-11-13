@@ -1,0 +1,523 @@
+/**
+ * @jest-environment jsdom
+ */
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import '@testing-library/jest-dom';
+
+import BoardView from '../../client/src/components/board/BoardView';
+import type { SourceSection } from '../../client/src/lib/sources';
+import { queuedStripFor, type LiveBar } from '../../client/src/lib/live-bar';
+import { daysAgoDate, daysAgoStamp } from '../helpers/dates';
+import { pickProject, pickStatus } from '../helpers/filter-bar';
+import { BOARD_TRACKER_POLL_MS } from '../../client/src/hooks/useBoard';
+import { TRACKER_POLL_MS } from '../../server/src/tracker/poller.service';
+import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage } from '../../shared/types';
+import { OrchestratorRunsProvider } from '../../client/src/hooks/OrchestratorRunsContext';
+
+/**
+ * What a tracker project looks like ON THE BOARD (task-45, spec §5.5): the
+ * band's absence of a poll line (the shell chip owns it since #228), the card's untyped badge, its link-out and its assignee,
+ * the item modal's age beside the cached body — and, since task-46, a dispatch
+ * control exactly like every other card's.
+ *
+ * That last one is INVERTED from what this suite asserted in phase 2, and the
+ * inversion is the dispatch lift. Task-45 hid the control because a spawned
+ * session would have run the file-writing skills against a project with no
+ * files; phase 3 made that false — the skills write through the API and the
+ * claim protocol gives a tracker item a `started` for `progressBlock` to read —
+ * so `deriveAction` no longer asks what an item's source is.
+ *
+ * What did NOT come back with it is the ORCHESTRATOR, whose control still hides
+ * for a tracker project until phase 4. The two used to be one line and are now
+ * two rules, so this suite states both.
+ *
+ * One files project beside one GitHub project in every render, deliberately.
+ * Each case then asserts both halves of its rule at once — which is the only
+ * shape that can catch a change that applies to everybody.
+ */
+
+const FILES_PATH = '/abs/alpha';
+const TRACKER_PATH = '/abs/tracker';
+
+function item(over: Partial<BacklogItem>): BacklogItem {
+  const base: BacklogItem = {
+    id: 'bug-1',
+    title: 'a files bug',
+    created: daysAgoDate(2),
+    started: '',
+    updated: daysAgoStamp(0),
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    tags: [],
+    section: 'bugs',
+    status: 'open',
+    project: 'alpha',
+    projectPath: FILES_PATH,
+    groomed: true,
+    path: `${FILES_PATH}/backlog/bugs/open/bug-1.md`,
+    source: 'files',
+    url: null,
+    assignee: null,
+    untyped: false
+  };
+  return { ...base, ...over };
+}
+
+/** The tracker's own row: `source: 'github'`, a URN for a path, a URL, and
+ *  whatever the case is about. */
+function issueItem(over: Partial<BacklogItem> = {}): BacklogItem {
+  return item({
+    id: '#31',
+    title: 'an issue',
+    project: 'tracker',
+    projectPath: TRACKER_PATH,
+    path: 'gh:futin/x#31',
+    source: 'github',
+    url: 'https://github.com/futin/x/issues/31',
+    ...over
+  });
+}
+
+function projects(trackerOver: Partial<ProjectSummary> = {}): ProjectSummary[] {
+  return [
+    {
+      name: 'alpha',
+      path: FILES_PATH,
+      createdAt: '2026-08-26T00:00:00.000Z',
+      missing: false,
+      counts: { bugs: 1, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+      source: 'files',
+      repo: null,
+      polledAt: null,
+      access: null,
+      detail: null,
+      interval: null
+    },
+    {
+      name: 'tracker',
+      path: TRACKER_PATH,
+      createdAt: '2026-08-26T00:00:00.000Z',
+      missing: false,
+      counts: { bugs: 1, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+      source: 'github',
+      repo: 'futin/x',
+      polledAt: new Date().toISOString(),
+      access: 'ok',
+      detail: null,
+      interval: null,
+      ...trackerOver
+    }
+  ];
+}
+
+const AGENTS_STATUS: AgentsStatus = {
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  // BOTH projects are visible to the dashboard, so the only reason a tracker
+  // card can lack a dispatch control is the one this suite is about.
+  projectPaths: [FILES_PATH, TRACKER_PATH]
+};
+
+const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [], remote: [], remoteStarting: [] };
+
+let bodyCalls: string[];
+
+function stubFetch(items: BacklogItem[], summaries: ProjectSummary[], runs: OrchestratorRunsPayload = NO_RUNS): void {
+  bodyCalls = [];
+  global.fetch = jest.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/api/items/body')) {
+      bodyCalls.push(url);
+      return Promise.resolve({ ok: true, text: () => Promise.resolve('## Symptom\n\nthe cached issue body\n') } as Response);
+    }
+    const payload = url.includes('/api/agents/status')
+      ? AGENTS_STATUS
+      : url.includes('/api/orchestrator/runs')
+        ? runs
+        : url.includes('/api/projects')
+          ? summaries
+          : ({ items, errors: [] } as ItemsIndex);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+  }) as jest.Mock;
+}
+
+/*
+ * Source sections: a board draws ONE source, and this suite is about the tracker (`github`) project, so `github` is the page by default. The files card the
+ * cases used to compare against in the same render is on the OTHER page now — a case that still wants it renders `files` as a second pass (`unmount`
+ * between, so one stub never answers two boards).
+ */
+async function renderBoard(
+  items: BacklogItem[],
+  summaries: ProjectSummary[] = projects(),
+  runs: OrchestratorRunsPayload = NO_RUNS,
+  source: SourceSection = 'github'
+): Promise<void> {
+  stubFetch(items, summaries, runs);
+  render(<OrchestratorRunsProvider><BoardView source={source} /></OrchestratorRunsProvider>);
+  await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
+}
+
+/** The card for one title — every assertion here is about one card's contents,
+ *  and `getByText` on a marker would happily match the other card's. */
+function card(title: string): HTMLElement {
+  return screen.getByText(title).closest('.board-card') as HTMLElement;
+}
+
+afterEach(() => {
+  jest.restoreAllMocks();
+  // The board persists its project filter to `localStorage` (`lib/settings.ts`),
+  // and jsdom keeps one store for the whole file — so the Orchestrate case
+  // below, which narrows the filter to make the control appear at all, would
+  // otherwise leave every later case rendering ONE project's cards and failing
+  // on the other's. Cleared here rather than in that one case, because the next
+  // test to touch a persisted setting would rediscover this the hard way.
+  localStorage.clear();
+});
+
+describe('dispatch on a tracker project', () => {
+  it('draws a dispatch control, exactly as a files card does on the Files page', async () => {
+    await renderBoard([item({}), issueItem({ groomed: true })]);
+
+    expect(within(card('an issue')).getByRole('button', { name: /execute/i })).toBeInTheDocument();
+    expect(screen.queryByText('a files bug')).toBeNull();
+    cleanup();
+    await renderBoard([item({}), issueItem({ groomed: true })], projects(), NO_RUNS, 'files');
+    expect(within(card('a files bug')).getByRole('button', { name: /execute/i })).toBeInTheDocument();
+    expect(screen.queryByText('an issue')).toBeNull();
+  });
+
+  /* The per-item blocks work for a tracker item for free, which is the other
+     half of the lift: `progressBlock` reads the `started` a live claim fills,
+     with no tracker-specific branch anywhere. DISABLED rather than hidden —
+     `.claude/rules/board.md`'s rule — because it is a fact about the item, not the project. */
+  it('disables the control for an item a live claim holds', async () => {
+    await renderBoard([item({}), issueItem({ groomed: true, started: daysAgoStamp(0), phase: 'groom' })]);
+
+    const button = within(card('an issue')).getByRole('button', { name: /execute/i });
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  /* The orchestrator half, which did NOT lift in task-46 and DID in task-47
+     (phase 4a): `projectIsFiles` is gone, and the control is now drawn for a
+     tracker project on exactly the four conditions it is drawn for a files
+     one. Both directions in one case, because a change that drew the control
+     for nobody would pass either half alone. */
+  it('draws the Orchestrate control for a tracker project as well as a files one', async () => {
+    await renderBoard([item({}), issueItem()]);
+
+    await pickProject('tracker');
+    expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeInTheDocument();
+    cleanup();
+
+    await renderBoard([item({}), issueItem()], projects(), NO_RUNS, 'files');
+    await pickProject('alpha');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Orchestrate' })).toBeInTheDocument());
+  });
+});
+
+describe('the card’s untyped, link-out and assignee readings', () => {
+  it('draws the untyped badge only for an untyped item', async () => {
+    await renderBoard([issueItem({ untyped: true, section: 'ideas', groomed: null }), issueItem({ id: '#32', title: 'typed issue' })]);
+    expect(within(card('an issue')).getByText('untyped')).toBeInTheDocument();
+    expect(within(card('typed issue')).queryByText('untyped')).toBeNull();
+  });
+
+  it('draws the link-out only when the item has a url', async () => {
+    await renderBoard([item({}), issueItem()]);
+    const link = within(card('an issue')).getByRole('link', { name: /open #31/i });
+    expect(link).toHaveAttribute('href', 'https://github.com/futin/x/issues/31');
+    cleanup();
+    await renderBoard([item({}), issueItem()], projects(), NO_RUNS, 'files');
+    expect(within(card('a files bug')).queryByRole('link')).toBeNull();
+  });
+
+  it('draws an assignee login, and nothing for an unassigned item', async () => {
+    await renderBoard([issueItem({ assignee: 'futin' }), issueItem({ id: '#32', title: 'nobody', assignee: null })]);
+    expect(within(card('an issue')).getByText('@futin')).toBeInTheDocument();
+    expect(within(card('nobody')).queryByText(/^@/)).toBeNull();
+  });
+
+  it('opening the issue does not open the item modal behind it, by click or by key', async () => {
+    await renderBoard([issueItem()]);
+    const link = within(card('an issue')).getByRole('link', { name: /open #31/i });
+
+    // The whole card is a button; without `stopPropagation` the click would
+    // open the modal as well as the issue.
+    await userEvent.click(link);
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // And the keyboard path, which is the half a click-only case cannot see:
+    // the card's `onKeyDown` bubbles from any descendant and calls
+    // `preventDefault()` + `onOpen()`, so an unstopped Enter would cancel the
+    // anchor's own activation AND open the modal — the issue unreachable from
+    // the keyboard entirely.
+    link.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // Space too: the card acts on both keys, so the guard has to cover both.
+    await userEvent.keyboard(' ');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('the orchestrator:queued strip', () => {
+  /** A local run of the tracker project — it holds the project, which is all the strip asks. An empty queue by default, so it claims no card and nothing
+   *  else on the card moves; the precedence cases hand it an entry for the card. Stamps are relative to the clock the assertion runs under. */
+  function trackerRun(over: Partial<OrchestratorRunsPayload['runs'][number]>): OrchestratorRunsPayload {
+    const now = new Date().toISOString();
+    return {
+      runs: [
+        {
+          runId: 'run-1',
+          project: TRACKER_PATH,
+          base: 'main',
+          startedAt: now,
+          updatedAt: now,
+          status: 'running',
+          queue: [],
+          fresh: true,
+          pastRuns: 0,
+          pauseRequested: false,
+          stopRequested: false,
+          ...over
+        } as OrchestratorRunsPayload['runs'][number]
+      ],
+      starting: [],
+      remote: [],
+      remoteStarting: []
+    };
+  }
+
+  /** The run's queue entry for the card, at `stage` — only the fields the board reads to find and paint it. */
+  function queueEntry(stage: RunStage): RunQueueItem {
+    return { id: '#31', title: 'an issue', stage, stageAt: { dispatched: new Date().toISOString() } } as unknown as RunQueueItem;
+  }
+
+  const strip = (title: string): HTMLElement | null => card(title).querySelector('.board-card-queued');
+
+  it('draws a live `queued` strip across the top while a live run holds the project, and no marker for it', async () => {
+    await renderBoard([issueItem({ queued: true })], projects(), trackerRun({}));
+    await waitFor(() => expect(strip('an issue')).not.toBeNull());
+    expect(strip('an issue')).toHaveAttribute('data-state', 'live');
+    expect(strip('an issue')).toHaveTextContent(/^queued$/);
+    expect(card('an issue').querySelector('.board-card-live')).toBeNull();
+    expect(within(card('an issue')).getByTestId('marker-row')).not.toHaveTextContent('queued');
+  });
+
+  it('draws a dimmed `queued · stale` strip, titled with the way out, when no live run does', async () => {
+    const crashed = new Date(Date.now() - 20 * 60_000).toISOString();
+    await renderBoard([issueItem({ queued: true })], projects(), trackerRun({ updatedAt: crashed, fresh: false }));
+    await waitFor(() => expect(strip('an issue')).not.toBeNull());
+    const band = strip('an issue') as HTMLElement;
+    expect(band).toHaveAttribute('data-state', 'stale');
+    expect(band).toHaveTextContent(/^queued · stale$/);
+    expect(band).toHaveAttribute('title', expect.stringContaining('no live run holds it'));
+    expect(band.getAttribute('title')).toContain('GitHub');
+    expect(within(card('an issue')).queryByText('queued')).toBeNull();
+  });
+
+  it('draws the live strip when the live run holding the project is another machine’s', async () => {
+    // Spec §5's card case the plan's list left out, and the one that pins
+    // BoardView's wiring rather than the derivation: the board must hand
+    // `queuedReading` the REMOTE runs too, or every other machine's live queue
+    // reads stale here.
+    const local = trackerRun({});
+    const remote = { ...local.runs[0], repo: 'futin/x', remote: true as const, host: null };
+    await renderBoard([issueItem({ queued: true })], projects(), { runs: [], starting: [], remote: [remote], remoteStarting: [] });
+    await waitFor(() => expect(strip('an issue')).toHaveAttribute('data-state', 'live'));
+  });
+
+  it('draws no strip for an item without the label', async () => {
+    await renderBoard([issueItem()], projects(), trackerRun({}));
+    expect(strip('an issue')).toBeNull();
+    expect(within(card('an issue')).queryByText(/queued/)).toBeNull();
+  });
+
+  it('gives way to the claim: a claimed item still carrying the label (one poll of cache lag) reads `executing`', async () => {
+    // The claim removes the label, but the cache can hold both facts for a poll. The live claim is the truth then — the label is a plan, never a claim.
+    await renderBoard([issueItem({ queued: true, started: daysAgoStamp(0), phase: 'execute' })], projects(), trackerRun({}));
+    await waitFor(() => expect(card('an issue').querySelector('.board-card-live')).toHaveTextContent('executing'));
+    expect(strip('an issue')).toBeNull();
+  });
+
+  it('gives way to the run’s own stage once the item is dispatched', async () => {
+    await renderBoard([issueItem({ queued: true })], projects(), trackerRun({ queue: [queueEntry('dispatched')] }));
+    await waitFor(() => expect(card('an issue').querySelector('.board-card-live')).toHaveTextContent('dispatched'));
+    expect(strip('an issue')).toBeNull();
+  });
+
+  it('still reads queued while the run holds the item at `pending`, which draws no live strip', async () => {
+    await renderBoard([issueItem({ queued: true })], projects(), trackerRun({ queue: [queueEntry('pending')] }));
+    await waitFor(() => expect(strip('an issue')).toHaveAttribute('data-state', 'live'));
+    expect(card('an issue').querySelector('.board-card-live')).toBeNull();
+  });
+
+  it('is not live work: a queued card neither floats above an idle one nor counts as In progress', async () => {
+    // `liveRank`'s `< 2` half is the column order, the In progress filter and the clock at once, and nobody is on a queued item.
+    await renderBoard(
+      [issueItem({ queued: true, created: daysAgoDate(5) }), issueItem({ id: '#32', title: 'idle issue', created: daysAgoDate(1) })],
+      projects(),
+      trackerRun({})
+    );
+    await waitFor(() => expect(strip('an issue')).not.toBeNull());
+    // Created (desc) is the default sort, so the idle card leads — and must still lead.
+    expect(card('idle issue').compareDocumentPosition(card('an issue')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await pickStatus('In progress');
+    await waitFor(() => expect(screen.queryByText('an issue')).toBeNull());
+  });
+});
+
+describe('queuedStripFor', () => {
+  const bar: LiveBar = { label: 'executing', tone: 'human', anchor: null, title: 'in progress since x' };
+
+  it('reads `queued` for a live label', () => {
+    expect(queuedStripFor('live', null)).toEqual({ word: 'queued', state: 'live' });
+  });
+
+  it('reads `queued · stale` for a stale label, titled with the way out', () => {
+    const got = queuedStripFor('stale', null);
+    expect(got).toMatchObject({ word: 'queued · stale', state: 'stale' });
+    expect(got?.title).toContain('no live run holds it');
+    expect(got?.title).toContain('GitHub');
+  });
+
+  it('draws nothing without a label', () => {
+    expect(queuedStripFor(null, null)).toBeNull();
+    expect(queuedStripFor(undefined, null)).toBeNull();
+  });
+
+  it('draws nothing under a live bar, whichever reading the label has', () => {
+    expect(queuedStripFor('live', bar)).toBeNull();
+    expect(queuedStripFor('stale', bar)).toBeNull();
+  });
+});
+
+describe('the band', () => {
+  it('draws no tracker line in the band — the strip chip is that reading’s home now', async () => {
+    // The tracker strip spec, §6: the poll clock is a fact about the machine, so it moved into the shell's chip, and a second copy here would be two
+    // readings of one clock on one screen. The item modal keeps its own age line (below); the band keeps nothing.
+    await renderBoard([issueItem()]);
+    expect(screen.queryByTestId('tracker-line')).toBeNull();
+    expect(screen.queryByText(/polled \d+ s ago/)).toBeNull();
+  });
+});
+
+describe('the item modal', () => {
+  it('renders the cached body with the poll age beside it, and asks GitHub for nothing', async () => {
+    await renderBoard([issueItem()]);
+    await userEvent.click(screen.getByText('an issue'));
+
+    await waitFor(() => expect(screen.getByText('the cached issue body')).toBeInTheDocument());
+    // The age says how old the cached copy is — the point of drawing it beside
+    // a body that was not fetched from GitHub on open (spec §5.5). Scoped to
+    // the dialog: the band printed the same line before #228, and an unscoped
+    // query would pass on any other copy while the modal drew nothing.
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/futin\/x · polled \d+ s ago/)).toBeInTheDocument();
+
+    // The ONE request the open made went to this app's own API, by URN, and
+    // was answered out of the poller's cache. Nothing in this browser ever
+    // talks to GitHub — the token is on the server and never leaves it.
+    expect(bodyCalls).toHaveLength(1);
+    expect(bodyCalls[0]).toContain(encodeURIComponent('gh:futin/x#31'));
+    for (const call of (global.fetch as jest.Mock).mock.calls) {
+      expect(String(call[0])).not.toContain('api.github.com');
+    }
+  });
+});
+
+describe('the board’s own poll', () => {
+  it('matches the server’s poll interval', () => {
+    // Two constants, one number, and a test rather than an import: the client
+    // module is bundled into the browser and the server's imports Nest. A
+    // client poll period longer than the server's would make the rendered age
+    // claim the items are older than they are.
+    expect(BOARD_TRACKER_POLL_MS).toBe(TRACKER_POLL_MS);
+  });
+
+  it('re-reads the payload while a tracker project is registered, and not otherwise', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+    try {
+      stubFetch([item({})], [projects()[0]]);
+      render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
+      await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
+      const filesOnly = (global.fetch as jest.Mock).mock.calls.length;
+      jest.advanceTimersByTime(BOARD_TRACKER_POLL_MS * 2);
+      // No poll timer at all on a board with no tracker: every card is a pure
+      // function of props that cannot change without an event this tab sees.
+      expect((global.fetch as jest.Mock).mock.calls.length).toBe(filesOnly);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+/**
+ * #17 — a tracker project whose sync is `off` on this machine. Its cache stops moving, so the server refuses every write and spawn for it; the board says
+ * why BEFORE the click, with the server's own sentence, and stops re-reading a payload nothing is refreshing. Disabled, never hidden: the block is a fact
+ * about one project, not about the environment (`.claude/rules/board.md`'s "environment-level blocks hide, per-item ones disable").
+ */
+describe('a tracker project whose sync is off (#17)', () => {
+  const SENTENCE = 'sync is off for futin/x — turn it on in GitHub › Settings';
+
+  it('disables the card’s dispatch control with the server’s sentence, and leaves the files card alone', async () => {
+    await renderBoard([item({}), issueItem({ groomed: true })], projects({ interval: 'off' }));
+
+    const button = within(card('an issue')).getByRole('button', { name: /execute/i });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).toHaveAttribute('title', SENTENCE);
+    cleanup();
+    await renderBoard([item({}), issueItem({ groomed: true })], projects({ interval: 'off' }), NO_RUNS, 'files');
+    expect(within(card('a files bug')).getByRole('button', { name: /execute/i })).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('leaves the control enabled for the same project at 15s', async () => {
+    await renderBoard([item({}), issueItem({ groomed: true })], projects({ interval: '15s' }));
+
+    expect(within(card('an issue')).getByRole('button', { name: /execute/i })).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('disables Orchestrate for the project with the same sentence, and a click opens nothing', async () => {
+    await renderBoard([item({}), issueItem()], projects({ interval: 'off' }));
+
+    await pickProject('tracker');
+    const chip = await screen.findByRole('button', { name: 'Orchestrate' });
+    expect(chip).toHaveAttribute('aria-disabled', 'true');
+    expect(chip).toHaveAttribute('title', SENTENCE);
+    await userEvent.click(chip);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // Nothing was re-asked either: a stale status is not what blocks it, so a status refetch could not unblock it.
+    expect((global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('/api/agents/status'))).toHaveLength(1);
+  });
+
+  it.each([
+    ['every tracker project is off', 'off' as const, false],
+    ['the tracker project is at 5m', '5m' as const, true]
+  ])('re-reads the payload on the board’s poll timer only while some tracker syncs — %s', async (_label, interval, polls) => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+    try {
+      stubFetch([item({})], projects({ interval }));
+      render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
+      await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
+      const before = (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('/api/projects')).length;
+      jest.advanceTimersByTime(BOARD_TRACKER_POLL_MS * 2);
+      const after = (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('/api/projects')).length;
+      if (polls) expect(after).toBeGreaterThan(before);
+      else expect(after).toBe(before);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});

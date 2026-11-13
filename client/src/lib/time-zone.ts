@@ -7,7 +7,7 @@
  * the same run must read the same clock, the same day and the same week, so the board reads ONE zone, chosen on Settings › Shared and stored on the API host
  * (`~/.backlog-manager/settings/timezone.json`), and falls back to each browser's own zone only while nobody has chosen one. `useTimeZone` hands it out.
  *
- * Why one file, guarded by `test/time-zone-guard.test.ts`: a `Date`'s local getters (`getHours`, `getDay`, `setHours` …) and the locale formatters
+ * Why one file, guarded by `test/guards/time-zone-guard.test.ts`: a `Date`'s local getters (`getHours`, `getDay`, `setHours` …) and the locale formatters
  * (`toLocaleTimeString`, `toLocaleDateString`) silently read the BROWSER's zone, so a single one left anywhere else reintroduces exactly the disagreement this
  * setting removes, and nothing on screen would say which reading is the odd one out. Here, every reading is `Intl.DateTimeFormat` with `timeZone` set, and the
  * guard refuses those calls in every other client file.

@@ -11,7 +11,7 @@ import { useNarrow } from '../hooks/useNarrow';
  *
  * Escape: `useDialogEscape(onClose)` here and `closeOnEscape={false}` on ui-kit's drawer, so the key keeps one owner and the drawer stays the sixth entry on
  * the stack. Left at ui-kit's default, the drawer would bind a `keydown` listener of its own beside the stack's, and one press would close it AND the item
- * modal it opened over — bug-23's exact defect, which `test/dialog-escape.test.tsx` pins.
+ * modal it opened over — bug-23's exact defect, which `test/board/dialog-escape.test.tsx` pins.
  *
  * The phone shape: `narrow` is `useNarrow()`, the 700 px reading every overlay here uses — ui-kit's CSS has no media queries, so the host decides.
  *

@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
  *
  * The temp-file-then-rename write used to be typed out by hand, once per file, and the part that is easy to forget was forgotten: of the seven copies #423
  * counted, only two removed their temp file when the write failed, so a full disk stranded a `*.tmp` beside the other five for good. A fix repeated by hand is
- * a fix missed somewhere, so the write has one home now and `test/atomic-write.test.ts` greps `server/src` for a `renameSync` anywhere else.
+ * a fix missed somewhere, so the write has one home now and `test/server/atomic-write.test.ts` greps `server/src` for a `renameSync` anywhere else.
  *
  * What a caller still owns is everything around the write: the refusal of a file it could not read, the merge, the return value. This module knows nothing
  * about any file's shape, and it never reads the target.

@@ -503,7 +503,7 @@ export default function RunsView() {
   // a project with a `running` run file (fresh or crashed) carries no
   // starting entry at all lives in `StartingRunsService.expired()` on the
   // server (bug-21's third eviction rule, tested in
-  // test/orchestrator-starting.test.ts), which is exactly why BoardView
+  // test/orchestrator/orchestrator-starting.test.ts), which is exactly why BoardView
   // deleted the filter it used to have. Restating that rule here would be a
   // second expression agreeing with the first — the shape `watchdogStoodDown`
   // and `isStale` are each one function to avoid, and the one this repo has

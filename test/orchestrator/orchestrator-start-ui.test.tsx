@@ -1,0 +1,2061 @@
+/**
+ * @jest-environment jsdom
+ */
+import { act, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import '@testing-library/jest-dom';
+
+import BoardView from '../../client/src/components/board/BoardView';
+import { OrchestrateSheet } from '../../client/src/components/board/OrchestrateSheet';
+import { SettingsProvider } from '../../client/src/hooks/useSettings';
+import type { SourceSection } from '../../client/src/lib/sources';
+import rawFixture from '../fixtures/orchestrator-run.json';
+import { daysAgoDate } from '../helpers/dates';
+import { pickProject } from '../helpers/filter-bar';
+import { homeOffer, homeOnly, proOffer, proSuggested } from '../helpers/offers';
+import { NO_MACHINE_TEXT } from '../../client/src/lib/dashboards';
+import { DEFAULT_REVIEW_CONFIG } from '../../shared/agent';
+import { RUN_IN_PROGRESS_CODE } from '../../shared/types';
+import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectOffers, ProjectSummary } from '../../shared/types';
+import { OrchestratorRunsProvider } from '../../client/src/hooks/OrchestratorRunsContext';
+
+// Same translation every other orchestrator suite (Task 8/10/11/12) already
+// applies: the fixture is plain JSON, so without this cast its string fields
+// widen to `string` instead of the narrower literal unions (RunStage, etc).
+const fixture = rawFixture as OrchestratorRun;
+type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; stopRequested: boolean };
+
+function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
+  const base: BacklogItem = {
+    id: 'task-1',
+    title: 'a task',
+    created: daysAgoDate(2),
+    started: '',
+    tags: [],
+    updated: '',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'tasks',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: true,
+    path: '/abs/alpha/backlog/tasks/open/task-1.md',
+    source: 'files',
+    url: null,
+    assignee: null,
+    untyped: false
+  };
+  return { ...base, ...over };
+}
+
+const READY: AgentsStatus = {
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'acceptEdits',
+  projectPaths: ['/abs/alpha']
+};
+
+const PROJECTS: ProjectSummary[] = [
+  {
+    name: 'alpha',
+    path: '/abs/alpha',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 },
+    source: 'files',
+    repo: null,
+    polledAt: null,
+    access: null,
+    detail: null,
+    interval: null
+  }
+];
+
+// Two projects, for the run-drawer exclusion case below: it needs a FRESH
+// run to open RunDrawer from, but test case 4 already pins that a project's
+// own fresh run hides ITS OWN Orchestrate button — so the run has to belong
+// to a project other than the one the board is narrowed to, or there would
+// be no button left to click at all.
+const PROJECTS_TWO: ProjectSummary[] = [
+  ...PROJECTS,
+  {
+    name: 'beta',
+    path: '/abs/beta',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+    source: 'files',
+    repo: null,
+    polledAt: null,
+    access: null,
+    detail: null,
+    interval: null
+  }
+];
+
+// =====================================================================
+// The toolbar button — test cases 1-4 from the task brief, plus the
+// mutual-exclusion regression the brief's own context calls out (Task 12
+// added it for the item/run drawer pair; this sheet is a second dialog
+// class that can now be open at the same time as LaunchSheet's, so the
+// same hazard needs the same fix).
+//
+// All five render the real BoardView: the button's visibility is a
+// function of board state (the project filter, useAgents' status, and
+// useOrchestratorRuns' run list) that only BoardView actually assembles —
+// unit-rendering a button in isolation would just be re-asserting the
+// gate function's own logic against itself.
+// =====================================================================
+describe('toolbar Orchestrate button', () => {
+  const realFetch = global.fetch;
+
+  /* What the stub answers `/api/agents/status` with, read PER CALL rather
+     than frozen into `stub`'s closure the way every other option still is
+     (bug-16). The re-ask cases below need the answer to change between the
+     board's mount fetch and the refetch a click provokes, with no window
+     focus event in between — a constant body cannot express "the world
+     changed while the tab kept focus", which is the entire failing
+     condition. Same mutable-let shape dispatch-button.test.tsx's own
+     board-wiring block already uses for bug-13's repro. */
+  let AGENTS: AgentsStatus = READY;
+
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  /** Same URL-branching shape board.test.tsx / board-live-cards.test.tsx
+   *  already use, with every endpoint BoardView now calls on mount. */
+  function stub(opts: { agents?: AgentsStatus; runs?: RunPayload[]; items?: BacklogItem[]; projects?: ProjectSummary[] }): jest.Mock {
+    AGENTS = opts.agents ?? READY;
+    const runs = opts.runs ?? [];
+    const items = opts.items ?? [];
+    const projects = opts.projects ?? PROJECTS;
+    const fn = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      // /api/agents/plan and /api/agents/dispatch only matter to the mutual
+      // -exclusion case below (it opens a real LaunchSheet), but stubbing
+      // them unconditionally costs nothing for the other cases, which never
+      // request either URL.
+      //
+      // Review fix round 1 (Important): `/api/agents/merge-check` used to
+      // have no branch here at all, so every one of this describe block's
+      // sheet-opening tests (the mutual-exclusion cases below) fell through
+      // to the `{ items, errors: [] }` catch-all — the WRONG shape for that
+      // endpoint, missing `covered` entirely — the instant OrchestrateSheet
+      // mounted with Settings' own default `mergeMode: 'merge'` and fired
+      // its merge-check effect. `fetchMergeCheck`'s shape guard now turns
+      // that malformed 200 into a thrown rejection the same way a network
+      // failure already was, so the practical difference from leaving this
+      // branch out is small (both render no hint), but the branch stays
+      // anyway: this stub exists to describe what each real endpoint
+      // answers, and a `/api/agents/merge-check` request silently landing
+      // on `/api/items`'s shape is exactly the kind of stub/reality drift a
+      // reviewer had to catch by hand once already. `covered: true` is
+      // Settings' own well-configured case — nothing here is testing the
+      // hint itself (that is `stubOrchestrate`'s job, below) — so no hint
+      // renders and no test in this block gets a surprise DOM node.
+      const payload: unknown = url.includes('/api/agents/status')
+        ? AGENTS
+        : url.includes('/api/orchestrator/runs')
+          ? ({ runs, starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload)
+          : url.includes('/api/agents/merge-check')
+            ? { covered: true, source: null }
+            : // task-32: the sheet fires this on mount, unconditionally (unlike
+              // merge-check, no mode gates it). Its own branch rather than the
+              // `/api/items` catch-all below for exactly the reason merge-check's
+              // exists — that shape has no `paths`, so `fetchUncommitted`'s guard
+              // would reject it, which happens to render the same "no chip" as this
+              // does but for the wrong reason, and this stub's job is to describe
+              // what each real endpoint answers. `known: true` with an empty list is
+              // the clean-tree answer: nothing flagged, so no test in this block
+              // gets a surprise DOM node. Note the ORDER — `/api/items/uncommitted`
+              // also contains `/api/items`, so this branch has to precede it.
+              url.includes('/api/items/uncommitted')
+              ? { paths: [], absent: [], known: true }
+              : url.includes('/api/agents/plan')
+                ? {
+                    action: 'execute',
+                    prompt: 'do it',
+                    project: 'alpha',
+                    allowedModes: ['plan', 'acceptEdits'],
+                    defaultMode: 'acceptEdits'
+                  }
+                : url.includes('/api/agents/dispatch')
+                  ? { sessionId: 'sess-1' }
+                  : url.includes('/api/projects')
+                    ? projects
+                    : { items, errors: [] };
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) } as Response);
+    });
+    global.fetch = fn as unknown as typeof fetch;
+    return fn;
+  }
+
+  // `source` is the page the project under test is drawn on (source-sections): `files` for the default fixture, `github` for a case that swaps in a tracker.
+  async function renderNarrowed(source: SourceSection = 'files'): Promise<void> {
+    render(<OrchestratorRunsProvider><BoardView source={source} /></OrchestratorRunsProvider>);
+    // Not just "the button exists" — the Filters popover renders with only
+    // "All projects" the instant BoardView mounts, before `/api/projects`
+    // has even resolved. Waiting for alpha's own chip is what proves the
+    // fetch landed and the pick below has something to pick. The popover is
+    // left open, as `pickProject` leaves it: every case that asserts on
+    // dialogs next clicks outside the panel first, and that click's
+    // `pointerdown` is what closes it.
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const picks = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Project' });
+    await waitFor(() => expect(within(picks).getByRole('button', { name: 'alpha' })).toBeInTheDocument());
+    await pickProject('alpha');
+  }
+
+  // --- Test case 1 ---------------------------------------------------
+  it('renders no button while the board is unfiltered, even with capability on', async () => {
+    stub({});
+    render(<OrchestratorRunsProvider><BoardView source="files" /></OrchestratorRunsProvider>);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Orchestrate' })).not.toBeInTheDocument();
+  });
+
+  // --- Test case 2 -----------------------------------------------------
+  // Only the one environment reason the brief names (BM_AGENTS off) is
+  // exercised here — environmentBlock's other three reasons already have
+  // their own dedicated coverage (test/agents/agents-shared.test.ts) and
+  // DispatchButton's own it.each; re-running all four again here would only
+  // re-prove the shared function, not this button's wiring to it.
+  it('renders no button at all when narrowed but BM_AGENTS is off — hidden, not disabled', async () => {
+    stub({ agents: { ...READY, enabled: false } });
+    await renderNarrowed();
+    expect(screen.queryByRole('button', { name: 'Orchestrate' })).not.toBeInTheDocument();
+  });
+
+  // --- Test case 3 -----------------------------------------------------
+  it('disables the button with the reason in title when the dashboard cannot see the project', async () => {
+    stub({ agents: { ...READY, projectPaths: [] } });
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(btn).toHaveAttribute('title', expect.stringContaining('/abs/alpha'));
+
+    // Mirrors DispatchButton's own "aria-disabled is a label, not a
+    // behaviour" case: the guard inside onClick is what actually makes a
+    // blocked control inert, and this is the only place that guard is
+    // proven rather than merely declared.
+    await userEvent.click(btn);
+    expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
+  });
+
+  // --- Test case 4 -----------------------------------------------------
+  it('renders no button once a fresh run exists for the project — the run chip owns that space', async () => {
+    stub({ runs: [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false, stopRequested: false }] });
+    await renderNarrowed();
+    // The chip itself is proof the run landed, so the button's absence
+    // here is "replaced by", not merely "coincides with". It was the run
+    // strip until task-37; the chip is what carries the fact now (DESIGN.md
+    // §8.3), and the hide rule it proves is unchanged.
+    await waitFor(() => expect(screen.getByTestId('run-chip')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Orchestrate' })).not.toBeInTheDocument();
+  });
+
+  // A stale run must NOT hide the button — a run that has gone silent is not
+  // a run in progress, so the band's control is the only way to start a fresh
+  // one once the last one has stopped reporting. Not one of the brief's numbered cases, but the
+  // inverse of case 4 is exactly the kind of edge its own "fresh" qualifier
+  // implies, and it costs one more stub call to pin.
+  it('still renders the button when the only known run for the project is stale', async () => {
+    stub({ runs: [{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0, pauseRequested: false, stopRequested: false }] });
+    await renderNarrowed();
+    expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeEnabled();
+  });
+
+  // The call site's half of spec §5: BoardView hands the sheet the REGISTERED project's source, so the picker's `pr` follows `/api/projects` and not
+  // anything about the items (this fixture has none — an empty queue is exactly the case reading `items[0]` could not answer).
+  it.each<[ProjectSummary['source'], string[]]>([
+    ['github', ['Merge to main', 'Leave branches for me', 'Open a PR into main']],
+    ['files', ['Merge to main', 'Leave branches for me']]
+  ])('opens the sheet for a %s project with the merge modes that source offers', async (source, labels) => {
+    stub({ projects: [{ ...PROJECTS[0], source }] });
+    await renderNarrowed(source === 'github' ? 'github' : 'files');
+    await userEvent.click(await screen.findByRole('button', { name: 'Orchestrate' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+
+    const picker = (await screen.findByLabelText('Merge mode')) as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(labels);
+  });
+
+  // --- bug-16: the click may re-ask a stale project-visibility block -----
+  // The same one-question click bug-13 gave the card, one control over. Every
+  // case here renders the real BoardView for the reason bug-13's own board
+  // case does: what is being proven is the WIRING — `useAgents().reload` is
+  // already held three lines from the gate as `reverifyAgents` and was simply
+  // never called by the toolbar, so a test that handed the button a
+  // hand-written re-ask would pass on a board that threads none.
+
+  /** How many times this stub has been asked for the dashboard status. The
+   *  re-ask is scoped to the blocked path, and "asked nothing extra" is only
+   *  a claim you can make by counting. */
+  const statusCalls = (fn: jest.Mock): number => fn.mock.calls.filter(([input]) => String(input).includes('/api/agents/status')).length;
+
+  /** Hold `/api/agents/status` open until the test releases it by hand,
+   *  delegating every other URL to the stub already installed. The controlled
+   *  deferred is the only way to observe a state that exists between the click
+   *  and the very next microtask — a `waitFor` would sample it after it is
+   *  already gone. Same technique dispatch-button.test.tsx's own aria-busy
+   *  case and the merge-check cases below use. */
+  function holdStatus(base: jest.Mock): { release: () => void; statusCalls: () => number } {
+    let release = (): void => {};
+    let calls = 0;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes('/api/agents/status')) return base(input, init);
+      calls += 1;
+      return new Promise<Response>((resolve) => {
+        release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(AGENTS) } as Response);
+      });
+    }) as unknown as jest.Mock;
+    return { release: () => release(), statusCalls: () => calls };
+  }
+
+  it('clears a stale project-visibility block on click, with the window never losing focus', async () => {
+    stub({ agents: { ...READY, projectPaths: [] } });
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+
+    // The world changes. No focus event, no reload — only the click.
+    AGENTS = READY;
+    await userEvent.click(btn);
+
+    expect(await screen.findByRole('dialog', { name: 'orchestrate alpha' })).toBeInTheDocument();
+  });
+
+  it('opens nothing and settles back when the re-ask returns the same block', async () => {
+    const fn = stub({ agents: { ...READY, projectPaths: [] } });
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    const before = statusCalls(fn);
+
+    await userEvent.click(btn);
+
+    // The question was actually asked — without this the assertions below
+    // would also pass on the old swallow-the-click behaviour.
+    await waitFor(() => expect(statusCalls(fn)).toBe(before + 1));
+    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'false'));
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
+  });
+
+  it('marks itself busy while the re-ask is in flight', async () => {
+    const base = stub({ agents: { ...READY, projectPaths: [] } });
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    expect(btn).toHaveAttribute('aria-busy', 'false');
+
+    const held = holdStatus(base);
+    await userEvent.click(btn);
+    expect(btn).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => {
+      held.release();
+    });
+    expect(btn).toHaveAttribute('aria-busy', 'false');
+  });
+
+  it('asks once however many times it is clicked while the first ask is in flight', async () => {
+    const base = stub({ agents: { ...READY, projectPaths: [] } });
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+
+    const held = holdStatus(base);
+    await userEvent.click(btn);
+    await userEvent.click(btn);
+    expect(held.statusCalls()).toBe(1);
+
+    await act(async () => {
+      held.release();
+    });
+  });
+
+  it('asks nothing extra when the button is not blocked at all', async () => {
+    const fn = stub({});
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    const before = statusCalls(fn);
+
+    await userEvent.click(btn);
+
+    expect(await screen.findByRole('dialog', { name: 'orchestrate alpha' })).toBeInTheDocument();
+    expect(statusCalls(fn)).toBe(before);
+  });
+
+  // #272: the one behaviour the GatedChip extraction changes. Blocked on visibility AND sync-off, the chip used to re-ask anyway and then refuse to open
+  // inside the callback — a status fetch whose answer could never open the sheet. Now it re-asks only when the visibility block is the ONLY block, which
+  // is DispatchButton's rule, so the click is refused outright like any other non-reaskable block.
+  it('asks nothing when the visibility block is joined by a sync-off block', async () => {
+    const fn = stub({
+      agents: { ...READY, projectPaths: [] },
+      projects: [{ ...PROJECTS[0], source: 'github', repo: 'futin/alpha', interval: 'off' }]
+    });
+    await renderNarrowed('github');
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    // The visibility reason outranks sync-off, in the title and in the description alike.
+    expect(btn.getAttribute('title')).toMatch(/^the dashboard does not list \/abs\/alpha/);
+    expect(btn).toHaveAccessibleDescription(/^the dashboard does not list \/abs\/alpha/);
+    const before = statusCalls(fn);
+
+    await userEvent.click(btn);
+
+    expect(btn).toHaveAttribute('aria-busy', 'false');
+    expect(statusCalls(fn)).toBe(before);
+    expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
+  });
+
+  // --- Dialog mutual exclusion ------------------------------------------
+  // Task 12 made the item drawer and `RunDrawer` mutually exclusive because
+  // both were `.drawer`s with no focus trap of their own — two mounted at once
+  // lets a keyboard user Tab straight through the frontmost one into the
+  // other's controls. OrchestrateSheet wears the same `FormSheet` shell as
+  // LaunchSheet (task-40), which has exactly the same no-focus-trap property,
+  // and this toolbar button is always reachable at the same time as every
+  // card's dispatch button AND every open overlay's own trigger — so
+  // the identical hazard exists for this sheet against all three of the
+  // other overlays, not just LaunchSheet's.
+  //
+  // Every case below also asserts `queryAllByRole('dialog')` has length at
+  // most 1 at each step — fix round 1's own ask, and a strictly stronger
+  // claim than "the one I closed is gone": a length check catches a THIRD
+  // dialog sneaking in that neither named assertion happens to be looking
+  // for, which two `queryByRole(..., { name })` checks on their own cannot.
+  it('opening the Orchestrate sheet closes an open item-dispatch sheet, and vice versa', async () => {
+    stub({ items: [fakeItem()] });
+    await renderNarrowed();
+    await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
+
+    const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
+    await userEvent.click(within(card).getByRole('button', { name: 'execute' }));
+    expect(await screen.findByRole('dialog', { name: /dispatch task-1/ })).toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Orchestrate' }));
+    expect(await screen.findByRole('dialog', { name: /orchestrate/ })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+
+    await userEvent.click(within(card).getByRole('button', { name: 'execute' }));
+    expect(await screen.findByRole('dialog', { name: /dispatch task-1/ })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+  });
+
+  // Fix round 1 (Important — the gap this task's own review found): the
+  // first pass reasoned by analogy from LaunchSheet's proven coexistence
+  // with the item modal that OrchestrateSheet could coexist with the other
+  // overlays too, but never actually tested it — and the analogy does not
+  // hold, since LaunchSheet's coexistence is reachable only through a control
+  // INSIDE the modal it coexists with, while this toolbar button sits outside
+  // every overlay and is clickable (or Tab-reachable past either one's own
+  // untrapped focus) the entire time one is open. See BoardView's own
+  // `openOrchestrateSheet` comment for the full reasoning; this pins it.
+  it('opening the Orchestrate sheet closes an open item drawer, and vice versa — never more than one dialog', async () => {
+    // Not just `open`: task-1 is `deriveAction`-queueable (open, groomed),
+    // so it appears a SECOND time once the sheet is open — inside its own
+    // queue preview (context point 6). Captured once here, while "a task"
+    // is still unique, and reused below so the later clicks target the
+    // CARD specifically rather than colliding with the preview's own copy
+    // of the same title.
+    stub({ items: [fakeItem()] });
+    await renderNarrowed();
+    await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
+    const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
+
+    // The card's face, not its dispatch tab — this opens the item modal, the
+    // OTHER overlay from the one the case above already covers.
+    await userEvent.click(within(card).getByText('a task'));
+    expect(await screen.findByRole('dialog', { name: 'a task' })).toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Orchestrate' }));
+    expect(await screen.findByRole('dialog', { name: /orchestrate/ })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'a task' })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+
+    // Back the other way: the card is still there behind where the sheet
+    // was (opening Orchestrate does not remove the card, only the drawer).
+    await userEvent.click(within(card).getByText('a task'));
+    expect(await screen.findByRole('dialog', { name: 'a task' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+  });
+
+  // The run-drawer half of this gap — "opening Orchestrate closes an open run
+  // drawer, and vice versa" — was a third case here until task-37 deleted
+  // `RunDrawer` (DESIGN.md §8.3's "What leaves"). It is not replaced by
+  // another case because the hazard it guarded is gone with the component:
+  // the run's detail is the Runs page's own sheet now, always beside the
+  // list and never a dialog, so the Board has one dialog family left and
+  // `useDialogEscape`'s stack is three deep rather than four
+  // (`test/board/dialog-escape.test.tsx` holds that count). The exclusion the case
+  // above proves — Orchestrate against the item drawer — is untouched.
+});
+
+// =====================================================================
+// OrchestrateSheet itself, direct-rendered — the same split
+// dispatch-button.test.tsx and launch-sheet.test.tsx already use between a
+// component's own suite and the board-wiring one above. Covers test cases
+// 5-7 from the brief, the queue-preview derivation (context point 6), and
+// two rounds of differentiation the "closes into the strip world" case-7
+// behaviour requires:
+//   - fix round 1: a DIFFERENT http status (502, the dashboard itself
+//     unreachable) must leave the sheet open and retryable, or every
+//     transient failure would silently discard the user's picks.
+//   - fix round 2: a SAME-status 409 that is not the activeRun lock — this
+//     one endpoint answers 409 for three other reasons too (project just
+//     lost visibility, no CLAUDE_BIN, remote answers off) — must ALSO leave
+//     the sheet open, or a capability/visibility problem gets reported as
+//     "your run is already in progress", which is confidently wrong rather
+//     than merely unhelpful. `RUN_IN_PROGRESS_CODE` (shared/types.ts) is
+//     what makes the lock 409 distinguishable from the other three at all.
+// =====================================================================
+/** Two clicks that both land before React re-renders — `test/runs/run-controls.test.tsx`'s `doubleClick`, for the same reason: `userEvent.click` awaits between
+ *  clicks, so the second lands on a re-rendered (disabled) control and the case would pass with the guard deleted. Only a raw dispatch pair inside one `act`
+ *  reaches `useAction`'s ref guard (#286). */
+function doubleClick(el: HTMLElement): void {
+  act(() => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
+describe('OrchestrateSheet', () => {
+  const realFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  type SheetProps = Partial<Parameters<typeof OrchestrateSheet>[0]>;
+
+  function renderSheet(props: SheetProps = {}) {
+    const onClose = jest.fn();
+    const refresh = jest.fn();
+    // A factory rather than one frozen element, so `rerender` below can hand
+    // the SAME component instance a different `items` prop — which is the
+    // only way to express "the queue changed while the sheet was open", the
+    // condition task-20's order reconciliation exists for. Re-rendering a
+    // fresh <OrchestrateSheet> under a fresh <SettingsProvider> would reset
+    // every piece of state the reconciliation is supposed to survive.
+    const ui = (over: SheetProps) => (
+      <SettingsProvider>
+        <OrchestrateSheet
+          project="/abs/alpha"
+          projectName="alpha"
+          // A tracker project by default: the three-option picker is the shape most of this block's cases were written against, and the files / null /
+          // unsupported shapes override it in the cases that pin the refusal.
+          source="github"
+          items={[]}
+          spawnMaxPermission="acceptEdits"
+          onClose={onClose}
+          refresh={refresh}
+          {...props}
+          {...over}
+        />
+      </SettingsProvider>
+    );
+    const { rerender } = render(ui({}));
+    return { onClose, refresh, rerender: (over: SheetProps) => rerender(ui(over)) };
+  }
+
+  /**
+   * Walk the sheet from step 1 to step 3 (task-20; design §7).
+   *
+   * Every case written before the sheet became a wizard reaches Start, the
+   * five pickers or the merge-check hint — all of which now live on step 3 —
+   * so they all funnel through this rather than each restating two clicks.
+   * Deliberately NOT a "jump straight to step 3" test hook on the component:
+   * the navigation is the feature, and a helper that bypassed it would let a
+   * broken Next keep every one of those cases green.
+   */
+  async function toModes(): Promise<void> {
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+  }
+
+  /**
+   * @param res The `/api/agents/orchestrate` response this test cares about
+   *   — unchanged from before Task 8.
+   * @param mergeCheck What `/api/agents/merge-check` answers. Defaults to
+   *   "covered", which is what keeps Task 8's merge-mode picker from ever
+   *   fetching that endpoint. Task 8's merge-mode picker seeds `mergeMode`
+   *   from Settings, whose own default is `'merge'` — so every sheet in this
+   *   describe block now fires a `/api/agents/merge-check` request the
+   *   instant it mounts, whether or not the test below has anything to do
+   *   with merge mode at all. Answered here, and kept OUT of `calls`, for
+   *   the same reason `stub()`'s `/api/agents/plan`/`dispatch` branches
+   *   above answer requests the mutual-exclusion cases never asked about:
+   *   `calls` exists to record the one request most of these tests actually
+   *   care about (the launch itself), and a merge-check row appearing in it
+   *   would fail `toHaveLength(1)`/`toEqual` assertions that predate this
+   *   feature and have nothing to do with it. The default's `covered: true`
+   *   also keeps the setup hint (see the "merge-mode picker" section below)
+   *   from rendering and leaking into an unrelated test's text assertions.
+   *   A caller that DOES care passes a literal `{ covered, source }` to
+   *   choose the hint's own answer, or the string `'fail'` to make the
+   *   request reject outright (brief case 7).
+   */
+  function stubOrchestrate(
+    res: { ok: boolean; status: number; body: unknown },
+    mergeCheck: { covered: boolean; source: string | null } | 'fail' = { covered: true, source: null },
+    // task-44. Defaulted to 'ok' so every case above is untouched; 'fail'
+    // is what lets one case prove a failed branch read still launches.
+    // 'nomain' (#285) answers a list without `main`, for the union-in-front case.
+    branches: 'ok' | 'fail' | 'nomain' = 'ok',
+    // Multi-dashboard task 9. The sheet reads the machine offers on open; answered here and kept OUT of `calls` for the reason the three reads above are.
+    // Home-only by default, which draws no picker and so leaves every case written before it untouched; 'pending' never answers, 'reject' fails.
+    offers: ProjectOffers | 'reject' | 'pending' = homeOnly()
+  ): { url: string; body: unknown }[] {
+    const calls: { url: string; body: unknown }[] = [];
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/dashboards/offers')) {
+        if (offers === 'reject') return Promise.reject(new Error('network down'));
+        if (offers === 'pending') return new Promise(() => {});
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(offers) } as Response);
+      }
+      if (url.includes('/api/agents/merge-check')) {
+        return mergeCheck === 'fail'
+          ? Promise.reject(new Error('network down'))
+          : Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(mergeCheck) } as Response);
+      }
+      // task-32's on-mount read, answered and kept OUT of `calls` for the
+      // identical reason merge-check is: `calls` records the one request most
+      // of these tests care about (the launch itself), and a second row in it
+      // would fail every `toHaveLength(1)`/`toEqual` assertion that predates
+      // this feature and has nothing to do with it. A clean tree, so no chip,
+      // no note and no fourth button leaks into an unrelated text assertion —
+      // test/orchestrator/orchestrate-uncommitted.test.tsx is where the flag itself is
+      // exercised.
+      if (url.includes('/api/items/uncommitted')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ paths: [], absent: [], known: true })
+        } as Response);
+      }
+      // task-44's on-mount read, answered and kept OUT of `calls` for exactly
+      // the reason the two above are. Two branches so the picker has something
+      // to pick, without which the base cases below could not tell "the picker
+      // works" apart from "the list was empty and it fell back to main".
+      if (url.includes('/api/agents/branches')) {
+        return branches === 'fail'
+          ? Promise.reject(new Error('network down'))
+          : Promise.resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve({ branches: branches === 'nomain' ? ['trunk', 'feature/x'] : ['main', 'feature/x'] })
+            } as Response);
+      }
+      // Reviewer coverage task 11's on-open read, answered with the default config and kept OUT of `calls` for the reason the reads above are. Its own
+      // cases are in test/settings/settings-reviewer.test.tsx.
+      if (url.endsWith('/api/settings/review')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(DEFAULT_REVIEW_CONFIG) } as Response);
+      }
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return Promise.resolve({ ok: res.ok, status: res.status, json: () => Promise.resolve(res.body) } as Response);
+    }) as jest.Mock;
+    return calls;
+  }
+
+  // --- Test case 5 -------------------------------------------------------
+  it('seeds model, effort and permission mode from settings and the ceiling, never a previous launch', async () => {
+    localStorage.setItem(
+      'backlog-manager.settings',
+      JSON.stringify({
+        dispatchDefaultModel: 'sonnet',
+        dispatchDefaultEffort: 'low'
+      })
+    );
+    renderSheet({ spawnMaxPermission: 'acceptEdits' });
+    await toModes();
+
+    expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('sonnet');
+    expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('low');
+    // clampMode('auto', 'acceptEdits') === 'acceptEdits' — proves the seed is
+    // actually clamped against the ceiling, not just echoing 'auto' back.
+    expect((screen.getByLabelText('Permission mode') as HTMLSelectElement).value).toBe('acceptEdits');
+    const modes = screen.getByLabelText('Permission mode') as HTMLSelectElement;
+    expect([...modes.options].map((o) => o.value)).toEqual(['plan', 'acceptEdits']);
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  // --- Queue preview derivation (context point 6) -------------------------
+  // Final-review Important 5: this used to assert that `Fresh idea` WAS
+  // rendered, which pinned the preview to `deriveAction` alone — and
+  // `deriveAction` returns 'groom' for ideas and refactors, sections an
+  // orchestrate run can never touch (`GATE_SECTIONS = { bugs, tasks }`,
+  // orchestrate.mjs). The expectation is inverted below; a refactor joins the
+  // fixture so the other half of `deriveAction`'s 'groom' answer is pinned
+  // too, and the ungroomed BUG that was already here now carries the load of
+  // proving the fix was not over-applied into "groomed bugs and tasks only".
+  // Against the old code the two `queryByText` lines fail.
+  it('previews only the open bugs and tasks a run can actually queue, and labels itself a preview', () => {
+    // Every call overrides `path` along with `id`: `fakeItem`'s default path
+    // names task-1 specifically, so leaving it unoverridden across the six
+    // items here would collide `queue`'s own `key={item.path}` six ways.
+    const items = [
+      fakeItem({
+        id: 'task-1',
+        title: 'Groomed task',
+        section: 'tasks',
+        groomed: true,
+        path: '/abs/alpha/backlog/tasks/open/task-1.md'
+      }),
+      fakeItem({
+        id: 'bug-1',
+        title: 'Ungroomed bug',
+        section: 'bugs',
+        groomed: false,
+        path: '/abs/alpha/backlog/bugs/open/bug-1.md'
+      }),
+      fakeItem({
+        id: 'idea-1',
+        title: 'Fresh idea',
+        section: 'ideas',
+        groomed: null,
+        path: '/abs/alpha/backlog/ideas/open/idea-1.md'
+      }),
+      fakeItem({
+        id: 'refactor-1',
+        title: 'Tidy the thing',
+        section: 'refactors',
+        groomed: null,
+        path: '/abs/alpha/backlog/refactors/open/refactor-1.md'
+      }),
+      fakeItem({
+        id: 'task-2',
+        title: 'Already done',
+        status: 'done',
+        groomed: true,
+        path: '/abs/alpha/backlog/tasks/done/task-2.md'
+      }),
+      fakeItem({
+        id: 'oos-1',
+        title: 'Rejected',
+        section: 'out-of-scope',
+        status: 'terminal',
+        groomed: null,
+        path: '/abs/alpha/backlog/out-of-scope/oos-1.md'
+      })
+    ];
+    renderSheet({ items });
+
+    expect(screen.getByText('Groomed task')).toBeInTheDocument();
+    // An ungroomed BUG stays: the run queues it, gates it, and reports it as
+    // ungroomed — which is exactly what this screen is for.
+    expect(screen.getByText('Ungroomed bug')).toBeInTheDocument();
+    // Ideas and refactors do not: `deriveAction` says 'groom' for both, but
+    // the run's own queue is bugs and tasks, so listing them here would
+    // promise work that can never happen.
+    expect(screen.queryByText('Fresh idea')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tidy the thing')).not.toBeInTheDocument();
+    expect(screen.queryByText('Already done')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rejected')).not.toBeInTheDocument();
+    // The non-authoritative disclaimer this whole preview exists under.
+    expect(screen.getByText(/preview/i)).toBeInTheDocument();
+  });
+
+  it('says so, rather than rendering an empty box, when nothing in the project is queueable', () => {
+    renderSheet({ items: [fakeItem({ status: 'done' })] });
+    expect(screen.getByText(/nothing groomed and open/i)).toBeInTheDocument();
+  });
+
+  // The empty-state's other route, and the one the section filter opened: a
+  // project whose only open work is ideas has a non-empty `items` array and
+  // still nothing an orchestrate run could queue.
+  it('says so when the only open items are in sections a run never touches', () => {
+    renderSheet({ items: [fakeItem({ id: 'idea-9', section: 'ideas', groomed: null, title: 'Just an idea' })] });
+    expect(screen.getByText(/nothing groomed and open/i)).toBeInTheDocument();
+    expect(screen.queryByText('Just an idea')).not.toBeInTheDocument();
+  });
+
+  // --- Test case 6 ---------------------------------------------------
+  it('starts with exactly the picked project/model/effort/permissionMode and refreshes on success', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    const { onClose, refresh } = renderSheet();
+    await toModes();
+
+    await userEvent.selectOptions(screen.getByLabelText('Model'), 'opus');
+    await userEvent.selectOptions(screen.getByLabelText('Effort'), 'high');
+    await userEvent.selectOptions(screen.getByLabelText('Permission mode'), 'plan');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url.endsWith('/api/agents/orchestrate')).toBe(true);
+    // `mergeMode: 'merge'` here is Task 8's own addition (Settings' default,
+    // untouched by this test) — see that feature's own describe block below
+    // for the cases that pin ITS behaviour; this assertion only has to keep
+    // proving it rides along unconditionally, same as every other body here.
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha',
+      model: 'opus',
+      effort: 'high',
+      permissionMode: 'plan',
+      mergeMode: 'merge',
+      questionMode: 'park', base: 'main'
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  // #286 — before useAction, `start` had no guard at all: both clicks of one tick POSTed, and the second came back as the run lock's 409.
+  it('sends one start for a double-click on start', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    const answered = global.fetch as jest.Mock;
+    let starts = 0;
+    // The start never answers, so the in-flight window stays open for the whole case and nothing settles after it ends.
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).endsWith('/api/agents/orchestrate')) return answered(input, init);
+      starts += 1;
+      return new Promise(() => {});
+    }) as jest.Mock;
+    renderSheet();
+    await toModes();
+
+    doubleClick(screen.getByRole('button', { name: 'start' }));
+
+    expect(starts).toBe(1);
+  });
+
+  it('omits model and effort when both are left on default', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
+  });
+
+  // --- Test case 7 ---------------------------------------------------
+  // Fix round 2: the server sends `code: RUN_IN_PROGRESS_CODE` on a refusal
+  // meaning "a run for this project is alive right now", and this is the
+  // shape a real lock conflict actually arrives in — error text AND code
+  // together, matching what test/orchestrator/orchestrator-start.test.ts's own "carries
+  // RUN_IN_PROGRESS_CODE on the activeRun lock 409" case pins server-side.
+  // bug-21's starting lock answers with the same code and this sheet reacts
+  // identically, which is why this case turns on the code and not on the
+  // error prose.
+  it('shows the already-running message and closes into the strip world after refresh on a 409 conflict', async () => {
+    stubOrchestrate({
+      ok: false,
+      status: 409,
+      body: { error: 'a run is already in progress for this project (run-9)', code: RUN_IN_PROGRESS_CODE }
+    });
+    const { onClose, refresh } = renderSheet();
+    await toModes();
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    expect(await screen.findByText(/already in progress/)).toBeInTheDocument();
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  // Fix round 1 (Important): the case above alone cannot prove this is
+  // detected by a stable discriminator rather than by matching a substring
+  // of the server's message — its fixture happens to say "already in
+  // progress" too, so a message-based check would pass it right alongside
+  // a discriminator-based one. This case is the one that actually tells
+  // them apart: same 409 status, same `code`, deliberately DIFFERENT
+  // wording (not even a real server literal) — and the sheet still has to
+  // close into the strip, because what it now checks is the code, not the
+  // prose.
+  it('closes on a coded 409, regardless of the message wording', async () => {
+    stubOrchestrate({
+      ok: false,
+      status: 409,
+      body: { error: 'nope, not right now', code: RUN_IN_PROGRESS_CODE }
+    });
+    const { onClose, refresh } = renderSheet();
+    await toModes();
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    expect(await screen.findByText('nope, not right now')).toBeInTheDocument();
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  // Fix round 2 (the finding this whole round exists for): a 409 status
+  // ALONE is not enough — this endpoint's other three 409 reasons
+  // (project-invisible, no CLAUDE_BIN, remote-answers-off, the dirName
+  // race) never carry `code` at all, and confusing one of THOSE for the
+  // lock would tell a user their run is "already in progress" when the
+  // real problem is that the dashboard cannot spawn — confidently wrong,
+  // not merely brittle. The message here is the server's REAL
+  // project-invisible wording (agents.service.ts / shared/agent.ts's
+  // `projectDispatchGate`), uncoded, and the sheet must stay open with it
+  // rather than silently closing into a strip that will never appear
+  // (nothing was ever started).
+  it('leaves the sheet open and shows the server message for an uncoded 409 — a capability or visibility conflict, not the lock', async () => {
+    stubOrchestrate({
+      ok: false,
+      status: 409,
+      body: { error: 'the dashboard does not list /abs/alpha — most likely no Claude session there inside its LOOKBACK_HOURS' }
+    });
+    const { onClose, refresh } = renderSheet();
+    await toModes();
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    expect(await screen.findByText(/does not list \/abs\/alpha/)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+  });
+
+  // The differentiation above must NOT generalise past 409 either — see
+  // this describe block's own file comment. 502 specifically: the one
+  // status this endpoint answers with for "the dashboard itself is
+  // unreachable" (agents.service.ts), which retrying a moment later can
+  // genuinely resolve.
+  it('leaves the sheet open and retryable for any other error', async () => {
+    stubOrchestrate({ ok: false, status: 502, body: { error: 'dashboard unreachable' } });
+    const { onClose, refresh } = renderSheet();
+    await toModes();
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    expect(await screen.findByText('dashboard unreachable')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+  });
+
+  // =====================================================================
+  // The item selector — checkboxes over the preview rows, so a run can be
+  // narrowed to a subset of the queue instead of always draining all of it.
+  //
+  // The contract these cases defend, in one line: `ids` rides along ONLY
+  // when the selection is a strict subset. Everything else about the
+  // request, and every case above, is unchanged — which is itself pinned,
+  // because "starts with exactly the picked project/model/effort/
+  // permissionMode" asserts the whole body with toEqual and fails the
+  // moment an `ids` key appears in a request that did not narrow anything.
+  // =====================================================================
+
+  /** Three queueable rows: two tasks and a bug, in board order. Every one
+   *  overrides `path` as well as `id` for the reason the preview case above
+   *  already gives — `fakeItem`'s default path names task-1, and `queue`
+   *  keys on `item.path`. */
+  const THREE = [
+    fakeItem({ id: 'bug-1', title: 'A bug', section: 'bugs', groomed: true, path: '/abs/alpha/backlog/bugs/open/bug-1.md' }),
+    fakeItem({ id: 'task-1', title: 'A task', section: 'tasks', groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1.md' }),
+    fakeItem({ id: 'task-2', title: 'Another task', section: 'tasks', groomed: true, path: '/abs/alpha/backlog/tasks/open/task-2.md' })
+  ];
+
+  const boxFor = (id: string): HTMLInputElement => screen.getByRole('checkbox', { name: new RegExp(id) }) as HTMLInputElement;
+
+  /* Everything checked on open, and this is the case that keeps the control
+     from changing what the sheet MEANS. Someone who opens Orchestrate and
+     presses start without noticing the checkboxes has always got a
+     whole-queue drain, and must keep getting one. */
+  it('checks every previewed row when it opens', () => {
+    renderSheet({ items: THREE });
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes).toHaveLength(3);
+    expect(boxes.every((b) => (b as HTMLInputElement).checked)).toBe(true);
+  });
+
+  /* The regression the whole "strict subset" rule exists for — and, since
+     Task 8, the task brief's own case 8: `mergeMode` and `ids` have
+     deliberately opposite absent-value semantics (the former is always
+     sent, the latter only for a strict subset) and share this one request
+     body, which is exactly where that distinction would get confused. An
+     untouched sheet must send the request it sent before this feature
+     existed, `mergeMode` aside — no `ids` key at all — because a full list
+     is not the same instruction: it freezes the run to a snapshot of the
+     queue taken when the sheet opened, and an item groomed and committed in
+     the meantime would be silently dropped from a run the user believes is
+     draining everything. */
+  it('sends no ids at all when nothing was unchecked (brief case 8)', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await toModes();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
+  });
+
+  it('sends exactly the still-checked ids, in board order, once one is unchecked', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await userEvent.click(boxFor('task-1'));
+    await toModes();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
+      base: 'main',
+      ids: ['bug-1', 'task-2']
+    });
+  });
+
+  /* Refused on this side rather than left to the server's 400. The server
+     check is the one that matters (a non-browser caller reaches it too), but
+     a disabled button with a reason beside it is a better answer than a
+     round trip that comes back an error, and it is the only place that can
+     explain the distinction: unchecking everything means "run nothing",
+     which is never what anyone wants, and is emphatically not the same as
+     "run everything". */
+  /* Since task-20 the refusal is one step earlier: Start lives on step 3 and
+     `next` is what an empty selection blocks, so the assertion moves to the
+     control that is actually reachable in that state. The reason sentence is
+     unchanged and still renders beside it — and "no start control exists at
+     all" is a strictly stronger claim than the old "start is disabled". */
+  it('disables next, with a reason, when every row is unchecked', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await userEvent.click(screen.getByRole('button', { name: /select none/i }));
+
+    expect(screen.getByRole('button', { name: 'next' })).toBeDisabled();
+    expect(screen.getByText(/pick at least one/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'start' })).not.toBeInTheDocument();
+  });
+
+  it('re-enables next as soon as one row is checked again', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await userEvent.click(screen.getByRole('button', { name: /select none/i }));
+    await userEvent.click(boxFor('task-2'));
+
+    expect(screen.getByRole('button', { name: 'next' })).toBeEnabled();
+    await toModes();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
+      base: 'main',
+      ids: ['task-2']
+    });
+  });
+
+  /* The subtle one, and the reason "strict subset" is a rule rather than an
+     optimisation: a round trip through select-none and select-all lands on
+     the same SET the sheet opened with, so it must land on the same REQUEST
+     too. An implementation that tracked "has the user touched anything"
+     instead of comparing the selection to the queue sends an explicit
+     three-id list here and quietly re-introduces the snapshot problem the
+     case above describes. */
+  it('goes back to sending no ids after select-none then select-all', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await userEvent.click(screen.getByRole('button', { name: /select none/i }));
+    await userEvent.click(screen.getByRole('button', { name: /select all/i }));
+    await toModes();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
+  });
+
+  /* An ungroomed item is a legal pick. The run really will queue it, gate
+     it and report it as ungroomed — information, not an error — which is the
+     same reasoning the preview itself is built on (see `queue`'s comment in
+     OrchestrateSheet.tsx). Disabling its checkbox would be this screen
+     claiming an authority over the gate that it explicitly does not have. */
+  it('lets an ungroomed row be selected like any other', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({
+      items: [
+        ...THREE,
+        fakeItem({
+          id: 'bug-2',
+          title: 'Ungroomed bug',
+          section: 'bugs',
+          groomed: false,
+          path: '/abs/alpha/backlog/bugs/open/bug-2.md'
+        })
+      ]
+    });
+
+    expect(boxFor('bug-2')).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: /select none/i }));
+    await userEvent.click(boxFor('bug-2'));
+    await toModes();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
+      base: 'main',
+      ids: ['bug-2']
+    });
+  });
+
+  /* The existing disclaimer promises the run may re-gate an item to a
+     different VERDICT. It says nothing about the run ignoring most of the
+     list, so a narrowed selection needs its own sentence — this is the last
+     screen before a multi-hour unattended operation. */
+  it('says the run is narrowed once a subset is selected, and not before', async () => {
+    renderSheet({ items: THREE });
+    expect(screen.queryByText(/only the 2 selected/i)).not.toBeInTheDocument();
+
+    await userEvent.click(boxFor('task-1'));
+    expect(screen.getByText(/only the 2 selected/i)).toBeInTheDocument();
+  });
+
+  /* Zero selected is narrowed too, arithmetically, and the sentence above
+     renders as "only the 0 selected items will run" if it is gated on
+     `narrowed` alone — a promise about a run that cannot start, sitting
+     directly above the message explaining that it cannot. Caught by looking
+     at the real sheet, not by the case above, which never reaches zero. */
+  it('drops the narrowed sentence entirely when nothing is selected', async () => {
+    renderSheet({ items: THREE });
+
+    await userEvent.click(screen.getByRole('button', { name: /select none/i }));
+
+    expect(screen.queryByText(/selected item/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/pick at least one/i)).toBeInTheDocument();
+  });
+
+  /* An empty queue is not an empty selection. There are no rows to check, so
+     there is nothing to narrow, and the sheet keeps its pre-selector
+     behaviour: start stays live and sends a plain whole-queue request. The
+     preview is only an approximation of the gate (its own disclaimer says
+     so), so refusing to start here would be the board overruling the tool on
+     the strength of a derivation it already admits is not authoritative. */
+  it('leaves start live for an empty queue, with no ids and no checkboxes', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: [fakeItem({ status: 'done' })] });
+
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    // An empty queue is emphatically NOT the "nothing ticked" state task-20's
+    // Next guard refuses — there is nothing to tick — so the wizard has to
+    // walk all the way to a live Start.
+    expect(screen.getByRole('button', { name: 'next' })).toBeEnabled();
+    await toModes();
+    expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
+  });
+
+  // =====================================================================
+  // The merge-mode picker and its setup hint (Task 8; design §2.2/§6). The
+  // eight cases below are numbered to match the task brief's own table
+  // exactly — case 8 is the regression guard fixed into the ids tests
+  // above, not a new test here, since it pins the SHARED request body those
+  // tests already cover rather than anything specific to this picker.
+  // =====================================================================
+
+  // --- Test case 1 -----------------------------------------------------
+  it('seeds the merge-mode picker from the Settings default "branch"', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
+    renderSheet();
+    await toModes();
+    const picker = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+    expect(picker.value).toBe('branch');
+    // The design's own binding wording (§2.2): each option names the
+    // OUTCOME, never the flag — pinned here so a future edit that quietly
+    // reverts to 'merge'/'branch' as the visible label fails a test instead
+    // of only a design-doc diff.
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to main', 'Leave branches for me', 'Open a PR into main']);
+  });
+
+  // --- Test case 1b (bug-36) -------------------------------------------
+  // The case above is now also the regression guard for the DEFAULT base:
+  // `base` seeds from the literal 'main', so those words are what a `main`
+  // run must keep reading. This one is the half that was wrong — the label
+  // has to follow the Base branch picker two fields away, and it has to
+  // agree with the note rendered directly beneath the same row. What was
+  // filed was two statements of one fact disagreeing on one screen, so
+  // asserting the new string alone would pin only half of it.
+  it('names the picked base in the merge-mode label, agreeing with the note below it', async () => {
+    // Stubbed rather than bare like case 1 above, because this case needs the
+    // branch read answered — that is what puts a second branch in the Base
+    // picker for it to select, the same setup the base-picker cases below use.
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+
+    await userEvent.selectOptions(screen.getByLabelText('Base branch'), 'feature/x');
+
+    const picker = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to feature/x', 'Leave branches for me', 'Open a PR into feature/x']);
+    expect(screen.getByText(/this run gates, branches and merges on/).textContent).toContain('feature/x');
+  });
+
+  // --- pr mode (spec §5): the option is offered by the project's source ------
+  it('offers the pr option for a tracker project and posts mergeMode pr when it is picked', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ source: 'github' });
+    await toModes();
+
+    const picker = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to main', 'Leave branches for me', 'Open a PR into main']);
+
+    await userEvent.selectOptions(picker, 'pr');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'pr', questionMode: 'park', base: 'main' });
+  });
+
+  // A files project, one with no `backlog/`, and one whose marker the build cannot read all have a source that is not `github`, and the server refuses `pr`
+  // for every one of them — so the picker never offers it, and a stored default of `pr` (Settings cannot know the project) falls back to `merge`.
+  it.each<[string, ProjectSummary['source']]>([
+    ['a files project', 'files'],
+    ['a project with no source', null],
+    ['a project whose source is unsupported', 'unsupported']
+  ])('offers no pr option for %s and falls a stored pr default back to merge', async (_name, source) => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'pr' }));
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ source });
+    await toModes();
+
+    const picker = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to main', 'Leave branches for me']);
+    expect(picker.value).toBe('merge');
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
+  });
+
+  // A stored `branch` default is valid for every source and must survive the fallback untouched.
+  it('keeps a stored branch default on a files project', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ source: 'files' });
+    await toModes();
+
+    expect((screen.getByLabelText('Merge mode') as HTMLSelectElement).value).toBe('branch');
+  });
+
+  // --- Test case 2 -----------------------------------------------------
+  // Seeded on 'branch' specifically (not the Settings default of 'merge')
+  // so a passing assertion can only mean the OVERRIDE was sent, never a
+  // default that happened to already read 'merge'.
+  it('sends the picked mergeMode once the user switches away from the seeded default', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+
+    await userEvent.selectOptions(screen.getByLabelText('Merge mode'), 'merge');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
+  });
+
+  // --- Test case 3 -----------------------------------------------------
+  // The brief's own wording: sent on EVERY launch, never omitted — even
+  // an untouched sheet, sitting on exactly the Settings default nobody
+  // picked, must still say so explicitly. (`stubOrchestrate`'s default
+  // merge-check answer is 'covered', so this is not also exercising the
+  // hint — that is cases 4/5/6/7's job below.)
+  it('sends the Settings default mergeMode on an untouched launch, never omitted', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
+  });
+
+  // --- Test case 4 -----------------------------------------------------
+  it('shows the setup hint, naming the file and the JSON to paste, when merge-check reports no coverage', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: false, source: null });
+    renderSheet();
+    await toModes();
+
+    // `findBy`, not a synchronous `getBy`: the hint depends on the
+    // merge-check response actually landing, and this is the one case in
+    // this section where waiting for something to APPEAR is the right tool
+    // — case 5 below is the mirror case (waiting for something to stay
+    // ABSENT), which `findBy` cannot prove and is handled differently.
+    expect(await screen.findByText(/settings\.local\.json/)).toBeInTheDocument();
+    expect(screen.getByText('git merge')).toBeInTheDocument();
+    // Both rules of the pair (#269): the -C one, naming this project's own path, covers a real merge; the other the -C-less probe.
+    const json = document.querySelector('.orchestrate-merge-hint-json')?.textContent ?? '';
+    expect(JSON.parse(json)).toEqual({ permissions: { allow: ['Bash(git merge --no-ff *)', 'Bash(git -C "/abs/alpha" merge --no-ff *)'] } });
+  });
+
+  // A pr run asks the classifier for the same `git merge` at every item, so the no-allow-rule hint applies to it exactly as it does to merge (spec §5).
+  it('shows the setup hint for pr mode as it does for merge mode', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'pr' }));
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: false, source: null });
+    renderSheet({ source: 'github' });
+    await toModes();
+
+    expect(await screen.findByText(/settings\.local\.json/)).toBeInTheDocument();
+  });
+
+  it('shows no setup hint for branch mode even when merge-check reports no coverage', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: false, source: null });
+    renderSheet({ source: 'github' });
+    await toModes();
+
+    // Switch through pr and back so the effect has been asked to fetch once and must hide what it fetched on leaving: a hint that lingered after the
+    // switch would be a stale answer for a mode that never touches the base.
+    await userEvent.selectOptions(screen.getByLabelText('Merge mode'), 'pr');
+    expect(await screen.findByText(/settings\.local\.json/)).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Merge mode'), 'branch');
+    expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+  });
+
+  // --- Review fix round 1 (Important) -------------------------------------
+  // The reviewer's own reproduction, pinned directly: a 200 whose body is
+  // NOT `{ covered, source }` — the exact shape the pre-existing `stub()`
+  // helper in the "toolbar Orchestrate button" describe block above used to
+  // hand back for `/api/agents/merge-check` before that helper's own fix,
+  // since it fell through to the `{ items, errors: [] }` catch-all meant for
+  // `/api/items`. `fetchMergeCheck` (client/src/lib/agents.ts) now runs
+  // `isMergeCheckResult` over the parsed body and THROWS on a mismatch
+  // rather than returning it — the same treatment `fetchAgentsStatus` and
+  // `fetchOrchestratorRuns` already give their own payloads — so the
+  // effect's existing `.catch(() => setMergeCoverage(null))` (proven by
+  // case 7 below) is what actually keeps the hint from rendering here, not
+  // a second, separate code path.
+  //
+  // Same controlled-deferred + `act` technique as case 5 below, not
+  // `findBy`/`waitFor`: this is an absence claim, and a bare `waitFor`
+  // would pass at t=0, before the malformed response has even landed,
+  // proving nothing about whether the guard actually ran.
+  //
+  // Without `isMergeCheckResult`'s check, `mergeCoverage` would become this
+  // malformed object as-is, `mergeCoverage.covered` reads as `undefined`,
+  // and the hint's own guard is `!mergeCoverage.covered` — `!undefined` is
+  // `true`, so the hint would render from a response that never said
+  // anything about coverage at all. Deleting the `if (!isMergeCheckResult(data))`
+  // check in `fetchMergeCheck` is exactly what turns this test red: the
+  // `findByText`/`queryByText` assertion below would then find the hint's
+  // `<code>...settings.local.json</code>` node instead of its absence.
+  it('shows no hint when merge-check answers 200 with the wrong shape', async () => {
+    let settle: (value: Response) => void = () => {};
+    global.fetch = jest.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          settle = resolve;
+        })
+    ) as jest.Mock;
+    renderSheet();
+    // Step 3 is where the hint lives since task-20, so the absence claim
+    // below has to be made from there — asserted on step 1 it would pass for
+    // the wrong reason, on a screen that never renders a hint at all.
+    await toModes();
+
+    await act(async () => {
+      // Deliberately missing `covered` — the reviewer's own reproduction of
+      // what a stale/wrong stub (or a future server response shape change)
+      // hands back on an otherwise-successful request.
+      settle({ ok: true, status: 200, json: () => Promise.resolve({ items: [], errors: [] }) } as Response);
+    });
+
+    expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+  });
+
+  // --- Test case 5 -----------------------------------------------------
+  // A controlled deferred + `act`, not `findBy`/`waitFor`, because the
+  // claim here is an ABSENCE. `findByText` retries until something APPEARS
+  // and would simply time out trying to prove a negative, and a bare
+  // `waitFor(() => expect(...).not.toBeInTheDocument())` would pass at
+  // t=0 — before the merge-check round trip (and the `mergeCoverage`
+  // update it drives) has happened at all — which would let a real
+  // inversion of the hint's own `!mergeCoverage.covered` guard slip
+  // straight through this test undetected. Awaiting the SPECIFIC promise
+  // this mock handed out, inside `act`, is what makes "settled, and still
+  // nothing rendered" an actual claim about mounted state rather than
+  // about the instant of render, before `mergeCoverage` has even left
+  // `null`. Same technique dispatch-button.test.tsx's own
+  // "marks itself busy while the re-ask is in flight" case already uses.
+  it('shows no hint once merge-check reports coverage', async () => {
+    let settle: (value: Response) => void = () => {};
+    global.fetch = jest.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          settle = resolve;
+        })
+    ) as jest.Mock;
+    renderSheet();
+    // Step 3 is where the hint lives since task-20, so the absence claim
+    // below has to be made from there — asserted on step 1 it would pass for
+    // the wrong reason, on a screen that never renders a hint at all.
+    await toModes();
+
+    await act(async () => {
+      settle({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ covered: true, source: '/abs/alpha/.claude/settings.json' })
+      } as Response);
+    });
+
+    expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+  });
+
+  // --- Test case 6 -----------------------------------------------------
+  // No `act`/`waitFor` needed here at all: the decision not to fetch is
+  // made SYNCHRONOUSLY, in the effect's own `mergeMode !== 'merge'` branch
+  // (OrchestrateSheet.tsx), which RTL's `render` already flushes before
+  // returning — there is no async step for this assertion to race against.
+  it('never fetches merge-check at all when branch mode is selected', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
+    const fetchSpy = jest.fn();
+    global.fetch = fetchSpy as unknown as jest.Mock;
+    renderSheet();
+    // Walking to step 3 must not provoke the request either — the effect's
+    // `mergeMode !== 'merge'` branch is what refuses it, and no amount of
+    // navigation changes `mergeMode`.
+    await toModes();
+
+    // Asserted per URL rather than as `not.toHaveBeenCalled()` (task-32):
+    // the sheet now also reads `/api/items/uncommitted` on mount, and that
+    // one is deliberately NOT gated on any mode — its answer is about
+    // someone's working tree, which branch mode does not change. Naming the
+    // endpoint keeps this case's claim exactly what it always was, and the
+    // second assertion is stronger than the old blanket one: it pins exactly
+    // which requests this sheet fires in branch mode, so a further one has to
+    // come here and be accounted for.
+    //
+    // task-44 is that accounting, arriving as this comment predicted:
+    // `/api/agents/branches` is the third on-mount read and is ungated for the
+    // same reason `uncommitted` is — which branches exist is a fact about the
+    // repository, and no mode on this sheet changes it. The claim this case
+    // actually makes is unchanged: merge-check, and only merge-check, is
+    // gated on merge mode.
+    const urls = fetchSpy.mock.calls.map(([input]) => String(input));
+    //
+    // Multi-dashboard task 9 is the fourth such accounting: the machine offers are a fact about the project's dashboards, which no mode on this sheet changes.
+    // Reviewer coverage task 11 is the fifth: the saved reviewer is read whatever the merge mode, since every run reviews each item.
+    const ungated = (url: string): boolean =>
+      url.includes('/api/items/uncommitted') ||
+      url.includes('/api/agents/branches') ||
+      url.includes('/api/dashboards/offers') ||
+      url.endsWith('/api/settings/review');
+    expect(urls.filter((url) => url.includes('/api/agents/merge-check'))).toEqual([]);
+    expect(urls.filter((url) => !ungated(url))).toEqual([]);
+    expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+  });
+
+  // --- Test case 7 -----------------------------------------------------
+  // A controlled deferred REJECTION + `act`, deliberately awaited BEFORE
+  // clicking start — not after, and not interleaved via plain `waitFor`.
+  // `start` (OrchestrateSheet.tsx) calls `setError(null)` as its own very
+  // first line, unconditionally, the instant it is pressed: a version of
+  // this test that clicked start first and only checked for "no error" at
+  // the end would have that click silently erase the exact evidence a
+  // merge-check leak would leave behind, passing whether or not the leak
+  // happened. Splitting it into "let the failed request settle and prove
+  // nothing rendered from it" first, THEN "start still launches", is what
+  // makes each half a claim about its own step rather than one step's
+  // side effect quietly covering for the other's bug.
+  it('shows no hint and surfaces no error once merge-check fails, then still launches on start', async () => {
+    let reject: (err: Error) => void = () => {};
+    const calls: { url: string; body: unknown }[] = [];
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/agents/merge-check')) {
+        return new Promise<Response>((_resolve, rej) => {
+          reject = rej;
+        });
+      }
+      // Multi-dashboard task 9's on-mount read, home-only and kept out of `calls` for the same reason as the reads below.
+      if (url.includes('/api/dashboards/offers')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(homeOnly()) } as Response);
+      }
+      // Reviewer coverage task 11's on-open read, kept out of `calls` for the same reason.
+      if (url.endsWith('/api/settings/review')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(DEFAULT_REVIEW_CONFIG) } as Response);
+      }
+      // task-32's own on-mount read, answered clean and kept out of `calls`
+      // for `stubOrchestrate`'s reason: `calls` is this case's evidence that
+      // exactly one launch went out, and this is not it.
+      if (url.includes('/api/items/uncommitted')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ paths: [], absent: [], known: true })
+        } as Response);
+      }
+      // task-44's on-mount read, answered and kept OUT of `calls` for exactly
+      // the reason the two above are. Two branches so the picker has something
+      // to pick, without which the base cases below could not tell "the picker
+      // works" apart from "the list was empty and it fell back to main".
+      if (url.includes('/api/agents/branches')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ branches: ['main', 'feature/x'] })
+        } as Response);
+      }
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return Promise.resolve({
+        ok: true,
+        status: 201,
+        json: () => Promise.resolve({ sessionId: 'sess-9' })
+      } as Response);
+    }) as jest.Mock;
+    const { onClose, refresh } = renderSheet();
+    await toModes();
+
+    await act(async () => {
+      reject(new Error('network down'));
+    });
+
+    expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+    // A substring match, not an exact one: a leak would render whatever
+    // `error` holds VERBATIM (no fixed prefix), so it could arrive wrapped
+    // (`Error: network down`, `String(e)`, ...) rather than as the bare
+    // message this mock rejects with — an exact-match query would miss it.
+    expect(screen.queryByText(/network down/)).not.toBeInTheDocument();
+
+    // The hint failing to show up must not have cost the launch anything —
+    // a hint is not worth blocking a run over, and this is the step that
+    // proves it literally does not.
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  // =====================================================================
+  // The three steps (task-20; design §7). The restructure's own trigger is
+  // the fifth picker, but its justification is that Start used to sit below
+  // a scroll region whose length is the size of the project's queue — so the
+  // cases below pin BOTH halves: where each control lives, and that nothing
+  // about the request the last screen sends has changed.
+  //
+  // Every case above already carries the other half of this contract by
+  // going through `toModes()` — a Next that stops working takes the whole
+  // file down with it, which is the point.
+  // =====================================================================
+
+  it('opens on step 1 — the queue and a next control, with no start and no pickers', () => {
+    renderSheet({ items: THREE });
+
+    expect(screen.getByTestId('orchestrate-step-items')).toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: 'next' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'start' })).not.toBeInTheDocument();
+    // Nothing to go back to yet — a disabled Back would be one more control
+    // to read on the screen that already carries the longest list.
+    expect(screen.queryByRole('button', { name: 'back' })).not.toBeInTheDocument();
+  });
+
+  it('puts all five pickers on step 3 and none of them before it', async () => {
+    const labels = ['Permission mode', 'Model', 'Effort', 'Merge mode', 'Question mode'];
+    renderSheet({ items: THREE });
+
+    for (const label of labels) expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+
+    await toModes();
+
+    for (const label of labels) expect(screen.getByLabelText(label)).toBeInTheDocument();
+    expect(screen.getByTestId('orchestrate-step-modes')).toBeInTheDocument();
+    // The queue itself is gone by step 3 — that is the whole point of the
+    // restructure, since its length is what used to push Start off-screen.
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('lists exactly the selected ids in queue order on step 2, then reaches the modes', async () => {
+    renderSheet({ items: THREE });
+
+    await userEvent.click(boxFor('task-1'));
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+
+    const rows = within(screen.getByTestId('orchestrate-order')).getAllByTestId('orchestrate-order-row');
+    expect(rows.map((r) => r.getAttribute('data-id'))).toEqual(['bug-1', 'task-2']);
+    // Still no Start: the whole reason this step exists is that Start must
+    // not be reachable from underneath a list.
+    expect(screen.queryByRole('button', { name: 'start' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    expect(screen.getByRole('button', { name: 'start' })).toBeInTheDocument();
+  });
+
+  it('goes back through step 2 to step 1 with the selection intact', async () => {
+    renderSheet({ items: THREE });
+
+    await userEvent.click(boxFor('task-1'));
+    await toModes();
+
+    await userEvent.click(screen.getByRole('button', { name: 'back' }));
+    expect(screen.getByTestId('orchestrate-step-order')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'back' }));
+    expect(screen.getByTestId('orchestrate-step-items')).toBeInTheDocument();
+    expect(boxFor('task-1').checked).toBe(false);
+    expect(boxFor('bug-1').checked).toBe(true);
+    expect(boxFor('task-2').checked).toBe(true);
+  });
+
+  // --- The question-mode picker (task-19's vocabulary, task-20's control) ---
+
+  it('seeds the question-mode picker from Settings and names the outcomes, never the flag', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultQuestionMode: 'decide' }));
+    renderSheet();
+    await toModes();
+
+    const picker = screen.getByLabelText('Question mode') as HTMLSelectElement;
+    expect(picker.value).toBe('decide');
+    // Same binding rule the merge-mode picker's own case pins: the option
+    // text names what the run will DO, never `decide`/`park` as typed.
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Decide and continue', 'Skip the item for me']);
+  });
+
+  /* The doctrine sentence, in the third of the four places a reader can meet
+     this feature first (Settings' hint, this picker, SKILL.md §3, CLAUDE.md).
+     Asserted on the one word that carries it: the two modes are identical
+     whenever `AskUserQuestion` is reachable, so a board-started run is
+     choosing between skipping the item and letting the runner answer. */
+  it('carries the question-mode doctrine beside the picker', async () => {
+    renderSheet();
+    await toModes();
+    expect(screen.getByText(/AskUserQuestion/)).toBeInTheDocument();
+  });
+
+  /* Seeded on the Settings default 'park' and switched away from, so a
+     passing assertion can only mean the OVERRIDE was sent. The other value
+     is pinned by every `toEqual` body above, all of which carry
+     `questionMode: 'park'` on an untouched sheet — which is what "sent on
+     every launch, both values" actually means. */
+  it('sends the picked questionMode once the user switches away from the seeded default', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+
+    await userEvent.selectOptions(screen.getByLabelText('Question mode'), 'decide');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'decide', base: 'main'
+    });
+  });
+
+  // =====================================================================
+  // Step 2 as a reorder control (task-20; design §7.1-§7.5). `--ids` is
+  // already run in the order given by both `resolveIds` and
+  // `buildGatedQueue`, so everything below is client-side: what is being
+  // pinned is that the sheet can express an order at all, and that
+  // expressing one changes the request's MEMBERSHIP rule as well as its
+  // sequence.
+  // =====================================================================
+
+  /** The ids step 2 is currently showing, top to bottom. */
+  const orderRows = (): string[] =>
+    within(screen.getByTestId('orchestrate-order'))
+      .getAllByTestId('orchestrate-order-row')
+      .map((row) => row.getAttribute('data-id') as string);
+
+  const toOrder = (): Promise<void> => userEvent.click(screen.getByRole('button', { name: 'next' }));
+
+  it('disables up on the first row and down on the last, and nothing else', async () => {
+    renderSheet({ items: THREE });
+    await toOrder();
+
+    expect(screen.getByRole('button', { name: 'move bug-1 up' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'move task-2 down' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'move bug-1 down' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'move task-2 up' })).toBeEnabled();
+  });
+
+  it('moves a row down and a row up', async () => {
+    renderSheet({ items: THREE });
+    await toOrder();
+    expect(orderRows()).toEqual(['bug-1', 'task-1', 'task-2']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'move bug-1 down' }));
+    expect(orderRows()).toEqual(['task-1', 'bug-1', 'task-2']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'move task-2 up' }));
+    expect(orderRows()).toEqual(['task-1', 'task-2', 'bug-1']);
+  });
+
+  /* The pinning rule, in the direction that is easy to get wrong: nothing
+     was deselected, so `narrowed` is false — and the request must still
+     carry an explicit list, because an order IS a membership decision. */
+  it('sends every id in the chosen order once anything is reordered, with nothing deselected', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await toOrder();
+    await userEvent.click(screen.getByRole('button', { name: 'move bug-1 down' }));
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
+      base: 'main',
+      ids: ['task-1', 'bug-1', 'task-2']
+    });
+  });
+
+  /* And the way back out of it. Reset is the only control that can return
+     `order` to `null`, which is the only thing that returns the request to
+     the whole-queue instruction it opened with — the same asymmetry "select
+     all" already has against "select none". */
+  it('resets to queue order, and back to sending no ids at all', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await toOrder();
+    expect(screen.getByRole('button', { name: 'reset order' })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'move bug-1 down' }));
+    await userEvent.click(screen.getByRole('button', { name: 'reset order' }));
+    expect(orderRows()).toEqual(['bug-1', 'task-1', 'task-2']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park', base: 'main'
+    });
+  });
+
+  /* Reconciliation (§7.2). The order is a list of ids resolved against the
+     live queue on every render, never a stored resolved list — so an item
+     that leaves the queue while the sheet is open simply stops appearing,
+     and one that joins lands at the end rather than nowhere. Driven by a
+     changed `items` prop, which is exactly how BoardView's own poll delivers
+     a queue that moved underneath an open sheet. */
+  it('drops an id that leaves the queue and appends one that joins', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    const { rerender } = renderSheet({ items: THREE });
+
+    await toOrder();
+    await userEvent.click(screen.getByRole('button', { name: 'move bug-1 down' }));
+    expect(orderRows()).toEqual(['task-1', 'bug-1', 'task-2']);
+
+    // task-1 is gone (merged, say) and task-3 has just been groomed.
+    rerender({
+      items: [THREE[0], THREE[2], fakeItem({ id: 'task-3', title: 'A third task', groomed: true, path: '/abs/alpha/backlog/tasks/open/task-3.md' })]
+    });
+
+    expect(orderRows()).toEqual(['bug-1', 'task-2', 'task-3']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
+      base: 'main',
+      ids: ['bug-1', 'task-2', 'task-3']
+    });
+  });
+
+  /* Both notes, and they are two different facts rather than one restated.
+     The first is the consequence of §7.3 — an order reintroduces exactly the
+     sheet-open snapshot the strict-subset rule exists to avoid, so the step
+     that causes it has to say so. The second is §7.4: a `runner-fix:` item
+     still hoists above the chosen order, and this screen deliberately cannot
+     name which one, because `BacklogItem` carries no `runnerFix` and the
+     marker's authority is the blob at `<base>`. */
+  it('renders the pinning note and the runner-fix note on step 2', async () => {
+    renderSheet({ items: THREE });
+    await toOrder();
+
+    expect(screen.getByText(/pins this run to these items/i)).toBeInTheDocument();
+    expect(screen.getByText(/runner-fix/i)).toBeInTheDocument();
+  });
+
+  it('closes on Escape', async () => {
+    const { onClose } = renderSheet();
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalled();
+  });
+  // --- task-44: the base picker ---------------------------------------
+  //
+  // The payload cases above already pin that `base` rides along on every
+  // launch. These pin the picker itself: that it offers what the branch read
+  // returned, that a pick reaches the request, that it is seeded from the
+  // literal `'main'` rather than from Settings, and — the one most worth
+  // having — that a failed branch read never blocks a launch.
+
+  it('offers the branches the read returned and sends the picked one', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+
+    await userEvent.selectOptions(screen.getByLabelText('Base branch'), 'feature/x');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect((calls[0].body as { base: string }).base).toBe('feature/x');
+  });
+
+  it("seeds the base from the literal 'main', never from Settings", async () => {
+    // The deliberate departure from its two neighbouring pickers. A stored
+    // base would outlive the experiment it was set for and silently send a
+    // later run onto a stale feature branch — so a Settings key that looks
+    // like one must have no effect here. Both spellings are set, since the
+    // failure this guards against is someone adding either.
+    localStorage.setItem(
+      'backlog-manager.settings',
+      JSON.stringify({ orchestrateDefaultBase: 'feature/x', orchestrateDefaultMergeMode: 'merge' })
+    );
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+
+    expect((screen.getByLabelText('Base branch') as HTMLSelectElement).value).toBe('main');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect((calls[0].body as { base: string }).base).toBe('main');
+  });
+
+  it('still launches on main when the branch read fails', async () => {
+    // The strongest form of this sheet's silent-catch rule: the other two
+    // reads exist to WARN, so losing one costs a warning. This one exists to
+    // offer alternatives to the default, so losing it must cost only the
+    // alternatives — a sheet that refused to start here would fail every
+    // ordinary run over a feature that run never used.
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: true, source: null }, 'fail');
+    renderSheet();
+    await toModes();
+
+    expect((screen.getByLabelText('Base branch') as HTMLSelectElement).value).toBe('main');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect((calls[0].body as { base: string }).base).toBe('main');
+  });
+
+  // #285: the branch list is a `useFetched` read — anything but `ok` reads as `['main']`, and an `ok` lacking `main` gets it unioned in front.
+  it('offers exactly one base, main, when the branch read fails', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: true, source: null }, 'fail');
+    renderSheet();
+    await toModes();
+    const options = [...(screen.getByLabelText('Base branch') as HTMLSelectElement).options].map((o) => o.value);
+    expect(options).toEqual(['main']);
+  });
+
+  it('puts main first when the branch read lacks it', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: true, source: null }, 'nomain');
+    renderSheet();
+    await toModes();
+    await waitFor(() => expect((screen.getByLabelText('Base branch') as HTMLSelectElement).options).toHaveLength(3));
+    const options = [...(screen.getByLabelText('Base branch') as HTMLSelectElement).options].map((o) => o.value);
+    expect(options).toEqual(['main', 'trunk', 'feature/x']);
+  });
+
+  it('says what a non-main base means, and says nothing at all for main', async () => {
+    // Shown only for a non-default base, unlike the question-mode note beside
+    // it: that note is about a CHOICE and so is true of both its values, while
+    // this one is about a consequence only one value has.
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+    expect(screen.queryByText(/is never written/i)).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText('Base branch'), 'feature/x');
+
+    expect(screen.getByText(/is never written/i)).toBeInTheDocument();
+  });
+  // --- Multi-dashboard task 9 ----------------------------------------------------------------------------------------------------------------------------
+  // The "Run on" group sits at the top of step 3, beside the pickers it locks. Home-only offers draw nothing and send the body this sheet always sent
+  // (Review Focus 1); a remote pick forces Merge mode to PR, narrows Model and Effort to the machine's lists and renames Start; switching back to home gives
+  // Merge mode back as the person had it (Review Focus 5) and leaves a narrowed-away model on the Settings default.
+  describe('run on', () => {
+    const OK = { ok: true, status: 201, body: { sessionId: 'sess-9' } };
+    const covered = { covered: true, source: null };
+    const options = (label: string): string[] => [...(screen.getByLabelText(label) as HTMLSelectElement).options].map((o) => o.value);
+
+    it('draws no group for home-only offers and sends the body it always sent, with no machine key', async () => {
+      const calls = stubOrchestrate(OK, covered, 'ok', homeOnly());
+      renderSheet();
+      await toModes();
+      expect(screen.queryByRole('group', { name: 'Run on' })).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'start' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('button', { name: 'start' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
+      expect(calls[0].body).not.toHaveProperty('machine');
+    });
+
+    it('starts on the suggested machine, locked: Merge mode at PR with its hint, Model and Effort narrowed with no hint of their own, the button naming the machine', async () => {
+      const calls = stubOrchestrate(OK, covered, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      const start = await screen.findByRole('button', { name: 'Start on Pro' });
+      await waitFor(() => expect(start).toBeEnabled());
+      expect(screen.queryByRole('button', { name: 'start' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Pro\b/ })).toHaveAttribute('aria-pressed', 'true');
+
+      const merge = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+      expect(merge.value).toBe('pr');
+      expect(merge).toBeDisabled();
+      expect(screen.getByText('Required when running on Pro')).toBeInTheDocument();
+      // '' first: the "default" option stays drawable on a remote (final-review I4), the machine's own list after it.
+      expect(options('Model')).toEqual(['', 'opus', 'sonnet']);
+      expect(screen.queryByText('Pro runs opus, sonnet')).not.toBeInTheDocument();
+      expect(options('Effort')).toEqual(['', 'low', 'high']);
+      expect(screen.queryByText('Pro runs low, high')).not.toBeInTheDocument();
+
+      await userEvent.click(start);
+      await waitFor(() => expect(calls).toHaveLength(1));
+      // Default Settings: no model and no effort key (final-review I4) — the default is never narrowed into Pro's first value; the server fills the model.
+      expect(calls[0].body).toEqual({
+        project: '/abs/alpha',
+        permissionMode: 'acceptEdits',
+        mergeMode: 'pr',
+        questionMode: 'park',
+        base: 'main',
+        machine: 'Pro'
+      });
+    });
+
+    it('puts the group above every other field of the step', async () => {
+      stubOrchestrate(OK, covered, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      const group = await screen.findByRole('group', { name: 'Run on' });
+      const permission = screen.getByLabelText('Permission mode');
+      expect(group.compareDocumentPosition(permission) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    // Review Focus 5.
+    it('gives Merge mode back and keeps the narrowed model on the Settings default when the person switches back to home', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ dispatchDefaultModel: 'opus', orchestrateDefaultMergeMode: 'branch' }));
+      const calls = stubOrchestrate(OK, covered, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+      await userEvent.selectOptions(screen.getByLabelText('Model'), 'haiku');
+      expect((screen.getByLabelText('Merge mode') as HTMLSelectElement).value).toBe('branch');
+
+      await userEvent.click(screen.getByRole('button', { name: /^Pro\b/ }));
+      expect((screen.getByLabelText('Merge mode') as HTMLSelectElement).value).toBe('pr');
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('opus');
+
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      const merge = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+      expect(merge.value).toBe('branch');
+      expect(merge).toBeEnabled();
+      expect(screen.queryByText('Required when running on Pro')).not.toBeInTheDocument();
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('opus');
+      expect(options('Model')).toContain('haiku');
+
+      await userEvent.click(screen.getByRole('button', { name: 'start' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).toMatchObject({ mergeMode: 'branch', model: 'opus' });
+      expect(calls[0].body).not.toHaveProperty('machine');
+    });
+
+    it('sends no model or effort on home after the suggested Pro, with default Settings (final-review I4)', async () => {
+      const calls = stubOrchestrate(OK, covered, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('');
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('');
+      await userEvent.click(screen.getByRole('button', { name: 'start' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).not.toHaveProperty('machine');
+      expect(calls[0].body).not.toHaveProperty('model');
+      expect(calls[0].body).not.toHaveProperty('effort');
+    });
+
+    it('does not ask for the local merge-check while a remote machine is picked', async () => {
+      const calls = stubOrchestrate(OK, { covered: false, source: null }, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+      expect(calls).toHaveLength(0);
+    });
+
+    it("shows the server's 409 in the error slot and stays open", async () => {
+      const refusal = 'Pro is not offered for alpha: dashboard unreachable — connect ECONNREFUSED';
+      stubOrchestrate({ ok: false, status: 409, body: { error: refusal } }, covered, 'ok', proSuggested());
+      const { onClose } = renderSheet();
+      await toModes();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('button', { name: 'Start on Pro' }));
+      expect(await screen.findByText(refusal)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('keeps start disabled while the offers load', async () => {
+      stubOrchestrate(OK, covered, 'ok', 'pending');
+      renderSheet();
+      await toModes();
+      expect(screen.getByRole('button', { name: 'start' })).toBeDisabled();
+    });
+
+    it('keeps start disabled, and says why, when no machine is offered', async () => {
+      stubOrchestrate(OK, covered, 'ok', {
+        project: '/abs/alpha',
+        machines: [homeOffer({ offered: false, reason: 'dashboard unreachable — down', usage: null }), proOffer({ offered: false, reason: 'sync is off for o/r on Pro', usage: null })],
+        suggestion: null
+      });
+      renderSheet();
+      await toModes();
+      await screen.findByText(NO_MACHINE_TEXT);
+      expect(screen.getByRole('button', { name: 'start' })).toBeDisabled();
+    });
+
+    it('runs here, and says so, when the machine list cannot be read', async () => {
+      const calls = stubOrchestrate(OK, covered, 'ok', 'reject');
+      renderSheet();
+      await toModes();
+      expect(await screen.findByText(/could not load the machine list/i)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'start' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).not.toHaveProperty('machine');
+    });
+  });
+});

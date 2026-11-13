@@ -424,7 +424,7 @@ is the same skill reached from a different starting point.
   prompt names only the cached MR's project and iid); and the new module edge agents → gitlab. *(Review 2-4.)*
 - `.claude/rules/board.md`: the Run ▾ / launch-sheet rule, which gains the review entry point.
 - `docker-compose.yml`: pass `BM_GITLAB_REVIEW_BOT: '${BM_GITLAB_REVIEW_BOT:-}'` through beside the GitLab pair, and add it to
-  `test/compose-env.test.ts`'s pinned spellings. *(Review 1-17.)*
+  `test/guards/compose-env.test.ts`'s pinned spellings. *(Review 1-17.)*
 - `docs/subsystems/` gitlab and jira pages.
 - `.claude/DESIGN.md`: the fifth step, the CodeRabbit row, the chip precedence and the filter.
 - Project 1's spec §9: points to this spec.

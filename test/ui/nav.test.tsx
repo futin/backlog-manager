@@ -1,0 +1,447 @@
+/**
+ * @jest-environment jsdom
+ */
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import '@testing-library/jest-dom';
+
+import { App } from '../../client/src/App';
+import runFixture from '../fixtures/orchestrator-run.json';
+import { daysAgoDate } from '../helpers/dates';
+import { SECTIONS } from '../../client/src/lib/sections';
+import { GITHUB_PAGE_KEY, resolveLegacySection } from '../../client/src/lib/source-page';
+import { RUNS_MODE_KEY } from '../../client/src/lib/runs-mode';
+import { SETTINGS_STORAGE_KEY, clampSettings } from '../../client/src/lib/settings';
+
+/*
+  Board and Settings are stubbed; Archive and Runs deliberately are not.
+
+  The subject here is the shell — which section a stored value resolves to,
+  which tab is marked, what gets written back. Rendering the real BoardView to
+  answer that would drag in `useBoard`, `useAgents` and `useOrchestratorRuns`,
+  so every case would need four fetch stubs and a polling clock to assert
+  something none of them are about, and board.test.tsx already covers that
+  component properly. A stub whose whole content is a findable string keeps
+  each assertion pointed at the shell.
+
+  Archive and Runs are left real because "the tab renders the section it
+  names" is a claim about the actual component, and a stub would assert it
+  against itself. Archive is no longer a placeholder, so it now fetches like
+  the Board does — hence the `beforeEach` stub below, which is the whole cost
+  of keeping it real. Runs needs no such stub: the case here only reaches its
+  empty state, which is a heading and a fixed string with nothing to fetch.
+
+  `require` inside the factories rather than the imports above, because
+  jest.mock is hoisted above them and may not close over module scope.
+*/
+/* The Board stub draws nothing of its own: the cursor reads the shell's one runs poll (spec §4.9a), so no view has anything to report up. */
+jest.mock('../../client/src/components/board/BoardView', () => ({
+  __esModule: true,
+  default: () => require('react').createElement('div', null, 'board stub')
+}));
+/* The stub forwards `onOpenWatchdog`, which is the whole subject of the
+   `Live view` case below: what that case asserts is what THIS SHELL hands
+   Settings, not what Settings draws with it (test/settings/settings-watchdog.test.tsx
+   owns the button). A stub that swallowed the prop would leave the wiring —
+   the one thing App owns here — untested. */
+/* `mockSettingsThrows` (the `mock` prefix is what lets a hoisted factory read it) makes the stub throw on render — the #270 case below, standing in for a
+   section whose chunk a rebuild deleted, without depending on how jest resolves a rejected `import()`. */
+let mockSettingsThrows = false;
+jest.mock('../../client/src/components/settings/SettingsView', () => ({
+  __esModule: true,
+  default: ({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) => {
+    if (mockSettingsThrows) throw new Error('chunk gone');
+    return require('react').createElement(
+      'div',
+      null,
+      'settings stub',
+      require('react').createElement('button', { type: 'button', onClick: () => onOpenWatchdog?.() }, 'open watchdog')
+    );
+  }
+}));
+
+const SECTION_KEY = 'backlog-manager.section';
+/** Written the way the shell's `readRaw` reads it back: JSON, not a bare string. */
+const storeSection = (raw: string): void => localStorage.setItem(SECTION_KEY, JSON.stringify(raw));
+const storedSection = (): unknown => JSON.parse(localStorage.getItem(SECTION_KEY) ?? 'null');
+const storeSettings = (patch: object): void => localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(patch));
+
+const railTabs = (): HTMLElement[] => within(screen.getByRole('navigation', { name: 'Sections' })).getAllByRole('button');
+const markedTabs = (): HTMLElement[] => railTabs().filter((t) => t.getAttribute('aria-current') === 'page');
+/** A section ROW by its label — not `getByRole('button', { name })`, because GitHub's tree has a `Settings` page of its own beside the Settings row. */
+const row = (label: string): HTMLElement => {
+  const found = railTabs().find((t) => t.classList.contains('rail-link') && t.textContent === label);
+  if (!found) throw new Error(`no rail row named ${label}`);
+  return found;
+};
+
+/**
+ * The Archive marker these cases wait on: its Out of scope column heading,
+ * which no other surface has — the Board evicted that section entirely. A
+ * column only renders when it has something to hold, which is why the stub
+ * below carries one rejected item and nothing else.
+ */
+const ARCHIVE_MARK = 'Out of scope';
+
+/** One rejected item, so Archive renders its columns rather than an empty
+ *  state. Deliberately minimal: this suite is about the shell, not about what
+ *  Archive puts in its columns (test/items/archive.test.tsx owns that). */
+const ARCHIVE_ITEM = {
+  id: 'oos-1',
+  title: 'declined thing',
+  created: daysAgoDate(2),
+  started: '',
+  updated: '',
+  phase: '',
+  groomElapsed: 0,
+  executeElapsed: 0,
+  groomTokens: 0,
+  executeTokens: 0,
+  kind: '',
+  tags: [],
+  section: 'out-of-scope',
+  status: 'terminal',
+  project: 'alpha',
+  projectPath: '/abs/alpha',
+  groomed: null,
+  path: '/abs/alpha/backlog/out-of-scope/oos-1.md'
+};
+
+/** The same rejection in the github project: each source's Archive draws only its own projects (source-sections), so the page a case lands on needs an
+ *  archived item of its own to render the `Out of scope` column the cases wait on. */
+const GITHUB_ARCHIVE_ITEM = { ...ARCHIVE_ITEM, id: '#7', title: 'declined issue', project: 'beta', projectPath: '/abs/beta', path: 'gh:futin/x#7' };
+
+/**
+ * RunsView's empty state — final copy, not a placeholder, so this is matched
+ * exactly rather than by a loose phrase the way ARCHIVE_MARK is: there is no
+ * surrounding prose here for a regex to leave room to breathe in.
+ */
+const RUNS_EMPTY = 'no runs yet';
+
+describe('the section rail', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    /* Archive is the one un-stubbed section here and it now fetches: items,
+       projects, agents status and orchestrator runs. Answered rather than
+       failed, so a case waiting on a column is not waiting on a retry. */
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload = url.includes('/api/agents/status')
+        ? {
+            enabled: false,
+            reachable: false,
+            remoteAnswer: false,
+            spawnAvailable: false,
+            spawnMaxPermission: null,
+            projectPaths: []
+          }
+        : url.includes('/api/orchestrator/runs')
+          ? { runs: [] }
+          : url.includes('/api/projects')
+            ? [
+                {
+                  name: 'alpha',
+                  path: '/abs/alpha',
+                  createdAt: '2026-08-26T00:00:00.000Z',
+                  missing: false,
+                  counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 1 },
+                  source: 'files'
+                },
+                // A second project from the other source, so the rail draws both source rows (source-sections spec).
+                {
+                  name: 'beta',
+                  path: '/abs/beta',
+                  createdAt: '2026-08-26T00:00:00.000Z',
+                  missing: false,
+                  counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+                  source: 'github'
+                }
+              ]
+            : { items: [ARCHIVE_ITEM, GITHUB_ARCHIVE_ITEM], errors: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    }) as jest.Mock;
+  });
+
+  it('draws a failing section as an in-place failure under a live rail, and clears it on a switch (#270)', async () => {
+    const quiet = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockSettingsThrows = true;
+    try {
+      storeSection('settings');
+      render(<App />);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('this section failed to load');
+      // The rail is outside the boundary, so the reader can still leave.
+      await userEvent.click(within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name: 'GitHub' }));
+      expect(await screen.findByText('board stub')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      mockSettingsThrows = false;
+      quiet.mockRestore();
+    }
+  });
+
+  /*
+    The pre-Board name `projects`, and anything else that is not a section, is a provisional landing (source-sections spec, Fallback): nothing is marked
+    and no section is drawn until the projects answer, which settles it on the first drawn source row — Files here — rather than on a blank main area.
+  */
+  it('settles the legacy stored "projects" on the first drawn source, not on a blank main area', async () => {
+    // What every install that predates the Board name has in localStorage.
+    storeSection('projects');
+    render(<App />);
+
+    expect(markedTabs()).toHaveLength(0);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    expect(markedTabs()[0]).toHaveTextContent('Files');
+    expect(storedSection()).toBe('files');
+  });
+
+  it('settles a hand-edited garbage section the same way', async () => {
+    storeSection('not-a-section');
+    render(<App />);
+
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    expect(markedTabs()[0]).toHaveTextContent('Files');
+  });
+
+  it('opens on GitHub when landing pins it, with no flash of another section', async () => {
+    // Stored section is Files on purpose: if `landing` were ignored, or applied
+    // a render late, the Files board is what would paint first and this would catch it.
+    storeSection('files');
+    storeSettings({ landing: 'github' });
+    localStorage.setItem(GITHUB_PAGE_KEY, JSON.stringify('archive'));
+    render(<App />);
+
+    /*
+      Synchronous, before the awaits below let the lazy chunk resolve. The rail
+      is not lazy, so what it says here IS the first paint — and it already says
+      GitHub, which is the whole claim: the landing override is resolved in the
+      useState initializer, not in an effect that would repaint a frame later.
+      A real `github` pin is a section the reader chose, so it is held and drawn
+      before the projects answer, unlike a provisional guess.
+    */
+    expect(markedTabs()[0]).toHaveTextContent('GitHub');
+    expect(screen.queryByText('board stub')).not.toBeInTheDocument();
+
+    expect(await screen.findByText(ARCHIVE_MARK)).toBeInTheDocument();
+    expect(screen.queryByText('board stub')).not.toBeInTheDocument();
+  });
+
+  it('keeps recording the last section under a landing pin, and finds it when the pin comes off', async () => {
+    storeSection('files');
+    storeSettings({ landing: 'github' });
+    localStorage.setItem(GITHUB_PAGE_KEY, JSON.stringify('archive'));
+    const pinned = render(<App />);
+    expect(await screen.findByText(ARCHIVE_MARK)).toBeInTheDocument();
+
+    await userEvent.click(row('Settings'));
+    expect(await screen.findByText('settings stub')).toBeInTheDocument();
+    // The switch wrote through even though `landing` was pinning the section —
+    // `stored` records underneath the override rather than being frozen by it.
+    expect(storedSection()).toBe('settings');
+
+    // Reload with the pin taken off. 'last' has to find Settings, the section
+    // genuinely left last, and not GitHub, the one the pin had it sitting on.
+    pinned.unmount();
+    storeSettings({ landing: 'last' });
+    render(<App />);
+
+    expect(markedTabs()[0]).toHaveTextContent('Settings');
+    expect(await screen.findByText('settings stub')).toBeInTheDocument();
+  });
+
+  it('marks exactly one tab as the current page, and moves the mark on a switch', async () => {
+    render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+
+    expect(railTabs().filter((t) => t.classList.contains('rail-link')).map((t) => t.textContent)).toEqual(['Files', 'GitHub', 'Runs', 'Settings']);
+    expect(markedTabs()).toHaveLength(1);
+    expect(markedTabs()[0]).toHaveTextContent('Files');
+
+    await userEvent.click(row('GitHub'));
+    await userEvent.click(within(screen.getByRole('group', { name: 'GitHub pages' })).getByRole('button', { name: 'Archive' }));
+
+    expect(markedTabs()).toHaveLength(1);
+    expect(markedTabs()[0]).toHaveTextContent('GitHub');
+    expect(await screen.findByText(ARCHIVE_MARK)).toBeInTheDocument();
+  });
+
+  /*
+    Its own test, separate from the order assertion folded into "marks
+    exactly one tab" above, because that one's subject is the *mark* moving
+    and this one's subject is the *rail* itself — the sources first, then
+    Runs, then Settings (source-sections spec, "The rail after the change").
+  */
+  it('shows four rows in order: Files, GitHub, Runs, Settings', async () => {
+    render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+
+    expect(railTabs().filter((t) => t.classList.contains('rail-link')).map((t) => t.textContent)).toEqual(['Files', 'GitHub', 'Runs', 'Settings']);
+  });
+
+  it('clicking Runs renders the runs view', async () => {
+    render(<App />);
+
+    await userEvent.click(row('Runs'));
+
+    expect(markedTabs()[0]).toHaveTextContent('Runs');
+    // Exact match, not a loose phrase like ARCHIVE_MARK: this is the shell's whole
+    // body, and Task 6 keeps this exact string for the genuinely-empty case
+    // rather than treating it as placeholder copy to improve on later.
+    expect(await screen.findByText(RUNS_EMPTY)).toBeInTheDocument();
+  });
+
+  /*
+    task-42: every section renders in the same wrap, Settings included.
+
+    Settings was the one exception — `wrap` rather than `wrap wide`, on the
+    grounds that a column of label-and-control rows reads better narrow — and
+    the split took the exception away: the page is two hand-balanced columns of
+    cards on both of its pages now, the same shape every other section draws,
+    and a narrow wrap would fold them to one column at every width.
+
+    Asserted for all four rather than for Settings alone, deliberately. A
+    single-section assertion is the shape that goes stale: it keeps passing
+    while a later change quietly gives some other section a measure of its own,
+    which is the drift this case exists to catch.
+  */
+  it('renders every section in the same wide wrap', async () => {
+    render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+
+    for (const label of ['Files', 'GitHub', 'Runs', 'Settings']) {
+      await userEvent.click(row(label));
+      expect(document.querySelector('.main > div')).toHaveClass('wrap', 'wide');
+    }
+  });
+
+  it('gives no tab aria-expanded — every tab is a plain section switch', async () => {
+    render(<App />);
+
+    // A button that only navigates must not announce a panel it does not hold.
+    // Narrowing the board to one project is a board control, not a rail one.
+    // Awaited first, so the source rows the projects answer draws are among the tabs checked.
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    for (const tab of railTabs()) expect(tab).not.toHaveAttribute('aria-expanded');
+  });
+  /**
+   * task-39 — Settings' watchdog card carries a `Live view` link to Runs ›
+   * Watchdog (DESIGN.md §8.6), and what this case pins is that the shell hands
+   * it the SAME pair the rail's own Watchdog sub-nav entry calls: `setRunsMode`
+   * then the section change.
+   *
+   * Asserted as the state both produce — the stored section, the stored runs
+   * mode and the marked sub-nav entry — rather than as a spy on the setter,
+   * because the claim is "the link and the rail agree", and two call sites
+   * agreeing is only observable in what they leave behind. The Watchdog PAGE is
+   * deliberately not asserted: which page Runs draws is `runs-view`'s subject,
+   * and a case that waited for it here would fail for that surface's reasons.
+   */
+  it("opens Runs › Watchdog from Settings' own link, exactly as the rail's sub-nav does", async () => {
+    storeSection('settings');
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'open watchdog' }));
+
+    expect(storedSection()).toBe('runs');
+    expect(JSON.parse(localStorage.getItem(RUNS_MODE_KEY) ?? 'null')).toBe('watchdog');
+    expect(markedTabs()[0]).toHaveTextContent('Runs');
+    // The rail's own tree entry is what ends up marked — the same element the
+    // reader would have clicked to get here.
+    const tree = screen.getByRole('group', { name: 'Runs views' });
+    const current = within(tree)
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('aria-current') === 'true');
+    expect(current.map((b) => b.textContent)).toEqual(['Watchdog']);
+  });
+});
+
+/*
+  The wordmark's cursor (dashboard-redesign-ports task 4, spec §4.9a). `App` mounts the one `OrchestratorRunsProvider` above the shell and draws the cursor from
+  its `working` — so the reading is the payload's own, not a view's report: it survives a view switch, and it is there on Settings, which used to poll nothing.
+*/
+describe('the wordmark cursor', () => {
+  const cursor = (): Element | null => document.querySelector('.rail-cursor');
+  const beta = {
+    name: 'beta',
+    path: '/abs/beta',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+    source: 'github'
+  };
+  /** Answers the registry with one GitHub project (so GitHub stays a drawn row) and the run payload with `runs`. */
+  const stubRuns = (runs: object[]): void => {
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const body = String(input) === '/api/projects' ? [beta] : { runs, starting: [], remote: [], remoteStarting: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
+    }) as jest.Mock;
+  };
+  const liveRun = (over: object): object => ({ ...runFixture, pastRuns: 0, pauseRequested: false, stopRequested: false, ...over });
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('blinks on a working run and keeps blinking when the section switches to Settings and back', async () => {
+    stubRuns([liveRun({ status: 'running', fresh: true })]);
+    storeSection('github');
+    render(<App />);
+    await waitFor(() => expect(cursor()).toHaveClass('blink'));
+
+    await userEvent.click(row('Settings'));
+    expect(await screen.findByText('settings stub')).toBeInTheDocument();
+    expect(cursor()).toHaveClass('blink');
+
+    await userEvent.click(row('GitHub'));
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    expect(cursor()).toHaveClass('blink');
+  });
+
+  it('stands solid before the first answer and for a crashed run', async () => {
+    stubRuns([liveRun({ status: 'running', fresh: false })]);
+    storeSection('github');
+    render(<App />);
+    expect(cursor()).not.toHaveClass('blink');
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    await waitFor(() => expect((global.fetch as jest.Mock).mock.calls.some(([u]) => String(u) === '/api/orchestrator/runs')).toBe(true));
+    expect(cursor()).not.toHaveClass('blink');
+  });
+
+  it('leaves exactly one h1 in the document, named Backlog Manager', async () => {
+    storeSection('github');
+    render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 1 })).toHaveAccessibleName('Backlog Manager');
+  });
+});
+
+describe('the section list', () => {
+  it('passes every section the rail actually has straight through', () => {
+    // Sources first (Files, GitHub, Jira), then Runs, then Settings — Archive is no longer a root section (source-sections spec). Whether the rail DRAWS
+    // a source or Jira row is the projects answer's and the status's call, which test/board/source-sections.test.tsx and test/jira/jira-sections.test.tsx own.
+    expect(SECTIONS).toEqual(['files', 'github', 'jira', 'runs', 'settings']);
+    for (const s of SECTIONS) expect(resolveLegacySection(s).section).toBe(s);
+  });
+
+  it('maps the legacy names, and anything else that is not a section, onto the provisional GitHub', () => {
+    // 'Board' is in here for the case: the compare is exact, not case-folded.
+    const strays = ['projects', 'guides', 'Board', '', null, undefined, 7, { section: 'archive' }, 'board', 'archive'];
+    for (const raw of strays) expect(resolveLegacySection(raw)).toMatchObject({ section: 'github', provisional: true });
+  });
+
+  /*
+    Not exercised by the loop above: that one calls `resolveLegacySection`, not
+    `clampSettings`, and the two guard different things — a stored *section*
+    versus a stored *landing preference*. This is the "settings' LANDINGS
+    all derive from it too" half of SideRail's own comment on SECTIONS: the
+    only way `clampSettings({ landing: 'runs' })` could keep the value is if
+    `lib/settings.ts`'s derived `LANDINGS` (`['last', ...SECTIONS]`) actually
+    picked up the new tab, rather than a hand-copied list sitting one entry
+    behind SideRail.tsx the way SettingsView's *labeled* LANDINGS would if
+    nobody had touched it.
+  */
+  it('clampSettings accepts the new section as a landing value too', () => {
+    expect(clampSettings({ landing: 'runs' }).landing).toBe('runs');
+  });
+});

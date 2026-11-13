@@ -13,7 +13,7 @@ import type { DispatchGate } from '../../../shared/agent';
  * environment ladder in `shared/agent.ts`, and the Orchestrate chip also hides for an unfiltered board and for a project with a fresh run. Nor is the
  * policy — which gate each caller runs, and what its other blocks are — which stays with the callers; only the mechanics they shared live here.
  *
- * Imports nothing from React and nothing from `components/`, so `test/gate-view.test.ts` pins it under jest's default `node` environment with no render.
+ * Imports nothing from React and nothing from `components/`, so `test/orchestrator/gate-view.test.ts` pins it under jest's default `node` environment with no render.
  */
 
 /** A gate's block reason when it disables, or null — the `control === 'disabled' ? reason : null` both callers wrote. A `hidden` gate is null here

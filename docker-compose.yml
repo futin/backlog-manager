@@ -111,14 +111,14 @@ services:
       # NEVER a literal. The email is half of the Basic credential and the site is the host it is sent to, so a literal for any of them commits one machine's
       # account to this repository — and a literal token can only be undone by revoking it. `:-` so an empty value reads as absent, which the server reports
       # as `configured: false` (the Jira section is not drawn) rather than sending a blank credential and explaining the 401. Pinned through the server's own
-      # spellings (`JIRA_ENV`) by test/compose-env.test.ts.
+      # spellings (`JIRA_ENV`) by test/guards/compose-env.test.ts.
       BM_JIRA_SITE: '${BM_JIRA_SITE:-}'
       BM_JIRA_EMAIL: '${BM_JIRA_EMAIL:-}'
       BM_JIRA_TOKEN: '${BM_JIRA_TOKEN:-}'
       # The GitLab pair (GitLab connection, read-only delivery marks). bug-25's rule once more: an interpolation with an empty default, NEVER a literal — the
       # site is the host the token is sent to, and a literal token can only be undone by revoking it. `:-` so an empty value reads as absent, which the server
       # reports as not configured (the board simply has no delivery marks) rather than sending a blank credential. Pinned through the server's own spellings
-      # (`GITLAB_ENV`) by test/compose-env.test.ts.
+      # (`GITLAB_ENV`) by test/guards/compose-env.test.ts.
       BM_GITLAB_SITE: '${BM_GITLAB_SITE:-}'
       BM_GITLAB_TOKEN: '${BM_GITLAB_TOKEN:-}'
       # The name this machine's tracker claims record (#225). backlog.mjs and

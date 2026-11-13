@@ -18,7 +18,7 @@ import type { ClaimRecord } from '../../shared/types';
  * the two-claimant case and the stale-retirement case one line of setup each.
  *
  * It is faked at `fetch`, INSIDE a real `GithubClient`, exactly as
- * `test/tracker-items.test.ts` fakes the read side: the client's own three
+ * `test/tracker/tracker-items.test.ts` fakes the read side: the client's own three
  * rules (one host, rate headers recorded, nothing thrown on a status) stay
  * under test rather than being stubbed away.
  *

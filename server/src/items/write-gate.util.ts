@@ -10,7 +10,7 @@ import type { WriterLookup } from './items.service';
  * Its own file rather than functions exported from the controller for the layering reason #351 named: `items-abort.service.ts` used to import `writable`
  * from `items-write.controller.ts`, which is a service depending on a controller — loading the abort route dragged the whole write controller, its guard
  * and its Nest decorators in with it, and the next helper anyone needed would have gone the same way. A controller is an HTTP edge that only its module
- * names (`test/server-layering.test.ts` holds that line); the gates are plain functions, so they live where `answer` already moved for the same kind of
+ * names (`test/guards/server-layering.test.ts` holds that line); the gates are plain functions, so they live where `answer` already moved for the same kind of
  * reason in #270 (`write-answer.util.ts`).
  */
 

@@ -18,7 +18,7 @@
  * `dialog-escape.test.tsx`'s `daysAgo` returned the second, under names one letter apart. The two exported names here keep that distinction visible,
  * which is the whole reason they are not one function with a flag. Same "one implementation" rule `listenLoopback` follows in `test/helpers/app.ts`.
  *
- * `test/fixture-clock.test.ts` is the guard that keeps absolute literals from coming back; it reads the source of every `test/*.test.tsx` because
+ * `test/guards/fixture-clock.test.ts` is the guard that keeps absolute literals from coming back; it reads the source of every `test/<feature>/*.test.tsx` because
  * behaviour cannot catch this class — a fresh absolute date is green on the day it is written and for thirty days afterwards.
  */
 

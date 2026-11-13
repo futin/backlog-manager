@@ -23,7 +23,7 @@ export default defineConfig({
     // form covers every node on the tailnet and survives a machine rename.
     allowedHosts: ['.ts.net'],
     // One prefix, on purpose: every server route lives under /api, and
-    // test/vite-proxy.test.ts asserts controllers never leave it. A route
+    // test/guards/vite-proxy.test.ts asserts controllers never leave it. A route
     // outside /api would not 404 in dev — Vite's SPA fallback would answer it
     // with index.html.
     proxy: {
@@ -38,7 +38,7 @@ export default defineConfig({
     // is refused — which is what Vite's 4 KiB default did to the smallest
     // @fontsource subsets. `undefined` hands every other asset back to that
     // default; images may still inline, since img-src admits data:.
-    // test/csp.test.ts pins both halves.
+    // test/server/csp.test.ts pins both halves.
     assetsInlineLimit: (filePath) => (/\.woff2?$/.test(filePath) ? false : undefined)
   }
 });

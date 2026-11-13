@@ -119,11 +119,11 @@ The dashboard's releases.md §The chip and §The drawer are the behaviour spec; 
   Full screen below the board's narrow breakpoint, a 400 px right panel over a scrim above it.
 - **Escape**: the drawer joins `useDialogEscape`'s stack while drawn — the topmost dialog is the only one that closes (CLAUDE.md invariant). A right-hand
   drawer is a third overlay shape, so (my call) it gets its own shell, `ui/Drawer.tsx`, which calls the hook exactly as `ui/Modal.tsx` and
-  `ui/FormSheet.tsx` do — a new primitive family, so `test/design-guards.test.ts`'s `FAMILIES` list and the `ui primitives` block of `styles.css` gain it,
+  `ui/FormSheet.tsx` do — a new primitive family, so `test/guards/design-guards.test.ts`'s `FAMILIES` list and the `ui primitives` block of `styles.css` gain it,
   and DESIGN.md §8.7's "both shapes" becomes three — "the shells call it" stays true. The dialog count becomes six, and every home of that count is updated in the same PR:
   `.claude/rules/board.md` (the Escape bullet), `docs/subsystems/invariants.md` (its reasoning), the `hooks/useDialogEscape.ts` header,
-  `test/dialog-escape.test.tsx`, DESIGN.md §8.7, `docs/subsystems/board.md` (its two "five dialogs" mentions), and `test/dialog-count-docs.test.ts`, which
-  pins "five" and the five names in those homes and must move to six with them (`test/dialog-escape.test.tsx`'s stale "three" describe moves to six too).
+  `test/board/dialog-escape.test.tsx`, DESIGN.md §8.7, `docs/subsystems/board.md` (its two "five dialogs" mentions), and `test/guards/dialog-count-docs.test.ts`, which
+  pins "five" and the five names in those homes and must move to six with them (`test/board/dialog-escape.test.tsx`'s stale "three" describe moves to six too).
 - **Fetch**: once on load and again when the chip opens the drawer; no poll.
 - **Code homes**: every decision (chip label, dot, version compare `0.10.0 > 0.9.0`, title prefix strip) in `client/src/lib/releases.ts`, no React; the
   hook in `hooks/`; the drawer in `components/`. Header comments cite the new DESIGN.md subsection.

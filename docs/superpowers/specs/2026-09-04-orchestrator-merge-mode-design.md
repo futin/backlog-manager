@@ -149,7 +149,7 @@ Every site that must classify it, all of them compiler-forced or test-pinned tod
 | Site                                                   | Classification                                                         |
 | ------------------------------------------------------ | ---------------------------------------------------------------------- |
 | `RunStage` union (`shared/types.ts`)                   | new member                                                             |
-| `RUN_STAGES` (`orchestrate.mjs`, deliberate duplicate) | new member; pinned against the union by `test/agents-shared.test.ts`   |
+| `RUN_STAGES` (`orchestrate.mjs`, deliberate duplicate) | new member; pinned against the union by `test/agents/agents-shared.test.ts`   |
 | `RUN_CLAIMED_STAGES`                                   | **not** in it — the run has let go                                     |
 | `ATTENTION_RUN_STAGES`                                 | **not** in it — a clean branch needs nobody                            |
 | `runHoldsItem` / `RUN_HELD_STAGES` (`shared/agent.ts`) | a fifth true exit alongside `merged`, `failed`, `skipped`, `ungroomed` |
@@ -160,7 +160,7 @@ Every site that must classify it, all of them compiler-forced or test-pinned tod
 | `status` summary line (`N/M merged`)                   | mode-aware wording                                                     |
 | `aggregateRuns` (`run-stats.ts`)                       | counted as completed, alongside `merged`                               |
 
-`test/agents-shared.test.ts`'s `Record<RunStage, true>` literal makes the compiler demand a decision for both partitions, which is the mechanism that keeps this
+`test/agents/agents-shared.test.ts`'s `Record<RunStage, true>` literal makes the compiler demand a decision for both partitions, which is the mechanism that keeps this
 table from being a checklist someone forgets.
 
 **Why a new stage rather than reusing `merged` with the run mode as the qualifier:** the cheaper option makes the stored history state that an item merged when
@@ -269,7 +269,7 @@ Behaviour and expected values; the implementer writes the code.
 
 **Shared** (jest):
 
-12. `test/agents-shared.test.ts`'s `Record<RunStage, true>` literal gains `branched` and classifies it in both partitions; `runHoldsItem` returns false for it.
+12. `test/agents/agents-shared.test.ts`'s `Record<RunStage, true>` literal gains `branched` and classifies it in both partitions; `runHoldsItem` returns false for it.
 13. The `RUN_STAGES` duplication pin still matches the union.
 
 **Client** (jest + jsdom):

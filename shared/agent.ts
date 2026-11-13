@@ -38,7 +38,7 @@ export type AgentAction = 'groom' | 'execute' | 'capture';
  * without restating the union by hand, which is the one thing this module
  * exists to prevent: a hand-written `!== 'groom' && !== 'execute'` chain is a
  * second copy of the vocabulary, and it is exactly the copy that got missed
- * when a third action was added. `test/agents-shared.test.ts` pins it against
+ * when a third action was added. `test/agents/agents-shared.test.ts` pins it against
  * the type.
  */
 export const AGENT_ACTIONS: readonly AgentAction[] = ['groom', 'execute', 'capture'];
@@ -215,7 +215,7 @@ export const MODELS: readonly string[] = ['opus', 'sonnet', 'haiku', 'fable'];
 /**
  * The model a spawn gets when the caller names none. A bare `claude -p` takes the host CLI's own default, which was Sonnet on this machine — so "no
  * choice" silently meant a cheaper model than the one the board's runs are meant to use. Applied by `AgentsService` at both spawn sites; the skill's dispatch
- * lines and the reviewer agent carry the same value literally, since neither can import from here; test/default-model.test.ts holds them to it.
+ * lines and the reviewer agent carry the same value literally, since neither can import from here; test/agents/default-model.test.ts holds them to it.
  */
 export const DEFAULT_MODEL = 'opus';
 
@@ -680,7 +680,7 @@ export function queueItemIs(queueId: string, item: BacklogItem): boolean {
  * the one place in this pair of lists that composing is right: both halves are
  * hand-written next to `RunStage` itself (see their comments), so this union
  * cannot silently gain or lose a member without one of them changing, and
- * `test/agents-shared.test.ts` asserts the three-way partition against a
+ * `test/agents/agents-shared.test.ts` asserts the three-way partition against a
  * `Record<RunStage, true>` literal in any case.
  */
 export const RUN_HELD_STAGES: readonly RunStage[] = [...RUN_CLAIMED_STAGES, ...ATTENTION_RUN_STAGES];

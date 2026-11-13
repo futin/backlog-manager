@@ -177,7 +177,7 @@ function AppShell() {
     by the two effects below to tell whether their closure is behind. It is: a click can land between a commit and that commit's passive effects (a
     default-lane commit hands its effects to the scheduler, and a busy frame splits the two), and React flushes those effects ahead of the click's render,
     with the closure that still holds the old values. The settle then saw `pending` the click had already cleared, and its `change('files')` overtook the
-    click's `change('runs')` (test/section-settle-race.test.tsx). An effect that finds itself behind does nothing: the writes that made it stale queued a
+    click's `change('runs')` (test/ui/section-settle-race.test.tsx). An effect that finds itself behind does nothing: the writes that made it stale queued a
     render, and that render runs it again with the values it should have seen.
   */
   const intent = useRef({ section: initial.section, pending: initial.pending });

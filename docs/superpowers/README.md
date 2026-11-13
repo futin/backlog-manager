@@ -5,7 +5,7 @@ What the brainstorm → plan → review loop leaves behind, and which of it stay
 | Directory    | Kept?                     | Why                                                                                                     |
 | ------------ | ------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `specs/`     | yes                       | The _why_ behind the code: comments in `server/`, `client/`, `shared/`, `skills/` and `test/` cite spec sections. |
-| `decisions/` | yes                       | Rulings made while a plan ran, and the CLAUDE.md fence audit `test/claude-rules.test.ts` cites.          |
+| `decisions/` | yes                       | Rulings made while a plan ran, and the CLAUDE.md fence audit `test/guards/claude-rules.test.ts` cites.          |
 | `plans/`     | only while in flight      | A plan is read by the session that executes it. Once its PR merges, the code, the spec and git hold it. |
 | `reviews/`   | never (gitignored)        | Reviewer reports are spent the moment their findings are applied or ruled on.                          |
 

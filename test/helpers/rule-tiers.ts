@@ -4,7 +4,7 @@
  * A rule is stated at up to three depths, each with exactly one home: the MECHANISM (the full bullet — headline, how the rule is implemented, its `Why:`
  * link — in exactly one `.claude/rules/*.md`, loaded when a session reads a file under that rule file's `paths:`), the REASONING
  * (`docs/subsystems/invariants.md#<anchor>`, read when a person follows the link), and — only for a rule that matters whichever file is touched — the
- * HEADLINE (one bolded sentence, in CLAUDE.md, loaded by every session). The seams between tier one and tier two are what `test/claude-rules.test.ts` guards:
+ * HEADLINE (one bolded sentence, in CLAUDE.md, loaded by every session). The seams between tier one and tier two are what `test/guards/claude-rules.test.ts` guards:
  * a headline CLAUDE.md states must be byte-equal in its one rule file, every rule must have one home, and CLAUDE.md must carry nothing past the headline —
  * whatever CLAUDE.md holds is paid for by every session, which is the cost the split exists to remove
  * (docs/superpowers/specs/2026-09-22-claude-md-three-tiers-design.md; tier one became a subset of tier two in
@@ -12,7 +12,7 @@
  *
  * Everything here is a function over a STRING, deliberately: the guards run the same parser over the real files and over inline fixtures, and a parser that
  * produced nothing would match nothing against nothing and pass every guard while asserting exactly zero — so the parsers are pinned on fixtures first. No
- * fs, no repo paths, no YAML or glob dependency (the suite reads the files as source, like `test/csp.test.ts`).
+ * fs, no repo paths, no YAML or glob dependency (the suite reads the files as source, like `test/server/csp.test.ts`).
  *
  * One parser for both tiers rather than one each, because "byte-equal headline" is only meaningful if both sides extracted it the same way. A headline may
  * wrap across a continuation line (CLAUDE.md wraps at 160 columns and one headline does), so every comparison happens on the JOINED bullet: continuation

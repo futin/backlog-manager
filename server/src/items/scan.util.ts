@@ -16,7 +16,7 @@ import type { BacklogItem, ItemStatus, RegistryProject, Section } from '../../..
  * happens to exist on disk, so a new section is two rows here as well as two
  * entries in LEAF_DIRS. Deliberately still a hand-written mirror: importing
  * LEAF_DIRS would drag a .mjs module into the Nest build to save two lines,
- * and the mirror is asserted by test/items.test.ts scanning a real store.
+ * and the mirror is asserted by test/items/items.test.ts scanning a real store.
  */
 const LEAVES: { section: Section; status: ItemStatus; rel: string }[] = [
   { section: 'bugs', status: 'open', rel: 'bugs/open' },

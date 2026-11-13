@@ -8,7 +8,7 @@ sentences embedded in `## Layout`. Research was split across three readers by ho
 ## Rulings over the readers' proposals
 
 - **Keep is the error-safe direction.** A wrong `keep` costs ~230 B in every session; a wrong `fenced` drops a rule from sessions that can break it. Every `keep`
-  proposal is accepted without a second pass; every `widen` glob is checked against `git ls-files` by `test/claude-rules.test.ts`.
+  proposal is accepted without a second pass; every `widen` glob is checked against `git ls-files` by `test/guards/claude-rules.test.ts`.
 - **#65** proposed `rehome: scripts.md`. Ruled `widen: scripts/sync-plugin.mjs` on `skills.md` instead — the rule governs `agents/**` too, which `scripts.md` does
   not fence, so `rehome`'s own condition fails.
 - **L3** (`hub/` is read-only, no actions) proposed `keep`. Ruled `widen: server/src/hub/**` on `security.md` with a new bullet — one glob, one small file.
@@ -38,7 +38,7 @@ sentences embedded in `## Layout`. Research was split across three readers by ho
 |---|---|---|---|---|
 | 13 | A starting entry blocks what a run file blocks, on every sur | board.md | `shared/agent.ts:500` (`runClaimBlock`'s required `starting` param; `runHoldsItem` at :687 must NOT gain it); `server/src/agents/agents.service.ts:382,576,914` (dispatch/plan call `runClaimBlock(item, runs, starting)`; orchestrate refuses a starting project with `RUN_IN_PROGRESS_CODE`) | widen: `shared/agent.ts`, `server/src/agents/agents.service.ts` |
 | 15 | Escape has one owner, and the topmost dialog is the only one | board.md | none — `client/src/hooks/useDialogEscape.ts` and every caller (`ui/Modal.tsx`, `ui/FormSheet.tsx`, `ui/Confirm.tsx`, `ui/Popover.tsx`, `ReleasesDrawer.tsx`, …) are under `client/src/` | fenced |
-| 16 | ui-kit draws the version chip and the What's new drawer; thi | board.md | `shared/theme.css` — one of the two sheets the guard checks for `.uk-*` restyles / non-public `--uk-*` (`test/ui-kit-guard.test.ts:13` `SHEETS = ['client/src/styles.css', 'shared/theme.css']`) | widen: `shared/theme.css` |
+| 16 | ui-kit draws the version chip and the What's new drawer; thi | board.md | `shared/theme.css` — one of the two sheets the guard checks for `.uk-*` restyles / non-public `--uk-*` (`test/guards/ui-kit-guard.test.ts:13` `SHEETS = ['client/src/styles.css', 'shared/theme.css']`) | widen: `shared/theme.css` |
 | 17 | The strip's height and the well's gap are one token, `--main | board.md | none — `--main-gap` appears only in `client/src/styles.css` and `client/src/App.tsx` | fenced |
 | 26 | Item bodies are served through a registry-built allowlist | items.md (proposed) | none — `server/src/items/allow.util.ts:11,23` (`buildAllowlist`, `resolveAllowed`), sole caller `server/src/items/sources/files.source.ts:56,94` | fenced |
 | 43 | Board-versus-Archive is derived from `updated ?? lastCommit  | board.md | none governing — `client/src/lib/item-stale.ts`, `client/src/lib/item-touched.ts` are in fence; `runHoldsItem` (`shared/agent.ts:687`) is only consumed | fenced |
@@ -59,8 +59,8 @@ sentences embedded in `## Layout`. Research was split across three readers by ho
 | 101 | `linkBase` becomes an href | board.md (proposed) | none — `client/src/lib/settings.ts` (`clampSettings`/`clampOrigin`), `components/settings/SettingsView.tsx:578-610`, `lib/agents.ts:466` | fenced |
 | 102 | "Queue wait is not work." | board.md | none governing — `client/src/lib/run-time.ts`, `lib/run-stats.ts` (`MACHINE_STAGES`, `runStageTotals`) | fenced |
 | 104 | Every `.claude/rules/` file carries `paths:` and is the one  | tests.md | `CLAUDE.md` (linked headlines byte-equal, headline+link bullets); `agents/backlog-reviewer.md:130` (reviewer opens the rule files covering the diff); `skills/backlog-execute/SKILL.md:308` (contract sweep visits `.claude/rules/*.md`); `skills/backlog-orchestrate/references/questions.md:12` | keep |
-| C1 | A suite that hands an app to supertest listens once, on `127 | tests.md | none — `test/helpers/app.ts:38` (`listenLoopback`), every `test/*.test.ts`, guard `test/supertest-bind.test.ts` | fenced |
-| C2 | A jsdom suite's fixture dates are relative to the clock the  | tests.md | none — `test/helpers/dates.ts`, every `test/*.test.tsx`, guard `test/fixture-clock.test.ts` | fenced |
+| C1 | A suite that hands an app to supertest listens once, on `127 | tests.md | none — `test/helpers/app.ts:38` (`listenLoopback`), every `test/*.test.ts`, guard `test/guards/supertest-bind.test.ts` | fenced |
+| C2 | A jsdom suite's fixture dates are relative to the clock the  | tests.md | none — `test/helpers/dates.ts`, every `test/*.test.tsx`, guard `test/guards/fixture-clock.test.ts` | fenced |
 | C3 | Tests are flat in `test/` under jest and beside the tool the | tests.md | `skills/*/tools/*.test.mjs` (20 files; e.g. `skills/backlog-retro/tools/retro-lib.test.mjs` must stay at `tools/` level); `scripts/*.test.mjs` (4 files); `package.json:18` (`test:skills` glob pair); `jest.config.ts:11` (`testMatch`); `scripts/test-all.mjs:33` | keep |
 | L1 | Layout: the ten write routes in `items-write.controller.ts` + `abort` are the ONLY writes to items | keep (proposal) | `server/src/items/items-write.controller.ts` (10 `@Post`), `server/src/agents/items-abort.controller.ts:20`, and any other server module (a new writer anywhere breaks it) | duplicate of #18 (KEEP) + #19 (`items.md:7`) |
 | L2 | Layout: `agents/`, `tracker/`, `jira/` are the outbound-calling modules, and the ONLY three (`agents/dashboards/` not a fourth; `releases/`, `tick/` not outbound) | keep (proposal) | every `server/src/**` module (a fourth caller can appear anywhere) | keep |

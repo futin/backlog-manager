@@ -199,7 +199,7 @@ its sentence; its red `detail` line goes — the `Can't read` line below says it
   warning chip" (the Inbox meta-line pill) and "`updating…`" (Matrix's Base-cell exception, `branch updated`).
 - `2026-10-29-prs-layouts-design.md`: one line under its title naming this spec as superseding the sections above; the body is history and stays.
 - `.claude/rules/board.md`, the Escape-stack bullet: GitHub › PRs' `Merge` Confirm is opened by `PrActions` and drawn by the foot, not `PrRow`
-  (`test/claude-rules.test.ts` keeps the headline; the mechanism sentence changes).
+  (`test/guards/claude-rules.test.ts` keeps the headline; the mechanism sentence changes).
 - `docs/subsystems/board.md`: the PRs-page paragraph (today's lines 481–507: the narrow Matrix gate, the compact keys and `Merge…`, the Quiet row's
   `Actions` toggle, the Cards head, `PrRow`'s strip with its method `Select`, the `(<method>)?` Confirm, Enable/Disable auto-merge, `Update branch`,
   "never a tooltip alone" and the timer order), rewritten whole; the `Chip` row of the primitives table (line 98, `as?: button|label|a`); and the `lib/`
@@ -210,16 +210,16 @@ its sentence; its red `detail` line goes — the `Can't read` line below says it
 
 The suites are the ones that exist; cases named here replace or join the ones there. Fixture dates stay relative to the clock the assertion runs under.
 
-- `test/prs-lib.test.ts` — `updateBlock`: behind + updatable + mark → `updating…`; behind + not updatable + mark → `updating…` (motion beats permission); not
+- `test/github/prs-lib.test.ts` — `updateBlock`: behind + updatable + mark → `updating…`; behind + not updatable + mark → `updating…` (motion beats permission); not
   behind + not updatable, no mark → `already up to date`; clean + updatable, no mark → null; sync off beats the mark. `autoMergeBlock`, unarmed: sync off, then
   draft, then conflicting, then failing, then the repo setting, first match wins; armed: a failing, conflicting or draft PR on a repo whose setting is off →
   null. `whyLine`: sync-off repo → exactly `['sync off']`; quiet PR, repo without auto-merge → `['auto-merge not enabled on the repo']`; repo with no allowed
   method and no auto-merge → both, merge's first; fork without edits → `['fork does not allow edits']`; behind + not updatable, own repo → `['no permission to
   update']`; failing checks on a clean repo → `[]`; a PR with the mark → `[]`.
-- `test/pr-layouts-lib.test.ts` — `primaryKey`: every `compactKeys` primary case today, renamed, plus behind + mark → null. `columnCounts`: two behind
+- `test/github/pr-layouts-lib.test.ts` — `primaryKey`: every `compactKeys` primary case today, renamed, plus behind + mark → null. `columnCounts`: two behind
   rows, one with the mark → `base: 2`. Layout: `parseLayout` cases stand; the `drawableLayout` and `layoutOptions` cases go; the options constant has
   three entries, inbox, matrix, cards, in that order.
-- `test/prs-actions.test.tsx` (rendering `PrActions` and the foot through a small harness that holds the confirming key in state, as the page does) — four keys
+- `test/github/prs-actions.test.tsx` (rendering `PrActions` and the foot through a small harness that holds the confirming key in state, as the page does) — four keys
   in order by accessible name `Merge`, `Auto-merge`, `Update`, `Open ↗`; `Open ↗` is an `<a>` to `pr.url` with `target=_blank`; the primary is `ui-chip-ink`,
   the others `ui-chip-outline`, none ink when there is no primary; `Merge` opens `pr-merge-confirm` holding a `Select` of the repo's methods and the text `Merge
   #5 into main?`, accept POSTs once with the picked method, dismiss POSTs nothing, Escape dismisses; failing checks → `Merge` `aria-disabled`, `title` `checks
@@ -229,21 +229,21 @@ The suites are the ones that exist; cases named here replace or join the ones th
   on a failing PR; `Update` on a behind PR sends one update POST, and is `aria-disabled` with `title` `updating…` while the mark holds; in flight sets
   `disabled` on all but `Open ↗` and lands free; with the Confirm open, clicking `Auto-merge` leaves no `pr-merge-confirm` and sends one auto-merge POST and no
   merge POST; a second click on `Merge` while its Confirm is open leaves that one Confirm.
-- `test/prs-inbox.test.tsx` — a loud and a quiet row each carry the four keys, and the quiet row has no toggle (`#n` is a link, no `aria-expanded` anywhere); a
+- `test/github/prs-inbox.test.tsx` — a loud and a quiet row each carry the four keys, and the quiet row has no toggle (`#n` is a link, no `aria-expanded` anywhere); a
   why-line only on rows with a repo reason; a row with the mark and an `auto-merge armed` outcome reads `updating…` on its why-line and `auto-merge armed` on
   its outcome line, and with the `updating` outcome its why-line is empty; a loud row under a live run draws the warning as one pill on its meta line and not as
   a step, and its meta line reads `author · head → base · age`; opening `Merge` on a second row leaves one `pr-merge-confirm` on the page, on the second row;
   the Confirm sits in the row's foot under the text, found `within` the row and not within the keys column; the a/x#7-leaves-a/y#7-stays case stands; an outcome
   line under a loud and under a quiet row; departed outcomes above, `Can't read` and truncated lines below, from `PrRepoNotes`; a sync-off repo's sentence once
   above and `sync off` on each of its rows' why-lines.
-- `test/prs-matrix.test.tsx` — the expansion holds the four keys and the why-line; an ok outcome on an OPEN row is inside `prs-matrix-expand` and no
+- `test/github/prs-matrix.test.tsx` — the expansion holds the four keys and the why-line; an ok outcome on an OPEN row is inside `prs-matrix-expand` and no
   `prs-matrix-outcome` row exists for it; the same outcome on the collapsed row is one `prs-matrix-outcome` row; an `updating` outcome draws no row either way,
   the Base cell reads `updating…`, and the expansion's `Update` is `aria-disabled` with `title` `updating…`; `branch updated` draws as a row; Base header reads
   2 with two behind rows, one marked; a rate-limited repo with rows keeps its rows and has no muted row, and the `Can't read` line is below the table; a
   rate-limited repo without rows is a line only; the only shown repo failed and holds nothing → no table, no empty sentence, the line; the table is inside the
   scroll box, the dot and PR cells carry the sticky class, and the expansion block and the outcome row carry the pinned class; closing an expansion with a
   Confirm open leaves no `pr-merge-confirm`; every toggle, link and key case today stands.
-- `test/prs-view.test.tsx` — every shown repo read clean and listing nothing → Cards draws `no open pull requests` and no count note; a stored `matrix` draws
+- `test/github/prs-view.test.tsx` — every shown repo read clean and listing nothing → Cards draws `no open pull requests` and no count note; a stored `matrix` draws
   Matrix on a narrow window and the switcher offers three options (replacing the narrow-as-Inbox case); Cards draws no `pr-repo-*` for an ok repo with no PRs
   and the toolbar reads `1 repo with no open PRs` (then `2 repos …`); a rate-limited repo without rows has no `pr-repo-*` and a `Can't read` line; a repo whose
   only PR departed keeps its `pr-repo-*` with `#12 merged` inside, and Cards draws no departed line and no `showing N of M` from `PrRepoNotes`; the merge,
@@ -253,7 +253,7 @@ The suites are the ones that exist; cases named here replace or join the ones th
   re-read showing a new head → `branch updated` (the mark is dropped after that re-read, not before); the same-head 30 s case stands; the layout-switch cases
   for marks and in-flight stand, plus: a layout switch closes an open Confirm, and a re-read that turns the confirming PR's checks to `failure` closes it too,
   nothing sent.
-- `test/claude-rules.test.ts` and the CSP, proxy and DESIGN guards run as they are; `test/ui-chip.test.tsx` gains the anchor case: `as="a"` with `href`
+- `test/guards/claude-rules.test.ts` and the CSP, proxy and DESIGN guards run as they are; `test/ui/ui-chip.test.tsx` gains the anchor case: `as="a"` with `href`
   renders an `<a>` carrying the chip classes, `target=_blank` and `rel=noreferrer`.
 - Source guards to add to the scoped CI run, by `grep -l <symbol> test/` — run on 2026-10-30: `PrActions` → prs-actions; `PrInbox` → prs-inbox; `PrMatrix` →
   prs-matrix; `PullRequestsView` → run-pulse, prs-view, source-sections; `usePullRequests` → github-settings, use-pull-requests; `compactKeys` → pr-layouts-lib;

@@ -39,8 +39,8 @@ import { runGit } from '../git-run.util';
  * `|`, `<`, `>`, `!`, `#` and `{}`. So the shape is an ALLOWLIST — the set `tick.mjs` already holds its own `--base` to — rather than a denylist of
  * metacharacters, which is wrong the first time it misses one.
  *
- * Uncoded 400s, messages pinned by test/base-branch.test.ts and
- * test/uncommitted.test.ts.
+ * Uncoded 400s, messages pinned by test/orchestrator/base-branch.test.ts and
+ * test/orchestrator/uncommitted.test.ts.
  */
 
 /**

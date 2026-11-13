@@ -37,7 +37,7 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   answered 200 (spec §3).
   `authorization: Basic …` is built there and nowhere else, and every `message` is Jira's sentence or the transport error's, never the request.
   `JiraStatusPayload` carries `site`, `me.name`, `me.accountId` and `tokenKind` — never the email or the token. Compose passes all three as
-  `'${BM_JIRA_<NAME>:-}'`, pinned through `JIRA_ENV` by `test/compose-env.test.ts`. `JiraPollerService` is a `setTimeout` chain on `JIRA_POLL_MS`, `unref`'d,
+  `'${BM_JIRA_<NAME>:-}'`, pinned through `JIRA_ENV` by `test/guards/compose-env.test.ts`. `JiraPollerService` is a `setTimeout` chain on `JIRA_POLL_MS`, `unref`'d,
   armed at bootstrap while the site is configured AND some board's interval is not `off`, OR some board is still owed its one cold sweep, OR the boot
   (`cloudId`, `serverInfo`, `me`, the sprint field) is unanswered — except `unsupported`, which is final and disarms. The rule is judged at the end of every
   sweep against `jira.json` read again there. `skills/jira/tools/jira.mjs` dials `http://127.0.0.1:${BM_API_PORT || 4322}` and nothing else — `jira.mjs
@@ -85,7 +85,7 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   or the end, every occurrence tried) live in `shared/jira-branch.ts`, beside `slugOf`, `renderBranchPattern`, `patternProblem`, `worktreePathFor` and
   `shellQuote`; the server's `parseBranchChoice` (`branch-choice.util.ts`), `readRepoDefaults`, `/repo-defaults` and the launch sheet all import them.
   `skills/jira/tools/jira.mjs` cannot import `shared/`, so it carries Tables A and B by hand, and `jira.test.mjs` pins the same rows as
-  `test/jira-branch.test.ts`: a change to one is a change to both, in one commit. The repo path is the one value that can hold anything, so it alone is
+  `test/jira/jira-branch.test.ts`: a change to one is a change to both, in one commit. The repo path is the one value that can hold anything, so it alone is
   `shellQuote`d. Why: [invariants.md](docs/subsystems/invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-one-hand-kept-copy)
 - **A Jira session is a persisted link, and Stop, a quiet dashboard or the 8-hour backstop each end it.** `JiraLiveService` (`server/src/jira/live.service.ts`,
   NOT `JiraService`) holds the link store in memory and writes it whole after every change but a `starting` reservation: `server/src/jira/links.store.ts`,

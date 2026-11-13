@@ -78,7 +78,7 @@ track or a watchdog console. Those are this document's job.
 
 ### 1.1 Where, and how it is reached
 
-`.claude/DESIGN.md`, mirroring the dashboard. It is **not** a `.claude/rules/` file: those are pinned by `test/claude-rules.test.ts` to be one-line pointers
+`.claude/DESIGN.md`, mirroring the dashboard. It is **not** a `.claude/rules/` file: those are pinned by `test/guards/claude-rules.test.ts` to be one-line pointers
 into `docs/subsystems/invariants.md` and nothing else, so a design pointer there would fail the suite. It is reached the way the dashboard reaches its own: a
 line in `CLAUDE.md`'s Layout under `client/src/` and a row in `docs/overview.md`'s map, plus a `DESIGN.md §n` citation in the header comment of every component
 drawn from it.
@@ -118,7 +118,7 @@ and its component test, used by nothing yet but the rail. Landing them first mea
 
 - Add `@fontsource/hanken-grotesk`; import weights 400, 500, 600, 700 in `client/src/main.tsx`. Remove `@fontsource/barlow`, `@fontsource/barlow-condensed`,
   `@fontsource/ibm-plex-mono` from `package.json` and their six imports.
-- Self-hosted, not Google Fonts: the served build's CSP is `default-src 'self'` with no `font-src`, `style-src` is pinned exactly by `test/csp.test.ts`, and the
+- Self-hosted, not Google Fonts: the served build's CSP is `default-src 'self'` with no `font-src`, `style-src` is pinned exactly by `test/server/csp.test.ts`, and the
   tailnet/phone use case wants the board to render with no third-party fetch. The dashboard links Google Fonts; that is the one thing in its foundation this app
   does not copy.
 - `--font: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif` in every theme block. `--mono` and `--display` are **deleted from
@@ -405,7 +405,7 @@ edited in place to name the new surface, never deleted.
 - **Style suites move with their selectors.** The ten `*-style.test.ts` suites read `styles.css` through `helpers/css-rule`; a task that renames or removes a
   selector moves the case to its replacement in the same change. No case is deleted without one — `dispatch-busy-style` in particular keeps all three re-asking
   controls.
-- **Six source guards land with task 1**, one file `test/design-guards.test.ts` reading `client/src/styles.css`, `shared/theme.css` and `client/src/main.tsx` as
+- **Six source guards land with task 1**, one file `test/guards/design-guards.test.ts` reading `client/src/styles.css`, `shared/theme.css` and `client/src/main.tsx` as
   text:
   1. neither stylesheet declares or reads `--mono` or `--display`;
   2. `theme.css` declares exactly one `--font` stack per theme block and `styles.css` declares no other `font-family` but `inherit`;
@@ -418,7 +418,7 @@ edited in place to name the new surface, never deleted.
      `/* ── ui primitives`, and no selector outside that block starts with one of those names — a page may lay a `.chip` out, never restyle it.
 - **Every `ui/` primitive has a component suite**, `test/ui-<name>.test.tsx`, pinning its role, its accessible name, and that each variant prop lands as its
   documented class — the shape `SettingsRow`'s suite already has.
-- **`test/csp.test.ts` is untouched** and must stay green: the pre-paint script does not change.
+- **`test/server/csp.test.ts` is untouched** and must stay green: the pre-paint script does not change.
 - **Component suites** keep their assertions where the DOM keeps its role and text; Board and Runs suites (`runs-view`, `run-strip`, `starting-strip`,
   `watchdog-coupling`, `settings-view`) are rewritten with their task, the moved rules of §8 each keeping a named case.
 - **Screenshots per task**, before merge: Board, Runs › History, Runs › Watchdog, Settings, an open item modal, at 1400 and 400 px wide, daylight and midnight —

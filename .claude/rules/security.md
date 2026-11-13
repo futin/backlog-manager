@@ -5,7 +5,7 @@ paths: ["server/src/*.ts", "vite.config.ts", "docker-compose.yml", "server/src/j
 # Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
 
 - **Both processes bind `127.0.0.1` by default; loopback is the access control** (nothing has auth). `BM_BIND` is the single knob; compose sets `0.0.0.0`. Both
-  halves are pinned: `test/vite-proxy.test.ts` imports the dev config, `test/server-bind.test.ts` reads `server/src/main.ts`'s SOURCE — a bare
+  halves are pinned: `test/guards/vite-proxy.test.ts` imports the dev config, `test/guards/server-bind.test.ts` reads `server/src/main.ts`'s SOURCE — a bare
   `app.listen(PORT)` fails it. Why: [invariants.md](docs/subsystems/invariants.md#loopback-bind-is-the-access-control-except-where-noted)
 - **Every route is gated by a Host allowlist, because a bind is no defence against DNS rebinding** (bug-22). `isAllowedHost` (`server/src/allowed-hosts.ts`) is
   the one implementation; loopback and every other IP literal, `localhost`, `.ts.net` and `BM_ALLOWED_HOSTS` are the only names this app answers to, and an

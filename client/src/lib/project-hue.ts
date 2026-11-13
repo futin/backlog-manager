@@ -46,7 +46,7 @@ import type { RegistryProject } from '../../../shared/types';
  * raw hash preference — and the pill's text carries it from there.
  *
  * Raising it means adding that many tokens to all five theme blocks and the
- * matching .pill-proj-N rules in client/src/styles.css; test/project-hue.test.ts
+ * matching .pill-proj-N rules in client/src/styles.css; test/board/project-hue.test.ts
  * checks the first half of that and will fail loudly on the second.
  */
 export const PROJECT_HUES = 8;
@@ -55,7 +55,7 @@ export const PROJECT_HUES = 8;
  * FNV-1a, 32-bit. A named, fully specified hash rather than a hand-rolled
  * `charCode * 31` sum because the output is user-visible and long-lived: once
  * a project is violet on this board it should stay violet, so the function
- * that decides it is one whose behaviour is pinned by test/project-hue.test.ts
+ * that decides it is one whose behaviour is pinned by test/board/project-hue.test.ts
  * rather than one anybody would feel free to "tidy". Math.imul keeps the
  * multiply in 32-bit integer space — a plain `*` overflows into a double at
  * the third character and the result stops being FNV at all.

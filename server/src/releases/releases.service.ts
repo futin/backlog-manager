@@ -11,7 +11,7 @@ import { runGit } from '../git-run.util';
  * The whole read — tag filters, ordering, the GitHub-remote regex, `describe`, the memo — is release-kit's `createReleasesReader` (spec D3). What this
  * server keeps is the one rule release-kit cannot know about: every git read is `runGit`, async and bounded at 10 s, so a slow disk degrades one route
  * instead of hanging it. The reader takes a git PORT for exactly that, and the memo key's `rev-parse` goes through the same port as the read itself, so
- * nothing this route does launches git any other way (`test/api-releases.test.ts` pins it).
+ * nothing this route does launches git any other way (`test/server/api-releases.test.ts` pins it).
  *
  * Failure degrades per read, never as an error status: `for-each-ref` failing is the empty shape, `describe` failing is `current: null` with the releases
  * kept, `remote get-url` failing only drops `url`. An incomplete answer — either of the first two — is answered but never memoised, so one timeout cannot
@@ -19,7 +19,7 @@ import { runGit } from '../git-run.util';
  * memoised nowhere, by rule).
  */
 
-/** Re-exported for `test/api-releases.test.ts`, which pins the `.git`-FILE case a server started inside a linked worktree depends on. */
+/** Re-exported for `test/server/api-releases.test.ts`, which pins the `.git`-FILE case a server started inside a linked worktree depends on. */
 export { findRepoRoot };
 
 /**

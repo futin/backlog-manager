@@ -33,7 +33,7 @@ question.
   pr-mode sentence instead of `COMMIT_RULE` ("Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR."). Groom and capture,
   and execute in an `in-place` project, keep `COMMIT_RULE` byte for byte. A config the reader would reject (malformed JSON, unknown `finish`, unreadable
   file) reads as `in-place` here → `COMMIT_RULE`; the spawned skill then reads the same file itself and stops with the error (review 2, my call). Test cases
-  in `test/agents-prompt.test.ts`: no file, `in-place`, `pr`, malformed, unknown value — only `pr` drops `COMMIT_RULE`. The "known seam" comment above `COMMIT_RULE` (`shared/agent.ts:819-825`) is the
+  in `test/agents/agents-prompt.test.ts`: no file, `in-place`, `pr`, malformed, unknown value — only `pr` drops `COMMIT_RULE`. The "known seam" comment above `COMMIT_RULE` (`shared/agent.ts:819-825`) is the
   place it says the reconciliation starts, and is rewritten with it.
 - No machine-wide default. The config is per project and committed, so a team shares it and each repo can differ.
 - No merging. Execute opens the PR; a human (or GitHub) merges it. `backlog-orchestrate` stays the only skill that merges.
@@ -129,7 +129,7 @@ Order relative to today's skill sections (Pick an item → refusal gate → mark
   `pr` mode commits, and pushes in files projects too. New meaning: orchestrate is the only skill that **merges**; `backlog-execute` commits and pushes its
   own branch only in `pr` mode, only in a tree that holds the item's work alone, never to `<base>`, never under an `[orchestrator-run` marker. Every site
   that states the old rule moves together: `CLAUDE.md:175` and `.claude/rules/orchestrator.md:33` (byte-equal headlines, guarded by
-  `test/claude-rules.test.ts`) plus that rules bullet's body (`orchestrator.md:35-37`, "No other skill touches git history at all"), `invariants.md`
+  `test/guards/claude-rules.test.ts`) plus that rules bullet's body (`orchestrator.md:35-37`, "No other skill touches git history at all"), `invariants.md`
   §"`backlog-orchestrate` is the only skill that commits or merges" (~434-454, incl. the push paragraph), `skills/backlog-orchestrate/SKILL.md:9` and `:26`,
   `docs/subsystems/skills.md:34`, `skills/backlog-groom/SKILL.md:18`, `skills/backlog/SKILL.md:138`, and — to re-read, likely still true because they are
   about execute inside a run — `skills/backlog-orchestrate/references/recovery.md:253` and the comment at `orchestrate.mjs:6127` (review 2). The list is

@@ -511,7 +511,7 @@ export interface ProjectSummary {
  * **The token is not in this payload and never will be.** It is process-only
  * (spec §11): `hasToken` says whether one is configured and `login` says who
  * it authenticates as, which is what an operator needs in order to know
- * whether the right credential is loaded. `test/tracker-items.test.ts`'s
+ * whether the right credential is loaded. `test/tracker/tracker-items.test.ts`'s
  * `never puts the token in a payload` asserts the value appears in no response
  * of any route this module serves — `/api/items`, `/api/projects` and
  * `/api/trackers` alike.
@@ -1248,7 +1248,7 @@ export function jiraSessionName(key: string): string {
  * The dashboard's permission-mode ladder, lowest to highest. Re-declared here
  * rather than imported from ../claude-agents-dashboard: that repo is a sibling
  * checkout, not a dependency, and a cross-repo import would make this app
- * unbuildable without it. Four strings, pinned by test/agents-shared.test.ts.
+ * unbuildable without it. Four strings, pinned by test/agents/agents-shared.test.ts.
  */
 export type PermissionMode = 'plan' | 'acceptEdits' | 'auto' | 'bypassPermissions';
 
@@ -1805,7 +1805,7 @@ export const PIPELINE_STAGES: readonly RunStage[] = ['dispatched', 'inspecting',
  * `RunStage`, not a fact about dispatch: a new stage added to the union three
  * lines up has to be classified as claimed-or-finished in the same edit, and
  * the only place a reader will look for that decision is next to the union
- * itself. `test/agents-shared.test.ts` pins the partition against a
+ * itself. `test/agents/agents-shared.test.ts` pins the partition against a
  * `Record<RunStage, true>` literal, so the compiler forces a new member into
  * that test and the test then forces it into one of the two halves.
  *
@@ -1854,7 +1854,7 @@ export const RUN_CLAIMED_STAGES: readonly RunStage[] = ['pending', 'preflight', 
  * dozen lines up has to be classified in the same edit, and the only place a
  * reader will look for that decision is next to the union itself. There are
  * now TWO such classifications, claimed-or-terminal and live-or-exited, and
- * `test/agents-shared.test.ts` pins both against one `Record<RunStage, true>`
+ * `test/agents/agents-shared.test.ts` pins both against one `Record<RunStage, true>`
  * literal so a new stage cannot satisfy one and be forgotten by the other.
  *
  * `parked` belongs here rather than with the claimed stages and that
@@ -3463,7 +3463,7 @@ export interface ItemReleaseRequest extends ItemWriteRequest {
    * The board's own authority to release (#225) — the fifth clause, set by `ItemsAbortService` and by NOTHING that reads an HTTP body.
    *
    * `POST /api/items/release` rebuilds its request field by field and never copies this one, so a caller that sends `authority: 'board'` is still a
-   * stranger to somebody else's live claim (pinned in `test/tracker-abort.test.ts`). The abort route is the one writer: it sets it only after it has either
+   * stranger to somebody else's live claim (pinned in `test/tracker/tracker-abort.test.ts`). The abort route is the one writer: it sets it only after it has either
    * stopped the holding session through the dashboard (case A) or shown that the holder is on this machine and not running (case B) — the two proofs a
    * caller of `release` cannot offer, because it has no dispatch record and no dashboard to ask.
    */

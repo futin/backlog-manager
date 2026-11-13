@@ -47,16 +47,16 @@ token the board already has, every tint is `color-mix` of a mark token over a su
 
 These are the repo's guards and rules this work runs into. Each line says what the guard asserts and how this spec stays inside it.
 
-- **Uppercase** (`test/design-guards.test.ts` guard 4): `text-transform: uppercase` in exactly one rule, `.rail-kicker`. The menu's section headers are
+- **Uppercase** (`test/guards/design-guards.test.ts` guard 4): `text-transform: uppercase` in exactly one rule, `.rail-kicker`. The menu's section headers are
   sentence case — `Built in`, `Skills on this machine · 2` — at 11/600 `--ink3` with `letter-spacing: .04em`, never uppercased. The mock's uppercase
   headers are a mock-only rendering.
 - **Type floor** (guard, same file): every px font-size ≥ 11 px. The mock's 10.5 px headers and 11.5 px sub-lines become 11 px.
-- **Tint form** (`test/daylight-contrast.test.ts`): every tint is `color-mix(in srgb, var(--<mark>) N%, <surface>)` where the mark is `--green-solid`,
+- **Tint form** (`test/guards/daylight-contrast.test.ts`): every tint is `color-mix(in srgb, var(--<mark>) N%, <surface>)` where the mark is `--green-solid`,
   `--amber-solid`, `--red`, `--magenta`, `--cyan` or `--mustard` and the surface is `var(--strip)` or `var(--steel)`; a word on a tint keeps 4.5:1 over
   the tint; `styles.css` never reads bare `var(--amber)` — a mark is `--amber-solid`, a word is `--amber-text` or `--amber-ink`. Every tint this spec
   adds (§4.2, §4.1, §4.4) is listed in §6 so it joins the test's `PINNED` map.
 - **Primitives block** (guard): the `ui-*` families are declared once, inside the delimited block. The new `.ui-split` family (§4.1) goes in that block.
-- **Dialog count** (`test/dialog-count-docs.test.ts`, `.claude/rules/board.md`, `useDialogEscape`'s comment, `invariants.md`): `Popover` has seven
+- **Dialog count** (`test/guards/dialog-count-docs.test.ts`, `.claude/rules/board.md`, `useDialogEscape`'s comment, `invariants.md`): `Popover` has seven
   composers today. The Move-to popover (§4.4) is the eighth; the rule file's bullet, the hook comment, `invariants.md`'s popover paragraph and the test's
   `seven composers` line move to eight together. The DIALOG count (eight: two `Modal`s, five `FormSheet`s, `ReleasesDrawer`) does not move — `Confirm` and
   a Popover are not dialogs in that count.
@@ -64,7 +64,7 @@ These are the repo's guards and rules this work runs into. Each line says what t
 - **DESIGN.md is the visual language**: where this spec contradicts a §8.9 sentence, §7 lists the override and the plan carries a DESIGN.md task.
 - **The Run control on a Jira card is never hidden for the dashboard's sake** (`board.md`): the split button keeps that — it is the environment block's
   exception, as the chip was.
-- **Run ▾'s test selectors** (`test/jira-detail.test.tsx`, `jira-list.test.tsx`, `jira-board.test.tsx`): the button named `Run <key>` stays — it is
+- **Run ▾'s test selectors** (`test/jira/jira-detail.test.tsx`, `jira-list.test.tsx`, `jira-board.test.tsx`): the button named `Run <key>` stays — it is
   the split's LEFT half; the menu stays `role="dialog"` named `Run menu`; rows stay findable by their label. §6 lists what each test changes.
 
 ## 4. Decided
@@ -225,7 +225,7 @@ ended line stays after the foot (§4.2).
 
 ## 6. Tests this changes or adds (behaviour and cases, not code — the plan states this override of writing-plans' literal-code rule)
 
-- `test/jira-detail.test.tsx`: `moveSelect()` becomes the button named `Move to` (`aria-haspopup="dialog"`); opening it shows a dialog named `Move to`
+- `test/jira/jira-detail.test.tsx`: `moveSelect()` becomes the button named `Move to` (`aria-haspopup="dialog"`); opening it shows a dialog named `Move to`
   with one row per transition labelled by `transitionOptions` (two transitions landing in one status show their own
   names, as today's case does); a row click posts `{ key, transitionId }` once and the dialog closes; the chip is disabled
   with title `transitions unavailable` after a failed read and `no transitions offered` on an empty list; the current status's row is first and
@@ -234,24 +234,24 @@ ended line stays after the foot (§4.2).
   title assertions on the left half, and assert the right half is disabled too. The `Status` fact's `In Review · in progress` assertions (four sites)
   become the raw name `In Review` plus a dot carrying the `indeterminate` tone class. After a menu pick, focus is on `Run options for PAY-131`; the chip is
   disabled while a transition post is out.
-- `test/jira-list.test.tsx` (the Sessions rows: `Run PAY-131` now opens the launch sheet directly; the three sites that expect `Run menu` after it click
-  `Run options for PAY-131` instead), `test/jira-board.test.tsx`: the card's foot holds a button `Run <key>` and a button `Run options for <key>`; the menu's
+- `test/jira/jira-list.test.tsx` (the Sessions rows: `Run PAY-131` now opens the launch sheet directly; the three sites that expect `Run menu` after it click
+  `Run options for PAY-131` instead), `test/jira/jira-board.test.tsx`: the card's foot holds a button `Run <key>` and a button `Run options for <key>`; the menu's
   rows are found by label; the row carrying `default` is the resolved default action and is NOT first when the default is a skill; the `Skills on this
   machine · N` header is absent when `data.skills` is empty; the repository name is drawn in the foot only when mapped; the menu footer reads `Every
   choice opens the launch sheet first` (the `opens the launch sheet` assertion in `jira-board.test.tsx` moves with it).
-- `test/jira-board.test.tsx` (card marks): priority `High` draws a pill titled `priority High` with the red tone class; `Medium` the amber tone;
+- `test/jira/jira-board.test.tsx` (card marks): priority `High` draws a pill titled `priority High` with the red tone class; `Medium` the amber tone;
   `Lowest` the grey tone; an unknown name the grey tone with no glyph; `null` draws no pill. Status text keeps the RAW name (`In Review`), with a dot
   element carrying the category's tone class. The type tile carries `bug` / `story` / neutral tone classes by `type.name` and `subtask`. The foot's
   repository reads the one path's basename, `2 repos` for two (both paths in its title), nothing when none is mapped; the ended line still follows.
-- `test/dialog-count-docs.test.ts`, `.claude/rules/board.md`, `useDialogEscape`'s comment, `docs/subsystems/invariants.md`: `seven composers` → `eight composers`, naming `JiraDetail`'s
+- `test/guards/dialog-count-docs.test.ts`, `.claude/rules/board.md`, `useDialogEscape`'s comment, `docs/subsystems/invariants.md`: `seven composers` → `eight composers`, naming `JiraDetail`'s
   Move-to popover; the eight-DIALOG assertions do not move.
-- `test/daylight-contrast.test.ts` `PINNED` (its case title `the ten tint sites` follows the new count): add every new tint site with its hue, percentage and surface — `.jira-card-type[data-tone="bug"]`
+- `test/guards/daylight-contrast.test.ts` `PINNED` (its case title `the ten tint sites` follows the new count): add every new tint site with its hue, percentage and surface — `.jira-card-type[data-tone="bug"]`
   (`--red` 12 `--strip`), `[data-tone="story"]` (`--green-solid` 14 `--strip`), `.jira-card-prio[data-tone="high"]` (`--red` 12), `[data-tone="med"]`
   (`--amber-solid` 14), `.jira-card-av` (`--magenta` 14), `.jira-run-opt-default .jira-run-tile` (`--green-solid` 14), `.jira-run[data-state="live"] .ui-split`
   (`--green-solid` 14) — selectors are the builder's, the hue/percentage/surface are this spec's; and the words on them (`--red`, `--amber-ink`,
   `--magenta`, `--green`) pass the 4.5:1 check over their tints on daylight.
-- `test/design-guards.test.ts`: the `.ui-split` family is appended to guard 7's hard-coded `FAMILIES` list and declared once inside the primitives block; no new rule uppercases; no font-size under 11 px.
-- `test/ui-chip.test.tsx` gains, or a new `test/ui-split.test.tsx` holds: `SplitChip` renders two buttons in a group; `disabled` disables both; `dashed`
+- `test/guards/design-guards.test.ts`: the `.ui-split` family is appended to guard 7's hard-coded `FAMILIES` list and declared once inside the primitives block; no new rule uppercases; no font-size under 11 px.
+- `test/ui/ui-chip.test.tsx` gains, or a new `test/ui/ui-split.test.tsx` holds: `SplitChip` renders two buttons in a group; `disabled` disables both; `dashed`
   sets the dashed class; `onMain` and `onMore` fire from their own halves only; Enter/Space on either half does not reach the parent.
 - Last plan task is `/ui-verify`: the shelves at 1440 px against `Board.dc.html`, a card against `Card.dc.html` (idle), the open menu against
   `RunButton.dc.html` column A, the dialog with the Move-to popover open against `Modal.dc.html`.

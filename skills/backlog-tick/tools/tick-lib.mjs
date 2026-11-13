@@ -3,7 +3,7 @@
 // Every function here that exists somewhere else in this repository is a TWIN, with a comment naming each original. That is the rule and not an oversight:
 // a plugin skill's `tools/` may never import another skill's `tools/`, nor anything under `server/` or `shared/` (CLAUDE.md Invariants) — an install is a copy of
 // whatever shipped, and a prune of one skill must never break another. `skills/backlog-retro/tools/lib/paths.mjs` is the pattern, and the twin guards
-// (the `UNKNOWN` regex below against `parse.util.ts`, the Jira-branch rule against `shared/`) live in this directory's tests and in `test/agents-shared.test.ts`
+// (the `UNKNOWN` regex below against `parse.util.ts`, the Jira-branch rule against `shared/`) live in this directory's tests and in `test/agents/agents-shared.test.ts`
 // so a drift in an original fails a suite rather than a tick at 3 a.m.
 //
 // Nothing in this file writes a byte. The one thing under `tickHome()` that a tick owns is written by `tick-state.mjs`, and only there.

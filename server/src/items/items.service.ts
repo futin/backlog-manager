@@ -184,7 +184,7 @@ export class ItemsService {
    * rule CLAUDE.md pins on `dispatchGate`'s membership check. That choice is
    * load-bearing rather than merely mirrored: `realpathSync`-ing an
    * unregistered path before comparing it would itself BE the filesystem
-   * touch `test/uncommitted.test.ts`'s unregistered case proves never
+   * touch `test/orchestrator/uncommitted.test.ts`'s unregistered case proves never
    * happens, and "gate first" is a stronger guarantee than "eventually
    * degrades to known: false".
    *

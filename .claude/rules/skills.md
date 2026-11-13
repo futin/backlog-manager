@@ -59,7 +59,7 @@ paths: ["skills/**", "agents/**", "server/src/tick/tick.service.ts", "server/src
   `tick.json` is `idle` too (`<path> unreadable — fix or remove it by hand`), never a default. `status` prints `breaker: N of M failures in a row` or `breaker:
   HALTED — N failures in a row (halt after M) since <at>`, plus ` (reset <resetAt>)`, and `status --json` carries `breaker: { streak, haltAfter, halted, resetAt,
   settings }` and `caps: { maxPlans, maxPrs, source }`. The rule has TWO copies — `tick-breaker.mjs` and `server/src/tick/tick-breaker.util.ts` — because a skill's `tools/` never imports `server/` or
-  `shared/`; the same `streakOf` table is pinned row for row in `tick-breaker.test.mjs` and `test/tick-breaker.test.ts`, and a change to one is a change to both.
+  `shared/`; the same `streakOf` table is pinned row for row in `tick-breaker.test.mjs` and `test/tick/tick-breaker.test.ts`, and a change to one is a change to both.
   Reset is a `resetAt` stamp the server writes — `max(now, newest parseable at)` — and the tool never writes `tick.json`. Why:
   [invariants.md](docs/subsystems/invariants.md#a-tick-halt-is-derived-from-the-records-and-the-reset-time-never-stored-and-only-a-persons-reset-clears-it)
 - **`backlog.mjs` in a tracker project and `jira.mjs` always need the stack up, and say so with exit `5` — save `jira.mjs worktree`.**

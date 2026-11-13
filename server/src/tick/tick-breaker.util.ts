@@ -9,12 +9,12 @@ import { TICK_CAP_LIMITS, TICK_HALT_LIMITS, type TickRecentEntry } from '../../.
  * tick-breaker.util.ts — the tick breaker's streak rule, and `~/.backlog-manager/settings/tick.json`, which says how many failures in a row halt a project,
  * when each project was last Reset, and the machine's two caps — `maxPlans` and `maxPrs` — a job without `--max-plans` / `--max-prs` applies (#378). The
  * clamp rule for all three numbers is twinned the same way as the streak rule: `tick-breaker.test.mjs`'s cap clamp table is carried row for row by
- * `test/tick-breaker.test.ts`.
+ * `test/tick/tick-breaker.test.ts`.
  *
  * This is the SECOND COPY of the streak rule; the first is `skills/backlog-tick/tools/tick-breaker.mjs`, and each header points at the other. They are two
  * copies and not one import because this server may not import from `skills/` and a plugin skill's `tools/` may never import from `server/` or `shared/`
  * (an install is a copy of whatever shipped) — the `pauseRequestEffective` precedent: `pause-control.util.ts` here and `orchestrate.mjs` each carry a
- * byte-equivalent rule, and the guard against drift is a suite on each side. `test/tick-breaker.test.ts` carries the SAME `streakOf` table, row for row, as
+ * byte-equivalent rule, and the guard against drift is a suite on each side. `test/tick/tick-breaker.test.ts` carries the SAME `streakOf` table, row for row, as
  * `tick-breaker.test.mjs`, so changing the rule on one side fails the other side's tests rather than letting `tick.mjs decide` stop a project the board shows
  * as healthy, or the reverse. "Parseable" is `Date.parse` not being NaN on both sides, for the same reason.
  *

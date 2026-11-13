@@ -142,7 +142,7 @@ Two checks, in this order: the string is a legal ref name (`git check-ref-format
 
 - **`orchestrate.test.mjs`** — `init --base` records the base; `init` refuses a tag, a SHA, `origin/main`, a nonexistent branch and a malformed ref name; a run
   file with no `base` reads as `main` for an older run; `resume` reads the recorded base rather than a default.
-- **`test/agents-prompt.test.ts`** — the composed prompt gains ` --base <ref>` only when asked, in the existing order, and a default-base request composes the
+- **`test/agents/agents-prompt.test.ts`** — the composed prompt gains ` --base <ref>` only when asked, in the existing order, and a default-base request composes the
   byte-identical prompt it composes today. This suite already pins the composition, so the assertion goes where the rule lives.
 - **`test/agents-orchestrate.test.ts`** (or wherever the endpoint's 400s live) — a malformed or nonexistent base is a 400 before anything spawns.
 - **The base-tree resolution** is the one piece that is prose in SKILL.md rather than code in the tool, so it is pinned the way this repo already pins skill

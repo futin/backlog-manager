@@ -1,0 +1,1298 @@
+import {
+  AGENT_ACTIONS,
+  COMMIT_RULE,
+  DEFAULT_REVIEW_CONFIG,
+  EFFORTS,
+  MODELS,
+  PERMISSION_LADDER,
+  actionLabel,
+  clampMode,
+  deriveAction,
+  dispatchBlock,
+  dispatchGate,
+  finishClause,
+  EXECUTE_HELD_REASON,
+  IN_REVIEW_REASON,
+  inReviewBlock,
+  itemLadderBlock,
+  PLAN_REVIEW_REASON,
+  UNVETTED_REASON,
+  planReviewBlock,
+  unvettedBlock,
+  isAgentAction,
+  isExecuteFinish,
+  isItemId,
+  isMergeMode,
+  isPrUrl,
+  isQuestionMode,
+  modesUpTo,
+  pickFrom,
+  projectDispatchGate,
+  queueItemIs,
+  resumeGate,
+  runClaimBlock,
+  runHoldsItem,
+  watchdogFailing,
+  watchdogStoodDown
+} from '../../shared/agent';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import rawFixture from '../fixtures/orchestrator-run.json';
+import { ATTENTION_RUN_STAGES, EXECUTE_FINISHES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from '../../shared/types';
+import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, QuestionMode, RunQueueItem, RunStage, StartingRun } from '../../shared/types';
+
+function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
+  const base: BacklogItem = {
+    id: 'bug-1',
+    title: 'a bug',
+    created: '2026-08-20',
+    started: '',
+    tags: [],
+    updated: '',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'bugs',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: false,
+    path: '/abs/alpha/backlog/bugs/open/bug-1.md',
+    source: 'files',
+    url: null,
+    assignee: null,
+    untyped: false
+  };
+  return { ...base, ...over };
+}
+
+const OK: AgentsStatus = {
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: ['/abs/alpha']
+};
+
+describe('deriveAction', () => {
+  it('sends an open idea to groom', () => {
+    expect(deriveAction(fakeItem({ section: 'ideas', groomed: null }))).toBe('groom');
+  });
+
+  // Reached through the `groomed === true` fall-through rather than a branch
+  // naming the section, which is exactly why it is worth an assertion: nothing
+  // in deriveAction mentions refactors, so this is the only thing standing
+  // between a null derivation and a refactor card offering `execute` — the one
+  // action backlog-execute refuses on the section outright.
+  it('sends an open refactor to groom, never to execute', () => {
+    expect(deriveAction(fakeItem({ section: 'refactors', groomed: null }))).toBe('groom');
+  });
+
+  it('grooms an ungroomed bug and executes a groomed one', () => {
+    expect(deriveAction(fakeItem({ groomed: false }))).toBe('groom');
+    expect(deriveAction(fakeItem({ groomed: true }))).toBe('execute');
+  });
+
+  it('executes a planned task and grooms an unplanned one', () => {
+    expect(deriveAction(fakeItem({ section: 'tasks', groomed: true }))).toBe('execute');
+    expect(deriveAction(fakeItem({ section: 'tasks', groomed: false }))).toBe('groom');
+  });
+
+  it('has nothing to dispatch for a done item — history has no next step', () => {
+    expect(deriveAction(fakeItem({ status: 'done', groomed: true }))).toBeNull();
+    expect(deriveAction(fakeItem({ section: 'ideas', status: 'done', groomed: null }))).toBeNull();
+  });
+
+  it('captures an out-of-scope item, though its status is terminal', () => {
+    // The status is what makes this case worth its own assertion: `terminal` is
+    // not `open`, so the `status !== 'open'` line WOULD swallow this item — and
+    // did, back when one line covered both archives. The section check running
+    // first is the rule being pinned here, not just the return value.
+    //
+    // A rejection has a next step where a done item does not: reviving it is a
+    // NEW item citing `from: oos-1`, never a move out of out-of-scope, which
+    // `moveItem` refuses.
+    expect(deriveAction(fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null }))).toBe('capture');
+  });
+
+  /**
+   * A tracker item derives exactly what a files item derives (task-46, the
+   * dispatch lift). Task-45 opened this function with `source !== 'files' →
+   * null`; phase 3 removed that line, because the skills detect a tracker
+   * project from its committed marker and write through the API, and the claim
+   * protocol gives a tracker item a `started` for `progressBlock` to read.
+   *
+   * Four rows rather than one, because the removed line sat AHEAD of every
+   * branch below it — so each branch has to be shown reaching a tracker item,
+   * not just the first one.
+   */
+  it('derives for a tracker item exactly as it does for a files one', () => {
+    const issue = (over: Partial<BacklogItem> = {}): BacklogItem => fakeItem({ id: '#31', source: 'github', path: 'gh:futin/x#31', url: 'https://github.com/futin/x/issues/31', ...over });
+
+    expect(deriveAction(issue({ section: 'ideas', groomed: null }))).toBe('groom');
+    expect(deriveAction(issue({ groomed: true }))).toBe('execute');
+    // A `not_planned` close maps to out-of-scope/terminal — revivable, exactly
+    // like `oos-1` above.
+    expect(deriveAction(issue({ section: 'out-of-scope', status: 'terminal', groomed: null }))).toBe('capture');
+    // A `completed` close is history and has no next step.
+    expect(deriveAction(issue({ status: 'done', groomed: true }))).toBeNull();
+  });
+});
+
+describe('the action vocabulary', () => {
+  it('holds exactly the three actions', () => {
+    expect(AGENT_ACTIONS).toEqual(['groom', 'execute', 'capture']);
+  });
+
+  it('accepts each of them and nothing else', () => {
+    // The controller's whole body check for `action` — so a value that gets
+    // past this is a value the service is asked to re-derive against.
+    for (const action of AGENT_ACTIONS) expect(isAgentAction(action)).toBe(true);
+    expect(isAgentAction('archive')).toBe(false);
+    expect(isAgentAction('')).toBe(false);
+    expect(isAgentAction(null)).toBe(false);
+    expect(isAgentAction(undefined)).toBe(false);
+    expect(isAgentAction(1)).toBe(false);
+    expect(isAgentAction(['groom'])).toBe(false);
+  });
+});
+
+describe('the merge mode vocabulary', () => {
+  it('holds exactly the three modes, in picker order', () => {
+    // Order is load-bearing: the Orchestrate sheet and the Settings default both build their options from this list, so `pr` landing anywhere but third
+    // would reorder a control people already have muscle memory for.
+    expect(MERGE_MODES).toEqual(['merge', 'branch', 'pr']);
+  });
+
+  it('accepts each of them and nothing else', () => {
+    // `AgentsService.orchestrate`'s whole body check for a request's
+    // `mergeMode` — so a value that gets past this is a value the service
+    // trusts without re-deriving it, the same reasoning `isAgentAction`'s
+    // sibling test above pins for `action`.
+    for (const mode of MERGE_MODES) expect(isMergeMode(mode)).toBe(true);
+    expect(isMergeMode('rebase')).toBe(false);
+    expect(isMergeMode('')).toBe(false);
+    expect(isMergeMode(null)).toBe(false);
+    expect(isMergeMode(undefined)).toBe(false);
+    expect(isMergeMode(1)).toBe(false);
+    expect(isMergeMode(['merge'])).toBe(false);
+  });
+
+  it('accepts pr, exactly and case-sensitively', () => {
+    expect(isMergeMode('pr')).toBe(true);
+    expect(isMergeMode('PR')).toBe(false);
+    expect(isMergeMode('pull')).toBe(false);
+  });
+});
+
+describe('isPrUrl', () => {
+  it('accepts a github.com pull request URL', () => {
+    expect(isPrUrl('https://github.com/futin/backlog-manager/pull/275')).toBe(true);
+  });
+
+  it('refuses everything that is not exactly one', () => {
+    // Each row is a distinct way a recorded URL could be wrong, and a distinct way a rendered href could be unsafe: a downgraded scheme, a lookalike host
+    // that merely starts with github.com, a sibling path, a deeper path, a script URL, and the three non-string-or-empty shapes a hand-edited file yields.
+    for (const bad of [
+      'http://github.com/a/b/pull/1',
+      'https://github.com.evil.io/a/b/pull/1',
+      'https://github.com/a/b/issues/1',
+      'https://github.com/a/b/pull/1/files',
+      'javascript:alert(1)',
+      '',
+      null,
+      42
+    ]) {
+      expect(isPrUrl(bad)).toBe(false);
+    }
+  });
+});
+
+describe('the question mode vocabulary', () => {
+  it('holds exactly the two modes', () => {
+    expect(QUESTION_MODES).toEqual(['decide', 'park']);
+  });
+
+  it('accepts each of them and nothing else', () => {
+    // `AgentsService.orchestrate`'s whole body check for a request's
+    // `questionMode`, exactly as the merge-mode sibling above is for
+    // `mergeMode` — and the stakes are higher here, because an unrecognised
+    // value is a 400 rather than a clamp, so this guard is the only thing
+    // standing between a typo and a mode nobody asked for in the archive.
+    for (const mode of QUESTION_MODES) expect(isQuestionMode(mode)).toBe(true);
+    expect(isQuestionMode('Decide')).toBe(false); // case matters; the value is written verbatim
+    expect(isQuestionMode('merge')).toBe(false); // a MergeMode member is not a QuestionMode one
+    expect(isQuestionMode('')).toBe(false);
+    expect(isQuestionMode(null)).toBe(false);
+    expect(isQuestionMode(undefined)).toBe(false);
+    expect(isQuestionMode(42)).toBe(false);
+    expect(isQuestionMode({})).toBe(false);
+  });
+
+  /* The same compile-time device the `RunStage` partition test below uses,
+     for the same reason: `Record<QuestionMode, true>` refuses the literal if
+     a member is missing, so the day a third mode is added the build fails
+     here rather than the new member silently reaching `run.json` with nobody
+     having decided what the tool, the prompt and the sheet do with it. */
+  it('fails the build the day a third member lands unclassified', () => {
+    const everyMode: Record<QuestionMode, true> = { decide: true, park: true };
+    expect(Object.keys(everyMode).sort()).toEqual([...QUESTION_MODES].sort());
+  });
+});
+
+describe('actionLabel', () => {
+  it('says only what it does — never where the item lands', () => {
+    // An idea reads the same as a bug. It used to say `groom → task`; the
+    // destination is the skill's business, and one button should not look like
+    // two actions depending on which column it sits in.
+    expect(actionLabel(fakeItem({ section: 'ideas' }), 'groom')).toBe('groom');
+    expect(actionLabel(fakeItem({ section: 'tasks' }), 'groom')).toBe('groom');
+    expect(actionLabel(fakeItem(), 'groom')).toBe('groom');
+    expect(actionLabel(fakeItem(), 'execute')).toBe('execute');
+  });
+
+  it('labels the third action', () => {
+    // Its own case rather than a fourth line above: the label used to be a
+    // ternary that answered `groom` for everything that was not `execute`, so
+    // a capture control read as a groom control — the button lying about what
+    // it would do.
+    expect(actionLabel(fakeItem({ section: 'out-of-scope' }), 'capture')).toBe('capture');
+  });
+});
+
+describe('the permission ladder', () => {
+  it('runs lowest to highest', () => {
+    expect(PERMISSION_LADDER).toEqual(['plan', 'acceptEdits', 'auto', 'bypassPermissions']);
+  });
+
+  it('offers only the modes at or below the ceiling', () => {
+    expect(modesUpTo('acceptEdits')).toEqual(['plan', 'acceptEdits']);
+    expect(modesUpTo('bypassPermissions')).toEqual([...PERMISSION_LADDER]);
+  });
+
+  it('offers nothing but plan when the ceiling is unknown', () => {
+    expect(modesUpTo(null)).toEqual(['plan']);
+  });
+
+  it('clamps a want above the ceiling down to it, and junk down to plan', () => {
+    expect(clampMode('bypassPermissions', 'acceptEdits')).toBe('acceptEdits');
+    expect(clampMode('plan', 'auto')).toBe('plan');
+    expect(clampMode('nonsense', 'auto')).toBe('plan');
+    expect(clampMode('auto', null)).toBe('plan');
+  });
+});
+
+describe('dispatchGate', () => {
+  it('enables a dispatchable item on a healthy dashboard', () => {
+    expect(dispatchGate(fakeItem(), OK)).toEqual({ control: 'enabled' });
+  });
+
+  /* The four host-level conditions HIDE the control. None of them is about any
+     one card — all four are true of every card at once — none is fixable from
+     the board, and the .env.example and spec both promise that with BM_AGENTS
+     off the board looks exactly as it did before this feature. A disabled
+     button on forty cards would break that promise and tell the reader
+     nothing they can act on from there. */
+  it.each([
+    [{ enabled: false }, /BM_AGENTS/],
+    [{ reachable: false, error: 'ECONNREFUSED' }, /unreachable.*ECONNREFUSED/],
+    [{ spawnAvailable: false }, /CLAUDE_BIN/],
+    [{ remoteAnswer: false }, /remote answers/]
+  ])('hides the control for an environment-level block (%p)', (over, matcher) => {
+    const gate = dispatchGate(fakeItem(), { ...OK, ...over });
+    expect(gate.control).toBe('hidden');
+    expect(gate.control === 'enabled' ? '' : gate.reason).toMatch(matcher);
+  });
+
+  /* The per-item one DISABLES instead: it is about this card, it names a path,
+     and it is fixable — open a session in that repo, or raise the dashboard's
+     LOOKBACK_HOURS. That reason has nowhere else to be stated (Settings
+     reports a count, not which projects), which is also why the button that
+     carries it stays focusable. */
+  it('disables the control, with the reason, for the project-visibility block', () => {
+    const gate = dispatchGate(fakeItem(), { ...OK, projectPaths: ['/abs/other'] });
+    expect(gate.control).toBe('disabled');
+    expect(gate.control === 'enabled' ? '' : gate.reason).toContain('/abs/alpha');
+  });
+});
+
+/**
+ * `projectDispatchGate` (fix round 1 hoist) is `dispatchGate`'s own
+ * implementation now — `dispatchGate` below is a one-line delegation to it
+ * with `item.projectPath` supplied. These cases exercise it directly with a
+ * bare project path, the shape its two OTHER callers actually have on hand
+ * (`AgentsService.orchestrate()` and BoardView's toolbar gate, neither of
+ * which has a `BacklogItem` to build). Deliberately the same four scenarios
+ * `dispatchGate`'s own suite above already covers — the point of the hoist
+ * is that both functions now share one code path, so proving this one
+ * behaves right is what makes `dispatchGate`'s unchanged behaviour (also
+ * still asserted above, untouched) a guarantee rather than a coincidence.
+ */
+describe('projectDispatchGate', () => {
+  it('enables a visible project on a healthy dashboard', () => {
+    expect(projectDispatchGate(OK, '/abs/alpha')).toEqual({ control: 'enabled' });
+  });
+
+  it.each([
+    [{ enabled: false }, /BM_AGENTS/],
+    [{ reachable: false, error: 'ECONNREFUSED' }, /unreachable.*ECONNREFUSED/],
+    [{ spawnAvailable: false }, /CLAUDE_BIN/],
+    [{ remoteAnswer: false }, /remote answers/]
+  ])('hides the control for an environment-level block (%p)', (over, matcher) => {
+    const gate = projectDispatchGate({ ...OK, ...over }, '/abs/alpha');
+    expect(gate.control).toBe('hidden');
+    expect(gate.control === 'enabled' ? '' : gate.reason).toMatch(matcher);
+  });
+
+  it('disables the control, with the reason, for the project-visibility block', () => {
+    const gate = projectDispatchGate({ ...OK, projectPaths: ['/abs/other'] }, '/abs/alpha');
+    expect(gate.control).toBe('disabled');
+    expect(gate.control === 'enabled' ? '' : gate.reason).toContain('/abs/alpha');
+  });
+
+  // The hoist's whole point, pinned directly: dispatchGate must answer
+  // IDENTICALLY to a direct call with the same status and the same path,
+  // for every one of the scenarios above — not merely similarly.
+  it('is exactly what dispatchGate delegates to', () => {
+    const item = fakeItem();
+    for (const status of [
+      OK,
+      { ...OK, enabled: false },
+      { ...OK, reachable: false, error: 'ECONNREFUSED' },
+      { ...OK, spawnAvailable: false },
+      { ...OK, remoteAnswer: false },
+      { ...OK, projectPaths: ['/abs/other'] }
+    ]) {
+      expect(dispatchGate(item, status)).toEqual(projectDispatchGate(status, item.projectPath));
+    }
+  });
+});
+
+/**
+ * `resumeGate` is the environment half of "may this browser offer a Resume
+ * button", flattened out of `BoardView.tsx`'s own three lines so the Runs
+ * view's detail pane can ask the identical question. It is `projectDispatchGate`
+ * re-expressed in the vocabulary the two Resume surfaces actually consume —
+ * a `canResume` boolean and a reason string that is non-null ONLY for the
+ * project-visibility block — and the last case below is what pins it as
+ * exactly that re-expression rather than a second, agreeing implementation.
+ *
+ * The watchdog half (`watchdogStoodDown`) is deliberately NOT folded in: it
+ * answers "will the automation spawn one instead", which is the CRASHED
+ * strip's question alone. A paused run was never a watchdog subject, so the
+ * paused surfaces ask this gate and nothing else.
+ */
+describe('resumeGate', () => {
+  // A status that has not landed yet is not a block — it is an unknown. The
+  // board renders no Resume control at all rather than a disabled one with a
+  // reason it cannot state, which is why `blockedReason` stays null here.
+  it('withholds the control, with no reason, while the status is still null', () => {
+    expect(resumeGate(null, '/abs/alpha')).toEqual({ canResume: false, blockedReason: null });
+  });
+
+  it('allows a resume for a visible project on a healthy dashboard', () => {
+    expect(resumeGate(OK, '/abs/alpha')).toEqual({ canResume: true, blockedReason: null });
+  });
+
+  // The environment ladder HIDES rather than disables, so every one of these
+  // four is `canResume: false` with a null reason — the reason exists (the
+  // gate computed one) but nothing renders it, exactly as the dispatch
+  // control's environment-level block shows no disabled button either.
+  it.each([[{ enabled: false }], [{ reachable: false, error: 'ECONNREFUSED' }], [{ spawnAvailable: false }], [{ remoteAnswer: false }]])(
+    'withholds the control for an environment-level block (%p)',
+    (over) => {
+      expect(resumeGate({ ...OK, ...over }, '/abs/alpha')).toEqual({ canResume: false, blockedReason: null });
+    }
+  );
+
+  // The one block that keeps its button: a project the dashboard cannot see
+  // is the stale-answer case (bug-13/bug-16), so the control renders disabled
+  // and says which path is missing rather than vanishing.
+  it('keeps the control, disabled with the path in the reason, for the project-visibility block', () => {
+    const gate = resumeGate({ ...OK, projectPaths: ['/abs/other'] }, '/abs/alpha');
+    expect(gate.canResume).toBe(true);
+    expect(gate.blockedReason).toContain('/abs/alpha');
+  });
+
+  // The three lines this function replaced in BoardView.tsx:668-670, verbatim.
+  // Anything that changes `projectDispatchGate` and not this stays green only
+  // if the two still agree — which is the whole point of there being one
+  // implementation underneath.
+  it('is exactly the projectDispatchGate expression it replaced', () => {
+    for (const status of [
+      OK,
+      { ...OK, enabled: false },
+      { ...OK, reachable: false, error: 'ECONNREFUSED' },
+      { ...OK, spawnAvailable: false },
+      { ...OK, remoteAnswer: false },
+      { ...OK, projectPaths: ['/abs/other'] }
+    ]) {
+      const g = projectDispatchGate(status, '/abs/alpha');
+      expect(resumeGate(status, '/abs/alpha')).toEqual({
+        canResume: g.control !== 'hidden',
+        blockedReason: g.control === 'disabled' ? g.reason : null
+      });
+    }
+  });
+});
+
+describe('dispatchBlock', () => {
+  it('passes a dispatchable item on a healthy dashboard', () => {
+    expect(dispatchBlock(fakeItem(), OK)).toBeNull();
+  });
+
+  /* Flattens dispatchGate for the two callers that only ever refuse — the
+     launch sheet's re-check and the server's — so hidden and disabled read
+     the same to them. Asserted here so the two forms cannot drift into
+     different wordings for the same condition. */
+  it('flattens both kinds of block to their reason string', () => {
+    for (const over of [{ enabled: false }, { projectPaths: ['/abs/other'] }]) {
+      const status = { ...OK, ...over };
+      const gate = dispatchGate(fakeItem(), status);
+      expect(dispatchBlock(fakeItem(), status)).toBe(gate.control === 'enabled' ? null : gate.reason);
+    }
+  });
+
+  it('reports each gate, most-fundamental first', () => {
+    expect(dispatchBlock(fakeItem(), { ...OK, enabled: false })).toMatch(/BM_AGENTS/);
+    expect(dispatchBlock(fakeItem(), { ...OK, reachable: false, error: 'ECONNREFUSED' })).toMatch(/unreachable.*ECONNREFUSED/);
+    expect(dispatchBlock(fakeItem(), { ...OK, spawnAvailable: false })).toMatch(/CLAUDE_BIN/);
+    expect(dispatchBlock(fakeItem(), { ...OK, remoteAnswer: false })).toMatch(/remote answers/);
+  });
+
+  it('names the project the dashboard cannot see, and why', () => {
+    const blocked = dispatchBlock(fakeItem(), { ...OK, projectPaths: ['/abs/other'] });
+    expect(blocked).toContain('/abs/alpha');
+    expect(blocked).toMatch(/LOOKBACK_HOURS/);
+  });
+
+  /* bug-13: the wording has to separate what the caller KNOWS from what it is
+     guessing. All any reader of this string actually has is a `projectPaths`
+     list that does not contain the path — the dashboard's lookback window is
+     only the usual explanation for that, and the case bug-13 was filed for is
+     precisely the other one (the list itself was out of date). The old wording
+     stated the cause flatly, which made a stale block confidently actionable:
+     it sent people to open a session in a repo that already had one. */
+  it('states the missing path as fact and the lookback as a likelihood', () => {
+    const blocked = dispatchBlock(fakeItem(), { ...OK, projectPaths: ['/abs/other'] });
+    expect(blocked).toContain('does not list /abs/alpha');
+    expect(blocked).toMatch(/most likely/);
+  });
+});
+
+describe('MODELS / EFFORTS', () => {
+  /* Mirrors of the dashboard's server/lib/spawn.ts arrays of the same names.
+     There is no cross-repo drift test: the sibling checkout is not guaranteed
+     to exist here, and PERMISSION_LADDER above is already duplicated on the
+     same terms. What keeps this honest is the fail-soft rule below — a value
+     this copy has never heard of is dropped, so drift costs a missing flag,
+     never a wrong one. */
+  it('offers the four model names the dashboard accepts', () => {
+    expect(MODELS).toEqual(['opus', 'sonnet', 'haiku', 'fable']);
+  });
+
+  it('offers the five effort levels, lowest first', () => {
+    expect(EFFORTS).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+});
+
+describe('pickFrom', () => {
+  it('keeps a value the list knows', () => {
+    expect(pickFrom('sonnet', MODELS)).toBe('sonnet');
+    expect(pickFrom('xhigh', EFFORTS)).toBe('xhigh');
+  });
+
+  /* Dropped, not rejected — the same rule the dashboard's own parseSpawnRequest
+     applies to these two fields. There is no ladder to clamp along, so the only
+     safe reading of a name we do not know is "send no flag and let the CLI
+     default stand". A 400 here would also make this app the thing that breaks
+     when the dashboard learns a fifth model. */
+  it('drops a value the list does not know', () => {
+    expect(pickFrom('gpt', MODELS)).toBeUndefined();
+    expect(pickFrom('ludicrous', EFFORTS)).toBeUndefined();
+  });
+
+  it('drops the empty string, which is what "default" submits', () => {
+    expect(pickFrom('', MODELS)).toBeUndefined();
+  });
+
+  it('drops a non-string', () => {
+    expect(pickFrom(undefined, MODELS)).toBeUndefined();
+    expect(pickFrom(7, EFFORTS)).toBeUndefined();
+    expect(pickFrom(['sonnet'], MODELS)).toBeUndefined();
+  });
+});
+
+describe('isItemId', () => {
+  /* The shape backlog.mjs's own ID_SHAPE has always enforced, restated on
+     this side for the one caller that needs it before any file is touched:
+     POST /api/agents/orchestrate composes a shell-visible prompt out of these
+     strings, so a value that is not an id must never reach the composition
+     step at all. */
+  it('accepts every section prefix the store mints', () => {
+    expect(isItemId('bug-1')).toBe(true);
+    expect(isItemId('idea-2')).toBe(true);
+    expect(isItemId('task-12')).toBe(true);
+    expect(isItemId('ref-3')).toBe(true);
+    expect(isItemId('oos-4')).toBe(true);
+  });
+
+  it('rejects a bare prefix, a bare number, and an empty string', () => {
+    expect(isItemId('')).toBe(false);
+    expect(isItemId('task')).toBe(false);
+    expect(isItemId('task-')).toBe(false);
+    expect(isItemId('-1')).toBe(false);
+    expect(isItemId('12')).toBe(false);
+  });
+
+  it('rejects anything with case, a filename, or inner whitespace', () => {
+    expect(isItemId('Task-1')).toBe(false);
+    expect(isItemId('task-1.md')).toBe(false);
+    expect(isItemId('task 1')).toBe(false);
+    expect(isItemId('task-1-a-title')).toBe(false);
+  });
+
+  /* The reason this predicate exists rather than a membership check alone.
+     Membership is the real boundary and runs second (AgentsService.orchestrate),
+     but these are the values that must not survive even long enough to be
+     looked up. `\n` matters on its own: the prompt is one line, and an id
+     carrying a newline would split it. */
+  it('rejects traversal, shell metacharacters and newlines', () => {
+    expect(isItemId('../task-1')).toBe(false);
+    expect(isItemId('../../etc/passwd')).toBe(false);
+    expect(isItemId('task-1; rm -rf /')).toBe(false);
+    expect(isItemId('task-1;ls')).toBe(false);
+    expect(isItemId('task-1\n')).toBe(false);
+    expect(isItemId('task-1 --resume')).toBe(false);
+  });
+
+  /* The two tracker spellings (task-46). `#` is the ONE metacharacter these
+     add, and the predicate's own comment records why it is safe here: nothing
+     this guards reaches a shell, and the one composition that concatenates
+     caller text — the orchestrate prompt — refuses a tracker project outright
+     before `resolveIds` runs. */
+  it('accepts a bare issue number and a full URN', () => {
+    expect(isItemId('#31')).toBe(true);
+    expect(isItemId('gh:futin/x#31')).toBe(true);
+    expect(isItemId('gh:my-org/my.repo_2#7')).toBe(true);
+  });
+
+  it('rejects a half-written issue number or URN', () => {
+    expect(isItemId('#')).toBe(false);
+    expect(isItemId('# 31')).toBe(false);
+    expect(isItemId('#31a')).toBe(false);
+    // No slash: `gh:futin#31` names no repository.
+    expect(isItemId('gh:futin#31')).toBe(false);
+    expect(isItemId('gh:futin/x')).toBe(false);
+    expect(isItemId('gh:futin/x#')).toBe(false);
+    // A path that merely starts with the prefix is still not a URN.
+    expect(isItemId('gh:../../etc/passwd#1')).toBe(false);
+  });
+
+  /* Anchored, so a valid id embedded in a longer string is not "a valid id".
+     A regex without ^ and $ passes every one of the cases above — including
+     the two padded ones, which is exactly how a `--ids` list built by naive
+     string joining would smuggle an argument through.
+
+     `xtask-1` is deliberately NOT here: it is a well-formed id whose prefix
+     names no section, and this predicate's contract is "could this be an id",
+     not "does it exist". The membership scan is what refuses it, and it is
+     the only check that can — see isItemId's own comment. */
+  it('is anchored at both ends', () => {
+    expect(isItemId('task-1x')).toBe(false);
+    expect(isItemId(' task-1')).toBe(false);
+    expect(isItemId('task-1 ')).toBe(false);
+    expect(isItemId('a'.repeat(500))).toBe(false);
+  });
+
+  /* Well-formed but absurd. Refused on length rather than shape, so the
+     directory scan behind this predicate is never handed something that
+     cannot possibly name a file. */
+  it('rejects an id longer than any store can mint', () => {
+    expect(isItemId(`task-${'9'.repeat(500)}`)).toBe(false);
+    expect(isItemId('task-1234567890')).toBe(true);
+  });
+
+  it('rejects a non-string', () => {
+    expect(isItemId(undefined)).toBe(false);
+    expect(isItemId(7)).toBe(false);
+    expect(isItemId(['task-1'])).toBe(false);
+    expect(isItemId(null)).toBe(false);
+  });
+});
+
+/*
+ * The fourth kind of dispatch block: an item an orchestrator run has already
+ * claimed. Cast for the same reason every other suite that reads this fixture
+ * casts it — the file is plain JSON, so TS widens its string fields to
+ * `string` rather than the narrower literal unions (`RunStage` above all,
+ * which is the entire vocabulary these cases turn on).
+ */
+const runFixture = rawFixture as OrchestratorRun;
+
+type RunPayload = OrchestratorRunsPayload['runs'][number];
+
+/** One fresh run for `/abs/alpha` (the path `fakeItem` carries) holding
+ *  exactly one queue entry, at whatever stage the case is about. Built off
+ *  the contract fixture rather than a hand-rolled queue item so the shape
+ *  stays the real one, with only the two fields each case varies replaced. */
+function runWith(stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
+  const entry: RunQueueItem = { ...runFixture.queue[0], id: 'bug-1', stage };
+  return { ...runFixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, pauseRequested: false, stopRequested: false, ...over };
+}
+
+/** One starting-run placeholder (task-14) for `project`, defaulting to the
+ *  path `fakeItem` carries. It has two fields and nothing else — which is
+ *  bug-21's ruling 1 in one line: no block derived from this can be
+ *  per-item, because there is no item information in it to be per-item
+ *  about. */
+function startingFor(project: string = '/abs/alpha'): StartingRun {
+  return { project, requestedAt: new Date().toISOString() };
+}
+
+/*
+ * The seven stages a run has FINISHED with an item at. Written out here
+ * rather than derived as "everything RUN_CLAIMED_STAGES omits", because
+ * deriving it from the thing under test is how a partition test proves
+ * nothing: if RUN_CLAIMED_STAGES lost a member, a derived complement would
+ * gain it and both halves would still agree. `branched` joins this list for
+ * the same reason `merged` is in it: both are outcomes a run has finished
+ * the item at, and a human dispatching it by hand is the intended next move
+ * for either.
+ */
+const TERMINAL_STAGES: readonly RunStage[] = ['merged', 'branched', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'];
+
+/*
+ * The five stages a run has truly EXITED an item at — the complement of
+ * `runHoldsItem`'s answer rather than of `runClaimBlock`'s, and the reason
+ * the two lists above and below this comment both have to exist. A parked or
+ * needs-answers item is terminal to DISPATCH (nobody is going to move it but
+ * a human, which is what parking is for) and not terminal to the ITEM: the
+ * run still holds the worktree and is waiting, so bug-11's question — "is
+ * this item live work" — answers yes where `runClaimBlock`'s answers no.
+ * `branched` is a true exit like `merged`: the run mode decided where a
+ * successful item stops, but either way the run is done with it and holds
+ * nothing.
+ *
+ * Written out by hand for the reason TERMINAL_STAGES above is: derived from
+ * the constants under test, a partition test proves nothing, because a
+ * constant that loses a member hands it straight to the derived complement
+ * and both halves still agree.
+ */
+const EXITED_STAGES: readonly RunStage[] = ['merged', 'branched', 'failed', 'skipped', 'ungroomed'];
+
+describe('runClaimBlock', () => {
+  it('names the stage for every stage a run still owns the item at', () => {
+    for (const stage of RUN_CLAIMED_STAGES) {
+      const reason = runClaimBlock(fakeItem(), [runWith(stage)], []);
+      expect(reason).not.toBeNull();
+      // The stage itself, not a generic "a run has this": which stage it is
+      // tells the reader whether to wait a moment or go look at the run.
+      expect(reason).toContain(stage);
+    }
+  });
+
+  /* The half that keeps this from being a blanket "any run mentioning this
+     item blocks it". A run that merged, failed, skipped, parked or bounced an
+     item is DONE with it, and a human picking it up by hand is the intended
+     next move — `parked` most of all, since a park exists precisely to hand
+     the item back to a person. */
+  it('allows dispatch once the run has left the item at a terminal stage', () => {
+    for (const stage of TERMINAL_STAGES) {
+      expect(runClaimBlock(fakeItem(), [runWith(stage)], [])).toBeNull();
+    }
+  });
+
+  /* Staleness is the same rule every other run-derived surface already
+     applies (RunStrip renders nothing, BoardView's badge map is built from
+     fresh runs only). A crashed run may well still hold a worktree, but that
+     is what `--resume`/`--abort` are for: cards dead until someone runs one
+     of those is a worse failure than the one this block exists to prevent. */
+  it('allows dispatch when the only run holding the item has gone stale', () => {
+    expect(runClaimBlock(fakeItem(), [runWith('reviewing', { fresh: false })], [])).toBeNull();
+  });
+
+  /* Ids are only sequential within one project's own store, so two checkouts
+     can both hold `bug-1` — matching on id alone would block a card in a
+     project no run is touching at all. */
+  it('ignores a run for a different project holding the same id', () => {
+    expect(runClaimBlock(fakeItem(), [runWith('reviewing', { project: '/abs/other' })], [])).toBeNull();
+  });
+
+  it("allows dispatch when the right project's fresh run does not mention this item", () => {
+    expect(runClaimBlock(fakeItem({ id: 'task-99' }), [runWith('reviewing')], [])).toBeNull();
+  });
+
+  it('allows dispatch when there are no runs at all', () => {
+    expect(runClaimBlock(fakeItem(), [], [])).toBeNull();
+  });
+
+  /* bug-21 — the starting window. task-14 made a board-started run visible
+     1–5 minutes before its `run.json` exists; nothing else on the board
+     treated the project as occupied, so every card kept a live dispatch
+     button for an item the pending run was about to claim in its own
+     worktree. That is exactly the double-execution bug-4 and bug-12 each
+     closed for the run-file case, reopened for the window before the run
+     file exists. */
+  it('blocks dispatch for a project a run is starting for, with no run file at all', () => {
+    expect(runClaimBlock(fakeItem(), [], [startingFor()])).toBe('an orchestrator run is starting for this project');
+  });
+
+  /* Ruling 1, stated as a test: the block is project-wide and deliberately
+     coarse. A `StartingRun` carries no ids, and the server could not name
+     them if it wanted to — which items a run queues is `buildGatedQueue`'s
+     verdict inside the spawned session, over `<base>`, minutes later. So
+     every item in the project is blocked, not just the ones a subset launch
+     selected. */
+  it('blocks every item in that project, whatever its id', () => {
+    expect(runClaimBlock(fakeItem({ id: 'task-99' }), [], [startingFor()])).not.toBeNull();
+  });
+
+  /* The same absolute-registry-path compare `runEntryAt` documents — never a
+     display name and never anything derived from `item.path`. Two checkouts
+     can both hold `bug-1`, and a starting entry names one of them. */
+  it('ignores a starting entry naming a different project', () => {
+    expect(runClaimBlock(fakeItem(), [], [startingFor('/abs/other')])).toBeNull();
+  });
+
+  /* Ordering inside the function. Once the service's rule 3 lands these two
+     are mutually exclusive — a project with a `running` run file has no
+     starting entry — but the specific wording must win if they ever are
+     not, because "(dispatched)" tells the reader where to look and the
+     coarse sentence does not. */
+  it('prefers the per-item wording when a fresh run holds the item AND the project is starting', () => {
+    const reason = runClaimBlock(fakeItem(), [runWith('dispatched')], [startingFor()]);
+    expect(reason).toContain('dispatched');
+    expect(reason).not.toContain('starting');
+  });
+
+  /* The test that fails the day a new `RunStage` member is added and left
+     unclassified. `Record<RunStage, ...>` is what does the work: TS refuses
+     the object literal below if it omits a member, so the compiler forces
+     the new stage into this file, and the two assertions then force it into
+     one of the two lists rather than into neither. */
+  it('partitions every RunStage member into exactly one of claimed or terminal', () => {
+    const everyStage: Record<RunStage, true> = {
+      pending: true,
+      preflight: true,
+      dispatched: true,
+      inspecting: true,
+      reviewing: true,
+      fixing: true,
+      verifying: true,
+      merging: true,
+      merged: true,
+      branched: true,
+      failed: true,
+      skipped: true,
+      'needs-answers': true,
+      ungroomed: true,
+      parked: true
+    };
+    const all = Object.keys(everyStage) as RunStage[];
+
+    expect([...RUN_CLAIMED_STAGES, ...TERMINAL_STAGES].sort()).toEqual([...all].sort());
+    expect(RUN_CLAIMED_STAGES.filter((s) => TERMINAL_STAGES.includes(s))).toEqual([]);
+
+    // `branched` is the branch-mode success exit: the run has let go of the
+    // item exactly as it does at `merged`, so it must sit outside both the
+    // claimed and the attention partitions.
+    expect(RUN_CLAIMED_STAGES.includes('branched')).toBe(false);
+    expect(ATTENTION_RUN_STAGES.includes('branched')).toBe(false);
+
+    /* The SECOND partition of the same fifteen members, the one bug-11
+       added: live (a run still holds the item, whether working it or blocked
+       on a person) versus exited. It shares the `Record<RunStage, true>`
+       literal above deliberately — one object the compiler forces a new
+       member into, and two independent classifications it then has to be
+       given, so a stage cannot be filed as claimed-or-terminal and left out
+       of live-or-exited. */
+    const live = [...RUN_CLAIMED_STAGES, ...ATTENTION_RUN_STAGES];
+    expect([...live, ...EXITED_STAGES].sort()).toEqual([...all].sort());
+    expect(live.filter((s) => EXITED_STAGES.includes(s))).toEqual([]);
+  });
+});
+
+/*
+ * The in-review guard (spec decision 9): execute in `pr` mode labels a tracker issue `in-review` after a successful push, and every per-item gate reads
+ * the mapped flag. One sentence, the global-constraints string, shared by the board's button, the server's two ladders and execute's own refusal.
+ */
+describe('inReviewBlock', () => {
+  it('names the open PR for an item carrying the flag', () => {
+    expect(inReviewBlock(fakeItem({ source: 'github', inReview: true }))).toBe('a PR is open for this item');
+  });
+
+  it('is null for an item without the flag', () => {
+    expect(inReviewBlock(fakeItem())).toBeNull();
+    expect(inReviewBlock(fakeItem({ source: 'github' }))).toBeNull();
+  });
+
+  /* `orchestrate.mjs` cannot import this module (a plugin skill's `tools/` is a standalone copy of what was pushed), so its gate carries a hand-kept
+     copy of the sentence. This is what keeps the "one string everywhere" constraint mechanical rather than a promise. */
+  it('is the same sentence the orchestrator gate carries by hand', () => {
+    const tool = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
+    expect(tool).toContain(`const IN_REVIEW_REASON = '${IN_REVIEW_REASON}';`);
+  });
+
+  /* The third copy: execute's refusal gate says the same sentence, in prose a session prints. Same seam, same reason. */
+  it('is the same sentence backlog-execute refuses with', () => {
+    const skill = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain(IN_REVIEW_REASON);
+  });
+
+  /* The board's pr sentence, as pr-mode.md §1 quotes it to say what it means. The skill text and the constant drifted once already (#326 review 2), and a
+     reworded `finishClause` would leave that quote naming a sentence no prompt carries any more. The quote spells the base as the literal `<base>`
+     placeholder, so that is the base it is rendered with here. */
+  it('is the pr sentence backlog-execute pr-mode.md quotes', () => {
+    const prMode = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('execute', 'pr', '<base>'));
+  });
+
+  /* The same seam for the flagged sentence: §1 quotes it so a session can tell `--auto-merge --fix` arrived from the board, and a reworded clause would
+     leave the quote describing a prompt nobody sends. Both flags on, because that sentence carries every clause the auto-merge-only one has. */
+  it('pr-mode.md quotes the execute flag sentence', () => {
+    const prMode = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('execute', 'pr', '<base>', { autoMerge: true, fix: true }));
+  });
+
+  /* The procedure's load-bearing literals: the one line a not-allowed repo gets (a person greps the final message for it), the two soft bounds the spec
+     states in the file, the `--auto --<method>` spelling that arms rather than merges, and the force-push ban the fix loop's merge-of-base relies on. */
+  it('auto-merge.md names the exact not-allowed line, the 45-minute and 3-round bounds, and forbids force-push', () => {
+    const autoMerge = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'references', 'auto-merge.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(autoMerge).toContain('auto-merge: not allowed on <owner>/<repo> — PR left open');
+    expect(autoMerge).toContain('45 minutes');
+    expect(autoMerge).toContain('3 fix rounds');
+    expect(autoMerge).toContain('--auto --');
+    expect(autoMerge.toLowerCase()).toContain('never force');
+    // Fix round 1: a merge of the base is verified before it is committed, clean or not, and a red round leaves the tree at HEAD with its stat recorded.
+    expect(autoMerge).toContain('git merge --no-commit --no-ff origin/<base>');
+    expect(autoMerge).toContain('git diff --stat HEAD');
+    // Final review: gh merges an already-mergeable PR at once, so it arms at once only where GitHub gates the merge, and otherwise waits for the checks
+    // unarmed — and a red check there, without --fix, ends on its own line, since nothing was armed.
+    expect(autoMerge).toContain('**`BLOCKED` or `BEHIND`** — GitHub itself gates the merge on the repository\'s requirements. Arm now');
+    expect(autoMerge).toContain('**do not arm yet.** Run the Wait (§2) unarmed');
+    expect(autoMerge).toContain('auto-merge: not armed — checks failed on a PR GitHub would merge at once — PR left open');
+  });
+
+  /* The two quotes above would stay green if the hooks that lead a session INTO auto-merge.md were deleted: SKILL.md's flag rule and mode line, and pr-mode
+     §8's read-it-now pointer. One literal each keeps the door pinned, not only the room. */
+  it('backlog-execute reads the flags and hands off to auto-merge.md', () => {
+    const skill = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    const prMode = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain('`--fix` without both `--finish pr` and `--auto-merge` → stop and name that rule');
+    expect(skill).toContain('finish mode: pr → PR into <base>, auto-merge, fix');
+    expect(prMode).toContain('${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now');
+  });
+
+  /* Groom's half of the same seam. Its sentence differs from execute's by "reviews, " (no reviewer runs on a groom PR), so a groom pr-mode.md that copied
+     execute's quote would describe a prompt the board never sends a groom — and the flag sentence is the one a session reads `--auto-merge --fix` out of. */
+  it('groom pr-mode.md quotes both groom sentences', () => {
+    const prMode = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('groom', 'pr', '<base>'));
+    expect(prMode).toContain(finishClause('groom', 'pr', '<base>', { autoMerge: true, fix: true }));
+  });
+
+  /* `tick.mjs` skips `.worktrees/groom-<id>` when it scans for `started:` markers and treats `groom/<id>` or that tree as taken (`groomTaken`). The spelling
+     is a contract between two files that never import each other: a groom that cut `.worktrees/groom/<id>` or branched `groom-<id>` would block every tick on
+     a files project with its marker, and let a tick re-groom an item whose plan sits on an open PR. */
+  it('groom pr-mode.md spells the tree tick.mjs skips', () => {
+    const prMode = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8');
+    expect(prMode).toContain('.worktrees/groom-<id>');
+    expect(prMode).toContain('groom/<id>');
+  });
+
+  /* The doors into the room: SKILL.md's Finish mode section is the only thing that sends a session to pr-mode.md, and pr-mode.md's auto-merge step is the
+     only thing that sends a groom to the shared procedure. pr-mode.md also names auto-merge.md in its intro, so the bare path would stay green with §8's
+     read-it-now pointer deleted: the pointer is pinned whole, as execute's is, and so are SKILL.md's `--fix` stop rule and its flagged mode line. */
+  it('groom SKILL.md points at pr-mode.md and auto-merge.md is reached from it', () => {
+    const skill = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-groom', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    const prMode = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain('skills/backlog-groom/references/pr-mode.md');
+    expect(skill).toContain('`--fix` without both `--finish pr` and `--auto-merge` → stop and name that rule');
+    expect(skill).toContain('finish mode: pr → PR into <base>, auto-merge, fix');
+    expect(prMode).toContain('${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now');
+  });
+});
+
+/*
+ * bug-11: the same lookup asked the other question — "is this item live work",
+ * which is what keeps a stale open bug an orchestrator is working on the Board
+ * instead of in Archive. Every case here is the `runClaimBlock` case above it
+ * read against the wider stage set, plus the two attention stages, which are
+ * the whole reason this is a second function rather than a second caller.
+ */
+describe('runHoldsItem', () => {
+  it('holds the item at every stage a run still owns it', () => {
+    for (const stage of RUN_CLAIMED_STAGES) {
+      expect(runHoldsItem(fakeItem(), [runWith(stage)])).toBe(true);
+    }
+  });
+
+  /* The half that differs from `runClaimBlock`, and the reason bug-11's fix
+     could not simply reuse it: a parked or needs-answers run has STOPPED and
+     is waiting for a person. Dispatch is allowed (that is what parking hands
+     back), but the item is the last card that should leave the surface the
+     person is being asked to look at. */
+  it('holds the item at both stages a run is blocked on a person at', () => {
+    for (const stage of ATTENTION_RUN_STAGES) {
+      expect(runHoldsItem(fakeItem(), [runWith(stage)])).toBe(true);
+    }
+  });
+
+  it('releases the item at the five stages a run has exited it at', () => {
+    for (const stage of EXITED_STAGES) {
+      expect(runHoldsItem(fakeItem(), [runWith(stage)])).toBe(false);
+    }
+  });
+
+  // The table case from the design's classification list, spelled out on its
+  // own rather than left to the loop above: `branched` is the mode this
+  // repo did not have when EXITED_STAGES was first written, and the loop
+  // alone would not tell a reader that this specific stage was the reason
+  // the list grew.
+  it('releases the item at the branch-mode success exit', () => {
+    expect(runHoldsItem(fakeItem(), [runWith('branched')])).toBe(false);
+  });
+
+  /* The three lines the two functions share, asserted here as well as on
+     `runClaimBlock` — the extracted helper is what makes them one
+     implementation, and these are the cases that would notice if it stopped
+     being. */
+  it('releases the item when the only run holding it has gone stale', () => {
+    expect(runHoldsItem(fakeItem(), [runWith('reviewing', { fresh: false })])).toBe(false);
+  });
+
+  it('ignores a run for a different project holding the same id', () => {
+    expect(runHoldsItem(fakeItem(), [runWith('reviewing', { project: '/abs/other' })])).toBe(false);
+  });
+
+  it("releases an item the right project's fresh run does not mention", () => {
+    expect(runHoldsItem(fakeItem({ id: 'task-99' }), [runWith('reviewing')])).toBe(false);
+  });
+
+  it('releases the item when there are no runs at all', () => {
+    expect(runHoldsItem(fakeItem(), [])).toBe(false);
+  });
+
+  /* bug-21's one deliberate NON-change, pinned rather than left as prose.
+     `runHoldsItem` does NOT gain the `starting` parameter its sibling did:
+     its caller is `isStale`/`leavesBoard`, asking "is a run holding THIS
+     item", which a placeholder naming no items cannot answer. The window it
+     would affect is at most RUN_STALE_MS — fifteen minutes — against a
+     30-day staleness threshold, so an item it would newly protect was
+     already in Archive a minute earlier. The signature staying two-argument
+     while `runClaimBlock` became three-argument is the assertion. */
+  it('takes no starting parameter — a placeholder naming no items cannot say a run holds one', () => {
+    expect(runHoldsItem.length).toBe(2);
+  });
+});
+
+/* =========================================================================
+ * task-47 — `queueItemIs`, the one place a run's queue id meets an item's id
+ *
+ * Inside a run a tracker item is its BARE issue number (`31`), because the id
+ * travels through `orchestrate.mjs`'s argv and into SKILL.md's fenced shell
+ * commands, where `#` opens a comment and swallows the rest of the line.
+ * `BacklogItem.id` for the same issue is `#31`, because that is what a person
+ * types and what the board draws. Both spellings are right for their own side,
+ * and this function is where they are reconciled.
+ * ========================================================================= */
+
+describe('queueItemIs', () => {
+  it('matches a bare queue number against a tracker item-s hashed id', () => {
+    expect(queueItemIs('31', fakeItem({ id: '#31', source: 'github' }))).toBe(true);
+  });
+
+  /* The gate that makes this safe, and the reason it is `source` rather than
+     "does the id start with a `#`": the question is which STORE the queue
+     entry belongs to. A files store cannot mint `#31` today, but matching on
+     the coincidence of spelling rather than on the item's actual source is how
+     that stops being true quietly. */
+  it('never matches a bare number against a files item, whatever its id looks like', () => {
+    expect(queueItemIs('31', fakeItem({ id: '#31', source: 'files' }))).toBe(false);
+  });
+
+  it('matches identically-spelled ids for either source', () => {
+    expect(queueItemIs('task-3', fakeItem({ id: 'task-3', source: 'files' }))).toBe(true);
+    // Identity holds first, so a caller that already has the board's spelling
+    // never depends on the tracker clause at all.
+    expect(queueItemIs('#31', fakeItem({ id: '#31', source: 'github' }))).toBe(true);
+  });
+});
+
+/* The consequence on the surface that matters: a run whose queue holds `31`
+   blocks dispatch on the item the board draws as `#31`. Before task-47 the two
+   never matched, so a tracker item a run was actively working rendered as
+   free — and the project check is asserted in the same case, because a block
+   that ignored the path would pass the first half alone. */
+describe('runClaimBlock over a tracker item', () => {
+  it('blocks #31 for a fresh run holding queue id 31, and only in that item-s own project', () => {
+    const item = fakeItem({ id: '#31', source: 'github' });
+    const run = { ...runWith('dispatched'), queue: [{ ...runFixture.queue[0], id: '31', stage: 'dispatched' as RunStage }] };
+
+    expect(runClaimBlock(item, [run], [])).toBe('an orchestrator run is working this item (dispatched)');
+    expect(runClaimBlock(item, [{ ...run, project: '/abs/elsewhere' }], [])).toBeNull();
+  });
+});
+
+/* bug-35 — the cap a REFUSED resume is measured against. `watchdogExhausted`
+   counts sessions the sweeper started, so a resume the dashboard refuses for a
+   reason only a person can clear (remote answers off, a misconfigured
+   `BM_AGENTS`, the dashboard down) never moved it and the sweeper retried
+   every grace window forever. This predicate is that cap's sibling over the
+   other counter, and it is written the same way and for the same reason: a
+   person reading the board must be able to check the sentence against the two
+   numbers printed beside it. */
+describe('watchdogFailing', () => {
+  it.each([
+    [0, 3, false],
+    [2, 3, false],
+    // The bug's own state: three refusals in a row against a cap of three,
+    // with `attempts` still 0 because not one of them started a session.
+    [3, 3, true],
+    // `>=`, not `===`, for the reason `watchdogExhausted` uses it: lowering
+    // "Give up after" while a run is failing must not step over the ceiling.
+    [4, 3, true],
+    // The raised-cap re-entry — the same escape hatch an exhausted run has.
+    [3, 4, false]
+  ])('is %p >= %p → %p', (failures, maxAttempts, expected) => {
+    expect(watchdogFailing(failures, maxAttempts)).toBe(expected);
+  });
+});
+
+/* The third stand-down condition, and the reason it is a REQUIRED property
+   rather than one defaulting to `false`: the board renders its hand-Resume
+   control on this predicate being true, so a caller that silently opted out of
+   the new condition would put the board back to offering Resume while the
+   sweeper was still spawning — the one thing this predicate exists to
+   prevent. */
+describe('watchdogStoodDown over a failing run', () => {
+  it('stands down on refusals alone, with the attempt cap untouched', () => {
+    expect(watchdogStoodDown({ enabled: true, exhausted: false, failing: true })).toBe(true);
+  });
+
+  it('keeps spawning while the refusals are still under the ceiling', () => {
+    expect(watchdogStoodDown({ enabled: true, exhausted: false, failing: false })).toBe(false);
+  });
+});
+
+/* The execute finish vocabulary and the one sentence that closes an execute prompt. `finishClause` is shared so the launch sheet's preview and the prompt the
+   server sends are the same string by construction — these cases pin the bytes, because the pr sentence is what the spawned session obeys. */
+describe('finishClause', () => {
+  const EXEC_PR = 'Finish with `--finish pr --base main`: the skill commits, reviews, pushes and opens the PR into main, and never merges.';
+  const GROOM_PR = 'Finish with `--finish pr --base main`: the skill commits, pushes and opens the PR into main, and never merges.';
+  /* One row per flag combination, for either action: the sentence is the same bar the word "reviews", which only an execute has a reviewer for. The base is a
+     parameter so a slashed one is proved verbatim in every place the sentence spells it. */
+  const armed = (action: 'execute' | 'groom', base: string, fix: boolean): string => {
+    const reviews = action === 'execute' ? 'reviews, ' : '';
+    return (
+      `Finish with \`--finish pr --base ${base} --auto-merge${fix ? ' --fix' : ''}\`: the skill commits, ${reviews}pushes, opens the PR into ${base} ` +
+      'and arms GitHub auto-merge if the repository allows it, then waits for GitHub to merge it' +
+      `${fix ? `, fixing failing checks and conflicts with ${base} meanwhile` : ''}; ` +
+      'the skill never merges itself.'
+    );
+  };
+
+  it.each(['execute', 'groom'] as const)('is COMMIT_RULE for in-place, whatever the base (%s)', (action) => {
+    expect(finishClause(action, 'in-place', 'develop')).toBe(COMMIT_RULE);
+    expect(finishClause(action, 'in-place', 'main')).toBe(COMMIT_RULE);
+  });
+
+  it('in-place is COMMIT_RULE for both actions and any flags', () => {
+    expect(finishClause('groom', 'in-place', 'develop', { autoMerge: true, fix: true })).toBe(COMMIT_RULE);
+    expect(finishClause('execute', 'in-place', 'main', { autoMerge: true })).toBe(COMMIT_RULE);
+  });
+
+  it('names the base in both places for an execute pr, byte for byte as before', () => {
+    expect(finishClause('execute', 'pr', 'main')).toBe(EXEC_PR);
+  });
+
+  it('groom pr drops "reviews"', () => {
+    const clause = finishClause('groom', 'pr', 'main');
+    expect(clause).toBe(GROOM_PR);
+    expect(clause).not.toContain('reviews');
+  });
+
+  it('carries a slashed base through verbatim', () => {
+    const clause = finishClause('execute', 'pr', 'release/1.x');
+    expect(clause).toContain('--finish pr --base release/1.x');
+    expect(clause).toContain('into release/1.x');
+  });
+
+  it('each flag combination, both actions', () => {
+    const base = 'release/1.x';
+    for (const action of ['execute', 'groom'] as const) {
+      expect(finishClause(action, 'pr', base, { autoMerge: true })).toBe(armed(action, base, false));
+      expect(finishClause(action, 'pr', base, { autoMerge: true, fix: true })).toBe(armed(action, base, true));
+    }
+    // The four rows against the literal sentences, so `armed` above cannot drift into agreeing with a wrong function.
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge`: the skill commits, reviews, pushes, opens the PR into main and arms GitHub auto-merge if the ' +
+        'repository allows it, then waits for GitHub to merge it; the skill never merges itself.'
+    );
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge --fix`: the skill commits, reviews, pushes, opens the PR into main and arms GitHub auto-merge if ' +
+        'the repository allows it, then waits for GitHub to merge it, fixing failing checks and conflicts with main meanwhile; the skill never merges itself.'
+    );
+    expect(finishClause('groom', 'pr', 'main', { autoMerge: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge`: the skill commits, pushes, opens the PR into main and arms GitHub auto-merge if the repository ' +
+        'allows it, then waits for GitHub to merge it; the skill never merges itself.'
+    );
+    expect(finishClause('groom', 'pr', 'main', { autoMerge: true, fix: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge --fix`: the skill commits, pushes, opens the PR into main and arms GitHub auto-merge if the ' +
+        'repository allows it, then waits for GitHub to merge it, fixing failing checks and conflicts with main meanwhile; the skill never merges itself.'
+    );
+  });
+
+  it('fix alone is ignored', () => {
+    expect(finishClause('execute', 'pr', 'main', { fix: true })).toBe(EXEC_PR);
+    expect(finishClause('groom', 'pr', 'main', { fix: true })).toBe(GROOM_PR);
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: false, fix: true })).toBe(EXEC_PR);
+  });
+
+  /* The skill's flag parser reads the backticked span; prose that spelled a flag outside it would be a second, unparsed spelling a reader could take for one.
+     Asserted on the text outside the backticks — no `--` at all there — so the flagless sets, where a per-match loop would have nothing to iterate, still
+     assert something. */
+  it('flags only inside the backticks', () => {
+    const review = DEFAULT_REVIEW_CONFIG;
+    const flagSets = [{}, { autoMerge: true }, { autoMerge: true, fix: true }, { fix: true }, { review }, { autoMerge: true, review }, { autoMerge: true, fix: true, review }];
+    for (const action of ['execute', 'groom'] as const) {
+      for (const flags of flagSets) {
+        const clause = finishClause(action, 'pr', 'main', flags);
+        const open = clause.indexOf('`');
+        const close = clause.indexOf('`', open + 1);
+        expect(open).toBeGreaterThanOrEqual(0);
+        expect(close).toBeGreaterThan(open);
+        expect(clause.slice(0, open) + clause.slice(close + 1)).not.toContain('--');
+      }
+    }
+  });
+});
+
+describe('isExecuteFinish', () => {
+  it('accepts the two finishes', () => {
+    expect(isExecuteFinish('in-place')).toBe(true);
+    expect(isExecuteFinish('pr')).toBe(true);
+  });
+
+  it.each(['merge', '', undefined, 7, 'PR'])('rejects %p', (value) => {
+    expect(isExecuteFinish(value)).toBe(false);
+  });
+
+  it('EXECUTE_FINISHES is exactly in-place then pr', () => {
+    expect(EXECUTE_FINISHES).toEqual(['in-place', 'pr']);
+  });
+});
+
+/*
+ * The plan-review guard (backlog-tick): a plan written unattended carries `plan-review` until a person removes it, and every per-item gate reads the mapped
+ * flag. One sentence, shared by the board's button, the server's two ladders, and the orchestrator's and tick's hand-kept copies.
+ */
+describe('planReviewBlock', () => {
+  it('names the awaited review for an item carrying the flag', () => {
+    expect(planReviewBlock(fakeItem({ planReview: true }))).toBe('this plan awaits review');
+    expect(PLAN_REVIEW_REASON).toBe('this plan awaits review');
+  });
+
+  it('is null for an item without the flag', () => {
+    expect(planReviewBlock(fakeItem())).toBeNull();
+    expect(planReviewBlock(fakeItem({ source: 'github' }))).toBeNull();
+  });
+
+  /* The in-review twin's twin: `orchestrate.mjs` cannot import this module, so its gate carries a hand-kept copy of the sentence, and this keeps the "one
+     string everywhere" constraint mechanical. */
+  it('is the same sentence the orchestrator gate carries by hand', () => {
+    const tool = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
+    expect(tool).toContain(`const PLAN_REVIEW_REASON = '${PLAN_REVIEW_REASON}';`);
+  });
+
+  /* The third copy, beside `inReviewBlock`'s: execute's refusal gate prints the same sentence, in prose a session says. Whitespace-collapsed because the
+     SKILL.md wraps at 160 columns and a reflow must not turn a green guard red. */
+  it('is the same sentence backlog-execute refuses with', () => {
+    const skill = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain(PLAN_REVIEW_REASON);
+  });
+});
+
+describe('EXECUTE_HELD_REASON', () => {
+  it('says what is known, which is a branch or a tree, never that a PR is open', () => {
+    expect(EXECUTE_HELD_REASON).toBe('an execute branch or worktree already holds this item');
+  });
+
+  it('is the same sentence the orchestrator gate carries by hand', () => {
+    const tool = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
+    expect(tool).toContain(`const EXECUTE_HELD_REASON = '${EXECUTE_HELD_REASON}';`);
+  });
+});
+
+/*
+ * The per-item ladder (#468): the one home of the order of in-review, execute-held, unvetted and plan-review. A PR first, then the branch that is its files
+ * half, then the vetting, then the review — approving a plan does not vet it, so an item holding both must say the reason the approval would not clear.
+ */
+describe('itemLadderBlock', () => {
+  const held = EXECUTE_HELD_REASON;
+  it.each<[string, Partial<BacklogItem>, string | null, string | null]>([
+    ['no flags, not held', {}, null, null],
+    ['no flags, held', {}, held, EXECUTE_HELD_REASON],
+    ['plan-review alone', { planReview: true }, null, PLAN_REVIEW_REASON],
+    ['unvetted over plan-review', { unvetted: true, planReview: true }, null, UNVETTED_REASON],
+    ['held over unvetted and plan-review', { unvetted: true, planReview: true }, held, EXECUTE_HELD_REASON],
+    ['in-review over unvetted and plan-review', { inReview: true, unvetted: true, planReview: true }, null, IN_REVIEW_REASON],
+    ['in-review over held', { inReview: true, unvetted: true, planReview: true }, held, IN_REVIEW_REASON]
+  ])('%s', (_name, flags, executeHeld, expected) => {
+    expect(itemLadderBlock(fakeItem(flags), executeHeld)).toBe(expected);
+  });
+
+  /* The source guard the table cannot be: a reader that goes back to composing the rungs by hand keeps every behaviour test green until the order moves, and
+     then only the reader that was edited moves with it. `(` is what tells a call from the doc comments, which name these helpers freely. */
+  describe('its readers', () => {
+    const read = (...path: string[]): string => readFileSync(join(__dirname, '..', '..', ...path), 'utf8');
+    const count = (text: string, needle: string): number => text.split(needle).length - 1;
+    const service = read('server', 'src', 'agents', 'agents.service.ts');
+    const button = read('client', 'src', 'components', 'board', 'DispatchButton.tsx');
+
+    it.each(['inReviewBlock(', 'unvettedBlock(', 'planReviewBlock('])('neither calls %s directly', (call) => {
+      expect(count(service, call)).toBe(0);
+      expect(count(button, call)).toBe(0);
+    });
+
+    it('agents.service.ts reads it twice, plan and dispatch', () => {
+      expect(count(service, 'itemLadderBlock(')).toBe(2);
+    });
+
+    it('DispatchButton.tsx reads it once', () => {
+      expect(count(button, 'itemLadderBlock(')).toBe(1);
+    });
+  });
+});
+
+/*
+ * The unvetted guard (#341): a tracker bug or task filed from outside the repository whose body no trusted groom has pinned. One sentence again, shared by
+ * the board's button, the server's two ladders, the orchestrator's hand-kept copy and execute's refusal — and one rung, between in-review and plan-review.
+ */
+describe('unvettedBlock', () => {
+  it('names the vetting a groom gives for an item carrying the flag', () => {
+    expect(unvettedBlock(fakeItem({ unvetted: true }))).toBe('filed from outside the repo — groom it to vet the plan');
+    expect(UNVETTED_REASON).toBe('filed from outside the repo — groom it to vet the plan');
+  });
+
+  it('is null for an item without the flag', () => {
+    expect(unvettedBlock(fakeItem())).toBeNull();
+    expect(unvettedBlock(fakeItem({ source: 'github', planReview: true }))).toBeNull();
+  });
+
+  it('is the same sentence the orchestrator gate carries by hand', () => {
+    const tool = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
+    expect(tool).toContain(`const UNVETTED_REASON = '${UNVETTED_REASON}';`);
+  });
+
+  it('is the same sentence backlog-execute refuses with', () => {
+    const skill = readFileSync(join(__dirname, '..', '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain(UNVETTED_REASON);
+  });
+});
