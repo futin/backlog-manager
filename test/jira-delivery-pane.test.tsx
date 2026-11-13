@@ -342,6 +342,8 @@ describe('the CodeRabbit row', () => {
     drawRow([lead], { onReview });
     expect(rowEl()?.textContent).toContain('CodeRabbit · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
     expect(rowEl()?.querySelector('[data-tone]')).toHaveAttribute('data-tone', 'amber');
+    // The sentence ellipsises before the button gives way (a failed read's suffix overflowed 505 > 495 at 1440 in /ui-verify), so it is its own title.
+    expect(rowEl()?.querySelector('.jira-dlv-review-text')).toHaveAttribute('title', 'CodeRabbit · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
     const btn = screen.getByRole('button', { name: 'Fix review' });
     expect(btn).toBeEnabled();
     expect(btn.closest('.ui-split')).toHaveClass('ui-split-28');

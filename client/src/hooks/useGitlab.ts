@@ -25,7 +25,19 @@ async function fetchGitlab(): Promise<GitlabPayload> {
   }
   const data: unknown = await res.json().catch(() => null);
   if (!isPayload(data)) throw new Error('unexpected /api/gitlab response');
-  return data;
+  return withReviewDefaults(data);
+}
+
+/**
+ * Fills the two fields the CodeRabbit review added (`GitlabMr.review`, `GitlabProjectView.repos`) where an API one release older leaves them out — a client
+ * rebuilt against a stack that is not yet, or the reverse mid-`docker:sync`. `reviewState` dereferences `review`, so a missing one is not "no review" but a
+ * throw inside one MR chip that takes the whole Jira section down with it (/ui-verify, 2026-11-13). `null` and `[]` are exactly what a current API sends for
+ * "nothing read yet" and "no candidate repo", so every reader already draws them: no review word, no review button.
+ */
+function withReviewDefaults(data: GitlabPayload): GitlabPayload {
+  const jiraProjects: GitlabPayload['jiraProjects'] = {};
+  for (const [key, views] of Object.entries(data.jiraProjects)) jiraProjects[key] = views.map((v) => (Array.isArray(v.repos) ? v : { ...v, repos: [] }));
+  return { ...data, jiraProjects, mrs: data.mrs.map((mr) => (mr.review === undefined ? { ...mr, review: null } : mr)) };
 }
 
 /**

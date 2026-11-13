@@ -20,7 +20,9 @@ import { Glyph } from '../ui/Glyphs';
  * live-session gate holds (`reviewGate`) — two sessions pushing one MR branch is the failure it prevents, and the server's 409s are the authority for what
  * this view cannot see (another tab's in-flight reservation).
  *
- * `useAgents` is read HERE and not in the pane, so a ticket whose row is absent mounts no poller for it.
+ * `useAgents` is read HERE, beside the one decision it feeds, rather than threaded down from the pane. Hooks run before the early returns below, so the row
+ * mounts its own `/api/agents/status` poller whenever the pane draws a lead, open or not, sentence or not — one instance per open Detail, which is the cost.
+ * The sentence carries itself as a `title`: it ellipsises before the button gives up any width, and a failed read's suffix overflows at 1440 px.
  */
 
 /** Whether a dashboard row's checkout is one of the candidates: the main checkout itself or one of its `.worktrees/` trees (how a Jira worktree is laid out). */
@@ -83,7 +85,7 @@ export function ReviewRow({
   const blocked = showButton ? reviewGate(issue, lead, repos, jira?.live ?? {}, sessions?.links ?? []) : null;
   return (
     <div className="jira-dlv-review">
-      <span className="jira-dlv-review-text" data-tone={tone}>
+      <span className="jira-dlv-review-text" data-tone={tone} title={text}>
         {text}
       </span>
       {showButton && (
