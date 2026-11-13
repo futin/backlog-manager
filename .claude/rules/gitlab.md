@@ -23,6 +23,27 @@ paths: ["server/src/gitlab/**"]
 - **One sweep reads at most `GITLAB_PAGES_PER_PROJECT` pages of `GITLAB_PER_PAGE` per project, then one detail read per kept open MR.** Opened first, then
   merged and closed updated within `GITLAB_FINISHED_DAYS`, each `order_by=updated_at&sort=desc`, so the budget cuts the oldest finished MRs, never an open one.
   A spent budget after a full page sets `capped`. An unrecognised pipeline folds to `none` (`foldPipeline`) — unknown never reads as green.
+- **A review read is one more GET through `GitlabClient.request`, at most `GITLAB_REVIEW_PAGES` (3) pages of discussions per MR per read, and it is read-only.**
+  `mergeRequestDiscussions` (`gitlab.client.ts`) asks `GET /projects/:id/merge_requests/:iid/discussions?per_page=100&page=N` by number, behind the same
+  `redirect: 'manual'` and `PRIVATE-TOKEN` header as every other call. It runs after an open MR's detail read, under the same `run.stop` guard, and has three
+  triggers (`reviewDue`, `poller.service.ts`): the MR's `updated_at` is not the one stored at the last SUCCESSFUL read (`ProjectCache.reviewSeen`, server-only,
+  advanced only by a read that succeeded), its facts have never been read, or its state is `reviewing`/`open` and the facts are over `REVIEW_REREAD_MS` (10 min)
+  old — GitLab need not bump `updated_at` when a thread is resolved. Every page must answer 200 or the whole read fails: a fold is never built from a partial
+  set, and a third page that is still full sets `capped`. A merged or closed MR is never read and carries `review: null`, which means NOT READ, never "no review".
+  Why: [invariants.md](docs/subsystems/invariants.md#a-review-is-read-as-facts-and-its-state-is-derived-where-it-is-drawn)
+- **The fold is facts, never a state.** `foldReview` (`review.util.ts`, pure, no clock) turns discussions into `GitlabReview` (`open`, `resolved`, `worst`,
+  `bySeverity`, `triggeredAt`, `landedAt`, `commitsSince`, `capped`, `readAt`, `failed`) for the bot named by `gitlabReviewBot()` (`env.util.ts`:
+  `BM_GITLAB_REVIEW_BOT` trimmed, blank or unset is `coderabbitai`, read per call, passed by compose as `'${BM_GITLAB_REVIEW_BOT:-}'`). The state is
+  `reviewState(review, now)` in `shared/review.ts`, derived where it is drawn so a trigger that never lands stops reading `reviewing` after `REVIEW_STUCK_MS`
+  (30 min) by itself; the cache stores none. A failed review read keeps the last good facts with `failed: true` and `readAt` still the last success's, a stop
+  leaves them untouched, and an MR never read successfully stays `null`. Every rule in the fold is an observation of how CodeRabbit behaves on Timify's GitLab,
+  so each one is a small exported function (`isTrigger`, `parseSeverity`, `countAddedCommits`) a test pins.
+  Why: [invariants.md](docs/subsystems/invariants.md#a-review-is-read-as-facts-and-its-state-is-derived-where-it-is-drawn)
+- **The cache is readable by `agents/` through two methods and nothing else.** `findMr(project, iid)` (the GitLab path exact — `GRP/proj` is not `grp/proj`)
+  and `reposFor(jiraProject, gitlabProject)` answer from memory, as copies, with no request: review dispatch must see what the board saw. `GitlabProjectTarget.repos`
+  (mapping) is per Jira key, because a checkout mapped under `OPS` is no review candidate for a `PAY` ticket; `GitlabProjectView.repos` carries the same list to
+  the client. `isGitlabProjectPath` (`remote.util.ts`) is the pure shape check `jira/`'s review prompt validates an MR's project with — see jira.md.
+  Why: [invariants.md](docs/subsystems/invariants.md#a-review-is-read-as-facts-and-its-state-is-derived-where-it-is-drawn)
 - **An MR's ticket keys come from `keysInBranch`, over its source branch and its title (`mrKeys`), never a pattern of its own**, because an MR and a Jira
   session must agree on which ticket a branch belongs to: `timify-1234-x` is never `TIMIFY-123`. An MR naming none of its project's mapped keys is dropped.
 - **The state's precedence is identity first: `checking`, `rejected` (401/403 on `/user`), `unreachable`, then `idle` (zero projects) or `connected`.** A

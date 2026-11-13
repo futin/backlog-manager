@@ -159,6 +159,8 @@ happened.
   Why: [invariants.md](docs/subsystems/invariants.md#path-scoped-clauderules-reach-a-headless-run-in-a-linked-worktree-task-35)
 - **`agents/`, `tracker/`, `jira/` and `gitlab/` are the server's only outbound-calling modules**; `agents/dashboards/` is part of `agents/`, not a fifth, and
   `releases/` and `tick/` call out to nothing.
+- **`agents/` reads the GitLab poller's cache and calls GitLab never.**
+  Why: [invariants.md](docs/subsystems/invariants.md#agents-reads-the-gitlab-pollers-cache-and-never-calls-gitlab)
 - **Start orchestrator runs from the board, not by typing the trigger into a terminal.**
 
 ## Conventions

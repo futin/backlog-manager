@@ -298,6 +298,8 @@ Common vocabulary, used by all three surfaces:
 
 ## 9. Room for project 2 (not built here)
 
+> Built since: see [the CodeRabbit review design](2026-11-13-coderabbit-review-design.md), which kept to the three constraints below.
+
 Project 2 will read CodeRabbit's notes and unresolved threads per MR and add a **Review** step and a **Fix review** button that starts a session running
 `mr-review-loop` from its "pull findings" step on the lead MR. So this project should: keep per-MR data in a shape that can grow review fields; keep the
 track's step list data-driven so a step can be inserted; and keep the server strictly read-only toward GitLab, because project 2's writes (notes, resolve)
