@@ -56,7 +56,8 @@ export function useBranchState(
   repo: string,
   key: string,
   summary: string,
-  defaults: JiraRepoDefaults | undefined
+  defaults: JiraRepoDefaults | undefined,
+  locked: string | null = null
 ): BranchState {
   const actionKey = jiraActionParam(action);
   const refs = useFetched(repo === '' ? null : () => fetchJiraRefs(repo, key), [repo, key]);
@@ -73,15 +74,18 @@ export function useBranchState(
   }
 
   const ready = repo !== '' && settled && seed.visit === visit.n;
-  const choice = branchChoiceOf(draft, action);
+  // A review's branch is the MR's own, never the person's (CodeRabbit spec §5.4): Continue on `locked`, MR switch off. The draft keeps seeding as it always
+  // does — the section never draws it — and only what leaves this hook is overridden, so the preview, Copy and Start all carry the one choice.
+  const effective: BranchDraft = locked === null ? draft : { ...draft, mode: 'continue', continueBranch: locked, openMr: false };
+  const choice = branchChoiceOf(effective, action);
   return {
     refs,
     known,
     ready,
-    draft,
+    draft: effective,
     setDraft,
     choice,
-    refusal: ready ? draftRefusal(draft, action, key, known) : null,
+    refusal: ready ? draftRefusal(effective, action, key, known) : null,
     offTicket: ready && continueOffTicket(choice, key)
   };
 }
@@ -104,6 +108,9 @@ export function useBranchState(
  * **Refusals are said before Start.** `draftRefusal` is the same rules the server and the tool apply; its sentence is drawn here and the sheet disables Start
  * and Copy prompt on it. A New name that already exists offers `switch to Continue` on that branch, the server's own remedy, one click away.
  *
+ * **A review's branch is locked** (spec §5.4): `action === 'review'` draws `Continue` and the MR's source branch as two static values — no mode switch, no picker,
+ * no Open MR switch, because the session works on the MR's branch and pushes to it, and a new branch or an MR of its own would be a second review target.
+ *
  * **Open MR when done** is `execute`'s with a branch only, off on every open (spec §5.6); with Continue it asks for the MR's target, opening on the repo's
  * default base. A skill's prompt is its template, with no commit rule for the switch to amend.
  */
@@ -120,6 +127,22 @@ export function JiraBranchSection({
 }) {
   const { refs, known, ready, draft, setDraft, refusal, offTicket } = branch;
   const set = (patch: Partial<BranchDraft>): void => setDraft((d) => ({ ...d, ...patch }));
+
+  if (action === 'review') {
+    return (
+      <div className="sheet-field">
+        <span className="set-name">Branch</span>
+        <div className="jira-branch-line">
+          <span className="sheet-static">Continue</span>
+          <span className="sheet-static" title={draft.continueBranch}>
+            {draft.continueBranch}
+          </span>
+        </div>
+        {!ready && <div className="sheet-note">{repo === '' ? 'choose a repository first' : 'loading branches…'}</div>}
+        {refusal !== null && <div className="sheet-blocked">{refusal.text}</div>}
+      </div>
+    );
+  }
 
   const modes: { value: BranchDraft['mode']; label: string }[] = [
     { value: 'new', label: 'New' },

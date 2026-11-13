@@ -5,6 +5,7 @@ import { countdownReading, pollAge, pollProgress, type PollReading } from './tra
 import { DEFAULT_NAME_PATTERN, branchCarriesKey, branchNameProblem, renderBranchPattern, shellQuote, slugOf } from '../../../shared/jira-branch';
 import { JIRA_PROMPT_MAX, SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
 import type {
+  ReviewHalf,
   JiraAccess,
   JiraAction,
   JiraBoard,
@@ -1012,8 +1013,20 @@ export function transitionOptions(transitions: readonly JiraTransition[]): { val
  * `new`, `target` with `continue` and only when set, `openMr` only when true — because the server refuses a field that does not belong (`base is only for a new
  * branch`) rather than ignoring it, so a client that sent every field blank would be refused for the ones it did not mean.
  */
-export async function fetchJiraPrompt(key: string, action: JiraAction, repo: string, branch: JiraBranchChoice): Promise<string> {
+export async function fetchJiraPrompt(
+  key: string,
+  action: JiraAction,
+  repo: string,
+  branch: JiraBranchChoice,
+  review?: { half: ReviewHalf; mr: { project: string; iid: number } }
+): Promise<string> {
   const query = new URLSearchParams({ key, action: jiraActionParam(action), repo, mode: branch.mode });
+  // A review names its MR and half on the query (CodeRabbit spec §5.4, §6): the preview only shapes them, the dispatch route is what resolves the MR.
+  if (review !== undefined) {
+    query.set('mrProject', review.mr.project);
+    query.set('mrIid', String(review.mr.iid));
+    query.set('half', review.half);
+  }
   if (branch.mode !== 'none') {
     query.set('branch', branch.branch);
     if (branch.mode === 'new') query.set('base', branch.base);

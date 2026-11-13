@@ -5,7 +5,10 @@ import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useJiraPage } from '../../hooks/useJiraPage';
 import type { JiraChildrenIndex } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
-import type { JiraAction, JiraIssue } from '../../../../shared/types';
+import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf } from '../../../../shared/types';
+
+/** What a review launch adds to the sheet's state: the half, the MR (its source branch is the sheet's locked branch) and the candidate repos. */
+type ReviewLaunch = { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] };
 import { JiraBoardView } from './JiraBoardView';
 import { JiraDetail } from './JiraDetail';
 import { JiraLaunchSheet } from './JiraLaunchSheet';
@@ -77,10 +80,13 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   // The slot is JiraView's, and JiraView does not unmount on a page switch, so leaving the Board must clear it by hand — otherwise returning to Board would
   // redraw the modal for an issue the reader closed the page on.
   useEffect(() => setWalk([]), [page]);
-  const [launch, setLaunch] = useState<{ issue: JiraIssue; action: JiraAction } | null>(null);
+  const [launch, setLaunch] = useState<{ issue: JiraIssue; action: JiraAction; review?: ReviewLaunch } | null>(null);
   useEffect(() => setLaunch(null), [page]);
   const [nudge, setNudge] = useState(0);
   const run = (issue: JiraIssue, action: JiraAction): void => setLaunch({ issue, action });
+  // The CodeRabbit row's button (spec §5.4): the same sheet, pre-set to `review` on one MR. Reached from Detail's Delivery pane only, so `Run ▾` never offers it.
+  const runReview = (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]): void =>
+    setLaunch({ issue, action: 'review', review: { half, mr: { project: mr.project, iid: mr.iid, sourceBranch: mr.sourceBranch }, repos } });
   // A Start that landed, or a Start refused after the server's writes landed (the ticket moved either way): reload the shell's status, nudge the board, and
   // re-ask the sessions payload too — Detail's `sessionLive` and the List's `canRun` read it, and left to its own 15 s clock they would offer Start again
   // on a ticket the server now holds a run on (the one-run 409).
@@ -112,6 +118,7 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onBack={() => setWalk((w) => w.slice(0, -1))}
           onWrote={() => setNudge((n) => n + 1)}
           onRun={run}
+          onReview={runReview}
           onClose={() => setWalk([])}
         />
       )}
@@ -121,6 +128,7 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           key={launch.issue.key}
           issue={launch.issue}
           initialAction={launch.action}
+          review={launch.review}
           onClose={() => setLaunch(null)}
           onStarted={landed}
           onWrote={landed}

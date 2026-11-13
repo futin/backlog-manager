@@ -1,23 +1,31 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { JiraLaunchSheet, PREVIEW_SETTLE_MS } from '../client/src/components/jira/JiraLaunchSheet';
+import JiraView from '../client/src/components/jira/JiraView';
+import { GitlabContext } from '../client/src/hooks/GitlabContext';
 import { JiraContext } from '../client/src/hooks/JiraContext';
+import { JiraSessionsContext } from '../client/src/hooks/JiraSessionsContext';
+import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { daysAgoStamp } from './helpers/dates';
 import type {
   AgentsStatus,
+  GitlabMr,
+  JiraBoardStatus,
+  GitlabPayload,
   JiraAction,
   JiraDispatchResult,
   JiraIssue,
   JiraIssueDetail,
   JiraRefBranch,
   JiraRepoRefs,
-  JiraStatusPayload
+  JiraStatusPayload,
+  ReviewHalf
 } from '../shared/types';
 
 /*
@@ -198,14 +206,16 @@ let onClose: jest.Mock;
 let onStarted: jest.Mock;
 let onWrote: jest.Mock;
 
-function mount(opts: { initialAction?: JiraAction; status?: Partial<JiraStatusPayload>; issue?: JiraIssue } = {}) {
+type ReviewProp = { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] };
+
+function mount(opts: { initialAction?: JiraAction; status?: Partial<JiraStatusPayload>; issue?: JiraIssue; review?: ReviewProp } = {}) {
   onClose = jest.fn();
   onStarted = jest.fn();
   onWrote = jest.fn();
   const tree = (status?: Partial<JiraStatusPayload>) => (
     <SettingsProvider>
       <JiraContext.Provider value={{ data: jiraStatus(status), loading: false, error: false, reload: jest.fn() }}>
-        <JiraLaunchSheet issue={opts.issue ?? CARD} initialAction={opts.initialAction ?? 'execute'} onClose={onClose} onStarted={onStarted} onWrote={onWrote} />
+        <JiraLaunchSheet issue={opts.issue ?? CARD} initialAction={opts.initialAction ?? 'execute'} review={opts.review} onClose={onClose} onStarted={onStarted} onWrote={onWrote} />
       </JiraContext.Provider>
     </SettingsProvider>
   );
@@ -1170,5 +1180,220 @@ describe('JiraLaunchSheet — Copy prompt', () => {
     mount();
     await within(dialog()).findByText('prompt too long');
     expect(copyButton()).toBeDisabled();
+  });
+});
+
+/*
+  The launch sheet in review mode (CodeRabbit review spec §5.4): the MR's button opens the one sheet pre-set to the `review` action. The three usual tiles give
+  way to ONE pressed tile, the branch is the MR's own (Continue, locked, no open-MR control), the repository is one of the MR's candidates, and the preview and
+  Start both carry the MR and the half.
+*/
+describe('JiraLaunchSheet — review mode', () => {
+  const REVIEW: ReviewProp = { half: 'fix', mr: { project: 'dev/pay', iid: 15958, sourceBranch: 'PAY-131-x' }, repos: ['/Users/ada/pay', '/Users/ada/pay-web'] };
+  const reviewReady = async (over: Partial<Parameters<typeof mount>[0]> = {}, repoName = 'pay'): Promise<void> => {
+    mount({ initialAction: 'review', review: REVIEW, ...over });
+    await userEvent.click(repoPick(repoName));
+    await waitFor(() => expect(promptBox().value).not.toBe(''));
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/status')).toBe(true));
+  };
+
+  it('draws exactly one pressed tile, titled for the half, with the skill named in its sub-line, and none of the usual three', () => {
+    mount({ initialAction: 'review', review: REVIEW });
+    const tiles = within(within(dialog()).getByRole('group', { name: 'Action' })).getAllByRole('button');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveAccessibleName('Fix review');
+    expect(tiles[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(tiles[0]).toHaveTextContent('mr-review-loop on !15958');
+    expect(within(dialog()).queryByRole('button', { name: 'End to end' })).not.toBeInTheDocument();
+    expect(within(dialog()).queryByRole('button', { name: 'Ticket loaded' })).not.toBeInTheDocument();
+    expect(within(dialog()).queryByRole('button', { name: 'A skill' })).not.toBeInTheDocument();
+  });
+
+  it('titles the tile Request review for the request half', () => {
+    mount({ initialAction: 'review', review: { ...REVIEW, half: 'request' } });
+    expect(tile('Request review')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('without a review there are the three usual tiles and no review tile', () => {
+    mount();
+    const tiles = within(within(dialog()).getByRole('group', { name: 'Action' })).getAllByRole('button');
+    expect(tiles.map((t) => t.getAttribute('aria-label'))).toEqual(['End to end', 'Ticket loaded', 'A skill']);
+  });
+
+  it('lists exactly the review candidates as the repositories, not the project\'s other mapped paths', () => {
+    mount({ initialAction: 'review', review: { ...REVIEW, repos: ['/Users/ada/pay-web', '/Users/ada/pay'] }, status: { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web', '/Users/ada/other'] } } });
+    const group = within(dialog()).getByRole('group', { name: 'Repository' });
+    expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['pay-web', 'pay']);
+  });
+
+  it('shows the branch as Continue on the MR\'s source branch, not editable, with no open-MR control', async () => {
+    await reviewReady();
+    const sheet = dialog();
+    expect(within(sheet).getByText('Continue')).toBeInTheDocument();
+    expect(within(sheet).getByText('PAY-131-x')).toBeInTheDocument();
+    expect(within(sheet).queryByRole('group', { name: 'Branch mode' })).not.toBeInTheDocument();
+    expect(within(sheet).queryByRole('switch', { name: 'Open MR when done' })).not.toBeInTheDocument();
+    expect(within(sheet).queryByRole('textbox', { name: 'Branch' })).not.toBeInTheDocument();
+    expect(within(sheet).queryByRole('combobox', { name: 'Branch' })).not.toBeInTheDocument();
+  });
+
+  it('leaves Assign to me and Move to off', async () => {
+    await reviewReady();
+    expect(within(dialog()).getByRole('switch', { name: 'Assign to me' })).toHaveAttribute('aria-checked', 'false');
+    expect(within(dialog()).getByRole('combobox', { name: 'Move to' })).toHaveValue('');
+  });
+
+  it('opens on Desktop when the dashboard can and defaults to it, and on Dashboard with no Open in control when it cannot', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'desktop' });
+    mount({ initialAction: 'review', review: REVIEW });
+    await waitFor(() => expect(within(dialog()).getByRole('button', { name: 'Desktop' })).toHaveAttribute('aria-pressed', 'true'));
+    cleanup();
+    server.agents = agents({ launchSurfaceDefault: 'desktop' });
+    mount({ initialAction: 'review', review: REVIEW });
+    await waitFor(() => expect(calls.filter((c) => c.url === '/api/agents/status').length).toBeGreaterThan(1));
+    expect(within(dialog()).queryByRole('group', { name: 'Open in' })).not.toBeInTheDocument();
+  });
+
+  it('seeds the permission from defaultModeFor: acceptEdits by default, a fixed Settings default otherwise', async () => {
+    await reviewReady();
+    expect(within(dialog()).getByRole('combobox', { name: 'Permissions' })).toHaveValue('acceptEdits');
+  });
+
+  it('previews with the MR and the half on the query', async () => {
+    await reviewReady();
+    const read = promptReads().find((u) => u.searchParams.get('action') === 'review');
+    expect(read).toBeDefined();
+    expect(read?.searchParams.get('mrProject')).toBe('dev/pay');
+    expect(read?.searchParams.get('mrIid')).toBe('15958');
+    expect(read?.searchParams.get('half')).toBe('fix');
+    expect(read?.searchParams.get('mode')).toBe('continue');
+    expect(read?.searchParams.get('branch')).toBe('PAY-131-x');
+  });
+
+  it('a non-review preview carries none of the three', async () => {
+    await ready();
+    const read = promptReads()[0];
+    expect(read.searchParams.has('mrProject')).toBe(false);
+    expect(read.searchParams.has('mrIid')).toBe(false);
+    expect(read.searchParams.has('half')).toBe(false);
+  });
+
+  it('Start posts the review action with the MR, the half and a continue on the source branch with openMr off', async () => {
+    await reviewReady();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toMatchObject({
+      key: 'PAY-131',
+      repo: '/Users/ada/pay',
+      action: 'review',
+      mr: { project: 'dev/pay', iid: 15958 },
+      half: 'fix',
+      mode: 'continue',
+      branch: 'PAY-131-x',
+      openMr: false,
+      assign: false,
+      transitionId: null
+    });
+    expect(dispatchBody()).not.toHaveProperty('base');
+    expect(dispatchBody()).not.toHaveProperty('target');
+    expect(dispatchBody().mr).toEqual({ project: 'dev/pay', iid: 15958 });
+  });
+
+  it('a normal Start sends neither mr nor half', async () => {
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).not.toHaveProperty('mr');
+    expect(dispatchBody()).not.toHaveProperty('half');
+  });
+
+  it('shows a 409 answer\'s error in the sheet, as for any Run', async () => {
+    server.dispatch = { status: 409, body: { error: 'a session is live on PAY-131-x' } };
+    await reviewReady();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByRole('alert')).toHaveTextContent('a session is live on PAY-131-x');
+    expect(onStarted).not.toHaveBeenCalled();
+  });
+});
+
+/*
+  The button's whole path (spec §5.4): the CodeRabbit row in Jira Detail's Delivery pane, through `JiraView`, opens the launch sheet over the dialog. The
+  ruling this pins: `onReview` is threaded from `JiraView`'s launch state through `JiraDetail` into `DeliveryPane`; without that the row's button did nothing.
+*/
+describe('JiraView — the review button opens the launch sheet', () => {
+  const now = Date.now();
+  const iso = (minutes: number): string => new Date(now - minutes * 60_000).toISOString();
+  const LEAD: GitlabMr = {
+    project: 'dev/pay',
+    iid: 15958,
+    title: 'PAY-131 | refunds',
+    webUrl: 'https://gitlab.example.test/dev/pay/-/merge_requests/15958',
+    state: 'opened',
+    draft: false,
+    sourceBranch: 'PAY-131-x',
+    targetBranch: 'develop',
+    createdAt: iso(120),
+    updatedAt: iso(30),
+    mergedAt: null,
+    pipeline: 'success',
+    keys: ['PAY-131'],
+    review: {
+      open: 2,
+      resolved: 3,
+      worst: 'major',
+      bySeverity: { critical: 0, major: 1, minor: 1, trivial: 0, other: 0 },
+      triggeredAt: iso(30),
+      landedAt: iso(4),
+      commitsSince: 0,
+      capped: false,
+      readAt: iso(1),
+      failed: false
+    }
+  };
+  const GITLAB = {
+    status: { state: 'connected', site: 'gitlab.example.test', malformedSite: false, user: { username: 'ada', name: 'Ada' }, httpStatus: null, reason: null, armed: true, retryAt: null, mappedRepos: 1, foundHosts: [], problems: [] },
+    jiraProjects: { PAY: [{ path: 'dev/pay', repo: 'pay', polledAt: iso(2), capped: false, failed: false, repos: ['/Users/ada/pay'] }] },
+    mrs: [LEAD]
+  } as unknown as GitlabPayload;
+  const BOARD: JiraBoardStatus = { id: 'b_0a1b2c3d', name: 'Payments', roots: ['PAY-120'], queries: [], interval: '1m', polledAt: daysAgoStamp(0), count: 1, truncated: false, failures: [] };
+
+  it('opens one pressed Fix review tile, the right half, on the MR, over the dialog', async () => {
+    localStorage.clear();
+    setJiraPage('board');
+    const board = jiraStatus({ boards: [BOARD] });
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/jira/issue/')) return Promise.resolve(res(200, detail({ boards: [BOARD.id] })));
+      if (url.includes('/issues')) return Promise.resolve(res(200, { issues: [CARD], polledAt: daysAgoStamp(0) }));
+      if (url.startsWith('/api/jira/')) return base(input, init);
+      if (url.startsWith('/api/agents/')) return base(input, init);
+      return Promise.resolve(res(200, board));
+    }) as unknown as typeof fetch;
+    render(
+      <SettingsProvider>
+        <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: jest.fn() }}>
+          <JiraSessionsContext.Provider value={{ data: { links: [], reachable: true, rowsAt: null }, reload: jest.fn(() => Promise.resolve()) }}>
+            <GitlabContext.Provider value={{ data: GITLAB, error: null, refresh: () => Promise.resolve(GITLAB) }}>
+              <JiraView onOpenJiraPage={jest.fn()} />
+            </GitlabContext.Provider>
+          </JiraSessionsContext.Provider>
+        </JiraContext.Provider>
+      </SettingsProvider>
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
+    const modal = await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' });
+    await userEvent.click(await within(modal).findByRole('button', { name: 'Fix review' }));
+
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    const tiles = within(within(sheet).getByRole('group', { name: 'Action' })).getAllByRole('button');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveAccessibleName('Fix review');
+    expect(tiles[0]).toHaveTextContent('mr-review-loop on !15958');
+    expect(within(sheet).getByText('PAY-131-x')).toBeInTheDocument();
   });
 });
