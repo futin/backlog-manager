@@ -396,13 +396,27 @@ describe('the review built-in', () => {
     expect(review('fix', null).startsWith(readSentence)).toBe(true);
   });
 
-  it('fix: names the open findings and does not tell the session to post a trigger', () => {
+  it('request: discovery (Step 1) only, skips Steps 2 and 3, posts the trigger, then pushes and replies and resolves', () => {
+    const prompt = review('request', ws);
+    expect(prompt).toMatch(/discovery step \(Step 1\) for the host, project and token only/);
+    expect(prompt).toMatch(/skip[^.]*\(Steps 2 and 3\)/i);
+    expect(prompt).toContain('post a comment `@coderabbitai review`');
+    expect(prompt).toMatch(/push/);
+    expect(prompt).toMatch(/reply and resolve/);
+    expect(prompt).not.toMatch(/change nothing in the repository\./i);
+  });
+
+  it('fix: Step 1 wording, starts at fetching the open findings, no trigger to post, then pushes and replies and resolves', () => {
     const prompt = review('fix', ws);
     expect(prompt).toContain('!15958');
     expect(prompt).toContain('mr-review-loop');
     expect(prompt).toMatch(/open findings/i);
+    expect(prompt).toMatch(/\(Step 1\) for the host, project and token only/);
+    expect(prompt).toMatch(/start at the step that fetches the open findings/);
     expect(prompt).toMatch(/do not post/i);
     expect(prompt).not.toMatch(/post (a comment of )?`?@coderabbitai review/);
+    expect(prompt).toMatch(/push/);
+    expect(prompt).toMatch(/reply and resolve/);
   });
 
   it('carries none of the ticket text', () => {

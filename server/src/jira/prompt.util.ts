@@ -114,23 +114,26 @@ function readTicket(key: string): string {
 /**
  * `review` (spec 6): one session per half. It carries NO finding text — the session fetches the findings itself through the mr-review-loop skill, so nothing a
  * bot or a stranger wrote on the MR is ever in the prompt this server composes. The body opens with `readTicket` (after the workspace block, which every action
- * puts first), then names the MR as `!<iid>` in its project. `request` asks the skill to post the `@coderabbitai review` trigger comment and wait; `fix` must
- * not post one — the review already ran — and instead fetches the open findings and fixes what they ask. A session without the skill stops and says so rather
- * than improvising a GitLab call of its own: credentials live in the skill's tooling, not in this prompt.
+ * puts first), then names the MR as `!<iid>` in its project, which already exists for this branch. Both halves run the skill's discovery step (Step 1) for the
+ * host, project and token only — the credentials live in the skill's tooling, not in this prompt — and neither pushes nor opens an MR (Steps 2-3 are skipped).
+ * `request` starts at the trigger step: post `@coderabbitai review`, wait for the review, then triage, fix, verify, push, and reply and resolve as the skill
+ * says. `fix` starts at the step that fetches the open findings and must not post a trigger — the review already landed — then carries on through fix, verify,
+ * push, and reply and resolve. A session without the skill stops and says so rather than improvising a GitLab call of its own.
  */
 function reviewText(key: string, half: ReviewHalf, mr: { project: string; iid: number }): string {
   const where = `merge request !${mr.iid} in the GitLab project ${mr.project}`;
   const missing = 'If the mr-review-loop skill is not installed, stop and say so; do not call GitLab by any other route.';
   if (half === 'request') {
     return (
-      `${readTicket(key)} Then use the mr-review-loop skill on ${where}: post a comment \`@coderabbitai review\` on it to ask CodeRabbit for a review, ` +
-      `and report that the review was requested. Change nothing in the repository. ${missing}`
+      `${readTicket(key)} Then use the mr-review-loop skill on ${where}, which already exists for this branch. Run its discovery step (Step 1) for the host, ` +
+      `project and token only, and skip pushing the branch and creating the merge request (Steps 2 and 3). Start at the trigger step: post a comment ` +
+      `\`@coderabbitai review\` on it, wait for the review, then triage the findings, fix them, verify, push, and reply and resolve as the skill says. ${missing}`
     );
   }
   return (
-    `${readTicket(key)} Then use the mr-review-loop skill on ${where}: fetch CodeRabbit's open findings on it and fix what they ask, in this worktree, ` +
-    `verifying each fix with the repository's own tests and checks. Do not post a new review trigger comment; the review has already run. ` +
-    `Report which findings you fixed and which you left, with the reason. ${missing}`
+    `${readTicket(key)} Then use the mr-review-loop skill on ${where}. A review has already landed and has open findings. Run its discovery step (Step 1) ` +
+    `for the host, project and token only, then start at the step that fetches the open findings; do not post a new review trigger comment. Carry on through ` +
+    `fix, verify, push, and reply and resolve as the skill says. ${missing}`
   );
 }
 
