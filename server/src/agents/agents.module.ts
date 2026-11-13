@@ -21,6 +21,7 @@ import { ItemsModule } from '../items/items.module';
 import { OrchestratorModule } from '../orchestrator/orchestrator.module';
 import { TrackerModule } from '../tracker/tracker.module';
 import { JiraModule } from '../jira/jira.module';
+import { GitlabModule } from '../gitlab/gitlab.module';
 
 /**
  * SameOriginPostGuard is listed here rather than left to `@UseGuards`'s own
@@ -79,10 +80,14 @@ import { JiraModule } from '../jira/jira.module';
  *
  * `MachinesService` (Settings › Dashboards page, task 3) is `GET /api/dashboards/machines`: each machine's health (`DashboardStatusService.healthOf`, health only)
  * and, for a reachable one, its usage (`UsageService`). Nothing injects it back, so it adds no edge to the graph above.
+ *
+ * `GitlabModule` arrived with the CodeRabbit review action (spec §6): `JiraDispatchService` reads `GitlabPollerService`'s cache (`findMr`, `reposFor`) to
+ * check the MR a review names and derive its half, and makes no GitLab call of its own. The edge runs agents → gitlab and never back, like agents → jira;
+ * `GitlabModule` imports `JiraModule` (for `JiraLiveService.onReposChanged`), which imports neither, so there is no cycle and no `forwardRef`.
  */
 @Module({
   // `TrackerModule` for the poller's `syncOffBlock` (#17) — no cycle: it imports only `RegistryModule`.
-  imports: [RegistryModule, ItemsModule, OrchestratorModule, TrackerModule, JiraModule],
+  imports: [RegistryModule, ItemsModule, OrchestratorModule, TrackerModule, JiraModule, GitlabModule],
   controllers: [AgentsController, DashboardsController, ItemsAbortController, JiraAgentsController],
   providers: [
     AgentsService,
