@@ -188,7 +188,7 @@ export function JiraCard({
               {trees.length === 1 ? (trees[0].branch ?? '') : `${trees.length} worktrees`}
             </span>
           )}
-          {delivery !== null && <MrChip delivery={delivery} />}
+          {delivery !== null && <MrChip delivery={delivery} now={now} />}
           <JiraRunMenu issue={issue} onPick={onRun} />
         </div>
         {last !== null && (

@@ -19,6 +19,8 @@ import { GitlabPollerService } from './poller.service';
     { provide: GitlabClient, useFactory: () => new GitlabClient() },
     { provide: GitlabPollerService, useFactory: (client: GitlabClient, live: JiraLiveService) => new GitlabPollerService(client, live), inject: [GitlabClient, JiraLiveService] },
     SameOriginPostGuard
-  ]
+  ],
+  // Review dispatch (`agents/`) reads the poller's cache through `findMr` / `reposFor` and never makes a GitLab call of its own.
+  exports: [GitlabPollerService]
 })
 export class GitlabModule {}

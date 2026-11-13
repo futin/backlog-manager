@@ -4,7 +4,7 @@ import { isJiraKey, parseJiraAction } from '../../../shared/types';
 import type { JiraDispatchRequest, JiraDispatchResult } from '../../../shared/types';
 import { parseBranchChoice } from '../jira/branch-choice.util';
 import { JIRA_TRANSITION_ID_MAX_CHARS } from '../jira/config.util';
-import { JIRA_PROMPT_MAX } from '../jira/prompt.util';
+import { JIRA_PROMPT_MAX, parseReviewHalf, parseReviewMr } from '../jira/prompt.util';
 import { JiraDispatchService } from './jira-dispatch.service';
 import { SameOriginPostGuard } from './origin.guard';
 
@@ -51,7 +51,21 @@ export class JiraAgentsController {
     const key = body.key;
     if (!isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
     const action = parseJiraAction(body.action);
-    if (action === null) throw new HttpException({ error: 'action must be execute, context or { skill: <id> }' }, 400);
+    if (action === null) throw new HttpException({ error: 'action must be execute, context, review or { skill: <id> }' }, 400);
+    // A review names the MR its button was drawn for and the half its sheet previewed (spec §6); both are shape here and checked against the GitLab cache by
+    // the service. `mr` before `half`, both before the branch choice: the brief's one order. The iid must arrive as a JSON number — `parseReviewMr` also takes
+    // a digit string because `GET /api/jira/prompt` reads it from a query, but a body has no reason to quote it, so a quoted one is a malformed body. Any other
+    // action ignores both fields: they are never rebuilt into its request, so they cannot reach a composition that does not expect them.
+    let review: { mr: { project: string; iid: number }; half: 'request' | 'fix' } | null = null;
+    if (action === 'review') {
+      const rawMr = body.mr;
+      const mrBody = typeof rawMr === 'object' && rawMr !== null && !Array.isArray(rawMr) ? (rawMr as Record<string, unknown>) : null;
+      const mr = mrBody !== null && typeof mrBody.iid === 'number' ? parseReviewMr(mrBody.project, mrBody.iid) : null;
+      if (mr === null) throw new HttpException({ error: 'mr must be { project, iid }' }, 400);
+      const half = parseReviewHalf(body.half);
+      if (half === null) throw new HttpException({ error: 'half must be request or fix' }, 400);
+      review = { mr, half };
+    }
     const repo = body.repo;
     if (typeof repo !== 'string' || repo.trim() === '') throw new HttpException({ error: 'repo is required' }, 400);
     if (typeof body.assign !== 'boolean') throw new HttpException({ error: 'assign must be true or false' }, 400);
@@ -91,7 +105,8 @@ export class JiraAgentsController {
       effort: body.effort as string | undefined,
       remoteControl: body.remoteControl === true,
       ...(surface === undefined ? {} : { surface }),
-      ...(typeof prompt === 'string' ? { prompt } : {})
+      ...(typeof prompt === 'string' ? { prompt } : {}),
+      ...(review === null ? {} : review)
     });
   }
 

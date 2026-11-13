@@ -1,7 +1,7 @@
 import { COMMIT_RULE, oneLine } from '../../shared/agent';
 import { JIRA_BUILTIN_LABELS, jiraActionParam, parseJiraAction, parseJiraActionParam } from '../../shared/types';
 import type { JiraAction, JiraIssue, JiraIssueDetail, JiraSkill, JiraWorkspace } from '../../shared/types';
-import { JIRA_PROMPT_MAX, composeJiraPrompt, resolveJiraActionOrThrow, workspaceBlock } from '../../server/src/jira/prompt.util';
+import { JIRA_PROMPT_MAX, composeJiraPrompt, parseReviewHalf, parseReviewMr, resolveJiraActionOrThrow, workspaceBlock } from '../../server/src/jira/prompt.util';
 
 /**
  * Jira phase 5 (Run), spec §3 `prompt.util.ts` and §9: the composer that every Run prompt, built-in or a person's template, comes out of. No prompt carries a
@@ -171,8 +171,8 @@ describe('the shared helpers', () => {
     expect(COMMIT_RULE).toContain('Do not push.');
   });
 
-  it('names the two built-ins', () => {
-    expect(JIRA_BUILTIN_LABELS).toEqual({ execute: 'Work it end to end', context: 'Open with the ticket loaded' });
+  it('names the built-ins (review is a link label, never a menu row)', () => {
+    expect(JIRA_BUILTIN_LABELS).toEqual({ execute: 'Work it end to end', context: 'Open with the ticket loaded', review: 'Review the MR' });
   });
 
   it('parseJiraActionParam reads execute, context and skill:<s_ id>', () => {
@@ -224,6 +224,7 @@ describe('resolveJiraActionOrThrow', () => {
     expect(resolveJiraActionOrThrow('execute', [])).toEqual({ kind: 'execute' });
     expect(resolveJiraActionOrThrow('context', [skill])).toEqual({ kind: 'context' });
     expect(resolveJiraActionOrThrow({ skill: skill.id }, [skill])).toEqual({ kind: 'skill', skill });
+    expect(() => resolveJiraActionOrThrow('review', [skill])).toThrow(expect.objectContaining({ status: 400 }));
   });
 
   it('throws the 400 `unknown skill <id>` for an id the list does not hold', () => {
@@ -493,4 +494,109 @@ describe('the workspace block', () => {
       }
     });
   });
+});
+
+describe('the review built-in', () => {
+  const MR = { project: 'development/backend/microservice', iid: 15958 };
+  const ws: JiraWorkspace = { mode: 'continue', branch: 'pay-151-fix', base: null, worktree: '/work/pay/.worktrees/pay-151-fix', openMr: false, review: false, target: null };
+  const review = (half: 'request' | 'fix', workspace: JiraWorkspace | null) =>
+    ok(composeJiraPrompt(detail({ key: 'PAY-151' }), { kind: 'review', half, mr: MR }, '/work/pay', workspace));
+  const readSentence = "Read Jira ticket PAY-151 first with the backlog-manager:jira skill: run `jira.mjs show PAY-151`.";
+
+  it('request: the workspace block first (as for execute), then readTicket, then the review wording', () => {
+    const prompt = review('request', ws);
+    const head = ok(composeJiraPrompt(detail({ key: 'PAY-151' }), { kind: 'execute' }, '/work/pay', ws)).split('\n\n')[0];
+    expect(prompt.startsWith(`${head}\n\n`)).toBe(true);
+    const body = prompt.slice(head.length + 2);
+    expect(body.startsWith(readSentence)).toBe(true);
+    expect(prompt).toContain('mr-review-loop');
+    expect(prompt).toContain('!15958');
+    expect(prompt).toContain('development/backend/microservice');
+    expect(prompt).toContain('@coderabbitai review');
+    expect(prompt).toMatch(/not installed[^.]*stop/i);
+    expect(prompt.indexOf(readSentence)).toBeLessThan(prompt.indexOf('mr-review-loop'));
+  });
+
+  it('with a null workspace the text starts with the body', () => {
+    expect(review('request', null).startsWith(readSentence)).toBe(true);
+    expect(review('fix', null).startsWith(readSentence)).toBe(true);
+  });
+
+  it('request: discovery (Step 1) only, skips Steps 2 and 3, posts the trigger, then pushes and replies and resolves', () => {
+    const prompt = review('request', ws);
+    expect(prompt).toMatch(/discovery step \(Step 1\) for the host, project and token only/);
+    expect(prompt).toMatch(/skip[^.]*\(Steps 2 and 3\)/i);
+    expect(prompt).toContain('post a comment `@coderabbitai review`');
+    expect(prompt).toMatch(/push/);
+    expect(prompt).toMatch(/reply and resolve/);
+    expect(prompt).not.toMatch(/change nothing in the repository\./i);
+  });
+
+  it('fix: Step 1 wording, starts at fetching the open findings, no trigger to post, then pushes and replies and resolves', () => {
+    const prompt = review('fix', ws);
+    expect(prompt).toContain('!15958');
+    expect(prompt).toContain('mr-review-loop');
+    expect(prompt).toMatch(/open findings/i);
+    expect(prompt).toMatch(/\(Step 1\) for the host, project and token only/);
+    expect(prompt).toMatch(/start at the step that fetches the open findings/);
+    expect(prompt).toMatch(/do not post/i);
+    expect(prompt).not.toMatch(/post (a comment of )?`?@coderabbitai review/);
+    expect(prompt).toMatch(/push/);
+    expect(prompt).toMatch(/reply and resolve/);
+  });
+
+  it('carries none of the ticket text', () => {
+    for (const half of ['request', 'fix'] as const) {
+      const prompt = ok(composeJiraPrompt(hostile, { kind: 'review', half, mr: MR }, '/work/pay', null));
+      for (const text of TICKET_TEXT) expect(prompt).not.toContain(text);
+    }
+  });
+
+  it('resolveJiraActionOrThrow still refuses a bare review', () => {
+    let caught = null as { getStatus(): number; getResponse(): unknown } | null;
+    try {
+      resolveJiraActionOrThrow('review', []);
+    } catch (error) {
+      caught = error as typeof caught;
+    }
+    expect((caught as { getStatus(): number }).getStatus()).toBe(400);
+    expect((caught as { getResponse(): unknown }).getResponse()).toEqual({ error: 'review needs mr and half' });
+  });
+});
+
+describe('parseReviewMr', () => {
+  it.each([
+    ['grp/proj', '15958', 15958],
+    ['grp/proj', 15958, 15958]
+  ])('accepts %s / %s', (project, iid, expected) => {
+    expect(parseReviewMr(project, iid)).toEqual({ project, iid: expected });
+  });
+
+  it.each([
+    ['', 1],
+    ['grp/proj', 0],
+    ['grp/proj', 1.5],
+    ['grp/proj', '-3'],
+    ['grp/proj', '+3'],
+    ['grp/proj', '1e3'],
+    ['grp/proj', ' 3'],
+    ['grp/proj', '3 '],
+    ['grp/proj', '0'],
+    ['grp/proj', ''],
+    ['grp/proj', undefined],
+    ['../x', 1],
+    ['grp proj', 1],
+    ['grp//proj', 1],
+    ['/grp/proj', 1],
+    ['grp', 1],
+    [`g/${'p'.repeat(254)}`, 1],
+    [undefined, 1]
+  ])('rejects %p / %p', (project, iid) => {
+    expect(parseReviewMr(project, iid)).toBeNull();
+  });
+});
+
+describe('parseReviewHalf', () => {
+  it.each(['request', 'fix'])('accepts %s', (half) => expect(parseReviewHalf(half)).toBe(half));
+  it.each(['Fix', '', undefined, 'both', 1])('rejects %p', (half) => expect(parseReviewHalf(half)).toBeNull());
 });

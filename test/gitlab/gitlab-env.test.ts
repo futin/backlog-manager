@@ -1,4 +1,4 @@
-import { gitlabEnv } from '../../server/src/gitlab/env.util';
+import { gitlabEnv, gitlabReviewBot } from '../../server/src/gitlab/env.util';
 
 const NOT_SET = { configured: false, malformedSite: false, detail: 'set BM_GITLAB_SITE and BM_GITLAB_TOKEN in .env and restart' };
 const MALFORMED = { configured: false, malformedSite: true, detail: 'BM_GITLAB_SITE must be a hostname, like gitlab.example.com' };
@@ -41,5 +41,15 @@ describe('gitlabEnv', () => {
       const out = gitlabEnv(env);
       if (!out.configured) expect(out.detail).not.toContain(token);
     }
+  });
+});
+
+describe('gitlabReviewBot', () => {
+  it.each([
+    [{}, 'coderabbitai'],
+    [{ BM_GITLAB_REVIEW_BOT: '  cr-bot  ' }, 'cr-bot'],
+    [{ BM_GITLAB_REVIEW_BOT: '   ' }, 'coderabbitai']
+  ])('%j -> %s', (env, want) => {
+    expect(gitlabReviewBot(env)).toBe(want);
   });
 });

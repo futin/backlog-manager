@@ -4194,6 +4194,56 @@ every other GET in this app, because it starts nothing and discloses strictly le
 rediscover it. Without it the CLI could take an item and never give it back. Spec §6.2 names seven routes and not this one; the deviation is recorded in
 task-46's Outcome.
 
+## `agents/` reads the GitLab poller's cache and never calls GitLab
+
+The CodeRabbit review action (spec `2026-11-13-coderabbit-review-design.md` §6) is dispatched by `JiraDispatchService`, which lives in `agents/`, but the facts
+it checks — is this MR cached and open, which local checkouts are its candidates, what state is its review in — are the GitLab poller's. There were two ways to
+get them. A GitLab call from `agents/` would be a second GitLab client beside `GitlabClient`: a second place the token is sent, a second redirect policy, a
+second request budget the 429 window does not know about, and a read the board never saw — so a button drawn from one answer could be refused from another.
+Reading the poller's cache (`findMr`, `reposFor`) means the dispatch sees exactly what the board drew its button from, costs no request, and leaves `gitlab/`
+the only module that dials GitLab, which is what the outbound-calling modules rule above promises.
+
+So `AgentsModule` imports `GitlabModule`, and the edge runs agents → gitlab and never back, like agents → jira. It is acyclic because `GitlabModule` imports
+`JiraModule` (for `JiraLiveService.onReposChanged`) and `JiraModule` imports neither `agents/` nor `gitlab/`'s module: `jira/prompt.util.ts` takes one pure
+helper, `isGitlabProjectPath`, from `gitlab/remote.util.ts` — a file with no Nest in it — to shape an MR's project path, which is why that helper lives there
+and not in the poller. The price is that a review is decided on cache age: the GitLab sweep runs every two minutes and a review's own facts can be ten minutes
+old, so dispatch can accept a review the MR has since outgrown. The half check (a 409 when the cached state no longer derives the half the sheet previewed) and
+the session's own read of the MR through its skill are what catch that; the spec accepts the window rather than pay for a live read on every click.
+
+## A review is read as facts, and its state is derived where it is drawn
+
+The poller stores what the discussions SAY about CodeRabbit (`foldReview`: the triggers, the findings, the rounds, the commits since) and never what they MEAN.
+Meaning needs a clock — a trigger that has not landed reads `reviewing` for 30 minutes and then stops reading `reviewing`, falling first to `open` when any thread is still open (`open > 0` wins before the rest), then to `stale` when an
+earlier round landed and to `none` when none did (`unknown` is only a capped read with nothing open) — and a poller that wrote the word would keep it
+until the next sweep happened to rewrite it, so a stuck trigger would read as live for as long as nothing else on the MR moved. `reviewState(review, now)` runs where
+the track is drawn and where dispatch decides, so both read the same minute.
+
+A read that fails halfway fails whole: a fold over two of three pages would count fewer open threads and could say `clean` about an MR that is not, and `clean`
+is the one answer that makes a person stop looking. So any non-200 page keeps the last facts flagged `failed`, and `ProjectCache.reviewSeen` — the `updated_at`
+the facts were read at — advances only on success, so a failed read is retried on the next sweep instead of being mistaken for current. `review: null` is "not
+read" (merged and closed MRs, which are not worth three requests), never "no review", which is a real state with its own copy. GitLab does not bump `updated_at`
+when a thread is resolved, so an `open` or `reviewing` review is also re-read after ten minutes whatever the MR says.
+
+## A review dispatch decides from the cache and gates the branch
+
+A click on the CodeRabbit row makes no GitLab request: the server answers from `GitlabPollerService.findMr` and `reposFor`, so the click costs nothing the sweep
+did not already spend and the answer is the one the person was looking at. The sheet's `half` is re-derived from that cache, and a sheet that has gone stale is
+a 409 `the review on !<iid> moved on — reopen the sheet` rather than a session that does the other half. The prompt names the CACHED MR and carries no finding
+text, because finding text is a stranger's and the session reads it itself through the skill; `mr` and `half` are validated, then checked against the cache, so
+a caller cannot point a session at an MR the poller does not hold.
+
+Two reviews on one branch would answer the same findings twice and commit over each other, so dispatch refuses a second one: `branchHolds` (memory only, keyed
+`<main checkout>\0<branch>`, taken synchronously with `live.reserve`, released on a failed spawn and on a desktop launch that answered no id), any live link on
+the branch of any `how`, and any live dashboard row on it. The links and the rows can be 15 to 60 s old; the spec accepts that, because the cost of a second
+session slipping through that window is a redundant comment, and a gate that read GitLab or the dashboard per click would put a request on a button.
+
+## The CodeRabbit button belongs to the MR, never to Run
+
+A review acts on one merge request's threads, and `Run ▾` is a ticket's menu: it has no MR to name, and a row in it would either guess the lead MR or add a pick
+the launch sheet already owns. So the button lives on the row under the MR's own track, `JiraRunMenu` never offers `review`, and the row opens the sheet
+pre-set: one tile, the MR's source branch locked as `continue`, and only the repos the MR resolves to. A review on any other branch would be a review of a
+different change, and a tile or a branch the person can change would let the sheet disagree with the MR the row drew.
+
 ## The claim protocol: lowest live comment id wins
 
 Task-46, spec §6.3. A claim has to be readable by every machine, editable in place, ordered consistently, and visible to a PERSON looking at the issue in

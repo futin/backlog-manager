@@ -152,6 +152,13 @@ describe('docker-compose BM_GITLAB_SITE / BM_GITLAB_TOKEN', () => {
   });
 });
 
+/** The CodeRabbit review bot's username (spec 4.2): a passthrough with an empty default beside the GitLab pair, so blank means the server's default. */
+describe('docker-compose BM_GITLAB_REVIEW_BOT', () => {
+  it('passes the host value through with an empty default', () => {
+    expect(assignments('BM_GITLAB_REVIEW_BOT')).toEqual(['${BM_GITLAB_REVIEW_BOT:-}']);
+  });
+});
+
 /**
  * #225 — the server's copy of the machine name, read by the board's Release claim on a session it did not dispatch. A passthrough with an empty default,
  * because a hostname read inside the container is its id and would match no claim, and a literal here would be one machine's name on every machine.

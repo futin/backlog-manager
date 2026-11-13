@@ -11,15 +11,18 @@ import {
   type GitlabPayload,
   type GitlabPipeline,
   type GitlabProjectView,
+  type GitlabReview,
   type GitlabRepoProblem,
   type GitlabState,
   type GitlabStatus
 } from '../../../shared/types';
+import { REVIEW_REREAD_MS, reviewState } from '../../../shared/review';
 import { readJiraConfig } from '../jira/config.util';
 import type { JiraLiveService } from '../jira/live.service';
 import { runGit } from '../git-run.util';
-import { gitlabEnv } from './env.util';
+import { GITLAB_REVIEW_PAGES, gitlabEnv, gitlabReviewBot } from './env.util';
 import { GITLAB_PER_PAGE, GitlabClient, type GitlabResponse, type RawMr } from './gitlab.client';
+import { foldReview, type RawDiscussion } from './review.util';
 import { foldMrState, foldPipeline, mrKeys, resolveGitlabProjects, type GitlabMapping, type GitlabProjectTarget } from './mapping.util';
 
 /**
@@ -70,6 +73,11 @@ interface ProjectCache {
   shown: number;
   failed: boolean;
   cannotRead: 403 | 404 | null;
+  /**
+   * Per open MR: its `updated_at` at the last SUCCESSFUL review read (spec §4.3 rule 1). Server-only — `GitlabMr` does not carry it — and advanced only by a
+   * read that succeeded, so a failed read leaves the MR due again on the next sweep instead of being mistaken for "seen".
+   */
+  reviewSeen: Map<number, string>;
 }
 
 /** A call that got no HTTP answer, a 5xx or a refused 3xx — what turns the state `unreachable`. */
@@ -256,10 +264,11 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
       // ticket points at Settings › Shared › Sources. A project read before keeps its own flag — its last good answer still stands (§6.3).
       const polledAt = c?.polledAt ?? null;
       const failed = (c?.failed ?? false) || (verdict.kind === 'rejected' && polledAt === null);
-      const view: GitlabProjectView = { path: p.path, repo: p.repo, polledAt, capped: c?.capped ?? false, failed };
-      for (const key of p.jiraKeys) (jiraProjects[key] ??= []).push({ ...view });
+      const view: GitlabProjectView = { path: p.path, repo: p.repo, polledAt, capped: c?.capped ?? false, failed, repos: [] };
+      // `repos` per Jira key: a checkout mapped under `OPS` is no candidate for a `PAY` ticket, so one shared view copy would be wrong (spec §5.2).
+      for (const key of p.jiraKeys) (jiraProjects[key] ??= []).push({ ...view, repos: [...(p.repos[key] ?? [])] });
       if (c === undefined) continue;
-      mrs.push(...c.mrs.map((m) => ({ ...m, keys: [...m.keys] })));
+      mrs.push(...c.mrs.map((m) => ({ ...m, keys: [...m.keys], review: m.review === null ? null : { ...m.review, bySeverity: { ...m.review.bySeverity } } })));
       if (c.failed && c.cannotRead !== null) cannotRead.push({ kind: 'cannot-read', path: p.path, status: c.cannotRead });
       if (c.capped) capped.push({ kind: 'capped', path: p.path, shown: c.shown });
     }
@@ -284,6 +293,24 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
       jiraProjects,
       mrs
     };
+  }
+
+  /**
+   * The cached MR of `project` (the GitLab path, exact — `GRP/proj` is not `grp/proj`) and `iid`, or `null`. Review dispatch's read (spec §6): the cache
+   * only, no request, so it sees what the board saw. A copy, so a caller cannot move the cache.
+   */
+  findMr(project: string, iid: number): GitlabMr | null {
+    const mr = this.cache.get(project)?.mrs.find((m) => m.iid === iid);
+    if (mr === undefined) return null;
+    return { ...mr, keys: [...mr.keys], review: mr.review === null ? null : { ...mr.review, bySeverity: { ...mr.review.bySeverity } } };
+  }
+
+  /** The `jira.json` paths under `jiraProject` whose origin is `gitlabProject` — the same list the project view carries; `[]` for any unknown pair. */
+  reposFor(jiraProject: string, gitlabProject: string): string[] {
+    const env = gitlabEnv(this.env());
+    if (!env.configured || this.mapping === null || this.mapping.site !== env.site) return [];
+    const target = this.mapping.projects.find((p) => p.path === gitlabProject);
+    return [...(target?.repos[jiraProject] ?? [])];
   }
 
   /**
@@ -488,32 +515,58 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
         mergedAt: raw.merged_at ?? null,
         // Finished MRs are not read for a pipeline (spec §6.3 bounds the requests by open MRs), so they carry `null`, never a guessed `none`.
         pipeline: null,
+        review: null,
         keys
       });
     }
 
     const lastGood = (iid: number): GitlabPipeline => prev?.mrs.find((m) => m.iid === iid)?.pipeline ?? 'none';
+    const lastReview = (iid: number): GitlabReview | null => prev?.mrs.find((m) => m.iid === iid)?.review ?? null;
+    const reviewSeen = new Map<number, string>();
+    const bot = gitlabReviewBot(this.env());
     for (const mr of byIid.values()) {
       if (mr.state !== 'opened') continue;
+      const seen = prev?.reviewSeen.get(mr.iid);
+      if (seen !== undefined) reviewSeen.set(mr.iid, seen);
       if (run.stop) {
+        // Unread this sweep, not failed: a stop says nothing about this MR, so its last good facts stand exactly as they were.
         mr.pipeline = lastGood(mr.iid);
+        mr.review = lastReview(mr.iid);
         continue;
       }
       const res = await this.client.mergeRequest(run.site, run.token, target.path, mr.iid);
       if (res.status === 200) {
         mr.pipeline = foldPipeline(res.data?.head_pipeline?.status);
+      } else {
+        mr.pipeline = lastGood(mr.iid);
+        if (res.status === 429) {
+          this.openWindow(res);
+          run.stop = true;
+        } else if (res.status === 401) {
+          if (await this.reReadIdentity(run)) run.stop = true;
+        } else if (unansweredStatus(res.status)) {
+          run.unanswered ??= { httpStatus: res.status === 0 ? null : res.status, reason: res.message ?? `HTTP ${res.status}` };
+        }
+        // A detail 403/404 (or any other code) is that MR's problem alone: last good pipeline, no project verdict, no state.
+      }
+      // The review read goes after the detail read, under the same stop guard (spec §4.3).
+      const previous = lastReview(mr.iid);
+      if (run.stop) {
+        mr.review = previous;
         continue;
       }
-      mr.pipeline = lastGood(mr.iid);
-      if (res.status === 429) {
-        this.openWindow(res);
-        run.stop = true;
-      } else if (res.status === 401) {
-        if (await this.reReadIdentity(run)) run.stop = true;
-      } else if (unansweredStatus(res.status)) {
-        run.unanswered ??= { httpStatus: res.status === 0 ? null : res.status, reason: res.message ?? `HTTP ${res.status}` };
+      if (!this.reviewDue(previous, seen, mr.updatedAt, run.now)) {
+        mr.review = previous;
+        continue;
       }
-      // A detail 403/404 (or any other code) is that MR's problem alone: last good pipeline, no project verdict, no state.
+      const read = await this.readReview(run, target.path, mr.iid, bot);
+      if (read.ok) {
+        mr.review = read.review;
+        reviewSeen.set(mr.iid, mr.updatedAt);
+      } else {
+        // The last good facts, flagged: `readAt` stays the last success's, so the board can say how old they are.
+        mr.review = previous === null ? null : { ...previous, bySeverity: { ...previous.bySeverity }, failed: true };
+      }
     }
 
     // The lists were read: they are the answer, even when a stop above left some pipelines at their last good value.
@@ -523,8 +576,55 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
       capped,
       shown: capped ? rows.length : 0,
       failed: false,
-      cannotRead: null
+      cannotRead: null,
+      reviewSeen
     });
+  }
+
+  /**
+   * Spec §4.3: a review is read when (3) it never was, (1) the MR's `updated_at` is not the one at the last SUCCESSFUL read, or (2) its state is `reviewing`
+   * or `open` and its facts are over `REVIEW_REREAD_MS` old — GitLab may not bump `updated_at` when a thread is resolved or the bot edits its note, so a
+   * round in flight or a list of findings is re-asked on a clock instead. (4) A previous read that FAILED is always due: the facts it kept are stale by
+   * definition, and `reviewState` may have since moved off `reviewing`/`open` (a trigger that crossed the stuck line), which would otherwise park the flagged
+   * facts until the MR next changed.
+   */
+  private reviewDue(previous: GitlabReview | null, seenUpdatedAt: string | undefined, updatedAt: string, now: number): boolean {
+    if (previous === null || seenUpdatedAt === undefined) return true;
+    if (seenUpdatedAt !== updatedAt) return true;
+    if (previous.failed) return true;
+    const state = reviewState(previous, now);
+    if (state !== 'reviewing' && state !== 'open') return false;
+    const readAt = Date.parse(previous.readAt);
+    return Number.isNaN(readAt) || now - readAt > REVIEW_REREAD_MS;
+  }
+
+  /**
+   * Up to `GITLAB_REVIEW_PAGES` pages of discussions, then one fold. Every page must answer 200 or the whole read fails — a fold is never built from a partial
+   * set. A page shorter than `GITLAB_PER_PAGE` ends it; a third page that is still full means there may be more unread (`capped`), and the fold is told so.
+   * Failure handling mirrors the detail read: 429 opens the window and stops the sweep, 401 re-reads the identity, an unanswered status is recorded once.
+   */
+  private async readReview(run: SweepRun, project: string, iid: number, bot: string): Promise<{ ok: true; review: GitlabReview } | { ok: false }> {
+    const all: RawDiscussion[] = [];
+    let capped = false;
+    for (let page = 1; page <= GITLAB_REVIEW_PAGES; page++) {
+      const res = await this.client.mergeRequestDiscussions(run.site, run.token, project, iid, page);
+      if (res.status !== 200) {
+        if (res.status === 429) {
+          this.openWindow(res);
+          run.stop = true;
+        } else if (res.status === 401) {
+          if (await this.reReadIdentity(run)) run.stop = true;
+        } else if (unansweredStatus(res.status)) {
+          run.unanswered ??= { httpStatus: res.status === 0 ? null : res.status, reason: res.message ?? `HTTP ${res.status}` };
+        }
+        return { ok: false };
+      }
+      const list = Array.isArray(res.data) ? res.data : [];
+      all.push(...list);
+      if (list.length < GITLAB_PER_PAGE) break;
+      if (page === GITLAB_REVIEW_PAGES) capped = true;
+    }
+    return { ok: true, review: foldReview(all, bot, capped, iso(run.now)) };
   }
 
   /** A list read that did not answer 200: the project keeps its MRs and `polledAt`, and the code decides what else happens. */
@@ -535,7 +635,7 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
       run.stop = true;
       return;
     }
-    const kept: ProjectCache = prev ?? { mrs: [], polledAt: null, capped: false, shown: 0, failed: false, cannotRead: null };
+    const kept: ProjectCache = prev ?? { mrs: [], polledAt: null, capped: false, shown: 0, failed: false, cannotRead: null, reviewSeen: new Map() };
     if (res.status === 401) {
       // A token revoked after a good identity read: ask again now, so the row turns `rejected` within this sweep rather than at a restart.
       if (await this.reReadIdentity(run)) {

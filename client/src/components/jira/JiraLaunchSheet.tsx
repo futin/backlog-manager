@@ -20,7 +20,7 @@ import {
 } from '../../lib/jira';
 import { clampMode, modesUpTo, projectDispatchGate } from '../../../../shared/agent';
 import { JIRA_BUILTIN_LABELS, JIRA_PROMPT_MAX, jiraActionParam } from '../../../../shared/types';
-import type { JiraAction, JiraDispatchResult, JiraIssue, LaunchSurface, PermissionMode } from '../../../../shared/types';
+import type { JiraAction, JiraDispatchResult, JiraIssue, LaunchSurface, PermissionMode, ReviewHalf } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 import { GlyphTile } from '../ui/GlyphTile';
@@ -86,12 +86,19 @@ export const PREVIEW_SETTLE_MS = 350;
 export function JiraLaunchSheet({
   issue,
   initialAction,
+  review,
   onClose,
   onStarted,
   onWrote
 }: {
   issue: JiraIssue;
   initialAction: JiraAction;
+  /**
+   * Set by an MR's CodeRabbit button (spec §5.4): the sheet is then the review's, with `initialAction` `'review'`. One pressed tile in place of the three, the
+   * repository one of `repos` (the MR's candidates — not every path the project maps), the branch locked to Continue on `mr.sourceBranch`, and the MR and the
+   * half carried on the preview's query and Start's body. Absent, the sheet is exactly what it was.
+   */
+  review?: { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] };
   onClose: () => void;
   onStarted: () => void;
   onWrote: () => void;
@@ -103,7 +110,9 @@ export function JiraLaunchSheet({
 
   const skills = data?.skills ?? [];
   const me = data?.me ?? null;
-  const paths = data?.repos[issue.project.key] ?? [];
+  const paths = review !== undefined ? review.repos : (data?.repos[issue.project.key] ?? []);
+  // What the server is told about the MR: its project and iid only — the source branch is the sheet's own, sent as the Continue choice.
+  const reviewWire = review === undefined ? undefined : { half: review.half, mr: { project: review.mr.project, iid: review.mr.iid } };
 
   const [action, setAction] = useState<JiraAction>(initialAction);
   // '' is "not chosen": several mapped paths wait for a pick, and the preview waits with them rather than guessing a repository. A single path is
@@ -120,7 +129,11 @@ export function JiraLaunchSheet({
   // Seeded in render, not an effect, for the board sheet's reason: an effect would paint one frame of Dashboard on a sheet whose default is Desktop. `null`
   // until the status first lands — the shell's `useAgents` may still be loading when the sheet opens.
   const [pickedSurface, setSurface] = useState<LaunchSurface | null>(null);
-  if (pickedSurface === null && agents !== null) setSurface(agents.launchSurfaceDefault ?? 'dashboard');
+  // A review launch seeds Desktop whenever it is offered, whatever `launchSurfaceDefault` says (spec §5.2/§6): a review session is one a person watches and
+  // answers, so the Settings default for ordinary launches does not apply to it. Without Desktop available it seeds as any other sheet does.
+  if (pickedSurface === null && agents !== null) {
+    setSurface(review !== undefined && agents.desktopAvailable === true ? 'desktop' : (agents.launchSurfaceDefault ?? 'dashboard'));
+  }
   const offersDesktop = agents?.desktopAvailable === true;
   const desktop = offersDesktop && pickedSurface === 'desktop';
   // Where the launch that landed went — the answer alone cannot say, because today's dashboard answers a desktop launch with an id like any other.
@@ -128,7 +141,7 @@ export function JiraLaunchSheet({
   const [started, setStarted] = useState<JiraDispatchResult | null>(null);
 
   const actionKey = jiraActionParam(action);
-  const branch = useBranchState(action, repo, issue.key, issue.summary, data?.repoDefaults?.[repo]);
+  const branch = useBranchState(action, repo, issue.key, issue.summary, data?.repoDefaults?.[repo], review?.mr.sourceBranch ?? null);
   const branchSent = branch.ready && branch.refusal === null;
   const choiceKey = JSON.stringify(branch.choice);
   // The choice the preview may be asked about — the live one once it has stood still (I1). Typing (a field or a switch inside the same mode) waits
@@ -152,7 +165,7 @@ export function JiraLaunchSheet({
   // Copy prompt are disabled — and the moment it settles the key changes once, so `useFetched` starts exactly one request for it. Start can therefore
   // never send a choice other than the one the preview was composed for: any edit after the answer makes the key differ again and the answer reads stale.
   const previewable = branchSent && settled !== null && settled.choice === choiceKey;
-  const preview = useFetched(previewable ? () => fetchJiraPrompt(issue.key, action, repo, branch.choice) : null, [issue.key, actionKey, repo, choiceKey]);
+  const preview = useFetched(previewable ? () => fetchJiraPrompt(issue.key, action, repo, branch.choice, reviewWire) : null, [issue.key, actionKey, repo, choiceKey]);
   const detail = useFetched(() => fetchJiraDetail(issue.key), [issue.key]);
 
   const promptText = preview.status === 'ok' ? preview.value : null;
@@ -235,6 +248,8 @@ export function JiraLaunchSheet({
           key: issue.key,
           repo,
           action,
+          // A review names its MR and the half the sheet previewed; the server derives the half again and 409s a mismatch.
+          ...(reviewWire !== undefined ? { mr: reviewWire.mr, half: reviewWire.half } : {}),
           assign: assignNow,
           // `null` is "leave as is" — the server's own spelling, not an empty string it would have to refuse.
           transitionId: transitionId === '' ? null : transitionId,
@@ -294,6 +309,20 @@ export function JiraLaunchSheet({
       }
     }
   ];
+  // A review replaces the three with the one tile it is: pressed, and inert — there is nothing else to pick, and pressing it again must not change the action.
+  const shownTiles: typeof tiles =
+    review === undefined
+      ? tiles
+      : [
+          {
+            key: 'review',
+            title: review.half === 'fix' ? 'Fix review' : 'Request review',
+            sub: `mr-review-loop on !${review.mr.iid}`,
+            glyph: 'play',
+            on: true,
+            pick: () => undefined
+          }
+        ];
   const tileIds = useId();
 
   // Two to four paths with distinct basenames read as a segmented control of those basenames (the full path is each button's title); anything else — five or
@@ -362,7 +391,7 @@ export function JiraLaunchSheet({
           <div className="sheet-field">
             <span className="set-name">Action</span>
             <div className="launch-tiles" role="group" aria-label="Action">
-              {tiles.map((t) => (
+              {shownTiles.map((t) => (
                 <button
                   key={t.key}
                   type="button"

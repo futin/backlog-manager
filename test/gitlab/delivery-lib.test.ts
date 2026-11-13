@@ -4,6 +4,7 @@ import {
   deliveryIndex,
   deliveryLook,
   deliveryShown,
+  effectiveDeliveryFilter,
   leadMr,
   matchesDelivery,
   mrRepo,
@@ -11,7 +12,7 @@ import {
 } from '../../client/src/lib/delivery';
 import type { DeliveryFilter, TicketDelivery, TrackStep } from '../../client/src/lib/delivery';
 import { polledPhrase } from '../../client/src/lib/jira';
-import type { GitlabMr, GitlabPayload, GitlabPipeline, GitlabProjectView, GitlabStatus, JiraIssue } from '../../shared/types';
+import type { GitlabMr, GitlabPayload, GitlabReview, GitlabPipeline, GitlabProjectView, GitlabStatus, JiraIssue } from '../../shared/types';
 
 /**
  * The delivery derivations (GitLab connection spec §7). Fixtures discriminate: every MR carries its own iid, branch, project and `updatedAt`, so a reading
@@ -38,12 +39,13 @@ function mr(over: Partial<GitlabMr> = {}): GitlabMr {
     mergedAt: null,
     pipeline: 'success',
     keys: ['TIMIFY-123'],
+    review: null,
     ...over
   };
 }
 
 function view(over: Partial<GitlabProjectView> = {}): GitlabProjectView {
-  return { path: 'development/backend/microservice', repo: 'microservice', polledAt: minutesAgo(1), capped: false, failed: false, ...over };
+  return { path: 'development/backend/microservice', repo: 'microservice', polledAt: minutesAgo(1), capped: false, failed: false, repos: [], ...over };
 }
 
 function status(over: Partial<GitlabStatus> = {}): GitlabStatus {
@@ -98,16 +100,16 @@ const marks = (track: TrackStep[]): string[] => track.map((t) => `${t.step} ${t.
 
 describe('deliveryLook', () => {
   it.each<[string, Partial<GitlabMr>, string, string, string, string[]]>([
-    ['opened draft, failed pipeline', { iid: 419, draft: true, pipeline: 'failed' }, '!419 · draft', 'draft', 'grey', ['pushed on', 'open grey', 'pipeline off', 'merged off']],
-    ['opened, success', { iid: 412, pipeline: 'success' }, '!412 · ✓ pipeline', 'pipeline passed', 'green', ['pushed on', 'open on', 'pipeline green', 'merged off']],
-    ['opened, failed', { iid: 415, pipeline: 'failed' }, '!415 · ✕ pipeline failed', 'pipeline failed', 'red', ['pushed on', 'open on', 'pipeline red', 'merged off']],
-    ['opened, running', { iid: 416, pipeline: 'running' }, '!416 · ◷ running', 'pipeline running', 'amber', ['pushed on', 'open on', 'pipeline amber', 'merged off']],
-    ['opened, canceled', { iid: 417, pipeline: 'canceled' }, '!417 · pipeline canceled', 'pipeline canceled', 'grey', ['pushed on', 'open on', 'pipeline grey', 'merged off']],
-    ['opened, no pipeline', { iid: 418, pipeline: 'none' }, '!418 · open', 'open, no pipeline', 'grey', ['pushed on', 'open on', 'pipeline off', 'merged off']],
-    ['merged', { iid: 398, state: 'merged', pipeline: null }, '!398 · merged', 'merged', 'magenta', ['pushed magenta', 'open magenta', 'pipeline magenta', 'merged magenta']],
-    ['closed', { iid: 390, state: 'closed', pipeline: null }, '!390 · closed', 'closed', 'grey', ['pushed on', 'open on', 'pipeline off', 'closed grey']]
+    ['opened draft, failed pipeline', { iid: 419, draft: true, pipeline: 'failed' }, '!419 · draft', 'draft', 'grey', ['pushed on', 'open grey', 'pipeline off', 'review off', 'merged off']],
+    ['opened, success', { iid: 412, pipeline: 'success' }, '!412 · ✓ pipeline', 'pipeline passed', 'green', ['pushed on', 'open on', 'pipeline green', 'review off', 'merged off']],
+    ['opened, failed', { iid: 415, pipeline: 'failed' }, '!415 · ✕ pipeline failed', 'pipeline failed', 'red', ['pushed on', 'open on', 'pipeline red', 'review off', 'merged off']],
+    ['opened, running', { iid: 416, pipeline: 'running' }, '!416 · ◷ running', 'pipeline running', 'amber', ['pushed on', 'open on', 'pipeline amber', 'review off', 'merged off']],
+    ['opened, canceled', { iid: 417, pipeline: 'canceled' }, '!417 · pipeline canceled', 'pipeline canceled', 'grey', ['pushed on', 'open on', 'pipeline grey', 'review off', 'merged off']],
+    ['opened, no pipeline', { iid: 418, pipeline: 'none' }, '!418 · open', 'open, no pipeline', 'grey', ['pushed on', 'open on', 'pipeline off', 'review off', 'merged off']],
+    ['merged', { iid: 398, state: 'merged', pipeline: null }, '!398 · merged', 'merged', 'magenta', ['pushed magenta', 'open magenta', 'pipeline magenta', 'review magenta', 'merged magenta']],
+    ['closed', { iid: 390, state: 'closed', pipeline: null }, '!390 · closed', 'closed', 'grey', ['pushed on', 'open on', 'pipeline off', 'review off', 'closed grey']]
   ])('%s', (_name, over, chip, word, tone, track) => {
-    const look = deliveryLook(mr(over));
+    const look = deliveryLook(mr(over), NOW);
     expect(look.chip).toBe(chip);
     expect(look.word).toBe(word);
     expect(look.tone).toBe(tone);
@@ -115,7 +117,86 @@ describe('deliveryLook', () => {
   });
 
   it('reads an open MR whose pipeline was never read (null) as having none, never as passing', () => {
-    expect(deliveryLook(mr({ iid: 420, pipeline: null })).word).toBe('open, no pipeline');
+    expect(deliveryLook(mr({ iid: 420, pipeline: null }), NOW).word).toBe('open, no pipeline');
+  });
+});
+
+function review(over: Partial<GitlabReview> = {}): GitlabReview {
+  return {
+    open: 0,
+    resolved: 0,
+    worst: null,
+    bySeverity: { critical: 0, major: 0, minor: 0, trivial: 0, other: 0 },
+    triggeredAt: minutesAgo(600),
+    landedAt: minutesAgo(590),
+    commitsSince: 0,
+    capped: false,
+    readAt: minutesAgo(1),
+    failed: false,
+    ...over
+  };
+}
+const twoOpen = (over: Partial<GitlabReview> = {}): GitlabReview =>
+  review({ open: 2, worst: 'major', bySeverity: { critical: 0, major: 1, minor: 1, trivial: 0, other: 0 }, ...over });
+
+describe('deliveryLook with a CodeRabbit review', () => {
+  it('open findings: the chip, the word, amber, the Review step amber, and the pipeline word kept apart', () => {
+    const look = deliveryLook(mr({ iid: 15958, pipeline: 'success', review: twoOpen() }), NOW);
+    expect(look.chip).toBe('!15958 · 2 to fix');
+    expect(look.word).toBe('2 to fix');
+    expect(look.tone).toBe('amber');
+    expect(look.pipelineWord).toBe('pipeline passed');
+    expect(marks(look.track)).toEqual(['pushed on', 'open on', 'pipeline green', 'review amber', 'merged off']);
+  });
+
+  it('a failed pipeline beats the findings', () => {
+    const look = deliveryLook(mr({ pipeline: 'failed', review: twoOpen() }), NOW);
+    expect(look.word).toBe('pipeline failed');
+    expect(look.tone).toBe('red');
+    expect(look.pipelineWord).toBe('pipeline failed');
+    expect(marks(look.track)).toEqual(['pushed on', 'open on', 'pipeline red', 'review amber', 'merged off']);
+  });
+
+  it('a draft stays a draft over its findings, and still draws the Review step', () => {
+    const look = deliveryLook(mr({ iid: 419, draft: true, pipeline: 'success', review: twoOpen() }), NOW);
+    expect(look.chip).toBe('!419 · draft');
+    expect(look.word).toBe('draft');
+    expect(look.tone).toBe('grey');
+    expect(marks(look.track)).toEqual(['pushed on', 'open grey', 'pipeline off', 'review amber', 'merged off']);
+  });
+
+  it('a capped count reads n+', () => {
+    const look = deliveryLook(mr({ iid: 7, review: review({ open: 5, capped: true }) }), NOW);
+    expect(look.word).toBe('5+ to fix');
+    expect(look.chip).toBe('!7 · 5+ to fix');
+  });
+
+  it('review null: the pipeline word and an off Review step', () => {
+    const look = deliveryLook(mr({ pipeline: 'running', review: null }), NOW);
+    expect(look.word).toBe('pipeline running');
+    expect(look.pipelineWord).toBe('pipeline running');
+    expect(marks(look.track)).toEqual(['pushed on', 'open on', 'pipeline amber', 'review off', 'merged off']);
+  });
+
+  it.each<[string, Partial<GitlabReview>, string]>([
+    ['none', { triggeredAt: null, landedAt: null }, 'off'],
+    ['unknown', { capped: true, open: 0 }, 'off'],
+    ['reviewing', { triggeredAt: minutesAgo(4), landedAt: null }, 'grey'],
+    ['stale', { commitsSince: 3 }, 'grey'],
+    ['clean', { resolved: 25 }, 'green']
+  ])('Review step mark for %s', (_n, over, mark) => {
+    const look = deliveryLook(mr({ review: review(over) }), NOW);
+    expect(look.track[3]).toEqual({ step: 'review', mark });
+    expect(look.word).toBe('pipeline passed');
+  });
+
+  it('merged: five magenta steps; closed: Review off and ends on closed, whatever the review says', () => {
+    expect(marks(deliveryLook(mr({ state: 'merged', pipeline: null, review: twoOpen() }), NOW).track)).toEqual([
+      'pushed magenta', 'open magenta', 'pipeline magenta', 'review magenta', 'merged magenta'
+    ]);
+    expect(marks(deliveryLook(mr({ state: 'closed', pipeline: null, review: twoOpen() }), NOW).track)).toEqual([
+      'pushed on', 'open on', 'pipeline off', 'review off', 'closed grey'
+    ]);
   });
 });
 
@@ -349,38 +430,61 @@ describe('matchesDelivery', () => {
   });
 
   it('all matches everything', () => {
-    for (const d of [ownOpened, closedOnly, none, unknown, hidden]) expect(matchesDelivery('all', d)).toBe(true);
+    for (const d of [ownOpened, closedOnly, none, unknown, hidden]) expect(matchesDelivery('all', d, NOW)).toBe(true);
   });
 
   it('has-mr: own opened and inherited merged; not closed-only, none or unknown', () => {
-    expect(matchesDelivery('has-mr', ownOpened)).toBe(true);
-    expect(matchesDelivery('has-mr', inheritedMerged)).toBe(true);
-    expect(matchesDelivery('has-mr', closedOnly)).toBe(false);
-    expect(matchesDelivery('has-mr', none)).toBe(false);
-    expect(matchesDelivery('has-mr', unknown)).toBe(false);
+    expect(matchesDelivery('has-mr', ownOpened, NOW)).toBe(true);
+    expect(matchesDelivery('has-mr', inheritedMerged, NOW)).toBe(true);
+    expect(matchesDelivery('has-mr', closedOnly, NOW)).toBe(false);
+    expect(matchesDelivery('has-mr', none, NOW)).toBe(false);
+    expect(matchesDelivery('has-mr', unknown, NOW)).toBe(false);
   });
 
   it('failing: an opened non-draft failed lead, own or inherited; never a draft', () => {
-    expect(matchesDelivery('failing', ownFailed)).toBe(true);
-    expect(matchesDelivery('failing', inheritedFailed)).toBe(true);
-    expect(matchesDelivery('failing', draftFailed)).toBe(false);
-    expect(matchesDelivery('failing', ownOpened)).toBe(false);
+    expect(matchesDelivery('failing', ownFailed, NOW)).toBe(true);
+    expect(matchesDelivery('failing', inheritedFailed, NOW)).toBe(true);
+    expect(matchesDelivery('failing', draftFailed, NOW)).toBe(false);
+    expect(matchesDelivery('failing', ownOpened, NOW)).toBe(false);
   });
 
   it('done-not-merged mirrors notMerged', () => {
-    expect(matchesDelivery('done-not-merged', doneOwn)).toBe(true);
-    expect(matchesDelivery('done-not-merged', doneInherited)).toBe(false);
-    expect(matchesDelivery('done-not-merged', ownOpened)).toBe(false);
+    expect(matchesDelivery('done-not-merged', doneOwn, NOW)).toBe(true);
+    expect(matchesDelivery('done-not-merged', doneInherited, NOW)).toBe(false);
+    expect(matchesDelivery('done-not-merged', ownOpened, NOW)).toBe(false);
   });
 
   it('hidden and unknown match no value but all', () => {
     const values = Object.keys(DELIVERY_FILTER_LABELS).filter((v) => v !== 'all') as DeliveryFilter[];
-    expect(values).toHaveLength(3);
-    for (const v of values) for (const d of [hidden, unknown] as TicketDelivery[]) expect(matchesDelivery(v, d)).toBe(false);
+    expect(values).toHaveLength(4);
+    for (const v of values) for (const d of [hidden, unknown] as TicketDelivery[]) expect(matchesDelivery(v, d, NOW)).toBe(false);
   });
 
   it('labels are the spec’s', () => {
-    expect(DELIVERY_FILTER_LABELS).toEqual({ all: 'All', 'has-mr': 'Has MR', failing: 'Pipeline failing', 'done-not-merged': 'Done, not merged' });
+    expect(DELIVERY_FILTER_LABELS).toEqual({ all: 'All', 'has-mr': 'Has MR', failing: 'Pipeline failing', 'done-not-merged': 'Done, not merged', 'review-open': 'Review open' });
+  });
+});
+
+describe('matchesDelivery review-open', () => {
+  const idx = (mrs: GitlabMr[], jiraProjects?: Record<string, GitlabProjectView[]>) => deliveryIndex(payload(mrs, jiraProjects));
+  it('matches a lead with open findings, own or inherited; not a clean one, a null one, a merged one or a hidden ticket', () => {
+    const own = ticketDelivery(issue(), idx([mr({ review: twoOpen() })]));
+    const inherited = ticketDelivery(subtaskOf('TIMIFY-101', 'TIMIFY-100'), idx([mr({ keys: ['TIMIFY-100'], review: twoOpen() })]));
+    const clean = ticketDelivery(issue(), idx([mr({ review: review({ resolved: 3 }) })]));
+    const unread = ticketDelivery(issue(), idx([mr({ review: null })]));
+    const merged = ticketDelivery(issue(), idx([mr({ state: 'merged', pipeline: null, review: twoOpen() })]));
+    const hidden = ticketDelivery(issue({ key: 'PAY-1' }), idx([]));
+    expect(matchesDelivery('review-open', own, NOW)).toBe(true);
+    expect(matchesDelivery('review-open', inherited, NOW)).toBe(true);
+    expect(matchesDelivery('review-open', clean, NOW)).toBe(false);
+    expect(matchesDelivery('review-open', unread, NOW)).toBe(false);
+    expect(matchesDelivery('review-open', merged, NOW)).toBe(false);
+    expect(matchesDelivery('review-open', hidden, NOW)).toBe(false);
+  });
+
+  it('a stored review-open with delivery hidden applies as all', () => {
+    expect(effectiveDeliveryFilter('review-open', false)).toBe('all');
+    expect(effectiveDeliveryFilter('review-open', true)).toBe('review-open');
   });
 });
 
@@ -416,5 +520,5 @@ describe('deliveryShown', () => {
 
 // Keeps `GitlabPipeline` honest as a fixture type: every value the server folds to has a row in deliveryLook's table.
 it.each<GitlabPipeline>(['success', 'failed', 'running', 'canceled', 'none'])('deliveryLook has a word for pipeline %s', (p) => {
-  expect(deliveryLook(mr({ pipeline: p })).word).not.toBe('');
+  expect(deliveryLook(mr({ pipeline: p }), NOW).word).not.toBe('');
 });

@@ -3,8 +3,12 @@ import type { GitlabPipeline } from '../../../shared/types';
 import { runGit } from '../git-run.util';
 import { parseGitRemote, remoteOnSite } from './remote.util';
 
-/** One GitLab project the poller reads. `repo` is the basename of the first `jira.json` path that resolved to it, for messages only. */
-export type GitlabProjectTarget = { path: string; repo: string; jiraKeys: string[] };
+/**
+ * One GitLab project the poller reads. `repo` is the basename of the first `jira.json` path that resolved to it, for messages only. `repos` is the full
+ * list: per Jira project key, EVERY `jira.json` path under that key whose origin resolved here, in the file's own (already normalised) spelling — the one
+ * review dispatch compares (spec §5.2 "Review candidates"). Per key and not flat, because `PAY`'s checkout of a project is not a candidate for `OPS`.
+ */
+export type GitlabProjectTarget = { path: string; repo: string; jiraKeys: string[]; repos: Record<string, string[]> };
 
 /**
  * What mapping the configured Jira repos found. `foundHosts` are the hosts of remotes that parsed but are not on the site (so Settings can say "your repos
@@ -31,7 +35,7 @@ export async function resolveGitlabProjects(
 
   const origins = await Promise.all(reads.map((r) => readOrigin(r.repoPath)));
 
-  const byPath = new Map<string, { repo: string; keys: Set<string> }>();
+  const byPath = new Map<string, { repo: string; keys: Set<string>; repos: Record<string, string[]> }>();
   const hosts = new Set<string>();
   const failures = new Set<string>();
   reads.forEach((r, i) => {
@@ -45,13 +49,15 @@ export async function resolveGitlabProjects(
       hosts.add(remote.host);
       return;
     }
-    const entry = byPath.get(remote.path) ?? { repo: baseName(r.repoPath), keys: new Set<string>() };
+    const entry = byPath.get(remote.path) ?? { repo: baseName(r.repoPath), keys: new Set<string>(), repos: {} };
     entry.keys.add(r.jiraKey);
+    const listed = (entry.repos[r.jiraKey] ??= []);
+    if (!listed.includes(r.repoPath)) listed.push(r.repoPath);
     byPath.set(remote.path, entry);
   });
 
   const projects = [...byPath.entries()]
-    .map(([path, e]) => ({ path, repo: e.repo, jiraKeys: [...e.keys].sort() }))
+    .map(([path, e]) => ({ path, repo: e.repo, jiraKeys: [...e.keys].sort(), repos: e.repos }))
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { projects, foundHosts: [...hosts].sort(), originFailures: [...failures].sort() };
 }

@@ -321,6 +321,15 @@ export class JiraLiveService {
     return this.rows.get(sessionId);
   }
 
+  /**
+   * Every kept row whose session is still doing something (`working` or `question`, the reconciler's ACTIVE pair), as copies. Review dispatch's branch gate
+   * (spec §5.2) reads it: a session the board never linked can still be pushing the MR's branch, and its row's `gitBranch` and `projectPath` are the only
+   * record of that. Memory only and synchronous, like `rowFor`, so the gate can read it between the reservation and its own entry with no `await` between.
+   */
+  activeRows(): DashboardRow[] {
+    return [...this.rows.values()].filter((r) => r.status === 'working' || r.status === 'question').map((r) => ({ ...r }));
+  }
+
   /** The latest tick could not read the dashboard. The previous rows stay, so a page can still show them, flagged stale. */
   markUnreachable(_at: number): void {
     this.up = false;

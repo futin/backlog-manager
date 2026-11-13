@@ -235,6 +235,6 @@ export function stripTitle(state: JiraSessionState): string | undefined {
 export function runLabel(link: JiraLink, skills: readonly { id: string; name: string }[]): string {
   const a = link.action;
   if (a === null) return link.name;
-  if (a === 'execute' || a === 'context') return JIRA_BUILTIN_LABELS[a];
+  if (a === 'execute' || a === 'context' || a === 'review') return JIRA_BUILTIN_LABELS[a];
   return skills.find((k) => k.id === a.skill)?.name ?? a.skill;
 }

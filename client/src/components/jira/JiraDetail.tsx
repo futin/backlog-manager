@@ -36,7 +36,7 @@ import { elapsedSince } from '../../lib/item-age';
 import { renderMarkdown } from '../../lib/markdown';
 import { STATE_LABEL, type JiraSessionState } from '../../../../shared/jira-sessions';
 import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
-import type { JiraAction, JiraIssue, JiraTransition, JiraIssueDetail, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
+import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf, JiraTransition, JiraIssueDetail, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Fact } from '../ui/Fact';
 import { Glyph } from '../ui/Glyphs';
@@ -190,6 +190,7 @@ export function JiraDetail({
   onBack,
   onWrote,
   onRun,
+  onReview,
   onClose
 }: {
   issue: JiraIssue;
@@ -201,6 +202,8 @@ export function JiraDetail({
   onWrote: () => void;
   /** `Run ▾`'s pick — the page opens the launch sheet over this dialog. */
   onRun: (issue: JiraIssue, action: JiraAction) => void;
+  /** The Delivery pane's CodeRabbit button — the page opens the launch sheet pre-set to a review (spec §5.4). Absent, the row draws no button. */
+  onReview?: (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
   onClose: () => void;
 }) {
   const { zone } = useTimeZone();
@@ -401,7 +404,7 @@ export function JiraDetail({
         )}
       </div>
       {/* Delivery (GitLab connection spec §7.1): what became of the work — under the sessions that did it, above their history. It draws itself or nothing. */}
-      <DeliveryPane issue={src} now={now} />
+      <DeliveryPane issue={src} now={now} onReview={onReview === undefined ? undefined : (half, mr, repos) => onReview(src, half, mr, repos)} />
       {ended.length > 0 && (
         <>
           <div className="jira-detail-lbl">History</div>

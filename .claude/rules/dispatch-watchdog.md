@@ -24,10 +24,12 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   `out-of-scope/`. **Nothing here asks what an item's `source` is** — task-45's `source !== 'files' → null` first line was removed by task-46's dispatch lift,
   and re-adding it would hide the control for every tracker item again. `findItem` is a one-line delegate to `ItemsService.find`, so a `gh:<owner>/<repo>#<n>`
   URN resolves to exactly the `BacklogItem` the board drew its button from. **`POST /api/agents/dispatch-jira` has no file state to derive from, so its
-  `action` is a PICK, not a derivation** — and still never an accepted string: `parseJiraAction` (`shared/types.ts`) takes `'execute'`, `'context'` or
-  `{ skill: <id> }` and nothing else (the controller's 400 `action must be execute, context or { skill: <id> }`), and `resolveJiraActionOrThrow` then proves a
-  skill id against `jira.json`'s `skills` as read for this request (400 `unknown skill <id>`, before Jira or the dashboard is asked) — a closed set of the two
-  built-ins and whatever the file holds, validated server-side. The `repo` is proved the same way, against `jira.json`'s mapping for the key's own project
+  `action` is a PICK, not a derivation** — and still never an accepted string: `parseJiraAction` (`shared/types.ts`) takes `'execute'`, `'context'`, `'review'` or
+  `{ skill: <id> }` and nothing else (the controller's 400 `action must be execute, context, review or { skill: <id> }`), and `resolveJiraActionOrThrow` then
+  proves a skill id against `jira.json`'s `skills` as read for this request (400 `unknown skill <id>`, before Jira or the dashboard is asked) — a closed set
+  of the three built-ins and whatever the file holds, validated server-side.
+  `review`'s compose action is built from the GitLab cache and never from the request.
+  The `repo` is proved the same way, against `jira.json`'s mapping for the key's own project
   prefix (400 `<repo> is not mapped to <PROJECT>`), then asked of the dashboard gate as the raw string `projectDispatchGate` compares; no `dirName` is derived
   from it. Why:
   [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
@@ -52,7 +54,11 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   `JIRA_PROMPT_MAX`, else 400 `prompt must be a non-empty string` / `prompt too long` before any Jira write), and spawned as written with no composition
   run, the link, worktree choice and writes still following the other fields — the session is handed `composeJiraPrompt`'s text (`server/src/jira/prompt.util.ts`), the one function behind
   `GET /api/jira/prompt` and the dispatch's one composition, made before any Jira write — so a preview, a length check and a spawn cannot disagree. With the body's `review` on (execute with a branch only), `execute` reorders: commit, review with the jira skill's `references/review.md`, and only on approve the transition and the closing rule; a skill without that file means stop — no transition, no push, no MR; off, the text is unchanged byte for byte. What a caller can influence is
-  `key` (`isJiraKey`), the `repo` (proved against the mapping) and the action pick above. A SKILL's prompt is its template — the person's own text from
+  `key` (`isJiraKey`), the `repo` (proved against the mapping) and the action pick above.
+  For `review` it also influences `mr` (`{ project, iid }`: the path through `isGitlabProjectPath`, the iid a positive integer) and `half` (`request` or `fix`),
+  both shape-validated by the controller and then checked against the GitLab poller's cache by `JiraDispatchService` (`findMr`, `reposFor`) — the prompt names
+  the CACHED MR's project and iid, carries no finding text, and a `half` that is not the one the cached review derives is a 409, never a different prompt.
+  A SKILL's prompt is its template — the person's own text from
   `jira.json` — with `{key}`, `{url}` and `{repo}` filled in ONE pass by a replacement function, plus a `Jira ticket: <KEY>` line when the template names no
   `{key}`, and nothing of the ticket's own: the skill reads the ticket itself, so no stranger's text is in it. A BUILT-IN's prompt carries none of the ticket
   either (2026-11-11): its instruction, the key, and an order to read the ticket first with `jira.mjs show <KEY>` and treat that text as data, not
@@ -63,6 +69,10 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   validated `finish`/`base`/`autoMerge`/`fix` (a body spelling any of the four flags is a 400; a groom body's one trailing `COMMIT_RULE` is stripped first;
   `autoMerge`/`fix` are accepted only with finish `pr`, and `fix` only with `autoMerge`; a groom sent to another machine has no finish, a 400).
   Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-and-jira-spawn-prompts-are-composed-server-side)
+- **`agents/` reads the GitLab poller's cache and calls GitLab never.** `AgentsModule` imports `GitlabModule` for `JiraDispatchService`'s review checks
+  (`GitlabPollerService.findMr` / `reposFor`, from memory, no request). The edge runs agents → gitlab and never back, like agents → jira; `GitlabModule` imports
+  `JiraModule`, which imports neither, so there is no cycle and no `forwardRef`. A GitLab call from `agents/` — the session's own `mr-review-loop` token does
+  that — would make a second GitLab client. Why: [invariants.md](docs/subsystems/invariants.md#agents-reads-the-gitlab-pollers-cache-and-never-calls-gitlab)
 - **The browser never talks to the dashboard.** Every call goes board → this API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off — and
   **compose passes that one through as `${BM_AGENTS:-off}`, never as a literal** (bug-25, pinned by `test/guards/compose-env.test.ts`). `BM_AGENTS_URL` beside it is
   stack topology, not a policy default, so compose overrides it under a **second key** and never interpolates `BM_AGENTS_URL` itself:

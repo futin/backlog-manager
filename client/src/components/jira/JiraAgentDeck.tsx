@@ -94,7 +94,7 @@ function DeckCard({ entry, now, onOpenIssue }: { entry: DeckEntry; now: number; 
         {crumb !== '' && <span className="jira-card-crumb">{crumb}</span>}
         {delivery?.kind === 'mrs' && (
           <div className="jira-deck-mr">
-            <MrChip delivery={delivery} />
+            <MrChip delivery={delivery} now={now} />
           </div>
         )}
         {pct !== undefined && (

@@ -224,7 +224,7 @@ export function runKey(row: Pick<ListRow, 'link'>): string | null {
 function runOptionLabel(key: string, skills: readonly { id: string; name: string }[]): string {
   if (key === 'branch') return 'Found by branch';
   if (key === 'manual') return 'Linked by hand';
-  if (key === 'execute' || key === 'context') return JIRA_BUILTIN_LABELS[key];
+  if (key === 'execute' || key === 'context' || key === 'review') return JIRA_BUILTIN_LABELS[key];
   const id = key.slice('skill:'.length);
   return skills.find((k) => k.id === id)?.name ?? id;
 }

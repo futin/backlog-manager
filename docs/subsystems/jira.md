@@ -100,7 +100,7 @@ unconfigured, then ask the poller — so a malformed request never reads as an e
 | `GET /api/jira/search?q=`         | ≤ 20 issues for the roots picker; `q` required (400), trimmed, blank → `[]` with no call, over 100 characters → 400            |
 | `GET /api/jira/projects`          | every project the credentials see, `{ key, name }[]` sorted by key, paged by `startAt`                                          |
 | `GET /api/jira/jql/check?jql=`    | `{ ok: true, count }` or `{ ok: false, message }` (Jira rejected it — still a 200); `jql` required, over 2 000 characters → 400  |
-| `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&review&target` | `text/plain`: `composeJiraPrompt`'s answer. Refusals in order: 400 `invalid issue key`, 400 `action must be execute, context or skill:<id>`, 400 `repo is required`, the branch choice's 400s (`parseBranchChoice`, [below](#branch-and-worktree-the-repobranch-work)), 503, 409 (`jira.json` unreadable), 400 `unknown skill <id>`, the issue read (§8), 400 `<repo> is not mapped to <PROJECT>` (`repos[detail.project.key]`, repo normalised like a stored path), the refs' 409s (`resolveWorkspace`), 400 `prompt too long` |
+| `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&review&target&mrProject&mrIid&half` | `text/plain`: `composeJiraPrompt`'s answer (`mrProject`, `mrIid` and `half` only for `action=review`, the iid a string here). Refusals in order: 400 `invalid issue key`, 400 `action must be execute, context, review or skill:<id>`, 400 `repo is required`, the branch choice's 400s (`parseBranchChoice`, [below](#branch-and-worktree-the-repobranch-work)), 503, 409 (`jira.json` unreadable), 400 `unknown skill <id>`, the issue read (§8), 400 `<repo> is not mapped to <PROJECT>` (`repos[detail.project.key]`, repo normalised like a stored path), the refs' 409s (`resolveWorkspace`), 400 `prompt too long` |
 | `GET /api/jira/refs?repo&key`     | `JiraRepoRefs` for one mapped repo, as of its last fetch. 400 `repo is required`, 400 `invalid issue key` (`key` is optional), 503, 409, 400 `<repo> is not mapped`; an unreadable repo is a 200 with `available: false` and its reason |
 | `GET /api/jira/worktrees`         | `{ worktrees, unavailable }` — every working tree of every distinct mapped path, and each repo that could not be read with its reason; never an error for one repo |
 | `GET /api/jira/sessions?open=1`   | `JiraSessionsPayload` — every link, live and ended, with its derived `state`, the dashboard's `row` (`null` for an ended link or a live one the dashboard does not list) and `stateSince`, plus `reachable`, `rowsAt` and `saveError` (the link store's latest failed save, `null` once one lands; the List draws it as an amber line above the rows); memory only, and answered while unconfigured (no 503). `?open=1` marks a Jira page open, which quickens the reconciler |
@@ -440,7 +440,7 @@ repository's default branch", and only if the review approves apply the done-tra
 skill has no `references/review.md` (a server ahead of the plugin) the session stops: no transition, no push, no merge request. It adds at most 500 characters of
 fixed text; with `review` off the prompt is byte for byte what it was.
 
-`GET /api/jira/prompt?key=&action=&repo=` answers `text/plain`. Its refusals, in order: 400 `invalid issue key`; 400 `action must be execute, context or
+`GET /api/jira/prompt?key=&action=&repo=` answers `text/plain`. Its refusals, in order: 400 `invalid issue key`; 400 `action must be execute, context, review or
 skill:<id>`; 400 `repo is required`; 503 not configured; 409 for an unreadable `jira.json`; 400 `unknown skill <id>`; the issue read through §8's mapping; 400
 `<repo> is not mapped to <PROJECT>`; the refs' 409s; 400 `prompt too long`. The branch choice's 400s come right after `repo is required`. The repo is normalised
 as `parseReposWrite` stored it (`~` expanded, one trailing slash dropped).
@@ -490,15 +490,31 @@ nothing and written nothing.
 
 | status | `error` |
 | ------ | ------- |
-| 400 | `invalid issue key`; `action must be execute, context or { skill: <id> }`; `repo is required`; `surface must be dashboard or desktop`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `review must be true or false`, `review is only for execute with a branch`, `target is only for openMr with continue`, a name failing Table A) |
+| 400 | `invalid issue key`; `action must be execute, context, review or { skill: <id> }`; `mr must be { project, iid }`; `half must be request or fix`; `review needs mr and half`; `repo is required`; `surface must be dashboard or desktop`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `review must be true or false`, `review is only for execute with a branch`, `target is only for openMr with continue`, a name failing Table A) |
 | 503 | `Jira is not configured`; `no identity` |
-| 409 | `settings/jira.json <reason> — fix or delete it by hand`; `the desktop app is not available on this machine's dashboard — launch on Dashboard instead`; `<branch> exists — switch to Continue`; `<branch> is checked out in the mapped checkout <repo>`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment` |
-| 400 | `unknown skill <id>`; `<repo> is not mapped to <PROJECT>`; `transition not offered`; `prompt too long` |
+| 409 | `settings/jira.json <reason> — fix or delete it by hand`; `the desktop app is not available on this machine's dashboard — launch on Dashboard instead`; `<branch> exists — switch to Continue`; `<branch> is checked out in the mapped checkout <repo>`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment`; for a review, `a session is live on <branch>`, `no review state for !<iid> yet`, `nothing to review on !<iid>`, `!<iid> has too many threads to read`, `the review on !<iid> moved on — reopen the sheet` |
+| 400 | `unknown skill <id>`; `<repo> is not mapped to <PROJECT>`; `transition not offered`; `prompt too long`; for a review, `!<iid> is not an open merge request of <KEY>`, `<repo> is not a review candidate for !<iid>`, `a review continues <branch>` |
 | 502 | dispatch is on and the dashboard is unreachable (the gate's reason); a spawn the dashboard refused |
 | as §8 | the issue read, the assign and the transition, through `unwrapJira` / `jiraWriteOrThrow` — `retryAt` verbatim; an assign or transition failure is prefixed `assign: ` / `transition: ` |
 
 A failure after a write landed keeps its status and says the write stands: `— the assign stands` after a failed transition, `— the Jira writes stand` after a
 failed re-read, re-composition or spawn. The write is not undone, and the sentence says so rather than inviting a retry as though it were.
+
+### The review action
+
+`{ action: 'review', mr: { project, iid }, half: 'request' | 'fix' }` is the third built-in, started from the delivery track's CodeRabbit row, never from `Run
+▾`. The mechanism is in [`.claude/rules/jira.md`](../../.claude/rules/jira.md); the reasoning is the
+[spec](../superpowers/specs/2026-11-13-coderabbit-review-design.md). The controller validates `mr` (`parseReviewMr`: the path through `isGitlabProjectPath`, the
+iid a positive integer of at most nine digits) and `half` (`parseReviewHalf`), and `resolveJiraActionOrThrow` refuses a bare `review`. `JiraDispatchService`
+then runs `reviewOrThrow` as step 3a, after the mapping check and the dashboard gate and before `live.reserve`, from the GitLab poller's cache alone (`findMr`,
+`reposFor`) — no GitLab request for a click: the MR must be an open one of this key, the repo one of its candidates, the branch the MR's own source branch (a
+review always continues one), and the half the cache still derives (`reviewState(review, now)` → `reviewHalf`), else 409 `the review on !<iid> moved on — reopen
+the sheet`. The prompt (`reviewText`) names the CACHED MR and half, carries no finding text, and tells the session to use the `mr-review-loop` skill.
+
+Step 4b is the branch gate, synchronous with `live.reserve`: `branchBusy` refuses a review while another review hold (`branchHolds`, memory only, keyed `<main
+checkout>\0<branch>`, released on a failed spawn and on a no-id desktop launch), a live link of any `how` on that branch (`mainCheckoutOf` of its repo), or a
+live dashboard row on it exists. The links and the dashboard rows can be 15 to 60 s stale; the spec accepts that, because the second session would only add its
+own comment.
 
 ### `POST /api/agents/jira-stop`
 
@@ -538,6 +554,11 @@ timer and re-arms at 15 s. For each live link with a session id and older than `
 Setup maps a repo; an unreadable list (`markUnreachable`) or agents off leaves the store as it was. Its comment holds the long form.
 
 ### The client half of Run (phase 5b)
+
+The review sheet: `DeliveryPane.onReview` is threaded through `JiraDetail` into `JiraView`'s launch state, and `JiraLaunchSheet` takes a `review` prop — one
+pressed action tile, a locked `continue` branch (`useBranchState`'s `locked` argument) and the candidate repos only. `JiraRunMenu` never offers `review`; its
+label (`JIRA_BUILTIN_LABELS.review`, `Review the MR`) exists for the sessions list. The row itself is `ReviewRow`, under the track of the lead MR only
+(DESIGN.md §8.9.6).
 
 The look is DESIGN.md §8.9.1 (`Run ▾` and the strip), §8.9.2 (the modal's row), §8.9.3 (Skills) and §8.9.5 (the launch sheet). The rules are
 [invariants.md](invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake) (`Run ▾` is never hidden for the dashboard's sake) and the Escape
@@ -656,6 +677,9 @@ The repo/branch work adds `jira-branch` (Tables A–E of `shared/jira-branch.ts`
 (`/refs`, `/worktrees`, the prompt's branch parameters), `jira-prompt` (the workspace block, the placeholders, Open MR), `agents-dispatch-jira`, `compose-env`
 (the second mount, `BM_REPO_ROOTS`), `jira-lib`, `jira-launch` (the Branch section), `jira-setup` (the row defaults and the path's worktrees), `jira-board`
 (the chip) and `jira-detail` (the Worktrees list). `skills/jira/tools/jira.test.mjs` (node) covers `worktree` over real temp repos and its own Tables A and B.
+The CodeRabbit review work adds `review-state`, `review-copy` and `gitlab-review-fold`, and widens `agents-dispatch-jira` (the review dispatch, the branch
+gate), `agents-jira-live`, `jira-prompt`, `jira-routes`, `jira-launch` (the review sheet), `jira-delivery-pane`, `jira-delivery-surfaces`, `jira-board`,
+`jira-lib` and `delivery-lib`.
 `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a per-request failure hook; `test/helpers/env.ts` blanks
 the three keys so no suite inherits a developer's credentials. `test/guards/compose-env.test.ts` pins the compose passthrough.
 The Jira sessions work adds `jira-sessions-state` (`sessionState` and `needsYou`) and widens `jira-live` (the store, its file, retention, the one-run gate),

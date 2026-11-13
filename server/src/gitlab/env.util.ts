@@ -35,3 +35,16 @@ export function gitlabEnv(env: NodeJS.ProcessEnv = process.env): GitlabEnv {
   if (!isJiraHostname(site)) return { configured: false, malformedSite: true, detail: MALFORMED_SITE_DETAIL };
   return { configured: true, site, token };
 }
+
+/** At most this many discussion pages are read per MR per read (CodeRabbit review spec §4.3); a longer MR is `capped`, never walked on. */
+export const GITLAB_REVIEW_PAGES = 3;
+
+/** The review bot's GitLab username unless `BM_GITLAB_REVIEW_BOT` names another (a self-hosted CodeRabbit can carry its own account name). */
+export const DEFAULT_REVIEW_BOT = 'coderabbitai';
+
+/** The bot whose discussions are folded: the env value trimmed, blank or unset meaning the default. Read per call, like `gitlabEnv`. */
+export function gitlabReviewBot(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = env.BM_GITLAB_REVIEW_BOT;
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  return v === '' ? DEFAULT_REVIEW_BOT : v;
+}

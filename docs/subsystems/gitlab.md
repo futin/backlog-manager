@@ -21,11 +21,12 @@ the server holds is never handed to a session: `mr-review-loop` carries its own 
 
 | file                    | what it owns                                                                                                                            |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `env.util.ts`           | `gitlabEnv()`, `GITLAB_ENV` — the pair, read per call; the not-set and malformed-site sentences                                         |
-| `remote.util.ts`        | `parseGitRemote` (scp-style and URL remotes; drops userinfo, keeps a port and nested groups), `remoteOnSite`, `gitlabProjectId`         |
-| `gitlab.client.ts`      | `GitlabClient` — `GET /user`, `GET /projects/:id/merge_requests`, `GET /projects/:id/merge_requests/:iid`; `redirect: 'manual'`, 10 s  |
-| `mapping.util.ts`       | `resolveGitlabProjects` (Jira repos → GitLab projects via `origin`), `mrKeys`, `foldPipeline`, `foldMrState`                            |
-| `poller.service.ts`     | `GitlabPollerService` — the MR cache, the identity, the state, the 429 window, `payload()` and `sweepNow()`                             |
+| `env.util.ts`           | `gitlabEnv()`, `GITLAB_ENV` — the pair, read per call; the not-set and malformed-site sentences; `gitlabReviewBot()`, `GITLAB_REVIEW_PAGES`  |
+| `remote.util.ts`        | `parseGitRemote` (scp-style and URL remotes; drops userinfo, keeps a port and nested groups), `remoteOnSite`, `gitlabProjectId`, `isGitlabProjectPath` |
+| `gitlab.client.ts`      | `GitlabClient` — `GET /user`, `GET /projects/:id/merge_requests`, `…/merge_requests/:iid`, `…/merge_requests/:iid/discussions`; `redirect: 'manual'`, 10 s |
+| `review.util.ts`        | `foldReview` — discussions into `GitlabReview` facts; `isTrigger`, `parseSeverity`, `countAddedCommits`. Pure, no clock                 |
+| `mapping.util.ts`       | `resolveGitlabProjects` (Jira repos → GitLab projects via `origin`, and per Jira key the checkouts that did: `repos`), `mrKeys`, `foldPipeline`, `foldMrState` |
+| `poller.service.ts`     | `GitlabPollerService` — the MR cache, the identity, the state, the 429 window, `payload()`, `sweepNow()`, `findMr`, `reposFor`             |
 | `gitlab.controller.ts`  | `GET /api/gitlab`, `POST /api/gitlab/sweep`                                                                                             |
 | `gitlab.module.ts`      | imports `JiraModule` for `JiraLiveService`'s `onReposChanged` listener list                                                             |
 
@@ -47,11 +48,12 @@ an `arm()` that lands mid-sweep re-arms after it. One sweep is in flight at a ti
 
 **Per project, per sweep**: the opened MRs, then merged and closed MRs updated within `GITLAB_FINISHED_DAYS` (30), each `order_by=updated_at&sort=desc`, at
 `GITLAB_PER_PAGE` (100) rows a page and at most `GITLAB_PAGES_PER_PROJECT` (5) pages — a spent budget after a full page sets `capped`, and the order means it
-cuts the oldest finished MRs, never an open one. Then one detail read per kept open MR, for its head pipeline. So a sweep's request count is bounded by
-`1 + projects × 5 + open MRs` (the `1` being an identity read when one is due).
+cuts the oldest finished MRs, never an open one. Then one detail read per kept open MR, for its head pipeline, and — when it is due — its review. So a sweep's
+request count is bounded by `1 + projects × 5 + open MRs × (1 + 3)` (the `1` being an identity read when one is due; the `3` the review's discussion pages).
 
 **Failure keeps the last answer.** A failed list keeps the project's MRs and `polledAt` and sets `failed` (a 403/404 is `cannot-read`, that project's
-problem line); a failed detail read keeps that MR's last pipeline. One 429 stores one `retryAt` (`Retry-After`, else `GITLAB_RATE_LIMIT_DEFAULT_MS`),
+problem line); a failed detail read keeps that MR's last pipeline, and a failed review read keeps its last good review flagged `failed`. One 429 stores one
+`retryAt` (`Retry-After`, else `GITLAB_RATE_LIMIT_DEFAULT_MS`),
 expired where it is read. A refused token stops a sweep before any project is asked, so while the state is `rejected`, `payload()` marks every project never
 read as `failed` too — its tickets read "could not be read", not "not read yet" (spec §7.2).
 
@@ -61,11 +63,35 @@ shows even when no repo is mapped; a 401 inside a sweep forces a re-read, and an
 **State**, in precedence: `unconfigured`; `checking` (identity not answered for this pair); `rejected` (401/403 on `/user`); `unreachable` (no answer, a
 5xx or a refused redirect, from the identity or the last sweep); then `idle` with zero mapped projects, else `connected`.
 
+## CodeRabbit review state
+
+The review project ([spec](../superpowers/specs/2026-11-13-coderabbit-review-design.md), mocks under
+[`2026-11-13-coderabbit-review-mockups/`](../superpowers/specs/2026-11-13-coderabbit-review-mockups/)) adds one field to a cached open MR, `review:
+GitlabReview | null`, and one action to Jira — `review`, which starts a session that asks CodeRabbit for a review or fixes what it found. The server stays
+read-only toward GitLab: the trigger comment and the fixes are the session's, through `mr-review-loop` and its own `api` token.
+
+**What is read.** After an open MR's detail read, `GET …/merge_requests/:iid/discussions?per_page=100&page=N`, at most `GITLAB_REVIEW_PAGES` (3) pages. It is
+read when it never was, when the MR's `updated_at` differs from the one stored at the last successful read (`ProjectCache.reviewSeen`, server-only), or — GitLab
+need not bump `updated_at` when a thread is resolved — when the state is `reviewing` or `open` and the facts are over `REVIEW_REREAD_MS` (10 min) old. A page
+that does not answer 200 fails the whole read, so a fold is never built from a partial set; a full third page sets `capped`. A 429, a 401 and an unanswered
+call behave exactly as in the detail read. Merged and closed MRs are not read and carry `null`, meaning not read — never "no review".
+
+**Facts, not a state.** `foldReview` reads the bot's username from `BM_GITLAB_REVIEW_BOT` (default `coderabbitai`). A trigger is a person's note with a line
+beginning `@<bot> review` or `@<bot> full review`; a finding is a discussion opened by the bot with a resolvable note, open until every resolvable note in it is
+resolved; its severity is the bold badge on the note's first line. A round lands on the bot's `Actionable comments posted:` note or on the bot's edited reply in
+the trigger's own discussion, whichever is earlier; `commitsSince` sums the `added N commit(s)` system notes after the landing. The state — `none`, `reviewing`,
+`open`, `stale`, `clean`, `unknown` — is `reviewState(review, now)` in `shared/review.ts`, derived where it is drawn, so a trigger that never lands stops
+reading `reviewing` after 30 minutes without any sweep noticing. `reviewHalf(state)` maps it to what a button may do: `open` fixes, `none` and `stale` request,
+the rest offer nothing.
+
+**Dispatch reads the cache.** `findMr` and `reposFor` answer review dispatch from memory (see [jira.md](jira.md#the-review-action)); no request is made for a
+click, so a review is decided on the age of the last read and the sheet's half is re-derived and refused with a 409 when it moved.
+
 ## Routes
 
 - **`GET /api/gitlab`** → `GitlabPayload { status, jiraProjects, mrs }`, built from memory. `status` is `GitlabStatus` (state, site, user, `armed`,
   `retryAt`, `mappedRepos`, `foundHosts`, `problems`); `jiraProjects` maps each Jira key to its `GitlabProjectView`s (`path`, `repo`, `polledAt`,
-  `capped`, `failed`); `mrs` is every cached `GitlabMr` with its `keys`.
+  `capped`, `failed`, `repos` — the review candidates); `mrs` is every cached `GitlabMr` with its `keys` and `review`.
 - **`POST /api/gitlab/sweep`** (`SameOriginPostGuard`) → `arm()`, then `sweepNow()`: 200 `{ ok: true }`, 409 when not armed, 429 with `retryAt` inside the
   window. It waits for the sweep up to `GITLAB_SWEEP_WAIT_MS`, then answers 200 and lets the sweep finish behind it. The Sources row's Read again calls it
   beside the GitHub and Jira sweeps (`lib/sweep.ts`).
@@ -84,13 +110,14 @@ with `DeliveryTrack` (`components/ui/`), and the Delivery quick filter — are d
 
 ## Room for project 2
 
-Spec §9: a later project reads review notes per MR, adds a **Review** step and a button that starts a session on the lead MR. What this one leaves for it:
-`GitlabMr` is a flat object a review field can join; the track's steps are a list `deliveryLook` builds, so a step can be inserted without touching
-`DeliveryTrack`; and the server stays read-only toward GitLab — project 2's writes (notes, resolve) are the session's, with its own `api` token.
+Spec §9's room for a second project was used by the CodeRabbit review work above: `GitlabMr` grew a `review` field, the track a `Review` step, and the server
+stayed read-only toward GitLab — the notes and the fixes are the session's, with its own `api` token.
 
 ## Tests
 
-`gitlab-env`, `gitlab-remote`, `gitlab-client`, `gitlab-mapping`, `gitlab-poller` and `gitlab-routes` cover the server; `compose-env` pins the compose
-pass-through; `delivery-lib` covers `lib/delivery.ts`; `gitlab-context`, `sources-group`, `jira-delivery-pane`, `jira-delivery-surfaces`, `jira-list` and
+`gitlab-env`, `gitlab-remote`, `gitlab-client`, `gitlab-mapping`, `gitlab-poller`, `gitlab-review-fold`, `review-state` and `gitlab-routes` cover the server;
+`compose-env` pins the compose
+pass-through; `delivery-lib` covers `lib/delivery.ts` and `review-copy` `lib/review-copy.ts`; `gitlab-context`, `sources-group`, `jira-delivery-pane`,
+`jira-delivery-surfaces`, `jira-list` and
 `jira-board` cover the client. `test/helpers/gitlab.ts` builds payloads, and `test/helpers/no-gitlab.tsx` hands a pending answer through the raw context, for
 suites that mount `SettingsView` (whose Sources card needs the provider) without stubbing `/api/gitlab`.

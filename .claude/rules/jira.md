@@ -135,4 +135,25 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   own entry re-opened, the 8-hour clock restarted — so history does not grow. The edge runs agents → jira and never back: `jira/` imports nothing from `agents/`
   except `SameOriginPostGuard`, which is why the dispatch, the stop and the reconciler live in `agents/` while the store does not. Why:
   [invariants.md](docs/subsystems/invariants.md#a-jira-session-is-a-persisted-link-and-stop-a-quiet-dashboard-or-the-8-hour-backstop-each-end-it)
+- **`review` is a third built-in action, and it is built from the GitLab cache, never from the request's spelling.** `parseJiraAction` / `parseJiraActionParam`
+  (`shared/types.ts`) accept `'review'`; `resolveJiraActionOrThrow` refuses a bare one (400 `review needs mr and half`), because a review is composed only with
+  its MR and half: `{ kind: 'review', half, mr }` (`prompt.util.ts`, `reviewText`). The controller shapes `mr` (`parseReviewMr`: a project path through
+  `isGitlabProjectPath` and a positive iid of at most nine digits — a JSON number on dispatch, a digit string on `GET /api/jira/prompt`'s `mrProject`/`mrIid`)
+  and `half` (`parseReviewHalf`, exactly `request` or `fix`), 400 `mr must be { project, iid }` / `half must be request or fix`, before the branch choice.
+  **`jira/` imports `gitlab/remote.util.ts` for `isGitlabProjectPath` and for nothing else** — a pure helper, no Nest, no poller, so the one `jira/` → `gitlab/`
+  edge cannot drag `GitlabModule` in (`GitlabModule` imports `JiraModule`; the reverse would be a cycle). The prompt carries no finding text: it names the MR as
+  `!<iid>` in its project, tells the session to use the `mr-review-loop` skill (both run its Step 1 discovery for host, project and token only; `request` skips Steps 2-3, posts the
+  `@coderabbitai review` trigger and runs the whole loop through push and reply/resolve, `fix` starts at fetching the open findings and posts no trigger) and to stop if the skill is absent, so nothing a bot or a stranger wrote on the
+  MR is in the prompt. The half is DERIVED, never accepted: dispatch (`reviewOrThrow`, step 3a) reads `findMr` and `reposFor` and answers 400 `!<iid> is not an
+  open merge request of <KEY>` (not cached, not `opened`, or its `keys` carry neither the key nor — checked once the detail is read — its parent's), 400 `<repo>
+  is not a review candidate for !<iid>`, 400 `a review continues <branch>` (anything but `continue` on the MR's source branch without `openMr`), then 409 `no
+  review state for !<iid> yet` / `nothing to review on !<iid>` (`reviewing`, `clean`) / `!<iid> has too many threads to read` (`unknown`) / `the review on
+  !<iid> moved on — reopen the sheet` when `reviewHalf(reviewState(...))` is not the sent half. The ticket gate's 409s keep their text; the branch has its own
+  gate (spec 5.2). It is synchronous with the key reservation — no `await` between `live.reserve`, the gate's reads and the insert — so of two reviews racing
+  for one branch exactly one holds it: a memory-only `branchHolds` map keyed `<candidate repo>\0<branch>`, never written, released by token on a failed spawn,
+  on a desktop launch that answered no id, and at `confirm` (the stored link's `branch` then carries the gate). The gate (`branchBusy`) reads another review's
+  hold, any live link of any `how` storing that branch in a candidate (a linked worktree folded to its main checkout by `mainCheckoutOf`), and
+  `JiraLiveService.activeRows()` — `working` / `question` dashboard rows on that branch. Those rows come from the reconciler's list, 15–60 s old by design; the
+  spec accepts that window, and a refusal is 409 `a session is live on <branch>`. `JIRA_BUILTIN_LABELS.review` (`Review the MR`) is a label for links and the
+  List, never a menu row. Why: [invariants.md](docs/subsystems/invariants.md#a-review-dispatch-decides-from-the-cache-and-gates-the-branch)
 - **`jira.mjs` writes no file of its own**; its one exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo.

@@ -24,6 +24,15 @@ describe('GitlabClient', () => {
     noToken(res);
   });
 
+  it('mergeRequestDiscussions pages by number with the token only in the header', async () => {
+    const fake = new FakeGitlab();
+    await client(fake).mergeRequestDiscussions('gitlab.example.com', TOKEN, 'grp/sub/proj', 15958, 2);
+    expect(fake.calls[0].url).toBe('https://gitlab.example.com/api/v4/projects/grp%2Fsub%2Fproj/merge_requests/15958/discussions?per_page=100&page=2');
+    expect(fake.calls[0].url).not.toContain(TOKEN);
+    expect(new Headers(fake.calls[0].init?.headers).get('PRIVATE-TOKEN')).toBe(TOKEN);
+    expect(fake.calls[0].init?.redirect).toBe('manual');
+  });
+
   it('listMergeRequests builds the project path and the paging query', async () => {
     const fake = new FakeGitlab();
     const res = await client(fake).listMergeRequests(SITE, TOKEN, 'development/backend/microservice', {

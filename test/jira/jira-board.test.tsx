@@ -367,6 +367,7 @@ describe('the band', () => {
     mergedAt: null,
     pipeline: 'failed',
     keys: ['PAY-131'],
+    review: null,
     ...over
   });
   const gitlab = (over: Partial<GitlabPayload['status']> = {}): GitlabPayload => ({
@@ -384,7 +385,7 @@ describe('the band', () => {
       problems: [],
       ...over
     },
-    jiraProjects: { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false }] },
+    jiraProjects: { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false, repos: [] }] },
     mrs: [gitlabMr({}), gitlabMr({ iid: 398, state: 'merged', pipeline: null, keys: ['PAY-140'], mergedAt: new Date(Date.now() - 86_400_000).toISOString() })]
   });
   async function renderWithGitlab(data: GitlabPayload): Promise<void> {
@@ -1891,6 +1892,7 @@ describe('the Delivery quick filter', () => {
     mergedAt: null,
     pipeline: 'failed',
     keys: ['PAY-131'],
+    review: null,
     ...over
   });
   const payload = (state: 'connected' | 'unconfigured' = 'connected', mrs: GitlabMr[] = [MR({}), MR({ iid: 398, state: 'merged', pipeline: null, keys: ['PAY-140'], mergedAt: new Date(Date.now() - 86_400_000).toISOString() })]): GitlabPayload => ({
@@ -1907,7 +1909,7 @@ describe('the Delivery quick filter', () => {
       foundHosts: [],
       problems: []
     },
-    jiraProjects: state === 'connected' ? { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false }] } : {},
+    jiraProjects: state === 'connected' ? { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false, repos: [] }] } : {},
     mrs: state === 'connected' ? mrs : []
   });
 
@@ -1949,6 +1951,13 @@ describe('the Delivery quick filter', () => {
     // The click outside shut the panel (its own pointerdown listener); reopened, it reads the value the List control set.
     const reopened = await openFilters();
     expect(within(within(reopened).getByRole('group', { name: 'Delivery' })).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('offers `Review open` after `Done, not merged` (CodeRabbit spec §5.4)', async () => {
+    mount(payload(), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    const names = within(seg()).getAllByRole('button').map((b) => b.textContent);
+    expect(names.indexOf('Review open')).toBe(names.indexOf('Done, not merged') + 1);
   });
 
   it('the segmented control drives the value, and it survives a remount through JIRA_FILTERS_KEY', async () => {

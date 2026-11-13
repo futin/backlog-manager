@@ -1,4 +1,4 @@
-import { gitlabProjectId, parseGitRemote, remoteOnSite } from '../../server/src/gitlab/remote.util';
+import { gitlabProjectId, isGitlabProjectPath, parseGitRemote, remoteOnSite } from '../../server/src/gitlab/remote.util';
 
 const SITE = 'www.gitlab.timify.io';
 const SCP = 'git@www.gitlab.timify.io:development/backend/microservice.git';
@@ -45,5 +45,30 @@ describe('remoteOnSite', () => {
 describe('gitlabProjectId', () => {
   it('url-encodes the namespace path', () => {
     expect(gitlabProjectId('development/backend/microservice')).toBe('development%2Fbackend%2Fmicroservice');
+  });
+});
+
+describe('isGitlabProjectPath', () => {
+  it.each(['grp/proj', 'development/backend/microservice', 'a.b/c_d-e', 'a/..b', 'a/b.c'])('accepts %s', (path) => {
+    expect(isGitlabProjectPath(path)).toBe(true);
+  });
+
+  it.each([
+    ['', 'empty'],
+    ['grp', 'one segment'],
+    ['/grp/proj', 'a leading slash'],
+    ['grp/proj/', 'a trailing slash'],
+    ['grp//proj', 'an empty segment'],
+    ['grp proj/x', 'a space'],
+    ['../x', 'a .. segment'],
+    ['grp/./x', 'a . segment'],
+    ['grp/pr%2Foj', 'a percent sign'],
+    [`g/${'p'.repeat(254)}`, 'over 255 characters']
+  ])('rejects %s (%s)', (path) => {
+    expect(isGitlabProjectPath(path)).toBe(false);
+  });
+
+  it('accepts exactly 255 characters', () => {
+    expect(isGitlabProjectPath(`g/${'p'.repeat(253)}`)).toBe(true);
   });
 });
