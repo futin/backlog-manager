@@ -21,6 +21,7 @@ const STEP_LABEL: Record<TrackStep['step'], string> = {
   pushed: 'Pushed',
   open: 'MR open',
   pipeline: 'Pipeline',
+  review: 'Review',
   merged: 'Merged',
   closed: 'Closed'
 };

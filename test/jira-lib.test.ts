@@ -1197,6 +1197,8 @@ describe('defaultModeFor', () => {
   it('per action (the setting is empty): plan for context and acceptEdits for execute and for a skill', () => {
     expect(defaultModeFor('context', '')).toBe('plan');
     expect(defaultModeFor('execute', '')).toBe('acceptEdits');
+    expect(defaultModeFor('review', '')).toBe('acceptEdits');
+    expect(defaultModeFor('review', 'plan')).toBe('plan');
     expect(defaultModeFor({ skill: 's_0123abcd' }, '')).toBe('acceptEdits');
   });
 
@@ -1906,5 +1908,8 @@ describe('launchFootLine', () => {
 describe('clampJiraPanelFilters keeps every Delivery filter value the UI offers', () => {
   it.each(Object.keys(DELIVERY_FILTER_LABELS))('keeps `%s`', (value) => {
     expect(clampJiraPanelFilters({ ...NO_JIRA_PANEL_FILTERS, delivery: value }).delivery).toBe(value);
+  });
+  it('keeps `review-open` by name', () => {
+    expect(clampJiraPanelFilters({ delivery: 'review-open' }).delivery).toBe('review-open');
   });
 });

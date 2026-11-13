@@ -108,7 +108,7 @@ const stepWord = (label: string): string | null => step(label).querySelector('.j
 afterEach(cleanup);
 
 describe('DeliveryPane', () => {
-  it('draws an open MR with a passing pipeline: head, link, repo → target, polled age, and the four-step track', () => {
+  it('draws an open MR with a passing pipeline: head, link, repo → target, polled age, and the five-step track', () => {
     const { container } = draw(payload([mr()]));
     expect(screen.getByText('Delivery')).toBeInTheDocument();
     const link = screen.getByRole('link', { name: '!412' });
@@ -120,7 +120,7 @@ describe('DeliveryPane', () => {
     expect(screen.getByText('polled 5m ago')).toBeInTheDocument();
 
     const labels = [...container.querySelectorAll('.jira-dlv-step-label')].map((n) => n.textContent);
-    expect(labels).toEqual(['Pushed', 'MR open', 'Pipeline', 'Merged']);
+    expect(labels).toEqual(['Pushed', 'MR open', 'Pipeline', 'Review', 'Merged']);
     expect(stepWord('Pushed')).toBe('2h');
     expect(stepWord('MR open')).toBe('2h');
     expect(stepWord('Pipeline')).toBe('pipeline passed');
@@ -128,8 +128,9 @@ describe('DeliveryPane', () => {
     expect(step('Pipeline').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'green');
     expect(step('Merged').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'off');
 
-    // v1 draws no Review step and no CodeRabbit placeholder (spec §7, "Delivery track").
-    expect(container.textContent).not.toMatch(/Review/);
+    // The Review step is in the track now (CodeRabbit spec §5.1), off with no word for `review: null`; the CodeRabbit row is a later task's, so none yet.
+    expect(stepWord('Review')).toBeNull();
+    expect(step('Review').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'off');
     expect(container.textContent).not.toMatch(/CodeRabbit/);
     expect(screen.queryByText(/Also:/)).not.toBeInTheDocument();
   });

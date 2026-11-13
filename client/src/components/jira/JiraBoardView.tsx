@@ -156,14 +156,14 @@ export function JiraBoardView({
   }, [filters, options, me, deliveryIndex]);
   const sessions = useJiraSessionsContext();
   const [view] = useJiraView();
-  // Memoised on the fold, the filters and the sessions answer — never on `now`, so the minute tick re-ages the cards without re-folding or re-filtering up
-  // to 500 issues. F1 (grouped-board spec §5): a top is kept when it matches or when an issue folded under it does, with that issue's key to ring it by.
+  // Memoised on the fold, the filters, the sessions answer and the minute's `now` — `now` only since the `Review open` filter, whose match depends on the clock
+  // (a stuck review stops reading `reviewing`); the fold is still not rebuilt by it, and the filter pass over up to 500 issues is a map lookup each. F1 (grouped-board spec §5): a top is kept when it matches or when an issue folded under it does, with that issue's key to ring it by.
   // The deck and the shelves read the same `kept`, so one filter answers for both; which tops a live session took OFF the shelves is `boardAgents`' call on
   // the UNFILTERED fold, so a filter never puts a ticket on a shelf and on the deck at once.
   const { deck, shelves, rows, cellStates } = useMemo(() => {
     // The delivery filter ANDs in here, per issue, so F1 reaches it: a top with no MR is kept when a folded child's own MR matches (`ticketDelivery` reads each
     // issue on its own, a sub-task falling back to its parent's MRs exactly as its card does).
-    const byDelivery = applied.delivery === 'all' || deliveryIndex === null ? null : (i: JiraIssue) => matchesDelivery(applied.delivery, ticketDelivery(i, deliveryIndex));
+    const byDelivery = applied.delivery === 'all' || deliveryIndex === null ? null : (i: JiraIssue) => matchesDelivery(applied.delivery, ticketDelivery(i, deliveryIndex), now);
     const kept = foldMatches(fold, (i) => matchesBoardFilters(i, applied, me) && (byDelivery === null || byDelivery(i)));
     const agents = boardAgents(fold, sessions.data, live);
     return {
@@ -174,7 +174,7 @@ export function JiraBoardView({
       rows: sortTops(fold.tops.filter((t) => kept.has(t.key)), fold.under),
       cellStates: topSessionCell(agents, sessions.data?.links ?? [], fold)
     };
-  }, [fold, applied, me, sessions.data, live, deliveryIndex]);
+  }, [fold, applied, me, sessions.data, live, deliveryIndex, now]);
 
   if (unreadable !== null || board === null || shown === null) {
     return (

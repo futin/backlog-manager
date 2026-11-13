@@ -696,7 +696,7 @@ export type JiraPanelFilters = Omit<JiraBoardFilters, 'search'>;
 export const NO_JIRA_PANEL_FILTERS: JiraPanelFilters = { type: undefined, assignee: 'anyone', sprint: undefined, statuses: [], delivery: 'all' };
 
 /** The stored `delivery` values `clampJiraPanelFilters` accepts — a literal list because `lib/delivery.ts` imports this file, and a value import back would cycle. */
-const DELIVERY_VALUES: readonly DeliveryFilter[] = ['all', 'has-mr', 'failing', 'done-not-merged'];
+const DELIVERY_VALUES: readonly DeliveryFilter[] = ['all', 'has-mr', 'failing', 'done-not-merged', 'review-open'];
 
 /**
  * The per-browser key holding the panel filters (`usePersistedState`, so the value is JSON). ONE key for every board, not one per board: a pick already
@@ -913,6 +913,7 @@ export function jiraSettingOf(action: JiraAction): string {
  */
 export function defaultModeFor(action: JiraAction, setting: '' | PermissionMode): PermissionMode {
   if (setting !== '') return setting;
+  // `review` edits code and pushes like `execute`, so it takes the same default (CodeRabbit spec §5.2); only `context` reads and plans.
   return action === 'context' ? 'plan' : 'acceptEdits';
 }
 

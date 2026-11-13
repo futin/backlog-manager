@@ -40,7 +40,7 @@ function stepWords(mr: GitlabMr, now: number): Partial<Record<TrackStep['step'],
     if (merged !== null) words.merged = merged;
   } else if (mr.state === 'opened') {
     if (mr.draft) words.open = 'draft';
-    else words.pipeline = deliveryLook(mr).word;
+    else words.pipeline = deliveryLook(mr, now).pipelineWord;
   }
   return words;
 }
@@ -84,7 +84,7 @@ export function DeliveryPane({ issue, now }: { issue: JiraIssue; now: number }) 
   }
 
   const { lead, also, via } = d;
-  const look = deliveryLook(lead);
+  const look = deliveryLook(lead, now);
   return (
     <section className="jira-detail-pane jira-dlv" aria-label="Delivery">
       <div className="jira-dlv-head">
@@ -99,7 +99,7 @@ export function DeliveryPane({ issue, now }: { issue: JiraIssue; now: number }) 
         <div className="jira-dlv-also">
           <span className="jira-dlv-meta">Also:</span>
           {also.map((mr) => {
-            const other = deliveryLook(mr);
+            const other = deliveryLook(mr, now);
             // `updatedAt`'s age: the time the lead order reads, so the line's ages explain why these are not the lead.
             const age = pollAge(mr.updatedAt, now);
             return (
