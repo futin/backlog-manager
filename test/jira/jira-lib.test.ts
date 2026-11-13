@@ -1315,6 +1315,9 @@ describe('the branch choice wire', () => {
     f = answer(200, null);
     await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'continue', branch: 'pay-1-x', openMr: false, review: false, target: null });
     expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=execute&repo=%2Fr&mode=continue&branch=pay-1-x');
+    f = answer(200, null);
+    await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'new', branch: 'b', base: 'develop', openMr: false, review: true });
+    expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=execute&repo=%2Fr&mode=new&branch=b&base=develop&review=true');
   });
 
   it('fetchJiraRefs sends key only when there is one, and rejects with the sentence', async () => {
@@ -1549,6 +1552,7 @@ describe('branch choice derivations', () => {
         newBranch: 'timify-123-export-contacts',
         base: 'develop',
         openMr: false,
+        review: true,
         target: 'develop'
       });
     });
@@ -1559,6 +1563,7 @@ describe('branch choice derivations', () => {
         newBranch: 'feature/timify-123-export',
         base: 'develop',
         openMr: false,
+        review: true,
         target: 'develop'
       });
     });
@@ -1569,16 +1574,18 @@ describe('branch choice derivations', () => {
         newBranch: 'timify-123-export',
         base: 'main',
         openMr: false,
+        review: true,
         target: 'main'
       });
     });
     it('the choice keeps only the fields its mode and action own', () => {
-      const draft = { mode: 'continue' as const, continueBranch: 'b', newBranch: 'n', base: 'develop', openMr: true, target: 'main' };
-      expect(branchChoiceOf(draft, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: false, target: 'main' });
-      expect(branchChoiceOf({ ...draft, target: '' }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: false, target: null });
-      expect(branchChoiceOf({ ...draft, openMr: false }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: false, review: false, target: null });
+      const draft = { mode: 'continue' as const, continueBranch: 'b', newBranch: 'n', base: 'develop', openMr: true, review: true, target: 'main' };
+      expect(branchChoiceOf(draft, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: true, target: 'main' });
+      expect(branchChoiceOf({ ...draft, target: '' }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: true, target: null });
+      expect(branchChoiceOf({ ...draft, openMr: false }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: false, review: true, target: null });
+      expect(branchChoiceOf({ ...draft, review: false }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: false, target: 'main' });
       expect(branchChoiceOf(draft, 'context')).toEqual({ mode: 'continue', branch: 'b', openMr: false, review: false, target: null });
-      expect(branchChoiceOf({ ...draft, mode: 'new' }, 'execute')).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: true, review: false });
+      expect(branchChoiceOf({ ...draft, mode: 'new' }, 'execute')).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: true, review: true });
       expect(branchChoiceOf({ ...draft, mode: 'new' }, { skill: 's_0a1b2c3d' })).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: false, review: false });
       expect(branchChoiceOf({ ...draft, mode: 'none' }, 'context')).toEqual({ mode: 'none' });
     });
@@ -1588,18 +1595,25 @@ describe('branch choice derivations', () => {
         mode: 'new',
         branch: 'n',
         base: 'develop',
-        openMr: false
+        openMr: false,
+        review: false
       });
-      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: true, review: false, target: 'main' })).toEqual({
+      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: true, review: true, target: 'main' })).toEqual({
         mode: 'continue',
         branch: 'b',
         openMr: true,
+        review: true,
         target: 'main'
       });
-      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: false, review: false, target: null })).toEqual({ mode: 'continue', branch: 'b', openMr: false });
+      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: false, review: false, target: null })).toEqual({
+        mode: 'continue',
+        branch: 'b',
+        openMr: false,
+        review: false
+      });
     });
     it('the draft refusal reads the mode\'s own fields, then a typed MR target', () => {
-      const draft = { mode: 'new' as const, continueBranch: 'develop', newBranch: 'timify-123-n', base: '', openMr: false, target: '' };
+      const draft = { mode: 'new' as const, continueBranch: 'develop', newBranch: 'timify-123-n', base: '', openMr: false, review: true, target: '' };
       expect(draftRefusal(draft, 'execute', 'TIMIFY-123', tickets)?.text).toBe('base is required for a new branch');
       expect(draftRefusal({ ...draft, mode: 'continue' }, 'execute', 'TIMIFY-123', tickets)?.text).toBe(
         'develop is checked out in the mapped checkout /repos/app'

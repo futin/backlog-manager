@@ -561,6 +561,7 @@ describe('JiraLaunchSheet — assign and move', () => {
       branch: 'pay-131-refund-partial-captures',
       base: 'develop',
       openMr: false,
+      review: true,
       permissionMode: 'acceptEdits',
       remoteControl: true
     });
@@ -587,6 +588,7 @@ describe('JiraLaunchSheet — assign and move', () => {
       branch: 'pay-131-refund-partial-captures',
       base: 'develop',
       openMr: false,
+      review: false,
       model: 'opus',
       effort: 'high',
       permissionMode: 'plan',
@@ -978,6 +980,32 @@ describe('JiraLaunchSheet — the branch', () => {
     expect(await within(dialog()).findByText('as of last fetch, 7 min ago')).toBeInTheDocument();
   });
 
+  const reviewSwitch = (): HTMLElement | null => within(dialog()).queryByRole('switch', { name: 'Review before finishing' });
+
+  it('draws Review before finishing above Open MR, on, for execute with a branch only; off is posted as false', async () => {
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('New'));
+    expect(reviewSwitch()).toBeChecked();
+    expect(
+      within(dialog()).getByText('review before finishing — run the reviewer over the change and fix what it finds before the work is called done')
+    ).toBeInTheDocument();
+    expect((reviewSwitch() as HTMLElement).compareDocumentPosition(mrSwitch() as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await userEvent.click(reviewSwitch() as HTMLElement);
+    expect(reviewSwitch()).not.toBeChecked();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toMatchObject({ action: 'execute', review: false });
+  });
+
+  it('hides Review before finishing for context', async () => {
+    await ready({ initialAction: 'context' });
+    await waitFor(() => expect(pressed()).toBe('No branch'));
+    expect(reviewSwitch()).not.toBeInTheDocument();
+    await userEvent.click(modeButton('New'));
+    expect(reviewSwitch()).not.toBeInTheDocument();
+  });
+
   it('draws Open MR only for execute with a branch, and Target only with Continue', async () => {
     server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
     await ready({ initialAction: 'context' });
@@ -1028,6 +1056,7 @@ describe('JiraLaunchSheet — the branch', () => {
       mode: 'continue',
       branch: 'pay-131-x',
       openMr: 'true',
+      review: 'true',
       target: 'develop'
     });
     await waitFor(() => expect(startButton()).toBeEnabled());
@@ -1042,6 +1071,7 @@ describe('JiraLaunchSheet — the branch', () => {
       mode: 'continue',
       branch: 'pay-131-x',
       openMr: true,
+      review: true,
       target: 'develop',
       permissionMode: 'acceptEdits',
       remoteControl: true
@@ -1117,8 +1147,8 @@ describe('JiraLaunchSheet — the preview settles before it is asked', () => {
     });
     const previewed = Object.fromEntries((promptReads().at(-1) as URL).searchParams);
     const body = dispatchBody();
-    expect(previewed).toEqual({ key: 'PAY-131', action: 'execute', repo: '/Users/ada/pay', mode: 'new', branch: 'pay-131-fix', base: 'develop' });
-    expect({ key: body.key, action: body.action, repo: body.repo, mode: body.mode, branch: body.branch, base: body.base }).toEqual(previewed);
+    expect(previewed).toEqual({ key: 'PAY-131', action: 'execute', repo: '/Users/ada/pay', mode: 'new', branch: 'pay-131-fix', base: 'develop', review: 'true' });
+    expect({ key: body.key, action: body.action, repo: body.repo, mode: body.mode, branch: body.branch, base: body.base, review: String(body.review) }).toEqual(previewed);
   });
 
   it('a mode switch is asked about at once — only typing waits', async () => {
