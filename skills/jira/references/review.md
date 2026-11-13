@@ -92,6 +92,12 @@ asked for. It sits in ONE fenced block whose backtick fence is longer than any b
 `#`/`##` lines and an unfenced `## Acceptance criteria` or `## Fix` would end or hijack the section; the command above sizes the fence. An empty
 description — `show` prints `(no description)` — is not a stop: the summary and the children are the promise.
 
+### A clean tree before every `scope`
+
+`scope` reviews HEAD plus every uncommitted and untracked file, but only commits are pushed. Before every `scope`, the first review and each re-review, run
+`git -C <tree> status --porcelain`. A file this session wrote into the tree only to make verification possible is deleted first. Any other path left is a
+**stop** (§4) that lists the paths: a file the commit missed, or a person's work in a held tree. Never stage a path just to make the tree clean.
+
 ## 4. Act on the result
 
 The procedure hands back `merge`'s stdout — one JSON line, then one `<path>:<line> — <Severity>: <text>` line per Critical/Important finding — and the merged
@@ -109,8 +115,9 @@ report path. That stdout is the review's whole result: never read a report into 
 3. Commit the round in `<tree>` with the prompt's own staging rule — stage only the files this session changed, never `git add -A` or `git add .` — as a
    **new** commit whose subject names the round, in the repository's commit style. A finding in an earlier commit — a Continue branch's earlier sessions
    included — is fixed the same way, by a new commit: never `--amend`, `rebase`, `reset`, a squash or a force-push, never a rewrite of history.
-4. Re-review through the procedure's re-review branch (its §5): a new `<prefix>`, then `scope --previous <the latest manifest>` with the same `tree`,
-   `base` and `item` and no `config`, dispatch only the groups it marks `rerun`, and pass the others' latest reports to `merge` as `--carried`.
+4. Re-review through the procedure's re-review branch (its §5): the clean-tree check (§3), a new `<prefix>`, then `scope --previous <the latest manifest>`
+   with the same `tree`, `base` and `item` and no `config`, dispatch only the groups it marks `rerun`, and pass the others' latest reports to `merge` as
+   `--carried`.
 
 **Stop — no transition, no push, no MR** — on any of:
 
@@ -121,6 +128,7 @@ report path. That stdout is the review's whole result: never read a report into 
 - `scope` or `merge` exiting `1`, so the procedure hands back its stderr line instead of a verdict — no verdict is not an `approve`;
 - no base ref (§3);
 - `jira.mjs show` exiting non-zero (§3);
+- a path `status --porcelain` still lists before `scope` (§3), named in the final message — never staged to clear it;
 - the permission layer refusing either item-file command (§3), or a fix round's `git add` or `git commit` — never retried another way.
 
 A stop leaves everything committed so far where it is: no transition, no push, no merge request, and no other step of the prompt after the review. The final

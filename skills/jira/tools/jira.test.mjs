@@ -1224,7 +1224,9 @@ test('jira/references/review.md keeps the review gate a Jira Execute Run follows
     ['- no base ref', 'a base that resolves to no ref is no longer a stop'],
     ['- `jira.mjs show` exiting non-zero', 'a ticket that cannot be read is no longer a stop'],
     ['is never written another way', 'a refused item-file command may be worked around'],
-    ['Where the reports go', 'the reference no longer says where the review reports go']
+    ['Where the reports go', 'the reference no longer says where the review reports go'],
+    ['git -C <tree> status --porcelain', 'scope reviews uncommitted files too, and nothing checks the tree is clean before it'],
+    ['- a path `status --porcelain` still lists before `scope`', 'a dirty tree is no longer a stop, so an approve can cover work that is never pushed']
   ]
   for (const [needle, rule] of needles) assert.ok(text.includes(needle), `${rule} (lost: ${needle})`)
   assert.match(text, /at most two fix rounds/i, 'the fix rounds are no longer capped at two')
