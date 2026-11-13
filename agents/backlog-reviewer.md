@@ -1,13 +1,10 @@
 ---
 name: backlog-reviewer
 description: >
-  Review one group of files of a change — a backlog item's branch before it merges or is pushed, or a checkout's work against its base: correctness
-  first, the repo's CLAUDE.md invariants second, test adequacy
-  third, and the executor's own contract-sweep and red-proof lines fourth. Dispatched once per file group, all groups in one message, by the review procedure
-  (skills/backlog-review/references/procedure.md) that backlog-orchestrate follows before a merge, backlog-execute follows in a --finish pr session before it
-  pushes, and /backlog-review follows standalone — each time with the worktree, the base, the from/to pair of the diff, a report path, and optionally the
-  item file, the manifest, its group, the earlier findings it must re-check and whether it does the item checks. It writes the full report to that path and
-  returns only a verdict plus the Critical/Important findings, one line each. Read-only by design: it never fixes, stages or commits anything it finds.
+  Review one file group of a change — an item branch before it merges or is pushed, or a checkout against its base: correctness first, then the repo's CLAUDE.md
+  invariants, test adequacy, and the executor's contract-sweep and red-proof lines. Dispatched per group, all groups in one message, by
+  skills/backlog-review/references/procedure.md. Writes its full report to the given path and returns only the verdict plus Critical/Important findings.
+  Read-only.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

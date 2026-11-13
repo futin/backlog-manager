@@ -1,10 +1,9 @@
 ---
 name: backlog-tick
 description: >
-  Run one unattended unit of backlog work per scheduled tick, started by a dashboard job and never by hand: only when the project's pipeline is idle, it
-  executes a ready bug or task to a PR, or else grooms an ungroomed bug or a refactor into a plan marked `plan-review` for a person to approve. It never
-  merges, never commits a groom, never asks a question and never runs anything in the background. Use it for /backlog-tick, run a backlog tick, or when a
-  scheduled job names it. Trigger: /backlog-tick
+  Run one unattended unit of backlog work per scheduled tick, only when the project is idle: execute a ready bug or task to a PR, or groom one into a plan
+  marked `plan-review` for a person to approve. Started by a dashboard job, never by hand; never merges and never asks a question. Use it for /backlog-tick, run
+  a backlog tick, or when a scheduled job names it. Trigger: /backlog-tick
 trigger: /backlog-tick
 ---
 
