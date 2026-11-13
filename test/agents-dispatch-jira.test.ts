@@ -64,6 +64,11 @@ interface Dashboard {
   projectPaths?: string[];
   /** The health answer says `desktopAvailable: true` — a Mac whose dashboard can hand a launch to the desktop app. */
   desktop?: boolean;
+  /**
+   * The FIRST spawn answers only once this settles; later spawns answer at once. A race case needs the first dispatch held mid-spawn — its key reserved, its
+   * branch held, no link yet — while a second one runs every gate, and a second spawn that would hang on the same gate would turn a red case into a timeout.
+   */
+  firstSpawnGate?: Promise<void>;
 }
 
 /** What the dashboard stub saw: every URL, the spawn bodies, and the Jira write log as it stood at the moment each spawn arrived. */
@@ -88,11 +93,12 @@ function stubDashboard(opts: Dashboard = {}): Sent {
       sent.spawns.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       sent.writesAtSpawn.push(writes());
       const ok = opts.spawn?.ok ?? true;
-      return Promise.resolve({
+      const answer = {
         ok,
         status: opts.spawn?.status ?? (ok ? 200 : 500),
         json: () => Promise.resolve(opts.spawn?.body ?? { sessionId: 'sess-1' })
-      } as Response);
+      } as Response;
+      return opts.firstSpawnGate !== undefined && sent.spawns.length === 1 ? opts.firstSpawnGate.then(() => answer) : Promise.resolve(answer);
     }
     if (url.endsWith('/api/health') && opts.healthDown) return Promise.reject(new TypeError('fetch failed'));
     return Promise.resolve({
@@ -946,12 +952,30 @@ describe('review', () => {
       await post(body()).expect(200);
     });
 
-    it('two sub-tasks of one parent on the same MR branch at the same moment: exactly one spawns, the other 409s on the branch', async () => {
-      const [a, b] = await Promise.all([post(body()), post(body({ key: 'PAY-3' }))]);
-      expect([a.status, b.status].sort()).toEqual([200, 409]);
-      expect((a.status === 409 ? a : b).body).toEqual(busy);
+    it('two sub-tasks of one parent on the same MR branch, the second while the first is still spawning: it 409s on the hold, not on a link', async () => {
+      // `Promise.all` over two posts does not race them: supertest's first request usually finishes before the second reaches the gate, so the second 409s
+      // on the first one's LINK and the hold is never exercised. Here the first dispatch is parked inside its spawn — key reserved, branch held, no link —
+      // and the second runs every gate in that window, so the only thing that can refuse it is the hold.
+      let open!: () => void;
+      sent = stubDashboard({ projectPaths: [MAIN, CLONE], firstSpawnGate: new Promise<void>((resolve) => (open = resolve)) });
+      const first = post(body()).then((res) => res);
+      // `finally`, so a failed assertion still lets the parked request answer: left parked, it holds the app open and the case reads as a 30 s timeout.
+      try {
+        for (let waited = 0; sent.spawns.length === 0; waited += 5) {
+          if (waited > 5_000) throw new Error('the first dispatch never reached its spawn');
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        expect(live.liveLinks()).toEqual([]);
+        expect(live.get('PAY-2')).toMatchObject({ sessionId: null });
+        expect((await post(body({ key: 'PAY-3' })).expect(409)).body).toEqual(busy);
+        expect(live.get('PAY-3')).toBeNull();
+      } finally {
+        open();
+      }
+      expect((await first).status).toBe(200);
       expect(sent.spawns).toHaveLength(1);
-    });
+      // Bounded on its own: a red state must fail here, never park the suite behind a request that never answers.
+    }, 5_000);
 
     it('a failed spawn releases the branch reservation: a third dispatch passes', async () => {
       sent = stubDashboard({ projectPaths: [MAIN, CLONE], spawn: { ok: false, status: 500, body: { error: 'boom' } } });
