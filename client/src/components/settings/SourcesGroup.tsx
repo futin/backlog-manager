@@ -2,13 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { StatusPill } from '../ui/StatusPill';
+import { useGitlabContext } from '../../hooks/GitlabContext';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useProjectsContext } from '../../hooks/ProjectsContext';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
 import { useTrackersContext } from '../../hooks/TrackersContext';
 import type { JiraPage } from '../../lib/jira-page';
 import type { GithubPage } from '../../lib/source-page';
-import { githubDown, jiraDown, serviceTone } from '../../lib/service-status';
+import { githubDown, gitlabLines, gitlabTone, jiraDown, serviceTone } from '../../lib/service-status';
 import { projectsPerSource, sourceSectionOf } from '../../lib/sources';
 import { postSweep, refusalText, type SweepOutcome } from '../../lib/sweep';
 import type { StateTone } from '../../lib/tones';
@@ -49,11 +50,12 @@ export function SourcesGroup({
   const trackers = useTrackersContext();
   const { data, loading, error } = trackers;
   const jira = useJiraContext();
+  const gitlab = useGitlabContext();
   // The rail's own answer (`GET /api/projects`), read for the GitHub link's gate alone — see the comment on the link.
   const projects = useProjectsContext();
   const drawn = projects.drawn;
-  const answers = [useAnsweredAt(projects.data), useAnsweredAt(data), useAnsweredAt(jira.data)].filter((t): t is number => t !== null);
-  // The oldest of the three latest answers: the moment since which ALL answered. Sources that have not answered at all do not hold the foot back.
+  const answers = [useAnsweredAt(projects.data), useAnsweredAt(data), useAnsweredAt(jira.data), useAnsweredAt(gitlab.data)].filter((t): t is number => t !== null);
+  // The oldest of the four latest answers: the moment since which ALL answered. Sources that have not answered at all do not hold the foot back.
   const answeredAt = answers.length === 0 ? null : Math.min(...answers);
   const [reading, setReading] = useState(false);
   const [readNotice, setReadNotice] = useState<string | null>(null);
@@ -81,21 +83,36 @@ export function SourcesGroup({
       ? null
       : serviceTone({ down: jiraDown(jira.data.access), rows: jira.data.boards, limited: jira.data.access === 'rate-limited' }, now);
 
-  // Read again: both sweeps, then every context re-reads. A sweep's 409 means nothing is armed to sweep (Jira unconfigured, no github repo), which is not an
+  // GitLab: before its first answer the pill says `checking…`, and `unavailable` when that read failed. Otherwise the word is `CARD_WORD`'s for the tone, bar
+  // the two grey states that have a word of their own (`not configured`, `checking…`) — `not polled yet` is only the idle state's.
+  const gitlabStatus = gitlab.data?.status ?? null;
+  const gitlabHint: string[] = gitlabStatus === null ? [gitlab.error === null ? 'checking…' : 'unavailable'] : gitlabLines(gitlabStatus, now);
+  const gitlabPill: { tone: StateTone; word: string } =
+    gitlabStatus === null
+      ? { tone: 'grey', word: gitlab.error === null ? 'checking…' : 'unavailable' }
+      : gitlabStatus.state === 'unconfigured'
+        ? { tone: 'grey', word: 'not configured' }
+        : gitlabStatus.state === 'checking'
+          ? { tone: 'grey', word: 'checking…' }
+          : { tone: gitlabTone(gitlabStatus, now), word: CARD_WORD[gitlabTone(gitlabStatus, now)] };
+
+  // Read again: all three sweeps, then every context re-reads. A sweep's 409 means nothing is armed to sweep (Jira or GitLab unconfigured or idle, no github repo), which is not an
   // error on a card whose job is to say what the machine has; anything else is a sentence under the foot. A ref guards the double click `reading` cannot.
   const readAgain = async (): Promise<void> => {
     if (inFlight.current) return;
     inFlight.current = true;
     setReading(true);
     setReadNotice(null);
-    const [github, jiraOutcome] = await Promise.all([postSweep('github'), postSweep('jira')]);
-    const outcomes: ['github' | 'jira', SweepOutcome][] = [
+    const [github, jiraOutcome, gitlabOutcome] = await Promise.all([postSweep('github'), postSweep('jira'), postSweep('gitlab')]);
+    const outcomes: ['github' | 'jira' | 'gitlab', SweepOutcome][] = [
       ['github', github],
-      ['jira', jiraOutcome]
+      ['jira', jiraOutcome],
+      ['gitlab', gitlabOutcome]
     ];
     projects.reload();
     trackers.reload();
     jira.reload();
+    void gitlab.refresh();
     const refused = outcomes.flatMap(([service, o]) => (o.ok || o.status === 409 ? [] : [refusalText(service, o, zone)]));
     setReadNotice(refused.length === 0 ? null : refused.join(' · '));
     inFlight.current = false;
@@ -155,6 +172,10 @@ export function SourcesGroup({
             Jira setup
           </button>
         )}
+      </SettingsRow>
+
+      <SettingsRow name="GitLab" hint={<Lines lines={gitlabHint} />}>
+        <StatusPill tone={gitlabPill.tone} word={gitlabPill.word} />
       </SettingsRow>
 
       {error && data !== null && <SettingsRow name="Last read" hint="the last read failed — showing the previous answer" />}

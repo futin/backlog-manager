@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings — Sources GitLab row</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Hanken Grotesk',sans-serif;color:#131313}
+a{color:#306c0f}a:hover{color:#1f4a09}
+.src{display:flex;align-items:center;gap:12px;padding:14px 0;border-top:1px solid #eaeae8}
+.name{width:90px;font-size:14px;font-weight:500;flex-shrink:0}
+.meta{font-size:12px;color:#6b6b6b}
+.st{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500}
+.d{width:8px;height:8px;border-radius:999px;display:inline-block}
+.tag{font-size:11px;font-weight:600;color:#6b6b6b;background:#ededec;border-radius:6px;padding:2px 7px}
+</style>
+</helmet>
+<div style="width:880px;height:520px;box-sizing:border-box;background:#f4f4f3;padding:28px">
+  <div style="background:#ffffff;border:1px solid #eaeae8;border-radius:14px;padding:18px 20px 6px">
+    <h2 style="margin:0 0 4px;font-size:16px;font-weight:600">Sources</h2>
+    <p class="meta" style="margin:0 0 12px">Credentials live in this machine's .env and never leave the server.</p>
+    <div class="src">
+      <span class="name">GitHub</span>
+      <span class="st"><span class="d" style="background:#7dc242"></span>futin</span>
+      <span class="meta" style="margin-left:auto">rate 4,812 / 5,000</span>
+    </div>
+    <div class="src">
+      <span class="name">Jira</span>
+      <span class="st"><span class="d" style="background:#7dc242"></span>Andreja J.</span>
+      <span class="meta" style="margin-left:auto">timify.atlassian.net</span>
+    </div>
+    <div class="src" style="background:#fbfbfa;margin:0 -20px;padding:14px 20px">
+      <span class="name">GitLab <span class="tag">new</span></span>
+      <span class="st"><span class="d" style="background:#7dc242"></span>andreja.j</span>
+      <span class="meta">www.gitlab.timify.io · read_api</span>
+      <span class="meta" style="margin-left:auto">2 repos mapped via Jira › Repositories</span>
+    </div>
+  </div>
+  <p class="meta" style="margin:20px 0 8px;font-weight:600">The GitLab row's other states</p>
+  <div style="background:#ffffff;border:1px solid #eaeae8;border-radius:14px;padding:0 20px">
+    <div class="src" style="border-top:0">
+      <span class="name">GitLab</span>
+      <span class="st" style="color:#6b6b6b"><span class="d" style="background:#dcdcda"></span>no token</span>
+      <span class="meta" style="margin-left:auto">set BM_GITLAB_SITE and BM_GITLAB_TOKEN in .env and restart</span>
+    </div>
+    <div class="src">
+      <span class="name">GitLab</span>
+      <span class="st" style="color:#b03b28"><span class="d" style="background:#b03b28"></span>rejected</span>
+      <span class="meta" style="margin-left:auto">www.gitlab.timify.io answered 401 — token invalid or expired</span>
+    </div>
+    <div class="src">
+      <span class="name">GitLab</span>
+      <span class="st" style="color:#8a5214"><span class="d" style="background:#c4761f"></span>no access</span>
+      <span class="meta" style="margin-left:auto">token cannot read development/dev-api-graphql-proxy (404)</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":880,"height":520}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

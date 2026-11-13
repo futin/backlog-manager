@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/*.ts", "vite.config.ts", "docker-compose.yml", "server/src/jira/env.util.ts", "server/src/jira/refs.util.ts", "server/src/hub/**"]
+paths: ["server/src/*.ts", "vite.config.ts", "docker-compose.yml", "server/src/jira/env.util.ts", "server/src/jira/refs.util.ts", "server/src/hub/**", "server/src/gitlab/**"]
 ---
 
 # Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md

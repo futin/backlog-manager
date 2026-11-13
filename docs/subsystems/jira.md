@@ -24,6 +24,7 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 [invariants](invariants.md#the-server-never-writes-git) — and the map is [below](#branch-and-worktree-the-repobranch-work).
 
 `server/src/jira/` is the third outbound-calling module, after `agents/` and `tracker/`, and the only one that talks to Atlassian.
+`server/src/gitlab/` is the fourth, and the Jira board, List and Detail draw the merge requests it reads — [gitlab.md](gitlab.md).
 
 ## Scopes — what lives where
 
@@ -307,6 +308,9 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   slot with the fold's `childrenOf` beside the issue. The band's `Board | List` switch (`JiraViewSwitch`, `hooks/useJiraView.ts`) picks the deck over the shelves or
   `JiraIssueList`: one row per top, never a folded issue, in `sortTops`' order and uncut, with the deck's own session roll-up (`topSessionCell`, `issueCellWord`
   in `lib/jira-deck.ts`) and `rolledUpdated` (`lib/jira.ts`) for the Updated cell; a row opens Detail through `rowOpens` (`lib/jira-list.ts`).
+  Since the GitLab connection, while `useDeliveryIndex` answers an index: `MrChip` on each card (`components/jira/MrChip.tsx`), `GitlabBandLine` under
+  `JiraBandSub`, the List's Delivery column after Status (`DeliveryTrack`'s compact shape), and a `Delivery` section in the Filters popover beside a
+  List-only segmented control, stored with the board filters (`lib/jira.ts`'s `delivery`) — [gitlab.md](gitlab.md#the-client-half), DESIGN.md §8.9.6.
 - **Jira › Sessions** (`components/jira/JiraSessionsView.tsx`, `JiraBandSub.tsx`). The session table, `JiraSessionList`, on a page of its own: the shared board pick and
   load (`usePickedJiraBoard`), its own `Search sessions` text, no FilterBar and no view switch. The table's bar is drawn in every state and `All tickets` on is scoped
   to every linked ticket whatever the board is doing, so the rail badge's click (page `sessions`, filters `{ chip: 'needs-you', allTickets: true }`) never waits on a
@@ -318,6 +322,8 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `ItemModal` also uses), the children and the boards holding it. The held answer is stamped with its key, so a late answer for an issue the modal has left
   is dropped. The children draw as a tree: the detail's direct children with their descendants from the `childrenOf` snapshot the card click carried, each
   key once; a row click swaps the one modal's issue through the same `JiraView` setter, never a second `Modal`.
+  **The Delivery pane (the GitLab connection)** — `DeliveryPane` (`components/jira/DeliveryPane.tsx`) sits in the agent column under the sessions band,
+  above History: the lead MR's head, `DeliveryTrack`'s full shape and an `Also:` line, or the no-MR or not-yet-known sentence (DESIGN.md §8.9.6).
   **The controls row (phase 3)** sits under the facts: an `Assign to me` chip and a `Move to…` select (DESIGN.md §8.9.2). Assign posts `{ key }` to
   `/api/jira/issue/assign`; a pick in the select posts `{ key, transitionId }` to `/issue/transition` at once, the select staying controlled at its
   placeholder. Both go through ONE `useAction`, so its ref guard holds across them — a double click, or a Move picked while Assign is out, sends one POST — and

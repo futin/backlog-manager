@@ -475,6 +475,15 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
     expect(styles).toMatch(/@media \(max-width: 700px\) \{\s*\.jira-issues-frame \{ container-type: normal \}\s*\.jira-issues-scroll \{ overflow-x: auto \}/);
     const block = styles.slice(at, styles.indexOf('\n}', at));
     expect(block).toContain('.jira-issues-scroll { overflow-x: auto }');
+    // GitLab's Delivery column (spec §7.3) widens the table only while it is drawn, keyed on the box's `data-delivery`; that box scrolls under the same rule
+    // — once, inside a container query of its own whose threshold is the wider table's `min-width` plus one, so it scrolls exactly when the table cannot fit.
+    const dlv = [...styles.matchAll(/\.jira-issues-scroll\[data-delivery\]\s*\{[^}]*overflow-x:\s*auto/g)];
+    expect(dlv).toHaveLength(1);
+    const dlvAt = styles.lastIndexOf('@container (max-width: ', dlv[0].index);
+    const threshold = Number(/^@container \(max-width: (\d+)px\) \{/.exec(styles.slice(dlvAt))?.[1]);
+    expect(styles.slice(dlvAt, dlv[0].index)).not.toMatch(/\n\}/);
+    const minWidth = Number(/\.jira-issues-scroll\[data-delivery\] \.jira-issues-table \{ min-width: (\d+)px \}/.exec(styles)?.[1]);
+    expect(threshold).toBe(minWidth + 1);
   });
 
   /**

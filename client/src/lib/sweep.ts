@@ -4,16 +4,16 @@ import { formatZonedClock } from './time-zone';
 /**
  * The popover head's `Sync now` and a GitHub row's sync icon: one POST to the server's sweep route, folded into the three answers a button can act on.
  *
- * GitHub: `/api/github/sweep`, `{ repo }` when one repo is asked for. Jira: `/api/jira/sweep`, site-wide and bodiless — a Jira ROW does not come through here,
+ * GitHub: `/api/github/sweep`, `{ repo }` when one repo is asked for. GitLab: `/api/gitlab/sweep`, site-wide and bodiless like Jira's. Jira: `/api/jira/sweep`, site-wide and bodiless — a Jira ROW does not come through here,
  * it keeps `/api/jira/boards/sweep`'s own callback in `JiraChip`. Both routes answer a 200 with the fresh status payload, but the caller re-reads the shell's
  * context instead of trusting it: the context's own fetch is what every other reader shares, so there is one place a cache is replaced.
  */
-export type SweepService = 'github' | 'jira';
+export type SweepService = 'github' | 'jira' | 'gitlab';
 
 export type SweepOutcome = { ok: true } | { ok: false; status: number; message: string; retryAt: string | null };
 
-const URLS: Record<SweepService, string> = { github: '/api/github/sweep', jira: '/api/jira/sweep' };
-export const SERVICE_NAME: Record<SweepService, string> = { github: 'GitHub', jira: 'Jira' };
+const URLS: Record<SweepService, string> = { github: '/api/github/sweep', jira: '/api/jira/sweep', gitlab: '/api/gitlab/sweep' };
+export const SERVICE_NAME: Record<SweepService, string> = { github: 'GitHub', jira: 'Jira', gitlab: 'GitLab' };
 
 export async function postSweep(service: SweepService, target?: string): Promise<SweepOutcome> {
   try {

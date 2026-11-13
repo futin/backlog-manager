@@ -15,8 +15,20 @@ import { setJiraView } from '../client/src/hooks/useJiraView';
 import { elapsedSince } from '../client/src/lib/item-age';
 import { JIRA_BOARD_KEY, JIRA_FILTERS_KEY, bandSub } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
+import { GitlabContext } from '../client/src/hooks/GitlabContext';
+import { NoGitlab } from './helpers/no-gitlab';
 import { daysAgoStamp } from './helpers/dates';
-import { JIRA_BUILTIN_LABELS, type AgentsStatus, type DashboardRow, type JiraBoardStatus, type JiraIssue, type JiraLiveSession, type JiraStatusPayload } from '../shared/types';
+import {
+  JIRA_BUILTIN_LABELS,
+  type AgentsStatus,
+  type DashboardRow,
+  type GitlabMr,
+  type GitlabPayload,
+  type JiraBoardStatus,
+  type JiraIssue,
+  type JiraLiveSession,
+  type JiraStatusPayload
+} from '../shared/types';
 
 /*
   Jira › Board (Jira phase 2; spec §6.2; DESIGN.md §8.9.1) — the real page over a mocked `fetch`, in the style of `tracker-board.test.tsx`: the band
@@ -225,7 +237,8 @@ function renderPage(): void {
   render(
     <JiraProvider>
       <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={onOpenIssue} onRun={jest.fn()} nudge={0} />
-    </JiraProvider>
+    </JiraProvider>,
+    { wrapper: NoGitlab }
   );
 }
 
@@ -333,6 +346,70 @@ describe('the band', () => {
     expect(sub.text).toBe('acme.atlassian.net · 4 issues from 1 root and 1 query · polled 10m ago');
     expect(document.querySelector('.ui-band-sub')?.textContent).toBe(sub.text);
     expect(document.querySelector('.jira-band-sub')).not.toHaveClass('failing');
+  });
+
+  /*
+    The GitLab line (GitLab connection spec §7.2): `bandTotals` over the board's shown tops, under the board's own sub-line. The payload is handed in through
+    the raw context, as the shell's one answer would hand it over; PAY maps one GitLab project polled two minutes ago, PAY-131 leads with an open MR whose
+    pipeline failed and PAY-140 with a merged one.
+  */
+  const gitlabMr = (over: Partial<GitlabMr>): GitlabMr => ({
+    project: 'payments/api',
+    iid: 415,
+    title: 'PAY-131 | refund partial captures',
+    webUrl: 'https://gitlab.example.test/payments/api/-/merge_requests/415',
+    state: 'opened',
+    draft: false,
+    sourceBranch: 'pay-131-refunds',
+    targetBranch: 'develop',
+    createdAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+    mergedAt: null,
+    pipeline: 'failed',
+    keys: ['PAY-131'],
+    ...over
+  });
+  const gitlab = (over: Partial<GitlabPayload['status']> = {}): GitlabPayload => ({
+    status: {
+      state: 'connected',
+      site: 'gitlab.example.test',
+      malformedSite: false,
+      user: { username: 'ada', name: 'Ada' },
+      httpStatus: null,
+      reason: null,
+      armed: true,
+      retryAt: null,
+      mappedRepos: 1,
+      foundHosts: [],
+      problems: [],
+      ...over
+    },
+    jiraProjects: { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false }] },
+    mrs: [gitlabMr({}), gitlabMr({ iid: 398, state: 'merged', pipeline: null, keys: ['PAY-140'], mergedAt: new Date(Date.now() - 86_400_000).toISOString() })]
+  });
+  async function renderWithGitlab(data: GitlabPayload): Promise<void> {
+    render(
+      <GitlabContext.Provider value={{ data, error: null, refresh: () => Promise.resolve(data) }}>
+        <JiraProvider>
+          <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={jest.fn()} onRun={jest.fn()} nudge={0} />
+        </JiraProvider>
+      </GitlabContext.Provider>
+    );
+    await screen.findByText('Refund partial captures');
+  }
+
+  it('adds the GitLab line under the sub-line while GitLab is shown, counted over the tops', async () => {
+    await renderWithGitlab(gitlab());
+    const line = document.querySelector('.ui-band-sub .jira-band-gitlab');
+    expect(line?.textContent).toBe('GitLab: 1 open · 1 failing · 1 merged · polled 2m ago');
+    // The board's own sub-line is untouched beside it.
+    expect(document.querySelector('.jira-band-sub')?.textContent).toMatch(/^acme\.atlassian\.net · 4 issues/);
+  });
+
+  it('draws no GitLab text anywhere on the board while GitLab is unconfigured', async () => {
+    await renderWithGitlab({ ...gitlab({ state: 'unconfigured', site: null, user: null, armed: false }), jiraProjects: {}, mrs: [] });
+    expect(document.body.textContent).not.toContain('GitLab:');
+    expect(document.querySelector('.jira-mr-chip')).toBeNull();
   });
 
   it('draws a failing board’s sub with the failing class and Jira’s message', async () => {
@@ -579,7 +656,7 @@ describe('filters and search', () => {
     await pick('Assignee', 'me');
     await pick('Status', 'Backlog');
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'refund');
-    expect(JSON.parse(localStorage.getItem(JIRA_FILTERS_KEY) ?? 'null')).toEqual({ assignee: 'me', statuses: ['Backlog'] });
+    expect(JSON.parse(localStorage.getItem(JIRA_FILTERS_KEY) ?? 'null')).toEqual({ assignee: 'me', statuses: ['Backlog'], delivery: 'all' });
     cleanup();
 
     // Not `renderAlpha`: the card it waits for is one the restored filters hide. The badge counts the APPLIED filters, so it lights only once the list
@@ -619,7 +696,8 @@ describe('the shapes that are not a board', () => {
     render(
       <JiraProvider>
         <JiraBoardView onOpenJiraPage={setJiraPage} onOpenIssue={onOpenIssue} onRun={jest.fn()} nudge={0} />
-      </JiraProvider>
+      </JiraProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByText('No boards yet');
     expect(screen.queryByRole('button', { name: /Pick a Jira board/ })).toBeNull();
@@ -650,7 +728,8 @@ it('draws no page switch inside main', async () => {
           <JiraView onOpenJiraPage={jest.fn()} />
         </JiraSessionsProvider>
       </JiraProvider>
-    </main>
+    </main>,
+    { wrapper: NoGitlab }
   );
   await screen.findByText('Refund partial captures');
   const main = document.querySelector('main') as HTMLElement;
@@ -899,7 +978,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
             <JiraView onOpenJiraPage={jest.fn()} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByText(firstCard);
   }
@@ -1294,7 +1374,8 @@ describe('worktree chips on the card', () => {
             <JiraView onOpenJiraPage={jest.fn()} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByText('Refund partial captures');
   }
@@ -1384,7 +1465,8 @@ describe('the agent deck and the status shelves', () => {
             <JiraView onOpenJiraPage={jest.fn()} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByText(firstText);
   }
@@ -1560,7 +1642,8 @@ describe('the issue List', () => {
             <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={onOpenIssue} onRun={jest.fn()} nudge={0} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByRole('table');
   }
@@ -1712,7 +1795,8 @@ describe('the issue List', () => {
             <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={jest.fn()} onRun={jest.fn()} nudge={0} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     expect(await screen.findByText('No issues')).toBeInTheDocument();
   });
@@ -1754,7 +1838,8 @@ describe('Run on: a sub-task runs its parent from the card and the List cell', (
             <JiraView onOpenJiraPage={jest.fn()} />
           </JiraSessionsProvider>
         </JiraProvider>
-      </SettingsProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
     );
     await screen.findByText('Prepare refund TODOs');
   }
@@ -1784,5 +1869,137 @@ describe('Run on: a sub-task runs its parent from the card and the List cell', (
     await runParentFrom(row);
     expect(await screen.findByRole('dialog', { name: 'run PAY-99' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'run PAY-175' })).toBeNull();
+  });
+});
+
+/*
+  The Delivery quick filter (GitLab connection spec §7.4; mock `List.dc.html`): one stored value, drawn twice — a `Delivery` section in the Filters panel and a
+  segmented control above the List. PAY-131 leads with an open MR whose pipeline failed, PAY-140 with a merged one (the same payload the band line reads).
+*/
+describe('the Delivery quick filter', () => {
+  const MR = (over: Partial<GitlabMr>): GitlabMr => ({
+    project: 'payments/api',
+    iid: 415,
+    title: 'PAY-131 | refund partial captures',
+    webUrl: 'https://gitlab.example.test/payments/api/-/merge_requests/415',
+    state: 'opened',
+    draft: false,
+    sourceBranch: 'pay-131-refunds',
+    targetBranch: 'develop',
+    createdAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+    mergedAt: null,
+    pipeline: 'failed',
+    keys: ['PAY-131'],
+    ...over
+  });
+  const payload = (state: 'connected' | 'unconfigured' = 'connected', mrs: GitlabMr[] = [MR({}), MR({ iid: 398, state: 'merged', pipeline: null, keys: ['PAY-140'], mergedAt: new Date(Date.now() - 86_400_000).toISOString() })]): GitlabPayload => ({
+    status: {
+      state,
+      site: state === 'connected' ? 'gitlab.example.test' : null,
+      malformedSite: false,
+      user: state === 'connected' ? { username: 'ada', name: 'Ada' } : null,
+      httpStatus: null,
+      reason: null,
+      armed: state === 'connected',
+      retryAt: null,
+      mappedRepos: 1,
+      foundHosts: [],
+      problems: []
+    },
+    jiraProjects: state === 'connected' ? { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false }] } : {},
+    mrs: state === 'connected' ? mrs : []
+  });
+
+  function mount(data: GitlabPayload, view: 'board' | 'list'): void {
+    setJiraView(view);
+    setJiraPage('board');
+    render(
+      <GitlabContext.Provider value={{ data, error: null, refresh: () => Promise.resolve(data) }}>
+        <SettingsProvider>
+          <JiraProvider>
+            <JiraSessionsProvider open>
+              <JiraBoardView onOpenJiraPage={jest.fn()} onOpenIssue={jest.fn()} onRun={jest.fn()} nudge={0} />
+            </JiraSessionsProvider>
+          </JiraProvider>
+        </SettingsProvider>
+      </GitlabContext.Provider>
+    );
+  }
+  afterEach(() => act(() => setJiraView('board')));
+
+  const seg = (): HTMLElement => screen.getByRole('group', { name: 'Delivery' });
+  const rowSummaries = (): string[] => Array.from(document.querySelectorAll('.jira-issues-table tbody tr')).map((r) => r.querySelector('td:nth-child(3)')?.textContent ?? '');
+
+  it('picks Pipeline failing in the panel: only the failing top stays, and the List control shows the same value', async () => {
+    mount(payload(), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    expect(rowSummaries()).toHaveLength(4);
+    const panel = await openFilters();
+    await userEvent.click(within(within(panel).getByRole('group', { name: 'Delivery' })).getByRole('button', { name: 'Pipeline failing' }));
+    expect(rowSummaries()).toEqual([expect.stringContaining('Refund partial captures')]);
+    expect(screen.getByRole('button', { name: 'Filters, 1 set' })).toBeInTheDocument();
+    // Two groups carry the name (panel and List): the control above the table is the one outside the dialog.
+    const controls = screen.getAllByRole('group', { name: 'Delivery' });
+    const listControl = controls.find((c) => !panel.contains(c)) as HTMLElement;
+    expect(within(listControl).getByRole('button', { name: 'Pipeline failing' })).toHaveAttribute('aria-pressed', 'true');
+
+    await userEvent.click(within(listControl).getByRole('button', { name: 'All' }));
+    expect(rowSummaries()).toHaveLength(4);
+    // The click outside shut the panel (its own pointerdown listener); reopened, it reads the value the List control set.
+    const reopened = await openFilters();
+    expect(within(within(reopened).getByRole('group', { name: 'Delivery' })).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('the segmented control drives the value, and it survives a remount through JIRA_FILTERS_KEY', async () => {
+    mount(payload(), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    await userEvent.click(within(seg()).getByRole('button', { name: 'Has MR' }));
+    expect(rowSummaries().sort()).toEqual([expect.stringContaining('Currency symbol'), expect.stringContaining('Refund partial captures')]);
+    expect(JSON.parse(localStorage.getItem(JIRA_FILTERS_KEY) ?? 'null')).toMatchObject({ delivery: 'has-mr' });
+    cleanup();
+
+    mount(payload(), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    expect(within(seg()).getByRole('button', { name: 'Has MR' })).toHaveAttribute('aria-pressed', 'true');
+    expect(rowSummaries()).toHaveLength(2);
+  });
+
+  // F1 (grouped-board spec §5): the top is kept when anything folded under it matches, so a story with no MR stays while its sub-task's own MR fails.
+  it('keeps a top with no MR when a folded child’s own MR fails', async () => {
+    const STORY = issue({ key: 'PAY-60', summary: 'Story without an MR', type: { name: 'Story', level: 0, subtask: false }, subtasks: 1, updated: daysAgoStamp(0) });
+    const CHILD = issue({
+      key: 'PAY-61',
+      summary: 'Child with a failing MR',
+      type: { name: 'Sub-task', level: -1, subtask: true },
+      parent: { key: 'PAY-60', summary: 'Story without an MR' },
+      updated: daysAgoStamp(0)
+    });
+    lists[ALPHA.id] = [STORY, CHILD, PAY_140];
+    mount(payload('connected', [MR({ iid: 500, keys: ['PAY-61'], title: 'PAY-61 | child' })]), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    await userEvent.click(within(seg()).getByRole('button', { name: 'Pipeline failing' }));
+    expect(rowSummaries()).toEqual([expect.stringContaining('Story without an MR')]);
+  });
+
+  // Review Focus 5: a stored filter for a GitLab that is no longer shown is not a filter — nothing hides, nothing counts, and nothing offers it.
+  it('reads a stored Pipeline failing as All when GitLab is unconfigured: every ticket, no control, no badge', async () => {
+    localStorage.setItem(JIRA_FILTERS_KEY, JSON.stringify({ delivery: 'failing' }));
+    mount(payload('unconfigured'), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    expect(rowSummaries()).toHaveLength(4);
+    expect(screen.queryByRole('group', { name: 'Delivery' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
+    await openFilters();
+    expect(screen.queryByRole('group', { name: 'Delivery' })).toBeNull();
+    expect(screen.queryByText('Delivery')).toBeNull();
+  });
+
+  it('draws the panel section but no List control in Board view', async () => {
+    mount(payload(), 'board');
+    await screen.findByText('Refund partial captures');
+    expect(screen.queryByRole('group', { name: 'Delivery' })).toBeNull();
+    await openFilters();
+    expect(screen.getAllByRole('group', { name: 'Delivery' })).toHaveLength(1);
   });
 });

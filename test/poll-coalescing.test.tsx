@@ -5,6 +5,7 @@ import { act, renderHook } from '@testing-library/react';
 
 import { useAgents } from '../client/src/hooks/useAgents';
 import { BOARD_TRACKER_POLL_MS, useBoard } from '../client/src/hooks/useBoard';
+import { GITLAB_CLIENT_POLL_MS, useGitlab } from '../client/src/hooks/useGitlab';
 import { useOrchestratorArchive } from '../client/src/hooks/useOrchestratorArchive';
 import { POLL_MS, useOrchestratorRuns } from '../client/src/hooks/useOrchestratorRuns';
 import { useRefreshing } from '../client/src/hooks/useRefreshing';
@@ -12,7 +13,7 @@ import { TICKS_POLL_MS, useTicks } from '../client/src/hooks/useTicks';
 import { useWatchdog, WATCHDOG_IDLE_POLL_MS, WATCHDOG_POLL_MS } from '../client/src/hooks/useWatchdog';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
-import type { AgentsStatus, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, TicksPayload, WatchdogPhase, WatchdogStatus } from '../shared/types';
+import type { AgentsStatus, GitlabPayload, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, TicksPayload, WatchdogPhase, WatchdogStatus } from '../shared/types';
 
 /**
  * #277 — the board's pollers never have two of their own requests in flight, and a focus / mount / refresh that lands mid-flight coalesces into exactly ONE
@@ -76,6 +77,10 @@ function watchdog(phase: WatchdogPhase): WatchdogStatus {
 // answer to describe — see GATED below.
 const TICKS: TicksPayload = { config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, source: 'default' }, projects: [] };
 
+// The GitLab reader's payload. Both `Kind`s answer the same body: `useGitlab` is armed constant `true` (the Sources row needs the status whatever GitLab
+// says), so nothing in its answer can disarm it.
+const GITLAB = { status: { configured: false }, jiraProjects: {}, mrs: [] } as unknown as GitlabPayload;
+
 const AGENTS: AgentsStatus = {
   enabled: true,
   reachable: true,
@@ -130,14 +135,24 @@ const SUBJECTS: Subject[] = [
     perRequest: 1,
     mount: () => renderHook(() => useTicks()),
     body: () => TICKS
+  },
+  {
+    // The shell's one `GET /api/gitlab` read. A POLLER with nothing in its answer that disarms it, so not GATED. Appended after `useTicks` for the same
+    // index reason.
+    name: 'useGitlab',
+    periodMs: GITLAB_CLIENT_POLL_MS,
+    perRequest: 1,
+    mount: () => renderHook(() => useGitlab()),
+    body: () => GITLAB
   }
 ];
 const POLLERS = SUBJECTS.filter((s) => s.periodMs !== null);
 // The pollers whose arming condition can go false while they are mounted with defaults. Not the watchdog: since #270 a live monitor never stops — an
 // idle sweeper re-arms it on `WATCHDOG_IDLE_POLL_MS` instead of clearing the timer — so its case 9 is the period switch in its own describe below. Not
 // `useTicks` either: nothing in its answer can disarm it (it polls while `live`, which is the caller's choice and not the server's), so its case 9 is the
-// `live: false` describe below.
-const GATED = POLLERS.filter((s) => s.name !== 'useWatchdog' && s.name !== 'useTicks');
+// `live: false` describe below. Not `useGitlab` either: it is armed constant `true` — the Sources row needs the status whatever GitLab answers — so there is no
+// world in which its answer stops the clock.
+const GATED = POLLERS.filter((s) => s.name !== 'useWatchdog' && s.name !== 'useTicks' && s.name !== 'useGitlab');
 
 /** A `fetch` whose every call hangs until the test answers it. `answer` settles everything outstanding with the subject's body for `kind`. */
 function controlledFetch(subject: Subject): { fn: jest.Mock; answer: (kind: Kind) => Promise<void>; fail: () => Promise<void> } {

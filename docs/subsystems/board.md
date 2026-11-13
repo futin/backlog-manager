@@ -148,10 +148,12 @@ page's cards — and a component only one directory can import is the drift the 
 `.set-*` were never `.ui-*` families, they sit outside the ui primitives block, and guard 7 does not pin them, because the hoist moved the components and
 left their CSS byte-for-byte where both surfaces already read it. `LiveStrip` followed for the same reason in Jira phase 5: it was `ItemCard`'s inline markup
 until the Jira card needed the same band for a live session, and the component owns the markup while `.board-card-live` stays the stylesheet's, declared once.
+`DeliveryTrack` (the GitLab connection) sits in `ui/` without a row, for the same reason and with the same split: two surfaces draw it — the Detail's
+Delivery pane (full) and the List's Delivery cell (`compact`) — and its `.jira-dlv-*` classes are the Jira stylesheet's, outside the ui primitives block.
 Everything else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`,
 `RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`, `StageBars`, `WatchdogMonitor` (runs); `JiraView`, `JiraBoardView`, `JiraSessionsView`, `JiraIssueList`, `JiraCard`,
 `JiraDetail`, `JiraSetupView`, `JiraBoardSheet`, `JiraReposGroup`, `JiraConnectionGroup`, `JiraSkillsGroup`, `JiraWorktreeRow`, `JiraRunMenu`,
-`JiraLaunchSheet`, `JiraBranchSection` (jira). `JiraChip` sits at the top level of `components/` beside
+`JiraLaunchSheet`, `JiraBranchSection`, `MrChip`, `GitlabBandLine`, `DeliveryPane` (jira). `JiraChip` sits at the top level of `components/` beside
 `TrackerChip`, because the shell draws it. `FilterBar` sits at the top level of `components/`, like `lib/view-keys.ts`, because more than one lazy chunk
 reads it (Board, Archive and the Jira board); `RunControls` sits there too, though only the Runs chunk reads it (`RunDetail`, `WatchdogMonitor`), and
 `RunRowTime` is in `board/`, where the run drawer that first read it lived — `RunDetail` is its one reader now. `FilterBar.tsx` is three components, not

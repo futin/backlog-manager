@@ -41,8 +41,8 @@ inside the compose stack they are fixed. `pnpm run tailnet` reads `BM_WEB_PORT` 
 One line per seam; the full description of each is in [docs/overview.md](docs/overview.md#every-seam-in-detail), the mechanism in the subsystem docs linked
 there, and the reasoning behind the rules below in [docs/subsystems/invariants.md](docs/subsystems/invariants.md).
 
-- `server/src/` — Nest, every route under `/api`, one module per directory: `health/`, `items/`, `agents/`, `tracker/`, `jira/`, `orchestrator/`, `hub/`,
-  `releases/`, `tick/`, `settings/`, `registry/`; plus `static.ts`, `security.ts`, `allowed-hosts.ts`, `git-run.util.ts`, `atomic-write.util.ts`. →
+- `server/src/` — Nest, every route under `/api`, one module per directory: `health/`, `items/`, `agents/`, `tracker/`, `jira/`, `gitlab/`, `orchestrator/`,
+  `hub/`, `releases/`, `tick/`, `settings/`, `registry/`; plus `static.ts`, `security.ts`, `allowed-hosts.ts`, `git-run.util.ts`, `atomic-write.util.ts`. →
   [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: Files, GitHub, Jira, Runs and Settings behind a side rail. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language. Not a `.claude/rules/` file.
@@ -65,11 +65,12 @@ brief — read that rule file.**
 | --------- | ----- |
 | `board.md` | `client/src/**`, `shared/agent.ts`, `shared/theme.css`, `client/index.html`, `server/src/security.ts`, `server/src/agents/agents.service.ts`, `server/src/orchestrator/remote-runs.util.ts` |
 | `dispatch-watchdog.md` | `server/src/agents/**`, `shared/agent.ts`, `server/src/jira/prompt.util.ts`, `docker-compose.yml`, `skills/backlog-orchestrate/tools/orchestrate.mjs`, `server/src/orchestrator/watchdog-*.ts`, `server/src/orchestrator/orchestrator.controller.ts` |
+| `gitlab.md` | `server/src/gitlab/**` |
 | `items.md` | `server/src/items/**`, `server/src/git-run.util.ts`, `server/src/releases/**`, `server/src/agents/items-abort.*.ts`, `server/src/tracker/tracker.controller.ts`, `shared/types.ts`, `Dockerfile` |
 | `jira.md` | `server/src/jira/**`, `server/src/agents/jira-*.ts`, `skills/jira/**`, `docker-compose.yml`, `shared/jira-branch.ts`, `server/src/agents/session-stop.util.ts` |
 | `orchestrator.md` | `skills/backlog-orchestrate/**`, `server/src/orchestrator/**`, `shared/agent.ts`, `skills/backlog-retro/tools/lib/paths.mjs`, `skills/backlog-retro/tools/lib/reviews.mjs`, `server/src/agents/agents.*.ts`, `server/src/agents/orchestrate-args.service.ts`, `server/src/tracker/map-issue.ts`, `client/src/lib/remote-starting.ts`, `client/src/components/RunControls.tsx` |
 | `scripts.md` | `scripts/**`, `package.json`, `pnpm-workspace.yaml`, `docker-compose*.yml` |
-| `security.md` | `server/src/*.ts`, `vite.config.ts`, `docker-compose.yml`, `server/src/jira/env.util.ts`, `server/src/jira/refs.util.ts`, `server/src/hub/**` |
+| `security.md` | `server/src/*.ts`, `vite.config.ts`, `docker-compose.yml`, `server/src/jira/env.util.ts`, `server/src/jira/refs.util.ts`, `server/src/hub/**`, `server/src/gitlab/**` |
 | `skills.md` | `skills/**`, `agents/**`, `server/src/tick/tick.service.ts`, `server/src/tick/tick-breaker.util.ts`, `scripts/sync-plugin.mjs` |
 | `tests.md` | `test/**`, `.claude/rules/**` |
 | `tick.md` | `server/src/tick/**`, `skills/backlog-tick/tools/tick.mjs`, `skills/backlog-tick/tools/tick-breaker.mjs` |
@@ -103,10 +104,12 @@ happened.
 - **Every server route lives under `/api`**; the Vite proxy has exactly one entry, asserted by `test/vite-proxy.test.ts`.
 - **The GitHub token never leaves the server, and the poller is armed only while something is connected.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
+- **The GitLab token never leaves the server, never follows a redirect, and the poller is armed only while a mapped repo is on the site.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-gitlab-token-never-leaves-the-server-never-follows-a-redirect-and-the-poller-is-armed-only-while-a-mapped-repo-is-on-the-site)
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-repo-whose-sync-is-off-refuses-every-write-path-and-cannot-be-switched-off-under-a-live-or-paused-run)
-- **The tracker, Jira and pull-request caches are the three caches in this server whose age is a rendered value.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-and-pull-request-caches-are-the-three-caches-in-this-server-whose-age-is-a-rendered-value)
+- **The tracker, Jira, pull-request and GitLab caches are the four caches in this server whose age is a rendered value.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-pull-request-and-gitlab-caches-are-the-four-caches-in-this-server-whose-age-is-a-rendered-value)
 - **A tracker project has no item files, and that shows up in three places — and dispatch is NOT one of them.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places)
 - **Groomed is derived** (bug: Cause+Fix filled and not a deferral — `unknown`, `Not decided`, `TBD`, …; task: Plan non-empty), never stored; status is the
@@ -139,9 +142,6 @@ happened.
   Why: [invariants.md](docs/subsystems/invariants.md#undoing-an-already-completed-orchestrator-merge-is-git-revert--m-1-never-git-reset---hard)
 - **Editing `skills/` changes nothing until it is committed, pushed, and `pnpm run plugin:sync` runs.**
   Why: [invariants.md](docs/subsystems/invariants.md#editing-skills-changes-nothing-until-commit--push--pluginsync)
-- **The served build carries a CSP (`server/src/security.ts`); dev does not.** `script-src` pins the pre-paint theme script's sha256 — edit that script and
-  `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows. `style-src` is `'self'` alone: write inline styles through CSSOM, never a `<style>` element
-  or a `style=` attribute in markup.
 - **pnpm only**, pinned by `packageManager`, enforced via corepack in the image.
 - **Backlog items move `open/` → `done/`; `out-of-scope/` is flat.**
 - **Dispatch derives the action; it never accepts one.** Why: [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
@@ -156,7 +156,7 @@ happened.
   Why: [invariants.md](docs/subsystems/invariants.md#a-sessions-cost-is-recorded-per-transcript-and-a-transcripts-identity-is-its-file-name)
 - **Every `.claude/rules/` file carries `paths:` and is the one home of its rules' mechanism — never the reasoning.**
   Why: [invariants.md](docs/subsystems/invariants.md#path-scoped-clauderules-reach-a-headless-run-in-a-linked-worktree-task-35)
-- **`agents/`, `tracker/` and `jira/` are the server's only outbound-calling modules**; `agents/dashboards/` is part of `agents/`, not a fourth, and
+- **`agents/`, `tracker/`, `jira/` and `gitlab/` are the server's only outbound-calling modules**; `agents/dashboards/` is part of `agents/`, not a fifth, and
   `releases/` and `tick/` call out to nothing.
 - **Start orchestrator runs from the board, not by typing the trigger into a terminal.**
 

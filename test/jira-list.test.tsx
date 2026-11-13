@@ -12,6 +12,7 @@ import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { resetJiraListFilters, setJiraListFilters } from '../client/src/hooks/useJiraListFilters';
 import { sessionsEmptyTitle } from '../client/src/lib/jira-list';
+import { NoGitlab } from './helpers/no-gitlab';
 import { daysAgoStamp } from './helpers/dates';
 import type { JiraBoardStatus, JiraEndReason, JiraIssue, JiraLiveSession, JiraStatusPayload } from '../shared/types';
 
@@ -166,7 +167,8 @@ async function renderList(onOpenJiraPage: (p: string) => void = jest.fn()): Prom
           <JiraView onOpenJiraPage={onOpenJiraPage} />
         </JiraSessionsProvider>
       </JiraProvider>
-    </SettingsProvider>
+    </SettingsProvider>,
+    { wrapper: NoGitlab }
   );
   await screen.findByRole('region', { name: 'Sessions' });
   // The sessions answer lands after the shell's: wait for the rows (or the empty line) rather than the section.

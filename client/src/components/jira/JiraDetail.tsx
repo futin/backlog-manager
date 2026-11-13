@@ -46,6 +46,7 @@ import { Chevron } from '../ui/Chevron';
 import { Pill } from '../ui/Pill';
 import { Popover } from '../ui/Popover';
 import { SpreadBar } from '../ui/SpreadBar';
+import { DeliveryPane } from './DeliveryPane';
 import { JiraRunMenu } from './JiraRunMenu';
 import { JiraHistoryLine, JiraSessionCard, JiraStartingCard } from './JiraSessionCard';
 import { WorktreeRow } from './JiraWorktreeRow';
@@ -62,6 +63,7 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * It passes `Modal` a `head`, which is the shell's split shape (`Detail.dc.html`): the head carries the type, key, parent and sprint as crumbs, the link out
  * and the title; the facts slot holds the AGENT — one `JiraSessionCard` per live session, newest first, then the history, then `Run ▾`; the body holds the
  * TICKET — a facts pane with the two writes beside the facts they change, then the description, children and worktrees panes and the comments note.
+ * Between the sessions band and the history sits `DeliveryPane` (GitLab connection spec §7.1), which reads the shell's GitLab answer and draws itself or nothing.
  *
  * **The left column is the sessions page's, not the status'.** The cards and the history read `useJiraSessionsContext()` (`GET /api/jira/sessions`, one poll
  * for the whole Jira section), narrowed to this key by `ticketSessions`. A `starting` Run is the one thing that payload never carries — a reservation has no
@@ -398,6 +400,8 @@ export function JiraDetail({
           </>
         )}
       </div>
+      {/* Delivery (GitLab connection spec §7.1): what became of the work — under the sessions that did it, above their history. It draws itself or nothing. */}
+      <DeliveryPane issue={src} now={now} />
       {ended.length > 0 && (
         <>
           <div className="jira-detail-lbl">History</div>

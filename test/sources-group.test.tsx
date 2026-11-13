@@ -6,15 +6,16 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { SourcesGroup } from '../client/src/components/settings/SourcesGroup';
+import { GitlabContext } from '../client/src/hooks/GitlabContext';
 import { JiraContext } from '../client/src/hooks/JiraContext';
 import { ProjectsContext } from '../client/src/hooks/ProjectsContext';
 import type { DrawnSources } from '../client/src/lib/sources';
 import type { JiraState } from '../client/src/hooks/useJira';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
-import type { JiraBoardStatus, JiraStatusPayload, TrackerPlatform, TrackerProjectRow, TrackersPayload } from '../shared/types';
+import type { GitlabPayload, GitlabStatus, JiraBoardStatus, JiraStatusPayload, TrackerPlatform, TrackerProjectRow, TrackersPayload } from '../shared/types';
 
 /**
- * Settings › Shared's `Sources · this machine` card (source-sections spec): one read-only row per source — Files, GitHub, Jira — saying
+ * Settings › Shared's `Sources · this machine` card (source-sections spec): one read-only row per source — Files, GitHub, Jira, GitLab — saying
  * what is connected on this machine and whether it works. It took the old Trackers card's reports (the token / login / rate-limit line, each github repo's
  * reach, each files project's `backlog.mjs connect` command, the Jira row); the sync pickers went to GitHub › Settings (`github-settings.test.tsx`).
  *
@@ -76,6 +77,31 @@ function jiraStatus(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
 
 const UNCONFIGURED = jiraStatus({ configured: false, site: null, me: null, access: 'unconfigured', boards: [], home: null });
 
+function gitlabStatus(over: Partial<GitlabStatus> = {}): GitlabStatus {
+  return {
+    state: 'unconfigured',
+    site: null,
+    malformedSite: false,
+    user: null,
+    httpStatus: null,
+    reason: null,
+    armed: false,
+    retryAt: null,
+    mappedRepos: 0,
+    foundHosts: [],
+    problems: [],
+    ...over
+  };
+}
+
+/** The GitLab answer the card reads, handed in through the raw context; `null` is "not answered yet". */
+let gitlab: GitlabPayload | null;
+let gitlabRefresh: jest.Mock;
+const gitlabValue = () => ({ data: gitlab, error: null, refresh: gitlabRefresh });
+const setGitlab = (status: GitlabStatus) => {
+  gitlab = { status, jiraProjects: {}, mrs: [] };
+};
+
 let onOpenFilesPage: jest.Mock;
 let projectsReload: jest.Mock;
 let jiraReload: jest.Mock;
@@ -90,13 +116,15 @@ async function renderCard(jira: JiraStatusPayload | null = UNCONFIGURED, drawn: 
   stubFetch();
   const state: JiraState = { data: jira, loading: jira === null, error: false, reload: jiraReload };
   render(
-    <JiraContext.Provider value={state}>
-      <ProjectsContext.Provider value={{ data: null, drawn, reload: projectsReload }}>
-        <TrackersProvider>
-          <SourcesGroup onOpenFilesPage={onOpenFilesPage} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
-        </TrackersProvider>
-      </ProjectsContext.Provider>
-    </JiraContext.Provider>
+    <GitlabContext.Provider value={gitlabValue()}>
+      <JiraContext.Provider value={state}>
+        <ProjectsContext.Provider value={{ data: null, drawn, reload: projectsReload }}>
+          <TrackersProvider>
+            <SourcesGroup onOpenFilesPage={onOpenFilesPage} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+          </TrackersProvider>
+        </ProjectsContext.Provider>
+      </JiraContext.Provider>
+    </GitlabContext.Provider>
   );
   await waitFor(() => expect(linesOf('GitHub')[0]).not.toBe('checking…'));
 }
@@ -123,6 +151,8 @@ beforeEach(() => {
   onOpenFilesPage = jest.fn();
   projectsReload = jest.fn();
   jiraReload = jest.fn();
+  gitlabRefresh = jest.fn(() => Promise.resolve(null));
+  setGitlab(gitlabStatus());
   onOpenGithubPage = jest.fn();
   onOpenJiraPage = jest.fn();
 });
@@ -136,7 +166,7 @@ describe('the Sources card', () => {
     await renderCard();
     expect(screen.getByText('Sources')).toHaveClass('ui-sheet-title');
     expect(screen.getByText('this machine')).toBeInTheDocument();
-    expect(rowNames()).toEqual(['Files', 'GitHub', 'Jira']);
+    expect(rowNames()).toEqual(['Files', 'GitHub', 'Jira', 'GitLab']);
   });
 });
 
@@ -276,11 +306,13 @@ describe('before and after a failed read', () => {
   it('says `checking…` on the Files and GitHub rows before the trackers answer', async () => {
     global.fetch = jest.fn(() => new Promise(() => {})) as jest.Mock;
     render(
-      <JiraContext.Provider value={{ data: UNCONFIGURED, loading: false, error: false, reload: () => {} }}>
-        <TrackersProvider>
-          <SourcesGroup onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
-        </TrackersProvider>
-      </JiraContext.Provider>
+      <GitlabContext.Provider value={gitlabValue()}>
+        <JiraContext.Provider value={{ data: UNCONFIGURED, loading: false, error: false, reload: () => {} }}>
+          <TrackersProvider>
+            <SourcesGroup onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+          </TrackersProvider>
+        </JiraContext.Provider>
+      </GitlabContext.Provider>
     );
     expect(linesOf('Files')).toEqual(['checking…']);
     expect(linesOf('GitHub')).toEqual(['checking…']);
@@ -333,10 +365,10 @@ describe('the status pills', () => {
 
 describe('the foot: Last read and Read again', () => {
   /** Every POST the card made, by URL, and how many times `/api/trackers` was read. */
-  function stubRead(sweeps: { github?: number; jira?: number } = {}): { posts: () => string[]; trackerReads: () => number } {
+  function stubRead(sweeps: { github?: number; jira?: number; gitlab?: number } = {}): { posts: () => string[]; trackerReads: () => number } {
     const fn = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const status = init?.method === 'POST' ? (url.endsWith('/github/sweep') ? sweeps.github : sweeps.jira) ?? 200 : 200;
+      const status = init?.method === 'POST' ? (url.endsWith('/github/sweep') ? sweeps.github : url.endsWith('/gitlab/sweep') ? sweeps.gitlab : sweeps.jira) ?? 200 : 200;
       return Promise.resolve({ ok: status < 300, status, json: () => Promise.resolve(init?.method === 'POST' ? { message: 'nothing is being polled' } : payload) } as Response);
     });
     global.fetch = fn as unknown as typeof fetch;
@@ -346,17 +378,19 @@ describe('the foot: Last read and Read again', () => {
     };
   }
 
-  async function renderWithStub(sweeps?: { github?: number; jira?: number }) {
+  async function renderWithStub(sweeps?: { github?: number; jira?: number; gitlab?: number }) {
     const probe = stubRead(sweeps);
     const state: JiraState = { data: jiraStatus(), loading: false, error: false, reload: jiraReload };
     render(
-      <JiraContext.Provider value={state}>
-        <ProjectsContext.Provider value={{ data: null, drawn: { files: true, github: true }, reload: projectsReload }}>
-          <TrackersProvider>
-            <SourcesGroup onOpenFilesPage={onOpenFilesPage} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
-          </TrackersProvider>
-        </ProjectsContext.Provider>
-      </JiraContext.Provider>
+      <GitlabContext.Provider value={gitlabValue()}>
+        <JiraContext.Provider value={state}>
+          <ProjectsContext.Provider value={{ data: null, drawn: { files: true, github: true }, reload: projectsReload }}>
+            <TrackersProvider>
+              <SourcesGroup onOpenFilesPage={onOpenFilesPage} onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+            </TrackersProvider>
+          </ProjectsContext.Provider>
+        </JiraContext.Provider>
+      </GitlabContext.Provider>
     );
     await waitFor(() => expect(linesOf('GitHub')[0]).not.toBe('checking…'));
     return probe;
@@ -367,13 +401,14 @@ describe('the foot: Last read and Read again', () => {
     expect(await screen.findByText(/^Last read \d+ s ago$/)).toBeInTheDocument();
   });
 
-  it('posts both sweeps once and reloads projects, trackers and Jira', async () => {
+  it('posts all three sweeps once and reloads projects, trackers, Jira and GitLab', async () => {
     const probe = await renderWithStub();
     const readsBefore = probe.trackerReads();
     await userEvent.click(screen.getByRole('button', { name: 'Read again' }));
 
     await waitFor(() => expect(jiraReload).toHaveBeenCalledTimes(1));
-    expect(probe.posts().sort()).toEqual(['/api/github/sweep', '/api/jira/sweep']);
+    expect(probe.posts().sort()).toEqual(['/api/github/sweep', '/api/gitlab/sweep', '/api/jira/sweep']);
+    expect(gitlabRefresh).toHaveBeenCalledTimes(1);
     expect(projectsReload).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(probe.trackerReads()).toBeGreaterThan(readsBefore));
     expect(screen.queryByRole('alert')).toBeNull();
@@ -386,7 +421,7 @@ describe('the foot: Last read and Read again', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Read again' }));
 
     await waitFor(() => expect(jiraReload).toHaveBeenCalledTimes(1));
-    expect(probe.posts()).toHaveLength(2);
+    expect(probe.posts()).toHaveLength(3);
     expect(projectsReload).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('alert')).toBeNull();
   });
@@ -397,5 +432,103 @@ describe('the foot: Last read and Read again', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('nothing is being polled');
     expect(jiraReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds no notice when only the GitLab sweep answers 409 (not armed)', async () => {
+    await renderWithStub({ gitlab: 409 });
+    await userEvent.click(screen.getByRole('button', { name: 'Read again' }));
+    await waitFor(() => expect(gitlabRefresh).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+describe('the GitLab row (spec §5.2)', () => {
+  const SITE = 'www.gitlab.timify.io';
+  const ME = { username: 'andreja', name: 'Andreja J.' };
+  const gitlabRow = (status: GitlabStatus) => {
+    setGitlab(status);
+    return renderCard();
+  };
+
+  it('unconfigured: grey `not configured` and the .env instruction', async () => {
+    await gitlabRow(gitlabStatus());
+    expect([pillOf('GitLab'), toneOf('GitLab')]).toEqual(['not configured', 'grey']);
+    expect(linesOf('GitLab')).toEqual(['set BM_GITLAB_SITE and BM_GITLAB_TOKEN in .env and restart']);
+  });
+
+  it('a malformed site names the hostname rule instead', async () => {
+    await gitlabRow(gitlabStatus({ malformedSite: true }));
+    expect([pillOf('GitLab'), toneOf('GitLab')]).toEqual(['not configured', 'grey']);
+    expect(linesOf('GitLab')).toEqual(['BM_GITLAB_SITE must be a hostname, like gitlab.example.com']);
+  });
+
+  it('before the first answer: grey `checking…`', async () => {
+    gitlab = null;
+    await renderCard();
+    expect([pillOf('GitLab'), toneOf('GitLab'), linesOf('GitLab')]).toEqual(['checking…', 'grey', ['checking…']]);
+  });
+
+  it('checking: grey `checking…` and the site', async () => {
+    await gitlabRow(gitlabStatus({ state: 'checking', site: SITE }));
+    expect([pillOf('GitLab'), toneOf('GitLab'), linesOf('GitLab')]).toEqual(['checking…', 'grey', [SITE]]);
+  });
+
+  it('rejected: red `down`, the status and GitLab’s message; no message ends the line at the status', async () => {
+    await gitlabRow(gitlabStatus({ state: 'rejected', site: SITE, httpStatus: 401, reason: '401 Unauthorized' }));
+    expect([pillOf('GitLab'), toneOf('GitLab')]).toEqual(['down', 'red']);
+    expect(linesOf('GitLab')).toEqual([`${SITE} refused the token (401) — 401 Unauthorized`]);
+    cleanup();
+    await gitlabRow(gitlabStatus({ state: 'rejected', site: SITE, httpStatus: 401, reason: null }));
+    expect(linesOf('GitLab')).toEqual([`${SITE} refused the token (401)`]);
+  });
+
+  it('unreachable: red `down` and the short reason', async () => {
+    await gitlabRow(gitlabStatus({ state: 'unreachable', site: SITE, reason: 'redirect refused (301)' }));
+    expect([pillOf('GitLab'), toneOf('GitLab')]).toEqual(['down', 'red']);
+    expect(linesOf('GitLab')).toEqual([`${SITE} did not answer — redirect refused (301)`]);
+  });
+
+  it('idle: grey `not polled yet`; the found hosts are named, and with none there is no suffix', async () => {
+    await gitlabRow(gitlabStatus({ state: 'idle', site: SITE, user: ME, foundHosts: ['gitlab.timify.io'] }));
+    expect([pillOf('GitLab'), toneOf('GitLab')]).toEqual(['not polled yet', 'grey']);
+    expect(linesOf('GitLab')).toEqual([`andreja · ${SITE}`, `no mapped repository is on ${SITE} — found gitlab.timify.io`]);
+    cleanup();
+    await gitlabRow(gitlabStatus({ state: 'idle', site: SITE, user: ME, foundHosts: [] }));
+    expect(linesOf('GitLab')).toEqual([`andreja · ${SITE}`, `no mapped repository is on ${SITE}`]);
+  });
+
+  const connected = (over: Partial<GitlabStatus> = {}) => gitlabStatus({ state: 'connected', site: SITE, user: ME, mappedRepos: 2, armed: true, ...over });
+
+  it('connected: green `connected`, the identity, the count and one line per repo problem', async () => {
+    await gitlabRow(
+      connected({
+        problems: [
+          { kind: 'cannot-read', path: 'development/dev-api-graphql-proxy', status: 403 },
+          { kind: 'origin', repo: 'proxy' },
+          { kind: 'capped', path: 'development/backend/microservice', shown: 500 }
+        ]
+      })
+    );
+    expect([pillOf('GitLab'), toneOf('GitLab')]).toEqual(['connected', 'green']);
+    expect(linesOf('GitLab')).toEqual([
+      `andreja · ${SITE}`,
+      '2 repos mapped via Jira › Setup › Repositories',
+      'cannot read development/dev-api-graphql-proxy (403)',
+      'proxy: could not read origin',
+      'development/backend/microservice: first 500 shown'
+    ]);
+  });
+
+  it('connected inside a 429 window: amber `late`, the connected lines, then the wait', async () => {
+    await gitlabRow(connected({ retryAt: new Date(Date.now() + 90_000).toISOString() }));
+    expect([pillOf('GitLab'), toneOf('GitLab')]).toEqual(['late', 'amber']);
+    const lines = linesOf('GitLab');
+    expect(lines.slice(0, 2)).toEqual([`andreja · ${SITE}`, '2 repos mapped via Jira › Setup › Repositories']);
+    expect(lines[2]).toMatch(/^rate limited — next read in (8\d|90) s$|^rate limited — next read in 1m$/);
+  });
+
+  it('draws the live row shape: no `new` tag, no scope word', async () => {
+    await gitlabRow(connected());
+    expect(rowOf('GitLab').textContent).not.toMatch(/\bnew\b|read_api/);
   });
 });

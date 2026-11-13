@@ -81,8 +81,8 @@ paths: ["server/src/tracker/**"]
   `lastSyncAt`, stamped on failure too but not for a sweep that found the repo asleep on a rate limit. The interval is `intervalFor(repo)`, read fresh per call from
   `settings/tracker-sync.json` (`sync-config.util.ts`, `BM_TRACKER_SYNC_FILE`), every missing or invalid entry reading `15s`. Why:
   [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
-- **The tracker, Jira and pull-request caches are the three caches in this server whose age is a rendered value.** In memory, per repo, lost on restart,
-  rebuilt by the first sync; it
+- **The tracker, Jira, pull-request and GitLab caches are the four caches in this server whose age is a rendered value.**
+  In memory, per repo, lost on restart, rebuilt by the first sync; it
   exists because the hourly rate limit makes a per-request fetch impossible, and `polledAt` on the board, in the item modal, on the Sources card and — since
   bug-41 — beside every tracker queue `orchestrate.mjs plan`/`init` builds is what keeps it honest. **A named `--ids` entry the cache has not polled yet buys
   ONE re-read, timed off `polledAt`, and only a second miss is refused** — never a fresh per-id `GET` to GitHub, which was weighed and rejected. Every other read stays per request — the registry's and `resolveSource`'s rules are untouched. A `304` leaves the cache unchanged and MOVES
@@ -118,7 +118,7 @@ paths: ["server/src/tracker/**"]
   entry's `splices`: a list read that lands with a different count drops its rows (the attempt still counts), and a successful read clears the `graphql` sleep only
   when it has run out. An `update-requested` sets `dueAt = now + PR_UPDATING_MS` (`shared/types.ts`, also the client's `UPDATING_MS`): `refresh` reads an
   entry past its `dueAt` inside the TTL too, still joining a read in flight. Each write reads its clock when its serialised turn comes. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-and-pull-request-caches-are-the-three-caches-in-this-server-whose-age-is-a-rendered-value)
+  [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-pull-request-and-gitlab-caches-are-the-four-caches-in-this-server-whose-age-is-a-rendered-value)
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.** `TrackerPollerService.syncOffBlock(path)` is
   the ONE server home of the sentence `sync is off for <owner/name> — turn it on in GitHub › Settings` (tracker projects only, `null` otherwise);
   `syncOffReason` (`client/src/lib/tracker.ts`) is the client's copy, and both are pinned to the same literal in a test, never an import. It answers 409
