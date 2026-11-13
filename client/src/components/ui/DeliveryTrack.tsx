@@ -39,10 +39,13 @@ function dotGlyph(mark: TrackStep['mark']) {
 export function DeliveryTrack({
   track,
   words = {},
+  titles = {},
   compact
 }: {
   track: TrackStep[];
   words?: Partial<Record<TrackStep['step'], string>>;
+  /** A step's hover text, where its word is not the whole story (the Review step's `not refreshed since <age>`). Full shape only. */
+  titles?: Partial<Record<TrackStep['step'], string>>;
   compact: boolean;
 }) {
   if (compact) {
@@ -63,7 +66,7 @@ export function DeliveryTrack({
       {track.map((t, i) => {
         const word = words[t.step];
         return (
-          <li key={t.step} className="jira-dlv-step">
+          <li key={t.step} className="jira-dlv-step" title={titles[t.step]}>
             {/* The rail sits behind the dot row, from the previous step's centre to this one's, so the dots stay on equal columns however long a word is. */}
             {i > 0 && <span className="jira-dlv-bar" data-mark={t.mark} aria-hidden="true" />}
             <span className="jira-dlv-dot" data-mark={t.mark} aria-hidden="true">

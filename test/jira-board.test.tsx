@@ -1953,6 +1953,13 @@ describe('the Delivery quick filter', () => {
     expect(within(within(reopened).getByRole('group', { name: 'Delivery' })).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('offers `Review open` after `Done, not merged` (CodeRabbit spec §5.4)', async () => {
+    mount(payload(), 'list');
+    await screen.findByText('Currency symbol missing on receipts');
+    const names = within(seg()).getAllByRole('button').map((b) => b.textContent);
+    expect(names.indexOf('Review open')).toBe(names.indexOf('Done, not merged') + 1);
+  });
+
   it('the segmented control drives the value, and it survives a remount through JIRA_FILTERS_KEY', async () => {
     mount(payload(), 'list');
     await screen.findByText('Currency symbol missing on receipts');

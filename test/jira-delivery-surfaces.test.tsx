@@ -16,7 +16,7 @@ import { JiraSessionsContext } from '../client/src/hooks/JiraSessionsContext';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { cardFold, foldBoard } from '../client/src/lib/jira';
 import type { DeckEntry } from '../client/src/lib/jira-deck';
-import type { GitlabMr, GitlabPayload, GitlabProjectView, GitlabStatus, JiraBoard, JiraIssue, JiraStatusPayload } from '../shared/types';
+import type { GitlabMr, GitlabReview, GitlabPayload, GitlabProjectView, GitlabStatus, JiraBoard, JiraIssue, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
 
 /**
@@ -136,6 +136,19 @@ function shell(data: GitlabPayload | null, children: ReactNode) {
   );
 }
 
+const OPEN_REVIEW: GitlabReview = {
+  open: 2,
+  resolved: 25,
+  worst: 'major',
+  bySeverity: { critical: 0, major: 1, minor: 1, trivial: 0, other: 0 },
+  triggeredAt: ago(30),
+  landedAt: ago(4),
+  commitsSince: 0,
+  capped: false,
+  readAt: ago(1),
+  failed: false
+};
+
 const BOARD: JiraBoard = { id: 'b1', name: 'Timify', roots: [], queries: [], interval: '5m' };
 
 /** One shelf card for `top`, folded over `board` (the whole board's issues) as the Board page folds it. */
@@ -197,6 +210,14 @@ describe('the shelf card’s MR chip', () => {
   });
 });
 
+describe('the review chip (CodeRabbit spec §5.3, variant X)', () => {
+  it('the card’s chip reads `!<iid> · <n> to fix` in amber, with nothing added beside it', () => {
+    drawCard(issue('TIMIFY-123'), payload([mr({ iid: 15958, review: OPEN_REVIEW })]));
+    expect(chips().map((c) => c.textContent)).toEqual(['!15958 · 2 to fix']);
+    expect(chips()[0]).toHaveAttribute('data-tone', 'amber');
+  });
+});
+
 describe('the deck card’s MR chip', () => {
   it('reads the session’s own ticket — a folded child’s MR, not its top’s', () => {
     const top = issue('TIMIFY-100');
@@ -253,6 +274,15 @@ describe('the List’s Delivery column', () => {
     expect(within(c).getByText('pipeline passed')).toHaveAttribute('data-tone', 'green');
     expect(within(c).getByText('+1 MR')).toBeInTheDocument();
     expect(c.querySelector('.jira-dlv-track')).not.toBeNull();
+  });
+
+  it('draws the review’s word beside the link and five dots in the compact track', () => {
+    drawList([issue('TIMIFY-123', done)], payload([mr({ iid: 15958, review: OPEN_REVIEW })]));
+    const c = cell('TIMIFY-123');
+    expect(within(c).getByRole('link', { name: '!15958' })).toBeInTheDocument();
+    expect(within(c).getByText('2 to fix')).toHaveAttribute('data-tone', 'amber');
+    expect(c.querySelectorAll('.jira-dlv-cell')).toHaveLength(5);
+    expect(c.querySelector('.jira-dlv-track')?.children[3].querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'amber');
   });
 
   it('adds `not merged` after the word on a done row whose own lead MR is open', () => {
