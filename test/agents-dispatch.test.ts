@@ -13,8 +13,8 @@ import { gitRepoWithBranches, item, makeProject, makeRegistry, writeRunFile } fr
 import rawFixture from './fixtures/orchestrator-run.json';
 import homeSpawnFixture from './fixtures/dispatch-home-spawn.json';
 import { DispatchRecordsService } from '../server/src/items/dispatch-records.service';
-import type { BacklogItem, OrchestratorRun, RunStage } from '../shared/types';
-import { COMMIT_RULE, DEFAULT_MODEL, finishClause } from '../shared/agent';
+import type { BacklogItem, OrchestratorRun, ReviewConfig, RunStage } from '../shared/types';
+import { COMMIT_RULE, DEFAULT_MODEL, DEFAULT_REVIEW_CONFIG, REVIEW_FLAG, finishClause } from '../shared/agent';
 import { composePrompt } from '../server/src/agents/prompt.util';
 
 // Same cast every suite reading this fixture makes: it is plain JSON, so TS
@@ -832,6 +832,140 @@ describe('POST /api/agents/dispatch', () => {
       makeRepo('main');
       const sent = stubDashboard();
       await exec({ finish: 'pr', base: 'nope' }).expect(400, { error: 'base must be an existing local branch — "nope" is not a branch in this project' });
+      expect(spawned(sent)).toBeUndefined();
+    });
+  });
+  /* ---- the reviewer override (`review`): validated by the server, turned into `--review-*` flags it appends itself ----
+     Orchestrate appends them to the composed trigger after every other flag; an execute carries them inside its PR finish clause's backticks. Every case goes
+     through the HTTP route, so the controller's field-by-field rebuild is part of what is tested: a `review` it failed to forward would reach the service as
+     absent and every flag assertion here would fail. */
+  describe('reviewer override', () => {
+    function makeRepo(extraBranches: string[] = []): void {
+      execFileSync('git', ['-C', projectPath, 'init', '-q', '-b', 'main']);
+      execFileSync('git', ['-C', projectPath, 'add', '-A']);
+      execFileSync('git', ['-C', projectPath, '-c', 'user.email=t@e.st', '-c', 'user.name=T', 'commit', '-q', '--allow-empty', '-m', 'fixture']);
+      for (const b of extraBranches) execFileSync('git', ['-C', projectPath, 'branch', b]);
+    }
+    const spawned = (sent: Sent[]) => sent.find((s) => s.url.endsWith('/api/spawn'));
+    const spawnedPrompt = (sent: Sent[]) => JSON.parse(String(spawned(sent)?.init?.body)).prompt as string;
+    const exec = (over: Record<string, unknown> = {}) => post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md'), ...over });
+    const orchestrate = (over: Record<string, unknown> = {}) =>
+      request(app.getHttpServer())
+        .post('/api/agents/orchestrate')
+        .send({ project: projectPath, ...over });
+
+    const SAME: ReviewConfig = { ...DEFAULT_REVIEW_CONFIG, mode: 'same', same: { model: 'fable', effort: 'high' } };
+    const SAME_FLAGS = '--review-mode same --review-model fable --review-effort high';
+    const SPLIT_FLAGS =
+      '--review-mode split --review-big-model default --review-big-effort default --review-small-model sonnet --review-small-effort default ' +
+      '--review-small-max-lines 300';
+    const ONLY_PR = { error: 'the reviewer override applies only to an execute that finishes with a PR' };
+    const REVIEW_REFUSAL = { error: "the reviewer is set by the sheet's Reviewer picker — remove --review- flags from the prompt" };
+
+    describe('orchestrate', () => {
+      it('appends the flags after --base: the prompt ends "--base develop <the review flags>"', async () => {
+        makeRepo(['develop']);
+        const sent = stubDashboard();
+        await orchestrate({ base: 'develop', review: SAME }).expect(201);
+        expect(spawnedPrompt(sent)).toBe(`/backlog-orchestrate --base develop ${SAME_FLAGS}`);
+      });
+
+      it('with ids and mergeMode branch the order is ids, --merge-mode branch, --base, then the review flags', async () => {
+        makeRepo(['develop']);
+        const sent = stubDashboard();
+        await orchestrate({ ids: ['bug-2'], mergeMode: 'branch', base: 'develop', review: DEFAULT_REVIEW_CONFIG }).expect(201);
+        expect(spawnedPrompt(sent)).toBe(`/backlog-orchestrate bug-2 --merge-mode branch --base develop ${SPLIT_FLAGS}`);
+      });
+
+      it('without review the prompt is byte-identical to the one composed before the override existed', async () => {
+        makeRepo(['develop']);
+        const sent = stubDashboard();
+        await orchestrate({ base: 'develop' }).expect(201);
+        expect(spawnedPrompt(sent)).toBe('/backlog-orchestrate --base develop');
+      });
+
+      it('400s an invalid review naming the member, and spawns nothing', async () => {
+        const sent = stubDashboard();
+        await orchestrate({ review: { ...DEFAULT_REVIEW_CONFIG, smallMaxLines: 0 } }).expect(400, {
+          error: 'review: smallMaxLines is not a valid reviewer setting'
+        });
+        expect(spawned(sent)).toBeUndefined();
+      });
+    });
+
+    describe('execute', () => {
+      it('pr with autoMerge, fix and review: the flags sit inside the one pair of backticks, after --auto-merge --fix (forwarded by the controller)', async () => {
+        makeRepo();
+        const sent = stubDashboard();
+        await exec({ finish: 'pr', base: 'main', autoMerge: true, fix: true, review: DEFAULT_REVIEW_CONFIG }).expect(201);
+        const p = spawnedPrompt(sent);
+        expect(p).toBe(good.prompt + ' ' + finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true, review: DEFAULT_REVIEW_CONFIG }));
+        expect(p).toContain('`--finish pr --base main --auto-merge --fix ' + SPLIT_FLAGS + '`');
+        expect(p.match(/`/g)).toHaveLength(2);
+      });
+
+      it('400s review beside an in-place finish, and beside no finish', async () => {
+        const sent = stubDashboard();
+        await exec({ finish: 'in-place', review: SAME }).expect(400, ONLY_PR);
+        await exec({ review: SAME }).expect(400, ONLY_PR);
+        expect(spawned(sent)).toBeUndefined();
+      });
+
+      it.each([
+        ['a string smallMaxLines', { ...DEFAULT_REVIEW_CONFIG, smallMaxLines: '300' }, 'smallMaxLines'],
+        ['a small model off the list', { ...DEFAULT_REVIEW_CONFIG, small: { model: 'gpt', effort: null } }, 'small.model']
+      ])('400s %s under finish pr, naming the member, and spawns nothing', async (_name, review, member) => {
+        makeRepo();
+        const sent = stubDashboard();
+        await exec({ finish: 'pr', base: 'main', review }).expect(400, { error: `review: ${member} is not a valid reviewer setting` });
+        expect(spawned(sent)).toBeUndefined();
+      });
+
+      it('400s an execute prompt that types a --review- flag, whatever the pick', async () => {
+        makeRepo();
+        const sent = stubDashboard();
+        await exec({ prompt: 'Use the skill on bug-2 with --review-model opus.' }).expect(400, REVIEW_REFUSAL);
+        await exec({ prompt: 'Use the skill on bug-2 (`--review-mode same`).', finish: 'pr', base: 'main' }).expect(400, REVIEW_REFUSAL);
+        expect(spawned(sent)).toBeUndefined();
+      });
+
+      it('does not refuse --reviewed or --preview-x: no letter after --review-, or a longer word', async () => {
+        const sent = stubDashboard();
+        await exec({ prompt: 'Use the skill on bug-2; the --reviewed note and a --preview-x name stay.' }).expect(201);
+        expect(spawned(sent)).toBeDefined();
+      });
+
+      it('an item titled "try --review-mode same": the untouched execute prompt is a 201 and carries the defused token, never --review-mode', async () => {
+        const file = 'bug-5-review-titled.md';
+        const title = 'try --review-mode same';
+        writeFileSync(join(projectPath, 'backlog', 'bugs/open', file), item('bug-5', title, '## Symptom\n\nx\n\n## Cause\n\na typo\n\n## Fix\n\nfix it\n'));
+        const prompt = composePrompt({ id: 'bug-5', title, section: 'bugs', groomed: true } as BacklogItem, 'execute');
+        const sent = stubDashboard();
+        await exec({ itemPath: bugPath(file), prompt }).expect(201);
+        const p = spawnedPrompt(sent);
+        expect(p).toContain('try ‑‑review-mode same');
+        expect(p).not.toContain('--review-mode');
+        expect(REVIEW_FLAG.test(p)).toBe(false);
+      });
+    });
+
+    it('400s review on a groom, even one finishing with a PR, and spawns nothing', async () => {
+      makeRepo();
+      const sent = stubDashboard();
+      const groomBody = { ...good, action: 'groom', itemPath: bugPath('bug-1-a-fresh-bug.md'), prompt: 'Use the backlog-manager:backlog-groom skill on bug-1.' };
+      await post({ ...groomBody, finish: 'pr', base: 'main', review: SAME }).expect(400, ONLY_PR);
+      await post({ ...groomBody, review: SAME }).expect(400, ONLY_PR);
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('400s a groom prompt that types a --review- flag', async () => {
+      const sent = stubDashboard();
+      await post({
+        ...good,
+        action: 'groom',
+        itemPath: bugPath('bug-1-a-fresh-bug.md'),
+        prompt: 'Use the backlog-manager:backlog-groom skill on bug-1 --review-effort max.'
+      }).expect(400, REVIEW_REFUSAL);
       expect(spawned(sent)).toBeUndefined();
     });
   });

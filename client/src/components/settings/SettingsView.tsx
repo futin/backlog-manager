@@ -10,6 +10,7 @@ import { Switch } from '../ui/Switch';
 import { DashboardsPage } from './DashboardsPage';
 import { TickGroup } from './TickGroup';
 import { TimeZoneGroup } from './TimeZoneGroup';
+import { ReviewerGroup } from './ReviewerGroup';
 import { SourcesGroup } from './SourcesGroup';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useJiraContext } from '../../hooks/JiraContext';
@@ -184,6 +185,7 @@ function SharedPage({
       <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
       <TickGroup />
       <TimeZoneGroup />
+      <ReviewerGroup />
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { daysAgoDate } from './helpers/dates';
 import { pickProject } from './helpers/filter-bar';
 import { homeOffer, homeOnly, proOffer, proSuggested } from './helpers/offers';
 import { NO_MACHINE_TEXT } from '../client/src/lib/dashboards';
+import { DEFAULT_REVIEW_CONFIG } from '../shared/agent';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectOffers, ProjectSummary } from '../shared/types';
 import { OrchestratorRunsProvider } from '../client/src/hooks/OrchestratorRunsContext';
@@ -660,6 +661,11 @@ describe('OrchestrateSheet', () => {
               status: 200,
               json: () => Promise.resolve({ branches: branches === 'nomain' ? ['trunk', 'feature/x'] : ['main', 'feature/x'] })
             } as Response);
+      }
+      // Reviewer coverage task 11's on-open read, answered with the default config and kept OUT of `calls` for the reason the reads above are. Its own
+      // cases are in test/settings-reviewer.test.tsx.
+      if (url.endsWith('/api/settings/review')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(DEFAULT_REVIEW_CONFIG) } as Response);
       }
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       return Promise.resolve({ ok: res.ok, status: res.status, json: () => Promise.resolve(res.body) } as Response);
@@ -1453,8 +1459,12 @@ describe('OrchestrateSheet', () => {
     const urls = fetchSpy.mock.calls.map(([input]) => String(input));
     //
     // Multi-dashboard task 9 is the fourth such accounting: the machine offers are a fact about the project's dashboards, which no mode on this sheet changes.
+    // Reviewer coverage task 11 is the fifth: the saved reviewer is read whatever the merge mode, since every run reviews each item.
     const ungated = (url: string): boolean =>
-      url.includes('/api/items/uncommitted') || url.includes('/api/agents/branches') || url.includes('/api/dashboards/offers');
+      url.includes('/api/items/uncommitted') ||
+      url.includes('/api/agents/branches') ||
+      url.includes('/api/dashboards/offers') ||
+      url.endsWith('/api/settings/review');
     expect(urls.filter((url) => url.includes('/api/agents/merge-check'))).toEqual([]);
     expect(urls.filter((url) => !ungated(url))).toEqual([]);
     expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
@@ -1485,6 +1495,10 @@ describe('OrchestrateSheet', () => {
       // Multi-dashboard task 9's on-mount read, home-only and kept out of `calls` for the same reason as the reads below.
       if (url.includes('/api/dashboards/offers')) {
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(homeOnly()) } as Response);
+      }
+      // Reviewer coverage task 11's on-open read, kept out of `calls` for the same reason.
+      if (url.endsWith('/api/settings/review')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(DEFAULT_REVIEW_CONFIG) } as Response);
       }
       // task-32's own on-mount read, answered clean and kept out of `calls`
       // for `stubOrchestrate`'s reason: `calls` is this case's evidence that

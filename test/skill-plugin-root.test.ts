@@ -26,8 +26,9 @@ function filesUnder(dir: string): string[] {
 describe('plugin-root spelling under skills/', () => {
   it('finds every skill this repo publishes, and the files beside them', () => {
     const files = filesUnder(SKILLS_DIR).map((f) => relative(SKILLS_DIR, f));
-    expect(files.filter((f) => f.endsWith('/SKILL.md')).length).toBe(8);
+    expect(files.filter((f) => f.endsWith('/SKILL.md')).length).toBe(9);
     expect(files).toContain('backlog-orchestrate/references/recovery.md');
+    expect(files).toContain('backlog-review/references/procedure.md');
     expect(files).toContain('backlog/tools/backlog.mjs');
     expect(files).toContain('jira/tools/jira.mjs');
   });

@@ -1354,6 +1354,12 @@ export interface AgentDispatchRequest {
   autoMerge?: boolean;
   fix?: boolean;
   /**
+   * The sheet's Reviewer picker, sent only when it differs from the saved setting (`review.json`). Legal only for an `execute` whose DERIVED finish is `pr` —
+   * a remote execute derives `pr` without sending `finish` — and a 400 on any other launch, groom included. Validated with `parseReviewConfig` and composed
+   * into the finish clause's backticks by `reviewFlags`, never copied from caller text; absent leaves the clause byte-identical to what it was before.
+   */
+  review?: ReviewConfig;
+  /**
    * The machine to start on: a configured remote's name. Absent or `home` is this machine and produces the spawn request it always has; the client omits it
    * for home. An unknown name is a 400.
    */
@@ -1435,6 +1441,12 @@ export interface StartOrchestrateRequest {
    * request is made.
    */
   machine?: string;
+  /**
+   * The sheet's Reviewer picker, sent only when it differs from the saved setting. The server validates it with `parseReviewConfig` (a 400 naming the bad
+   * member otherwise) and appends `reviewFlags` after the ids, the mode flags and `--base` — the second caller-derived value in the prompt beside `base`, and
+   * like it composed from a validated value, never from caller text. Absent appends nothing, so the prompt is byte-identical to what it was before.
+   */
+  review?: ReviewConfig;
 }
 
 /**
@@ -1676,6 +1688,8 @@ export type FinishAction = 'execute' | 'groom';
 export interface FinishFlags {
   autoMerge?: boolean;
   fix?: boolean;
+  /** A validated reviewer override (`parseReviewConfig`): its `reviewFlags` go inside the clause's backticks, after `--auto-merge [--fix]`. */
+  review?: ReviewConfig;
 }
 
 /**
@@ -2360,6 +2374,12 @@ export interface OrchestratorRun {
    * The server reads the run file but does nothing with this field.
    */
   driver?: { sessionId: string; at: string; aborting?: string } | null;
+  /**
+   * The reviewer this run's reviews used, as `init` recorded it from the run's review flags. Optional: a run file written before reviewer configuration
+   * existed lacks it, and absent renders as "Reviewer: default". The server's run sanitiser keeps it only when `parseReviewConfig` accepts it, so a
+   * hand-edited or half-written record reads back as absent rather than reaching the client in a shape `reviewerLabel` cannot name.
+   */
+  reviewConfig?: ReviewConfig;
   queue: RunQueueItem[];
   attention: RunAttention[];
 }
@@ -3658,6 +3678,40 @@ export interface ReleasesResponse {
   /** Newest first. */
   releases: Release[];
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// Reviewer config (`~/.backlog-manager/settings/review.json`, `/api/settings/review`). Its own block, apart from the pull-request and tracker shapes, because
+// it belongs to the backlog-review skill and not to any board payload. `skills/backlog-review/tools/review.mjs` holds the twin of the validator and
+// defaults that go with these (`parseReviewConfig` / `DEFAULT_REVIEW_CONFIG` in `shared/agent.ts`).
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/** A reviewer's model: one of the four named, or `null` for the agent's own default. */
+export type ReviewModel = 'opus' | 'sonnet' | 'haiku' | 'fable';
+
+/** A reviewer's effort: one of the five named, or `null` for the default. */
+export type ReviewEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** One reviewer's model and effort; `null` in either member is "unset — the agent's default", never a missing key. */
+export interface ReviewPair {
+  model: ReviewModel | null;
+  effort: ReviewEffort | null;
+}
+
+/**
+ * What review.json holds: `same` runs one reviewer on the whole diff, `split` sends groups above `smallMaxLines` changed lines to `big` and the rest to
+ * `small`. All three pairs are always stored, so switching mode in the UI loses nothing the person typed.
+ */
+export interface ReviewConfig {
+  mode: 'same' | 'split';
+  same: ReviewPair;
+  big: ReviewPair;
+  small: ReviewPair;
+  /** An integer, 1–10000. */
+  smallMaxLines: number;
+}
+
+/** `GET /api/settings/review`: the config in force, and `fileError` when review.json exists but could not be used (the defaults are what is shown). */
+export type ReviewSetting = ReviewConfig & { fileError?: true };
 
 /**
  * A merge request's pipeline folded to the five states the board draws (GitLab connection spec §6.3). `none` covers both "no pipeline" and every status the

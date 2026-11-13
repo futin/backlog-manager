@@ -1042,6 +1042,13 @@ button.rail-count { cursor: pointer }
   background: var(--strip); border: 1px solid var(--hairline2); border-radius: 12px;
 }
 .set-text:focus { outline: none; border-color: var(--ink3) }
+/* A value the field shows but will not send (the Reviewer card's small-group limit out of 1–10000): the red stroke says so where the value sits, focused or
+   not, since the focus rule above would otherwise hide it the moment the person goes back to fix it. */
+.set-text[aria-invalid='true'], .set-text[aria-invalid='true']:focus { border-color: var(--red) }
+/* The limit holds at most five digits; 220 px of empty field beside a `300` reads as a text box, not a count. */
+.reviewer-limit { width: 96px }
+/* The launch sheets' Reviewer section is its own column of controls under the finish rows; the stretch lets its wrapping row use the sheet's width. */
+.reviewer-fields { align-self: stretch }
 /* One rule for both the anchor (the dashboard link) and the button (the
    watchdog card's `Live view`): the two differ only in whether the destination
    is a URL, and a reader should not be able to tell them apart by looking. */

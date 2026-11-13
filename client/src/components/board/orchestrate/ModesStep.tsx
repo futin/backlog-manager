@@ -2,6 +2,7 @@ import { mergeAllowRules } from '../../../../../shared/agent';
 import { MERGE_MODES, QUESTION_MODES } from '../../../../../shared/types';
 import type { MergeMode, PermissionMode, QuestionMode } from '../../../../../shared/types';
 import { prRequiredText } from '../../../lib/dashboards';
+import { ReviewerFields } from '../../settings/ReviewerFields';
 import { RunOn } from '../../ui/RunOn';
 import { Select } from '../../ui/Select';
 import type { StepProps } from './types';
@@ -57,7 +58,9 @@ export function ModesStep({ draft }: StepProps) {
     branches,
     mergeCoverage,
     project,
-    error
+    error,
+    review,
+    setReview
   } = draft;
   const { model, setModel, effort, setEffort } = runOn;
   return (
@@ -192,6 +195,12 @@ export function ModesStep({ draft }: StepProps) {
           <pre className="orchestrate-merge-hint-json">{mergeAllowSnippet(project)}</pre>
         </div>
       )}
+
+      {/* Reviewer coverage task 11: who reviews each item, seeded from Settings' Reviewer card and sent only when changed here. Drawn only once that read
+          has landed — with no seed there is nothing to compare a pick against, and a pick the request would then drop must never be offered. Placed after
+          every note above rather than under the selects row: those notes (base, question mode, merge hint) each explain a select in that row, and
+          /ui-verify found the section drawn between the Question mode select and its own note, which read as the note describing the reviewer. */}
+      {review !== null && <ReviewerFields layout="sheet" value={review} onChange={setReview} />}
 
       {error !== null && <div className="sheet-error">{error}</div>}
     </div>

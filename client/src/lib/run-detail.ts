@@ -1,4 +1,4 @@
-import { isPrUrl } from '../../../shared/agent';
+import { isPrUrl, parseReviewConfig, reviewerLabel } from '../../../shared/agent';
 import { pickAuthority } from './run-authority';
 import { ACTIVE_RUN_STAGES, mergeModeLabel, runDotTone, runStatusChip } from './run-stage';
 import { formatTurns, formatUsd, runUsageTotals, runWallMs } from './run-stats';
@@ -389,6 +389,11 @@ export function runDetailModel(input: RunDetailInput, now: number, zone: string)
   // The mode and question notes as one line, mode note first; `null` when
   // neither has anything to say, so the line does not render at all.
   const noteLine = modeNote !== null || questionNote !== null ? [modeNote, questionNote].filter((part) => part !== null).join(' · ') : null;
+  // Reviewer coverage task 11: who reviewed this run's items, from the config the run recorded at `init`. Re-validated here although the server's run
+  // sanitiser already keeps only a value `parseReviewConfig` accepts: a run row can come from another machine's dashboard, and a malformed value must read
+  // as the default, never throw mid-render. A run recorded before the setting existed has none and reads `Reviewer: default` too.
+  const parsedReview = source.reviewConfig === undefined ? null : parseReviewConfig(source.reviewConfig);
+  const reviewerLine = reviewerLabel(parsedReview?.ok ? parsedReview.config : undefined);
   // The cost fact's one line. `null` exactly when `runUsage` is — every run
   // archived before task-27 — so the fact never renders as a `$0.00`.
   const usageLine =
@@ -449,6 +454,7 @@ export function runDetailModel(input: RunDetailInput, now: number, zone: string)
     questionMode,
     questionNote,
     noteLine,
+    reviewerLine,
     runUsage,
     usageLine,
     itemCount,

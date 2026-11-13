@@ -3303,7 +3303,7 @@ function mintRunBranch(projectRoot, target) {
 // inside cmdStage and not spread across a bigger switch.
 
 const INIT_USAGE =
-  'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--merge-mode <merge|branch|pr>] [--question-mode <decide|park>]';
+  'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--merge-mode <merge|branch|pr>] [--question-mode <decide|park>] [--review-config <json>]';
 
 function cmdInit(argv) {
   let project;
@@ -3334,6 +3334,10 @@ function cmdInit(argv) {
   // board that has been working for a fortnight to keep behaving the way it
   // always has.
   let questionMode = 'park';
+  // NOT defaulted, unlike the three above: an absent flag leaves `reviewConfig` off the run file altogether, which is how SKILL.md §7 and the board tell a
+  // run begun before the reviewer config existed (review on the defaults, show `Reviewer: default`) from one that recorded its config.
+  let reviewConfigArg;
+  let reviewConfigGiven = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--project') project = argv[++i];
     else if (argv[i] === '--ids') idsArg = argv[++i];
@@ -3341,6 +3345,10 @@ function cmdInit(argv) {
     else if (argv[i] === '--base') base = argv[++i];
     else if (argv[i] === '--merge-mode') mergeMode = argv[++i];
     else if (argv[i] === '--question-mode') questionMode = argv[++i];
+    else if (argv[i] === '--review-config') {
+      reviewConfigGiven = true;
+      reviewConfigArg = argv[++i];
+    }
   }
 
   // Validated before anything else touches disk: an unusable --project is a
@@ -3409,6 +3417,25 @@ function cmdInit(argv) {
       `--question-mode must be one of ${QUESTION_MODES.join(', ')} (got ${questionMode === undefined ? 'no value' : questionMode})`,
       1
     );
+  }
+
+  // The reviewer config `review.mjs config` printed, recorded so every `scope` of this run — a resumed driver's included — reviews on the models the run
+  // began with. Checked here, in the pre-write block, for the reason --question-mode's comment above gives: init archives an existing run before writing.
+  // Only "is a JSON object" is checked: `review.mjs scope` validates the members on every use, and this tool imports nothing from another skill's tools,
+  // so a member check here would be a third copy of the validator (shared/agent.ts and review.mjs hold the other two) kept in step for nothing.
+  let reviewConfig;
+  if (reviewConfigGiven) {
+    try {
+      reviewConfig = reviewConfigArg === undefined ? undefined : JSON.parse(reviewConfigArg);
+    } catch {
+      reviewConfig = undefined;
+    }
+    if (reviewConfig === null || typeof reviewConfig !== 'object' || Array.isArray(reviewConfig)) {
+      throw new OrchestrateError(
+        `--review-config must be a JSON object, as review.mjs config prints it (got ${reviewConfigArg === undefined ? 'no value' : reviewConfigArg})`,
+        1
+      );
+    }
   }
 
   // task-44, and in this same pre-write block for the reason --question-mode's
@@ -3635,6 +3662,8 @@ function cmdInit(argv) {
     // for the fuller rationale this file may not import but must uphold byte
     // for byte.
     questionMode,
+    // Absent when init was given no --review-config (spread, never `undefined`, so the key is not written at all): see the flag's parse above.
+    ...(reviewConfig === undefined ? {} : { reviewConfig }),
     queue,
     attention: [],
     // bug-19: the initiating session is a driver like any other, stamped from

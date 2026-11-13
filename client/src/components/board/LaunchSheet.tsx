@@ -7,16 +7,19 @@ import {
   fetchAgentPlan,
   fetchBranches,
   modelEffortFlags,
+  reviewOverride,
   sessionUrl
 } from '../../lib/agents';
 import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
+import { useReviewPick } from '../../hooks/useReviewSetting';
 import { useRunOn } from '../../hooks/useRunOn';
 import { useSettings } from '../../hooks/useSettings';
 import { prRequiredText } from '../../lib/dashboards';
 import { staleTakeover } from '../../lib/tracker';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
+import { ReviewerFields } from '../settings/ReviewerFields';
 import { RunOn } from '../ui/RunOn';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
@@ -141,6 +144,12 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
     setAutoMerge(v);
     if (!v) setFix(false);
   };
+  // Reviewer coverage task 11: an execute that finishes in a PR runs the skill's own review, so the sheet offers its reviewer — read from Settings only once
+  // that finish is on screen (an in-place or groom launch never asks the server), seeded once, and sent only when changed (`reviewOverride`; never
+  // `review: null`, which the server 400s). A groom's PR gets no reviewer: its diff is one plan, which the person reviews as the PR.
+  const reviewerOffered = isExecute && isPr;
+  const { seed: reviewSeed, pick: reviewPick, setPick: setReviewPick } = useReviewPick(reviewerOffered);
+  const reviewer = reviewerOffered ? reviewOverride(reviewSeed, reviewPick) : {};
   /**
    * The Base select's options — `GET /api/agents/branches`, the Orchestrate sheet's base picker's read (`useOrchestrateDraft.ts`, task-44), keyed on the
    * project so it runs once per sheet open and never again as Finish flips. Skipped (`null`) for a remote groom and for capture, which draw no picker.
@@ -180,7 +189,8 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           // abandoned must not reach an in-place launch, which the server refuses; under PR both booleans are always present, and `fix` is sent as
           // `autoMerge && fix` so a fix the server would refuse cannot leave this sheet. A remote groom and a capture send none of the four keys: the
           // server 400s a finish on either, and a remote groom's clause is always the commit rule.
-          ...(hasFinish ? (finish === 'pr' ? { finish, base, autoMerge, fix: autoMerge && fix } : { finish }) : {}),
+          // `reviewer` is `{}` unless an execute's PR pick differs from Settings, so every other launch's body is unchanged.
+          ...(hasFinish ? (finish === 'pr' ? { finish, base, autoMerge, fix: autoMerge && fix, ...reviewer } : { finish }) : {}),
           // Only a remote pick names its machine; home sends no key at all, so a home-only board's request is byte-identical to what it was before the
           // picker existed (Review Focus 1).
           ...runOn.request,
@@ -284,7 +294,9 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
               and outside the textarea on purpose: flipping Finish, Base or a toggle updates only this line, never the plan and never what was typed. A remote
               groom draws it too, with no finish to read: the server appends the commit rule to it, and `in-place` is what yields exactly that. */}
           {(isExecute || isGroom) && (
-            <div className="sheet-note">{finishClause(isGroom ? 'groom' : 'execute', hasFinish ? finish : 'in-place', base, { autoMerge, fix })}</div>
+            <div className="sheet-note">
+              {finishClause(isGroom ? 'groom' : 'execute', hasFinish ? finish : 'in-place', base, { autoMerge, fix, ...reviewer })}
+            </div>
           )}
 
           {hasFinish && (
@@ -331,6 +343,9 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
               <div className="sheet-note">Needs Allow auto-merge on the GitHub repo; checked when the PR opens.</div>
             </>
           )}
+
+          {/* The reviewer the PR's review runs on, drawn once the setting has landed: with no seed there is nothing to compare a pick against. */}
+          {reviewerOffered && reviewPick !== null && <ReviewerFields layout="sheet" value={reviewPick} onChange={setReviewPick} />}
 
           {/* One row, three controls: "how should this run" is a single
               decision, and the dashboard's own launch panel groups the same

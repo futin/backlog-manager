@@ -103,7 +103,10 @@ export class AgentsController {
       remoteControl: body.remoteControl === true,
       // Unvalidated here too: the service refuses a value outside the two surfaces, a desktop pick on anything but an execute or a groom, on a remote
       // machine, or while home's dashboard offers no desktop app — it holds the action and the machine, which this shape check does not.
-      surface: body.surface
+      surface: body.surface,
+      // The Reviewer picker, unvalidated here: the service refuses it on anything but an execute whose derived finish is `pr` (a remote execute's is), then
+      // runs it through `parseReviewConfig`. It holds the action and the machine, which this shape check does not.
+      review: body.review
     });
   }
 
@@ -211,7 +214,10 @@ export class AgentsController {
       // like every other key so that a new field reaches the service only
       // when it is added here too — the same discipline dispatch's own
       // rebuild keeps.
-      ids: body?.ids
+      ids: body?.ids,
+      // The Reviewer picker, unvalidated here like every field above: `parseReviewOverride` in the service is the one place it becomes a `ReviewConfig` (a
+      // 400 naming the bad member otherwise), and what reaches the prompt is `reviewFlags` of that, never this value.
+      review: body?.review
     });
     if (!machine.home) {
       // AFTER the await for the reason `mark()` below gives: a refused spawn throws out of the call above and never reaches here.

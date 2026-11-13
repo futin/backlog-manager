@@ -16,7 +16,7 @@ import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { GithubClient } from '../server/src/tracker/github.client';
 import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
-import { COMMIT_RULE, DEFAULT_MODEL, finishClause } from '../shared/agent';
+import { COMMIT_RULE, DEFAULT_MODEL, DEFAULT_REVIEW_CONFIG, finishClause } from '../shared/agent';
 import { RUN_STALE_MS, type ClaimRecord } from '../shared/types';
 import { FakeGithub, FAKE_REPO } from './helpers/github';
 import { listenLoopback } from './helpers/app';
@@ -447,6 +447,17 @@ describe('POST /api/agents/dispatch with a machine', () => {
     await execute({ base: 'main', machine: 'Pro', autoMerge: true, fix: true }).expect(201);
     const sent = JSON.parse(spawnsOf(pro)[0].body) as { prompt: string };
     expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true }));
+  });
+
+  // A remote execute derives `pr` with no `finish` in the body, so the reviewer override is allowed there on the derived finish — the same derivation the base
+  // rules use — and travels to Pro as text inside the clause's backticks. Pro's own review.json applies only when no override is sent.
+  it('an execute on Pro with no finish and a review: the sent prompt carries the review flags inside the pr clause', async () => {
+    gitInit();
+    await start();
+    await execute({ base: 'main', machine: 'Pro', review: DEFAULT_REVIEW_CONFIG }).expect(201);
+    const sent = JSON.parse(spawnsOf(pro)[0].body) as { prompt: string };
+    expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('execute', 'pr', 'main', { review: DEFAULT_REVIEW_CONFIG }));
+    expect(sent.prompt).toContain('--review-small-max-lines 300`');
   });
 
   it('groom and capture on Pro: the groom ends on the in-place clause (the commit rule), capture on its own text; no base, no 400', async () => {

@@ -15,7 +15,7 @@ import { listenLoopback } from './helpers/app';
 import { makeRegistry, runStateDir, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { runClaimBlock } from '../shared/agent';
-import type { BacklogItem, OrchestratorRun, RemoteRun } from '../shared/types';
+import type { BacklogItem, OrchestratorRun, RemoteRun, ReviewConfig } from '../shared/types';
 
 // Same translation orchestrator-shapes.test.ts already does: the fixture is
 // plain JSON (no `as const`), so TS would otherwise widen its string fields
@@ -286,6 +286,38 @@ describe('GET /api/orchestrator/runs', () => {
       const run = await readBack({ mergeMode: 'pr', mergeModeEffective: 'pr' });
       expect(run.mergeMode).toBe('pr');
       expect(run.mergeModeEffective).toBe('pr');
+    });
+  });
+
+  /* The run file's reviewer record is what the Runs view renders as "Reviewer: …"; the sanitiser keeps it only when parseReviewConfig accepts it, so a
+     hand-edited or half-written record reads back as absent ("Reviewer: default") instead of reaching the client in a shape it cannot label. */
+  describe('reviewConfig', () => {
+    async function readBack(over: Record<string, unknown>): Promise<OrchestratorRun> {
+      writeRunFile(orchHome, fixture.project, { ...fixture, updatedAt: new Date().toISOString(), ...over });
+      const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+      return res.body.runs[0];
+    }
+    const valid: ReviewConfig = { mode: 'split', same: { model: null, effort: null }, big: { model: 'opus', effort: 'max' }, small: { model: 'sonnet', effort: null }, smallMaxLines: 300 };
+
+    it('reads a valid record back unchanged', async () => {
+      const run = await readBack({ reviewConfig: valid });
+      expect(run.reviewConfig).toEqual(valid);
+    });
+
+    it('drops an empty object', async () => {
+      const run = await readBack({ reviewConfig: {} });
+      expect(run).not.toHaveProperty('reviewConfig');
+    });
+
+    it('drops a record with an invalid member and keeps the rest of the run', async () => {
+      const run = await readBack({ reviewConfig: { ...valid, smallMaxLines: 0 } });
+      expect(run).not.toHaveProperty('reviewConfig');
+      expect(run.runId).toBe(fixture.runId);
+    });
+
+    it('a run file without one reads back without one', async () => {
+      const run = await readBack({});
+      expect(run).not.toHaveProperty('reviewConfig');
     });
   });
 

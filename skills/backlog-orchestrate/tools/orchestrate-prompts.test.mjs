@@ -558,7 +558,17 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['**In a `pr` run that branch is `prTarget`, never the run branch**', "a pr run's merge list names prTarget, never the run branch"],
     ['PR mode adds no fourth git command', "the push hard limit names gh pr create as PR mode's one extra remote write"],
     // Groom drift: the one statement §5 gained; the story is references/rationale.md §5.
-    ['`stage <id> ungroomed --plan-stale` — no `--note`, the tool reads that line itself — then skip review, verify, retry and park', 'a plan-stale Outcome is staged ungroomed with its mark, and nothing else runs on it']
+    ['`stage <id> ungroomed --plan-stale` — no `--note`, the tool reads that line itself — then skip review, verify, retry and park', 'a plan-stale Outcome is staged ungroomed with its mark, and nothing else runs on it'],
+    // The grouped reviewer: §2 records the reviewer config once, §7 reviews through the backlog-review procedure. Each needle is a phrase of the one
+    // statement the body keeps; the dispatch itself lives only in procedure.md.
+    ['[--review-mode same|split', 'the trigger accepts the review flags'],
+    ['**Before `init`, run `review.mjs config`', 'the reviewer config is resolved by review.mjs config before init and recorded by it'],
+    ["--review-config '<reviewConfig>'", "every scope carries the run file's recorded reviewer config"],
+    ['config --defaults', 'a run file with no reviewConfig reviews on the default config, never the current review.json'],
+    ['scope --previous <the latest manifest>', "a fix loop's re-review rescopes against the latest manifest"],
+    ['--carried', "a fix loop's re-review passes the groups it does not re-run as carried reports"],
+    ["`merge`'s finding lines, verbatim", "the fix prompt file holds merge's resolved finding lines and the merged report path"],
+    ['skills/backlog-review/references/procedure.md', '§7 delegates the dispatch to the backlog-review procedure']
   ];
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`);
@@ -753,7 +763,12 @@ const RARE_PATH_REFERENCES = [
   ['questions.md', [/question/i]],
   ['stopping.md', [/exits `6` or `10`/]],
   ['merge-failures.md', [/merge call does not succeed/, /`overlap`/, /`runnerFix`/]],
-  ['check-failures.md', [/`verify` exits non-zero/, /second review says/]]
+  // The reviewer procedure's three no-verdict branches: `merge` still incomplete after its one coverage retry, `scope` finding an empty committed diff, and
+  // `scope` or `merge` exiting 1 — without that last trigger a headless driver handed an error line instead of a verdict has no rule to follow.
+  [
+    'check-failures.md',
+    [/`verify` exits non-zero/, /review says `fix` with `fixLoops` already at `2`/, /"verdict":"incomplete"/, /"files":0/, /`scope` or `merge` exits `1`/]
+  ]
 ];
 
 test('the body names each rare-path reference in the sentence that states its trigger', () => {
@@ -1509,7 +1524,13 @@ const NOTE_PLACEHOLDERS = new Map([
   // punctuation GitHub felt like — so it is exactly the text this rule exists
   // to keep off a command line. The copy of record is the tool's own stderr in
   // the run's log; the detail is a summary in the driver's voice.
-  ['<what the API refused, your words>', "the driver's summary of an API refusal"]
+  ['<what the API refused, your words>', "the driver's summary of an API refusal"],
+  // The review tool's exit-1 line names a bad argument, an unreadable manifest or git's own failure — stderr this run did not compose, and git's half of it
+  // can quote a path the branch named. The copy of record is the driver's transcript; the detail is a summary in the driver's voice.
+  ['<what the review tool refused, your words>', "the driver's summary of a review tool's exit-1 line"],
+  // Not prose at all: the count of this item's reviews, which the driver reads off its own report names (SKILL.md §7) — an integer, so it cannot carry a
+  // backtick or an apostrophe.
+  ['<k>', "the item's review count, an integer"]
 ]);
 
 // Values can wrap across lines in prose (`--detail\n"<what happened…>"`), so
@@ -1596,6 +1617,29 @@ test('every park instruction gives fixed --detail words and never quotes tool te
       'references/check-failures.md',
       '--detail "a check could not run: <the failing command names> — fix the command or the environment"',
       'a check that never ran parks naming the command, not quoting its row'
+    ],
+    // The grouped review's two no-verdict exits: an `incomplete` merge parks pointing at the merged report, never listing the uncovered paths a branch named.
+    [
+      'references/check-failures.md',
+      '--detail "review incomplete — uncovered files are listed in the merged review report"',
+      'an incomplete review parks pointing at the merged report, not listing the uncovered files'
+    ],
+    [
+      'references/check-failures.md',
+      '--detail "review not run — the item\'s committed diff is empty"',
+      'an empty committed diff parks with fixed words'
+    ],
+    // A review tool's exit 1 parks with the driver's summary: its stderr can carry git's own words and a path the branch named.
+    [
+      'references/check-failures.md',
+      '--detail "review reached no verdict — the review tool exited 1: <what the review tool refused, your words>"',
+      "a review tool exit 1 parks with the driver's summary of its stderr line, never the line itself"
+    ],
+    // The fix-exhausted entry names the report the exhausting verdict came from: a verify-red loop re-reviews, so that can be review 3 and review 2 an approve.
+    [
+      'references/check-failures.md',
+      '— report at <dir>/reviews/<id>-<k>.md"',
+      'the fix-exhausted entry points at the report its verdict came from, not a fixed -2.md'
     ],
     // Fix loop 1: the exit-9 row and its tracker.md restatement said "park the item with the server's own sentence in the detail" — the same defect in a
     // phrasing the first guard did not know.

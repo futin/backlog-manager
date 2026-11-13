@@ -462,6 +462,16 @@ the tracker's and a machine's reset clocks, a card's created date for a full sta
 clock for one run. It is read once per page load by the shell's `TimeZoneProvider` and handed out by `useTimeZone()`; `lib/time-zone.ts` is the one home of the
 zone math, and `test/time-zone-guard.test.ts` refuses a `Date`'s local getters and setters and the locale date/time formatters in every other client file.
 
+The `Reviewer` card (`ReviewerGroup`) closes that column, with the same `this machine` pill: which model and effort review a change, `Same for all groups`
+(one `Model` and `Effort`) or `Big and small groups` (two pairs and the changed-line limit under which a group takes the small pair). It reads and writes
+`settings/review.json` through `GET`/`POST /api/settings/review` (`useReviewSetting`), saving on every change; the edit shows at once from an optimistic copy,
+only the newest save's answer moves the card, and a refused save puts the server's value back with the same one red line. A `fileError` answer draws a hint
+that the file was ignored and the defaults are shown. The pickers are one component, `ReviewerFields`, drawn here as `SettingsRow`s and in two launch sheets
+as `.sheet-field`s: the execute sheet when its finish is a PR (a groom's PR gets none), and the Orchestrate sheet's modes step. Each sheet seeds them once
+from the saved setting (`useReviewPick`) and sends a `review` override only when the pick differs from that seed (`reviewOverride`, `lib/agents.ts`) — never
+`review: null`, which the server refuses. The Runs detail sheet's facts show who reviewed a run as one line, `Reviewer: …` (`reviewerLabel`, `shared/agent.ts`),
+from the config the run recorded at `init`; a run recorded before the setting existed, or a value that fails `parseReviewConfig`, reads `Reviewer: default`.
+
 The watchdog card is one of five places Settings writes to the server — GitHub › Settings' sync picker, since #17, the `Backlog tick` card's threshold and two
 caps, the `Time zone` card's zone (#241), and the Dashboards page's four `POST /api/dashboards/*` writes — four knobs that live in `settings/watchdog.json`
 beside the registry rather than in this browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the rail's tree calls. Because it

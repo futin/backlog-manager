@@ -882,6 +882,54 @@ test('init --merge-mode branch --question-mode decide sets both fields independe
   assert.equal(written.questionMode, 'decide');
 });
 
+// --- the reviewer config, recorded once at init ----------------------------
+// `review.mjs config` resolves the trigger's review flags (or review.json) into one JSON line before `init`, and `init` records that line so every `scope`
+// of the run — a `--resume`d driver's included — dispatches on the models the run began with. `init` checks only that it is a JSON object: `scope`
+// validates the members, and this tool imports nothing from review.mjs, so a second validator here would be a twin with nothing to gain.
+
+test('init records --review-config on the run file', (t) => {
+  const { home, project } = orchFixture(t);
+  const config = JSON.stringify({
+    mode: 'split',
+    same: { model: null, effort: null },
+    big: { model: 'fable', effort: 'xhigh' },
+    small: { model: 'sonnet', effort: null },
+    smallMaxLines: 120
+  });
+
+  const out = run(project, home, 'init', '--project', project, '--review-config', config);
+
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(JSON.stringify(written.reviewConfig), config);
+});
+
+// The no-flag run must be the run this tool always wrote: an absent key, never `null` or `{}`, so a reader tells "begun before the reviewer config
+// existed" (or begun by hand without one) from a recorded config, and §7 takes the defaults for it.
+test('init without --review-config leaves the key absent', (t) => {
+  const { home, project } = orchFixture(t);
+
+  const out = run(project, home, 'init', '--project', project);
+
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(Object.hasOwn(written, 'reviewConfig'), false);
+});
+
+// Checked in the pre-write block with the other flags, for the reason --question-mode's case gives: init archives an existing run before writing, so a late
+// refusal would destroy a real run's file on behalf of a call that was never going to succeed.
+test('init refuses a non-object --review-config', (t) => {
+  for (const bad of ['[]', '"x"', '3', 'null', '{bad']) {
+    const { home, project } = orchFixture(t);
+
+    const out = run(project, home, 'init', '--project', project, '--review-config', bad);
+
+    assert.equal(out.status, 1, `--review-config ${bad} was accepted`);
+    assert.match(out.stderr, /--review-config/, `the refusal of ${bad} does not name the flag`);
+    assert.deepEqual(fs.readdirSync(home), [], `init wrote something under BM_ORCH_HOME for --review-config ${bad}`);
+  }
+});
+
 // --- task-19: `assume`, the one writer of RunQueueItem.assumptions -------
 // A local helper rather than a shared one: only these tests need a JSON
 // file of pairs, and the temp directory is torn down per test the same way

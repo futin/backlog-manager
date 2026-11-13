@@ -985,10 +985,11 @@ describe('SettingsView', () => {
       // `Time zone` joined in #241, under the tick breaker in the same column — the third host control.
       // `Sources` replaced `Trackers` in the source-sections change and comes FIRST: the spec puts it at the page's top, so the one host report now
       // opens the left column and the three controls moved to the right. `Trackers` is gone from this page — its pickers are GitHub › Settings'.
-      expect(groupTitles()).toEqual(['Sources', 'Orchestrator watchdog', 'Backlog tick', 'Time zone']);
-      // Task 9 of the app restyle: Shared's four cards state their scope with the `this machine` pill, as Local's say `this browser`, and draw no sub-line.
+      // `Reviewer` joined in reviewer coverage task 11, under the time zone — a fourth host control, its file `review.json` on the API host.
+      expect(groupTitles()).toEqual(['Sources', 'Orchestrator watchdog', 'Backlog tick', 'Time zone', 'Reviewer']);
+      // Task 9 of the app restyle: Shared's cards state their scope with the `this machine` pill, as Local's say `this browser`, and draw no sub-line.
       expect(groupScopes()).toEqual([]);
-      expect(groupPills()).toEqual(['this machine', 'this machine', 'this machine', 'this machine']);
+      expect(groupPills()).toEqual(['this machine', 'this machine', 'this machine', 'this machine', 'this machine']);
     });
 
     /** And the same rows inside them — the three cards this file owns outright.

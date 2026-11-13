@@ -117,6 +117,8 @@ function makeDraft(
     busy: false,
     error: null,
     start: jest.fn(),
+    review: null,
+    setReview: jest.fn(),
     ...rest
   };
 }

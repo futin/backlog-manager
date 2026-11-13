@@ -3149,6 +3149,43 @@ const prModeSection = (heading) => {
   return raw.slice(at, end ? end.index : raw.length).replace(/\s+/g, ' ')
 }
 
+// task: the reviewer config flags ride the finish clause. `--review-*` are read in the same pass as `--auto-merge`/`--fix` and are meaningful only beside
+// `--finish pr`, because the review they configure is pr-mode §7's. Without the refusal a bare `--review-mode split` would be silently ignored.
+test('backlog-execute reads review flags only beside --finish pr', () => {
+  const text = flat(EXECUTE_SKILL_MD)
+  const at = text.indexOf('## Finish mode')
+  assert.notEqual(at, -1, 'backlog-execute/SKILL.md lost its Finish mode section')
+  const next = text.indexOf(' ## ', at + 5)
+  const section = text.slice(at, next === -1 ? text.length : next)
+  assert.ok(section.includes('--review-mode'), 'Finish mode no longer names --review-mode')
+  assert.ok(/`--review-\*` flags? (?:are|is) read in the same pass[^.]*only beside `--finish pr`/.test(section), 'Finish mode lost the beside---finish-pr rule for review flags')
+  assert.ok(/`--review-[^`]*` without `--finish pr`[^.]*stop and name that rule/.test(section), 'Finish mode no longer refuses a review flag without --finish pr')
+})
+
+// pr-mode §7 hands the review to the shared procedure rather than describing the dispatch: a third copy of the steps is a third, drifting, review.
+test('pr-mode §7 follows the review procedure', () => {
+  const raw = fs.readFileSync(PR_MODE_MD, 'utf8')
+  const section = prModeSection('## 7. Review')
+  assert.ok(section.includes('skills/backlog-review/references/procedure.md'), 'pr-mode §7 no longer follows the review procedure')
+  assert.ok(section.includes('scope --previous'), 'pr-mode §7 fix rounds no longer re-review through scope --previous')
+  assert.ok(!raw.includes('it diffs `<base>...<branch>`'), 'pr-mode.md describes the reviewer dispatch itself again')
+})
+
+// An incomplete review and an empty diff are both "nothing was proven", and a push after either would publish unreviewed work.
+test('pr-mode §7 does not push on incomplete coverage or an empty diff', () => {
+  const section = prModeSection('## 7. Review')
+  assert.ok(section.includes('"verdict":"incomplete"'), 'pr-mode §7 no longer names the incomplete verdict')
+  assert.ok(section.includes('"files":0'), 'pr-mode §7 no longer names the empty-diff scope result')
+  assert.ok(/do not push/i.test(section), 'pr-mode §7 no longer says do not push')
+})
+
+// review.mjs exiting 1 hands the session an error line and no verdict; without its own branch nothing stopped §8 from pushing an unreviewed commit.
+test('pr-mode §7 does not push when scope or merge exits 1', () => {
+  const section = prModeSection('## 7. Review')
+  assert.ok(section.includes('`scope` or `merge` exits `1`'), 'pr-mode §7 no longer has a branch for scope or merge exiting 1')
+  assert.ok(/exits `1`[^→]*→ \*\*do not push\.\*\*/.test(section), 'pr-mode §7 no longer refuses the push when scope or merge exits 1')
+})
+
 test('pr mode reuses only a clean linked worktree on a named branch that is not the base', () => {
   const section = prModeSection('### Reuse the tree you started in')
   const RULES = [
@@ -3221,7 +3258,7 @@ test('backlog-orchestrate hands the reviewer a base and the reviewer diffs again
 
   // The diff commands are the whole point of the field, so they are asserted
   // directly rather than inferred from the field being mentioned.
-  assert.ok(reviewer.includes('git -C <worktree> diff <base>...<branch>'), 'backlog-reviewer.md no longer takes its diff against the base')
+  assert.ok(reviewer.includes('git -C <worktree> diff <from> <to>'), 'backlog-reviewer.md no longer takes its diff between the manifest\'s from and to')
   assert.ok(
     !/git -C <worktree> diff main\.\.\.<branch>/.test(reviewer),
     'backlog-reviewer.md still has a diff hardcoded against main — on a --base run that reviews the wrong change set',
@@ -3235,6 +3272,80 @@ test('backlog-orchestrate hands the reviewer a base and the reviewer diffs again
   // missing, stop" rule silently stops checking for one of them.
   assert.ok(/Five fields, always/.test(reviewer), 'backlog-reviewer.md no longer says how many fields the dispatch gives it')
   assert.ok(/If any of the five is missing/.test(reviewer), "backlog-reviewer.md's missing-field rule no longer matches its own field count")
+})
+
+// --- backlog-review: the grouped reviewer, its procedure and the standalone skill ---------------------------------------------------------------------
+//
+// Three files and one tool agree on a report grammar and a dispatch shape, and nothing but these cases reads all of them: `review.mjs merge` parses what
+// the agent writes (`## Coverage`, `anchor:`, `## Earlier findings`), `procedure.md` is the only description of how groups are dispatched and merged, and
+// `backlog-review/SKILL.md` is the one entry point that may offer to fix. A section the agent stops writing is not an error anywhere — `merge` reads an
+// absent `## Coverage` as every file uncovered and an absent `anchor:` as `(unanchored)` — so the drift shows up only as reviews that never approve.
+// The `<base>...<branch>` pairing the old diff-string stood for is pinned in `review.test.mjs` (`full from is the merge base with the given base`).
+const REVIEW_SKILL_MD = fileURLToPath(new URL('../../backlog-review/SKILL.md', import.meta.url))
+const REVIEW_PROCEDURE_MD = fileURLToPath(new URL('../../backlog-review/references/procedure.md', import.meta.url))
+
+test('backlog-reviewer reports coverage, anchors and earlier findings', () => {
+  const text = flat(REVIEWER_MD)
+  const RULES = [
+    ['## Coverage', 'the per-file coverage section merge counts'],
+    ['anchor:', 'the quoted-code anchor line on every Critical/Important'],
+    ['## Earlier findings', 'the resolved/open marks for earlier findings'],
+    ['not checked: no Outcome', 'outcome: none skips check 4 instead of raising it'],
+    ['never read a tree other than the one given', 'the tree rule that replaced "never review the main tree"'],
+    ['any file', 'a group may raise a finding about any file'],
+    ['full severity', 'a finding outside the group keeps its full severity'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(text.includes(needle), `backlog-reviewer.md lost the rule: ${rule} (${needle})`)
+  }
+  for (const gone of ['<base>...<branch>', '<base>..<branch>', 'The main tree is not yours']) {
+    assert.ok(!text.includes(gone), `backlog-reviewer.md still says ${gone} — the diff is <from> <to> from the manifest`)
+  }
+})
+
+test('the review procedure dispatches every group in one message and retries coverage once', () => {
+  const text = flat(REVIEW_PROCEDURE_MD)
+  const RULES = [
+    ['in one message', 'every group is dispatched in one message'],
+    ['review.mjs scope', 'the procedure starts with scope'],
+    ['review.mjs merge', 'the reports go back through merge'],
+    ['--retry', 'one coverage retry, merged with --retry'],
+    ['--fallback', 'a refused model or effort is recorded with --fallback'],
+    ['item file path', 'the item reaches the reviewer'],
+    ['outcome: none', 'an item without ## Outcome is dispatched with outcome: none'],
+    ['--previous', 'the re-review branch scopes against the latest manifest'],
+    ['--carried', "a re-review passes the other groups' reports as carried"],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(text.includes(needle), `procedure.md lost the rule: ${rule} (${needle})`)
+  }
+  assert.ok(
+    /`model` and `effort` as the Agent tool's own `model` and `effort` parameters/.test(text),
+    "procedure.md no longer passes a group's model and effort as the Agent tool's own parameters",
+  )
+})
+
+test('backlog-review offers to fix and commits nothing', () => {
+  const text = flat(REVIEW_SKILL_MD)
+  const RULES = [
+    ['Fix Critical and Important (Recommended)', 'the recommended fix option'],
+    ['Fix all, including Minor', 'the fix-everything option'],
+    ["Don't fix", 'the decline option'],
+    ['commits nothing', 'a fix is left uncommitted for the user'],
+    ['at most two', 'the fix rounds are capped'],
+    ['autopilot decide', 'an autopilot-gated offer takes the Recommended option and logs it'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(text.includes(needle), `backlog-review/SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+  assert.ok(/headless[^.]*no offer/.test(text), 'backlog-review/SKILL.md no longer says a headless session gets no offer')
+})
+
+test('backlog-review says when there is nothing to review', () => {
+  assert.ok(
+    flat(REVIEW_SKILL_MD).includes('nothing to review — no changes against <base>'),
+    'backlog-review/SKILL.md lost the empty-diff sentence',
+  )
 })
 
 // --- backlog-groom's closing "on disk only" line -----------------------------
@@ -3421,6 +3532,8 @@ const CLI_SOURCES = {
   'jira.mjs': fileURLToPath(new URL('../../jira/tools/jira.mjs', import.meta.url)),
   // backlog-tick's CLI. `decide` prints one JSON line a scheduled step's skill reads off a pipe, and `status --json` grows with the outcome history.
   'tick.mjs': fileURLToPath(new URL('../../backlog-tick/tools/tick.mjs', import.meta.url)),
+  // backlog-review's CLI. `scope` and `merge` print JSON a driver reads off a pipe, so the same truncation guard applies.
+  'review.mjs': fileURLToPath(new URL('../../backlog-review/tools/review.mjs', import.meta.url)),
 }
 
 // Comment lines are stripped before matching because retro.mjs's own note
@@ -3451,6 +3564,7 @@ const ENTRY_SHAPES = {
   'api-call.mjs': ['process.exitCode = await main('],
   'jira.mjs': ['process.exitCode = await main('],
   'tick.mjs': ['process.exitCode = await main('],
+  'review.mjs': ['process.exitCode = main('],
 }
 
 test('every skill CLI ends through process.exitCode, never process.exit', () => {

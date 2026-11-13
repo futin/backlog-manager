@@ -1,14 +1,15 @@
 # The skills
 
-Eight skills under `skills/` — seven backlog skills and `jira` — one agent under `agents/`, and five CLIs beneath the skills — two of which do all the writing
+Nine skills under `skills/` — eight backlog skills and `jira` — one agent under `agents/`, and six CLIs beneath the skills — two of which do all the writing
 to items, the registry and the run file, a third that only reads them, `tick.mjs`, which owns the one directory a scheduled tick keeps its lock and its failure
 record in, and `jira.mjs`, which writes no file of its own and reaches Jira only through the local
-API, its one git command (`worktree`) aside — plus one single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47). This is the plugin's
-skill root — never duplicated under `.claude/skills/`, which would load the same skills twice and drift.
+API, its one git command (`worktree`) aside, and `review.mjs`, which scopes a change into reviewer groups and merges their reports — plus one
+single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47). This is the plugin's skill root
+— never duplicated under `.claude/skills/`, which would load the same skills twice and drift.
 
 ## Mechanism
 
-### The eight
+### The nine
 
 | skill                 | what it does                                                                                                                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -19,9 +20,10 @@ skill root — never duplicated under `.claude/skills/`, which would load the sa
 | `backlog-orchestrate` | drains a project's groomed queue unattended, one item per git worktree, each reviewed and verified before it merges                                                                                                                         |
 | `backlog-retro`       | sweeps every orchestrator run on the machine into a report of what the pipeline cost, where the time went and how much was rework, proposes backlog items from what it finds, and records the sweep for the next one to be measured against |
 | `backlog-tick`        | one unattended unit of work per scheduled tick, started by a dashboard job: only when the project is idle, it executes a ready bug or task to a PR, or grooms an ungroomed bug or a refactor into a plan marked `plan-review` |
+| `backlog-review`      | reviews the change in a checkout against its base — committed, uncommitted and untracked work alike — with one `backlog-reviewer` per file group in parallel, proves every changed file covered, pins every finding to a quoted line, offers to fix and never commits; its `references/procedure.md` is also the review the orchestrator and `pr`-mode execute follow |
 | `jira`                | reads one Jira ticket and moves it — prints it, lists and applies its transitions, assigns it to me, checks the connection — all through `/api/jira`; links or unlinks the calling session through `/api/agents/jira-link`/`jira-unlink`; on a Jira Run, makes the ticket's git worktree in a mapped repo (git only)           |
 
-`backlog-orchestrate` is the largest of the seven and the only one that merges. Told to drain a queue, it works every ready bug and task one at a time —
+`backlog-orchestrate` is the largest of the eight and the only one that merges. Told to drain a queue, it works every ready bug and task one at a time —
 each in its own worktree and its own headless `backlog-execute` session — then commits that item, has it reviewed and verified, and merges it into the run's
 base branch before the next one starts. The base is `main` unless the run was started with `--base <ref>`, and it is the ref items are gated at, worktrees are
 cut from and merges land in. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all.
@@ -92,6 +94,13 @@ that tree and branch as a groom already taken. `skills/backlog-groom/references/
   writer among them whose files nothing else reads at runtime: it reads the run-state directory (`$BM_ORCH_HOME`), the registry (`$BM_REGISTRY_FILE`) and, by
   recorded lease id, a run's driver transcript (`$BM_CLAUDE_PROJECTS`), and its `record` command writes a sweep, the session's labels and the report beside
   them, once, refusing to overwrite.
+- `skills/backlog-review/tools/review.mjs` — the review's tool, shared by `/backlog-review` and both gates through `references/procedure.md`. `scope`
+  snapshots the tree (HEAD plus uncommitted and untracked work, without touching the index), diffs it against the merge base or — incrementally — against the
+  last complete review of the branch, skips lockfiles and generated files, partitions the rest into groups with a reviewer model and effort each, and writes
+  the manifest to `--out`; `--previous` keeps an earlier round's groups for a fix loop. `merge` reads the group reports, proves every reviewed file appears
+  under some report's `## Coverage`, resolves each finding's `anchor:` quote against `to`, de-duplicates by line, computes the verdict (`approve`, `fix`, or
+  `incomplete` when a file went unreviewed), writes the merged report, and records the branch's review state under `~/.backlog-manager/reviews/`
+  (`$BM_REVIEW_HOME`), the one directory it owns. `config` prints the resolved reviewer config. It writes no git and no repo file.
 
 No skill's tools may import another skill's: one skill's `tools/` directory is not on another's path once installed, so a helper two of them need exists
 twice, on purpose. No helper is shared by all of them, and the two pairs are different pairs — `backlog.mjs` and `orchestrate.mjs` each carry the
@@ -287,11 +296,17 @@ session dispatched under a `[backlog-tick]` marker, read when a stop happens; an
 `show`, by a groom carrying that marker — the two verdicts a tick may groom, the `## Assumptions (unattended)` heading and the `plan-review` mark's spelling per
 source.
 
+`skills/backlog-review/references/procedure.md` is the other way round: not a rare branch of one skill but the one description of how any change is reviewed —
+scope, dispatch every group in one message, merge, one coverage retry, and the `--previous` re-review a fix loop uses. `/backlog-review`, orchestrate's §7 and
+execute's `pr`-mode §7 each follow it with their own parameters, so the three reviews cannot drift apart.
+
 ### `agents/`
 
 The plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention — no `.claude-plugin/plugin.json` declaration
 needed. Currently one: `backlog-reviewer.md`, the read-only reviewer `backlog-orchestrate` dispatches before every merge and `backlog-execute` before a
-`pr`-mode push. It is published only because
+`pr`-mode push, and `/backlog-review` on a person's own checkout. Each dispatch is one group of the manifest `review.mjs scope` wrote: the agent diffs
+the manifest's `from` and `to`, never `base` by name, lists every file of its group under `## Coverage`, quotes each finding's line in an `anchor:`, and marks
+any earlier finding it was handed `resolved` or `open` — the report grammar `review.mjs merge` parses. It is published only because
 `PUBLISHED_PATHS` (`scripts/sync-plugin.mjs`) names it alongside `skills/`.
 
 ## Interfaces
