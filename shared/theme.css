@@ -39,7 +39,7 @@
      look free from inside this repo (ref-4). HERE it is the capture dispatch control's tone: `.dispatch-word.capture` in client/src/styles.css, this app's one
      reader of it, which is why the token is declared in all five palettes rather than wherever the dashboard happens to need it. It lost its COLUMN job when
      task-39 moved Archive onto BoardColumn and the section ticks went with it; that is not the same as losing every job, which is what the prose ref-4 was
-     filed against said. test/design-guards.test.ts's guard 8 pins both halves — the reader exists, and every theme block declares the token. */
+     filed against said. test/guards/design-guards.test.ts's guard 8 pins both halves — the reader exists, and every theme block declares the token. */
   --magenta:#cf6f9e;          /* Task subagent / kaizen */
   --on-accent:#0c1220;        /* ink ON a filled accent (the amber Send button) */
   --scrim:rgba(4,8,16,.66);   /* drawer backdrop */
@@ -72,7 +72,7 @@
    Derived here, on bare `:root`, and NOT declared per dark block: a value written into four blocks is four places to drift, and a hex here would leak into
    every dark theme that does not override it. This block MUST stay above `[data-theme="daylight"]` — both selectors match <html> at the same specificity,
    so whichever comes later in the file wins, and a defaults block moved below the daylight one would silently undo every daylight override.
-   test/daylight-contrast.test.ts pins both: the values derive, and the order holds.
+   test/guards/daylight-contrast.test.ts pins both: the values derive, and the order holds.
 
    - `--green-solid`: green as a mark. The text green stays `--green`.
    - `--amber-solid`: amber as a mark. Amber text never reads bare `--amber` any more (`client/src/styles.css` names it nowhere):
@@ -91,7 +91,7 @@
    colour of its own: it is --strip-hi on paper, which is every sheet, popover and modal, and `.ui-band` — the page header, which sits straight on --board —
    re-points it at --tile-hover for its descendants, with `.ui-popover` pointing it back for the paper panels that hang from a band control. A context
    token rather than a `.ui-band .ui-chip:hover` rule because that selector out-specifies the chip's own `[aria-disabled]` and ink hovers and would
-   repaint both. Declared here, not in client/src/styles.css, so test/daylight-contrast.test.ts's cascade can resolve the rules that read it. */
+   repaint both. Declared here, not in client/src/styles.css, so test/guards/daylight-contrast.test.ts's cascade can resolve the rules that read it. */
 :root{--hover-fill:var(--strip-hi)}
 /* The hover fill of a board card (`.board-card`, which the Files board, the Jira board and the archive all draw). Its own token, not --tile-hover: a card
    carries --ink3 meta text, and daylight's --tile-hover #e8e8e6 holds that ink at only 4.3:1. A context token like --hover-fill, because a card sits on
@@ -153,7 +153,7 @@
   /* Not --strip-hi: on the dark boards that tone is lighter than the paper, so a hovered control on the board lifts; here it is a tint between white paper
      and grey board, 1.02:1 against the board, so a hovered band chip or segment dissolved into the page — §8's "nothing on --board uses --strip-hi"
      rule, broken by the hover state alone. A grey a step darker than the board keeps it a control. --strip-hi itself stays: it fills the rail's active
-     row, popover rows and pressed chips, which sit on paper and read fine there. test/daylight-contrast.test.ts holds the pair on every palette. */
+     row, popover rows and pressed chips, which sit on paper and read fine there. test/guards/daylight-contrast.test.ts holds the pair on every palette. */
   --tile-hover:#e8e8e6;
   --card-hover:var(--steel);--card-hover-steel:#f6f6f5;
   --frame:#e8e8e6;
@@ -176,7 +176,7 @@
        where it measures 4.8:1 and the dashboard's own #945917 only 4.3:1. --amber itself is unchanged, and no rule in client/src/styles.css reads it bare
        any more.
      - mustard and cyan stay single tokens, darkened to text values that are dark enough to be marks as they are.
-     test/daylight-contrast.test.ts recomputes every pair, the tint sites read straight off the stylesheet at the percentage and surface each one uses. */
+     test/guards/daylight-contrast.test.ts recomputes every pair, the tint sites read straight off the stylesheet at the percentage and surface each one uses. */
   --green:#38631a;--green-solid:#7dc242;
   --amber:#c4761f;--amber-solid:#c4761f;--amber-text:var(--ink);--amber-ink:#8a5214;
   --mustard:#5f530b;--cyan:#306c0f;

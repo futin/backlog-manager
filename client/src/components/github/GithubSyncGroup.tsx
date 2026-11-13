@@ -6,7 +6,7 @@ import { useTrackersContext } from '../../hooks/TrackersContext';
 import { DEFAULT_SYNC_INTERVAL, SYNC_INTERVALS } from '../../../../shared/types';
 import type { SyncInterval } from '../../../../shared/types';
 
-/** The picker's options: the shared constant's keys, in its order — never a second list (spec §11's pin, `test/github-settings.test.tsx`). */
+/** The picker's options: the shared constant's keys, in its order — never a second list (spec §11's pin, `test/github/github-settings.test.tsx`). */
 const INTERVAL_OPTIONS = (Object.keys(SYNC_INTERVALS) as SyncInterval[]).map((value) => ({ value, label: value }));
 
 /**

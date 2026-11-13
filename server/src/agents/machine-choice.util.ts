@@ -9,7 +9,7 @@ import type { Machine } from './dashboards/dashboards.service';
  * orchestrate alike.
  *
  * Moved out of `agents.service.ts` in #388 (#351): pure functions of their arguments, so a util rather than more of the service file, which exports its
- * class and its request types and nothing else (`test/server-layering.test.ts`).
+ * class and its request types and nothing else (`test/guards/server-layering.test.ts`).
  */
 
 /**

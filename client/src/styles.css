@@ -309,7 +309,7 @@ button.rail-count { cursor: pointer }
   .rail-menu { flex: none }
   .rail-bar .tracker-chip > span > span:nth-child(3) { display: none }
   /* In a bar the wordmark is a label rather than a page heading: the prompt drops to 17 px and the cursor scales with it (8 × 17, 6 px from the
-     word). The kicker stays at 11 px where the dashboard's bar draws 10 — guard 3's floor (test/design-guards.test.ts), which this board keeps. */
+     word). The kicker stays at 11 px where the dashboard's bar draws 10 — guard 3's floor (test/guards/design-guards.test.ts), which this board keeps. */
   .rail-brand { padding: 0 }
   /* The mock's full 44 px row, kept for the phone alone: here the row is a
      thumb target rather than a pointer one (§8.0's table). */
@@ -2476,7 +2476,7 @@ button.rail-count { cursor: pointer }
    The tone paints the WORD and not the chip, and that is the rule rather than
    a compromise: `Chip` owns its own shell, and a rule here reaching into
    `.ui-chip` to repaint it is precisely the restatement
-   `test/design-guards.test.ts`'s guard 7 refuses — every class token in a
+   `test/guards/design-guards.test.ts`'s guard 7 refuses — every class token in a
    selector is checked, so a descendant selector cannot smuggle one in either.
    It also reads the way §5 asks: the shell is the control, the ink is what it
    will do. */
@@ -2650,7 +2650,7 @@ button.rail-count { cursor: pointer }
    figures and the rows are the state, the feed is history. The SHEET carries
    the box rather than a rule reaching into the `Ledger` inside it — a page may
    never name a primitive's class (§12.1, and guard 7 in
-   test/design-guards.test.ts refuses it) — and the sheet is the right owner
+   test/guards/design-guards.test.ts refuses it) — and the sheet is the right owner
    anyway: `th` sticks against its nearest scrolling ancestor, which has to be
    the element the header scrolls inside. `Ledger` keeps the `overflow-x` half,
    which is the axis a five-column table actually overflows on; that is why
@@ -2819,7 +2819,7 @@ button.rail-count { cursor: pointer }
    scrollport edge, where everything above it is clipped. A `::before` rather
    than a margin on the head, because the head is a primitive's element
    (`.ui-sheet-head`) and a page may not name a primitive's family in a
-   selector — guard 7 of test/design-guards.test.ts. The height is the sheet's
+   selector — guard 7 of test/guards/design-guards.test.ts. The height is the sheet's
    own 24 px: this restores the gap, it does not change it.
      Only this sheet needs it. `.runs-detail` scrolls too but has no sticky
    child; the Archive's month heading sticks against the PAGE, whose ground it
@@ -3003,7 +3003,7 @@ button.rail-count { cursor: pointer }
    way `Sheet` has taken `.runs-history-sheet` and `.runs-detail` since
    task-38 — rather than by selecting `.ui-figure-strip` from here. Where a
    primitive stands is a fact about this page at this width, which the
-   component cannot know; and guard 7 of test/design-guards.test.ts forbids a
+   component cannot know; and guard 7 of test/guards/design-guards.test.ts forbids a
    page naming a primitive's family in a selector at all, because that is how
    two surfaces come to disagree about a radius. */
 .runs-frame { container-type: inline-size }
@@ -3486,7 +3486,7 @@ button.rail-count { cursor: pointer }
    `--uk-chip-bg` is the rail's recessed `--steel` well, mapped so the pill follows each palette rather than showing the kit's light default on a dark rail.
    `--uk-zoom` is `--font-scale`: the drawer renders inside `.shell`, whose `zoom` leaves `100dvh` and `100vw` meaning the unzoomed screen, so the kit divides its
    height and width by it — undivided, the panel overhangs the screen by the text scale. These two, with the rest of this block, are all an app may set: every
-   shape, size and the phone layout are ui-kit's, so the chip and drawer match the other two apps (guarded by `test/ui-kit-guard.test.ts`). `--uk-ink-muted` is
+   shape, size and the phone layout are ui-kit's, so the chip and drawer match the other two apps (guarded by `test/guards/ui-kit-guard.test.ts`). `--uk-ink-muted` is
    `--ink2`, as in the other two apps: the chip draws its 12 px label in it on `--steel`, where `--ink3` measured 3.5–3.9:1 on the four dark themes and
    `--ink2` 6.7–8.0:1 on all five. */
 :root {
@@ -3748,7 +3748,7 @@ button.rail-count { cursor: pointer }
    restates its look; a surface that needs a variant adds a prop, never a
    second class family. Same rule and same reason as `lib/`: every derivation
    has one home, so two surfaces cannot disagree about the same thing.
-   `test/design-guards.test.ts`'s guard 7 pins both halves — the base selector
+   `test/guards/design-guards.test.ts`'s guard 7 pins both halves — the base selector
    appears exactly once inside this block, and no selector outside it starts
    with one of these names.
 
@@ -3901,7 +3901,7 @@ button.rail-count { cursor: pointer }
   color: var(--ink2); background: var(--strip-hi);
 }
 /* `--on-fill`, not `--on-accent`: the ink for type ON `--fill-live`, which is what the card's live strip reads too. `--on-accent` is white in daylight,
-   2.07:1 on #F5A15C; every dark block sets `--on-fill` to `var(--on-accent)`, so they draw exactly what they did. test/daylight-contrast.test.ts
+   2.07:1 on #F5A15C; every dark block sets `--on-fill` to `var(--on-accent)`, so they draw exactly what they did. test/guards/daylight-contrast.test.ts
    measures every word on a rule's own one-token fill. */
 .ui-pill-live { color: var(--on-fill); background: var(--fill-live) }
 .ui-pill-warn { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
@@ -3910,7 +3910,7 @@ button.rail-count { cursor: pointer }
 /* A state on top of any tone (Pill's `off`), declared AFTER the tones so it wins at equal specificity: a fact that does not hold — a model a machine may not
    run. Three cues from existing tokens, so the state never rests on a hue alone: the fill is dropped, so the pill is an empty outline; the edge is
    dashed, the stroke `.jira-card-av.none` already uses for an absent assignee; and the word is struck through. `--ink3` is the muted ink
-   the general case in test/daylight-contrast.test.ts already measures on every surface, and `background: none` means the pill paints no fill of its own,
+   the general case in test/guards/daylight-contrast.test.ts already measures on every surface, and `background: none` means the pill paints no fill of its own,
    so a live pill's orange cannot sit under that muted ink. The 1 px border costs no height: the box is border-box and the 20 px is fixed. */
 .ui-pill-off { color: var(--ink3); background: none; border: 1px dashed var(--ink3); text-decoration: line-through }
 
@@ -3967,7 +3967,7 @@ button.rail-count { cursor: pointer }
    and an ink and nothing else (§8.3). */
 .ui-marker-untyped { color: var(--amber-ink) }
 /* The Jira card's F1 marker (grouped-board spec §5). `--amber-text`, the amber word set on paper: the card's 2 px `--amber-solid` ring beside it
-   already carries the hue, and bare `--amber` fails daylight contrast as type (test/daylight-contrast.test.ts). */
+   already carries the hue, and bare `--amber` fails daylight contrast as type (test/guards/daylight-contrast.test.ts). */
 .ui-marker-match { color: var(--amber-text) }
 /* Multi-dashboard task 10: `running on <machine>` / `Starting on <machine>`. A place, not a warning — `--ink3`, the same ink as `kind` (§8.3). */
 .ui-marker-machine { color: var(--ink3) }

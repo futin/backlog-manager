@@ -151,7 +151,7 @@ the second, and refuses to drop it unless every backtick span and number in the 
 
 The guards are what let the split hold after the people who did it have moved on. All read the files as SOURCE, the way the suite already does.
 
-### `test/claude-rules.test.ts`
+### `test/guards/claude-rules.test.ts`
 
 Keep, unchanged in intent: every rule file declares a non-empty `paths:` list; every `invariants.md` anchor a rule file cites resolves to a heading; every glob
 matches at least one tracked-or-untracked-unignored file today; the suite passes vacuously on an absent directory. The glob-to-regex helper must accept the two
@@ -182,7 +182,7 @@ Add, as behaviour with the exact cases the implementer writes:
 The 80-word bound is the guard that stops mechanism creeping back into CLAUDE.md by the side door of dropping the link. The two plain `- ` bullets under
 `## Conventions` (the comment-density note and the "tests are flat in `test/`" paragraph) are not bold-led and are outside case 3 — see "Left in place".
 
-### `test/dialog-count-docs.test.ts`
+### `test/guards/dialog-count-docs.test.ts`
 
 `claudeBullet()` reads the Escape bullet from `.claude/rules/board.md` — the mechanism is where the three dialog names now live. The CLAUDE.md half narrows to
 "the headline `Escape has one owner, and the topmost dialog is the only one that closes.` is present". The file's own doc comment updates from "two prose
@@ -210,7 +210,7 @@ tiers require.
   `## Invariants` states the three tiers. The rules-about-rules bullet keeps its anchor and gets the headline
   `Every .claude/rules/ file carries paths: and is the one home of its rules' mechanism — never the reasoning.`; its mechanism text is rewritten (the only bullet
   whose mechanism changes, because its old mechanism WAS the pointer rule) to state: `paths:` mandatory and why; one home per anchor, headlines byte-equal across
-  tiers, pinned by `test/claude-rules.test.ts`; the P4/P5 gaps and that the headline in CLAUDE.md is the mitigation; the contract sweep visits `.claude/rules/`.
+  tiers, pinned by `test/guards/claude-rules.test.ts`; the P4/P5 gaps and that the headline in CLAUDE.md is the mitigation; the contract sweep visits `.claude/rules/`.
 - **`docs/subsystems/invariants.md`**, section `## Path-scoped .claude/rules reach a headless run in a linked worktree (task-35)` — heading unchanged (it is an
   anchor). The opening paragraph's "is a **pointer** — one line per anchor" becomes the one-home statement. "**Why pointers only.**" becomes "**Why one home for
   the mechanism.**": three STATEMENTS of one rule was the drift the pointers avoided; three TIERS is not that — each tier says something the others do not, and
@@ -265,7 +265,7 @@ task-35 measured the globs firing.
 
 ## Order of work and verification
 
-1. Write the three new `test/claude-rules.test.ts` cases and the `dialog-count-docs` change first; run them against today's tree and record the red — guard 2
+1. Write the three new `test/guards/claude-rules.test.ts` cases and the `dialog-count-docs` change first; run them against today's tree and record the red — guard 2
    fails on the eleven orphans, guard 3 on all 66 fat bullets. That red IS the proof the guards can see the thing they exist to catch.
 2. Run the migration script; run the token-survival check; fix the homes table until both are clean.
 3. Hand-edit the prose sites under "Consumers that change".
@@ -273,7 +273,7 @@ task-35 measured the globs firing.
 5. docs-sync: record the checker's status before step 3 and after step 4; the set of docs it reports as drifted must be identical. If it flags `overview.md`,
    `invariants.md` or `CLAUDE.md` (all three are in `docs/.docs-sync.yml`, as `overview`, `subsystem` and `index`) as edited without a source change,
    re-baseline those only, through the docs-sync workflow, never by hand-editing a stamp. `.docs-sync.yml` lists no `.claude/rules/*` file today, so the three
-   new rule files need no entry — their mechanical checks (anchors resolve, globs match) are `test/claude-rules.test.ts`'s.
+   new rule files need no entry — their mechanical checks (anchors resolve, globs match) are `test/guards/claude-rules.test.ts`'s.
 6. Measure: `wc -c CLAUDE.md` before and after (71,333 → expected 24–27 KB). The token figure has no tokenizer in the repo; the person who lands this opens a
    fresh session and reads the context panel's "Memory files" line, expecting roughly 28k → 9k for the project file, and records both numbers in the
    `invariants.md` subsection.

@@ -4,8 +4,8 @@
  * the storage keys, the popover's labels and hints, the stored state and the pick handler — and calls in.
  *
  * It left the view because pure ordering logic inside a component can only be pinned through renders, and a render cannot discriminate a comparator: two
- * implementations of `sortItems` that agree on the handful of cards a jsdom fixture draws pass the same test (test/board.test.tsx says as much over its own
- * fallback case). Here `test/board-sort.test.ts` calls each piece directly, so a wrong comparator fails a test that names it (#258, the React-composability
+ * implementations of `sortItems` that agree on the handful of cards a jsdom fixture draws pass the same test (test/board/board.test.tsx says as much over its own
+ * fallback case). Here `test/board/board-sort.test.ts` calls each piece directly, so a wrong comparator fails a test that names it (#258, the React-composability
  * audit's gap 2). The render tests stay where they are: they pin the stored key reaching the track, which no unit test can.
  *
  * Pure by construction — no React, no `localStorage`, nothing from `components/` or `hooks/`. `lib/` imports nothing from `components/`, the same reason

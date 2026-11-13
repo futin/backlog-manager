@@ -233,7 +233,7 @@ blocks another session.
   groom body before appending the clause, so an old tab neither doubles the rule nor, under a PR pick, sends "Do not push." beside `--finish pr`.
 - `finishClause` (`shared/agent.ts`) **takes the action** (*my call*, from the builder check): today's pr sentence says the skill "commits, reviews, pushes"
   (`shared/agent.ts:938`), and a groom PR has no reviewer, so the groom sentence drops "reviews". The execute sentence with no flags stays byte-identical to
-  today's (its quote pin in `test/agents-shared.test.ts` keeps passing); the groom sentence gets a pin of its own. The two flags are spelled inside the
+  today's (its quote pin in `test/agents/agents-shared.test.ts` keeps passing); the groom sentence gets a pin of its own. The two flags are spelled inside the
   existing backticks: ``Finish with `--finish pr --base main --auto-merge --fix`: …``, the sentence adding that GitHub merges once checks pass and the session
   fixes failing checks and conflicts until then. The sheet previews this same function, so preview and spawn cannot drift.
 
@@ -265,7 +265,7 @@ blocks another session.
   only skill that runs a merge into a base; execute and groom commit and push their own branch only in `pr` mode, and may **arm GitHub auto-merge** on the PR
   they opened when the trigger says `--auto-merge` — GitHub performs the merge. The fix loop's `git merge origin/<base>` into the PR branch is a merge INTO
   the item's branch, not into the base, and is named as such. Update the headline in CLAUDE.md, its `.claude/rules/` home (byte-equal headline, guarded by
-  `test/claude-rules.test.ts`), its `invariants.md` section, `docs/overview.md`, and the description in `skills/backlog-orchestrate/SKILL.md` (line 9) together.
+  `test/guards/claude-rules.test.ts`), its `invariants.md` section, `docs/overview.md`, and the description in `skills/backlog-orchestrate/SKILL.md` (line 9) together.
   The rule's home, `.claude/rules/orchestrator.md`, also needs its mechanism body updated ("Execute is the one other skill that writes git", "it never
   merges"), not only the headline.
 - **Groom "never commits"** (SKILL.md header and hard limits) gains its `pr` exception, worded as execute's is.

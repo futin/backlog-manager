@@ -252,7 +252,7 @@ running for any skill on a tracker project** — today every skill works with no
 
 ### 6.2 Routes
 
-All under `/api/items/`, all POST, each guarded by content-type and origin the way the agents POSTs are (`test/agents-origin-guard.test.ts`'s route list grows
+All under `/api/items/`, all POST, each guarded by content-type and origin the way the agents POSTs are (`test/agents/agents-origin-guard.test.ts`'s route list grows
 by these), and each refused with `400` for a `files` project. A CLI sends no `Origin` and passes, as the guard already allows; a browser must match.
 
 | Route                | Body                                              | Does                                                                                        |
@@ -577,7 +577,7 @@ published on the tailnet. So:
 - The `files` adapter produces the same items and errors as today's `scanProject` on the existing fixture, plus `source: 'files'` on each.
 - `/api/items` and `/api/projects` payloads are unchanged but for the two `source` fields; a project with an unknown `kind` appears on `/api/projects` as
   `source: 'unsupported'` with zero counts and is absent from `/api/items`.
-- Every supertest suite listens once through `listenLoopback`; the source guard in `test/supertest-bind.test.ts` covers the new suite for free.
+- Every supertest suite listens once through `listenLoopback`; the source guard in `test/guards/supertest-bind.test.ts` covers the new suite for free.
 
 ### 12.2 Phase 2 — read side
 

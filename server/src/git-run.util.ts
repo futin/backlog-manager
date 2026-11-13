@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
  * lets a slow git make the routes that need git slow, and leaves every other
  * route answering normally. That is the entire reason this module exists, so
  * nothing here may ever block: no `*Sync` spawn, ever, anywhere
- * under `server/src` (`test/git-run.test.ts` greps for it).
+ * under `server/src` (`test/server/git-run.test.ts` greps for it).
  *
  * Failure is a VALUE, not an exception, because every call site already had
  * exactly one failure branch and each degrades rather than 500s: a timeout, a

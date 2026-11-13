@@ -1705,7 +1705,7 @@ test('the classifier denial records the run fact, not the classifier prose', () 
 //
 // NAME_RE and NAME_CAP are COPIES of the dashboard's own
 // (../claude-agents-dashboard/server/lib/spawn.ts), for the reason
-// test/agents-prompt.test.ts states for its copy: importing from a sibling
+// test/agents/agents-prompt.test.ts states for its copy: importing from a sibling
 // repo would make this suite depend on a checkout of another one. They are
 // checked here even though this spawn path never touches the dashboard's
 // validator — the CLI accepts any string — because the three server-side
@@ -1859,7 +1859,7 @@ test('step 10 removes a run-created base worktree without failing the run', () =
 // `git status`, and §6's `git add -A` committed it onto `backlog/task-45` as a
 // root-level path resolving outside every clone but the one that made it.
 //
-// `.gitignore` is fixed separately (test/gitignore-node-modules.test.ts). This
+// `.gitignore` is fixed separately (test/guards/gitignore-node-modules.test.ts). This
 // half is the one that generalises: §4 already writes a local exclude for
 // `.worktrees/`, and anything else the runner puts in a tree to make
 // verification possible belongs in that same file — so a run is safe in a repo

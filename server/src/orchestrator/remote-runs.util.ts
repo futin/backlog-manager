@@ -148,7 +148,7 @@ export function readClaimState(raw: unknown): ClaimState {
  *
  * Written by `orchestrate.mjs attention` (its `ATTENTION_MARKER`), which cannot
  * import this file — a plugin skill's `tools/` stands alone — so the two agree
- * through a SOURCE-READING guard (`test/remote-runs.test.ts`, G-1), the way
+ * through a SOURCE-READING guard (`test/runs/remote-runs.test.ts`, G-1), the way
  * `labels.ts` and `connect`'s issue forms do, and never through an import.
  *
  * Strict on purpose: the kinds are `RunAttention['kind']`'s three and nothing

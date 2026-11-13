@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
  * The suites that used to `selectOptions` a native `<select>` — Board's own, the tracker board's, the live cards', the Orchestrate start UI's, and Archive's —
  * now reach the same state through a popover, and one home for that walk keeps the accessible names it relies on in one place: the
  * dialogs `Filters` and `Sort by`, the buttons `Filters` / `Filters, N set` and `Change sort`, the groups `Project`, `Status` and `Direction`, and each sort
- * row's bare-label name. `test/filter-bar.test.tsx` pins those names on the component; a rename is a change there and here at once.
+ * row's bare-label name. `test/board/filter-bar.test.tsx` pins those names on the component; a rename is a change there and here at once.
  *
  * **Each helper opens its popover only if that dialog is not already open, and none closes it.** A pick does not close the panel (the dashboard's
  * behaviour, which `FilterBar` keeps), so two picks in a row are one visit — the second finds the dialog up and clicks inside it, rather than clicking the

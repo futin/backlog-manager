@@ -31,7 +31,7 @@ The plan asserted something the code or the platform contradicts. In each case t
 why every session name in that file is space-separated today. Spec §3 calls the dashboard's session list "the one durable trail this design leaves" and has the
 name carry who asked; a dropped name destroys both. The plan's intent (distinguish watchdog from board) is preserved verbatim. _Cost if wrong: a session row
 reads `resume backlog-manager`, the same shape its `orchestrate backlog-manager` sibling already has._ → `server/src/agents/agents.service.ts`, pinned against
-`DASHBOARD_NAME_RE` in `test/agents-prompt.test.ts`.
+`DASHBOARD_NAME_RE` in `test/agents/agents-prompt.test.ts`.
 
 **R13 — the spec was amended to match R12.** Spec §3's two `·` occurrences became spaces. The spec is the binding authority the next task's implementer reads;
 leaving it contradicting the code hands that task a defect the plan already caused once. Amending a design document to record a ruling made against it is the
@@ -98,7 +98,7 @@ beats a special case. _Cost if wrong: cosmetic label text on one option._
 `config.util.ts` already take. Recorded so a reviewer flagging it as inefficiency is answered once rather than each time. _Cost if wrong: a few extra small-file
 reads per runs poll._
 
-**R1 — the watchdog hook's tests live in a sibling file.** `test/watchdog-hook.test.tsx`, not a second `describe` inside `test/watchdog-routes.test.ts`: the
+**R1 — the watchdog hook's tests live in a sibling file.** `test/watchdog/watchdog-hook.test.tsx`, not a second `describe` inside `test/watchdog/watchdog-routes.test.ts`: the
 plan's own commit block named that path, and the two need different jest environments (node vs jsdom). _Cost if wrong: one file to move._
 
 ## 3. Plan requirements restated
@@ -137,7 +137,7 @@ triggers is not a guard. _Cost if wrong: one slightly stricter env check._
 the grace check) was unpinned — swapping the steps left all twenty-two planned cases green. Unpinned, that ordering means the strip's Resume control appears one
 grace window late. A case pinning a spec rule the plan forgot is coverage, not scope creep. _Cost if wrong: one extra test._
 
-**R22 — an invariant and the test enforcing it land together.** `watchdog/config` was added to `test/agents-origin-guard.test.ts`'s parametrized enumeration in
+**R22 — an invariant and the test enforcing it land together.** `watchdog/config` was added to `test/agents/agents-origin-guard.test.ts`'s parametrized enumeration in
 the same commit that rewrote `CLAUDE.md`'s guard invariant. Shipping the sentence while the enumeration covered fewer routes would document a guarantee nothing
 checks. _Cost if wrong: one array entry in a task whose brief did not name that file._
 
@@ -162,5 +162,5 @@ The fix is the repo's own posture stated twice already in `CLAUDE.md` — _Groom
 two agree by construction rather than by coincidence. A stored flag whose input is re-read on a schedule is the bug class, not just this bug. _Cost if wrong:
 the sweeper's stand-down and the board's control could disagree again — which is the bug this fixed._
 
-The coupling itself is now pinned by `test/watchdog-coupling.test.tsx`, which drives both halves from one table: widening the strip's render condition reddens
+The coupling itself is now pinned by `test/watchdog/watchdog-coupling.test.tsx`, which drives both halves from one table: widening the strip's render condition reddens
 it, and so does restoring the sticky flag. Before that test existed, both mutations left the entire suite green.

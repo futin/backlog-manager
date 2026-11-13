@@ -100,7 +100,7 @@ and no new control: this is a reading, the fourth tracker reading on the card.
 
 ## 5. Testing
 
-- **Route** (`test/tracker-write.test.ts` or a sibling): add, remove, remove-404-is-success, refused for a `files` project, guarded like the seven, serialised
+- **Route** (`test/tracker/tracker-write.test.ts` or a sibling): add, remove, remove-404-is-success, refused for a `files` project, guarded like the seven, serialised
   per item with a concurrent claim.
 - **Claim swap**: a won claim adds `in-progress` and removes `orchestrator:queued`; a lost one removes neither.
 - **Stop sweep**: removes from exactly the never-claimed queue items of a tracker run; a `files` run makes no call; a sweep failure lands in `unqueueFailed`

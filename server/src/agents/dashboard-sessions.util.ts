@@ -11,7 +11,7 @@ import type { DashboardRow } from '../../../shared/types';
  *
  * Moved out of `agents.service.ts` in #388: three modules imported these from the service file, which made it the grab-bag every neighbour reached into
  * for a helper (#351). They are plain functions over an `AgentsConfig` — no provider state — so they are a util, and `agents.service.ts` exports its class
- * and its request types and nothing else (`test/server-layering.test.ts`).
+ * and its request types and nothing else (`test/guards/server-layering.test.ts`).
  */
 
 /** The dashboard's session list is a scan of `~/.claude/projects/`, the same order of work as the management index, and gets that call's budget. */
@@ -73,7 +73,7 @@ export async function dashboardSessionRows(cfg: AgentsConfig): Promise<{ rows: D
  * The dashboard's session list as `id → status` — `'unknown'` for an entry with no status string — or a 502 when it cannot be read. One parse for every reader:
  * #225's case B and #227's stale probe ask for one session's status (`dashboardSessionStatus`), and none of them can disagree with another, or with the
  * reconciler's rows, about what the list said. It keeps the bare URL — the dashboard's own default caps — because these readers want any session a claim could
- * name, not the reconciler's capped window, and `test/tracker-abort.test.ts` matches that URL.
+ * name, not the reconciler's capped window, and `test/tracker/tracker-abort.test.ts` matches that URL.
  */
 export async function dashboardSessions(cfg: AgentsConfig): Promise<Map<string, string>> {
   const { rows } = await readSessions(cfg, '');

@@ -13,7 +13,7 @@ import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, 
  * count.
  *
  * `RunsView` is the only consumer today. These lived in RunsView.tsx until #284 moved them here, because every derivation has one home in `lib/`
- * (CLAUDE.md, Layout) and a pure function pinned by a direct unit test (test/runs-list.test.ts) cannot drift the way one exercised only through renders
+ * (CLAUDE.md, Layout) and a pure function pinned by a direct unit test (test/runs/runs-list.test.ts) cannot drift the way one exercised only through renders
  * can. A pure module: it imports nothing from `components/` and nothing React. The doc comments below came with the code — only their pointers into RunsView changed — and they are the record
  * of bug-29, M3 and task-38/48, which is why they run long.
  *

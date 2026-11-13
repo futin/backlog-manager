@@ -52,7 +52,7 @@ the task report. Line counts anywhere are soft targets, never limits.
 **Files:**
 - Modify: `shared/types.ts` (`GitlabMr` at ~703, `GitlabProjectView` at ~723, `JiraAction` at ~905 and its parsers ~935-960, `JiraDispatchRequest` ~1491)
 - Create: `shared/review.ts`
-- Test: `test/review-state.test.ts` (Create), `test/jira-lib.test.ts` (extend, for the action parsers)
+- Test: `test/review-state.test.ts` (Create), `test/jira/jira-lib.test.ts` (extend, for the action parsers)
 
 **Interfaces:**
 - Produces:
@@ -80,7 +80,7 @@ the task report. Line counts anywhere are soft targets, never limits.
   - `reviewHalf` for all six states.
   - Action parsers: `parseJiraAction('review')` → `'review'`; `parseJiraActionParam('review')` → `'review'`; `jiraActionParam('review')` → `'review'`;
     `'Review'` and `{ review: true }` → `null`.
-- [ ] **Step 2: Run** `pnpm exec jest test/review-state.test.ts test/jira-lib.test.ts` — expect FAIL (module missing).
+- [ ] **Step 2: Run** `pnpm exec jest test/review-state.test.ts test/jira/jira-lib.test.ts` — expect FAIL (module missing).
 - [ ] **Step 3: Implement** the types and `shared/review.ts`. `reviewState` is the spec's ordered table, first match wins; "latest trigger newer than latest
   landing" compares `Date.parse` of the two ISO strings, and an unparseable stamp reads as absent. Fix every compile error the new required fields cause
   (`GitlabMr.review`, `GitlabProjectView.repos`) by setting `review: null` / `repos: []` where MRs and views are built today, so `pnpm run typecheck` passes.
@@ -88,11 +88,11 @@ the task report. Line counts anywhere are soft targets, never limits.
   - `JIRA_BUILTIN_LABELS` (`shared/types.ts:908`) becomes `Record<'execute' | 'context' | 'review', string>` with `review: 'Review the MR'` (the label a
     review link shows on Sessions and the List — plan's call, spec names none). `client/src/lib/jira-sessions.ts:238` and `client/src/lib/jira-list.ts:227`
     take `review` beside the two built-ins. `SettingsView.tsx:508-509` stays two options, and `resolveJiraAction` (`client/src/lib/jira.ts:887`) is unchanged
-    — it never returns `review`, so a stored `jiraDefaultAction: 'review'` still reads `execute` (add that case to `test/jira-lib.test.ts`).
+    — it never returns `review`, so a stored `jiraDefaultAction: 'review'` still reads `execute` (add that case to `test/jira/jira-lib.test.ts`).
   - `resolveJiraActionOrThrow` (`server/src/jira/prompt.util.ts:149`): `'review'` throws 400 `review needs mr and half` — the callers build the review
     compose action themselves (Task 4) and never send `review` through it.
   - `links.store.ts:87` reads stored links through `parseJiraAction`, so a persisted `review` link round-trips; pin it beside the existing `links.store` cases
-    (`grep -l links.store test/` — `test/agents-jira-live.test.ts` at the plan's base).
+    (`grep -l links.store test/` — `test/jira/agents-jira-live.test.ts` at the plan's base).
 - [ ] **Step 4: Run** the two suites plus `pnpm run typecheck` — expect PASS.
 - [ ] **Step 5: Commit** `feat(gitlab): review facts and reviewState in shared`.
 
@@ -102,7 +102,7 @@ the task report. Line counts anywhere are soft targets, never limits.
 - Create: `server/src/gitlab/review.util.ts`
 - Modify: `server/src/gitlab/gitlab.client.ts` (add a method beside `mergeRequest`, ~81; extend the header comment's endpoint list), `server/src/gitlab/env.util.ts`
   (bot name)
-- Test: `test/gitlab-review-fold.test.ts` (Create), `test/gitlab-client.test.ts`, `test/gitlab-env.test.ts`
+- Test: `test/gitlab-review-fold.test.ts` (Create), `test/gitlab/gitlab-client.test.ts`, `test/gitlab/gitlab-env.test.ts`
 
 **Interfaces:**
 - Consumes: `GitlabReview`, `ReviewSeverity` (Task 1).
@@ -140,7 +140,7 @@ the task report. Line counts anywhere are soft targets, never limits.
     `https://gitlab.example.com/api/v4/projects/grp%2Fsub%2Fproj/merge_requests/15958/discussions?per_page=100&page=2` with `redirect: 'manual'` and the
     token only in the header (copy the pattern of the existing `mergeRequest` test).
   - Env: unset → `coderabbitai`; `'  cr-bot  '` → `cr-bot`; `'   '` → `coderabbitai`.
-- [ ] **Step 2: Run** `pnpm exec jest test/gitlab-review-fold.test.ts test/gitlab-client.test.ts test/gitlab-env.test.ts` — expect FAIL.
+- [ ] **Step 2: Run** `pnpm exec jest test/gitlab-review-fold.test.ts test/gitlab/gitlab-client.test.ts test/gitlab/gitlab-env.test.ts` — expect FAIL.
 - [ ] **Step 3: Implement.** Landing per round: for each trigger, the earlier of (a) the first bot non-system note created after the trigger whose body
   contains `Actionable comments posted:` and (b) the `updated_at` of the bot's first reply inside the trigger's discussion when `updated_at > created_at`;
   `landedAt` = latest landing over all rounds. Severity regex: case-insensitive, a bold run `**(<non-space emoji> )?(Critical|Major|Minor|Trivial)**`
@@ -154,8 +154,8 @@ the task report. Line counts anywhere are soft targets, never limits.
 - Modify: `server/src/gitlab/poller.service.ts` (`ProjectCache` ~65, `sweepProject` ~433-529, `payload()` ~219), `server/src/gitlab/mapping.util.ts`
   (`GitlabProjectTarget` ~7 gains every repo path, not one), `server/src/gitlab/gitlab.module.ts` (add `exports: [GitlabPollerService]`),
   `docker-compose.yml`
-- Test: `test/gitlab-poller.test.ts`, `test/helpers/gitlab.ts` (`FakeGitlab`, `rawMr` — serve `/discussions` here), `test/gitlab-mapping.test.ts`,
-  `test/compose-env.test.ts`
+- Test: `test/gitlab/gitlab-poller.test.ts`, `test/helpers/gitlab.ts` (`FakeGitlab`, `rawMr` — serve `/discussions` here), `test/gitlab/gitlab-mapping.test.ts`,
+  `test/guards/compose-env.test.ts`
 
 **Interfaces:**
 - Consumes: `foldReview`, `mergeRequestDiscussions`, `GITLAB_REVIEW_PAGES`, `gitlabReviewBot` (Task 2); `reviewState`, `REVIEW_REREAD_MS` (Task 1).
@@ -164,7 +164,7 @@ the task report. Line counts anywhere are soft targets, never limits.
   `GitlabPollerService.findMr(project: string, iid: number): GitlabMr | null` (exact match on both) and `reposFor(jiraProject: string, gitlabProject: string): string[]`.
   `GitlabModule` exports `GitlabPollerService`.
 
-- [ ] **Step 1: Write failing tests** in `test/gitlab-poller.test.ts` over the existing `FakeGitlab` (extend it to serve `/discussions` pages):
+- [ ] **Step 1: Write failing tests** in `test/gitlab/gitlab-poller.test.ts` over the existing `FakeGitlab` (extend it to serve `/discussions` pages):
   - first sweep reads discussions for each open MR, none for merged/closed; merged/closed MRs carry `review: null`.
   - second sweep with the same `updated_at` and state `clean`, 1 min later → no discussions request (rule 1 not met, rule 2 not met).
   - `updated_at` changed → re-read.
@@ -179,8 +179,8 @@ the task report. Line counts anywhere are soft targets, never limits.
     view under every key, `poller.service.ts:259-260` — build `repos` per key). `reposFor('PAY', 'grp/proj')` and `reposFor('OPS', 'grp/proj')` give the
     same lists; `reposFor('PAY', 'grp/none')` and `reposFor('XYZ', 'grp/proj')` → `[]`.
   - `findMr('grp/proj', 15958)` returns the cached MR; `findMr('GRP/proj', 15958)` returns `null` (exact).
-  - Compose: `test/compose-env.test.ts` expects `BM_GITLAB_REVIEW_BOT: '${BM_GITLAB_REVIEW_BOT:-}'` beside the GitLab pair.
-- [ ] **Step 2: Run** `pnpm exec jest test/gitlab-poller.test.ts test/gitlab-mapping.test.ts test/compose-env.test.ts` — expect FAIL.
+  - Compose: `test/guards/compose-env.test.ts` expects `BM_GITLAB_REVIEW_BOT: '${BM_GITLAB_REVIEW_BOT:-}'` beside the GitLab pair.
+- [ ] **Step 2: Run** `pnpm exec jest test/gitlab/gitlab-poller.test.ts test/gitlab/gitlab-mapping.test.ts test/guards/compose-env.test.ts` — expect FAIL.
 - [ ] **Step 3: Implement.** The review read goes after each open MR's detail read, under the same `run.stop` guard and the same 429/401/unanswered
   handling; the "updated_at at last successful review read" is server-only cache state beside the MR (not in `GitlabMr`). All pages succeed or the read
   fails as a whole. Keep the "lists were read" `cache.set` as is.
@@ -192,7 +192,7 @@ the task report. Line counts anywhere are soft targets, never limits.
 **Files:**
 - Modify: `server/src/jira/prompt.util.ts` (`JiraComposeAction` ~36, `composeJiraPrompt` ~125, `resolveJiraActionOrThrow` ~149), `server/src/jira/jira.controller.ts`
   (preview route ~186-224)
-- Test: `test/jira-prompt.test.ts`, `test/jira-routes.test.ts`
+- Test: `test/jira/jira-prompt.test.ts`, `test/jira/jira-routes.test.ts`
 
 **Interfaces:**
 - Consumes: `ReviewHalf`, `JiraAction` with `review` (Task 1).
@@ -213,14 +213,14 @@ the task report. Line counts anywhere are soft targets, never limits.
     `('grp/proj', '-3')`, `('../x', 1)`, `('grp proj', 1)`, `('grp//proj', 1)`, `('/grp/proj', 1)`, `('grp', 1)`, a 256-character path → `null`.
     The shape is new — `remote.util.ts` has none (`gitlabProjectId` only encodes, `remote.util.ts:57`): add `isGitlabProjectPath(path: string): boolean` to
     `server/src/gitlab/remote.util.ts` — at most 255 characters, two or more `/`-separated segments, each `[A-Za-z0-9_.-]+` and not `.` or `..`, no leading
-    or trailing `/` — with its own cases in `test/gitlab-mapping.test.ts`; `prompt.util.ts` imports it (a pure helper, not the poller, so `jira/` still never
+    or trailing `/` — with its own cases in `test/gitlab/gitlab-mapping.test.ts`; `prompt.util.ts` imports it (a pure helper, not the poller, so `jira/` still never
     reaches `gitlab/`'s poller).
   - `parseReviewHalf`: `request`, `fix` ok; `Fix`, `''`, `undefined` → `null`.
-  - Preview route (`test/jira-routes.test.ts`): `GET /api/jira/prompt?key=PAY-151&action=review&repo=…&mrProject=grp%2Fproj&mrIid=15958&half=fix` → 200
+  - Preview route (`test/jira/jira-routes.test.ts`): `GET /api/jira/prompt?key=PAY-151&action=review&repo=…&mrProject=grp%2Fproj&mrIid=15958&half=fix` → 200
     `text/plain` containing `!15958`; missing `mrIid` → 400 `mr must be { project, iid }`; `half=both` → 400 `half must be request or fix`;
     `action=bogus` → 400 `action must be execute, context, review or skill:<id>`. The route makes no GitLab call (the test module provides no GitLab
     provider at all).
-- [ ] **Step 2: Run** `pnpm exec jest test/jira-prompt.test.ts test/jira-routes.test.ts` — expect FAIL.
+- [ ] **Step 2: Run** `pnpm exec jest test/jira/jira-prompt.test.ts test/jira/jira-routes.test.ts` — expect FAIL.
 - [ ] **Step 3: Implement** the composer: the existing head (workspace block) stays first, then a body that opens with `readTicket(key)` and continues with
   the half text per spec §6 (wording is yours); and the preview params. The preview imports nothing from `gitlab/` but `isGitlabProjectPath`.
 - [ ] **Step 4: Run** the suites — expect PASS.
@@ -232,7 +232,7 @@ the task report. Line counts anywhere are soft targets, never limits.
 - Modify: `server/src/agents/agents.module.ts` (imports gain `GitlabModule`, ~85), `server/src/agents/jira-agents.controller.ts` (parse ~51-95: read `mr`
   and `half` for `review`, rebuild them into the request), `server/src/agents/jira-dispatch.service.ts` (`dispatch` ~76-117, `launch` ~127-190),
   `server/src/jira/live.service.ts` (a read of every kept dashboard row, beside `rowFor`)
-- Test: `test/agents-dispatch-jira.test.ts`
+- Test: `test/jira/agents-dispatch-jira.test.ts`
 
 **Interfaces:**
 - Consumes: `GitlabPollerService.findMr`, `reposFor` (Task 3); `reviewState`, `reviewHalf` (Task 1); `parseReviewMr`, `parseReviewHalf`, review compose
@@ -264,7 +264,7 @@ the task report. Line counts anywhere are soft targets, never limits.
   - spawned prompt equals `composeJiraPrompt` over the **cached** MR's project and iid (and an edited prompt spawns as written, as today); the confirmed
     link stores `action: 'review'` and the workspace's branch.
   - Jira writes: with `assign: false, transitionId: null` nothing is written to Jira.
-- [ ] **Step 2: Run** `pnpm exec jest test/agents-dispatch-jira.test.ts` — expect FAIL.
+- [ ] **Step 2: Run** `pnpm exec jest test/jira/agents-dispatch-jira.test.ts` — expect FAIL.
 - [ ] **Step 3: Implement.** One order, first failure wins:
   1. Controller: action, `mr`, `half`, then `parseBranchChoice` (existing) — 400s.
   2. `dispatch`, existing: configured (503), unreadable `jira.json` (409), repo mapped (400), agents gate, desktop surface (409).
@@ -287,7 +287,7 @@ the task report. Line counts anywhere are soft targets, never limits.
 - Modify: `client/src/lib/delivery.ts` (`TrackStep` ~142, `openTrack` ~155, `deliveryLook` ~167, filter ~248-290), `client/src/lib/jira.ts`
   (`DELIVERY_VALUES` ~699, `defaultModeFor` ~914 treats `review` like `execute`)
 - Create: `client/src/lib/review-copy.ts` (every §5.5 string, one function per row)
-- Test: `test/delivery-lib.test.ts`, `test/jira-lib.test.ts`, `test/review-copy.test.ts` (Create)
+- Test: `test/gitlab/delivery-lib.test.ts`, `test/jira/jira-lib.test.ts`, `test/review-copy.test.ts` (Create)
 
 **Interfaces:**
 - Consumes: `reviewState`, `reviewStaleKind`, `reviewHalf` (Task 1).
@@ -317,7 +317,7 @@ the task report. Line counts anywhere are soft targets, never limits.
     `CodeRabbit · 4 open findings · 1 major, 1 minor, 2 other · reviewed 2h ago`, `CodeRabbit · 1 open finding · 1 critical` (no landing → no age part),
     `CodeRabbit · not reviewed yet`, `CodeRabbit · 3 commits since the last review`, `CodeRabbit · the last review didn't land`, failed suffix
     ` · not refreshed since 1h`; row `null` for reviewing, clean, unknown; buttons per state.
-- [ ] **Step 2: Run** `pnpm exec jest test/delivery-lib.test.ts test/jira-lib.test.ts test/review-copy.test.ts` — expect FAIL.
+- [ ] **Step 2: Run** `pnpm exec jest test/gitlab/delivery-lib.test.ts test/jira/jira-lib.test.ts test/review-copy.test.ts` — expect FAIL.
 - [ ] **Step 3: Implement**, then update every `deliveryLook(` and `matchesDelivery(` caller to pass `now`: `DeliveryPane.tsx:43,87,102`, `MrChip.tsx:21`,
   `JiraIssueList.tsx:117`, `JiraBoardView.tsx:166` (re-grep — the list is as of the plan's base).
 - [ ] **Step 4: Run** the suites, `pnpm run typecheck`, and `grep -l 'deliveryLook\|matchesDelivery\|DELIVERY_FILTER_LABELS' test/` hits — expect PASS.
@@ -335,7 +335,7 @@ Open each mock before drawing its view.
   is built from `DELIVERY_FILTER_LABELS`, so the new label appears once Task 6 adds it — test it here),
   `client/src/styles.css` (row hairline, if the existing classes do not cover it)
 - Create: `client/src/components/jira/ReviewRow.tsx`
-- Test: `test/jira-delivery-pane.test.tsx`, `test/jira-delivery-surfaces.test.tsx`, `test/jira-list.test.tsx`
+- Test: `test/jira/jira-delivery-pane.test.tsx`, `test/jira/jira-delivery-surfaces.test.tsx`, `test/jira/jira-list.test.tsx`
 
 **Interfaces:**
 - Consumes: Task 6's look and copy; `useDeliveryIndex`/`useGitlabContext` (existing) for the view's `repos`; the sessions context (`useJiraSessions`) and
@@ -355,10 +355,10 @@ Open each mock before drawing its view.
   - Clicking the enabled button calls `onReview('fix', lead, ['/a/one', '/a/two'])`.
   - Card: chip text `!15958 · 2 to fix`; List: link `!15958` then word `2 to fix`, five `jira-dlv-cell`s; the filter offers `Review open` after
     `Done, not merged`.
-- [ ] **Step 2: Run** `pnpm exec jest test/jira-delivery-pane.test.tsx test/jira-delivery-surfaces.test.tsx test/jira-list.test.tsx` — expect FAIL.
+- [ ] **Step 2: Run** `pnpm exec jest test/jira/jira-delivery-pane.test.tsx test/jira/jira-delivery-surfaces.test.tsx test/jira/jira-list.test.tsx` — expect FAIL.
 - [ ] **Step 3: Implement**, matching the mocks: ink `ui-split ui-split-28` button with the play icon, hairline above the row, word in the state's tone.
   Header comments cite the DESIGN.md subsection (added in Task 9 — name it now: "Delivery track › Review step / CodeRabbit row").
-- [ ] **Step 4: Run** the suites and `pnpm exec jest test/design-guards.test.ts` — expect PASS.
+- [ ] **Step 4: Run** the suites and `pnpm exec jest test/guards/design-guards.test.ts` — expect PASS.
 - [ ] **Step 5: Commit** `feat(jira): draw the review step, CodeRabbit row and to-fix chip`.
 
 ### Task 8: The launch sheet in review mode
@@ -370,7 +370,7 @@ Open each mock before drawing its view.
   (action tiles ~280-296 / ~362-387, surface seed ~122-125, mode ~175, branch section, repo select, preview query, dispatch body),
   `client/src/components/jira/JiraBranchSection.tsx` (locked `continue` with no open-MR option), `client/src/lib/jira.ts` (preview URL builder, if it
   lives there)
-- Test: `test/jira-launch.test.tsx`
+- Test: `test/jira/jira-launch.test.tsx`
 
 **Interfaces:**
 - Consumes: `ReviewRow`'s `onReview` (Task 7); preview params (Task 4); dispatch body `mr`, `half` (Task 5); `reviewHalf` (Task 1).
@@ -388,7 +388,7 @@ Open each mock before drawing its view.
   - Preview request carries `action=review&mrProject=…&mrIid=15958&half=fix`.
   - Start posts `{ action: 'review', mr: { project, iid }, half: 'fix', choice: continue on the source branch, openMr: false, … }`.
   - A 409 answer's `error` shows in the sheet as for any Run.
-- [ ] **Step 2: Run** `pnpm exec jest test/jira-launch.test.tsx` — expect FAIL.
+- [ ] **Step 2: Run** `pnpm exec jest test/jira/jira-launch.test.tsx` — expect FAIL.
 - [ ] **Step 3: Implement.** Run ▾ (`JiraRunMenu`) is unchanged: it never offers `review`.
 - [ ] **Step 4: Run** the suite and `grep -l 'JiraLaunchSheet\|useJiraSessions' test/` hits — expect PASS.
 - [ ] **Step 5: Commit** `feat(jira): open the launch sheet pre-set for a review`.
@@ -402,7 +402,7 @@ Open each mock before drawing its view.
   edge), `.claude/rules/board.md` (Run ▾ never offers review; the CodeRabbit row opens the sheet pre-set), `.claude/DESIGN.md` (Review step, CodeRabbit
   row, chip precedence, `Review open` filter), `docs/subsystems/gitlab.md` and `docs/subsystems/jira.md` (or the files those subsystems use — check
   `docs/overview.md`), `docs/superpowers/specs/2026-11-12-gitlab-connection-design.md` §9 (points to this spec)
-- Test: `test/design-guards.test.ts` and any rule-file guard under `test/` (`grep -l '.claude/rules' test/`)
+- Test: `test/guards/design-guards.test.ts` and any rule-file guard under `test/` (`grep -l '.claude/rules' test/`)
 
 - [ ] **Step 1: Edit** each file; new prose at 160 columns; mechanism in rule files, reasoning in `docs/subsystems/invariants.md` only if a new invariant
   is stated (the agents → gitlab edge is one: add it beside "agents/, tracker/, jira/ and gitlab/ are the server's only outbound-calling modules").

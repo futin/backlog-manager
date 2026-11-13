@@ -6,7 +6,7 @@ import { BACKLOG_HUB } from './hub.tokens';
 
 /**
  * The Lookout widget catalog (#249): `GET /api/hub/widgets` and everything below it, handed whole to the `lookout-widgets` handler, which owns the
- * contract's routing. Under `/api` like every route (test/vite-proxy.test.ts), and behind the Host allowlist like every route — Lookout polls
+ * contract's routing. Under `/api` like every route (test/guards/vite-proxy.test.ts), and behind the Host allowlist like every route — Lookout polls
  * `http://<machine>.ts.net:<port>/api/hub/widgets` server-side, and `.ts.net` is already allowed, so the allowlist needs no change.
  *
  * Two paths, not one: Nest 11 runs Express 5 / path-to-regexp v8, where a wildcard must be NAMED (`*path` — an unnamed `*` throws at boot) and matches one

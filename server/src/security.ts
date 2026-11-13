@@ -13,11 +13,11 @@ import { allowedHostGate } from './allowed-hosts';
  * is the point). Vite copies the classic inline script into client/dist
  * verbatim, so one constant covers both the source and the built page.
  *
- * test/csp.test.ts recomputes this from client/index.html: editing that script
+ * test/server/csp.test.ts recomputes this from client/index.html: editing that script
  * without updating this constant is a red test, not a silently blocked script
  * and a theme flash nobody notices until they change themes.
  */
-export const THEME_SCRIPT_SHA256 = 'sha256-Twr6lVSQUJ92bCaX7PSyc9hqyBvevHee9QkkbR/qP9I=';
+export const THEME_SCRIPT_SHA256 = 'sha256-CVPZh+CMqVuM38YAff5Fi2WnaYRxu0Mdj2gS1lRre7I=';
 
 /**
  * The drawer renders item Markdown, and its sanitizer was the only thing
@@ -39,7 +39,7 @@ export const THEME_SCRIPT_SHA256 = 'sha256-Twr6lVSQUJ92bCaX7PSyc9hqyBvevHee9Qkkb
  * style.setProperty('--font-scale', …), and React's style prop, which assigns
  * element.style. Checked in the built app, every sheet and the font-scale change,
  * not only in jsdom, which enforces no CSP (#454). The failure is quiet, one
- * console line and an unstyled element, so test/csp.test.ts holds the source to it.
+ * console line and an unstyled element, so test/server/csp.test.ts holds the source to it.
  *
  * connect-src 'self' keeps a compromised page from exfiltrating what it read
  * off /api/items/body.

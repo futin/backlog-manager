@@ -164,7 +164,7 @@ The human line gains a suffix when a request is effective — `pause requested a
 ### 4.1 `POST /api/agents/pause`
 
 Body `{ project: string, cancel?: boolean }`. Origin- and content-type- guarded like every other agents POST; the parametrized route list in
-`test/agents-origin-guard.test.ts` gains the route, and it is that list, not a sentence in CLAUDE.md, that says which routes are guarded.
+`test/agents/agents-origin-guard.test.ts` gains the route, and it is that list, not a sentence in CLAUDE.md, that says which routes are guarded.
 
 - `project` missing or empty → 400.
 - No run for the project with `status === 'running'` → 409, uncoded, "no running run to pause". Fresh or stale both qualify (Non-goals, last bullet). A `paused`
@@ -213,7 +213,7 @@ counted. Two cases are pinned by tests rather than by this paragraph:
 
 `OrchestratorRun.status` gains `'paused'`; `OrchestratorRun` gains `unpausedAt?: string`. `OrchestratorRunsPayload`'s entries gain `pauseRequested: boolean`.
 Every `Record` keyed on the status union gains a `paused` key — `RUN_STATUS_CLASS` and `RUN_STATUS_GLYPH` in `lib/run-stage.ts`, `RunsView`'s `STATUS_ORDER`,
-`run-stats`' `byStatus` — and `test/run-stage.test.ts`'s `ALL_STATUSES` grows so the compiler, not a checklist, finds every site. `paused` sorts directly after
+`run-stats`' `byStatus` — and `test/runs/run-stage.test.ts`'s `ALL_STATUSES` grows so the compiler, not a checklist, finds every site. `paused` sorts directly after
 `running` in `STATUS_ORDER`: it is the one non-running status that still has a future.
 
 ### 5.2 Where each state is visible

@@ -174,7 +174,7 @@ Pure, `now` always passed in, beside `pollAge` and `accessReason`:
 ## 6. The Board band
 
 `BoardView` stops computing `trackerLines` and drops the five `board-band-tracker` spans; `.board-band-tracker` and the dot/spacing rules that served it
-leave `styles.css`. The band keeps its title, count, run chip and controls exactly as before. `test/tracker-board.test.tsx`'s "shows the poll age while
+leave `styles.css`. The band keeps its title, count, run chip and controls exactly as before. `test/tracker/tracker-board.test.tsx`'s "shows the poll age while
 access is ok" flips to asserting the band draws **no** `tracker-line` for a connected project — the reading has one home now and it is not the band.
 
 ## 7. Docs, rules and guards
@@ -186,7 +186,7 @@ access is ok" flips to asserting the band draws **no** `tracker-line` for a conn
 - **New invariant**, headline in CLAUDE.md under `Invariants`, mechanism in `.claude/rules/board.md`, reasoning in `docs/subsystems/invariants.md`:
   **The strip's height and the well's gap are one token, `--main-gap`, read by the strip, the Runs page and the narrow override — never a px literal.**
   The mechanism bullet also records the Escape rule's new count: four dialogs on the stack plus `Confirm` and the tracker popover joining while drawn.
-- **Design guard 9** in `test/design-guards.test.ts`: `--main-gap` is declared exactly once on `:root` and once in the narrow media block, nothing else
+- **Design guard 9** in `test/guards/design-guards.test.ts`: `--main-gap` is declared exactly once on `:root` and once in the narrow media block, nothing else
   declares it; `.main` carries no px `margin-top`; `.runs-board`'s height reads `var(--main-gap)`.
 - **CLAUDE.md** `client/src/` line: "A connected tracker adds three readings and no new surface" becomes "adds one shell-level chip (strip, or rail bar
   below 700 px) and three item readings".
@@ -196,18 +196,18 @@ access is ok" flips to asserting the band draws **no** `tracker-line` for a conn
 
 All jsdom / node, in `test/` (flat), under jest:
 
-- `test/tracker-lib.test.ts` — `pollProgress`: mid-cycle fraction and seconds; `null` for no stamp and for garbage; future stamp reads `fraction 0`,
+- `test/tracker/tracker-lib.test.ts` — `pollProgress`: mid-cycle fraction and seconds; `null` for no stamp and for garbage; future stamp reads `fraction 0`,
   `leftS 17`; exactly `2 × cycle` is overdue and `2 × cycle − 1 ms` is not; fraction clamps at 1 past the cycle. `sweepProgress`: picks the newest of three
   stamps, ignores `files` projects, `null` when no github project has polled. `apiUsage`: `null` for `limit: null`; `<1%` for 14 of 5000; `1.0%` for 50 of
   5000 (the floor's boundary); `1.4%` for 70 of 5000; `resetsAt` renders local `HH:MM`.
 - `test/meter.test.tsx` — draws label and value as text; fill width is `fraction × 100 %`, clamped at both ends; `null` draws an empty track; tone class
   follows the prop.
-- `test/tracker-chip.test.tsx` — renders nothing without a github project; draws login, `POLL` and `API` for a healthy payload; `overdue` at two cycles;
+- `test/tracker/tracker-chip.test.tsx` — renders nothing without a github project; draws login, `POLL` and `API` for a healthy payload; `overdue` at two cycles;
   red bar when every project fails, pip only when some fail; no-token draws `no token`, the amber pip and no meters; click opens the popover with one row
   per github project, a failing row carrying `accessReason`'s sentence, and no link or button inside it; pointerdown outside closes it; a section change
   closes it; **Escape closes the popover and not a sheet beneath it** (the stack test, mirroring the existing one for `Confirm`).
-- `test/use-trackers.test.tsx` — one fetch on mount; the next is scheduled at `newest polledAt + cycle + 500 ms` (fake timers); an error re-arms at one
+- `test/tracker/use-trackers.test.tsx` — one fetch on mount; the next is scheduled at `newest polledAt + cycle + 500 ms` (fake timers); an error re-arms at one
   cycle; no timer without a github project; unmount clears the timer; focus fetches immediately.
 - `test/shell.test.tsx` (new, or the existing App smoke test) — the chip is in `.topstrip` at desktop width and in `.rail-bar` under `useNarrow`, never both.
-- `test/tracker-board.test.tsx` — the band draws no tracker line (§6).
-- `test/design-guards.test.ts` — guard 9 (§7); `test/claude-rules.test.ts` goes red until the new bullet, headline and anchor agree.
+- `test/tracker/tracker-board.test.tsx` — the band draws no tracker line (§6).
+- `test/guards/design-guards.test.ts` — guard 9 (§7); `test/guards/claude-rules.test.ts` goes red until the new bullet, headline and anchor agree.

@@ -131,12 +131,12 @@ test('stageSpans sorts by time, not by key order', async () => {
 test('verificationFailures strips ANSI and extracts files, test names and error lines', async () => {
   const { verificationFailures } = await import('./lib/run-files.mjs');
   const tail = [
-    '\x1b[31mFAIL\x1b[0m test/agents-origin-guard.test.ts',
+    '\x1b[31mFAIL\x1b[0m test/agents/agents-origin-guard.test.ts',
     '  ● the agents POST guard › 403s an Origin: null POST to plan',
     'sh: jest: command not found'
   ].join('\n');
   assert.deepEqual(verificationFailures(tail), {
-    files: ['test/agents-origin-guard.test.ts'],
+    files: ['test/agents/agents-origin-guard.test.ts'],
     tests: ['the agents POST guard › 403s an Origin: null POST to plan'],
     errors: ['sh: jest: command not found']
   });

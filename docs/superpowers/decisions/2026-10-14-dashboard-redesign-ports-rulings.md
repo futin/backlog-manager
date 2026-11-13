@@ -45,7 +45,7 @@ under the git-ignored `.superpowers/` and are not kept.
   carries `⚠` keeps its glyph. It is less alarming than the old orange, which is the price of 4.5:1. Cost if wrong: Daylight warnings look subdued; moving a
   site to `--amber-text` is one token, but only where an amber neighbour is guaranteed.
 - **`--amber` is still declared in the Daylight block.** The aliases that still read it and design guard 5 need it, and `styles.css` reads no bare
-  `var(--amber)` (pinned by `test/daylight-contrast.test.ts`). Cost if wrong: a dead-looking declaration a later sweep might delete, which guard 5 would catch.
+  `var(--amber)` (pinned by `test/guards/daylight-contrast.test.ts`). Cost if wrong: a dead-looking declaration a later sweep might delete, which guard 5 would catch.
 
 ## Task 2 — one Chevron
 
@@ -87,7 +87,7 @@ under the git-ignored `.superpowers/` and are not kept.
 - **`App` tags each working report with the section that made it**, beyond the plan's reset-on-change. A poll that lands just before a section click can
   flush the old view's `true` on top of the reset; the tag drops it. A click on the section already open keeps the report. Cost if wrong: one field in the
   pulse state.
-- **`test/run-stage-chip-style.test.ts` now reads every reduced-motion block** (through `mediaBlocks`), not only the first. The cursor's own one-line block
+- **`test/runs/run-stage-chip-style.test.ts` now reads every reduced-motion block** (through `mediaBlocks`), not only the first. The cursor's own one-line block
   became the first in the file and broke a lazy regex; the assertion is unchanged and mutation-checked. Cost if wrong: none to behaviour.
 
 ## Task 5 — the screenshot pass
@@ -102,7 +102,7 @@ under the git-ignored `.superpowers/` and are not kept.
 - **No horizontal overflow at 375 px** on Board or Runs (`documentElement.scrollWidth − innerWidth` = 0); none at 1280 either.
 - **Found and left, because it predates this branch:** three status words take their colour from a FILL token, not a text one — `.runs-status-live`,
   `.runs-status-paused` and `.watchdog-kind-live` read `--fill-live`, which is `#F5A15C` in Daylight, about 2.1:1 on `--strip`. Task 1 left `--fill-*`
-  alone by plan, and `test/daylight-contrast.test.ts` checks status text tokens only, so neither saw them. Cost if left: Daylight's `paused` and `live` words
+  alone by plan, and `test/guards/daylight-contrast.test.ts` checks status text tokens only, so neither saw them. Cost if left: Daylight's `paused` and `live` words
   stay under AA. Fixed after the final review (I1) — see below.
 
 ## Final review fixes
@@ -111,14 +111,14 @@ under the git-ignored `.superpowers/` and are not kept.
   branch makes Daylight the default, `running` at 2.07:1 on `--strip` was no longer an opt-in theme's problem. `--live-ink` is `var(--fill-live)` in the
   `:root` defaults block, so every dark theme computes exactly what `.runs-status-live`, `.runs-status-paused` and `.watchdog-kind-live` drew before;
   Daylight's `#8a5214` holds AA on all four surfaces. No new hue: `--amber-ink` is already the amber word that keeps its hue, and `running` beside `aborted` in
-  one colour is what every dark theme draws today. `test/daylight-contrast.test.ts` gains a case that reads every token `styles.css` sets text in and holds
+  one colour is what every dark theme draws today. `test/guards/daylight-contrast.test.ts` gains a case that reads every token `styles.css` sets text in and holds
   it to 4.5:1, so the next word set in a fill goes red; it spares only rules that paint their own background, three mark glyphs closed by selector, and the
   `--proj-N` identity hues. Cost if wrong: in Daylight a live run and an aborted or crashed one share a colour and are told apart by the word and the dot
   alone; the fix is one value, a distinct live brown, in the daylight block — the test then measures it.
 
 ## Deferred minors (from the task reviews, not acted on)
 
-- `test/daylight-contrast.test.ts`'s tint case cannot see a descendant on its parent's tint (`.run-drawer-attn-kind`); `--amber-solid` is 3.01:1 on
+- `test/guards/daylight-contrast.test.ts`'s tint case cannot see a descendant on its parent's tint (`.run-drawer-attn-kind`); `--amber-solid` is 3.01:1 on
   `--steel`, which case 3 does not list; a `shared/theme.css` comment bullet ends in a dangling colon.
 - The chevron's reduced-motion rule is three `.chev-<dir>` rules rather than one, and its test asserts the exact one-line text — both workarounds for guard
   7's bare-selector count. (The §6-says-12–14-px note is gone: the final review's M4 moved the Chevron paragraph out of the copied §6 into §8.0.)

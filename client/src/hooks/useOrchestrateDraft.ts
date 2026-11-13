@@ -28,7 +28,7 @@ import type { BacklogItem, MergeCheckResult, MergeMode, PermissionMode, ProjectS
 
 /**
  * Everything the Orchestrate sheet's three step views and its footer read (#306) — one props currency, so each view renders alone from a hand-built one
- * (`test/orchestrate-steps.test.tsx`). Values are this render's; the actions are the only writers, and none of them is a raw `setState`, so a view cannot
+ * (`test/orchestrator/orchestrate-steps.test.tsx`). Values are this render's; the actions are the only writers, and none of them is a raw `setState`, so a view cannot
  * put the draft into a shape the derivations below would not produce.
  */
 export interface OrchestrateDraft {

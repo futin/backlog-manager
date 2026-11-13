@@ -41,7 +41,7 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
  * strictly larger consequence than the dispatch route the guard was written
  * for: a hidden cross-origin form auto-submit needs no CORS preflight, and
  * without the guard any page in the developer's browser could file issues, edit
- * bodies and close items. `test/agents-origin-guard.test.ts`'s route list is
+ * bodies and close items. `test/agents/agents-origin-guard.test.ts`'s route list is
  * where the guarded set lives, and it grew by every one of these.
  *
  * A JSON POST with NO `Origin` at all still passes, deliberately and by the

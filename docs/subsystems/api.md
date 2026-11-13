@@ -444,7 +444,7 @@ own files holding a `.git` entry, never `process.cwd()`.
 
 The read is release-kit's memoised `createReleasesReader` (spec D3 of release-kit's `docs/superpowers/specs/2026-10-18-shared-releases-ui-design.md`),
 handed `runGit` as its git port, so every launch — the memo key's `rev-parse` included — is async and bounded at 10 s rather than release-kit's own `execFile`;
-`test/api-releases.test.ts` pins that every one of the four goes through `runGit`. Every failure is a shape, never a status: `for-each-ref` failing is the empty shape, `describe` failing is
+`test/server/api-releases.test.ts` pins that every one of the four goes through `runGit`. Every failure is a shape, never a status: `for-each-ref` failing is the empty shape, `describe` failing is
 `current: null` with the releases kept, an origin that is not GitHub (or none) drops `url`. The memo is keyed by HEAD and the mtimes of `packed-refs` and
 `refs/tags` under the common git dir — a linked worktree's own git dir holds no tags — and a read in which a deciding call failed is never memoised.
 

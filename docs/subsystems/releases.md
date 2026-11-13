@@ -20,7 +20,7 @@ every release tag, newest first. Read-only and git only — not one of the outbo
 ordering, the GitHub-remote pattern and the memo below; `findRepoRoot` is its too. The service hands it one thing, `runGit` as the git port, because this
 server's rule is that every git read is `runGit` — async, bounded at 10 s ([invariants](invariants.md#the-server-never-spawns-git-synchronously-in-a-request-path))
 — and release-kit's default port is its own `execFile`. The memo key's `rev-parse` goes through the same port, so all four reads do, and
-`test/api-releases.test.ts` pins it.
+`test/server/api-releases.test.ts` pins it.
 
 **The root.** `BM_RELEASES_ROOT` when set (the test seam), else the first ancestor of the server's own files holding a `.git` entry — a directory in a main
 checkout, a file in a linked worktree. Never `process.cwd()`. In the compose stack that is `/app`, the bind-mounted checkout.
@@ -70,11 +70,11 @@ open over either. It is rendered in `AppShell`, outside the rail: the phone rail
 `position: fixed` child, so a drawer inside it would be clipped to the rail.
 
 Badge colours are each status token on a 14 % tint of its own over `--strip`, mapped onto ui-kit's `--uk-feat-*`, `--uk-fix-*`, `--uk-perf-*` and
-`--uk-breaking-*` in `styles.css`; `test/daylight-contrast.test.ts` holds each mapped pair to 4.5:1 in daylight, and `test/ui-kit-tokens.test.ts` holds
+`--uk-breaking-*` in `styles.css`; `test/guards/daylight-contrast.test.ts` holds each mapped pair to 4.5:1 in daylight, and `test/guards/ui-kit-tokens.test.ts` holds
 every `--uk-*` token the kit's stylesheet reads to being mapped there. A code span in the notes is the item
 body's — `--steel` fill, the board's one face — through `--uk-code-bg` and `--uk-font-mono`. The notes go through ui-kit's own escape-first `renderNotesHtml` (v0.3.0
 removed the `renderNotes` prop, so every app's drawer reads the same); `###` headings render as `h3`. The chip and the drawer are drawn entirely by the kit, so this
-board maps tokens and restyles no `.uk-*` class — `test/ui-kit-guard.test.ts` fails on a rule that does, and holds `--uk-chip-bg` and `--uk-zoom` to being mapped.
+board maps tokens and restyles no `.uk-*` class — `test/guards/ui-kit-guard.test.ts` fails on a rule that does, and holds `--uk-chip-bg` and `--uk-zoom` to being mapped.
 
 ## What is not here
 

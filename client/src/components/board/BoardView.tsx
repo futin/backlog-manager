@@ -257,7 +257,7 @@ export default function BoardView({ source, onOpenRuns }: { source: SourceSectio
      silent on exactly that condition, not linger because this
      map forgot to check. That single `fresh` filter is the ONLY thing
      unpinning a card when a run's heartbeat stops; there is deliberately no
-     second check downstream, and test/board-live-cards.test.tsx pins this
+     second check downstream, and test/board/board-live-cards.test.tsx pins this
      one in place so a future refactor sourcing the map from `runs` fails here
      rather than leaving a dead run pinning cards to the top of a column
      forever.
@@ -299,7 +299,7 @@ export default function BoardView({ source, onOpenRuns }: { source: SourceSectio
      that says the same thing would be the two-agreeing-expressions shape
      this repo pins tests against everywhere else (`watchdogStoodDown`,
      `isStale`) — and the crashed-run case that filter existed for is now
-     tested where the rule lives (test/orchestrator-starting.test.ts). */
+     tested where the rule lives (test/orchestrator/orchestrator-starting.test.ts). */
 
   /* The id→queue-entry lookup, one map per fresh run, keyed by the run's own
      `project` — the registry's absolute path, the exact string
@@ -588,7 +588,7 @@ export default function BoardView({ source, onOpenRuns }: { source: SourceSectio
    * `orchestrating` free to coexist with an open item modal, reasoning by
    * analogy that OrchestrateSheet was "the same kind of
    * overlay as LaunchSheet" and LaunchSheet already coexists with the item
-   * modal on purpose (test/dispatch-button.test.tsx's "opens the sheet from
+   * modal on purpose (test/agents/dispatch-button.test.tsx's "opens the sheet from
    * inside the modal, leaving it open behind it"). Review found the
    * analogy does not actually hold: LaunchSheet's coexistence is reachable
    * only through a per-item dispatch control that lives INSIDE the modal it

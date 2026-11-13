@@ -77,7 +77,7 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
   gates the render; nothing derived reads it; it changes no default selection. Any surface stating a consequence must split it, by the endpoint's per-row `absent`:
   absent from `main` is skipped, present-but-edited is executed on `main`'s bytes. Async since #277, and it still never joins the memo one file over: no
   memo, and no in-flight sharing either — two concurrent calls spawn git twice, because a call that arrives after an edit must not be handed a read that began
-  before it (`test/git-run.test.ts` pins it). Why:
+  before it (`test/server/git-run.test.ts` pins it). Why:
   [invariants.md](docs/subsystems/invariants.md#the-orchestrate-sheets-uncommitted-flag-is-read-from-git-per-request-and-memoised-nowhere)
 - **The server never spawns git synchronously: every git read is `runGit`, async, bounded at 10 s, and a timeout lands in the failure branch the call site
   already had.** `server/src/git-run.util.ts` is the one way this server runs git — `runGit(args, { cwd?, maxBuffer? })` answers stdout, or `null` for every
@@ -88,7 +88,7 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
   `resolveBaseBranch` → the same 400 a missing branch gets, `OrchestrateArgsService.branches` → an empty list, and `ReleasesService`'s four reads — `for-each-ref` → the
   empty shape, `describe` → `current: null`, `remote get-url` → no `url`, `rev-parse` → the answer is not memoised. No call site grew a new branch for a timeout and none may:
   a caller with a reason a timeout should differ from a missing repo is a new decision, not a refactor. `stdout` only, stdin closed, stderr dropped.
-  `test/git-run.test.ts` is the guard: a fake slow `git` on `PATH`, the timeout landing in each branch above, the sharing cases, a route case in which
+  `test/server/git-run.test.ts` is the guard: a fake slow `git` on `PATH`, the timeout landing in each branch above, the sharing cases, a route case in which
   `/api/health` answers in tens of milliseconds while `/api/items` waits out a 1 s git, and a grep that fails on `execFileSync`, `spawnSync` or `execSync`
   anywhere under `server/src`. The synchronous `fs` reads (`readFileSync`, `readdirSync`, `statSync`) stay synchronous on purpose — they were not the
   bottleneck. Why: [invariants.md](docs/subsystems/invariants.md#the-server-never-spawns-git-synchronously-in-a-request-path)

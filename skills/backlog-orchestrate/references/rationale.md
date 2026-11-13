@@ -409,7 +409,7 @@ the one the gate defaults to.
   makes before committing. Merging such a blob into a tree that already has a real `node_modules/` directory there makes git refuse to clobber it — a run-level
   failure, not a code defect — and if it does land, every clone gets a dangling root symlink and a broken `pnpm install`.
 
-  The repo's own `.gitignore` was widened to a bare `node_modules` (`test/gitignore-node-modules.test.ts` pins it), but that fixes one repo. The exclude list is
+  The repo's own `.gitignore` was widened to a bare `node_modules` (`test/guards/gitignore-node-modules.test.ts` pins it), but that fixes one repo. The exclude list is
   the general guard: it is local, it is written before the first dispatch, and it holds in any project whose `.gitignore` has the same gap. So the rule is
   stated as a rule — whatever the run writes into a worktree to make verification possible is excluded here and never committed — and the entry is bare, with no
   trailing slash, for the same reason the `.gitignore` one now is. The next such file will not be called `node_modules`; it goes in this same list, in the same

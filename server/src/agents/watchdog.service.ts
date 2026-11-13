@@ -572,7 +572,7 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
    * SYNCHRONOUSLY — which found the same still-crashed run (a resumed session
    * takes ~90s to reach its first `heartbeat`), no entry, `lastSpawnAt ===
    * null`, and so fell through grace and spawned a SECOND `--resume` against
-   * it. `test/watchdog-routes.test.ts` documented that second spawn in its
+   * it. `test/watchdog/watchdog-routes.test.ts` documented that second spawn in its
    * own comment as an accepted human-versus-watchdog window. It is not
    * accepted any more: design §1 defines grace as "the interval after ANY
    * spawn attempt or failure during which the run is left alone", and a board

@@ -6,7 +6,7 @@ import type { ClaimResult, ItemsIndex, ProjectSummary, UncommittedItems } from '
 
 /**
  * Everything lives under /api on purpose: dev-mode Vite proxies exactly one
- * prefix, and test/vite-proxy.test.ts asserts no controller ever leaves it —
+ * prefix, and test/guards/vite-proxy.test.ts asserts no controller ever leaves it —
  * a route outside /api would not 404 in dev, it would be answered by Vite's
  * SPA fallback with index.html.
  */

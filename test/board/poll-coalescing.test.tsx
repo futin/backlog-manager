@@ -1,0 +1,526 @@
+/**
+ * @jest-environment jsdom
+ */
+import { act, renderHook } from '@testing-library/react';
+
+import { useAgents } from '../../client/src/hooks/useAgents';
+import { BOARD_TRACKER_POLL_MS, useBoard } from '../../client/src/hooks/useBoard';
+import { GITLAB_CLIENT_POLL_MS, useGitlab } from '../../client/src/hooks/useGitlab';
+import { useOrchestratorArchive } from '../../client/src/hooks/useOrchestratorArchive';
+import { POLL_MS, useOrchestratorRuns } from '../../client/src/hooks/useOrchestratorRuns';
+import { useRefreshing } from '../../client/src/hooks/useRefreshing';
+import { TICKS_POLL_MS, useTicks } from '../../client/src/hooks/useTicks';
+import { useWatchdog, WATCHDOG_IDLE_POLL_MS, WATCHDOG_POLL_MS } from '../../client/src/hooks/useWatchdog';
+import rawFixture from '../fixtures/orchestrator-run.json';
+import { DEFAULT_WATCHDOG_CONFIG } from '../../shared/types';
+import type { AgentsStatus, GitlabPayload, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, TicksPayload, WatchdogPhase, WatchdogStatus } from '../../shared/types';
+
+/**
+ * #277 — the board's pollers never have two of their own requests in flight, and a focus / mount / refresh that lands mid-flight coalesces into exactly ONE
+ * follow-up. One subject per hook, one generic suite over all of them, because the contract is the same four sentences for each:
+ *
+ *   7.  A slow answer slows the poll; it does not stack requests behind it (and the next tick is `period` AFTER the answer, not on the wall clock).
+ *   8.  Focus during a flight starts nothing; the settle runs one follow-up at once; the timer re-arms from that follow-up.
+ *   9.  The arming condition each hook already had still decides whether a timer exists, including when it flips mid-flight. The watchdog's condition
+ *       is `live` alone since #270: an idle sweeper only moves it to the slow period, which its own cases below pin.
+ *   10. Unmount mid-flight: no state update, no follow-up, no further request however long the clock runs.
+ *
+ * Every request is a promise the test settles by hand, so "in flight" is a state the test holds rather than a race it hopes to win. Nothing here depends
+ * on a date: `fresh` and `phase` arrive in the stubbed bodies, so there is no fixture clock to keep relative to anything.
+ */
+
+type Kind = 'live' | 'quiet';
+
+interface Subject {
+  name: string;
+  /** null: no clock at all (`useAgents`, `useOrchestratorArchive`) — mount and focus only. */
+  periodMs: number | null;
+  /** How many `fetch` calls one request makes (`useBoard` reads `items` and `projects` as a pair). */
+  perRequest: number;
+  mount: () => { unmount: () => void };
+  /** The body a URL answers: `live` is the world where the hook's arming condition holds, `quiet` the one where it does not. */
+  body: (url: string, kind: Kind) => unknown;
+}
+
+const run = rawFixture as OrchestratorRun;
+
+function runsPayload(kind: Kind): OrchestratorRunsPayload {
+  const live = kind === 'live';
+  const entry = { ...run, status: live ? ('running' as const) : ('done' as const), fresh: live, pastRuns: 0, pauseRequested: false, stopRequested: false };
+  return { runs: [entry], starting: [], remote: [], remoteStarting: [] };
+}
+
+function projects(kind: Kind): ProjectSummary[] {
+  return [
+    {
+      name: 'tracker',
+      path: '/abs/tracker',
+      createdAt: '2026-08-26T00:00:00.000Z',
+      missing: false,
+      counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+      source: 'github',
+      repo: 'futin/x',
+      polledAt: new Date().toISOString(),
+      access: 'ok',
+      detail: null,
+      // `off` is a tracker that no longer syncs: `hasSyncingTracker` is false for it, so the board stops polling.
+      interval: kind === 'live' ? null : 'off'
+    }
+  ];
+}
+
+function watchdog(phase: WatchdogPhase): WatchdogStatus {
+  return { phase, nextTickAt: null, config: DEFAULT_WATCHDOG_CONFIG, watching: [], events: [] };
+}
+
+// The tick breaker's page payload. Both `Kind`s answer the same body: `useTicks` has no arming condition beyond `live`, so there is no "quiet" world for the
+// answer to describe — see GATED below.
+const TICKS: TicksPayload = { config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, source: 'default' }, projects: [] };
+
+// The GitLab reader's payload. Both `Kind`s answer the same body: `useGitlab` is armed constant `true` (the Sources row needs the status whatever GitLab
+// says), so nothing in its answer can disarm it.
+const GITLAB = { status: { configured: false }, jiraProjects: {}, mrs: [] } as unknown as GitlabPayload;
+
+const AGENTS: AgentsStatus = {
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: []
+};
+
+const SUBJECTS: Subject[] = [
+  {
+    name: 'useOrchestratorRuns',
+    periodMs: POLL_MS,
+    perRequest: 1,
+    mount: () => renderHook(() => useOrchestratorRuns()),
+    body: (_url, kind) => runsPayload(kind)
+  },
+  {
+    name: 'useBoard',
+    periodMs: BOARD_TRACKER_POLL_MS,
+    perRequest: 2,
+    mount: () => renderHook(() => useBoard()),
+    body: (url, kind) => (url === '/api/projects' ? projects(kind) : { items: [], errors: [] })
+  },
+  {
+    name: 'useWatchdog',
+    periodMs: WATCHDOG_POLL_MS,
+    perRequest: 1,
+    mount: () => renderHook(() => useWatchdog()),
+    body: (_url, kind) => watchdog(kind === 'live' ? 'armed' : 'idle')
+  },
+  {
+    name: 'useAgents',
+    periodMs: null,
+    perRequest: 1,
+    mount: () => renderHook(() => useAgents()),
+    body: () => AGENTS
+  },
+  {
+    // #285: on the coalesced poller since `useRefreshing`. Never polls — it must stay out of POLLERS and GATED.
+    name: 'useOrchestratorArchive',
+    periodMs: null,
+    perRequest: 1,
+    mount: () => renderHook(() => useOrchestratorArchive()),
+    body: () => ({ runs: [] })
+  },
+  {
+    // Runs › Ticks and the Settings card. Armed by `live` alone, like the watchdog, so it is a POLLER but not GATED. Appended last so the index-based
+    // `SUBJECTS[n]` lookups below keep pointing at the hooks they name.
+    name: 'useTicks',
+    periodMs: TICKS_POLL_MS,
+    perRequest: 1,
+    mount: () => renderHook(() => useTicks()),
+    body: () => TICKS
+  },
+  {
+    // The shell's one `GET /api/gitlab` read. A POLLER with nothing in its answer that disarms it, so not GATED. Appended after `useTicks` for the same
+    // index reason.
+    name: 'useGitlab',
+    periodMs: GITLAB_CLIENT_POLL_MS,
+    perRequest: 1,
+    mount: () => renderHook(() => useGitlab()),
+    body: () => GITLAB
+  }
+];
+const POLLERS = SUBJECTS.filter((s) => s.periodMs !== null);
+// The pollers whose arming condition can go false while they are mounted with defaults. Not the watchdog: since #270 a live monitor never stops — an
+// idle sweeper re-arms it on `WATCHDOG_IDLE_POLL_MS` instead of clearing the timer — so its case 9 is the period switch in its own describe below. Not
+// `useTicks` either: nothing in its answer can disarm it (it polls while `live`, which is the caller's choice and not the server's), so its case 9 is the
+// `live: false` describe below. Not `useGitlab` either: it is armed constant `true` — the Sources row needs the status whatever GitLab answers — so there is no
+// world in which its answer stops the clock.
+const GATED = POLLERS.filter((s) => s.name !== 'useWatchdog' && s.name !== 'useTicks' && s.name !== 'useGitlab');
+
+/** A `fetch` whose every call hangs until the test answers it. `answer` settles everything outstanding with the subject's body for `kind`. */
+function controlledFetch(subject: Subject): { fn: jest.Mock; answer: (kind: Kind) => Promise<void>; fail: () => Promise<void> } {
+  const outstanding: { url: string; settle: (body: unknown) => void; reject: (e: Error) => void }[] = [];
+  const fn = jest.fn(
+    (url: string) =>
+      new Promise<Response>((resolve, reject) => {
+        outstanding.push({ url, settle: (body) => resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response), reject });
+      })
+  );
+  global.fetch = fn as unknown as typeof fetch;
+  return {
+    fn,
+    async answer(kind) {
+      const batch = outstanding.splice(0);
+      for (const call of batch) call.settle(subject.body(call.url, kind));
+      await flush();
+    },
+    /** Rejects everything outstanding, as a dropped connection would. */
+    async fail() {
+      const batch = outstanding.splice(0);
+      for (const call of batch) call.reject(new Error('network down'));
+      await flush();
+    }
+  };
+}
+
+/** Lets every settled fetch's `.then` chain run and its setState commit, with no fake time passing. */
+async function flush(): Promise<void> {
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(0);
+  });
+}
+
+async function advance(ms: number): Promise<void> {
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(ms);
+  });
+}
+
+function focus(times = 1): void {
+  for (let i = 0; i < times; i += 1) {
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+  }
+}
+
+const realFetch = global.fetch;
+let consoleError: jest.SpyInstance;
+
+beforeEach(() => {
+  jest.useFakeTimers();
+  consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  // Every case below must leave React quiet: an act() or unmounted-update warning is the failure this suite exists to catch.
+  expect(consoleError).not.toHaveBeenCalled();
+  consoleError.mockRestore();
+  jest.useRealTimers();
+  global.fetch = realFetch;
+});
+
+describe.each(POLLERS)('$name — no overlap on a slow answer (#277 case 7)', (subject) => {
+  const period = subject.periodMs as number;
+
+  it('asks once while its first request never resolves, however far the clock runs', async () => {
+    const f = controlledFetch(subject);
+    subject.mount();
+    await advance(3 * period);
+
+    expect(f.fn).toHaveBeenCalledTimes(subject.perRequest);
+  });
+
+  it('asks once while a tick never resolves; the next tick is a whole period after the answer, not an instant after', async () => {
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('live');
+    expect(f.fn).toHaveBeenCalledTimes(subject.perRequest);
+
+    await advance(period);
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+
+    // The tick hangs. On a wall-clock interval this is where three more requests would pile up.
+    await advance(3 * period);
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+
+    await f.answer('live');
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+    await advance(period - 1);
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+    await advance(1);
+    expect(f.fn).toHaveBeenCalledTimes(3 * subject.perRequest);
+  });
+});
+
+describe.each(SUBJECTS)('$name — focus coalesces (#277 case 8)', (subject) => {
+  it('starts nothing for three focuses mid-flight, then exactly one follow-up the moment the flight settles', async () => {
+    const f = controlledFetch(subject);
+    subject.mount();
+    focus(3);
+    expect(f.fn).toHaveBeenCalledTimes(subject.perRequest);
+
+    await f.answer('live');
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+
+    // The follow-up is itself a flight: a further focus folds into the NEXT one rather than racing it, and nothing else starts while it hangs.
+    await advance(3 * (subject.periodMs ?? 5_000));
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+
+    await f.answer('live');
+    // One follow-up only — and, for a poller, the timer re-arms from THIS answer.
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+    if (subject.periodMs === null) {
+      await advance(10 * 60_000);
+      expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+    } else {
+      await advance(subject.periodMs - 1);
+      expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+      await advance(1);
+      expect(f.fn).toHaveBeenCalledTimes(3 * subject.perRequest);
+    }
+  });
+
+  it('a focus with nothing in flight starts a request at once', async () => {
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('quiet');
+    expect(f.fn).toHaveBeenCalledTimes(subject.perRequest);
+
+    focus();
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+  });
+});
+
+describe('useOrchestratorRuns — the resume-click refresh coalesces too (#277 case 8)', () => {
+  it('a noteResume during a flight starts nothing, and one follow-up runs when it settles', async () => {
+    const subject = SUBJECTS[0];
+    const f = controlledFetch(subject);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await f.answer('quiet');
+    expect(f.fn).toHaveBeenCalledTimes(1);
+
+    // A request is out (the focus), and the click's own refresh — plus a second one from the mark's caller — must fold into one follow-up behind it.
+    focus();
+    expect(f.fn).toHaveBeenCalledTimes(2);
+    act(() => result.current.noteResume('some-project'));
+    act(() => result.current.refresh());
+    expect(f.fn).toHaveBeenCalledTimes(2);
+
+    await f.answer('quiet');
+    expect(f.fn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('useOrchestratorRuns — a failed poll keeps the last good runs and re-arms (#260)', () => {
+  it('a rejected tick leaves `runs` as they were, and exactly one further request follows POLL_MS after the rejection settled', async () => {
+    const subject = SUBJECTS[0];
+    const f = controlledFetch(subject);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await f.answer('live');
+    const good = result.current.runs;
+    expect(good).toHaveLength(1);
+
+    await advance(POLL_MS);
+    expect(f.fn).toHaveBeenCalledTimes(2);
+    await f.fail();
+    expect(result.current.runs).toBe(good);
+
+    // The chain re-arms on a failure, not only on success — measured from the rejection, not from the tick that started it.
+    await advance(POLL_MS - 1);
+    expect(f.fn).toHaveBeenCalledTimes(2);
+    await advance(1);
+    expect(f.fn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('useOrchestratorArchive — never polls (#285)', () => {
+  it('after its first answer settles, a minute of fake time asks nothing further', async () => {
+    const subject = SUBJECTS.find((s) => s.name === 'useOrchestratorArchive')!;
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('live');
+    expect(f.fn).toHaveBeenCalledTimes(1);
+    await advance(60_000);
+    expect(f.fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useRefreshing — mount and focus are its two triggers (#285)', () => {
+  it('calls the task once on mount, once per focus, and never after unmount', async () => {
+    const task = jest.fn(() => Promise.resolve());
+    const { unmount } = renderHook(() => useRefreshing(task));
+    expect(task).toHaveBeenCalledTimes(1);
+    await flush();
+
+    focus();
+    expect(task).toHaveBeenCalledTimes(2);
+    await flush();
+
+    unmount();
+    focus();
+    await flush();
+    expect(task).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe.each(GATED)('$name — arming conditions hold (#277 case 9)', (subject) => {
+  const period = subject.periodMs as number;
+
+  it('arms no timer when the answer says there is nothing to watch', async () => {
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('quiet');
+    await advance(10 * period);
+
+    expect(f.fn).toHaveBeenCalledTimes(subject.perRequest);
+  });
+
+  it('a tick in flight when the condition flips false settles, updates state, and re-arms nothing', async () => {
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('live');
+    await advance(period);
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+
+    await f.answer('quiet');
+    await advance(10 * period);
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+  });
+
+  it('clears the pending timer when the condition flips false while it is waiting', async () => {
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('live');
+    await advance(period - 1);
+    // A focus is the one thing that can change the answer while a timer waits; it starts a request at once and drops the old timer.
+    focus();
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+    await f.answer('quiet');
+    await advance(10 * period);
+
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+  });
+});
+
+describe('useWatchdog — live:false skips the clock and nothing else (#277 case 9)', () => {
+  it('does not tick for an armed sweeper, but still refetches on focus', async () => {
+    const subject = SUBJECTS[2];
+    const f = controlledFetch(subject);
+    renderHook(() => useWatchdog({ live: false }));
+    await f.answer('live');
+    await advance(10 * WATCHDOG_POLL_MS);
+    expect(f.fn).toHaveBeenCalledTimes(1);
+
+    focus();
+    expect(f.fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('useTicks — live:false skips the clock and nothing else (#277 case 9)', () => {
+  it('does not tick, but still refetches on focus — the Settings card is nothing live', async () => {
+    const subject = SUBJECTS.find((s) => s.name === 'useTicks')!;
+    const f = controlledFetch(subject);
+    renderHook(() => useTicks({ live: false }));
+    await f.answer('live');
+    await advance(10 * TICKS_POLL_MS);
+    expect(f.fn).toHaveBeenCalledTimes(1);
+
+    focus();
+    expect(f.fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('useWatchdog — an idle sweeper slows the clock instead of stopping it (#270 over #277 case 9)', () => {
+  const subject = SUBJECTS[2];
+
+  it('ticks WATCHDOG_IDLE_POLL_MS after an idle answer, never on the armed period, and a hung tick stacks nothing behind it', async () => {
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('quiet');
+    await advance(WATCHDOG_IDLE_POLL_MS - 1);
+    expect(f.fn).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(f.fn).toHaveBeenCalledTimes(2);
+
+    await advance(10 * WATCHDOG_IDLE_POLL_MS);
+    expect(f.fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('a tick in flight when the sweeper goes idle settles and re-arms on the slow period, not the fast one', async () => {
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('live');
+    await advance(WATCHDOG_POLL_MS);
+    expect(f.fn).toHaveBeenCalledTimes(2);
+
+    await f.answer('quiet');
+    await advance(WATCHDOG_IDLE_POLL_MS - 1);
+    expect(f.fn).toHaveBeenCalledTimes(2);
+    await advance(1);
+    expect(f.fn).toHaveBeenCalledTimes(3);
+  });
+
+  it('the answer that reads armed swaps the pending slow timer for the fast one', async () => {
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('quiet');
+    await advance(1_000);
+    // A focus is the one way the answer changes before the slow timer fires; its answer must re-arm on the fast period.
+    focus();
+    expect(f.fn).toHaveBeenCalledTimes(2);
+    await f.answer('live');
+    await advance(WATCHDOG_POLL_MS - 1);
+    expect(f.fn).toHaveBeenCalledTimes(2);
+    await advance(1);
+    expect(f.fn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('useBoard — no syncing tracker means no tick (#277 case 9)', () => {
+  it('a board of files projects only never polls', async () => {
+    const subject: Subject = {
+      ...SUBJECTS[1],
+      body: (url) => {
+        const files: ProjectSummary = { ...projects('live')[0], source: 'files', repo: null, polledAt: null, access: null, interval: null };
+        return url === '/api/projects' ? [files] : { items: [], errors: [] };
+      }
+    };
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('live');
+    await advance(10 * BOARD_TRACKER_POLL_MS);
+
+    expect(f.fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe.each(SUBJECTS)('$name — unmount (#277 case 10)', (subject) => {
+  const horizon = 10 * (subject.periodMs ?? 60_000);
+
+  it('unmounted mid-flight: the answer sets no state and nothing else is ever asked', async () => {
+    const f = controlledFetch(subject);
+    const { unmount } = subject.mount();
+    unmount();
+    await f.answer('live');
+    await advance(horizon);
+
+    expect(f.fn).toHaveBeenCalledTimes(subject.perRequest);
+  });
+
+  it('unmounted with a follow-up queued: the follow-up is dropped and no timer is armed', async () => {
+    const f = controlledFetch(subject);
+    const { unmount } = subject.mount();
+    await f.answer('live');
+    if (subject.periodMs !== null) {
+      await advance(subject.periodMs);
+      expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+    } else {
+      focus();
+      expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+    }
+    focus(2);
+    unmount();
+    await f.answer('live');
+    await advance(horizon);
+
+    expect(f.fn).toHaveBeenCalledTimes(2 * subject.perRequest);
+  });
+});

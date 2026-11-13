@@ -38,7 +38,7 @@ const REPO = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
  * Two implementations of one rule, and deliberately so: a skill's `tools/` is
  * installed as a standalone copy with no path back into `server/`, exactly as
  * `labels.ts` describes for the label set. The agreement is enforced the same
- * way it is there — mechanically, from the outside. `test/tracker-origin.test.ts`
+ * way it is there — mechanically, from the outside. `test/tracker/tracker-origin.test.ts`
  * runs the SKILL's own parser (in a node child, over a file URL) against this
  * one on a shared table of remotes and asserts every answer matches, so the
  * two cannot drift without a red test. Before that guard existed they already

@@ -132,7 +132,7 @@ export function nodeSuitePaths(root = REPO_ROOT) {
   return patterns.flatMap((p) => expand('', p.split('/'))).sort();
 }
 
-// jest's testMatch is `test/**/*.test.ts(x)`; the tree is flat today, but a walk costs nothing and keeps a nested suite from going unselected.
+// jest's testMatch is `test/**/*.test.ts(x)` and the suites sit in `test/<feature>/`, so the walk is what selects them at all.
 export function jestSuitePaths(root = REPO_ROOT) {
   return readdirSync(join(root, 'test'), { recursive: true })
     .map((p) => `test/${p.split('\\').join('/')}`)

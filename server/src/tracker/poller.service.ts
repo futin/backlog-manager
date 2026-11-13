@@ -745,7 +745,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
    * the top of EVERY tick and returns without scheduling a successor when
    * either is missing; that is what disarms a chain when the token is removed
    * or the last connected project is unregistered, and it is the check
-   * `test/tracker-poll.test.ts`'s four arming cases drive. (Within one tick
+   * `test/tracker/tracker-poll.test.ts`'s four arming cases drive. (Within one tick
    * the pair is read once, before the awaits, and deliberately not re-read
    * afterwards: a token removed mid-tick costs at most the requests of the
    * tick already in flight, and the next tick — which cannot start before
