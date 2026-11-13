@@ -31,6 +31,9 @@ client/dist/
 # superpowers visual-companion sessions
 .superpowers/
 
+# reviewer reports (doc-review, ui-verify, plan reviews) — spent once applied, and 130 of them were pruned on 2026-11-13; see docs/superpowers/README.md
+docs/superpowers/reviews/
+
 # playwright MCP session artifacts (snapshots/traces), created wherever the
 # server runs — the repo root and every orchestrator worktree alike
 .playwright-mcp/
