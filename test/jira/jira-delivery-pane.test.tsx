@@ -130,7 +130,7 @@ describe('DeliveryPane', () => {
     expect(screen.getByText('polled 5m ago')).toBeInTheDocument();
 
     const labels = [...container.querySelectorAll('.jira-dlv-step-label')].map((n) => n.textContent);
-    expect(labels).toEqual(['Pushed', 'MR open', 'Pipeline', 'Review', 'Merged']);
+    expect(labels).toEqual(['Pushed', 'MR open', 'Review', 'Pipeline', 'Merged']);
     expect(stepWord('Pushed')).toBe('2h');
     expect(stepWord('MR open')).toBe('2h');
     expect(stepWord('Pipeline')).toBe('pipeline passed');

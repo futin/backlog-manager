@@ -100,14 +100,14 @@ const marks = (track: TrackStep[]): string[] => track.map((t) => `${t.step} ${t.
 
 describe('deliveryLook', () => {
   it.each<[string, Partial<GitlabMr>, string, string, string, string[]]>([
-    ['opened draft, failed pipeline', { iid: 419, draft: true, pipeline: 'failed' }, '!419 · draft', 'draft', 'grey', ['pushed on', 'open grey', 'pipeline off', 'review off', 'merged off']],
-    ['opened, success', { iid: 412, pipeline: 'success' }, '!412 · ✓ pipeline', 'pipeline passed', 'green', ['pushed on', 'open on', 'pipeline green', 'review off', 'merged off']],
-    ['opened, failed', { iid: 415, pipeline: 'failed' }, '!415 · ✕ pipeline failed', 'pipeline failed', 'red', ['pushed on', 'open on', 'pipeline red', 'review off', 'merged off']],
-    ['opened, running', { iid: 416, pipeline: 'running' }, '!416 · ◷ running', 'pipeline running', 'amber', ['pushed on', 'open on', 'pipeline amber', 'review off', 'merged off']],
-    ['opened, canceled', { iid: 417, pipeline: 'canceled' }, '!417 · pipeline canceled', 'pipeline canceled', 'grey', ['pushed on', 'open on', 'pipeline grey', 'review off', 'merged off']],
-    ['opened, no pipeline', { iid: 418, pipeline: 'none' }, '!418 · open', 'open, no pipeline', 'grey', ['pushed on', 'open on', 'pipeline off', 'review off', 'merged off']],
-    ['merged', { iid: 398, state: 'merged', pipeline: null }, '!398 · merged', 'merged', 'magenta', ['pushed magenta', 'open magenta', 'pipeline magenta', 'review magenta', 'merged magenta']],
-    ['closed', { iid: 390, state: 'closed', pipeline: null }, '!390 · closed', 'closed', 'grey', ['pushed on', 'open on', 'pipeline off', 'review off', 'closed grey']]
+    ['opened draft, failed pipeline', { iid: 419, draft: true, pipeline: 'failed' }, '!419 · draft', 'draft', 'grey', ['pushed on', 'open grey', 'review off', 'pipeline off', 'merged off']],
+    ['opened, success', { iid: 412, pipeline: 'success' }, '!412 · ✓ pipeline', 'pipeline passed', 'green', ['pushed on', 'open on', 'review off', 'pipeline green', 'merged off']],
+    ['opened, failed', { iid: 415, pipeline: 'failed' }, '!415 · ✕ pipeline failed', 'pipeline failed', 'red', ['pushed on', 'open on', 'review off', 'pipeline red', 'merged off']],
+    ['opened, running', { iid: 416, pipeline: 'running' }, '!416 · ◷ running', 'pipeline running', 'amber', ['pushed on', 'open on', 'review off', 'pipeline amber', 'merged off']],
+    ['opened, canceled', { iid: 417, pipeline: 'canceled' }, '!417 · pipeline canceled', 'pipeline canceled', 'grey', ['pushed on', 'open on', 'review off', 'pipeline grey', 'merged off']],
+    ['opened, no pipeline', { iid: 418, pipeline: 'none' }, '!418 · open', 'open, no pipeline', 'grey', ['pushed on', 'open on', 'review off', 'pipeline off', 'merged off']],
+    ['merged', { iid: 398, state: 'merged', pipeline: null }, '!398 · merged', 'merged', 'magenta', ['pushed magenta', 'open magenta', 'review magenta', 'pipeline magenta', 'merged magenta']],
+    ['closed', { iid: 390, state: 'closed', pipeline: null }, '!390 · closed', 'closed', 'grey', ['pushed on', 'open on', 'review off', 'pipeline off', 'closed grey']]
   ])('%s', (_name, over, chip, word, tone, track) => {
     const look = deliveryLook(mr(over), NOW);
     expect(look.chip).toBe(chip);
@@ -146,7 +146,7 @@ describe('deliveryLook with a CodeRabbit review', () => {
     expect(look.word).toBe('2 to fix');
     expect(look.tone).toBe('amber');
     expect(look.pipelineWord).toBe('pipeline passed');
-    expect(marks(look.track)).toEqual(['pushed on', 'open on', 'pipeline green', 'review amber', 'merged off']);
+    expect(marks(look.track)).toEqual(['pushed on', 'open on', 'review amber', 'pipeline green', 'merged off']);
   });
 
   it('a failed pipeline beats the findings', () => {
@@ -154,7 +154,7 @@ describe('deliveryLook with a CodeRabbit review', () => {
     expect(look.word).toBe('pipeline failed');
     expect(look.tone).toBe('red');
     expect(look.pipelineWord).toBe('pipeline failed');
-    expect(marks(look.track)).toEqual(['pushed on', 'open on', 'pipeline red', 'review amber', 'merged off']);
+    expect(marks(look.track)).toEqual(['pushed on', 'open on', 'review amber', 'pipeline red', 'merged off']);
   });
 
   it('a draft stays a draft over its findings, and still draws the Review step', () => {
@@ -162,7 +162,7 @@ describe('deliveryLook with a CodeRabbit review', () => {
     expect(look.chip).toBe('!419 · draft');
     expect(look.word).toBe('draft');
     expect(look.tone).toBe('grey');
-    expect(marks(look.track)).toEqual(['pushed on', 'open grey', 'pipeline off', 'review amber', 'merged off']);
+    expect(marks(look.track)).toEqual(['pushed on', 'open grey', 'review amber', 'pipeline off', 'merged off']);
   });
 
   it('a capped count reads n+', () => {
@@ -175,7 +175,7 @@ describe('deliveryLook with a CodeRabbit review', () => {
     const look = deliveryLook(mr({ pipeline: 'running', review: null }), NOW);
     expect(look.word).toBe('pipeline running');
     expect(look.pipelineWord).toBe('pipeline running');
-    expect(marks(look.track)).toEqual(['pushed on', 'open on', 'pipeline amber', 'review off', 'merged off']);
+    expect(marks(look.track)).toEqual(['pushed on', 'open on', 'review off', 'pipeline amber', 'merged off']);
   });
 
   it.each<[string, Partial<GitlabReview>, string]>([
@@ -186,16 +186,16 @@ describe('deliveryLook with a CodeRabbit review', () => {
     ['clean', { resolved: 25 }, 'green']
   ])('Review step mark for %s', (_n, over, mark) => {
     const look = deliveryLook(mr({ review: review(over) }), NOW);
-    expect(look.track[3]).toEqual({ step: 'review', mark });
+    expect(look.track[2]).toEqual({ step: 'review', mark });
     expect(look.word).toBe('pipeline passed');
   });
 
   it('merged: five magenta steps; closed: Review off and ends on closed, whatever the review says', () => {
     expect(marks(deliveryLook(mr({ state: 'merged', pipeline: null, review: twoOpen() }), NOW).track)).toEqual([
-      'pushed magenta', 'open magenta', 'pipeline magenta', 'review magenta', 'merged magenta'
+      'pushed magenta', 'open magenta', 'review magenta', 'pipeline magenta', 'merged magenta'
     ]);
     expect(marks(deliveryLook(mr({ state: 'closed', pipeline: null, review: twoOpen() }), NOW).track)).toEqual([
-      'pushed on', 'open on', 'pipeline off', 'review off', 'closed grey'
+      'pushed on', 'open on', 'review off', 'pipeline off', 'closed grey'
     ]);
   });
 });
