@@ -137,7 +137,8 @@ export type DeliveryTone = 'green' | 'red' | 'amber' | 'magenta' | 'grey';
 
 /**
  * One step of the delivery track: `on` reached, `off` not reached, or toned. The track is an ARRAY the surfaces map over rather than four named fields, so
- * project 2 can insert a `review` step between Pipeline and Merged without a surface changing (§7, "Delivery track"). A closed MR ends on `closed`, which
+ * project 2 could insert a `review` step without a surface changing (§7, "Delivery track"); it sits between MR open and Pipeline, because review comes first
+ * and the pipeline runs once the review is clean. A closed MR ends on `closed`, which
  * takes the place of `merged`.
  */
 export interface TrackStep {
@@ -150,7 +151,7 @@ export interface DeliveryLook {
   chip: string;
   word: string;
   /**
-   * The pipeline's word alone, never `<n> to fix`: Detail's Pipeline step reads it, so `pipeline passed` stays on that step while the Review step beside it
+   * The pipeline's word alone, never `<n> to fix`: Detail's Pipeline step reads it, so `pipeline passed` stays on that step while the Review step before it
    * says `2 open · 1 major` (spec §5.3). For a merged or closed MR it is the same as `word`.
    */
   pipelineWord: string;
@@ -180,8 +181,8 @@ function reviewMark(review: GitlabReview | null, now: number): TrackStep['mark']
 const openTrack = (open: TrackStep['mark'], pipeline: TrackStep['mark'], review: TrackStep['mark']): TrackStep[] => [
   { step: 'pushed', mark: 'on' },
   { step: 'open', mark: open },
-  { step: 'pipeline', mark: pipeline },
   { step: 'review', mark: review },
+  { step: 'pipeline', mark: pipeline },
   { step: 'merged', mark: 'off' }
 ];
 
@@ -190,7 +191,7 @@ const openTrack = (open: TrackStep['mark'], pipeline: TrackStep['mark'], review:
  * draft's red pipeline is work in progress, not a signal — but it still draws the Review step. An open MR whose pipeline is `null` (not read) reads as `none`:
  * an unknown pipeline must read as absent, never as passing. Word precedence for an open MR, worst first: draft, failed pipeline, findings open (`<n> to fix`,
  * `<n>+` when capped, amber), then the pipeline's own word; `pipelineWord` is that last one always. Merged and closed MRs carry no pipeline (§6.3 reads it only
- * for open ones) and no review: merged draws every step in magenta, closed draws Pipeline and Review `off` and ends on `closed`. `now` is a parameter because
+ * for open ones) and no review: merged draws every step in magenta, closed draws Review and Pipeline `off` and ends on `closed`. `now` is a parameter because
  * the review's state depends on the clock (a stuck round stops reading `reviewing` by itself).
  */
 export function deliveryLook(mr: GitlabMr, now: number): DeliveryLook {
@@ -201,7 +202,7 @@ export function deliveryLook(mr: GitlabMr, now: number): DeliveryLook {
       word: 'merged',
       pipelineWord: 'merged',
       tone: 'magenta',
-      track: (['pushed', 'open', 'pipeline', 'review', 'merged'] as const).map((step) => ({ step, mark: 'magenta' }))
+      track: (['pushed', 'open', 'review', 'pipeline', 'merged'] as const).map((step) => ({ step, mark: 'magenta' }))
     };
   }
   if (mr.state === 'closed') {
@@ -213,8 +214,8 @@ export function deliveryLook(mr: GitlabMr, now: number): DeliveryLook {
       track: [
         { step: 'pushed', mark: 'on' },
         { step: 'open', mark: 'on' },
-        { step: 'pipeline', mark: 'off' },
         { step: 'review', mark: 'off' },
+        { step: 'pipeline', mark: 'off' },
         { step: 'closed', mark: 'grey' }
       ]
     };

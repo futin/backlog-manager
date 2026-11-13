@@ -784,7 +784,7 @@ for `reviewing`, `clean`, `unknown` or an unread review, none for an `Also:` MR,
 and
 disabled, titled with the session's name, while the live-session gate holds ([board.md](rules/board.md)); it opens the Run launch sheet in review mode (§8.9.5).
 
-**The track** (`DeliveryTrack`, `components/ui/`; `.jira-dlv-*`). Five equal columns — `Pushed`, `MR open`, `Pipeline`, `Review`, then `Merged` or `Closed` —
+**The track** (`DeliveryTrack`, `components/ui/`; `.jira-dlv-*`). Five equal columns — `Pushed`, `MR open`, `Review`, `Pipeline`, then `Merged` or `Closed` —
 the
 steps an array so a step can be inserted without a surface changing (`Review` was, CodeRabbit spec §5.1). Full shape (Detail): a 22 px dot per step on a 2 px
 rail drawn INTO each

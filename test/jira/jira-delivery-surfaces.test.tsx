@@ -282,7 +282,7 @@ describe('the List’s Delivery column', () => {
     expect(within(c).getByRole('link', { name: '!15958' })).toBeInTheDocument();
     expect(within(c).getByText('2 to fix')).toHaveAttribute('data-tone', 'amber');
     expect(c.querySelectorAll('.jira-dlv-cell')).toHaveLength(5);
-    expect(c.querySelector('.jira-dlv-track')?.children[3].querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'amber');
+    expect(c.querySelector('.jira-dlv-track')?.children[2].querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'amber');
   });
 
   it('adds `not merged` after the word on a done row whose own lead MR is open', () => {

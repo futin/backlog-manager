@@ -4,7 +4,7 @@ import { Glyph } from './Glyphs';
 /**
  * DeliveryTrack — one merge request's delivery track (GitLab connection spec §7, "Delivery track"; DESIGN.md §8.9.2, drawn in §8.4.3's stage-track
  * language): a dot per step joined by a 2 px rail, in the marks `deliveryLook` hands over. It maps over `track` and never names a step position, so project 2
- * inserting a `review` step between Pipeline and Merged changes the array and not this component.
+ * inserting a `review` step between MR open and Pipeline changes the array and not this component.
  *
  * It lives in `components/ui/` because two surfaces draw it — Jira Detail's Delivery pane and the List's Delivery cell — and `.claude/rules/board.md` gives
  * every look more than one surface draws one home here, so the List's dots and Detail's track can never disagree on what a mark looks like.
@@ -20,8 +20,8 @@ import { Glyph } from './Glyphs';
 const STEP_LABEL: Record<TrackStep['step'], string> = {
   pushed: 'Pushed',
   open: 'MR open',
-  pipeline: 'Pipeline',
   review: 'Review',
+  pipeline: 'Pipeline',
   merged: 'Merged',
   closed: 'Closed'
 };
