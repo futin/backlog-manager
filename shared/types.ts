@@ -925,12 +925,12 @@ export interface JiraSkill {
 }
 
 /**
- * What Run ▾ starts: one of the two built-ins, or one of this machine's skills by id. Spec §4. A SHAPE, not a lookup — whether the skill exists is the
+ * What Run ▾ starts: one of the three built-ins (`review` is never a menu row), or one of this machine's skills by id. Spec §4. A SHAPE, not a lookup — whether the skill exists is the
  * server's question (`GET /api/jira/prompt` and `dispatch-jira` each answer 400 `unknown skill <id>` for an id `jira.json` lacks).
  */
 export type JiraAction = 'execute' | 'context' | 'review' | { skill: string };
 
-/** The built-ins' menu words (spec §7), one home so the menu, the launch sheet's Action select and a test read the same two strings. */
+/** The built-ins' menu words (spec §7), one home so the menu, the launch sheet's Action select and a test read the same strings. */
 export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context' | 'review', string> = {
   execute: 'Work it end to end',
   context: 'Open with the ticket loaded',
@@ -960,7 +960,7 @@ export interface JiraWorkspace {
 const JIRA_SKILL_ID_RE = /^s_[0-9a-f]{8}$/;
 
 /**
- * `?action=` on `GET /api/jira/prompt`: `execute`, `context` or `skill:<s_ id>`. Anything else — including a `skill:` with no id or a `b_` id — is `null`. Shape
+ * `?action=` on `GET /api/jira/prompt`: `execute`, `context`, `review` or `skill:<s_ id>`. Anything else — including a `skill:` with no id or a `b_` id — is `null`. Shape
  * checks only; see `JiraAction`. The inverse is `jiraActionParam`.
  */
 export function parseJiraActionParam(raw: unknown): JiraAction | null {
@@ -976,7 +976,7 @@ export function jiraActionParam(action: JiraAction): string {
 }
 
 /**
- * `action` in a JSON body: `'execute'`, `'context'`, or `{ skill: '<s_ id>' }` with no other key. The body shape and the query shape differ on purpose — a body
+ * `action` in a JSON body: `'execute'`, `'context'`, `'review'`, or `{ skill: '<s_ id>' }` with no other key. The body shape and the query shape differ on purpose — a body
  * has structure, a query string does not — and neither accepts the other's spelling.
  */
 export function parseJiraAction(raw: unknown): JiraAction | null {

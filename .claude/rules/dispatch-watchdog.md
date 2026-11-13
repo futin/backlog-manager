@@ -24,12 +24,10 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   `out-of-scope/`. **Nothing here asks what an item's `source` is** — task-45's `source !== 'files' → null` first line was removed by task-46's dispatch lift,
   and re-adding it would hide the control for every tracker item again. `findItem` is a one-line delegate to `ItemsService.find`, so a `gh:<owner>/<repo>#<n>`
   URN resolves to exactly the `BacklogItem` the board drew its button from. **`POST /api/agents/dispatch-jira` has no file state to derive from, so its
-  `action` is a PICK, not a derivation** — and still never an accepted string: `parseJiraAction` (`shared/types.ts`) takes `'execute'`, `'context'`, `'review'`
-  or
+  `action` is a PICK, not a derivation** — and still never an accepted string: `parseJiraAction` (`shared/types.ts`) takes `'execute'`, `'context'`, `'review'` or
   `{ skill: <id> }` and nothing else (the controller's 400 `action must be execute, context, review or { skill: <id> }`), and `resolveJiraActionOrThrow` then
-  proves a
-  skill id against `jira.json`'s `skills` as read for this request (400 `unknown skill <id>`, before Jira or the dashboard is asked) — a closed set of the three
-  built-ins and whatever the file holds, validated server-side.
+  proves a skill id against `jira.json`'s `skills` as read for this request (400 `unknown skill <id>`, before Jira or the dashboard is asked) — a closed set
+  of the three built-ins and whatever the file holds, validated server-side.
   `review`'s compose action is built from the GitLab cache and never from the request.
   The `repo` is proved the same way, against `jira.json`'s mapping for the key's own project
   prefix (400 `<repo> is not mapped to <PROJECT>`), then asked of the dashboard gate as the raw string `projectDispatchGate` compares; no `dirName` is derived

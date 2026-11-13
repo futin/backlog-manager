@@ -4213,9 +4213,9 @@ the session's own read of the MR through its skill are what catch that; the spec
 ## A review is read as facts, and its state is derived where it is drawn
 
 The poller stores what the discussions SAY about CodeRabbit (`foldReview`: the triggers, the findings, the rounds, the commits since) and never what they MEAN.
-Meaning needs a clock — a trigger that has not landed reads `reviewing` for 30 minutes and then stops reading `reviewing`, falling to `stale` when an earlier
-round landed and to `none` when none did (`unknown` is only a capped read with nothing open) — and a poller that wrote the word would keep it until
-the next sweep happened to rewrite it, so a stuck trigger would read as live for as long as nothing else on the MR moved. `reviewState(review, now)` runs where
+Meaning needs a clock — a trigger that has not landed reads `reviewing` for 30 minutes and then stops reading `reviewing`, falling first to `open` when any thread is still open (`open > 0` wins before the rest), then to `stale` when an
+earlier round landed and to `none` when none did (`unknown` is only a capped read with nothing open) — and a poller that wrote the word would keep it
+until the next sweep happened to rewrite it, so a stuck trigger would read as live for as long as nothing else on the MR moved. `reviewState(review, now)` runs where
 the track is drawn and where dispatch decides, so both read the same minute.
 
 A read that fails halfway fails whole: a fold over two of three pages would count fewer open threads and could say `clean` about an MR that is not, and `clean`
