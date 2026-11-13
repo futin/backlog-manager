@@ -3780,8 +3780,8 @@ The GitHub and Jira tokens' rule (above), stated a third time for a third creden
 service's name. `BM_GITLAB_SITE` and `BM_GITLAB_TOKEN` are read by `gitlabEnv()` (`server/src/gitlab/env.util.ts`) per call, trimmed, and never cached; both
 or neither, so a half-set pair is the ordinary mid-setup state and reads as not configured. No route returns the token, no payload or log line carries it,
 and the browser never talks to GitLab — every call is board → `/api/gitlab` → the site. The token is `read_api`, and the server is GitLab's read-only caller:
-the `mr-review-loop` skill a session runs carries its own `api`-scoped `GITLAB_TOKEN`, and the server's is never handed to a session, so project 2's writes
-(notes, resolved threads; spec §9) belong to the session and its token, never to this process.
+the `mr-review-loop` skill a session runs carries its own project-scoped token (keychain item `gitlab-mr-review-loop`), and the server's is
+never handed to a session, so project 2's writes (notes, resolved threads; spec §9) belong to the session and its token, never to this process.
 
 **Only the site is ever dialled, and only on a URL the server built.** `GitlabClient.request` is the one place a request is made: it builds
 `https://<BM_GITLAB_SITE>/api/v4/…`, puts the token in the `PRIVATE-TOKEN` header and nowhere else, and bounds the call at the same ten seconds `runGit` and

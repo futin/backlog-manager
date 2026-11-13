@@ -4,8 +4,9 @@
  * **The token never leaves the server.** No route returns it, no payload carries it, the client never sees it and the browser never talks to GitLab — every
  * call is board → this API → the configured site. The returned `detail` strings are written to be shown on the status payload, so none of them ever quotes
  * the token, and the malformed-site one does not quote the site either: a typo'd value is as likely to be a pasted URL with a credential in its userinfo as
- * a harmless hostname, and nothing here needs it echoed. This token is `read_api`; the `mr-review-loop` skill a session runs carries its OWN `api`-scoped
- * `GITLAB_TOKEN` from `~/.zshenv`, and the server's is never handed to a session.
+ * a harmless hostname, and nothing here needs it echoed. This token is `read_api`; the `mr-review-loop` skill a session runs carries its OWN token
+ * (a fine-grained PAT limited to the projects it may write to, read from the macOS keychain item `gitlab-mr-review-loop`), and the server's is never
+ * handed to a session.
  *
  * Read from the environment on every call, never cached — the rule `jiraEnv` and `githubToken` follow, for the same reason: a value read once at boot is a
  * value a test cannot change and an operator cannot fix without a restart, and the poller's "armed only while configured" question is asked repeatedly.

@@ -15,7 +15,8 @@ and, for the cache, in [the four caches](invariants.md#the-tracker-jira-pull-req
 Two variables in `.env`, both or neither: `BM_GITLAB_SITE` (a hostname, `gitlab.example.com`) and `BM_GITLAB_TOKEN` (a `read_api` personal access token).
 `docker-compose.yml` passes both with the empty-default form every optional variable uses. `gitlabEnv()` (`env.util.ts`) reads them per call, never caches,
 and checks the site with `isJiraHostname` — a scheme, a path or a port is `malformedSite`, which the Sources row says without quoting the value. The token
-the server holds is never handed to a session: `mr-review-loop` carries its own `api`-scoped `GITLAB_TOKEN`.
+the server holds is never handed to a session: `mr-review-loop` (the `timify-gitlab` plugin) carries its own token: a fine-grained
+PAT limited to the projects it may write to, read from the macOS keychain item `gitlab-mr-review-loop`, never git's host-wide login.
 
 ## The module, file by file
 
@@ -68,7 +69,7 @@ shows even when no repo is mapped; a 401 inside a sweep forces a re-read, and an
 The review project ([spec](../superpowers/specs/2026-11-13-coderabbit-review-design.md), mocks under
 [`2026-11-13-coderabbit-review-mockups/`](../superpowers/specs/2026-11-13-coderabbit-review-mockups/)) adds one field to a cached open MR, `review:
 GitlabReview | null`, and one action to Jira — `review`, which starts a session that asks CodeRabbit for a review or fixes what it found. The server stays
-read-only toward GitLab: the trigger comment and the fixes are the session's, through `mr-review-loop` and its own `api` token.
+read-only toward GitLab: the trigger comment and the fixes are the session's, through `mr-review-loop` and its own project-scoped token.
 
 **What is read.** After an open MR's detail read, `GET …/merge_requests/:iid/discussions?per_page=100&page=N`, at most `GITLAB_REVIEW_PAGES` (3) pages. It is
 read when it never was, when the MR's `updated_at` differs from the one stored at the last successful read (`ProjectCache.reviewSeen`, server-only), or — GitLab
@@ -111,7 +112,7 @@ with `DeliveryTrack` (`components/ui/`), and the Delivery quick filter — are d
 ## Room for project 2
 
 Spec §9's room for a second project was used by the CodeRabbit review work above: `GitlabMr` grew a `review` field, the track a `Review` step, and the server
-stayed read-only toward GitLab — the notes and the fixes are the session's, with its own `api` token.
+stayed read-only toward GitLab — the notes and the fixes are the session's, with its own project-scoped token.
 
 ## Tests
 
