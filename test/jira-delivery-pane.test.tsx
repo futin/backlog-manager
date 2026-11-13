@@ -36,12 +36,13 @@ function mr(over: Partial<GitlabMr> = {}): GitlabMr {
     mergedAt: null,
     pipeline: 'success',
     keys: ['TIMIFY-123'],
+    review: null,
     ...over
   };
 }
 
-const MICRO: GitlabProjectView = { path: 'development/backend/microservice', repo: 'microservice', polledAt: ago(5), capped: false, failed: false };
-const PROXY: GitlabProjectView = { path: 'development/graphql/dev-api-graphql-proxy', repo: 'dev-api-graphql-proxy', polledAt: ago(3), capped: false, failed: false };
+const MICRO: GitlabProjectView = { path: 'development/backend/microservice', repo: 'microservice', polledAt: ago(5), capped: false, failed: false, repos: [] };
+const PROXY: GitlabProjectView = { path: 'development/graphql/dev-api-graphql-proxy', repo: 'dev-api-graphql-proxy', polledAt: ago(3), capped: false, failed: false, repos: [] };
 
 function status(over: Partial<GitlabStatus> = {}): GitlabStatus {
   return {

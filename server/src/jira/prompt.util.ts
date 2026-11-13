@@ -147,6 +147,8 @@ export function composeJiraPrompt(detail: JiraIssueDetail, action: JiraComposeAc
  * id in the same words; it throws (rather than returning a result) because both callers' only answer to it is that status and that sentence.
  */
 export function resolveJiraActionOrThrow(action: JiraAction, skills: JiraSkill[]): JiraComposeAction {
+  // review is built by the callers with its MR and half (spec 6), never composed from a bare action: a review reaching here is a malformed request.
+  if (action === 'review') throw new HttpException({ error: 'review needs mr and half' }, 400);
   if (typeof action === 'string') return { kind: action };
   const skill = skills.find((candidate) => candidate.id === action.skill);
   if (skill === undefined) throw new HttpException({ error: `unknown skill ${action.skill}` }, 400);

@@ -128,7 +128,7 @@ describe('GitlabPollerService — configuration and arming', () => {
       retryAt: null,
       problems: []
     });
-    expect(p.jiraProjects.TIMIFY[0]).toEqual({ path: MS, repo: 'microservice', polledAt: new Date(T0).toISOString(), capped: false, failed: false });
+    expect(p.jiraProjects.TIMIFY[0]).toEqual({ path: MS, repo: 'microservice', polledAt: new Date(T0).toISOString(), capped: false, failed: false, repos: [] });
   });
 
   it('bootstrap with a healthy identity and a mapped repo makes exactly one /user call through the first sweep', async () => {
@@ -327,7 +327,7 @@ describe('GitlabPollerService — identity', () => {
     const p = await boot(h);
     expect(p.status.state).toBe('rejected');
     expect(h.paths().filter((x) => x.startsWith(listPath(MS)))).toEqual([]);
-    expect(p.jiraProjects.TIMIFY[0]).toEqual({ path: MS, repo: 'microservice', polledAt: null, capped: false, failed: true });
+    expect(p.jiraProjects.TIMIFY[0]).toEqual({ path: MS, repo: 'microservice', polledAt: null, capped: false, failed: true, repos: [] });
   });
 
   it('a refused 302 and a 503 are unreachable', async () => {

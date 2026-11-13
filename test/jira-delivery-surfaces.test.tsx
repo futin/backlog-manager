@@ -48,11 +48,12 @@ function mr(over: Partial<GitlabMr> = {}): GitlabMr {
     mergedAt: null,
     pipeline: 'success',
     keys: ['TIMIFY-123'],
+    review: null,
     ...over
   };
 }
 
-const MICRO: GitlabProjectView = { path: 'development/backend/microservice', repo: 'microservice', polledAt: ago(5), capped: false, failed: false };
+const MICRO: GitlabProjectView = { path: 'development/backend/microservice', repo: 'microservice', polledAt: ago(5), capped: false, failed: false, repos: [] };
 
 function gitlabStatus(over: Partial<GitlabStatus> = {}): GitlabStatus {
   return {

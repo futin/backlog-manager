@@ -1122,6 +1122,8 @@ describe('resolveJiraAction and jiraSettingOf', () => {
     expect(resolveJiraAction('s_ffffffff', skills)).toBe('execute');
     expect(resolveJiraAction('', skills)).toBe('execute');
     expect(resolveJiraAction('skill:s_0123abcd', skills)).toBe('execute');
+    // A stored review is not a setting: it never resolves, so the default reads execute (the review action is a button's, never a default).
+    expect(resolveJiraAction('review', skills)).toBe('execute');
   });
 
   it('jiraSettingOf is its inverse', () => {

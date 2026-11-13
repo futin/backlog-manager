@@ -171,8 +171,8 @@ describe('the shared helpers', () => {
     expect(COMMIT_RULE).toContain('Do not push.');
   });
 
-  it('names the two built-ins', () => {
-    expect(JIRA_BUILTIN_LABELS).toEqual({ execute: 'Work it end to end', context: 'Open with the ticket loaded' });
+  it('names the built-ins (review is a link label, never a menu row)', () => {
+    expect(JIRA_BUILTIN_LABELS).toEqual({ execute: 'Work it end to end', context: 'Open with the ticket loaded', review: 'Review the MR' });
   });
 
   it('parseJiraActionParam reads execute, context and skill:<s_ id>', () => {
@@ -224,6 +224,7 @@ describe('resolveJiraActionOrThrow', () => {
     expect(resolveJiraActionOrThrow('execute', [])).toEqual({ kind: 'execute' });
     expect(resolveJiraActionOrThrow('context', [skill])).toEqual({ kind: 'context' });
     expect(resolveJiraActionOrThrow({ skill: skill.id }, [skill])).toEqual({ kind: 'skill', skill });
+    expect(() => resolveJiraActionOrThrow('review', [skill])).toThrow(expect.objectContaining({ status: 400 }));
   });
 
   it('throws the 400 `unknown skill <id>` for an id the list does not hold', () => {

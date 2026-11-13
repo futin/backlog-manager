@@ -38,12 +38,13 @@ function mr(over: Partial<GitlabMr> = {}): GitlabMr {
     mergedAt: null,
     pipeline: 'success',
     keys: ['TIMIFY-123'],
+    review: null,
     ...over
   };
 }
 
 function view(over: Partial<GitlabProjectView> = {}): GitlabProjectView {
-  return { path: 'development/backend/microservice', repo: 'microservice', polledAt: minutesAgo(1), capped: false, failed: false, ...over };
+  return { path: 'development/backend/microservice', repo: 'microservice', polledAt: minutesAgo(1), capped: false, failed: false, repos: [], ...over };
 }
 
 function status(over: Partial<GitlabStatus> = {}): GitlabStatus {

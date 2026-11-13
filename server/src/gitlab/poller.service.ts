@@ -256,7 +256,7 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
       // ticket points at Settings › Shared › Sources. A project read before keeps its own flag — its last good answer still stands (§6.3).
       const polledAt = c?.polledAt ?? null;
       const failed = (c?.failed ?? false) || (verdict.kind === 'rejected' && polledAt === null);
-      const view: GitlabProjectView = { path: p.path, repo: p.repo, polledAt, capped: c?.capped ?? false, failed };
+      const view: GitlabProjectView = { path: p.path, repo: p.repo, polledAt, capped: c?.capped ?? false, failed, repos: [] };
       for (const key of p.jiraKeys) (jiraProjects[key] ??= []).push({ ...view });
       if (c === undefined) continue;
       mrs.push(...c.mrs.map((m) => ({ ...m, keys: [...m.keys] })));
@@ -488,6 +488,7 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
         mergedAt: raw.merged_at ?? null,
         // Finished MRs are not read for a pipeline (spec §6.3 bounds the requests by open MRs), so they carry `null`, never a guessed `none`.
         pipeline: null,
+        review: null,
         keys
       });
     }

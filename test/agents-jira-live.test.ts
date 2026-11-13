@@ -446,6 +446,11 @@ describe('after a restart', () => {
     expect(entryOf('PAY-1', 's1')).toMatchObject({ endReason: 'idle', endedAt: iso(T0 + 120_000) });
   });
 
+  it('a persisted review link round-trips through the store as the review action', () => {
+    restart([{ ...persisted('PAY-4', 's3', T0 - 60_000, null), action: 'review' }]);
+    expect(entryOf('PAY-4', 's3')?.action).toBe('review');
+  });
+
   /* Spec §12: "ends at the first reconcile, not on load" — a session that ended while the server was down. */
   it('a session that went quiet 10 minutes before the restart is live after load and ended idle at the first tick', async () => {
     restart([persisted('PAY-3', 's2', T0 - 3600_000, T0 - 10 * 60_000)]);

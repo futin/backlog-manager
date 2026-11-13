@@ -367,6 +367,7 @@ describe('the band', () => {
     mergedAt: null,
     pipeline: 'failed',
     keys: ['PAY-131'],
+    review: null,
     ...over
   });
   const gitlab = (over: Partial<GitlabPayload['status']> = {}): GitlabPayload => ({
@@ -384,7 +385,7 @@ describe('the band', () => {
       problems: [],
       ...over
     },
-    jiraProjects: { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false }] },
+    jiraProjects: { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false, repos: [] }] },
     mrs: [gitlabMr({}), gitlabMr({ iid: 398, state: 'merged', pipeline: null, keys: ['PAY-140'], mergedAt: new Date(Date.now() - 86_400_000).toISOString() })]
   });
   async function renderWithGitlab(data: GitlabPayload): Promise<void> {
@@ -1891,6 +1892,7 @@ describe('the Delivery quick filter', () => {
     mergedAt: null,
     pipeline: 'failed',
     keys: ['PAY-131'],
+    review: null,
     ...over
   });
   const payload = (state: 'connected' | 'unconfigured' = 'connected', mrs: GitlabMr[] = [MR({}), MR({ iid: 398, state: 'merged', pipeline: null, keys: ['PAY-140'], mergedAt: new Date(Date.now() - 86_400_000).toISOString() })]): GitlabPayload => ({
@@ -1907,7 +1909,7 @@ describe('the Delivery quick filter', () => {
       foundHosts: [],
       problems: []
     },
-    jiraProjects: state === 'connected' ? { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false }] } : {},
+    jiraProjects: state === 'connected' ? { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false, repos: [] }] } : {},
     mrs: state === 'connected' ? mrs : []
   });
 
