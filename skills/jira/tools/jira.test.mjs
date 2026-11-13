@@ -1219,10 +1219,26 @@ test('jira/references/review.md keeps the review gate a Jira Execute Run follows
     ['incomplete', 'an incomplete review is no longer a stop'],
     ['no transition, no push, no MR', 'a stop no longer withholds the transition, the push and the MR'],
     ['never a rewrite of history', 'a fix round may rewrite history'],
-    ['same turn', 'reviewers may be left running when the turn ends']
+    ['same turn', 'reviewers may be left running when the turn ends'],
+    ['never asks before fixing', 'the gate may stop to ask a person before it fixes, which a headless Run cannot answer'],
+    ['- no base ref', 'a base that resolves to no ref is no longer a stop'],
+    ['- `jira.mjs show` exiting non-zero', 'a ticket that cannot be read is no longer a stop'],
+    ['is never written another way', 'a refused item-file command may be worked around'],
+    ['Where the reports go', 'the reference no longer says where the review reports go']
   ]
   for (const [needle, rule] of needles) assert.ok(text.includes(needle), `${rule} (lost: ${needle})`)
   assert.match(text, /at most two fix rounds/i, 'the fix rounds are no longer capped at two')
+  // The stop report's commands are for a person to paste: every jira.mjs one spelled through the plugin-root path, never bare.
+  for (const cmd of ['transitions <KEY>', 'transition <KEY> <id>']) {
+    assert.ok(text.includes(`node "<plugin root>/skills/jira/tools/jira.mjs" ${cmd}`), `the stop report's jira.mjs ${cmd} is not runnable as written`)
+  }
+})
+
+// The reference sends the session to one section of /backlog-review's SKILL.md for the reports' home rather than copying its command; renaming that
+// heading would leave the reference pointing at nothing.
+test('backlog-review/SKILL.md still has the "Where the reports go" section jira/references/review.md points at', () => {
+  const other = fs.readFileSync(fileURLToPath(new URL('../../backlog-review/SKILL.md', import.meta.url)), 'utf8')
+  assert.match(other, /^## (?:\d+\. )?Where the reports go$/m, 'backlog-review/SKILL.md lost its "Where the reports go" heading')
 })
 
 test("the plugin's description names the jira skill", () => {

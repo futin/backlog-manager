@@ -57,7 +57,8 @@ parameters. A reviewer dispatched outside the procedure, or a verdict worked out
 ### The item file
 
 Write it from a **fresh** `show` — never the text the prompt or an earlier read gave you. Copy the commands exactly as shown: the heredoc's closing `JS`
-stands alone at the start of its line. Check `show`'s exit before running the second command.
+stands alone at the start of its line. Check `show`'s exit before running the second command. If the permission layer refuses either command, that is
+a **stop** (§4): the item file is never written another way — not with the Write tool, not by copying the ticket's text by hand.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/jira/tools/jira.mjs" show <KEY> > <tmp>/<KEY>.show.txt
@@ -120,14 +121,15 @@ report path. That stdout is the review's whole result: never read a report into 
 - `scope` or `merge` exiting `1`, so the procedure hands back its stderr line instead of a verdict — no verdict is not an `approve`;
 - no base ref (§3);
 - `jira.mjs show` exiting non-zero (§3);
-- the permission layer refusing a fix round's `git add` or `git commit` — never retried another way.
+- the permission layer refusing either item-file command (§3), or a fix round's `git add` or `git commit` — never retried another way.
 
 A stop leaves everything committed so far where it is: no transition, no push, no merge request, and no other step of the prompt after the review. The final
 message carries the reason (the verdict, or the exact line that stopped it), the findings (`merge`'s finding lines, every round's), every round's report path
 (`<prefix>.md`), the tree, the branch, and — for a person who reads the findings and decides they are wrong — the exact commands the Run did not run: the
-transition the prompt would have made (`jira.mjs transitions <KEY>`, then `jira.mjs transition <KEY> <id>`), `git -C <tree> push -u origin <branch>`, and,
-when the prompt asked for a merge request, the one that opens it into the prompt's target (`glab mr create --source-branch <branch> --target-branch <name>`
-on GitLab, `gh pr create --head <branch> --base <name>` on GitHub).
+transition the prompt would have made — `node "<plugin root>/skills/jira/tools/jira.mjs" transitions <KEY>`, then
+`node "<plugin root>/skills/jira/tools/jira.mjs" transition <KEY> <id>`, with `<plugin root>` written out as its absolute path — then
+`git -C <tree> push -u origin <branch>`, and, when the prompt asked for a merge request, the one that opens it into the prompt's target
+(`glab mr create --source-branch <branch> --target-branch <name>` on GitLab, `gh pr create --head <branch> --base <name>` on GitHub).
 
 ## 5. Wait for every reviewer in the same turn
 
