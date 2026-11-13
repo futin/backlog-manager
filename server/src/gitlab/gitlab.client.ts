@@ -3,8 +3,10 @@ import type { RawDiscussion } from './review.util';
 
 /**
  * A thin, read-only client over `fetch` for the four GitLab REST endpoints this app reads: `GET /user`, `GET /projects/:id/merge_requests`,
- * `GET /projects/:id/merge_requests/:iid` (spec §4) and `GET /projects/:id/merge_requests/:iid/discussions` (CodeRabbit review spec §4.3). Its own file with no Nest decorators and no dependency beyond `fetch`, the shape of `JiraClient`, so a
- * test can drive every failure branch (a 3xx, a 429 window, a deadline) over `FakeGitlab.fetch` — branches a live GitLab can never be asked to schedule.
+ * `GET /projects/:id/merge_requests/:iid` (spec §4) and
+ * `GET /projects/:id/merge_requests/:iid/discussions` (CodeRabbit review spec §4.3).
+ * Its own file with no Nest decorators and no dependency beyond `fetch`, the shape of `JiraClient`, so a test can drive every failure branch (a 3xx,
+ * a 429 window, a deadline) over `FakeGitlab.fetch` — branches a live GitLab can never be asked to schedule.
  * Nothing here throws on an HTTP status; every failure is a value the caller branches on.
  *
  * Rules this file holds so its callers do not have to:

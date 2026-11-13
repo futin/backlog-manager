@@ -127,6 +127,23 @@ describe('foldReview', () => {
     expect([r.triggeredAt, r.landedAt]).toEqual([at('14:00'), at('10:07')]);
   });
 
+  it('gives a landing note to the round whose window holds it (round 1 never acked)', () => {
+    const d = [trigger(at('10:00'), at('10:00'), at('10:00')), trigger(at('10:05'), at('10:05'), at('10:05')), landing(at('10:07'))];
+    const r = foldReview(d, BOT, false, READ);
+    expect([r.triggeredAt, r.landedAt]).toEqual([at('10:05'), at('10:07')]);
+  });
+
+  it('does not let round 1 claim a landing note created after round 2 triggered', () => {
+    const d = [trigger(at('10:00'), at('10:00'), at('10:00')), trigger(at('14:00'), at('14:00'), at('14:00')), landing(at('14:20'))];
+    const r = foldReview(d, BOT, false, READ);
+    expect([r.triggeredAt, r.landedAt]).toEqual([at('14:00'), at('14:20')]);
+  });
+
+  it('counts a resolvable bot note whose resolved is undefined as open', () => {
+    const d = disc(note({ body: '**Major**', author: BOT, resolvable: true }));
+    expect(foldReview([d], BOT, false, READ)).toMatchObject({ open: 1, resolved: 0, worst: 'major' });
+  });
+
   it("does not count the trigger's own discussion as a finding", () => {
     expect(foldReview([trigger(at('10:00'), at('10:00'), at('10:00'))], BOT, false, READ)).toMatchObject({ open: 0, resolved: 0 });
   });
