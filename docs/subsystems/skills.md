@@ -296,6 +296,9 @@ session dispatched under a `[backlog-tick]` marker, read when a stop happens; an
 `show`, by a groom carrying that marker — the two verdicts a tick may groom, the `## Assumptions (unattended)` heading and the `plan-review` mark's spelling per
 source.
 
+`skills/jira/references/review.md` is the `jira` skill's one reference: how a Jira Execute Run with `review` on reviews its own commit before the ticket moves or
+anything is pushed — read only when the prompt sends the session there.
+
 `skills/backlog-review/references/procedure.md` is the other way round: not a rare branch of one skill but the one description of how any change is reviewed —
 scope, dispatch every group in one message, merge, one coverage retry, and the `--previous` re-review a fix loop uses. `/backlog-review`, orchestrate's §7 and
 execute's `pr`-mode §7 each follow it with their own parameters, so the three reviews cannot drift apart.

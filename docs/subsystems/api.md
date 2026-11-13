@@ -238,7 +238,7 @@ them reads of git, never writes ([invariants](invariants.md#the-server-never-wri
   `repoDefaults`. Guard → validate (400) → configured (503) → readable (409) → mapped (400 `<path> is not mapped`) → write; no re-aim, since no sweep reads it.
 
 `GET /api/jira/prompt` and `POST /api/agents/dispatch-jira` both take the Run's branch choice — `mode` (`new`, `continue` or `none`), `branch`, `base`,
-`openMr`, `target` — through one parser, `parseBranchChoice` (`branch-choice.util.ts`), whose refusals are 400s (`mode must be new, continue or none`, `execute
+`openMr`, `review`, `target` — through one parser, `parseBranchChoice` (`branch-choice.util.ts`), whose refusals are 400s (`mode must be new, continue or none`, `execute
 needs a branch (mode new or continue)`, `branch must carry <KEY>`, …), and then one comparison with the repo's refs, `resolveWorkspace`, whose refusals are 409s
 (`<branch> exists — switch to Continue`, `<branch> is checked out in the mapped checkout <repo>`). A repo the server cannot read skips the 409s; `jira.mjs
 worktree` makes the same checks on the host.
@@ -314,7 +314,7 @@ the machine is `home`.
   assign and transition in Jira, then spawn a session in the mapped repository. The action is a pick from the body, never derived; the prompt is composed server-side
   by `composeJiraPrompt` — unless the body carries the launch sheet's edited `prompt` (a non-empty string of at most 4 000, else a 400 before any write), which
   is spawned as written. A failure after a Jira write says the write stands. Since the repo/branch work the body also carries the branch choice (`mode`,
-  `branch`, `base`, `openMr`, `target`, above), checked before anything is reserved or written. An optional `surface` (`dashboard` | `desktop`) is item
+  `branch`, `base`, `openMr`, `review`, `target`, above), checked before anything is reserved or written. An optional `surface` (`dashboard` | `desktop`) is item
   dispatch's, for any action: forwarded to the spawn as it came, `desktop` a 409 unless home's dashboard says `desktopAvailable`. → [jira.md](jira.md#run-phase-5a)
 - `POST /api/agents/jira-stop` `{ key, sessionId }` — stops ONE live session of the key through the dashboard (`session-stop.util.ts`, shared with the item
   abort) and ends its link as `stopped`; a ticket can hold several, so a bare key is a 400, and an id that is not a live link of the key a 409. Never calls
