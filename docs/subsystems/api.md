@@ -1,8 +1,9 @@
 # The API
 
-Nest, one process, every route under `/api`. It owns nine things: reading the registry, listing each registered project's items through whichever source owns
+Nest, one process, every route under `/api`. It owns ten things: reading the registry, listing each registered project's items through whichever source owns
 them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, polling the Jira
-boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), deriving the tick breaker's board from the tick home (`tick/`), and — behind a switch that is off
+boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), polling the merge requests of the GitLab projects those boards' mapped repos name
+(`gitlab/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), deriving the tick breaker's board from the tick home (`tick/`), and — behind a switch that is off
 by default — asking another local process to start a Claude Code session, which since multi-dashboard may be a process on another machine. It writes no item
 file and no run file; the only bytes it owns are eight files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
 `tracker-sync.json`, since Jira phase 2 `jira.json`, for the tick breaker `tick.json`, for the machine list `dashboards.json` and, for the board's one
@@ -128,7 +129,8 @@ Answers `{ id, released: true, stopped }`. The dispatch record is `DispatchRecor
 
 ### `tracker/`
 
-The second of three outbound-calling modules (`jira/` is the third): `github.client.ts` is a thin client over `fetch`, no Nest decorators — one constant host
+The second of four outbound-calling modules (`jira/` is the third, `gitlab/` the fourth): `github.client.ts` is a thin client over `fetch`, no Nest
+decorators — one constant host
 (`api.github.com`), rate-limit headers recorded from every response including a `304`, and no throw on any status: every failure is a value the poller turns
 into an `access` state. `poller.service.ts` is a `setTimeout` chain in the watchdog's shape, armed only while a registered project resolves to `github` and
 `BM_GITHUB_TOKEN` is set; each tick makes two conditional requests per connected repo (issues, then every comment in the repo, each paginated to the end and
@@ -241,6 +243,21 @@ needs a branch (mode new or continue)`, `branch must carry <KEY>`, …), and the
 (`<branch> exists — switch to Continue`, `<branch> is checked out in the mapped checkout <repo>`). A repo the server cannot read skips the 409s; `jira.mjs
 worktree` makes the same checks on the host.
 
+### `gitlab/`
+
+The fourth outbound-calling module (the GitLab connection, spec `2026-11-12-gitlab-connection-design.md`), and read-only toward GitLab: a `fetch` client on
+`https://<BM_GITLAB_SITE>/api/v4` that refuses every redirect and pages by number, a poller armed only while `BM_GITLAB_SITE` and `BM_GITLAB_TOKEN` are set
+and a repo Jira › Setup maps has its `origin` on the site, and the in-memory MR cache it fills (the fourth cache whose age is rendered, as each project's
+`polledAt`). It reads `jira.json`'s `repos` and one git verb, `remote get-url`; it writes no file and owns no setting. Two routes:
+
+- `GET /api/gitlab` — `GitlabPayload` (`{ status, jiraProjects, mrs }`) from memory: the Sources row's state, identity and problems, each Jira key's mapped
+  GitLab projects, and every cached MR with the ticket keys it carries. Never a token, never a remote's userinfo.
+- `POST /api/gitlab/sweep` — guarded; `arm()` then a sweep, waited for up to `GITLAB_SWEEP_WAIT_MS`: 200 `{ ok: true }`, 409 when there is nothing to poll,
+  429 with `retryAt` inside a rate-limit window.
+
+A repos save reaches it through `JiraLiveService.onReposChanged`, so `gitlab/` imports `JiraModule` and never the Jira poller. → [gitlab.md](gitlab.md),
+the full doc.
+
 ### `registry/`
 
 Read-only view of the registry file, re-read on every request so a capture made mid-session shows up on the next fetch. `read()` answers three ways (#349):
@@ -250,7 +267,7 @@ the board says it is unavailable instead of drawing a broken file as "no project
 
 ### `agents/`
 
-One of the three modules that call outbound, and every POST in it is guarded by content-type and origin. Since multi-dashboard its `dashboards/` folder widens
+One of the four modules that call outbound, and every POST in it is guarded by content-type and origin. Since multi-dashboard its `dashboards/` folder widens
 WHERE it calls — not how many modules do: home's dashboard (`BM_AGENTS_URL`) as ever, plus any remote dashboard and any remote board that
 `~/.backlog-manager/settings/dashboards.json` names, each read per request with a token that is env-only. With no such file every route below is what it was:
 the machine is `home`.
@@ -510,12 +527,14 @@ rebinding, which satisfies that guard with two matching lies. Global rather than
 - **`../claude-agents-dashboard`** — reached only from `agents/`, at an env-only URL, and never by the browser: every call goes board → this API → dashboard.
 - **Remote dashboards and remote boards** — reached only from `agents/dashboards/`, at the `url` and `bmUrl` of an entry in `settings/dashboards.json`, with the
   dashboard's token read per call from `BM_AGENTS_TOKEN_<NAME uppercased>` and no token ever sent to a board, and never by the browser. The same module as
-  the line above, not a fourth outbound-calling one.
+  the line above, not a fifth outbound-calling one.
 - **`api.github.com`** — reached only from `tracker/`, with a token read per call from `BM_GITHUB_TOKEN`, and never by the browser: every call goes board → this
   API → GitHub, and the token reaches no payload.
 - **`api.atlassian.com`** — reached only from `jira/`, through the gateway path `/ex/jira/<cloudId>/rest/api/3`, with Basic credentials read per call from
   `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN`, and never by the browser. Two calls go to the site itself (`https://<BM_JIRA_SITE>`): the unauthenticated `tenant_info`
   that yields the `cloudId`, and the one `myself` probe that tells a classic token from a scoped one.
+- **`<BM_GITLAB_SITE>`** — reached only from `gitlab/`, at `https://<site>/api/v4`, with `PRIVATE-TOKEN` read per call from `BM_GITLAB_TOKEN`, redirects
+  refused, three `GET` endpoints and nothing else, and never by the browser. A mapped repo's `origin` host is compared with the site, never dialled.
 - **The tick home** — `~/.backlog-manager/tick/`, read fresh per request by `tick/` and never written by this server; its only writer is `tick.mjs`. The one
   file this server writes for the breaker is `~/.backlog-manager/settings/tick.json`, beside the watchdog config.
 - **The client** — same-origin `fetch` against these routes, plus the built bundle when `static.ts` finds one.

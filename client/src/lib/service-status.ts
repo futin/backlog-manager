@@ -1,6 +1,6 @@
 import type { StateTone } from './tones';
 import { pollAge } from './tracker';
-import { DEFAULT_SYNC_INTERVAL, SYNC_INTERVALS, type SyncInterval } from '../../../shared/types';
+import { DEFAULT_SYNC_INTERVAL, SYNC_INTERVALS, type GitlabStatus, type SyncInterval } from '../../../shared/types';
 
 /**
  * What the shell's two status pills (GitHub, Jira) say, in one place so the pill's dot, its accessible name and the popover cannot disagree about "late".
@@ -73,4 +73,58 @@ export function fastestInterval(rows: readonly ServiceRow[]): SyncInterval {
     if (ms !== null && (SYNC_INTERVALS[best] === null || ms < (SYNC_INTERVALS[best] as number))) best = i;
   }
   return best;
+}
+
+/**
+ * The Sources GitLab pill's tone (spec §5.2). Grey while there is nothing to judge — unconfigured, checking, or idle (no mapped repo on the site, so the
+ * poller never armed); red when the site refused the token or did not answer; green once connected, amber (`late`) inside a stored 429 window — alive, but
+ * behind. Judged from the status alone, never from a poll age: GitLab's poll is one site-wide sweep, not a per-repo interval, so `serviceTone`'s
+ * twice-the-interval rule has no row to apply to.
+ */
+export function gitlabTone(status: GitlabStatus, now: number): StateTone {
+  if (status.state === 'rejected' || status.state === 'unreachable') return 'red';
+  if (status.state !== 'connected') return 'grey';
+  const until = status.retryAt === null ? NaN : Date.parse(status.retryAt);
+  return !Number.isNaN(until) && until > now ? 'amber' : 'green';
+}
+
+/**
+ * The Sources GitLab row's hint lines, one per element, in the words of spec §5.2's table verbatim. The hint names no scope (the server never reads a token's
+ * scopes) and a per-repo problem sits under a `connected` row only: one unreadable project does not make the source down. Paths and basenames only — the
+ * payload carries no remote URL, which could carry a PAT.
+ */
+export function gitlabLines(status: GitlabStatus, now: number): string[] {
+  const site = status.site ?? '';
+  switch (status.state) {
+    case 'unconfigured':
+      return [status.malformedSite ? 'BM_GITLAB_SITE must be a hostname, like gitlab.example.com' : 'set BM_GITLAB_SITE and BM_GITLAB_TOKEN in .env and restart'];
+    case 'checking':
+      return [site];
+    case 'rejected':
+      return [`${site} refused the token (${status.httpStatus ?? '?'})${status.reason ? ` — ${status.reason}` : ''}`];
+    case 'unreachable':
+      return [`${site} did not answer${status.reason ? ` — ${status.reason}` : ''}`];
+    case 'idle': {
+      const who = status.user === null ? site : `${status.user.username} · ${site}`;
+      const found = status.foundHosts.length === 0 ? '' : ` — found ${status.foundHosts.join(', ')}`;
+      return [who, `no mapped repository is on ${site}${found}`];
+    }
+    case 'connected': {
+      const lines = [
+        status.user === null ? site : `${status.user.username} · ${site}`,
+        `${status.mappedRepos} ${status.mappedRepos === 1 ? 'repo' : 'repos'} mapped via Jira › Setup › Repositories`
+      ];
+      for (const p of status.problems) {
+        if (p.kind === 'cannot-read') lines.push(`cannot read ${p.path} (${p.status})`);
+        else if (p.kind === 'origin') lines.push(`${p.repo}: could not read origin`);
+        else lines.push(`${p.path}: first ${p.shown} shown`);
+      }
+      const until = status.retryAt === null ? NaN : Date.parse(status.retryAt);
+      if (!Number.isNaN(until) && until > now) {
+        // `pollAge` counts backwards from a past stamp, so the window's remaining length is mirrored to one: 90 s ahead reads as the same `90 s`/`1m` an age would.
+        lines.push(`rate limited — next read in ${pollAge(new Date(now - (until - now)).toISOString(), now)}`);
+      }
+      return lines;
+    }
+  }
 }

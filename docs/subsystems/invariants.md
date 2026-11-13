@@ -3579,7 +3579,7 @@ slowing a live run's sync costs latency, and that is the user's call. The route 
 the starting entries, and hosting it in `TrackerModule` would be a module cycle. Remote runs are the read-side twin: an `off` repo derives none, because a
 frozen comment cache would otherwise show another machine's run as live for as long as sync stays off.
 
-## The tracker, Jira and pull-request caches are the three caches in this server whose age is a rendered value
+## The tracker, Jira, pull-request and GitLab caches are the four caches in this server whose age is a rendered value
 
 `TrackerPollerService` holds every connected repo's issues in memory, per repo, lost on restart and rebuilt by the first sync (task-45, spec §5.1). Every other
 read in this server is per request and uncached — the registry, each project's source marker, the run files, `uncommitted` — and those rules are untouched: this
@@ -3604,6 +3604,16 @@ spliced the repo drops its rows (it still counts as an attempt): it carries GitH
 on the page for a whole TTL. That holds for a repo's FIRST read too (#398): the read makes the entry before its request goes out, and a splice on an entry
 with no successful read keeps no row but still counts. A successful read likewise clears only a sleep that has run out — one a write recorded while the read
 was out is newer news.
+
+**The GitLab MR cache is the fourth** (`GitlabPollerService`, the GitLab connection, [spec](../superpowers/specs/2026-11-12-gitlab-connection-design.md)
+§6.4). It is per GitLab project — every project a `jira.json` repo's `origin` names on `BM_GITLAB_SITE` — in memory, lost on restart, and rebuilt by the
+sweep the poller runs the moment it arms; `polledAt` rides on every project's view in `GET /api/gitlab` and the board renders it (the band's `GitLab: … ·
+polled 2m ago`, Detail's Delivery head, which prints the lead MR's own project's age). It moves only on a successful read of that project's MR lists. A
+failure keeps the last answer — the MRs, their `polledAt` — and records `failed` beside them, and a detail read that fails keeps that MR's last good
+pipeline, for the Jira poller's reason: a list that empties on a blip makes every chip on the board vanish and flash back on the next sweep, which reads as
+the work disappearing, while a `polledAt` that stops moving is the honest way to say "this is old". It exists for the tracker's reason too — a per-request
+read would be a GitLab request per ticket per render — and it is bounded the same way: a sweep spends at most `GITLAB_PAGES_PER_PROJECT` list pages per
+project and one detail read per open MR, so its request count grows with open MRs, not with history.
 
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
 board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip
@@ -3757,6 +3767,48 @@ window and one identity, and a second caller would spend the first, miss the sec
 runs — inside a session in a mapped repository, reading a ticket whose text anyone with Jira access wrote. A token in that session's environment is a token a
 ticket's description could ask the session to print; a token that only the server process holds is not. So `jira.mjs` dials `127.0.0.1` and nothing else,
 reads no `BM_JIRA_*` and builds no `authorization` header, and its source guard fails on any of the three.
+
+## The GitLab token never leaves the server, never follows a redirect, and the poller is armed only while a mapped repo is on the site
+
+The GitHub and Jira tokens' rule (above), stated a third time for a third credential (the GitLab connection,
+[spec](../superpowers/specs/2026-11-12-gitlab-connection-design.md) §4, §6): a reader of `server/src/gitlab/` looks for the rule there, not under another
+service's name. `BM_GITLAB_SITE` and `BM_GITLAB_TOKEN` are read by `gitlabEnv()` (`server/src/gitlab/env.util.ts`) per call, trimmed, and never cached; both
+or neither, so a half-set pair is the ordinary mid-setup state and reads as not configured. No route returns the token, no payload or log line carries it,
+and the browser never talks to GitLab — every call is board → `/api/gitlab` → the site. The token is `read_api`, and the server is GitLab's read-only caller:
+the `mr-review-loop` skill a session runs carries its own `api`-scoped `GITLAB_TOKEN`, and the server's is never handed to a session, so project 2's writes
+(notes, resolved threads; spec §9) belong to the session and its token, never to this process.
+
+**Only the site is ever dialled, and only on a URL the server built.** `GitlabClient.request` is the one place a request is made: it builds
+`https://<BM_GITLAB_SITE>/api/v4/…`, puts the token in the `PRIVATE-TOKEN` header and nowhere else, and bounds the call at the same ten seconds `runGit` and
+`JiraClient` use. Two ways a URL the server did not build could still be dialled are closed in that one function. **A redirect is refused, never followed**:
+every call passes `redirect: 'manual'`, and a 3xx — or undici's `opaqueredirect` — is a failed call worded `redirect refused (<code>)`, which the state
+reads as `unreachable`. `follow` would replay the token header to wherever `Location` points, and that is not hypothetical: the bare `gitlab.timify.io`
+answers 301, so a site written without its `www.` would hand the token to the redirect's target on the first sweep; `error` would throw a TypeError that
+hides the code the Sources row needs. **Pages are asked for by number** — `page=N` on the server's own URL — never by following a `Link` header or a `next`
+URL, which is a server-chosen address the token would travel to. The site itself is checked like `BM_JIRA_SITE` (`isJiraHostname`, reused, not copied): a
+scheme, a path or a port would build a wrong URL or one to another host, so any of them reads as not configured, and the reason does not echo the value —
+a mistyped site is as likely to be a pasted URL with a credential in its userinfo as a harmless hostname.
+
+**A remote's host is compared, never dialled, and its userinfo never kept.** What the poller reads is every GitLab project a `jira.json` repo's `origin`
+names on the site (`resolveGitlabProjects`, through `runGit`'s `remote get-url`, a read). Remotes on this machine can be `https://oauth2:<PAT>@host/…`, so
+`parseGitRemote` matches userinfo without capturing it: what is never stored cannot reach a payload, an error string or a log line, and the Sources row's
+per-repo lines carry namespace paths and basenames only, never a remote URL. The host decides only WHETHER a repo is on the site (`remoteOnSite`: the same
+host, ssh or scp on any port, https on none or 443, plain http never); the URL the request goes to is still built from `BM_GITLAB_SITE`.
+
+**Armed only while a mapped repo is on the site.** The poller is the tracker poller's `setTimeout` chain (`GITLAB_POLL_MS`, two minutes, plus an immediate
+sweep when it arms): `arm()` — from the bootstrap hook, from a `jira.json` repos save through `JiraLiveService.onReposChanged`, and from
+`POST /api/gitlab/sweep` — is a signal, and the sweep re-derives the mapping and disarms on the tick that finds no project on the site. An unconfigured
+install makes no call to GitLab at all; a configured one with nothing mapped makes only the identity read. It does not follow the Jira boards: the cache is
+keyed by the ticket keys the mapped projects' MRs carry, so Detail can show an MR for a ticket no board holds, a board edit never re-aims it, and `gitlab/`
+never imports `jira/`'s poller (it reads `readJiraConfig().repos` per sweep and hears a save through the callback list that exists so `jira/` names nobody
+who listens). A 429 opens one stored window every caller checks — the Jira poller's — and the next sweep is scheduled past its end.
+
+**Identity is independent of arming.** `GET /user` is asked at bootstrap and whenever the (site, token) pair changes, whether or not the poller is armed,
+because a refused token has to show on the Sources row on a machine whose repos are all on github.com — the case where the poller never arms and the row
+would otherwise say `idle` over a credential that does not work. A 401 on any later call re-asks it at once, so a token revoked after a good read turns the
+row `rejected` within that sweep rather than at the next restart. The pair is remembered as a SHA-256 fingerprint held in memory, never as the token, which
+the poller only ever passes straight from `gitlabEnv` to the client. Compose passes both keys as interpolations with empty defaults, never literals —
+bug-25's rule, for the reason the Jira keys follow it.
 
 ## Jira's Done column is a window, not a store
 
@@ -4077,7 +4129,8 @@ no other way; the headless session never holds the token.
 **The ninth write route is `abort` (#225), and it is the one outside `items/`.** `POST /api/items/abort`, body `{ project, id }`, releases a live claim
 whose session was stopped from the dashboard, or died, without running its own closing `stop` — before it, a board-dispatched groom or execute left its item
 reading as in progress on every machine until the heartbeat went stale. It lives in `agents/items-abort.controller.ts` because it calls the dashboard, and
-`agents/`, `tracker/` and — since the Jira integration — `jira/` are the only outbound-calling modules; it gates and maps through the same exported
+`agents/`, `tracker/`, `jira/` (since the Jira integration) and `gitlab/` (since the GitLab connection) are the only outbound-calling modules;
+it gates and maps through the same exported
 `writable` and `answer`, carries the same class
 guard, and its release goes through `ItemWriter.release` on the same per-URN chain. Two proofs, one per case: a session THIS server dispatched (an in-memory
 `DispatchRecordsService` entry — lost on restart on purpose, like a starting run) is stopped through the dashboard first, and only a 200 or the `no live

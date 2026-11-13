@@ -642,6 +642,10 @@ button.rail-count { cursor: pointer }
 /* The sub-line's failing reading: red while the last sweep could not read a root or a query (`bandSub`'s `failing`). The class, never an inline colour, so
    each theme's `--red` is the red. */
 .jira-band-sub.failing { color: var(--red) }
+/* The band's GitLab line (GitLab connection spec §7.2, `GitlabBandLine`): a second line under the Jira sub-line, not a run-on of it. `Band` renders `sub` in one
+   `<p className="ui-band-sub">`, so the two are adjacent inline spans — a block box is what puts this one on its own line (a `<div>` inside the `<p>` would be
+   invalid markup). */
+.jira-band-gitlab { display: block }
 
 /* The picker is its Popover's positioning parent (the panel hangs `100% + 8px` under it, right edges together) and does not shrink in the band's wrapping
    right slot. The board's name ellipsises inside the chip, so a long name cannot push the search and the filter track off the line. */
@@ -713,6 +717,16 @@ button.rail-count { cursor: pointer }
 /* The worktree chip on the marker row (DESIGN.md §8.9.1): the branch of the ticket's one tree, or `N worktrees`. Quiet `--ink3`, like a marker, and it
    ellipsises first — the Run chip beside it keeps its width. */
 .jira-card-tree { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink3) }
+/* The MR chip (GitLab connection spec §7.2, `MrChip`): the lead MR's card-chip words on a tint of its tone, and the amber `not merged` beside it. The mock's
+   22 px pill at 11 px, but 500 rather than its 600 — §1's pill weight, as Detail's state pill beside an `Also:` MR (`.jira-dlv-word`, whose tone table it
+   shares below). It shrinks and ellipsises like the worktree chip, so `Run ▾` keeps its width, and is a block box rather than a flex one, because
+   `text-overflow` does not reach a flex container's text. */
+.jira-mr-chip {
+  display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 100%; height: 22px; line-height: 22px; padding: 0 8px; border-radius: 999px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 500
+}
+/* The deck card's own line for the chip: no foot to sit in, so it is a row of its own between the crumb and the meter. */
+.jira-deck-mr { display: flex; align-items: center; gap: 6px; min-width: 0 }
 
 /* Project pill: the item's project, in that project's own hue, on its card and
    in the drawer head. Both halves now say the same thing — name in the text,
@@ -1515,6 +1529,64 @@ button.rail-count { cursor: pointer }
 .jira-move-row > svg { flex: none; color: var(--green) }
 .jira-move-note { padding: 6px 10px 4px; margin-top: 4px; border-top: 1px solid var(--hairline2); font-size: 11px; color: var(--ink3) }
 .jira-detail-pane .jira-modal-error { margin-top: 12px }
+/* The Delivery pane (GitLab connection spec §7.1, `OptionC.dc.html`): a `.jira-detail-pane` in the Agent column holding the head (label, `!iid ↗`, `via`,
+   `<repo> → <target>`, `polled <age>` pushed right — wrapping rather than clipping in the column's width), the track, and the `Also:` line under a hairline.
+   The mock's 480 px column is its own artefact; the column keeps Detail's width (spec §7.1), so the head wraps and the step words wrap under their dots. */
+.jira-dlv { display: flex; flex-direction: column; gap: 14px }
+.jira-dlv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0 }
+.jira-dlv-link { font-size: 13px; font-weight: 600; color: var(--cyan); text-decoration: none; white-space: nowrap }
+.jira-dlv-link:hover { text-decoration: underline }
+.jira-dlv-link.small { font-size: 12px }
+.jira-dlv-via { font-size: 12px; font-weight: 500; color: var(--ink2) }
+.jira-dlv-meta { font-size: 12px; color: var(--ink3) }
+.jira-dlv-target { min-width: 0; overflow-wrap: anywhere }
+.jira-dlv-polled { margin-left: auto; white-space: nowrap }
+.jira-dlv-none { margin: 0; font-size: 13px; color: var(--ink3) }
+/* The track (`DeliveryTrack`), §8.4.3's language at the mock's size: equal columns, a 22 px dot per step on a 2 px rail, the step's label at 12/500 and its
+   word at 12 `--ink3` under it. The rail INTO a step is drawn by that step, from the previous column's centre to its own (`right: 50%`, one column wide),
+   behind the dot. A mark is a fill and a ring together, never a shade alone: reached is `--fill-progress`, the pipeline's verdicts the palette's
+   green/red/amber, merged `--magenta`, draft/canceled/closed `--ink3`, and not reached a hollow `--hairline2` ring. The glyph ink follows the fill: `--on-fill`
+   over the bright fills, `--on-accent` over red and magenta, which are the dark ones in daylight and the light ones in the dark themes — the same flip. That ink is set in the fill's own rule, so
+   `daylight-contrast` reads it as reverse type on the fill and not as a word on the pane. */
+/* "Behind the dot" needs a z-index, not source order: step i+1's rail is positioned and comes LATER in the tree than step i's dot, so without one it paints
+   over the dot's right half — the glyph is cut and a hollow ring shows the rail through it (ui-verify 2026-11-12, zoomed on 103, 107 and 108). The dot
+   takes `z-index: 1`, and the track takes `isolation: isolate` so that 1 stays inside the track and never climbs over the List's sticky header or a menu. */
+.jira-dlv-track { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); isolation: isolate }
+.jira-dlv-step { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; text-align: center }
+.jira-dlv-step > .jira-dlv-bar { position: absolute; top: 10px; right: 50%; width: 100%; height: 2px }
+.jira-dlv-dot {
+  position: relative; z-index: 1; display: grid; place-items: center; flex: none; width: 22px; height: 22px; box-sizing: border-box; border-radius: 50%;
+  color: var(--on-fill)
+}
+.jira-dlv-dot[data-mark='on'], .jira-dlv-bar[data-mark='on'] { background: var(--fill-progress) }
+.jira-dlv-dot[data-mark='green'], .jira-dlv-bar[data-mark='green'] { background: var(--green-solid) }
+.jira-dlv-dot[data-mark='amber'], .jira-dlv-bar[data-mark='amber'] { background: var(--amber-solid) }
+.jira-dlv-dot[data-mark='red'] { background: var(--red); color: var(--on-accent) }
+.jira-dlv-bar[data-mark='red'] { background: var(--red) }
+.jira-dlv-dot[data-mark='magenta'] { background: var(--magenta); color: var(--on-accent) }
+.jira-dlv-bar[data-mark='magenta'] { background: var(--magenta) }
+.jira-dlv-dot[data-mark='grey'], .jira-dlv-bar[data-mark='grey'] { background: var(--ink3) }
+.jira-dlv-dot[data-mark='off'] { background: var(--strip); border: 2px solid var(--hairline2) }
+.jira-dlv-bar[data-mark='off'] { background: var(--hairline2) }
+.jira-dlv-step-label { font-size: 12px; font-weight: 500; color: var(--ink) }
+.jira-dlv-step-label[data-mark='off'] { color: var(--ink3) }
+.jira-dlv-step-word { font-size: 12px; color: var(--ink3); overflow-wrap: anywhere }
+/* The compact track (the List's Delivery cell): the same marks at 8 px dots on 6 px rails, inline, with no labels — the cell's word says them. */
+.jira-dlv-track.compact { display: inline-flex; align-items: center; vertical-align: middle }
+.jira-dlv-cell { display: inline-flex; align-items: center }
+.jira-dlv-track.compact .jira-dlv-dot { width: 8px; height: 8px }
+.jira-dlv-track.compact .jira-dlv-dot[data-mark='off'] { border-width: 1.5px }
+.jira-dlv-track.compact .jira-dlv-bar { width: 6px; height: 2px }
+/* `Also:` — the other MRs, each its link, its state word on a tint of its tone (the `Pill` shape, page-local because `Pill` has no magenta), and
+   `<repo> · <age>`. */
+.jira-dlv-also { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding-top: 10px; border-top: 1px solid var(--hairline) }
+.jira-dlv-also-mr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0 }
+.jira-dlv-word { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 500; white-space: nowrap }
+.jira-dlv-word[data-tone='green'], .jira-mr-chip[data-tone='green'] { color: var(--green); background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)) }
+.jira-dlv-word[data-tone='red'], .jira-mr-chip[data-tone='red'] { color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--strip)) }
+.jira-dlv-word[data-tone='amber'], .jira-mr-chip[data-tone='amber'] { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
+.jira-dlv-word[data-tone='magenta'], .jira-mr-chip[data-tone='magenta'] { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 14%, var(--strip)) }
+.jira-dlv-word[data-tone='grey'], .jira-mr-chip[data-tone='grey'] { color: var(--ink2); background: var(--strip-hi) }
 /* The Agent band (restyle §4.4): the pane's own ground, 12 px radius, 16 px padding. Its row is the Run menu's positioning parent, so the panel hangs from the
    row (right edges aligned) and not from the band's foot; the wrapper's own `position: relative` is switched off for it. */
 .jira-detail-agent-band { display: flex; flex-direction: column; gap: 12px; background: var(--strip); border-radius: 12px; padding: 16px; min-width: 0 }
@@ -1695,10 +1767,18 @@ button.rail-count { cursor: pointer }
    menu scrolls inside it (the accepted degraded case). `.jira-issues-frame` is the container and holds nothing but the box: `container-type` makes it the
    containing block of `position: fixed` descendants (the phone shape of the menu's panel, `.ui-popover-narrow`), and the item modal and the launch sheet
    render outside it. */
+/* The List's delivery quick filter (spec §7.4): a row of its own above the table, right-aligned as in the mock. */
+.jira-issues-quick { display: flex; justify-content: flex-end }
 .jira-issues-frame { container-type: inline-size }
 .jira-issues-scroll { border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
 @container (max-width: 1121px) {
   .jira-issues-scroll { overflow-x: auto }
+}
+/* With GitLab's Delivery column the table is 256 px wider (1376), and the box starts scrolling 256 px sooner: at 1440 px with the rail open it scrolls —
+   the extra width is the box's to take, never the page's (GitLab connection spec §7.3). Keyed on the box's `data-delivery`, drawn only while the column is,
+   so a board with no GitLab keeps the 1120 fit and its Run menus on the bottom rows. Still inside a container query, for the menu reason above. */
+@container (max-width: 1377px) {
+  .jira-issues-scroll[data-delivery] { overflow-x: auto }
 }
 /* Under the fold the box always scrolls (the table is 1120 px) and the frame stops being a container: `container-type` makes it the containing block of the Run
    menu's FIXED bottom sheet, which would then sit at the foot of the whole table instead of the viewport's. A fixed panel is not clipped by a scroll box. */
@@ -1713,11 +1793,15 @@ button.rail-count { cursor: pointer }
 .jira-issues-table thead th:nth-child(2) { width: 108px } /* Key: fits a twelve-character key (TIMIFY-28086) at 13 px. */
 .jira-issues-table thead th:nth-child(4) { width: 100px }
 .jira-issues-table thead th:nth-child(5) { width: 116px }
-.jira-issues-table thead th:nth-child(6) { width: 116px } /* Priority: `Not prioritised` is a 85 px pill and needs 84+ of content. */
-.jira-issues-table thead th:nth-child(7) { width: 124px }
-.jira-issues-table thead th:nth-child(8) { width: 76px }
-.jira-issues-table thead th:nth-child(9) { width: 60px }
-.jira-issues-table thead th:nth-child(10) { width: 164px } /* The unlabelled Run cell: a live ticket's split `Running · 1h` is 135 px (140 of content after 24 px of padding), the ready one 93. Summary pays. */
+.jira-issues-scroll[data-delivery] .jira-issues-table { min-width: 1376px }
+/* Delivery (GitLab, spec §7.3), after Status: the 50 px track, a four-digit `!iid`, `pipeline canceled` and `+1 MR`, plus the cell's 24 px of padding. The
+   word ellipsises first (`.jira-issues-dlv-word`). Everything after it is sized from the row's END, so the column's presence or absence moves no width. */
+.jira-issues-table thead th.jira-issues-dlv-h { width: 256px }
+.jira-issues-table thead th:nth-last-child(5) { width: 116px } /* Priority: `Not prioritised` is a 85 px pill and needs 84+ of content. */
+.jira-issues-table thead th:nth-last-child(4) { width: 124px }
+.jira-issues-table thead th:nth-last-child(3) { width: 76px }
+.jira-issues-table thead th:nth-last-child(2) { width: 60px }
+.jira-issues-table thead th:nth-last-child(1) { width: 164px } /* The unlabelled Run cell: a live ticket's split `Running · 1h` is 135 px (140 of content after 24 px of padding), the ready one 93. Summary pays. */
 .jira-issues-table thead th {
   padding: 8px 12px; text-align: left; font-size: 12px; font-weight: 500;
   color: var(--ink3); border-bottom: 1px solid var(--hairline); white-space: nowrap;
@@ -1755,6 +1839,18 @@ button.rail-count { cursor: pointer }
 .jira-issues-under, .jira-issues-muted { color: var(--ink3) }
 .jira-issues-under { flex: none; font-size: 12px } /* The count is never cut: the title takes the ellipsis, in the flex row that holds both. */
 .jira-issues-updated { color: var(--ink3) }
+/* The Delivery cell: the dots, the link and the extras never shrink; the List word takes the ellipsis, in its tone's ink (the dots carry the tone too). */
+.jira-issues-dlv .jira-issues-flex { gap: 6px }
+.jira-issues-dlv .jira-dlv-track { flex: none }
+.jira-issues-dlv-link { flex: none; font-weight: 600; color: var(--cyan); text-decoration: none }
+.jira-issues-dlv-link:hover { text-decoration: underline }
+.jira-issues-dlv-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; color: var(--ink2) }
+.jira-issues-dlv-word[data-tone='green'] { color: var(--green) }
+.jira-issues-dlv-word[data-tone='red'] { color: var(--red) }
+.jira-issues-dlv-word[data-tone='amber'] { color: var(--amber-ink) }
+.jira-issues-dlv-word[data-tone='magenta'] { color: var(--magenta) }
+.jira-issues-dlv .jira-mr-chip { flex: none }
+.jira-issues-dlv-more { flex: none; font-size: 12px; color: var(--ink3) }
 /* A cell's text beside a mark ellipsises on its own, so the mark keeps its size (the flex row is `min-width: 0`). */
 .jira-issues-cut { min-width: 0; overflow: hidden; text-overflow: ellipsis }
 /* The card's pill sits right on the card head (`margin-left: auto`); in a cell it sits at the start. */

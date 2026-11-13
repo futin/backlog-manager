@@ -12,6 +12,7 @@ import { firstDrawn, settleSection } from './lib/sources';
 import { SETTINGS_STORAGE_KEY } from './lib/settings';
 import { readDeepLink, withoutDeepLink } from './lib/deep-link';
 import type { JiraPage } from './lib/jira-page';
+import { GitlabProvider } from './hooks/GitlabContext';
 import { JiraProvider, useJiraContext } from './hooks/JiraContext';
 import { JiraSessionsProvider } from './hooks/JiraSessionsContext';
 import { setJiraPage } from './hooks/useJiraPage';
@@ -95,7 +96,11 @@ export function App() {
                 {/* The shell's one `GET /api/prs` read (spec §4.9a), beside the runs poll: the rail's GitHub count is drawn on every page, so the read no
                     longer belongs to the pages that draw PRs. Inside `TrackersProvider` because it is enabled by a registered GitHub project. */}
                 <PullRequestsProvider>
-                  <AppShell />
+                  {/* The shell's one `GET /api/gitlab` read: no enable gate (the Sources row must say "not configured"), so it sits beside the PR read
+                      inside `JiraProvider`'s subtree, where the Jira ticket pages that draw MRs live. */}
+                  <GitlabProvider>
+                    <AppShell />
+                  </GitlabProvider>
                 </PullRequestsProvider>
               </OrchestratorRunsProvider>
             </ProjectsProvider>

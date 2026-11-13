@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Option B — Merge request fact row</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Hanken Grotesk',sans-serif;color:#131313}
+a{color:#306c0f}a:hover{color:#1f4a09}
+.pane{background:#ffffff;border:1px solid #eaeae8;border-radius:12px;padding:16px}
+.lbl{font-size:12px;font-weight:600;color:#6b6b6b;margin:0 0 8px}
+.chip{height:28px;box-sizing:border-box;border:1px solid #dcdcda;border-radius:8px;padding:0 10px;font:500 12px 'Hanken Grotesk',sans-serif;background:#ffffff;color:#131313;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+.pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;background:#ededec;padding:2px 9px;font-size:12px;font-weight:500;color:#525252}
+.fk{font-size:12px;color:#6b6b6b;width:110px;flex-shrink:0;padding-top:3px}
+.fv{font-size:13px;color:#131313}
+.meta{font-size:12px;color:#6b6b6b}
+</style>
+</helmet>
+<div style="width:1200px;height:800px;box-sizing:border-box;background:#f4f4f3;padding:24px 28px;display:flex;flex-direction:column;gap:18px">
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#525252">
+      <span style="font-weight:600;color:#131313">TIMIFY-123</span><span>· Story</span><span>· Sprint 42</span>
+      <a class="chip" href="#" style="margin-left:auto">Open in Jira ↗</a>
+    </div>
+    <h1 style="margin:0;font-size:22px;font-weight:600">Export bookings widget to CSV</h1>
+  </div>
+  <div style="display:grid;grid-template-columns:380px minmax(0,1fr);gap:20px;flex:1;min-height:0">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="pane">
+        <p class="lbl">Agent <span style="font-weight:400">· 0 live · 2 ended</span></p>
+        <div style="display:flex;align-items:center;gap:10px;border:1px dashed #dcdcda;border-radius:10px;padding:10px">
+          <div style="flex:1"><div style="font-size:13px;font-weight:500">No session on this ticket</div><div class="meta">default: Execute · last run 2h</div></div>
+          <button class="chip" style="height:32px">Run ▾</button>
+        </div>
+      </div>
+      <p class="lbl" style="margin:4px 0 -6px">History</p>
+      <div class="pane" style="display:flex;flex-direction:column;gap:10px">
+        <div><div style="font-size:13px">run · ended 2h ago</div><div class="meta">Desktop · 41m · execute TIMIFY-123</div></div>
+        <div style="border-top:1px solid #eaeae8;padding-top:10px"><div style="font-size:13px">run · ended 1d ago</div><div class="meta">Desktop · 12m · plan TIMIFY-123</div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+      <p class="lbl" style="margin:0 0 -6px">Ticket</p>
+      <div class="pane" style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex"><span class="fk">Status</span><span class="chip">● In Review ▾</span></div>
+        <div style="display:flex"><span class="fk">Assignee</span><span class="fv">Andreja J.</span></div>
+        <div style="display:flex"><span class="fk">Repository</span><span class="fv">~/Documents/timify-projects/microservice</span></div>
+        <div style="display:flex;border-top:1px solid #eaeae8;padding-top:10px">
+          <span class="fk">Merge requests</span>
+          <div style="display:flex;flex-direction:column;gap:7px;min-width:0">
+            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+              <a href="#" style="font-size:13px;font-weight:600">!412 ↗</a>
+              <span class="pill" style="background:#e6efdc;color:#38631a">Open</span>
+              <span class="pill" style="background:#e6efdc;color:#38631a">✓ pipeline</span>
+              <span class="pill" style="background:transparent;border:1px dashed #dcdcda;color:#6b6b6b">CodeRabbit · later</span>
+              <span class="meta">microservice → develop · 2h</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+              <a href="#" style="font-size:13px;font-weight:600">!398 ↗</a>
+              <span class="pill" style="background:#ece8f5;color:#6b52a8">Merged</span>
+              <span class="meta">dev-api-graphql-proxy → develop · 1d</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pane"><p class="lbl">Description</p><div style="font-size:13px;color:#525252">Users need to download the bookings list as CSV from the widget…</div></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":800}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+import type { DeliveryFilter } from './delivery';
 import { errorOf } from './http';
 import { elapsedSince, formatCreated } from './item-age';
 import { countdownReading, pollAge, pollProgress, type PollReading } from './tracker';
@@ -679,15 +680,23 @@ export interface JiraBoardFilters {
   assignee: JiraAssigneeFilter;
   sprint: string | null | undefined;
   statuses: readonly string[];
+  /**
+   * GitLab's quick filter (connection spec §7.4). Not applied by `matchesBoardFilters` — it needs the delivery index, which only the board holds — but it lives
+   * here so it is stored with the panel and counted by `boardFilterCount`. Callers hand those two the EFFECTIVE value (`effectiveDeliveryFilter`).
+   */
+  delivery: DeliveryFilter;
   search: string;
 }
 
-export const NO_JIRA_FILTERS: JiraBoardFilters = { type: undefined, assignee: 'anyone', sprint: undefined, statuses: [], search: '' };
+export const NO_JIRA_FILTERS: JiraBoardFilters = { type: undefined, assignee: 'anyone', sprint: undefined, statuses: [], delivery: 'all', search: '' };
 
-/** The four panel filters — the part of `JiraBoardFilters` that is stored. */
+/** The five panel filters — the part of `JiraBoardFilters` that is stored. */
 export type JiraPanelFilters = Omit<JiraBoardFilters, 'search'>;
 
-export const NO_JIRA_PANEL_FILTERS: JiraPanelFilters = { type: undefined, assignee: 'anyone', sprint: undefined, statuses: [] };
+export const NO_JIRA_PANEL_FILTERS: JiraPanelFilters = { type: undefined, assignee: 'anyone', sprint: undefined, statuses: [], delivery: 'all' };
+
+/** The stored `delivery` values `clampJiraPanelFilters` accepts — a literal list because `lib/delivery.ts` imports this file, and a value import back would cycle. */
+const DELIVERY_VALUES: readonly DeliveryFilter[] = ['all', 'has-mr', 'failing', 'done-not-merged'];
 
 /**
  * The per-browser key holding the panel filters (`usePersistedState`, so the value is JSON). ONE key for every board, not one per board: a pick already
@@ -707,7 +716,8 @@ export function clampJiraPanelFilters(v: unknown): JiraPanelFilters {
     type: typeof o.type === 'string' ? o.type : undefined,
     assignee: o.assignee === 'me' || o.assignee === 'unassigned' ? o.assignee : 'anyone',
     sprint: typeof o.sprint === 'string' || o.sprint === null ? o.sprint : undefined,
-    statuses: Array.isArray(o.statuses) ? o.statuses.filter((s): s is string => typeof s === 'string') : []
+    statuses: Array.isArray(o.statuses) ? o.statuses.filter((s): s is string => typeof s === 'string') : [],
+    delivery: DELIVERY_VALUES.find((d) => d === o.delivery) ?? 'all'
   };
 }
 
@@ -754,13 +764,25 @@ export function effectiveBoardFilters(
     sprint: sprintOffered ? filters.sprint : undefined,
     // Per name, not all-or-nothing: of `To Do` + `In Progress`, a board with no `In Progress` still keeps the `To Do` half of the pick.
     statuses: filters.statuses.filter((s) => options.statuses.includes(s)),
+    // Passed through: whether GitLab is shown is not this function's to know (it takes no payload), so the board overrides it with `effectiveDeliveryFilter`.
+    delivery: filters.delivery,
     search: filters.search
   };
 }
 
-/** How many of the four panel filters are set — the funnel's badge. The search is not one: it is in plain sight on the band, and `Clear all` leaves it. */
+/**
+ * How many of the five panel filters are set — the funnel's badge. The search is not one: it is in plain sight on the band, and `Clear all` leaves it. The
+ * delivery filter counts when it is not `all`, so the caller passes the EFFECTIVE filters: a stored `failing` while GitLab is not shown must not light a badge
+ * for a filter nobody can see (Review Focus 5).
+ */
 export function boardFilterCount(f: JiraBoardFilters): number {
-  return (f.type !== undefined ? 1 : 0) + (f.assignee !== 'anyone' ? 1 : 0) + (f.sprint !== undefined ? 1 : 0) + (f.statuses.length > 0 ? 1 : 0);
+  return (
+    (f.type !== undefined ? 1 : 0) +
+    (f.assignee !== 'anyone' ? 1 : 0) +
+    (f.sprint !== undefined ? 1 : 0) +
+    (f.statuses.length > 0 ? 1 : 0) +
+    (f.delivery !== 'all' ? 1 : 0)
+  );
 }
 
 /**

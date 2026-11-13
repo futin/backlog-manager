@@ -73,7 +73,8 @@ import {
   statusTone
 } from '../client/src/lib/jira';
 import type { JiraFold } from '../client/src/lib/jira';
-import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../client/src/lib/jira';
+import { DELIVERY_FILTER_LABELS, effectiveDeliveryFilter } from '../client/src/lib/delivery';
+import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
 import { SHELF_LIMIT, boardAgents, boardShelves, childSessions, deckCrumb, deckGroup, deckTally, endedLine, topSessionCell } from '../client/src/lib/jira-deck';
@@ -559,12 +560,20 @@ describe('pickBoard', () => {
 
 describe('clampJiraPanelFilters', () => {
   it('keeps every well-shaped field, `no sprint` (null) included', () => {
-    expect(clampJiraPanelFilters({ type: 'Bug', assignee: 'unassigned', sprint: null, statuses: ['To Do'] })).toEqual({
+    expect(clampJiraPanelFilters({ type: 'Bug', assignee: 'unassigned', sprint: null, statuses: ['To Do'], delivery: 'failing' })).toEqual({
       type: 'Bug',
       assignee: 'unassigned',
       sprint: null,
-      statuses: ['To Do']
+      statuses: ['To Do'],
+      delivery: 'failing'
     });
+  });
+
+  it('reads a bogus or missing delivery as all, and keeps each real value', () => {
+    expect(clampJiraPanelFilters({ delivery: 'bogus' }).delivery).toBe('all');
+    expect(clampJiraPanelFilters({ type: 'Bug' }).delivery).toBe('all');
+    expect(clampJiraPanelFilters({ delivery: 7 }).delivery).toBe('all');
+    for (const d of ['all', 'has-mr', 'failing', 'done-not-merged'] as const) expect(clampJiraPanelFilters({ delivery: d }).delivery).toBe(d);
   });
 
   it('reads each wrong-shaped field as its any, without costing the others', () => {
@@ -577,6 +586,20 @@ describe('clampJiraPanelFilters', () => {
 
   it.each([[null], [undefined], ['banana'], [42], [['To Do']]])('reads %p as no filter at all', (v) => {
     expect(clampJiraPanelFilters(v)).toEqual(NO_JIRA_PANEL_FILTERS);
+  });
+});
+
+describe('boardFilterCount and the delivery filter', () => {
+  it('counts a delivery pick as one, on top of the other four', () => {
+    expect(boardFilterCount(NO_JIRA_FILTERS)).toBe(0);
+    expect(boardFilterCount({ ...NO_JIRA_FILTERS, delivery: 'failing' })).toBe(1);
+    expect(boardFilterCount({ ...NO_JIRA_FILTERS, type: 'Bug', statuses: ['To Do'], delivery: 'has-mr' })).toBe(3);
+  });
+
+  it('counts the effective value: a stored pick is not counted while delivery is not shown', () => {
+    const stored = { ...NO_JIRA_FILTERS, delivery: 'failing' as const };
+    expect(boardFilterCount({ ...stored, delivery: effectiveDeliveryFilter(stored.delivery, false) })).toBe(0);
+    expect(boardFilterCount({ ...stored, delivery: effectiveDeliveryFilter(stored.delivery, true) })).toBe(1);
   });
 });
 
@@ -1873,5 +1896,13 @@ describe('launchFootLine', () => {
   it('is null without a repository and ends after the basename without a choice', () => {
     expect(launchFootLine(null, { mode: 'none' })).toBeNull();
     expect(launchFootLine('/Users/ada/microservice', null)).toBe('Starts in microservice');
+  });
+});
+
+// `lib/jira.ts` keeps its own copy of the Delivery filter values (DELIVERY_VALUES) because importing them from `lib/delivery.ts` would close an import
+// cycle. This pins the copy to the labels table, the list the UI draws: a value added there and not here would be clamped to `all` on every read.
+describe('clampJiraPanelFilters keeps every Delivery filter value the UI offers', () => {
+  it.each(Object.keys(DELIVERY_FILTER_LABELS))('keeps `%s`', (value) => {
+    expect(clampJiraPanelFilters({ ...NO_JIRA_PANEL_FILTERS, delivery: value }).delivery).toBe(value);
   });
 });

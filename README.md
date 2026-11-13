@@ -421,6 +421,13 @@ out, on purpose,
 | `BM_JIRA_TOKEN`     | empty                         | An Atlassian API token: a scoped one needs `read:jira-work`, `write:jira-work` and `read:jira-user`, a classic one works as it is. Process-only — no route returns it or the email, and the browser never talks to Jira |
 | `BM_JIRA_REPO_ROOT` | `~/Documents/timify-projects` | The second tree mounted read-only into the server container, at the same path: the repositories a Jira project is mapped to (Setup → Repositories). The server reads their branches and worktrees for the launch sheet and never writes them; a mapped repo outside both roots reads as `not mounted into the board`. A path that does not exist is created by Docker's bind mount, as an empty directory (root-owned on Linux), so set it to a directory that already exists |
 
+### GitLab
+
+| Key               | Default | Purpose |
+| ----------------- | ------- | ------- |
+| `BM_GITLAB_SITE`  | empty   | The GitLab site, as a hostname only (`gitlab.example.com`). With `BM_GITLAB_TOKEN` it turns on the read-only GitLab connection; one without the other is not configured |
+| `BM_GITLAB_TOKEN` | empty   | A GitLab personal access token with `read_api`. Process-only — sent in one header to the site and nowhere else, never on a redirect, and never handed to a session |
+
 ### State and settings files
 
 Paths the tools and the server keep their state in, or read another tool's state from. None of them is in `.env.example`; the defaults suit almost everyone.
@@ -501,8 +508,10 @@ Releases are nightly rollups: `.github/workflows/release.yml` runs at 04:17 UTC 
   config writes to `jira.json`, the two writes to Jira itself (`/issue/assign` and `/issue/transition`), the Run half in `agents/` (`POST
   /api/agents/dispatch-jira` and `/jira-stop`) with a persisted store of the sessions linked to each ticket, and the `jira` skill (`jira.mjs`) that reaches those routes from any
   session and, on a Run, makes the ticket's git worktree in a mapped repo.
+- [**GitLab**](docs/subsystems/gitlab.md) — the read-only GitLab connection: a poller over the merge requests of the GitLab projects Jira's mapped repos
+  name, `GET /api/gitlab`, and the MR chip, band line, List column and Detail pane that show each ticket's delivery.
 - [**Releases**](docs/subsystems/releases.md) — the rail's version chip and its What's new drawer, read from this checkout's release tags.
-- [**Invariant rationale**](docs/subsystems/invariants.md) — the rules the other five are held to, and the failure each one encodes.
+- [**Invariant rationale**](docs/subsystems/invariants.md) — the rules the other six are held to, and the failure each one encodes.
 
 Four workflow docs cover the procedures: [running the app](docs/workflows/development.md), [publishing a skill edit](docs/workflows/publishing.md),
 [CI](docs/workflows/ci.md) and [a second machine](docs/workflows/remote-machine.md).

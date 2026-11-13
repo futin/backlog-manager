@@ -19,6 +19,7 @@ import type { DrawnSources } from '../client/src/lib/sources';
 import type { JiraState } from '../client/src/hooks/useJira';
 import { SETTINGS_STORAGE_KEY, type SettingsScope } from '../client/src/lib/settings';
 import type { AgentsStatus, JiraSkill, JiraStatusPayload } from '../shared/types';
+import { NoGitlab } from './helpers/no-gitlab';
 
 // A healthy default: `SettingsView` now renders `AgentsGroup`, which calls
 // `useAgents()` on every mount, so every pre-existing test below triggers a
@@ -106,7 +107,7 @@ describe('SettingsView', () => {
     render(
       <SettingsProvider>
         <TrackersProvider>
-          <SettingsView />
+          <NoGitlab><SettingsView /></NoGitlab>
         </TrackersProvider>
       </SettingsProvider>
     );
@@ -248,7 +249,7 @@ describe('SettingsView', () => {
       <SettingsProvider>
         <TrackersProvider>
           <ProjectsContext.Provider value={{ data: null, drawn, reload: () => {} }}>
-            <SettingsView />
+            <NoGitlab><SettingsView /></NoGitlab>
           </ProjectsContext.Provider>
         </TrackersProvider>
       </SettingsProvider>
@@ -444,7 +445,7 @@ describe('SettingsView', () => {
   // the `renderView()` closure above: outside a `SettingsProvider`,
   // `useSettings()` falls back to `DEFAULT_SETTINGS` with a no-op `update`
   // (see the last lines of client/src/hooks/useSettings.tsx) and never
-  // touches localStorage at all, so a bare `render(<SettingsView />)` could
+  // touches localStorage at all, so a bare `render(<NoGitlab><SettingsView /></NoGitlab>)` could
   // never observe the edited-link case below.
   // The status that was the `Claude Agents` card is now Home's dispatch report on the Dashboards page. These cases answer every fetch with an agents status,
   // so the dashboards read fails its shape check and the page draws its fallback, which keeps the dispatch row — the cases still hold as they were written.
@@ -763,7 +764,7 @@ describe('SettingsView', () => {
         <JiraContext.Provider value={jira}>
           <SettingsProvider>
             <TrackersProvider>
-              <SettingsView />
+              <NoGitlab><SettingsView /></NoGitlab>
             </TrackersProvider>
           </SettingsProvider>
         </JiraContext.Provider>

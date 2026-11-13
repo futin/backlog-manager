@@ -8,6 +8,7 @@ import { AgentsModule } from './agents/agents.module';
 import { OrchestratorModule } from './orchestrator/orchestrator.module';
 import { HubModule } from './hub/hub.module';
 import { JiraModule } from './jira/jira.module';
+import { GitlabModule } from './gitlab/gitlab.module';
 import { ReleasesModule } from './releases/releases.module';
 import { TickModule } from './tick/tick.module';
 import { SettingsModule } from './settings/settings.module';
@@ -22,6 +23,7 @@ import { clientDistModules } from './static';
     OrchestratorModule,
     HubModule,
     JiraModule,
+    GitlabModule,
     ReleasesModule,
     TickModule,
     SettingsModule,

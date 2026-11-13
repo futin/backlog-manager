@@ -14,6 +14,7 @@ import { JIRA_BOARD_KEY, JIRA_QUERY_PRESETS, accessPhrase, boardRowLine } from '
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
 import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
 import type { JiraBoardStatus, JiraIssue, JiraSkill, JiraStatusPayload } from '../shared/types';
+import { NoGitlab } from './helpers/no-gitlab';
 
 /*
   Jira › Setup (Jira phase 2; spec §6.4; DESIGN.md §8.9.3) — the real page over a mocked `fetch`, in `jira-board.test.tsx`'s style: the Boards
@@ -220,7 +221,9 @@ async function renderSetup(): Promise<void> {
     <main>
       <SettingsProvider>
         <JiraProvider>
-          <JiraView onOpenJiraPage={onOpenJiraPage} />
+          <NoGitlab>
+            <JiraView onOpenJiraPage={onOpenJiraPage} />
+          </NoGitlab>
         </JiraProvider>
       </SettingsProvider>
     </main>
