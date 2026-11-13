@@ -584,11 +584,14 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
   /**
    * Spec §4.3: a review is read when (3) it never was, (1) the MR's `updated_at` is not the one at the last SUCCESSFUL read, or (2) its state is `reviewing`
    * or `open` and its facts are over `REVIEW_REREAD_MS` old — GitLab may not bump `updated_at` when a thread is resolved or the bot edits its note, so a
-   * round in flight or a list of findings is re-asked on a clock instead.
+   * round in flight or a list of findings is re-asked on a clock instead. (4) A previous read that FAILED is always due: the facts it kept are stale by
+   * definition, and `reviewState` may have since moved off `reviewing`/`open` (a trigger that crossed the stuck line), which would otherwise park the flagged
+   * facts until the MR next changed.
    */
   private reviewDue(previous: GitlabReview | null, seenUpdatedAt: string | undefined, updatedAt: string, now: number): boolean {
     if (previous === null || seenUpdatedAt === undefined) return true;
     if (seenUpdatedAt !== updatedAt) return true;
+    if (previous.failed) return true;
     const state = reviewState(previous, now);
     if (state !== 'reviewing' && state !== 'open') return false;
     const readAt = Date.parse(previous.readAt);

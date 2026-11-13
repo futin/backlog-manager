@@ -625,6 +625,28 @@ describe('GitlabPollerService — the review read', () => {
     expect(mrOf(h, 412)?.review).toMatchObject({ failed: false });
   });
 
+  it('a failed read stays due after its trigger passes the stuck line: re-read even though updated_at never changed and the state is no longer reviewing', async () => {
+    const h = setup();
+    h.fake.seed(MS, 'opened', [openMr()]);
+    // A trigger 5 minutes old with no landing: `reviewing` at the first read.
+    h.fake.discussions.set(`${MS}!412`, [
+      rawDiscussion('t1', [rawNote(1, 'ada', '@coderabbitai review', { created_at: ago(5), updated_at: ago(5), resolvable: true, resolved: true })])
+    ]);
+    await boot(h);
+    expect(h.svc.findMr(MS, 412)?.review).toMatchObject({ failed: false });
+    h.fake.script.set(discPath(MS, 412), { status: 500 });
+    h.clock.now = T0 + 11 * 60_000;
+    await h.svc.tick();
+    expect(mrOf(h, 412)?.review).toMatchObject({ failed: true });
+    const before = discCalls(h, 412).length;
+    // 45 minutes after the trigger: past the 30-minute stuck line, so the state is `none` and the old rules would call it not due.
+    h.fake.script.delete(discPath(MS, 412));
+    h.clock.now = T0 + 40 * 60_000;
+    await h.svc.tick();
+    expect(discCalls(h, 412)).toHaveLength(before + 1);
+    expect(mrOf(h, 412)?.review).toMatchObject({ failed: false });
+  });
+
   it('page 1 answering 429 opens the window and stops the sweep; unread MRs keep their last good review, not failed', async () => {
     const h = setup();
     h.fake.seed(MS, 'opened', [openMr(412), openMr(413)]);
