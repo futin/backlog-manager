@@ -64,7 +64,7 @@ export class FakeGitlab {
   mrs = new Map<string, Map<string, RawMr[]>>();
   /** `<projectPath>!<iid>` -> every discussion of that MR, oldest first; paged by `per_page` on read. An MR with none answers `[]`. */
   discussions = new Map<string, RawDiscussion[]>();
-  /** Keyed by the URL's path, e.g. `/api/v4/user`. */
+  /** Keyed by the URL's path, e.g. `/api/v4/user`, or by `<path>?page=N` for one page of a paged read. */
   script = new Map<string, Scripted>();
   readonly calls: GitlabCall[] = [];
 
@@ -81,7 +81,8 @@ export class FakeGitlab {
   fetch: FetchLike = async (url, init) => {
     this.calls.push({ url, init });
     const u = new URL(url);
-    const scripted = this.script.get(u.pathname);
+    // A `<path>?page=N` key scripts ONE page of a paged read and wins over the plain path key, which (query stripped) answers every page alike.
+    const scripted = this.script.get(`${u.pathname}?page=${u.searchParams.get('page')}`) ?? this.script.get(u.pathname);
     if (scripted?.throws) throw scripted.throws;
     if (scripted?.delay !== undefined) await new Promise<void>((resolve) => (scripted.delay === Infinity ? undefined : setTimeout(resolve, scripted.delay)));
     if (scripted?.opaqueRedirect) {

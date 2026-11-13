@@ -584,7 +584,7 @@ describe('GitlabPollerService — the review read', () => {
     expect(discCalls(h)).toHaveLength(1);
   });
 
-  it('page 2 answering 500 keeps the previous facts, failed, with the previous readAt; the failure turns the state unreachable', async () => {
+  it('page 2 answering 500 keeps the previous facts, failed, with the previous readAt — never a fold of page 1 alone; the state turns unreachable', async () => {
     const h = setup();
     h.fake.seed(MS, 'opened', [openMr()]);
     h.fake.discussions.set(`${MS}!412`, [finding('d1')]);
@@ -592,20 +592,23 @@ describe('GitlabPollerService — the review read', () => {
     const good = mrOf(h, 412)?.review;
     expect(good).toMatchObject({ open: 1, failed: false });
 
-    h.fake.discussions.set(`${MS}!412`, [...filler(100), finding('d2')]);
-    h.fake.script.set(discPath(MS, 412), { status: 500 });
+    // Page 1 is full and its fold would DIFFER (three open findings, not one); page 2 is the one that fails.
+    h.fake.discussions.set(`${MS}!412`, [finding('n1'), finding('n2'), finding('n3'), ...filler(97), finding('d9')]);
+    h.fake.script.set(`${discPath(MS, 412)}?page=2`, { status: 500 });
     h.clock.now = T0 + 11 * 60_000;
     await h.svc.tick();
+    expect(discCalls(h, 412).map((x) => x.split('&page=')[1])).toEqual(['1', '1', '2']);
     expect(mrOf(h, 412)?.review).toEqual({ ...good, failed: true });
     expect(h.svc.payload().status.state).toBe('unreachable');
   });
 
-  it('a page-2 failure builds no fold from page 1 alone, and the first-ever read failing leaves review null', async () => {
+  it.each([403, 500])('the first-ever read failing on page 2 (%i) leaves review null, not a fold of page 1', async (status) => {
     const h = setup();
     h.fake.seed(MS, 'opened', [openMr()]);
-    h.fake.discussions.set(`${MS}!412`, filler(150));
-    h.fake.script.set(discPath(MS, 412), { status: 403 });
+    h.fake.discussions.set(`${MS}!412`, [finding('n1'), ...filler(99), finding('n2')]);
+    h.fake.script.set(`${discPath(MS, 412)}?page=2`, { status });
     await boot(h);
+    expect(discCalls(h, 412).map((x) => x.split('&page=')[1])).toEqual(['1', '2']);
     expect(mrOf(h, 412)?.review).toBeNull();
   });
 
