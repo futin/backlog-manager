@@ -38,7 +38,7 @@ The `mr-review-loop` skill (timify-experimental plugin) already automates steps 
 Success means:
 
 - Every open MR's review state is visible at a glance, on Detail, card and List.
-- One click starts the right half of the loop.
+- One button opens a Run already set up for the right half of the loop.
 
 ## 2. Goals, non-goals, anti-goals
 
@@ -49,7 +49,7 @@ Success means:
   (`2 open · 1 major`).
 - The card's and the List's MR chip says `!N · K to fix` when findings are open (variant X).
 - A `Review open` quick filter beside `Done, not merged`.
-- **One smart button** in a CodeRabbit row under the Detail track (placement B):
+- **One smart button** in a CodeRabbit row under the Detail track (placement B). It opens the Run launch sheet pre-set to the review action:
   - **Request review** when the MR is not reviewed or out of date. It starts a session that runs `mr-review-loop` from its trigger step.
   - **Fix review** when findings are open. It starts a session that runs `mr-review-loop` from its fetch-findings step.
   - Nothing while a review is running or the MR is clean.
@@ -106,6 +106,11 @@ never means "no review"; that is the `none` state.
 - `triggeredAt`: the latest trigger, or `null`
 - `landedAt`: the latest landing, or `null`
 - `commitsSince`: commits pushed after `landedAt`, counted from system notes
+
+**The cache stores those raw facts, never a frozen state.** The state is derived from them against the clock by one pure function in `shared/`,
+`reviewState(review, now)`. The client calls it to draw, the poller calls it to decide re-reads (§4.3), and dispatch calls it to pick the half (§6). Rule 2
+below depends on the time, so a review that never lands stops reading `reviewing` once 30 minutes pass, whether or not anything re-reads the MR. *(My call,
+after the builder check: a state folded once at read time would keep a stuck review `reviewing` forever, with the button hidden.)*
 
 The state is derived in this order. The first rule that matches wins:
 
@@ -181,17 +186,42 @@ The row is absent while the state is `reviewing` or `clean`, when `review === nu
 It acts on the **lead MR** only, the one the track draws. "Also" MRs get no row. A ticket with two open MRs reviews its lead, and the others are reached
 by opening their tickets or their MR.
 
-The button is disabled, with a tooltip naming the session, while a session is live on the ticket, which is the same rule Run follows. It is hidden when
-agents are off. It is also hidden when the MR's GitLab project maps to no local repo. The session needs a checkout to fix in, and `mrRepo()` already answers
-which one.
+**Pressing the button opens the existing Run launch sheet, pre-set to the review action** (the user's pick). It does not dispatch on its own. In the sheet:
+
+- The Action select gains the built-in `review`. Its label follows the state: `Fix review` or `Request review`.
+- The branch section is locked to `continue` on the MR's source branch, with no "open MR" option.
+- The repo select lists the review candidates (below).
+- Assign and transition default to off. A review does not move the ticket.
+- Model, permission mode and surface take the sheet's usual defaults.
+- The prompt preview and edit work as they do for every action. The preview is `GET /api/jira/prompt` with `action=review` plus the MR.
+
+**Review candidates.**
+
+- A candidate is a `jira.json` repo path mapped to the ticket's Jira key, or to its parent's key when the MR is inherited from the parent story, whose
+  `origin` resolves to the MR's GitLab project.
+- `GitlabProjectView` gains the full paths it was built from, `repos: string[]`. Today it keeps only a basename, which is for messages only. These are
+  local paths on this machine, already in `jira.json`, so no secret is exposed.
+- The button is hidden when there are no candidates. With several, the sheet's repo select chooses. *(My call: `mrRepo()` falls back to a path segment
+  and never answers "none", so it cannot decide this.)*
+
+**Live-session gate.** The button is disabled, with a tooltip naming the session, while a session is live on the ticket. That is the same rule Run
+follows. It is also disabled while a live session's `gitBranch` is the MR's source branch in a candidate repo, because a sub-task's review continues its
+parent's branch, possibly in the very worktree the parent's session is using. Dispatch enforces both checks as 409s. *(My call: two sessions pushing one
+MR branch is the failure to prevent. `jira-live.service.ts` already reads each session's `gitBranch`.)*
+
+The button is hidden when agents are off.
 
 ### 5.3 Card and List chip (mocks `card-x.png`, `list.png`)
 
 `deliveryLook()` decides the MR chip's tone and text. Worst first:
 
-1. failed pipeline: red, as today
-2. findings open: amber, `!15958 · 2 to fix`
-3. otherwise the pipeline word, as today
+1. draft: as today. `deliveryLook` already returns `draft` before it looks at the pipeline, and this keeps that.
+2. failed pipeline: red, as today
+3. findings open: amber, `!15958 · 2 to fix`
+4. otherwise the pipeline word, as today
+
+*Drafts (my call):* a draft is an open MR. It is read for review, draws the Review step, and gets the CodeRabbit row and button, so people can review
+before marking it ready. Only its chip keeps saying `draft`.
 
 No chip is added anywhere. That keeps the List's 256 px Delivery cell within width (see the note on `list.png` at the top). The other review states do not
 change the chip: the Detail step and the List's fifth cell carry them.
@@ -208,12 +238,19 @@ The List's compact track gains the fifth `jira-dlv-cell`, toned as in §5.1.
 The button goes through the existing Jira Run dispatch (`POST /api/agents/dispatch-jira`) with a new built-in action, **`review`**:
 
 - `JiraAction` becomes `'execute' | 'context' | 'review' | { skill: string }`.
-- The client sends only `review`. **The server derives which half from its own GitLab cache at dispatch time**, the same way item dispatch derives its
-  action:
-  - `open` → fix
-  - `none` or `stale` → request
-  - `reviewing` or `clean` → a 409 `nothing to review`
-  - no lead open MR, or `review === null` → a 409 `no review state`
+- The client sends `review` plus the MR it drew, `{ project, iid }`. The sheet's other fields (repo, model, surface, prompt) are sent as for any Run.
+- **The server checks that MR, then derives which half from its own GitLab cache at dispatch time**, the same way item dispatch derives its action.
+  - The MR must be in the cache and open.
+  - Its `keys` must carry the ticket's key, or the parent key from the ticket's `JiraIssueDetail.parent`.
+  - The repo must be one of its review candidates (§5.2).
+  - Each failed check is a 400.
+  - The state, from `reviewState(review, now)`:
+    - `open` → fix
+    - `none` or `stale` → request
+    - `reviewing` or `clean` → a 409 `nothing to review`
+    - `review === null` → a 409 `no review state`
+  - *(My call: the client already picked the lead it drew, so the server checks that pick instead of re-implementing `leadMr` and the sub-task
+    inheritance rule.)*
 - The client's idea of the state may be up to one sweep old, so a stale click cannot start the wrong half.
 - The workspace is `continue` on the lead MR's `sourceBranch`, in the repo `mrRepo()` names, with `openMr: false`. This goes through the existing
   `branch-choice.util.ts` checks. A source branch that fails the name checks, or that is the repo's main branch, is a 400 and the button never starts a
@@ -243,9 +280,12 @@ is the same skill reached from a different starting point.
   which the skill reads first.
 - The builder runs one real Request review on a test MR before calling this done (§9).
 
-**Questions.** `mr-review-loop` gates its reply-and-resolve step on an AskUserQuestion. A Jira Run's first turn is headless and then handed to the
-desktop app (`docs/subsystems/jira.md`, the hand-over section). The gate lands in the desktop session the user opens, which is the same path `execute` +
-`mr-review-loop` already takes. No new mechanism.
+**Questions.** `mr-review-loop` gates its reply-and-resolve step on an AskUserQuestion.
+
+- On the dashboard surface, a Jira Run's first turn is headless and then handed to the desktop app (`docs/subsystems/jira.md`, the hand-over section),
+  so the gate lands in the desktop session the user opens.
+- On the desktop surface, the gate is asked in place.
+- Either way this is the same path `execute` + `mr-review-loop` already takes. No new mechanism.
 
 ## 7. Docs to update with the code
 
@@ -278,6 +318,8 @@ desktop app (`docs/subsystems/jira.md`, the hand-over section). The gate lands i
    `GET …/merge_requests/:iid/commits` instead, newest first, first page only, and cap the word at `20+`.
 4. **One end-to-end Request review and one Fix review from the button** on a real MR, watching the first turn for a keychain prompt. If one appears, the
    `GITLAB_TOKEN` fallback goes in `docs/subsystems/jira.md`.
-5. Prompt wording, test cases, and the exact constant and type names.
+5. That `jira-live.service.ts`'s session rows expose `gitBranch` for every live session, Runs included, so the branch gate in §5.2 can be computed on
+   both sides. If Runs lack it, use the Run's workspace branch, which the dispatcher knows.
+6. Prompt wording, test cases, and the exact constant and type names.
 
 The last task of the plan is `/ui-verify` against the mocks above.
