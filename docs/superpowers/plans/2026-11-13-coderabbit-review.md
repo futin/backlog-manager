@@ -84,6 +84,15 @@ the task report. Line counts anywhere are soft targets, never limits.
 - [ ] **Step 3: Implement** the types and `shared/review.ts`. `reviewState` is the spec's ordered table, first match wins; "latest trigger newer than latest
   landing" compares `Date.parse` of the two ISO strings, and an unparseable stamp reads as absent. Fix every compile error the new required fields cause
   (`GitlabMr.review`, `GitlabProjectView.repos`) by setting `review: null` / `repos: []` where MRs and views are built today, so `pnpm run typecheck` passes.
+  Widening `JiraAction` also breaks these sites; give each its final behaviour now:
+  - `JIRA_BUILTIN_LABELS` (`shared/types.ts:908`) becomes `Record<'execute' | 'context' | 'review', string>` with `review: 'Review the MR'` (the label a
+    review link shows on Sessions and the List — plan's call, spec names none). `client/src/lib/jira-sessions.ts:238` and `client/src/lib/jira-list.ts:227`
+    take `review` beside the two built-ins. `SettingsView.tsx:508-509` stays two options, and `resolveJiraAction` (`client/src/lib/jira.ts:887`) is unchanged
+    — it never returns `review`, so a stored `jiraDefaultAction: 'review'` still reads `execute` (add that case to `test/jira-lib.test.ts`).
+  - `resolveJiraActionOrThrow` (`server/src/jira/prompt.util.ts:149`): `'review'` throws 400 `review needs mr and half` — the callers build the review
+    compose action themselves (Task 4) and never send `review` through it.
+  - `links.store.ts:87` reads stored links through `parseJiraAction`, so a persisted `review` link round-trips; pin it beside the existing `links.store` cases
+    (`grep -l links.store test/` — `test/agents-jira-live.test.ts` at the plan's base).
 - [ ] **Step 4: Run** the two suites plus `pnpm run typecheck` — expect PASS.
 - [ ] **Step 5: Commit** `feat(gitlab): review facts and reviewState in shared`.
 
@@ -165,7 +174,10 @@ the task report. Line counts anywhere are soft targets, never limits.
   - page 1 answers 429 → window opens, sweep stops, remaining MRs keep last good review (and pipeline, as today).
   - 401 → identity re-read, as the detail read does.
   - after a 429 stop (`run.stop`), unread MRs keep their last good review unchanged (not `failed`).
-  - payload view `repos`: Jira project `PAY` maps `/a/one` and `/a/two` to `grp/proj`, `/a/three` to `grp/other` → the `grp/proj` view lists both.
+  - payload view `repos`, per Jira project: `PAY` maps `/a/one` and `/a/two` to `grp/proj` and `/a/three` to `grp/other`; `OPS` maps `/b/four` to
+    `grp/proj` → `jiraProjects.PAY`'s `grp/proj` view lists `['/a/one', '/a/two']`, `jiraProjects.OPS`'s lists `['/b/four']` (today `payload()` copies one
+    view under every key, `poller.service.ts:259-260` — build `repos` per key). `reposFor('PAY', 'grp/proj')` and `reposFor('OPS', 'grp/proj')` give the
+    same lists; `reposFor('PAY', 'grp/none')` and `reposFor('XYZ', 'grp/proj')` → `[]`.
   - `findMr('grp/proj', 15958)` returns the cached MR; `findMr('GRP/proj', 15958)` returns `null` (exact).
   - Compose: `test/compose-env.test.ts` expects `BM_GITLAB_REVIEW_BOT: '${BM_GITLAB_REVIEW_BOT:-}'` beside the GitLab pair.
 - [ ] **Step 2: Run** `pnpm exec jest test/gitlab-poller.test.ts test/gitlab-mapping.test.ts test/compose-env.test.ts` — expect FAIL.
@@ -191,21 +203,26 @@ the task report. Line counts anywhere are soft targets, never limits.
 
 - [ ] **Step 1: Write failing tests.**
   - `composeJiraPrompt` with `review`/`request` on `PAY-151`, MR `{ project: 'development/backend/microservice', iid: 15958 }`, a `continue` workspace:
-    the text starts with the same read-ticket sentence `execute` starts with (assert equality of the first paragraph against an `execute` composition),
-    contains the workspace block, `mr-review-loop`, `!15958`, `development/backend/microservice`, and the words that say to post `@coderabbitai review`;
-    contains the "if not installed, stop and say so" line.
+    the text starts with the workspace block (equal to the head of an `execute` composition with the same workspace — `composeJiraPrompt` puts the block
+    first for every action, `prompt.util.ts:132`), and the body after it contains `readTicket('PAY-151')`'s sentence before any review wording; it contains
+    `mr-review-loop`, `!15958`, `development/backend/microservice`, the words that say to post `@coderabbitai review`, and the "if not installed, stop and
+    say so" line. With a `null` workspace the text starts with the body.
   - `fix`: same, says not to post a new trigger, names fetching the open findings; contains no `@coderabbitai review` instruction to post.
   - No finding text is ever in the prompt (the composer takes none — assert the signature by the cases above).
   - `parseReviewMr`: `('grp/proj', '15958')` → ok (query strings), `('grp/proj', 15958)` → ok, `('', 1)`, `('grp/proj', 0)`, `('grp/proj', 1.5)`,
-    `('grp/proj', '-3')`, `('../x', 1)`, `('grp proj', 1)` → `null` (use the path shape `remote.util.ts`/`gitlabProjectId` accepts; read it, don't invent one).
+    `('grp/proj', '-3')`, `('../x', 1)`, `('grp proj', 1)`, `('grp//proj', 1)`, `('/grp/proj', 1)`, `('grp', 1)`, a 256-character path → `null`.
+    The shape is new — `remote.util.ts` has none (`gitlabProjectId` only encodes, `remote.util.ts:57`): add `isGitlabProjectPath(path: string): boolean` to
+    `server/src/gitlab/remote.util.ts` — at most 255 characters, two or more `/`-separated segments, each `[A-Za-z0-9_.-]+` and not `.` or `..`, no leading
+    or trailing `/` — with its own cases in `test/gitlab-mapping.test.ts`; `prompt.util.ts` imports it (a pure helper, not the poller, so `jira/` still never
+    reaches `gitlab/`'s poller).
   - `parseReviewHalf`: `request`, `fix` ok; `Fix`, `''`, `undefined` → `null`.
   - Preview route (`test/jira-routes.test.ts`): `GET /api/jira/prompt?key=PAY-151&action=review&repo=…&mrProject=grp%2Fproj&mrIid=15958&half=fix` → 200
     `text/plain` containing `!15958`; missing `mrIid` → 400 `mr must be { project, iid }`; `half=both` → 400 `half must be request or fix`;
     `action=bogus` → 400 `action must be execute, context, review or skill:<id>`. The route makes no GitLab call (the test module provides no GitLab
     provider at all).
 - [ ] **Step 2: Run** `pnpm exec jest test/jira-prompt.test.ts test/jira-routes.test.ts` — expect FAIL.
-- [ ] **Step 3: Implement** the composer (`readTicket(key)`, workspace block, half text per spec §6; wording is yours) and the preview params. The preview
-  never imports from `gitlab/`.
+- [ ] **Step 3: Implement** the composer: the existing head (workspace block) stays first, then a body that opens with `readTicket(key)` and continues with
+  the half text per spec §6 (wording is yours); and the preview params. The preview imports nothing from `gitlab/` but `isGitlabProjectPath`.
 - [ ] **Step 4: Run** the suites — expect PASS.
 - [ ] **Step 5: Commit** `feat(jira): review prompt and its preview`.
 
@@ -226,9 +243,13 @@ the task report. Line counts anywhere are soft targets, never limits.
 - [ ] **Step 1: Write failing tests** (extend the existing fakes; give every field a distinct value — two Jira keys, two repos, two branches):
   - controller: `action: 'review'` without `mr` → 400 `mr must be { project, iid }`; without `half` → 400 `half must be request or fix`; bad action → 400
     `action must be execute, context, review or { skill: <id> }`.
-  - check order, each a 400 with spec §5.5's text: MR not in cache or not open → `!<iid> is not an open merge request of <key>`; MR keys carry neither the
-    key nor its parent (from `JiraIssueDetail.parent`) → same; repo not in `reposFor` → `<repo> is not a review candidate for !<iid>`; choice not
-    `continue` on `sourceBranch` → `a review continues <sourceBranch>`. A sub-task whose parent's key is on the MR passes.
+  - the 400s, each with spec §5.5's text, in Step 3's order: MR not in cache or not open → `!<iid> is not an open merge request of <key>`; repo not in
+    `reposFor` → `<repo> is not a review candidate for !<iid>`; choice not `continue` on `sourceBranch` (`new`, `none`, `continue` on another branch) →
+    `a review continues <sourceBranch>`; MR keys carry neither the key nor its parent (from `JiraIssueDetail.parent`) → `!<iid> is not an open merge request
+    of <key>`, with no Jira write made. A sub-task whose parent's key is on the MR passes. Two-fault cases pin the order: MR not open AND wrong choice → the
+    MR sentence; not a candidate AND wrong choice → the candidate sentence; wrong choice AND a source branch the mapped checkout holds → the choice
+    sentence (it runs before `workspaceFor`). `openMr: true` → 400 `openMr is only for execute with a branch` from `parseBranchChoice`
+    (`branch-choice.util.ts:79`), which runs in the controller first — the sheet never sends it, and spec §5.5's `a review continues` row covers the rest.
   - state 409s: `reviewing` and `clean` → `nothing to review on !<iid>`; `review: null` → `no review state for !<iid> yet`; `unknown` →
     `!<iid> has too many threads to read`; sent `half: 'fix'` while state is `none` → `the review on !<iid> moved on — reopen the sheet`.
   - branch gate 409 `a session is live on <branch>` for: a live `manual` link on another key with that stored `branch` in a candidate repo; an ACTIVE row
@@ -236,15 +257,24 @@ the task report. Line counts anywhere are soft targets, never limits.
     row in a non-candidate repo.
   - race: two concurrent dispatches for two sub-tasks of one parent on the same MR branch → exactly one spawns, the other 409 `a session is live on <branch>`;
     after a failed spawn the branch reservation is released (a third dispatch passes).
+  - branch reservation on success: a dispatch succeeds (the link now holds the branch, so a second dispatch 409s on the link), then the link ends → a third
+    dispatch on that branch passes; a no-id desktop spawn (`jira-dispatch.service.ts:178-181`) → the next dispatch on that branch passes at once.
   - ticket gate unchanged: a live `run` link on the key → 409 `<KEY> already has a session`.
   - spawned prompt equals `composeJiraPrompt` over the **cached** MR's project and iid (and an edited prompt spawns as written, as today); the confirmed
     link stores `action: 'review'` and the workspace's branch.
   - Jira writes: with `assign: false, transitionId: null` nothing is written to Jira.
 - [ ] **Step 2: Run** `pnpm exec jest test/agents-dispatch-jira.test.ts` — expect FAIL.
-- [ ] **Step 3: Implement.** Order inside `dispatch`: the controller's 400s; then the existing pre-reservation checks; then the MR, candidate and choice
-  400s (these need only the cache and the request, so they run before `reserve`); then `reserve` (key) and the branch reservation, then the detail read
-  (the parent-key check happens there and releases both reservations on failure), then state 409s, then the existing launch. Every failure after a
-  reservation releases both, through the existing single `catch`. Comment the why (spec §5.2 live-session gate).
+- [ ] **Step 3: Implement.** One order, first failure wins:
+  1. Controller: action, `mr`, `half`, then `parseBranchChoice` (existing) — 400s.
+  2. `dispatch`, existing: configured (503), unreadable `jira.json` (409), repo mapped (400), agents gate, desktop surface (409).
+  3. Review, cache only: MR in cache and open (400), repo a candidate (400), choice `continue` on `sourceBranch` (400), then the state 409s
+     (`reviewState` over the cached review, `reviewHalf` against the sent `half`).
+  4. `workspaceFor` (existing; its name and checked-out refusals).
+  5. `reserve` (key), then the branch gate and branch reservation (409 `a session is live on <branch>`, refusing nothing it did not reserve).
+  6. `launch`: the detail read, then the keys/parent check (400, before the assign or transition), then the rest unchanged.
+  Every failure after step 5 releases both reservations through the existing single `catch`. On success the branch reservation is dropped where the key's
+  is: at `confirm` (the link's stored `branch` takes over the gate) and on the no-id desktop path beside its `release`. Comment the why (spec §5.2
+  live-session gate).
 - [ ] **Step 4: Run** the suite, then `grep -l 'JiraDispatchService\|AgentsModule' test/` and run every hit — expect PASS.
 - [ ] **Step 5: Commit** `feat(agents): dispatch the review action`.
 
@@ -263,7 +293,9 @@ the task report. Line counts anywhere are soft targets, never limits.
     Merged: five magenta steps. Closed: review `off`, ends on `closed`. Review step mark per state: `none`/`unknown` → `off`, `reviewing`/`stale` → `grey`,
     `open` → `amber`, `clean` → `green`; `review === null` → `off`.
   - Word precedence (open MRs): draft → failed pipeline → findings open (`<n> to fix`, `<n>+ to fix` when capped, amber, chip `!<iid> · <n> to fix`) →
-    pipeline word.
+    pipeline word. That is the card/List/head word only: `DeliveryLook` gains `pipelineWord: string` (the pipeline word alone, never `<n> to fix`), and
+    Detail's Pipeline step (`DeliveryPane.tsx:43`, today `deliveryLook(mr).word`) reads `pipelineWord` — spec §5.3 and `state-open.png` keep `pipeline
+    passed` on the Pipeline step while the Review step reads `2 open · 1 major`.
   - `DeliveryFilter` gains `'review-open'`, label `Review open`, after `Done, not merged`; `matchesDelivery(filter, d, now)` — `review-open` matches when the
     lead (own or inherited) is opened and `reviewState` is `open`.
   - `review-copy.ts`: `reviewStepWord(review, now)`, `reviewStepTitleSuffix(review, now)` (the ` · not refreshed since <age>` part when `failed`, age from
@@ -272,7 +304,7 @@ the task report. Line counts anywhere are soft targets, never limits.
 
 - [ ] **Step 1: Write failing tests.**
   - `deliveryLook`: open MR, pipeline `success`, review `open` (2 open, worst major) → chip `!15958 · 2 to fix`, word `2 to fix`, tone `amber`, track marks
-    `on, on, green, amber, off`; same with pipeline `failed` → word `pipeline failed`, red (failed beats findings); draft with open findings → `draft`,
+    `on, on, green, amber, off`, `pipelineWord` `pipeline passed`; same with pipeline `failed` → word `pipeline failed`, red (failed beats findings); draft with open findings → `draft`,
     grey; capped with 5 open → `5+ to fix`; `review: null` → pipeline word, review step `off`; merged → five magenta; closed → review step `off`.
   - Filter: stored `review-open` with delivery hidden → `all`; `matchesDelivery('review-open', …)` true for an inherited lead with open findings, false for
     clean, false for a `hidden` ticket; `clampJiraPanelFilters({ delivery: 'review-open' })` keeps it.
@@ -310,6 +342,8 @@ Open each mock before drawing its view.
 
 - [ ] **Step 1: Write failing tests.**
   - Detail track renders five steps with `data-mark` per state (one case per mock state) and the step's `title` carries the failed suffix when `failed`.
+  - Pipeline `success` + review `open` (2 open, worst major) → the Pipeline step's word is `pipeline passed`, the Review step's `2 open · 1 major`, the
+    head word `2 to fix` (`state-open.png`).
   - Row: open → `CodeRabbit · 2 open findings · 1 major, 1 minor · reviewed 4m ago` and a button `Fix review`; none → `Request review`; reviewing, clean,
     unknown, `review === null`, merged lead → no row; no candidate repos → row without button; agents off → no button.
   - Gate: a live `run` link on the key → button disabled, tooltip `<session name> is live on this ticket`; a live link on another key whose stored branch is
