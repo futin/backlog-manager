@@ -528,8 +528,7 @@ Four workflow docs cover the procedures: [running the app](docs/workflows/develo
 | `backlog/` | This repo's own backlog marker — its items are GitHub issues since the repo connected itself to a tracker                                                                                                                                |
 | `scripts/` | `sync-plugin.mjs` ([doc](docs/workflows/publishing.md)), `test-all.mjs` and `test-tmpdir.mjs`, the per-run temp root `test:skills` runs through ([doc](docs/workflows/development.md)), `tailnet.mjs`, the `tailscale serve` wrapper, and `ci-scope.mjs`, CI's one check command ([doc](docs/workflows/ci.md)) |
 | `test/`    | Jest suites, flat; many read the client or server tree and pin its shape ([doc](docs/workflows/development.md))                                                                                                                         |
-| `docs/`    | The reference docs — start at [`overview.md`](docs/overview.md); `superpowers/` is the design spec and implementation plans                                                                                                              |
-| `audits/`  | Dated whole-repo audit reports                                                                                                                                                                                                           |
+| `docs/`    | The reference docs — start at [`overview.md`](docs/overview.md); `superpowers/` is the design spec and implementation plans, `audits/` the dated whole-repo audit reports                                                                |
 
 <!-- docs-sync:
   sources:

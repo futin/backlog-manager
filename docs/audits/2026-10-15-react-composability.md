@@ -1,7 +1,7 @@
 # Client composability: backlog-manager (A) vs claude-agents-dashboard (B)
 
 Read-only comparison, 2026-10-15. A = `/Users/andrejajevtic/Documents/custom-projects/backlog-manager` @ `5511bd1`; B = `/Users/andrejajevtic/Documents/custom-projects/claude-agents-dashboard` @ `1ea48ec`.
-All paths below are relative to each repo's `client/src/` unless prefixed.
+All paths below are relative to each repo's `../../client/src` unless prefixed.
 
 ## Verdict
 
@@ -97,10 +97,10 @@ The fetch functions themselves live in `lib/agents.ts` (115-706), which is good.
 
 **Derivations living in component files.** These are pure, tested only through renders:
 - `components/runs/RunsView.tsx:234-475`: `runKey`, `mergeRuns` (`:264`), `parseStartedAt`, `sortByStartedAtDesc` (`:301`), `splitLive` (`:343`), `groupByDay` (`:373`),
-  `STATUS_ORDER`, `queueCounts` (`:464`). They are exercised only via `test/runs/runs-view.test.tsx`, whose comments at `:731,798,810,832,946` describe `mergeRuns`
+  `STATUS_ORDER`, `queueCounts` (`:464`). They are exercised only via `../../test/runs/runs-view.test.tsx`, whose comments at `:731,798,810,832,946` describe `mergeRuns`
   regressions caught by render.
 - `components/board/BoardView.tsx:121-243`: `COMPARATORS`, `resolveSortKey` (`:159`), `liveRank` (`:203`), `sortItems` (`:221`). They are exercised only via
-  `test/board/board.test.tsx` (comment `:817` even notes the render test cannot tell two implementations of `sortItems` apart).
+  `../../test/board/board.test.tsx` (comment `:817` even notes the render test cannot tell two implementations of `sortItems` apart).
 - `components/runs/RunDetail.tsx:142-176` (`rowsFromArchive`/`rowsFromLive`) and about 35 derived constants in the render body, `:318-516` (counts, labels, mode notes,
   boundary item). Most call into `lib/` already, but the assembly is inline.
 
@@ -128,14 +128,14 @@ Rough total: 4×S, 4×M, no L. Gaps 4 and 5 can share one primitive, and gap 6 i
 ## 4. Where A matches or beats B (not gaps)
 
 - **Shared UI primitives.** A has a real `components/ui/` (19 primitives: `Chip`, `Pill`, `Dot`, `Sheet`, `FormSheet`, `Modal`, `Select`, `Segmented`, `Switch`, `Popover`,
-  `Confirm`, `Ledger`, `Meter`, `Figure`...), with `test/ui/ui-sheet.test.tsx` and `test/ui/ui-form-sheet.test.tsx`. B scatters `Popover.tsx`/`Chevron.tsx` at the components root
+  `Confirm`, `Ledger`, `Meter`, `Figure`...), with `../../test/ui/ui-sheet.test.tsx` and `test/ui/ui-form-sheet.test.tsx`. B scatters `Popover.tsx`/`Chevron.tsx` at the components root
   and re-declares a `Dot` per feature (`sessions/atoms.tsx:33`). A is ahead here.
 - **Fetch functions centralised.** Every A request goes through `lib/agents.ts` with `unwrap`/`ApiError` (`:115-706`); the one exception is `ItemModal.tsx:312`. B calls
   `fetch()` with hand-built headers inside each hook, and once inside a component (`settings/SettingsView.tsx:158`).
 - **Settings composition.** A's `settings/SettingsView.tsx` is 281 code lines across 8 in-file components plus `WatchdogGroup.tsx` and `TrackersGroup.tsx`. B's is one
   583-code-line component.
 - **Pure-lib depth for the hard domain.** `lib/run-stats.ts`, `run-time.ts`, `run-stage.ts`, `run-watchdog.ts`, `tracker.ts` and `item-*.ts` each have a direct unit test
-  (`test/runs/run-stats.test.ts`, `run-time.test.ts`, `run-stage.test.ts`, `run-watchdog.test.ts`, `tracker-lib.test.ts`, `item-*.test.ts`). This is at least B's level.
+  (`../../test/runs/run-stats.test.ts`, `run-time.test.ts`, `run-stage.test.ts`, `run-watchdog.test.ts`, `tracker-lib.test.ts`, `item-*.test.ts`). This is at least B's level.
 - **Polling scope.** Polling is one section, one poller, and stops at idle: `useOrchestratorRuns` polls only while something is live (`:284`), and `useBoard` only while
   a tracker syncs (`:96`). B's `useSessions` polls unconditionally at `refreshMs`.
 - **Escape ownership.** A has a single Escape owner (`hooks/useDialogEscape.ts`) for its dialog stack; B has `useBackClose`/`lib/backClose.ts` for a comparable concern.
@@ -147,5 +147,5 @@ Rough total: 4×S, 4×M, no L. Gaps 4 and 5 can share one primitive, and gap 6 i
 
 - Do not adopt a query-cache library to "match B". B has none, and A's one-poller-per-section with idle-off would need re-deriving under a cache.
 - Do not strip comments to shrink files. The density is a documented A convention, and on code lines the files are already within B's range.
-- Any refactor that moves a derivation must keep `test/guards/claude-rules.test.ts` anchors and DESIGN.md citations intact, and new `ui/` primitives must cite their §8
+- Any refactor that moves a derivation must keep `../../test/guards/claude-rules.test.ts` anchors and DESIGN.md citations intact, and new `ui/` primitives must cite their §8
   subsection.

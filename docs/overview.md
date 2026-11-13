@@ -35,7 +35,7 @@ in them is mechanical: a dead anchor, a glob that matches nothing, a CLAUDE.md h
 table row that no longer matches its file's `paths:`.
 
 Deliberately not tracked, and each for a stated reason in [`.docs-sync.yml`](.docs-sync.yml): `backlog/` (the store's own items and README), `docs/superpowers/`
-(specs, plans, decision logs), `audits/` (dated findings), and `skills/` + `agents/` — those are the product, not documentation about it.
+(specs, plans, decision logs), `docs/audits/` (dated findings), and `skills/` + `agents/` — those are the product, not documentation about it.
 
 ## Architecture
 
