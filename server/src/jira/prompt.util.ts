@@ -27,13 +27,18 @@
 import { HttpException } from '@nestjs/common';
 import { COMMIT_RULE } from '../../../shared/agent';
 import { shellQuote } from '../../../shared/jira-branch';
+// The one allowed jira/ -> gitlab/ edge: a pure shape check, no Nest, no poller (it would drag the GitLab module in).
+import { isGitlabProjectPath } from '../gitlab/remote.util';
 import { JIRA_PROMPT_MAX, isJiraKey } from '../../../shared/types';
-import type { JiraAction, JiraIssueDetail, JiraSkill, JiraWorkspace } from '../../../shared/types';
+import type { JiraAction, JiraIssueDetail, JiraSkill, JiraWorkspace, ReviewHalf } from '../../../shared/types';
 
 /** Declared in `shared/types.ts` since the launch sheet's edited prompt counts against it too; re-exported so this module stays its server-side home. */
 export { JIRA_PROMPT_MAX };
 
-export type JiraComposeAction = { kind: 'execute' | 'context' } | { kind: 'skill'; skill: JiraSkill };
+export type JiraComposeAction =
+  | { kind: 'execute' | 'context' }
+  | { kind: 'skill'; skill: JiraSkill }
+  | { kind: 'review'; half: ReviewHalf; mr: { project: string; iid: number } };
 
 export type JiraComposeResult = { ok: true; prompt: string } | { ok: false; error: 'prompt too long' | 'invalid issue key' };
 
@@ -106,6 +111,43 @@ function readTicket(key: string): string {
   );
 }
 
+/**
+ * `review` (spec 6): one session per half. It carries NO finding text — the session fetches the findings itself through the mr-review-loop skill, so nothing a
+ * bot or a stranger wrote on the MR is ever in the prompt this server composes. The body opens with `readTicket` (after the workspace block, which every action
+ * puts first), then names the MR as `!<iid>` in its project. `request` asks the skill to post the `@coderabbitai review` trigger comment and wait; `fix` must
+ * not post one — the review already ran — and instead fetches the open findings and fixes what they ask. A session without the skill stops and says so rather
+ * than improvising a GitLab call of its own: credentials live in the skill's tooling, not in this prompt.
+ */
+function reviewText(key: string, half: ReviewHalf, mr: { project: string; iid: number }): string {
+  const where = `merge request !${mr.iid} in the GitLab project ${mr.project}`;
+  const missing = 'If the mr-review-loop skill is not installed, stop and say so; do not call GitLab by any other route.';
+  if (half === 'request') {
+    return (
+      `${readTicket(key)} Then use the mr-review-loop skill on ${where}: post a comment \`@coderabbitai review\` on it to ask CodeRabbit for a review, ` +
+      `and report that the review was requested. Change nothing in the repository. ${missing}`
+    );
+  }
+  return (
+    `${readTicket(key)} Then use the mr-review-loop skill on ${where}: fetch CodeRabbit's open findings on it and fix what they ask, in this worktree, ` +
+    `verifying each fix with the repository's own tests and checks. Do not post a new review trigger comment; the review has already run. ` +
+    `Report which findings you fixed and which you left, with the reason. ${missing}`
+  );
+}
+
+/** A GitLab project path and an MR iid from a request, or `null`. The iid arrives as a query string: decimal digits only, positive, no sign, space or exponent. */
+export function parseReviewMr(project: unknown, iid: unknown): { project: string; iid: number } | null {
+  if (typeof project !== 'string' || !isGitlabProjectPath(project)) return null;
+  const digits = typeof iid === 'number' ? (Number.isInteger(iid) && iid > 0 ? String(iid) : '') : typeof iid === 'string' ? iid : '';
+  if (!/^[0-9]{1,9}$/.test(digits)) return null;
+  const n = Number(digits);
+  return n > 0 ? { project, iid: n } : null;
+}
+
+/** `request` or `fix`, exactly; anything else (case included) is `null`. */
+export function parseReviewHalf(raw: unknown): ReviewHalf | null {
+  return raw === 'request' || raw === 'fix' ? raw : null;
+}
+
 /** The placeholders a template may use — exactly these six; any other brace text, `{summary}` and `{description}` included, stays literal. */
 const PLACEHOLDER_RE = /\{(key|url|repo|branch|base|worktree)\}/g;
 /** Whether the template names the ticket itself; one that does not gets the key on a line of its own (header). */
@@ -135,7 +177,9 @@ export function composeJiraPrompt(detail: JiraIssueDetail, action: JiraComposeAc
       ? skillPrompt(action.skill.prompt, detail, repo, workspace)
       : action.kind === 'execute'
         ? executeText(detail.key, workspace)
-        : contextText(detail.key);
+        : action.kind === 'review'
+          ? reviewText(detail.key, action.half, action.mr)
+          : contextText(detail.key);
   const prompt = head + body;
   return prompt.length <= JIRA_PROMPT_MAX ? { ok: true, prompt } : { ok: false, error: 'prompt too long' };
 }

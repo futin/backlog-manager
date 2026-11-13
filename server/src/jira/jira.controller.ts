@@ -14,7 +14,8 @@ import type {
   JiraSessionsPayload,
   JiraStatusPayload,
   JiraWorkspace,
-  JiraWorktreesPayload
+  JiraWorktreesPayload,
+  ReviewHalf
 } from '../../../shared/types';
 import { renderTicketBlock } from './block';
 import { parseBranchChoice, resolveWorkspace } from './branch-choice.util';
@@ -22,7 +23,8 @@ import { JIRA_JQL_MAX_CHARS, isJiraId, normaliseRepoPath, readJiraConfig } from 
 import { jiraEnv, repoRoots } from './env.util';
 import { JiraLiveService } from './live.service';
 import { JIRA_SEARCH_MAX_CHARS, JiraPollerService } from './poller.service';
-import { composeJiraPrompt, resolveJiraActionOrThrow } from './prompt.util';
+import { composeJiraPrompt, parseReviewHalf, parseReviewMr, resolveJiraActionOrThrow } from './prompt.util';
+import type { JiraComposeAction } from './prompt.util';
 import { readRepoRefs, readWorktrees } from './refs.util';
 import { unwrapJira } from './unwrap.util';
 
@@ -165,7 +167,7 @@ export class JiraController {
   }
 
   /**
-   * `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&target` — exactly what Copy prompt copies and what Start sends but for the status and
+   * `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&target` (and, for `action=review`, `mrProject&mrIid&half`) — exactly what Copy prompt copies and what Start sends but for the status and
    * assignee lines (spec §5, §7): the launch sheet previews it and the clipboard takes it from here, so there is one composition (`composeJiraPrompt`) behind
    * the preview, the copy and the spawn. The refusals come in the contract's order, each one wrong in a way no later check can excuse: `key` (400 `invalid
    * issue key`), `action` (400), `repo` present (400 `repo is required`), the branch choice's shape (400, `parseBranchChoice` — the same sentences
@@ -192,12 +194,24 @@ export class JiraController {
     @Query('base') base: unknown,
     @Query('openMr') openMr: unknown,
     @Query('target') target: unknown,
+    @Query('mrProject') mrProject: unknown,
+    @Query('mrIid') mrIid: unknown,
+    @Query('half') half: unknown,
     @Res({ passthrough: true }) res: Response
   ): Promise<string> {
     if (typeof key !== 'string' || !isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
     const action = parseJiraActionParam(actionParam);
-    if (action === null) throw new HttpException({ error: 'action must be execute, context or skill:<id>' }, 400);
+    if (action === null) throw new HttpException({ error: 'action must be execute, context, review or skill:<id>' }, 400);
     if (typeof repo !== 'string' || repo.trim() === '') throw new HttpException({ error: 'repo is required' }, 400);
+    // A review names its MR and half in the query; the preview only SHAPES them (no GitLab call), the dispatch route is what resolves the MR.
+    let review: { mr: { project: string; iid: number }; half: ReviewHalf } | null = null;
+    if (action === 'review') {
+      const mr = parseReviewMr(mrProject, mrIid);
+      if (mr === null) throw new HttpException({ error: 'mr must be { project, iid }' }, 400);
+      const parsedHalf = parseReviewHalf(half);
+      if (parsedHalf === null) throw new HttpException({ error: 'half must be request or fix' }, 400);
+      review = { mr, half: parsedHalf };
+    }
     const choice = parseBranchChoice({ mode, branch, base, openMr, target }, key, action);
     if (!choice.ok) throw new HttpException({ error: choice.error }, 400);
     this.requireConfigured();
@@ -205,7 +219,8 @@ export class JiraController {
     if (config.unreadable !== null) {
       throw new HttpException({ error: `settings/jira.json ${config.unreadable} — fix or delete it by hand` }, 409);
     }
-    const composeAction = resolveJiraActionOrThrow(action, config.skills);
+    const composeAction: JiraComposeAction =
+      review !== null ? { kind: 'review', half: review.half, mr: review.mr } : resolveJiraActionOrThrow(action, config.skills);
     const detail = unwrapJira(await this.poller.issueDetail(key));
     const normalised = normaliseRepoPath(repo, homedir());
     if (normalised === null || !(config.repos[detail.project.key] ?? []).includes(normalised)) {
