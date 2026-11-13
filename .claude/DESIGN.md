@@ -712,10 +712,10 @@ The fields, top to bottom: **Action** (three picture tiles in a `role="group"` n
 
 **Branch** (Jira repo/branch, spec §5.3, §5.6), under Repository and above Prompt — where the session will work. A `Segmented` of `New` / `Continue` / `No branch`, `No branch` absent for `execute` (an execute with no tree would commit on whatever the mapped checkout holds); each mode keeps its own fields, so flipping away and back returns what was typed. Under it the age of the list, `as of last fetch, N min ago` or `never fetched` (`fetchAgeLine`), at 12 px `--ink3`: the board lists refs and never fetches, so the reader is told how old they are. `New` is a base `Select` (seeded from the path's stored base, else `origin/HEAD`, else the checkout's own branch) and a name field (seeded from the path's pattern); `Continue` is a `Select` grouped `this ticket` (the branches that carry the key), `worktrees` (held by a tree other than the mapped checkout), `local` and `remote` (on `origin` only), with a search field (`.set-text`, `search N branches…`) over it and over the base `Select` — a big repo lists hundreds of `origin/*` branches; every term must match, `Enter` takes the first match, an `N of M` or `no branch matches` count says what is left, and searching never changes the choice on its own (`branchPickerOptions`, `BranchPicker`) — with the word `behind` or `diverged` beside it (`.sheet-static`, 11 px `--ink2`, titled with what it compares) on one `.jira-branch-line` — the session starts from the local tip, so a stale one is worth a word. A repository the board cannot read swaps the age line for one `.sheet-blocked` line, `branches unavailable — <path> <reason>`, and turns both selects into text fields, because `jira.mjs worktree` re-checks on the host what the board could not. Where the session goes is said only when it is not the obvious place: `will work in <path>` when Continue picks a branch another tree already holds, and `works in the mapped checkout itself — no branch, no worktree` for `No branch` — both `.sheet-note`, every path in `~` form (`displayPath`). A Continue on a branch that carries no key (`continueOffTicket`) is accepted and says one more `.sheet-note`, `this tree won't show on the card — it's listed under the repo in Setup` (M7) — drawn only while no refusal is, so the two sentences never stand together. A draft the server would refuse (`draftRefusal`, the same rules) is said in the `.sheet-blocked` line before Start, and a New name that already exists carries a `switch to Continue` chip on that branch, the server's own remedy. The server's own refusal of the same draft reaches the Prompt field's `.sheet-blocked` line through the preview, and a Start it refuses is §8.9.5's `.sheet-error` alert like any other. For `execute` with a branch, an `Open MR when done` `Switch`, off on every open; with `Continue` and the switch on, a `Target` field opening on `the repository's default`. The choice rides both the preview and Start, so the prompt shown is the prompt sent.
 
-**Review mode** (CodeRabbit review spec §5.4; opened by the CodeRabbit row's button, never by `Run ▾`). The Action group is ONE pressed, inert tile — `Fix review` or
-`Request review`, sub-line `mr-review-loop on !<iid>`, the play glyph. The Repository select lists only the MR's candidate repos. Branch is two static values, `Continue`
-and the MR's source branch, in place of the `New` / `Continue` / `No branch` segmented, the picker and the Open MR switch. The preview, Copy prompt and Start carry the
-MR and the half; the rest of the sheet is unchanged.
+**Review mode** (CodeRabbit review spec §5.4; opened by the CodeRabbit row's button, never by `Run ▾`). The Action group is ONE pressed, inert tile — `Fix
+review` or `Request review`, sub-line `mr-review-loop on !<iid>`, the play glyph. The Repository select lists only the MR's candidate repos. Branch is two
+static values, `Continue` and the MR's source branch, in place of the `New` / `Continue` / `No branch` segmented, the picker and the Open MR switch. The
+preview, Copy prompt and Start carry the MR and the half; the rest of the sheet is unchanged.
 
 `Start` is the only thing the environment can hide (the rule is [invariants.md](../docs/subsystems/invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake)): none is drawn before the agents status has landed or while the gate says `hidden`, and a `disabled` one carries the first reason that applies as its `title` — `choose a repository`, the dashboard's view of the repository, then the prompt's own refusal (for an edited prompt, the route's: `the prompt is empty`, `prompt too long`). `Copy prompt` waits for the preview and nothing else. A failed Start is the `.sheet-error` `role="alert"` line and the sheet stays open with every field where it was — except when the refusal says the writes stand (`— the assign stands`, `— the Jira writes stand`): the ticket has moved, so the board is reloaded as a landed Start would reload it and `Move to` goes back to `leave as is`, because the fresh read no longer offers that transition; a landed one replaces the form with `started · <session id>`, an `open in dashboard ↗` link and a note that the session's questions appear there — and on the phone, if the dashboard's hooks are installed — and drops the footer, because a second `Start` would be a second session on the same ticket.
 
@@ -752,31 +752,42 @@ Its look, by state and pipeline:
 An unknown pipeline reads as absent, never as passing. The amber `not merged` chip follows the lead wherever the ticket is done in Jira and its own lead MR
 is still open.
 
-The track column of that table is the first three steps and the last; the Review step between them is below. With findings the table's open rows change word: see
+The track column of that table is the first three steps and the last; the Review step between them is below. With findings the table's open rows change word:
+see
 **Chip precedence**.
 
 **Review step** (CodeRabbit review spec §5.1, §5.3, §5.5; `lib/review-copy.ts`, `reviewMark` in `lib/delivery.ts`). The fourth step, `Review`, on every open MR
-including a draft (a draft still draws it); a merged MR draws it magenta with the rest and a closed one `off`. Its mark follows `reviewState(review, now)`: `open`
+including a draft (a draft still draws it); a merged MR draws it magenta with the rest and a closed one `off`. Its mark follows `reviewState(review, now)`:
+`open`
 amber, `clean` green, `reviewing` and `stale` grey, and `off` (a hollow ring) for `none`, `unknown` and a review not read. The word under it, full shape only:
-`not reviewed`, `reviewing… 4m`, `<n> open · <k> <worst>` (`<n>+ open` when capped, with no severity part), `<n> commit(s) since review`, `last review didn't land`,
+`not reviewed`, `reviewing… 4m`, `<n> open · <k> <worst>` (`<n>+ open` when capped, with no severity part), `<n> commit(s) since review`, `last review didn't
+land`,
 `0 open · <n> resolved`, `too long to read`. When the latest read failed its `title` adds ` · not refreshed since <age>` from the last good `readAt`, so a stale
-count never reads as current. The Pipeline step keeps its own word (`pipelineWord`) whatever the review says, so `pipeline passed` and `2 open · 1 major` sit side
+count never reads as current. The Pipeline step keeps its own word (`pipelineWord`) whatever the review says, so `pipeline passed` and `2 open · 1 major` sit
+side
 by side. The head draws no review word.
 
-**Chip precedence** (`deliveryLook(mr, now)`), for an open MR, worst first: `draft`, then a failed pipeline, then findings to fix — `!N · <n> to fix`, `<n>+ to fix`
-when capped, amber — then the pipeline's own chip. The List word and the card chip read the same string; `matchesDelivery` and the band's `failing` are unchanged
+**Chip precedence** (`deliveryLook(mr, now)`), for an open MR, worst first: `draft`, then a failed pipeline, then findings to fix — `!N · <n> to fix`, `<n>+ to
+fix`
+when capped, amber — then the pipeline's own chip. The List word and the card chip read the same string; `matchesDelivery` and the band's `failing` are
+unchanged
 by it. A draft never turns amber for findings, and a failed pipeline outranks them because it blocks the merge outright.
 
-**CodeRabbit row** (`.jira-dlv-review`, `ReviewRow`; mocks `2026-11-13-coderabbit-review-mockups/opt-b-open.png` and `opt-b-none.png`). Under the track and above the
+**CodeRabbit row** (`.jira-dlv-review`, `ReviewRow`; mocks `2026-11-13-coderabbit-review-mockups/opt-b-open.png` and `opt-b-none.png`). Under the track and
+above the
 `Also:` line, behind a hairline: the sentence at 12/500 in a 28 px pill filling the left on a tint of its tone (amber 14 % for findings to fix, `--strip-hi` and
 `--ink2` for a request), ellipsising before the button gives up width, and at the right an ink `ui-split-28` button with the play glyph — a lone half of the Run
 split, no chevron. `CodeRabbit · <n> open findings · 1 critical, 2 major · reviewed 3h ago` (`Fix review`), `CodeRabbit · not reviewed yet`, `CodeRabbit · <n>
-commit(s) since the last review` or `CodeRabbit · the last review didn't land` (`Request review`), each with `· not refreshed since <age>` after a failed read. No row
-for `reviewing`, `clean`, `unknown` or an unread review, none for an `Also:` MR, none for a lead that is not open. The button is hidden where it can never work and
+commit(s) since the last review` or `CodeRabbit · the last review didn't land` (`Request review`), each with `· not refreshed since <age>` after a failed read.
+No row
+for `reviewing`, `clean`, `unknown` or an unread review, none for an `Also:` MR, none for a lead that is not open. The button is hidden where it can never work
+and
 disabled, titled with the session's name, while the live-session gate holds ([board.md](rules/board.md)); it opens the Run launch sheet in review mode (§8.9.5).
 
-**The track** (`DeliveryTrack`, `components/ui/`; `.jira-dlv-*`). Five equal columns — `Pushed`, `MR open`, `Pipeline`, `Review`, then `Merged` or `Closed` — the
-steps an array so a step can be inserted without a surface changing (`Review` was, CodeRabbit spec §5.1). Full shape (Detail): a 22 px dot per step on a 2 px rail drawn INTO each
+**The track** (`DeliveryTrack`, `components/ui/`; `.jira-dlv-*`). Five equal columns — `Pushed`, `MR open`, `Pipeline`, `Review`, then `Merged` or `Closed` —
+the
+steps an array so a step can be inserted without a surface changing (`Review` was, CodeRabbit spec §5.1). Full shape (Detail): a 22 px dot per step on a 2 px
+rail drawn INTO each
 step from the previous one, the label at 12/500 `--ink` (`--ink3` when off) and a word under it at 12 `--ink3` — Pushed and MR open the created-at age,
 Pipeline the table's word, Merged the merged-at age. Marks are a fill and a ring together, never a shade alone: on `--fill-progress`, green `--green-solid`,
 amber `--amber-solid`, red `--red`, magenta `--magenta`, grey `--ink3`, off a hollow `--hairline2` ring; a tick on a reached step and a cross on a failed
@@ -807,10 +818,12 @@ widths around it:
 | table `min-width`      | 1120 px          | 1376 px       |
 | scrolls inside         | `max-width:` 1121 | `max-width:` 1377 |
 
-**The quick filter.** `All`, `Has MR`, `Pipeline failing`, `Done, not merged`, `Review open` — a `Delivery` section of 28 px `Chip`s in the Filters panel (counted by the
+**The quick filter.** `All`, `Has MR`, `Pipeline failing`, `Done, not merged`, `Review open` — a `Delivery` section of 28 px `Chip`s in the Filters panel
+(counted by the
 funnel's badge) and, on the List only, the same value as a `Segmented` right-aligned above the table (`.jira-issues-quick`). It ANDs with the other filters
 per issue, so a top is kept when a folded child's own MR matches. `Has MR` is a lead that is not closed; `Pipeline failing` an open, non-draft lead whose
-pipeline failed (the band's `failing`); `Done, not merged` exactly the `not merged` chip. `Review open` an open lead (own or inherited) whose review state is `open`.
+pipeline failed (the band's `failing`); `Done, not merged` exactly the `not merged` chip. `Review open` an open lead (own or inherited) whose review state is
+`open`.
 
 **Detail's pane.** The head: the `Delivery` label, the lead's `!iid ↗` link out (a new tab with no referrer, `Open in Jira ↗`'s rule), `via <PARENT>` when
 inherited, `<repo> → <target branch>` at 12 `--ink3`, and `polled <age>` of the lead's own project pushed right. Then the full track, then, above a hairline,

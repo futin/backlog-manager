@@ -124,16 +124,16 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   else. Do not hide `Run ▾` on `BM_AGENTS` off to match the Board's buttons. Why:
   [invariants.md](docs/subsystems/invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake)
 - **The CodeRabbit button is the MR's, not Run ▾'s: `JiraRunMenu` never offers `review`, and the Detail row opens the launch sheet already set.** `ReviewRow`
-  (`components/jira/ReviewRow.tsx`) draws under Detail's delivery track for the LEAD MR only (`Also:` MRs get none), and only where `reviewRowText` has a sentence —
-  absent for `reviewing`, `clean`, `unknown` and an unread review. Its button is HIDDEN, not disabled, where it can never work (no candidate repo, agents off or not
-  yet answered, no `onReview`) and DISABLED with a title naming the session while `reviewGate` holds (a live `run` link or `status.live` entry on the key, or a
-  live link or `working`/`question` row on the MR's source branch in a candidate); dispatch's 409s stay the authority for what the client cannot see. The click calls
-  `DeliveryPane`'s `onReview`, threaded through `JiraDetail` to `JiraView`'s launch state, and dispatches nothing itself. The sheet in review mode (`review` prop)
-  shows ONE pressed tile (`Fix review` / `Request review`), offers only the MR's candidate repos (`GitlabProjectView.repos`, not every path the project maps),
-  and locks the branch to `continue` on the MR's source branch (`useBranchState`'s `locked`, so the preview, Copy and Start carry one choice); the MR and half ride the
-  preview's query and Start's body. Every sentence is `lib/review-copy.ts`'s and the state is `shared/review.ts`'s, derived at draw time against `now`, so the step,
-  the row, the chip and the `Review open` filter cannot word one MR two ways.
-  Why: [invariants.md](docs/subsystems/invariants.md#the-coderabbit-button-belongs-to-the-mr-never-to-run)
+  (`components/jira/ReviewRow.tsx`) draws under Detail's delivery track for the LEAD MR only (`Also:` MRs get none), and only where `reviewRowText` has a
+  sentence — absent for `reviewing`, `clean`, `unknown` and an unread review. Its button is HIDDEN, not disabled, where it can never work (no candidate repo,
+  agents off or not yet answered, no `onReview`) and DISABLED with a title naming the session while `reviewGate` holds (a live `run` link or `status.live` entry
+  on the key, or a live link or `working`/`question` row on the MR's source branch in a candidate); dispatch's 409s stay the authority for what the client
+  cannot see. The click calls `DeliveryPane`'s `onReview`, threaded through `JiraDetail` to `JiraView`'s launch state, and dispatches nothing itself. The sheet
+  in review mode (`review` prop) shows ONE pressed tile (`Fix review` / `Request review`), offers only the MR's candidate repos (`GitlabProjectView.repos`, not
+  every path the project maps), and locks the branch to `continue` on the MR's source branch (`useBranchState`'s `locked`, so the preview, Copy and Start carry
+  one choice); the MR and half ride the preview's query and Start's body. Every sentence is `lib/review-copy.ts`'s and the state is `shared/review.ts`'s,
+  derived at draw time against `now`, so the step, the row, the chip and the `Review open` filter cannot word one MR two ways. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-coderabbit-button-belongs-to-the-mr-never-to-run)
 - **A crashed run renders as crashed, never as nothing.** The Board counts it in `RunChip`'s own line (`1 run · crashed ›`) and says nothing the payload does
   not carry; badges, card live strips and `runClaimBlock` stay freshness-based. The Runs page reads the same payload (bug-29): `MergedRun.live` is the data
   authority, `MergedRun.isLive` the presentation gate; both status badges read `crashed` through `runStatusChip` (`lib/run-stage.ts`), never from `authority`,

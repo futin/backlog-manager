@@ -52,7 +52,8 @@ cuts the oldest finished MRs, never an open one. Then one detail read per kept o
 request count is bounded by `1 + projects × 5 + open MRs × (1 + 3)` (the `1` being an identity read when one is due; the `3` the review's discussion pages).
 
 **Failure keeps the last answer.** A failed list keeps the project's MRs and `polledAt` and sets `failed` (a 403/404 is `cannot-read`, that project's
-problem line); a failed detail read keeps that MR's last pipeline, and a failed review read keeps its last good review flagged `failed`. One 429 stores one `retryAt` (`Retry-After`, else `GITLAB_RATE_LIMIT_DEFAULT_MS`),
+problem line); a failed detail read keeps that MR's last pipeline, and a failed review read keeps its last good review flagged `failed`. One 429 stores one
+`retryAt` (`Retry-After`, else `GITLAB_RATE_LIMIT_DEFAULT_MS`),
 expired where it is read. A refused token stops a sweep before any project is asked, so while the state is `rejected`, `payload()` marks every project never
 read as `failed` too — its tickets read "could not be read", not "not read yet" (spec §7.2).
 
@@ -79,9 +80,9 @@ call behave exactly as in the detail read. Merged and closed MRs are not read an
 beginning `@<bot> review` or `@<bot> full review`; a finding is a discussion opened by the bot with a resolvable note, open until every resolvable note in it is
 resolved; its severity is the bold badge on the note's first line. A round lands on the bot's `Actionable comments posted:` note or on the bot's edited reply in
 the trigger's own discussion, whichever is earlier; `commitsSince` sums the `added N commit(s)` system notes after the landing. The state — `none`, `reviewing`,
-`open`, `stale`, `clean`, `unknown` — is `reviewState(review, now)` in `shared/review.ts`, derived where it is drawn, so a trigger that never lands stops reading
-`reviewing` after 30 minutes without any sweep noticing. `reviewHalf(state)` maps it to what a button may do: `open` fixes, `none` and `stale` request, the rest
-offer nothing.
+`open`, `stale`, `clean`, `unknown` — is `reviewState(review, now)` in `shared/review.ts`, derived where it is drawn, so a trigger that never lands stops
+reading `reviewing` after 30 minutes without any sweep noticing. `reviewHalf(state)` maps it to what a button may do: `open` fixes, `none` and `stale` request,
+the rest offer nothing.
 
 **Dispatch reads the cache.** `findMr` and `reposFor` answer review dispatch from memory (see [jira.md](jira.md#the-review-action)); no request is made for a
 click, so a review is decided on the age of the last read and the sheet's half is re-derived and refused with a 409 when it moved.
@@ -114,7 +115,9 @@ stayed read-only toward GitLab — the notes and the fixes are the session's, wi
 
 ## Tests
 
-`gitlab-env`, `gitlab-remote`, `gitlab-client`, `gitlab-mapping`, `gitlab-poller`, `gitlab-review-fold`, `review-state` and `gitlab-routes` cover the server; `compose-env` pins the compose
-pass-through; `delivery-lib` covers `lib/delivery.ts` and `review-copy` `lib/review-copy.ts`; `gitlab-context`, `sources-group`, `jira-delivery-pane`, `jira-delivery-surfaces`, `jira-list` and
+`gitlab-env`, `gitlab-remote`, `gitlab-client`, `gitlab-mapping`, `gitlab-poller`, `gitlab-review-fold`, `review-state` and `gitlab-routes` cover the server;
+`compose-env` pins the compose
+pass-through; `delivery-lib` covers `lib/delivery.ts` and `review-copy` `lib/review-copy.ts`; `gitlab-context`, `sources-group`, `jira-delivery-pane`,
+`jira-delivery-surfaces`, `jira-list` and
 `jira-board` cover the client. `test/helpers/gitlab.ts` builds payloads, and `test/helpers/no-gitlab.tsx` hands a pending answer through the raw context, for
 suites that mount `SettingsView` (whose Sources card needs the provider) without stubbing `/api/gitlab`.

@@ -4191,24 +4191,25 @@ task-46's Outcome.
 
 ## `agents/` reads the GitLab poller's cache and never calls GitLab
 
-The CodeRabbit review action (spec `2026-11-13-coderabbit-review-design.md` §6) is dispatched by `JiraDispatchService`, which lives in `agents/`, but the facts it
-checks — is this MR cached and open, which local checkouts are its candidates, what state is its review in — are the GitLab poller's. There were two ways to get
-them. A GitLab call from `agents/` would be a second GitLab client beside `GitlabClient`: a second place the token is sent, a second redirect policy, a second
-request budget the 429 window does not know about, and a read the board never saw — so a button drawn from one answer could be refused from another. Reading the
-poller's cache (`findMr`, `reposFor`) means the dispatch sees exactly what the board drew its button from, costs no request, and leaves `gitlab/` the only module
-that dials GitLab, which is what the outbound-calling modules rule above promises.
+The CodeRabbit review action (spec `2026-11-13-coderabbit-review-design.md` §6) is dispatched by `JiraDispatchService`, which lives in `agents/`, but the facts
+it checks — is this MR cached and open, which local checkouts are its candidates, what state is its review in — are the GitLab poller's. There were two ways to
+get them. A GitLab call from `agents/` would be a second GitLab client beside `GitlabClient`: a second place the token is sent, a second redirect policy, a
+second request budget the 429 window does not know about, and a read the board never saw — so a button drawn from one answer could be refused from another.
+Reading the poller's cache (`findMr`, `reposFor`) means the dispatch sees exactly what the board drew its button from, costs no request, and leaves `gitlab/`
+the only module that dials GitLab, which is what the outbound-calling modules rule above promises.
 
 So `AgentsModule` imports `GitlabModule`, and the edge runs agents → gitlab and never back, like agents → jira. It is acyclic because `GitlabModule` imports
 `JiraModule` (for `JiraLiveService.onReposChanged`) and `JiraModule` imports neither `agents/` nor `gitlab/`'s module: `jira/prompt.util.ts` takes one pure
-helper, `isGitlabProjectPath`, from `gitlab/remote.util.ts` — a file with no Nest in it — to shape an MR's project path, which is why that helper lives there and
-not in the poller. The price is that a review is decided on cache age: the GitLab sweep runs every two minutes and a review's own facts can be ten minutes old,
-so dispatch can accept a review the MR has since outgrown. The half check (a 409 when the cached state no longer derives the half the sheet previewed) and the
-session's own read of the MR through its skill are what catch that; the spec accepts the window rather than pay for a live read on every click.
+helper, `isGitlabProjectPath`, from `gitlab/remote.util.ts` — a file with no Nest in it — to shape an MR's project path, which is why that helper lives there
+and not in the poller. The price is that a review is decided on cache age: the GitLab sweep runs every two minutes and a review's own facts can be ten minutes
+old, so dispatch can accept a review the MR has since outgrown. The half check (a 409 when the cached state no longer derives the half the sheet previewed) and
+the session's own read of the MR through its skill are what catch that; the spec accepts the window rather than pay for a live read on every click.
 
 ## A review is read as facts, and its state is derived where it is drawn
 
 The poller stores what the discussions SAY about CodeRabbit (`foldReview`: the triggers, the findings, the rounds, the commits since) and never what they MEAN.
-Meaning needs a clock — a trigger that never lands is `reviewing` for half an hour and `unknown` after — and a poller that wrote the word would keep it until
+Meaning needs a clock — a trigger that has not landed reads `reviewing` for 30 minutes and then stops reading `reviewing`, falling to `stale` when an earlier
+round landed and to `none` when none did (`unknown` is only a capped read with nothing open) — and a poller that wrote the word would keep it until
 the next sweep happened to rewrite it, so a stuck trigger would read as live for as long as nothing else on the MR moved. `reviewState(review, now)` runs where
 the track is drawn and where dispatch decides, so both read the same minute.
 
@@ -4234,9 +4235,9 @@ session slipping through that window is a redundant comment, and a gate that rea
 ## The CodeRabbit button belongs to the MR, never to Run
 
 A review acts on one merge request's threads, and `Run ▾` is a ticket's menu: it has no MR to name, and a row in it would either guess the lead MR or add a pick
-the launch sheet already owns. So the button lives on the row under the MR's own track, `JiraRunMenu` never offers `review`, and the row opens the sheet pre-set:
-one tile, the MR's source branch locked as `continue`, and only the repos the MR resolves to. A review on any other branch would be a review of a different
-change, and a tile or a branch the person can change would let the sheet disagree with the MR the row drew.
+the launch sheet already owns. So the button lives on the row under the MR's own track, `JiraRunMenu` never offers `review`, and the row opens the sheet
+pre-set: one tile, the MR's source branch locked as `continue`, and only the repos the MR resolves to. A review on any other branch would be a review of a
+different change, and a tile or a branch the person can change would let the sheet disagree with the MR the row drew.
 
 ## The claim protocol: lowest live comment id wins
 

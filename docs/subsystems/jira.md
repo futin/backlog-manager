@@ -497,19 +497,19 @@ failed re-read, re-composition or spawn. The write is not undone, and the senten
 
 ### The review action
 
-`{ action: 'review', mr: { project, iid }, half: 'request' | 'fix' }` is the third built-in, started from the delivery track's CodeRabbit row, never from `Run ▾`. The
-mechanism is in [`.claude/rules/jira.md`](../../.claude/rules/jira.md); the reasoning is the [spec](../superpowers/specs/2026-11-13-coderabbit-review-design.md).
-The controller validates `mr` (`parseReviewMr`: the path through `isGitlabProjectPath`, the iid a positive integer of at most nine digits) and `half`
-(`parseReviewHalf`), and `resolveJiraActionOrThrow` refuses a bare `review`. `JiraDispatchService` then runs `reviewOrThrow` as step 3a, after the mapping check
-and the dashboard gate and before `live.reserve`, from the GitLab poller's cache alone (`findMr`, `reposFor`) — no GitLab request for a click: the MR must be
-an open one of this key, the repo one of its candidates, the branch the MR's own source branch (a review always continues one), and the half the cache still
-derives (`reviewState(review, now)` → `reviewHalf`), else 409 `the review on !<iid> moved on — reopen the sheet`. The prompt (`reviewText`) names the CACHED MR
-and half, carries no finding text, and tells the session to use the `mr-review-loop` skill.
+`{ action: 'review', mr: { project, iid }, half: 'request' | 'fix' }` is the third built-in, started from the delivery track's CodeRabbit row, never from `Run
+▾`. The mechanism is in [`.claude/rules/jira.md`](../../.claude/rules/jira.md); the reasoning is the
+[spec](../superpowers/specs/2026-11-13-coderabbit-review-design.md). The controller validates `mr` (`parseReviewMr`: the path through `isGitlabProjectPath`, the
+iid a positive integer of at most nine digits) and `half` (`parseReviewHalf`), and `resolveJiraActionOrThrow` refuses a bare `review`. `JiraDispatchService`
+then runs `reviewOrThrow` as step 3a, after the mapping check and the dashboard gate and before `live.reserve`, from the GitLab poller's cache alone (`findMr`,
+`reposFor`) — no GitLab request for a click: the MR must be an open one of this key, the repo one of its candidates, the branch the MR's own source branch (a
+review always continues one), and the half the cache still derives (`reviewState(review, now)` → `reviewHalf`), else 409 `the review on !<iid> moved on — reopen
+the sheet`. The prompt (`reviewText`) names the CACHED MR and half, carries no finding text, and tells the session to use the `mr-review-loop` skill.
 
-Step 4b is the branch gate, synchronous with `live.reserve`: `branchBusy` refuses a review while another review hold (`branchHolds`, memory only, keyed
-`<main checkout>\0<branch>`, released on a failed spawn and on a no-id desktop launch), a live link of any `how` on that branch (`mainCheckoutOf` of its repo), or a
-live dashboard row on it exists. The links and the dashboard rows can be 15 to 60 s stale; the spec accepts that, because the second session would only add
-its own comment.
+Step 4b is the branch gate, synchronous with `live.reserve`: `branchBusy` refuses a review while another review hold (`branchHolds`, memory only, keyed `<main
+checkout>\0<branch>`, released on a failed spawn and on a no-id desktop launch), a live link of any `how` on that branch (`mainCheckoutOf` of its repo), or a
+live dashboard row on it exists. The links and the dashboard rows can be 15 to 60 s stale; the spec accepts that, because the second session would only add its
+own comment.
 
 ### `POST /api/agents/jira-stop`
 
@@ -672,8 +672,9 @@ The repo/branch work adds `jira-branch` (Tables A–E of `shared/jira-branch.ts`
 (`/refs`, `/worktrees`, the prompt's branch parameters), `jira-prompt` (the workspace block, the placeholders, Open MR), `agents-dispatch-jira`, `compose-env`
 (the second mount, `BM_REPO_ROOTS`), `jira-lib`, `jira-launch` (the Branch section), `jira-setup` (the row defaults and the path's worktrees), `jira-board`
 (the chip) and `jira-detail` (the Worktrees list). `skills/jira/tools/jira.test.mjs` (node) covers `worktree` over real temp repos and its own Tables A and B.
-The CodeRabbit review work adds `review-state`, `review-copy` and `gitlab-review-fold`, and widens `agents-dispatch-jira` (the review dispatch, the branch gate),
-`agents-jira-live`, `jira-prompt`, `jira-routes`, `jira-launch` (the review sheet), `jira-delivery-pane`, `jira-delivery-surfaces`, `jira-board`, `jira-lib` and `delivery-lib`.
+The CodeRabbit review work adds `review-state`, `review-copy` and `gitlab-review-fold`, and widens `agents-dispatch-jira` (the review dispatch, the branch
+gate), `agents-jira-live`, `jira-prompt`, `jira-routes`, `jira-launch` (the review sheet), `jira-delivery-pane`, `jira-delivery-surfaces`, `jira-board`,
+`jira-lib` and `delivery-lib`.
 `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a per-request failure hook; `test/helpers/env.ts` blanks
 the three keys so no suite inherits a developer's credentials. `test/compose-env.test.ts` pins the compose passthrough.
 The Jira sessions work adds `jira-sessions-state` (`sessionState` and `needsYou`) and widens `jira-live` (the store, its file, retention, the one-run gate),

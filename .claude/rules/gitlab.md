@@ -29,8 +29,8 @@ paths: ["server/src/gitlab/**"]
   triggers (`reviewDue`, `poller.service.ts`): the MR's `updated_at` is not the one stored at the last SUCCESSFUL read (`ProjectCache.reviewSeen`, server-only,
   advanced only by a read that succeeded), its facts have never been read, or its state is `reviewing`/`open` and the facts are over `REVIEW_REREAD_MS` (10 min)
   old — GitLab need not bump `updated_at` when a thread is resolved. Every page must answer 200 or the whole read fails: a fold is never built from a partial
-  set, and a third page that is still full sets `capped`. A merged or closed MR is never read and carries `review: null`, which means NOT READ, never "no review".
-  Why: [invariants.md](docs/subsystems/invariants.md#a-review-is-read-as-facts-and-its-state-is-derived-where-it-is-drawn)
+  set, and a third page that is still full sets `capped`. A merged or closed MR is never read and carries `review: null`, which means NOT READ, never "no
+  review". Why: [invariants.md](docs/subsystems/invariants.md#a-review-is-read-as-facts-and-its-state-is-derived-where-it-is-drawn)
 - **The fold is facts, never a state.** `foldReview` (`review.util.ts`, pure, no clock) turns discussions into `GitlabReview` (`open`, `resolved`, `worst`,
   `bySeverity`, `triggeredAt`, `landedAt`, `commitsSince`, `capped`, `readAt`, `failed`) for the bot named by `gitlabReviewBot()` (`env.util.ts`:
   `BM_GITLAB_REVIEW_BOT` trimmed, blank or unset is `coderabbitai`, read per call, passed by compose as `'${BM_GITLAB_REVIEW_BOT:-}'`). The state is
@@ -39,11 +39,12 @@ paths: ["server/src/gitlab/**"]
   leaves them untouched, and an MR never read successfully stays `null`. Every rule in the fold is an observation of how CodeRabbit behaves on Timify's GitLab,
   so each one is a small exported function (`isTrigger`, `parseSeverity`, `countAddedCommits`) a test pins.
   Why: [invariants.md](docs/subsystems/invariants.md#a-review-is-read-as-facts-and-its-state-is-derived-where-it-is-drawn)
-- **The cache is readable by `agents/` through two methods and nothing else.** `findMr(project, iid)` (the GitLab path exact — `GRP/proj` is not `grp/proj`)
-  and `reposFor(jiraProject, gitlabProject)` answer from memory, as copies, with no request: review dispatch must see what the board saw. `GitlabProjectTarget.repos`
-  (mapping) is per Jira key, because a checkout mapped under `OPS` is no review candidate for a `PAY` ticket; `GitlabProjectView.repos` carries the same list to
-  the client. `isGitlabProjectPath` (`remote.util.ts`) is the pure shape check `jira/`'s review prompt validates an MR's project with — see jira.md.
-  Why: [invariants.md](docs/subsystems/invariants.md#a-review-is-read-as-facts-and-its-state-is-derived-where-it-is-drawn)
+- **The cache is readable by `agents/` through two methods and nothing else.** `findMr(project, iid)` (the GitLab path exact — `GRP/proj` is not `grp/proj`) and
+  `reposFor(jiraProject, gitlabProject)` answer from memory, as copies, with no request: review dispatch must see what the board saw.
+  `GitlabProjectTarget.repos` (mapping) is per Jira key, because a checkout mapped under `OPS` is no review candidate for a `PAY` ticket;
+  `GitlabProjectView.repos` carries the same list to the client. `isGitlabProjectPath` (`remote.util.ts`) is the pure shape check `jira/`'s review prompt
+  validates an MR's project with — see jira.md. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-review-is-read-as-facts-and-its-state-is-derived-where-it-is-drawn)
 - **An MR's ticket keys come from `keysInBranch`, over its source branch and its title (`mrKeys`), never a pattern of its own**, because an MR and a Jira
   session must agree on which ticket a branch belongs to: `timify-1234-x` is never `TIMIFY-123`. An MR naming none of its project's mapped keys is dropped.
 - **The state's precedence is identity first: `checking`, `rejected` (401/403 on `/user`), `unreachable`, then `idle` (zero projects) or `connected`.** A
