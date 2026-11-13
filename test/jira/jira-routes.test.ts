@@ -135,6 +135,9 @@ describe('unconfigured', () => {
     expect((await get('/prompt?key=pay-1&action=execute&repo=%2Fwork%2Fpay').expect(400)).body).toEqual({ error: 'invalid issue key' });
     // The branch choice is shape too (Task 6): a missing mode is a 400 where the same request with a mode is a 503.
     expect((await get('/prompt?key=PAY-131&action=execute&repo=%2Fwork%2Fpay').expect(400)).body).toEqual({ error: 'mode must be new, continue or none' });
+    expect((await get('/prompt?key=PAY-131&action=execute&repo=%2Fwork%2Fpay&mode=continue&branch=x&review=maybe').expect(400)).body).toEqual({
+      error: 'review must be true or false'
+    });
     expect((await get('/refs').expect(400)).body).toEqual({ error: 'repo is required' });
     expect((await get('/refs?repo=%2Fwork%2Fpay&key=pay-1').expect(400)).body).toEqual({ error: 'invalid issue key' });
   });

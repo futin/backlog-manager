@@ -253,10 +253,16 @@ export function JiraBranchSection({
       )}
 
       {ready && action === 'execute' && draft.mode !== 'none' && (
-        <div className="sheet-check">
-          <Switch checked={draft.openMr} onChange={(openMr) => set({ openMr })} label="Open MR when done" />
-          <span>open MR when done — push the branch and open one merge request</span>
-        </div>
+        <>
+          <div className="sheet-check">
+            <Switch checked={draft.review} onChange={(review) => set({ review })} label="Review before finishing" />
+            <span>review before finishing — review the commit against the ticket, fix what it finds, and only then push or move the ticket</span>
+          </div>
+          <div className="sheet-check">
+            <Switch checked={draft.openMr} onChange={(openMr) => set({ openMr })} label="Open MR when done" />
+            <span>open MR when done — push the branch and open one merge request</span>
+          </div>
+        </>
       )}
       {ready && action === 'execute' && draft.mode === 'continue' && draft.openMr && (
         <label className="sheet-field">

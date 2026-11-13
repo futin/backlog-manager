@@ -39,7 +39,7 @@ export class JiraAgentsController {
    * `dispatch`'s reasons: `clampMode` and `pickFrom` are where a junk value becomes a safe one, never a refusal. 200, not Nest's default 201 for a POST:
    * what this answers is a session that started elsewhere, not a resource this server now holds.
    *
-   * The branch choice (`mode`, `branch`, `base`, `openMr`, `target`) is read by `parseBranchChoice`, which `GET /api/jira/prompt` calls too, so a preview and a
+   * The branch choice (`mode`, `branch`, `base`, `openMr`, `review`, `target`) is read by `parseBranchChoice`, which `GET /api/jira/prompt` calls too, so a preview and a
    * Start refuse a choice in the same sentence. The service takes the PARSED choice as `choice` and reads none of the wire's flat fields: `mode` is set from
    * the parsed value only because the request type says it is required.
    */

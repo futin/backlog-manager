@@ -1010,7 +1010,7 @@ export function transitionOptions(transitions: readonly JiraTransition[]): { val
  * is built by `URLSearchParams`, so the repository's slashes and a skill's colon are escaped exactly once, here.
  *
  * `branch` is the sheet's choice and `mode` always rides (the route 400s without it). The other four go out only with the modes they belong to — `base` with
- * `new`, `target` with `continue` and only when set, `openMr` only when true — because the server refuses a field that does not belong (`base is only for a new
+ * `new`, `target` with `continue` and only when set, `openMr` and `review` only when true — because the server refuses a field that does not belong (`base is only for a new
  * branch`) rather than ignoring it, so a client that sent every field blank would be refused for the ones it did not mean.
  */
 export async function fetchJiraPrompt(
@@ -1031,6 +1031,7 @@ export async function fetchJiraPrompt(
     query.set('branch', branch.branch);
     if (branch.mode === 'new') query.set('base', branch.base);
     if (branch.openMr) query.set('openMr', 'true');
+    if (branch.review) query.set('review', 'true');
     if (branch.mode === 'continue' && branch.target !== null) query.set('target', branch.target);
   }
   const res = await fetch(`/api/jira/prompt?${query.toString()}`);
@@ -1200,6 +1201,7 @@ export interface BranchDraft {
   base: string;
   continueBranch: string;
   openMr: boolean;
+  review: boolean;
   target: string;
 }
 
@@ -1207,7 +1209,8 @@ export interface BranchDraft {
  * The draft the sheet opens with (spec §5.3): `branchSheetDefaults` decides the mode, and the two modes it did not pick are filled anyway, as they would open
  * if picked — New from the pattern and the default base (the same call with the ticket's branches taken away, so one derivation names both), Continue on the
  * first ticket branch the mapped checkout does not hold, else nothing. The MR target opens on the repo's default base — the stored one when refs could not be
- * read — and the switch itself always opens off (spec §5.6).
+ * read — and the Open MR switch always opens off (spec §5.6) while Review before finishing opens ON — a review before the work is called done is the default, and
+ * turning it off is the person's explicit choice.
  */
 export function branchDraft(
   action: JiraAction,
@@ -1226,29 +1229,32 @@ export function branchDraft(
     base: fresh.base,
     continueBranch: picked.mode === 'continue' ? picked.branch : (ticket?.name ?? ''),
     openMr: false,
+    review: true,
     target: refs !== null && refs.available ? (refs.defaultBase ?? '') : (defaults?.base ?? '')
   };
 }
 
 /**
- * The choice the draft stands for. `openMr` is `execute`'s alone (a skill's prompt is its template, with no commit rule to amend — spec §5.6), and `target`
+ * The choice the draft stands for. `review` is `execute`'s alone too, and only with a branch — `mode: 'none'` carries none, and a skill's prompt has no finish
+ * step to review before. `openMr` is `execute`'s alone (a skill's prompt is its template, with no commit rule to amend — spec §5.6), and `target`
  * rides only with Continue and the MR on, because the server refuses it anywhere else; a blank target is `null`, "the repository's default branch".
  */
 export function branchChoiceOf(draft: BranchDraft, action: JiraAction): JiraBranchChoice {
   const openMr = action === 'execute' && draft.openMr;
+  const review = action === 'execute' && draft.review;
   if (draft.mode === 'none') return { mode: 'none' };
-  if (draft.mode === 'new') return { mode: 'new', branch: draft.newBranch, base: draft.base, openMr };
-  return { mode: 'continue', branch: draft.continueBranch, openMr, target: openMr && draft.target !== '' ? draft.target : null };
+  if (draft.mode === 'new') return { mode: 'new', branch: draft.newBranch, base: draft.base, openMr, review };
+  return { mode: 'continue', branch: draft.continueBranch, openMr, review, target: openMr && draft.target !== '' ? draft.target : null };
 }
 
 /**
  * The choice as `POST /api/agents/dispatch-jira`'s five flat fields — the same rule `fetchJiraPrompt` follows on its query: each field only with the mode it
- * belongs to, because the server refuses a stray one (`base is only for a new branch`) rather than ignoring it. `openMr` goes out as the boolean it is.
+ * belongs to, because the server refuses a stray one (`base is only for a new branch`) rather than ignoring it. `openMr` and `review` go out as the booleans they are.
  */
-export function branchDispatchFields(choice: JiraBranchChoice): Pick<JiraDispatchRequest, 'mode' | 'branch' | 'base' | 'openMr' | 'target'> {
+export function branchDispatchFields(choice: JiraBranchChoice): Pick<JiraDispatchRequest, 'mode' | 'branch' | 'base' | 'openMr' | 'review' | 'target'> {
   if (choice.mode === 'none') return { mode: 'none' };
-  if (choice.mode === 'new') return { mode: 'new', branch: choice.branch, base: choice.base, openMr: choice.openMr };
-  return { mode: 'continue', branch: choice.branch, openMr: choice.openMr, ...(choice.target !== null ? { target: choice.target } : {}) };
+  if (choice.mode === 'new') return { mode: 'new', branch: choice.branch, base: choice.base, openMr: choice.openMr, review: choice.review };
+  return { mode: 'continue', branch: choice.branch, openMr: choice.openMr, review: choice.review, ...(choice.target !== null ? { target: choice.target } : {}) };
 }
 
 /**

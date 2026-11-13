@@ -53,7 +53,7 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   field by field) carries the launch sheet's EDITED `prompt` — sent only once the box was edited, shape-checked alone (a non-empty string, at most
   `JIRA_PROMPT_MAX`, else 400 `prompt must be a non-empty string` / `prompt too long` before any Jira write), and spawned as written with no composition
   run, the link, worktree choice and writes still following the other fields — the session is handed `composeJiraPrompt`'s text (`server/src/jira/prompt.util.ts`), the one function behind
-  `GET /api/jira/prompt` and the dispatch's one composition, made before any Jira write — so a preview, a length check and a spawn cannot disagree. What a caller can influence is
+  `GET /api/jira/prompt` and the dispatch's one composition, made before any Jira write — so a preview, a length check and a spawn cannot disagree. With the body's `review` on (execute with a branch only), `execute` reorders: commit, review with the jira skill's `references/review.md`, and only on approve the transition and the closing rule; a skill without that file means stop — no transition, no push, no MR; off, the text is unchanged byte for byte. What a caller can influence is
   `key` (`isJiraKey`), the `repo` (proved against the mapping) and the action pick above.
   For `review` it also influences `mr` (`{ project, iid }`: the path through `isGitlabProjectPath`, the iid a positive integer) and `half` (`request` or `fix`),
   both shape-validated by the controller and then checked against the GitLab poller's cache by `JiraDispatchService` (`findMr`, `reposFor`) — the prompt names

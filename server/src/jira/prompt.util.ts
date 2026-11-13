@@ -20,6 +20,12 @@
  * template, and it counts toward the cap (at most 600 characters of fixed text, plus the repo, branch, base and path it names — a test measures the fixed
  * part). `null` for the workspace is mode `none` and changes nothing.
  *
+ * **The review gate is execute's alone** (docs/superpowers/specs/2026-11-13-jira-review-gate-design.md). A workspace with `review` on reorders `execute`:
+ * commit, review that commit with the jira skill's `references/review.md` against the base, and only on its `approve` move the ticket and push — so a
+ * ticket never reads Done, and no MR opens, for a change that failed its review. It adds at most 500 characters of fixed text (a test measures it, as it
+ * measures the block's 600) and counts toward the cap like everything else. Off, the execute prompt is what it was before the gate, byte for byte; the
+ * context and skill prompts never look at the flag.
+ *
  * The cap is `JIRA_PROMPT_MAX`, the dashboard's own `PROMPT_CAP` — NOT the 8 000 `PROMPT_MAX` the item-dispatch paste bound uses. Over it is `{ ok: false }`,
  * which both routes turn into a 400 before any write. A built-in is far under it; a skill's template is at most 2 000, so a prompt is over only when its
  * placeholders (a long repo path, say) are.
@@ -71,10 +77,22 @@ export function workspaceBlock(key: string, repo: string, ws: JiraWorkspace): st
  */
 function closingRule(ws: JiraWorkspace | null): string {
   if (ws === null || !ws.openMr) return COMMIT_RULE;
+  return `${STAGING_RULE} ${closingTail(ws)}`;
+}
+
+/**
+ * `COMMIT_RULE` up to, not including, its `Do not push.`: the staging half, which says to commit and how. The review gate needs it on its own, because it
+ * commits BEFORE the review (the reviewer reads a commit, not a dirty tree) and decides about the push only AFTER it. A `COMMIT_RULE` that stopped ending in
+ * ` Do not push.` would leave this whole and the review-on prompt saying it twice — `jira-prompt.test.ts` counts `Do not push.` to catch exactly that.
+ */
+const STAGING_RULE = COMMIT_RULE.replace(/ Do not push\.$/, '');
+
+/** Where `closingRule` ends, without the staging half: `Do not push.` with the MR off, else the push and the one merge request (its comment has the why). */
+function closingTail(ws: JiraWorkspace | null): string {
+  if (ws === null || !ws.openMr) return 'Do not push.';
   const into = ws.target ?? ws.base ?? "the repository's default branch";
   return (
-    COMMIT_RULE.replace(/ Do not push\.$/, '') +
-    ` Then push the branch and open one merge request from it into ${into}: on GitLab use the mr-review-loop skill if it is installed, otherwise ` +
+    `Then push the branch and open one merge request from it into ${into}: on GitLab use the mr-review-loop skill if it is installed, otherwise ` +
     '`glab mr create`; on GitHub use `gh pr create`; if neither applies, push and report the exact command to run by hand. A merge request that fails to open ' +
     'is not a failure of this session: say that the branch is pushed and give the command.'
   );
@@ -85,14 +103,29 @@ function closingRule(ws: JiraWorkspace | null): string {
  * none is a judgement for the person, and the session is told to say so rather than pick. The workspace block owns the branch step, so the instruction no
  * longer says "create a branch" (a Run with no branch is refused for `execute` upstream). The commit rule is item dispatch's, imported from `shared/agent.ts`
  * (`server/src/jira/` imports no `agents/` service or prompt code; the one allowed import from there is the `SameOriginPostGuard`, spec §3).
+ *
+ * With the review gate on (`ws.review`, docs/superpowers/specs/2026-11-13-jira-review-gate-design.md) the order changes, and only then: commit first (the
+ * staging half of the rule), review that commit with the jira skill's `references/review.md`, and only on its `approve` the transition and the closing tail
+ * (`Do not push.`, or the push and the MR). The transition moves after the review because a ticket must not read Done for a change that failed its review,
+ * and the push and the MR move with it for the same reason. The base the review is told is the one the MR would go into — `target`, else `base` — and with
+ * neither it says "the repository's default branch", the words `review.md` §3 resolves from `origin/HEAD`. The fail-closed sentence is for a server that
+ * ships ahead of the plugin (`skills/` changes nothing until it is pushed and synced): a session whose jira skill has no review reference must stop rather
+ * than read "review" as optional and finish unreviewed. Off — and always with no workspace — the text is what it was before the gate, byte for byte, which
+ * `jira-prompt.test.ts` pins with literals composed before the change.
  */
 function executeText(key: string, ws: JiraWorkspace | null): string {
-  return (
+  const work =
     `Work on Jira ticket ${key} in this repository, end to end. ${readTicket(key)} Then implement what the ticket asks and verify the change with the ` +
-    "repository's own tests and checks. Then use the backlog-manager:jira skill: run `jira.mjs transitions " +
-    `${key}\` and, only if it offers exactly one transition whose target category is done, apply it with \`jira.mjs transition ${key} <id>\`; otherwise ` +
-    "leave the ticket's status alone and say so in your report. Report what you changed. " +
-    closingRule(ws)
+    "repository's own tests and checks.";
+  const transition =
+    `run \`jira.mjs transitions ${key}\` and, only if it offers exactly one transition whose target category is done, apply it with \`jira.mjs transition ` +
+    `${key} <id>\`; otherwise leave the ticket's status alone and say so in your report. Report what you changed.`;
+  if (ws?.review !== true) return `${work} Then use the backlog-manager:jira skill: ${transition} ${closingRule(ws)}`;
+  const against = ws.target ?? ws.base ?? "the repository's default branch";
+  return (
+    `${work} ${STAGING_RULE} Then review the commit with the backlog-manager:jira skill's review reference, references/review.md, against ${against}, and ` +
+    'follow it to its verdict. If that skill has no references/review.md, stop there: no transition, no push, no merge request. Only if the review ' +
+    `approves, use the backlog-manager:jira skill: ${transition} ${closingTail(ws)}`
   );
 }
 

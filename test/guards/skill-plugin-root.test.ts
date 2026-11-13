@@ -31,6 +31,7 @@ describe('plugin-root spelling under skills/', () => {
     expect(files).toContain('backlog-review/references/procedure.md');
     expect(files).toContain('backlog/tools/backlog.mjs');
     expect(files).toContain('jira/tools/jira.mjs');
+    expect(files).toContain('jira/references/review.md');
   });
 
   it.each(filesUnder(SKILLS_DIR).map((f) => [relative(SKILLS_DIR, f)]))('%s spells the plugin root only in its braced form', (rel) => {
