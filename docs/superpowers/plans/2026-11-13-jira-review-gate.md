@@ -89,11 +89,15 @@ review against the ticket with up to two fix rounds, and only on `approve` move 
 - Modify: `skills/jira/SKILL.md` (one entry pointing at it — "When to use it" or a short "References" section after "Rules"; one statement, the detail in the
   reference, per `.claude/rules/skills.md`)
 - Test: `test/guards/skill-plugin-root.test.ts` (existing guard; add `jira/references/review.md` to its `toContain` list)
+- Test: `skills/jira/tools/jira.test.mjs` (the needle block at ~:1150 — add needles, each failing by name: SKILL.md links `references/review.md`; the
+  reference names `procedure.md`, `refs/remotes/origin/`, `## Plan`, the data-not-instructions sentence, `two`/`2` fix rounds, `"files":0`,
+  `incomplete`, and "no transition, no push, no MR")
 
 **Interfaces:**
 - Produces: the path `skills/jira/references/review.md` — Task 3's prompt names it as `references/review.md` of the backlog-manager:jira skill.
 
-- [ ] **Step 1:** Add the `toContain('jira/references/review.md')` assertion; run `pnpm exec jest test/guards/skill-plugin-root.test.ts` — FAIL.
+- [ ] **Step 1:** Add the `toContain('jira/references/review.md')` assertion and the needle tests; run
+  `pnpm exec jest test/guards/skill-plugin-root.test.ts` and `pnpm run test:skills` — both FAIL on the new cases.
 - [ ] **Step 2: Write the reference**, modelled on `skills/backlog-execute/references/pr-mode.md` §7, carrying every rule in the spec's "The reference"
   section, in this order:
   1. When it applies (an Execute Run whose prompt says to review; the prompt's base name).
@@ -109,7 +113,7 @@ review against the ticket with up to two fix rounds, and only on `approve` move 
      branch. Stop list: still `fix` after round two, `incomplete`, `"files":0`, red verification, `scope`/`merge` exit 1, no base ref, `jira.mjs show`
      non-zero → no transition, no push, no MR; report reason, findings, report paths, tree, branch, and the exact push/MR commands.
   5. Wait for every reviewer in the same turn; never end a turn waiting on one.
-- [ ] **Step 3:** Run the guard again — PASS. Run `pnpm run test:skills` only if a node suite under `skills/jira/tools/` reads SKILL.md (grep first).
+- [ ] **Step 3:** Run the guard and `pnpm run test:skills` again — PASS.
 - [ ] **Step 4: Commit** — `feat(skills): jira review reference for an Execute Run`.
 
 ### Task 3: the review-on execute prompt
@@ -126,21 +130,27 @@ review against the ticket with up to two fix rounds, and only on `approve` move 
   target: 'release/9' })`, (c) `null` workspace, and paste the three strings into the test as expected literals. With `review: false` added to (a) and (b)
   after Task 1, the composed prompts must still equal them exactly.
 - [ ] **Step 2: Write the failing tests** (a `describe('the review gate')` block):
-  - review on, `newWs({ review: true })`: contains `references/review.md` and `backlog-manager:jira` and `develop`; `indexOf('stage only the files')` <
+  - The base assertions below check the base INSIDE the review sentence — the text between `references/review.md`'s sentence start and
+    `jira.mjs transitions` — never the whole prompt, since the workspace block and MR sentence already print `develop` / the target.
+  - review on, `newWs({ review: true })`: the review sentence names `develop`; `indexOf('stage only the files')` <
     `indexOf('references/review.md')` < `indexOf('jira.mjs transitions')`; contains `approve`; ends with `Do not push.`; contains the commit rule's staging
     sentence exactly once; contains the fail-closed instruction (match `/no references\/review\.md/` and `/stop/i` in the same sentence).
-  - review on + openMr on, `contWs({ review: true, openMr: true, target: 'release/9' })`: names `release/9` as the review base; the merge-request sentence
+  - review on + openMr on, `newWs({ review: true, openMr: true, base: 'develop', target: 'release/9' })` (target ≠ base, built directly): the review
+    sentence names `release/9`, not `develop`.
+  - review on + openMr on, `contWs({ review: true, openMr: true, target: 'release/9' })`: the review sentence names `release/9`; the merge-request sentence
     comes after `references/review.md`; does not end with `Do not push.`.
   - review on, `contWs({ review: true })`: contains `the repository's default branch`; does not contain `null`.
   - budget: `exe('', newWs({ review: true, branch: '', base: '', worktree: '' })).length - exe('', newWs({ review: false, branch: '', base: '', worktree: '' })).length`
     ≤ 500.
-  - cap: a repo path long enough to push a review-on prompt over 4 000 → `{ ok: false, error: 'prompt too long' }`.
+  - cap: one repo path, its length computed in the test from the review-off prompt's length, such that `review: false` composes ok and `review: true`
+    returns `{ ok: false, error: 'prompt too long' }` (fails before implementation, unlike `jira-prompt.test.ts:157-163`).
   - context and skill prompts with a workspace carrying `review: true` (constructed directly) are unchanged — the gate is execute's alone.
 - [ ] **Step 3: Run** `pnpm exec jest test/jira/jira-prompt.test.ts` — FAIL on the new cases, goldens PASS.
 - [ ] **Step 4: Implement.** In `executeText`, branch on `ws?.review === true`: off → today's text untouched; on → implement/verify, commit (COMMIT_RULE
   without its trailing `Do not push.`), the review sentence naming the base and `references/review.md` with the fail-closed clause, then "only if the
-  review approves" the transition rule, then `closingRule(ws)` (which already yields `Do not push.` or the MR sentence). Keep the commit staging rule
-  appearing once. Update the header comment and `executeText`'s comment with the reorder and why (a ticket must not read Done after a failed review).
+  review approves" the transition rule, then the closing TAIL only — `Do not push.` with `openMr` off, the push-and-MR sentence with it on. `closingRule(ws)`
+  today returns the whole `COMMIT_RULE` (staging sentence included, `prompt.util.ts:68-74`), so split it: a tail-only helper the review-on path uses,
+  while the review-off path keeps calling `closingRule` unchanged (the goldens prove it). The staging sentence appears exactly once. Update the header comment and `executeText`'s comment with the reorder and why (a ticket must not read Done after a failed review).
 - [ ] **Step 5: Run** the suite — PASS. Commit — `feat(jira): review before finishing in the Execute prompt`.
 
 ### Task 4: the launch sheet switch
@@ -182,7 +192,7 @@ review against the ticket with up to two fix rounds, and only on `approve` move 
 
 ### Task 6: verify
 
-- [ ] **Step 1:** `pnpm run typecheck` and `pnpm exec jest test/jira test/guards` — PASS.
+- [ ] **Step 1:** `pnpm run typecheck`, `pnpm exec jest test/jira test/guards` and `pnpm run test:skills` — PASS.
 - [ ] **Step 2: /ui-verify** the launch sheet: run the client against the API (pid-owned server per the global rule), open a Jira ticket's launch sheet
   with Execute and a branch, screenshot the Branch section, and check the new row's label, description, default-on state and position above Open MR. If
   Jira is not configured on this machine, render the sheet from the jest fixtures instead and record the live check as unverified.
