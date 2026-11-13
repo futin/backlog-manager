@@ -92,7 +92,7 @@ const RULES = ruleFilesIn(RULES_DIR);
 
 /**
  * Bytes, not words: the floor is billed in tokens and bytes track them; words would let long identifiers through. The spec suggested 14 KB against an
- * ~11 KB target that assumed fourteen cross-cutting rules; the fence audit kept 38 + 2 (docs/superpowers/reviews/2026-11-02-claude-md-floor-fence-audit.md),
+ * ~11 KB target that assumed fourteen cross-cutting rules; the fence audit kept 38 + 2 (docs/superpowers/decisions/2026-11-02-claude-md-floor-fence-audit.md),
  * which measured 18.4 KB, so the budget is that plus ~1 KB of headroom. Raise it only in a reviewed change — the cheaper move is a rule down a tier,
  * and the first rules to re-check are the 24 the audit kept unverified (its Keep-list section), before any new rule is demoted.
  */

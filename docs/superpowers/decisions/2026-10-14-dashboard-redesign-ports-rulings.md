@@ -1,6 +1,6 @@
 # Dashboard redesign ports — execution rulings
 
-Plan: [2026-10-14-dashboard-redesign-ports.md](../plans/2026-10-14-dashboard-redesign-ports.md). No separate spec: the reference is
+Plan: [2026-10-14-dashboard-redesign-ports.md](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-10-14-dashboard-redesign-ports.md). No separate spec: the reference is
 `../claude-agents-dashboard`, branch `management-redesign` (the commits are listed per task in the plan). Branch `dashboard-redesign-ports`, `9a84fb5..HEAD`:
 Daylight AA status tokens with marks split from text (Task 1), one `ui/Chevron` (Task 2), Daylight as the default theme (Task 3), the prompt-cursor wordmark
 (Task 4), and this record plus the screenshot pass (Task 5).

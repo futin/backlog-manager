@@ -54,7 +54,8 @@ there, and the reasoning behind the rules below in [docs/subsystems/invariants.m
 - `.claude/rules/` — the path-scoped mechanism files, listed in the next section.
 - `backlog/` — this repo's own backlog, self-registered and tracker-backed: its items are GitHub issues.
 - `scripts/` — `sync-plugin.mjs`, `test-all.mjs`, `test-tmpdir.mjs`, `tailnet.mjs`, `ci-scope.mjs`. → [docs/workflows/](docs/workflows/development.md)
-- `docs/` — the reference docs; `docs/superpowers/` holds the specs and plans this repo was built from.
+- `docs/` — the reference docs; `docs/superpowers/` holds the design specs code comments cite, decision logs and in-flight plans — a merged plan and every
+  review report leave it ([README](docs/superpowers/README.md)).
 
 ## Rule files
 
