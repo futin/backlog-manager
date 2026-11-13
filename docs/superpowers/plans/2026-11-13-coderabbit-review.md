@@ -247,8 +247,9 @@ the task report. Line counts anywhere are soft targets, never limits.
     `reposFor` → `<repo> is not a review candidate for !<iid>`; choice not `continue` on `sourceBranch` (`new`, `none`, `continue` on another branch) →
     `a review continues <sourceBranch>`; MR keys carry neither the key nor its parent (from `JiraIssueDetail.parent`) → `!<iid> is not an open merge request
     of <key>`, with no Jira write made. A sub-task whose parent's key is on the MR passes. Two-fault cases pin the order: MR not open AND wrong choice → the
-    MR sentence; not a candidate AND wrong choice → the candidate sentence; wrong choice AND a source branch the mapped checkout holds → the choice
-    sentence (it runs before `workspaceFor`). `openMr: true` → 400 `openMr is only for execute with a branch` from `parseBranchChoice`
+    MR sentence; not a candidate AND wrong choice → the candidate sentence; `continue` on a branch that is not the source branch but IS the mapped
+    checkout's `mainBranch` → 400 `a review continues <sourceBranch>`, not `resolveWorkspace`'s 409 (`branch-choice.util.ts:112`, which judges the
+    choice's own branch — so this case fails if the choice check runs after `workspaceFor`). `openMr: true` → 400 `openMr is only for execute with a branch` from `parseBranchChoice`
     (`branch-choice.util.ts:79`), which runs in the controller first — the sheet never sends it, and spec §5.5's `a review continues` row covers the rest.
   - state 409s: `reviewing` and `clean` → `nothing to review on !<iid>`; `review: null` → `no review state for !<iid> yet`; `unknown` →
     `!<iid> has too many threads to read`; sent `half: 'fix'` while state is `none` → `the review on !<iid> moved on — reopen the sheet`.
@@ -270,7 +271,9 @@ the task report. Line counts anywhere are soft targets, never limits.
   3. Review, cache only: MR in cache and open (400), repo a candidate (400), choice `continue` on `sourceBranch` (400), then the state 409s
      (`reviewState` over the cached review, `reviewHalf` against the sent `half`).
   4. `workspaceFor` (existing; its name and checked-out refusals).
-  5. `reserve` (key), then the branch gate and branch reservation (409 `a session is live on <branch>`, refusing nothing it did not reserve).
+  5. `reserve` (key), then the branch gate and branch reservation. A branch-gate 409 `a session is live on <branch>` releases the key reservation this
+     dispatch just took, and touches no branch entry (the one it lost to is another dispatch's). Test: the refused dispatch's key, dispatched again once the
+     branch is free, passes — not 409 `<KEY> is starting`.
   6. `launch`: the detail read, then the keys/parent check (400, before the assign or transition), then the rest unchanged.
   Every failure after step 5 releases both reservations through the existing single `catch`. On success the branch reservation is dropped where the key's
   is: at `confirm` (the link's stored `branch` takes over the gate) and on the no-id desktop path beside its `release`. Comment the why (spec §5.2
@@ -293,7 +296,7 @@ the task report. Line counts anywhere are soft targets, never limits.
     Merged: five magenta steps. Closed: review `off`, ends on `closed`. Review step mark per state: `none`/`unknown` → `off`, `reviewing`/`stale` → `grey`,
     `open` → `amber`, `clean` → `green`; `review === null` → `off`.
   - Word precedence (open MRs): draft → failed pipeline → findings open (`<n> to fix`, `<n>+ to fix` when capped, amber, chip `!<iid> · <n> to fix`) →
-    pipeline word. That is the card/List/head word only: `DeliveryLook` gains `pipelineWord: string` (the pipeline word alone, never `<n> to fix`), and
+    pipeline word. That is the card, List and Detail `Also:` word only: `DeliveryLook` gains `pipelineWord: string` (the pipeline word alone, never `<n> to fix`), and
     Detail's Pipeline step (`DeliveryPane.tsx:43`, today `deliveryLook(mr).word`) reads `pipelineWord` — spec §5.3 and `state-open.png` keep `pipeline
     passed` on the Pipeline step while the Review step reads `2 open · 1 major`.
   - `DeliveryFilter` gains `'review-open'`, label `Review open`, after `Done, not merged`; `matchesDelivery(filter, d, now)` — `review-open` matches when the
@@ -343,7 +346,8 @@ Open each mock before drawing its view.
 - [ ] **Step 1: Write failing tests.**
   - Detail track renders five steps with `data-mark` per state (one case per mock state) and the step's `title` carries the failed suffix when `failed`.
   - Pipeline `success` + review `open` (2 open, worst major) → the Pipeline step's word is `pipeline passed`, the Review step's `2 open · 1 major`, the
-    head word `2 to fix` (`state-open.png`).
+    head draws no word (`DeliveryPane.tsx:89-96` has none today, and `state-open.png` shows none — spec §5.3's "head word" sentence has no target, so
+    add none); an `Also:` MR in the same state reads `2 to fix` in amber on the `Also:` line (`DeliveryPane.tsx:109`).
   - Row: open → `CodeRabbit · 2 open findings · 1 major, 1 minor · reviewed 4m ago` and a button `Fix review`; none → `Request review`; reviewing, clean,
     unknown, `review === null`, merged lead → no row; no candidate repos → row without button; agents off → no button.
   - Gate: a live `run` link on the key → button disabled, tooltip `<session name> is live on this ticket`; a live link on another key whose stored branch is
