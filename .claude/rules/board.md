@@ -1,5 +1,5 @@
 ---
-paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.html", "server/src/security.ts", "server/src/agents/agents.service.ts", "server/src/orchestrator/remote-runs.util.ts"]
+paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.html", "server/src/security.ts", "server/src/agents/agents.service.ts", "server/src/orchestrator/remote-runs.util.ts", "server/src/agents/watchdog.service.ts", "server/src/orchestrator/watchdog-state.service.ts"]
 ---
 
 # Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md
