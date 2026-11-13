@@ -279,7 +279,8 @@ Worst first:
 
 *(Review 1-14.)*
 
-`DeliveryLook.word` is also Detail's head word, so Detail reads `2 to fix` in amber the same way, over a passed or running pipeline. The track itself is
+Detail's head draws no word, and this adds none: `DeliveryLook.word` reaches Detail only on its `Also:` line, which reads `2 to fix` in amber the same way
+for a non-lead MR, over a passed or running pipeline. *(Plan review 2-1.)* The track itself is
 unchanged by this: the Pipeline step keeps its own mark from the pipeline, and the Review step carries the review (§5.1). *(Review 2-7.)*
 
 *Drafts (my call):* a draft is an open MR. It is read for review, draws the Review step, and gets the CodeRabbit row and button, so people can review
