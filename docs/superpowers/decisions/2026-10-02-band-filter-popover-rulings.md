@@ -1,8 +1,8 @@
 # Band filter track and shared Popover — execution rulings
 
 Spec: [2026-10-01-band-filter-popover-design.md](../specs/2026-10-01-band-filter-popover-design.md). Plan:
-[2026-10-02-band-filter-popover.md](../plans/2026-10-02-band-filter-popover.md). Final whole-branch review (Fable, `cb98630..7fca6c0`, ready to merge, 0
-Critical / 0 Important / 13 Minor): [2026-10-02-band-filter-popover-final-review.md](../reviews/2026-10-02-band-filter-popover-final-review.md).
+[2026-10-02-band-filter-popover.md](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-10-02-band-filter-popover.md). Final whole-branch review (Fable, `cb98630..7fca6c0`, ready to merge, 0
+Critical / 0 Important / 13 Minor): [2026-10-02-band-filter-popover-final-review.md](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/reviews/2026-10-02-band-filter-popover-final-review.md).
 
 Rulings made during subagent-driven execution, each as what was decided, why, and what it costs if wrong. The per-task ledger, reports and reviews lived
 under the git-ignored `.superpowers/` and are not kept.

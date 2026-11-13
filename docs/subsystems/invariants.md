@@ -1285,8 +1285,9 @@ of a sentence in it is therefore the sentence times the turns, whether or not th
 2026-09-01 floor trim took it to **60,168**, and by 2026-10-05 it stood at **150,227** (151,246 bytes) — 2.5 times as large in five weeks. The growth was the
 habit, not the rules: each new rule landed with the incident that motivated it written out beside it (the bug number, what the first version did wrong, the
 measurement that proved it), each failure path landed inline in the section it interrupted, and each fixed sequence of repository and file checks landed as
-prose the driver re-derived into commands every time. The run read all of it, all the time. `docs/superpowers/plans/2026-10-05-orchestrate-body-shrink.md` is
-the shrink; this section is what stops the next one.
+prose the driver re-derived into commands every time. The run read all of it, all the time.
+[The shrink's plan](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-10-05-orchestrate-body-shrink.md) is the shrink; this
+section is what stops the next one.
 
 The three levers, and why exactly these three. **A story moves to `references/rationale.md`**, because the reader of the body needs the instruction and the
 reader of the rationale needs the evidence, and they are different readers at different moments. **A branch a clean run never takes moves to its own
@@ -3865,7 +3866,7 @@ last thing between that line and `git worktree add`.
 
 ## The board's Jira writes are assign and transition, nothing else
 
-Until phase 3 this server wrote to Jira nowhere: every call was a read and the only file it changed was `jira.json`. Phase 3 ([plan](../superpowers/plans/2026-10-19-jira-phase-3-writes.md),
+Until phase 3 this server wrote to Jira nowhere: every call was a read and the only file it changed was `jira.json`. Phase 3 ([plan](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-10-19-jira-phase-3-writes.md),
 spec §8, §13) adds the first two calls that change anything on Atlassian's side — **assign the issue to me** and **transition it** — and this rule is what keeps
 the list at two. A third (comment, edit a field, create, unassign, assign someone else) is a new rule and a new section here, never another route that "fits
 the pattern": a credential that can write to a person's tracker is the sharpest thing this server holds, and the size of what it may do with it should be a

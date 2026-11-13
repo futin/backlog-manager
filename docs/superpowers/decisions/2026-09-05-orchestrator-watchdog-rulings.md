@@ -1,6 +1,6 @@
 # Orchestrator watchdog — rulings taken during implementation
 
-Companion to [the design spec](../specs/2026-09-04-orchestrator-watchdog-design.md) and [the implementation plan](../plans/2026-09-04-orchestrator-watchdog.md).
+Companion to [the design spec](../specs/2026-09-04-orchestrator-watchdog-design.md) and [the implementation plan](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-09-04-orchestrator-watchdog.md).
 Branch `feature/orchestrator-watchdog`, nine tasks, `f352587..0c81bda`.
 
 ## Why this file exists
