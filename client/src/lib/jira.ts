@@ -1223,8 +1223,8 @@ export function branchDraft(
 export function branchChoiceOf(draft: BranchDraft, action: JiraAction): JiraBranchChoice {
   const openMr = action === 'execute' && draft.openMr;
   if (draft.mode === 'none') return { mode: 'none' };
-  if (draft.mode === 'new') return { mode: 'new', branch: draft.newBranch, base: draft.base, openMr };
-  return { mode: 'continue', branch: draft.continueBranch, openMr, target: openMr && draft.target !== '' ? draft.target : null };
+  if (draft.mode === 'new') return { mode: 'new', branch: draft.newBranch, base: draft.base, openMr, review: false };
+  return { mode: 'continue', branch: draft.continueBranch, openMr, review: false, target: openMr && draft.target !== '' ? draft.target : null };
 }
 
 /**

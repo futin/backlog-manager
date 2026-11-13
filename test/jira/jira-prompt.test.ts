@@ -156,7 +156,7 @@ describe('composeJiraPrompt', () => {
 
     it('applies to a built-in too: a repo path long enough to push it over is refused, never cut', () => {
       const repo = `/${'r'.repeat(4000)}`;
-      expect(composeJiraPrompt(detail(), { kind: 'execute' }, repo, { mode: 'continue', branch: 'b', base: null, worktree: `${repo}/w`, openMr: false, target: null })).toEqual({
+      expect(composeJiraPrompt(detail(), { kind: 'execute' }, repo, { mode: 'continue', branch: 'b', base: null, worktree: `${repo}/w`, openMr: false, review: false, target: null })).toEqual({
         ok: false,
         error: 'prompt too long'
       });
@@ -250,6 +250,7 @@ describe('the workspace block', () => {
     base: 'develop',
     worktree: '/r/.worktrees/feature-timify-123-x',
     openMr: false,
+    review: false,
     target: null,
     ...over
   });
@@ -259,7 +260,7 @@ describe('the workspace block', () => {
 
   it('has fixed text of at most 600 characters — repo, branch, base, worktree and key all empty, in either mode', () => {
     for (const mode of ['new', 'continue'] as const) {
-      const ws: JiraWorkspace = { mode, branch: '', base: mode === 'new' ? '' : null, worktree: '', openMr: false, target: null };
+      const ws: JiraWorkspace = { mode, branch: '', base: mode === 'new' ? '' : null, worktree: '', openMr: false, review: false, target: null };
       expect(workspaceBlock('', '', ws).length).toBeLessThanOrEqual(600);
     }
   });

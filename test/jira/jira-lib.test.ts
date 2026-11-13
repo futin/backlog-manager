@@ -1307,13 +1307,13 @@ describe('the branch choice wire', () => {
 
   it('fetchJiraPrompt adds mode, and branch/base/openMr/target only for the modes that carry them', async () => {
     let f = answer(200, null);
-    await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'new', branch: 'feature/pay-1-x', base: 'develop', openMr: false });
+    await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'new', branch: 'feature/pay-1-x', base: 'develop', openMr: false, review: false });
     expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=execute&repo=%2Fr&mode=new&branch=feature%2Fpay-1-x&base=develop');
     f = answer(200, null);
-    await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'continue', branch: 'pay-1-x', openMr: true, target: 'main' });
+    await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'continue', branch: 'pay-1-x', openMr: true, review: false, target: 'main' });
     expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=execute&repo=%2Fr&mode=continue&branch=pay-1-x&openMr=true&target=main');
     f = answer(200, null);
-    await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'continue', branch: 'pay-1-x', openMr: false, target: null });
+    await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'continue', branch: 'pay-1-x', openMr: false, review: false, target: null });
     expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=execute&repo=%2Fr&mode=continue&branch=pay-1-x');
   });
 
@@ -1574,29 +1574,29 @@ describe('branch choice derivations', () => {
     });
     it('the choice keeps only the fields its mode and action own', () => {
       const draft = { mode: 'continue' as const, continueBranch: 'b', newBranch: 'n', base: 'develop', openMr: true, target: 'main' };
-      expect(branchChoiceOf(draft, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, target: 'main' });
-      expect(branchChoiceOf({ ...draft, target: '' }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, target: null });
-      expect(branchChoiceOf({ ...draft, openMr: false }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: false, target: null });
-      expect(branchChoiceOf(draft, 'context')).toEqual({ mode: 'continue', branch: 'b', openMr: false, target: null });
-      expect(branchChoiceOf({ ...draft, mode: 'new' }, 'execute')).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: true });
-      expect(branchChoiceOf({ ...draft, mode: 'new' }, { skill: 's_0a1b2c3d' })).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: false });
+      expect(branchChoiceOf(draft, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: false, target: 'main' });
+      expect(branchChoiceOf({ ...draft, target: '' }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: false, target: null });
+      expect(branchChoiceOf({ ...draft, openMr: false }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: false, review: false, target: null });
+      expect(branchChoiceOf(draft, 'context')).toEqual({ mode: 'continue', branch: 'b', openMr: false, review: false, target: null });
+      expect(branchChoiceOf({ ...draft, mode: 'new' }, 'execute')).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: true, review: false });
+      expect(branchChoiceOf({ ...draft, mode: 'new' }, { skill: 's_0a1b2c3d' })).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: false, review: false });
       expect(branchChoiceOf({ ...draft, mode: 'none' }, 'context')).toEqual({ mode: 'none' });
     });
     it('the dispatch fields are the five flat ones, each only with its mode', () => {
       expect(branchDispatchFields({ mode: 'none' })).toEqual({ mode: 'none' });
-      expect(branchDispatchFields({ mode: 'new', branch: 'n', base: 'develop', openMr: false })).toEqual({
+      expect(branchDispatchFields({ mode: 'new', branch: 'n', base: 'develop', openMr: false, review: false })).toEqual({
         mode: 'new',
         branch: 'n',
         base: 'develop',
         openMr: false
       });
-      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: true, target: 'main' })).toEqual({
+      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: true, review: false, target: 'main' })).toEqual({
         mode: 'continue',
         branch: 'b',
         openMr: true,
         target: 'main'
       });
-      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: false, target: null })).toEqual({ mode: 'continue', branch: 'b', openMr: false });
+      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: false, review: false, target: null })).toEqual({ mode: 'continue', branch: 'b', openMr: false });
     });
     it('the draft refusal reads the mode\'s own fields, then a typed MR target', () => {
       const draft = { mode: 'new' as const, continueBranch: 'develop', newBranch: 'timify-123-n', base: '', openMr: false, target: '' };
@@ -1665,11 +1665,11 @@ describe('branch choice derivations', () => {
       expect(treeLiveKey(t('/a', '/a/w', 'pay-2-timify-123'), ['TIMIFY-123', 'PAY-2'])).toBe('PAY-2');
     });
     it('continueOffTicket is true only for a non-empty Continue branch without the key', () => {
-      expect(continueOffTicket({ mode: 'continue', branch: 'develop', openMr: false, target: null }, 'TIMIFY-123')).toBe(true);
-      expect(continueOffTicket({ mode: 'continue', branch: 'feature/timify-123-x', openMr: false, target: null }, 'TIMIFY-123')).toBe(false);
-      expect(continueOffTicket({ mode: 'continue', branch: 'timify-1234', openMr: false, target: null }, 'TIMIFY-123')).toBe(true);
-      expect(continueOffTicket({ mode: 'continue', branch: '  ', openMr: false, target: null }, 'TIMIFY-123')).toBe(false);
-      expect(continueOffTicket({ mode: 'new', branch: 'develop', base: 'main', openMr: false }, 'TIMIFY-123')).toBe(false);
+      expect(continueOffTicket({ mode: 'continue', branch: 'develop', openMr: false, review: false, target: null }, 'TIMIFY-123')).toBe(true);
+      expect(continueOffTicket({ mode: 'continue', branch: 'feature/timify-123-x', openMr: false, review: false, target: null }, 'TIMIFY-123')).toBe(false);
+      expect(continueOffTicket({ mode: 'continue', branch: 'timify-1234', openMr: false, review: false, target: null }, 'TIMIFY-123')).toBe(true);
+      expect(continueOffTicket({ mode: 'continue', branch: '  ', openMr: false, review: false, target: null }, 'TIMIFY-123')).toBe(false);
+      expect(continueOffTicket({ mode: 'new', branch: 'develop', base: 'main', openMr: false, review: false }, 'TIMIFY-123')).toBe(false);
       expect(continueOffTicket({ mode: 'none' }, 'TIMIFY-123')).toBe(false);
     });
   });
@@ -1888,8 +1888,8 @@ describe('card tone helpers', () => {
 describe('launchFootLine', () => {
   it('names the checkout itself for none, a new worktree for new, and the branch for continue', () => {
     expect(launchFootLine('/Users/ada/microservice', { mode: 'none' })).toBe('Starts in microservice on the checkout itself');
-    expect(launchFootLine('/Users/ada/microservice', { mode: 'new', branch: 'b', base: 'main', openMr: false })).toBe('Starts in microservice on a new worktree');
-    expect(launchFootLine('/Users/ada/microservice', { mode: 'continue', branch: 'pay-131-a', openMr: false, target: null })).toBe(
+    expect(launchFootLine('/Users/ada/microservice', { mode: 'new', branch: 'b', base: 'main', openMr: false, review: false })).toBe('Starts in microservice on a new worktree');
+    expect(launchFootLine('/Users/ada/microservice', { mode: 'continue', branch: 'pay-131-a', openMr: false, review: false, target: null })).toBe(
       'Starts in microservice on pay-131-a'
     );
   });

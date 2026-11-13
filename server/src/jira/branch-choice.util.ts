@@ -15,7 +15,7 @@ export type { JiraBranchChoice };
  */
 
 /**
- * The five flat fields as a route hands them over. `unknown` throughout: the query gives strings (and an array for a repeated parameter), the body gives
+ * The six flat fields as a route hands them over. `unknown` throughout: the query gives strings (and an array for a repeated parameter), the body gives
  * whatever JSON held, and a field of the wrong type is a refusal here, not a cast at the call site. `null` counts as absent, so a client that serialises its
  * unused fields as `null` is not refused for them.
  */
@@ -24,6 +24,7 @@ export interface JiraBranchChoiceRaw {
   branch?: unknown;
   base?: unknown;
   openMr?: unknown;
+  review?: unknown;
   target?: unknown;
 }
 
@@ -44,7 +45,8 @@ function nameProblem(field: string, value: unknown, notAString: string): string 
 /**
  * `raw` validated for `key` and `action`, the refusals in the order the spec lists them and the first hit winning — so a request wrong in two ways always
  * says the same sentence. `execute` is the one action that needs a branch: `none` is the "work in the mapped checkout" mode, and an execute with no worktree
- * would commit on whatever the checkout holds. `openMr` rides the query as `'true'`/`'false'` and the body as a boolean; absent is `false`.
+ * would commit on whatever the checkout holds. `openMr` rides the query as `'true'`/`'false'` and the body as a boolean; absent is `false`, and so is `review`, which
+ * is checked right after it and before `target`.
  */
 export function parseBranchChoice(raw: JiraBranchChoiceRaw, key: string, action: JiraAction): JiraBranchChoiceParse {
   const fail = (error: string): JiraBranchChoiceParse => ({ ok: false, error });
@@ -78,6 +80,13 @@ export function parseBranchChoice(raw: JiraBranchChoiceRaw, key: string, action:
   }
   if (openMr && (action !== 'execute' || mode === 'none')) return fail('openMr is only for execute with a branch');
 
+  let review = false;
+  if (!absent(raw.review)) {
+    if (raw.review === true || raw.review === 'true') review = true;
+    else if (raw.review !== false && raw.review !== 'false') return fail('review must be true or false');
+  }
+  if (review && (action !== 'execute' || mode === 'none')) return fail('review is only for execute with a branch');
+
   let target: string | null = null;
   if (!absent(raw.target)) {
     if (!(openMr && mode === 'continue')) return fail('target is only for openMr with continue');
@@ -87,8 +96,8 @@ export function parseBranchChoice(raw: JiraBranchChoiceRaw, key: string, action:
   }
 
   if (mode === 'none') return { ok: true, value: { mode } };
-  if (mode === 'new') return { ok: true, value: { mode, branch, base, openMr } };
-  return { ok: true, value: { mode, branch, openMr, target } };
+  if (mode === 'new') return { ok: true, value: { mode, branch, base, openMr, review } };
+  return { ok: true, value: { mode, branch, openMr, review, target } };
 }
 
 export type JiraWorkspaceResolution = { ok: true; workspace: JiraWorkspace | null } | { ok: false; status: 409; error: string };
@@ -116,6 +125,6 @@ export function resolveWorkspace(choice: JiraBranchChoice, _key: string, repo: s
   }
   const held = refs.available ? (refs.branches.find((b) => b.name === branch)?.worktree ?? null) : null;
   const worktree = held !== null && held !== repo ? held : worktreePathFor(repo, branch);
-  if (choice.mode === 'new') return { ok: true, workspace: { mode: 'new', branch, base: choice.base, worktree, openMr: choice.openMr, target: null } };
-  return { ok: true, workspace: { mode: 'continue', branch, base: null, worktree, openMr: choice.openMr, target: choice.target } };
+  if (choice.mode === 'new') return { ok: true, workspace: { mode: 'new', branch, base: choice.base, worktree, openMr: choice.openMr, review: choice.review, target: null } };
+  return { ok: true, workspace: { mode: 'continue', branch, base: null, worktree, openMr: choice.openMr, review: choice.review, target: choice.target } };
 }

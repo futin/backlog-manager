@@ -165,7 +165,7 @@ export class JiraController {
   }
 
   /**
-   * `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&target` — exactly what Copy prompt copies and what Start sends but for the status and
+   * `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&review&target` — exactly what Copy prompt copies and what Start sends but for the status and
    * assignee lines (spec §5, §7): the launch sheet previews it and the clipboard takes it from here, so there is one composition (`composeJiraPrompt`) behind
    * the preview, the copy and the spawn. The refusals come in the contract's order, each one wrong in a way no later check can excuse: `key` (400 `invalid
    * issue key`), `action` (400), `repo` present (400 `repo is required`), the branch choice's shape (400, `parseBranchChoice` — the same sentences
@@ -191,6 +191,7 @@ export class JiraController {
     @Query('branch') branch: unknown,
     @Query('base') base: unknown,
     @Query('openMr') openMr: unknown,
+    @Query('review') review: unknown,
     @Query('target') target: unknown,
     @Res({ passthrough: true }) res: Response
   ): Promise<string> {
@@ -198,7 +199,7 @@ export class JiraController {
     const action = parseJiraActionParam(actionParam);
     if (action === null) throw new HttpException({ error: 'action must be execute, context or skill:<id>' }, 400);
     if (typeof repo !== 'string' || repo.trim() === '') throw new HttpException({ error: 'repo is required' }, 400);
-    const choice = parseBranchChoice({ mode, branch, base, openMr, target }, key, action);
+    const choice = parseBranchChoice({ mode, branch, base, openMr, review, target }, key, action);
     if (!choice.ok) throw new HttpException({ error: choice.error }, 400);
     this.requireConfigured();
     const config = readJiraConfig();

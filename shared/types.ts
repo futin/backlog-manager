@@ -914,7 +914,8 @@ export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context', string> = {
  * The workspace a Jira Run is told to work in (spec §5.4, §5.6): `null` where it is carried means mode `none` — no branch, no worktree, no block. `branch`,
  * `base` and `target` have passed the §6 name checks, so they are shell-safe by construction. `worktree` is the EXPECTED path (5.4: the one 5.2 found holding
  * the branch, else `<repo>/.worktrees/<branch with / as ->`); the path `jira.mjs worktree` prints is the authoritative one. `base` is `null` for `continue`,
- * which cuts nothing; `target` is the MR's destination and is only ever set with `openMr` and `continue`.
+ * which cuts nothing; `target` is the MR's destination and is only ever set with `openMr` and `continue`. `review` asks the Run to hold its finish for a
+ * grouped review of the change (the Execute Run's "Review before finishing" switch); like `openMr` it is only ever true for execute with a branch.
  */
 export interface JiraWorkspace {
   mode: 'new' | 'continue';
@@ -922,6 +923,7 @@ export interface JiraWorkspace {
   base: string | null;
   worktree: string;
   openMr: boolean;
+  review: boolean;
   target: string | null;
 }
 
@@ -1236,8 +1238,8 @@ export interface JiraWorktreesPayload {
  */
 export type JiraBranchChoice =
   | { mode: 'none' }
-  | { mode: 'new'; branch: string; base: string; openMr: boolean }
-  | { mode: 'continue'; branch: string; openMr: boolean; target: string | null };
+  | { mode: 'new'; branch: string; base: string; openMr: boolean; review: boolean }
+  | { mode: 'continue'; branch: string; openMr: boolean; review: boolean; target: string | null };
 
 /** The title a Jira Run session carries in the dashboard: `jira <KEY>`, cut to 60 characters. Lives here, not in `agents/`, so `jira/` and `agents/` share it without an import between them. */
 export function jiraSessionName(key: string): string {
@@ -1481,9 +1483,9 @@ export const JIRA_PROMPT_MAX = 4000;
  * checked again against a fresh read before anything is written. `permissionMode`, `model` and `effort` are treated exactly as `AgentDispatchRequest`'s: clamped
  * to the dashboard's ceiling and dropped when off the list, never refused.
  *
- * `mode` and the four fields after it are the branch choice (Jira repo/branch, spec §5.3), the same five `GET /api/jira/prompt` takes on its query: `mode` is
+ * `mode` and the five fields after it are the branch choice (Jira repo/branch, spec §5.3), the same six `GET /api/jira/prompt` takes on its query: `mode` is
  * required — both routes 400 without it — and the rest ride only with the modes they belong to (`base` with `new`; `target` with `openMr` and `continue`;
- * `openMr` absent means `false`). The server checks the combinations; this is the wire shape.
+ * `openMr` and `review` absent mean `false`; `review` is only for execute with a branch). The server checks the combinations; this is the wire shape.
  *
  * `surface` is the sheet's Open in pick, `AgentDispatchRequest.surface`'s rule for any Jira action: sent only when the sheet drew the control (home's
  * dashboard says `desktopAvailable`), forwarded to `POST /api/spawn` as it came, and absent is a dashboard launch byte for byte as before the control existed.
@@ -1498,6 +1500,7 @@ export interface JiraDispatchRequest {
   branch?: string;
   base?: string;
   openMr?: boolean;
+  review?: boolean;
   target?: string;
   model?: string;
   effort?: string;

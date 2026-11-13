@@ -40,6 +40,9 @@ describe('parseBranchChoice — the refusals, each from a minimal failing input,
     ['a non-boolean openMr', { mode: 'continue', branch: 'x', openMr: 'yes' }, 'execute', 'openMr must be true or false'],
     ['openMr with context', { mode: 'continue', branch: 'x', openMr: true }, 'context', 'openMr is only for execute with a branch'],
     ['openMr with none', { mode: 'none', openMr: true }, 'context', 'openMr is only for execute with a branch'],
+    ['a non-boolean review', { mode: 'continue', branch: 'x', review: 'yes' }, 'execute', 'review must be true or false'],
+    ['review with context', { mode: 'continue', branch: 'x', review: true }, 'context', 'review is only for execute with a branch'],
+    ['review with none', { mode: 'none', review: true }, 'context', 'review is only for execute with a branch'],
     ['a target without openMr', { mode: 'continue', branch: 'x', target: 'develop' }, 'execute', 'target is only for openMr with continue'],
     [
       'a target with a new branch',
@@ -59,6 +62,8 @@ describe('parseBranchChoice — the refusals, each from a minimal failing input,
     expect(error({ mode: 'new', branch: 'timify-123-x', base: 'a..b', openMr: 'maybe' })).toBe('base may not contain ..');
     expect(error({ mode: 'new', branch: 'other-1', base: 'develop', openMr: 'maybe' })).toBe('branch must carry TIMIFY-123');
     expect(error({ mode: 'continue', branch: 'x', openMr: 'maybe', target: 'a:b' })).toBe('openMr must be true or false');
+    expect(error({ mode: 'continue', branch: 'x', openMr: 'maybe', review: 'maybe' })).toBe('openMr must be true or false');
+    expect(error({ mode: 'continue', branch: 'x', review: 'maybe', target: 'a:b' })).toBe('review must be true or false');
   });
 });
 
@@ -71,11 +76,11 @@ describe('parseBranchChoice — what is accepted', () => {
   it('new for execute, with and without openMr; a branch that carries the key in any case and position', () => {
     expect(parse({ mode: 'new', branch: 'timify-123-x', base: 'develop' })).toEqual({
       ok: true,
-      value: { mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: false }
+      value: { mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: false, review: false }
     });
     expect(parse({ mode: 'new', branch: 'feature/TIMIFY-123_x', base: 'origin/develop', openMr: true })).toEqual({
       ok: true,
-      value: { mode: 'new', branch: 'feature/TIMIFY-123_x', base: 'origin/develop', openMr: true }
+      value: { mode: 'new', branch: 'feature/TIMIFY-123_x', base: 'origin/develop', openMr: true, review: false }
     });
   });
 
@@ -83,33 +88,51 @@ describe('parseBranchChoice — what is accepted', () => {
     expect(parse({ mode: 'new', branch: 'timify-123-x', base: 'develop' }, 'context').ok).toBe(true);
     expect(parse({ mode: 'continue', branch: 'anything' }, { skill: 's_0123abcd' })).toEqual({
       ok: true,
-      value: { mode: 'continue', branch: 'anything', openMr: false, target: null }
+      value: { mode: 'continue', branch: 'anything', openMr: false, review: false, target: null }
     });
   });
 
   it('continue needs no key in its name — the branch already exists', () => {
-    expect(parse({ mode: 'continue', branch: 'develop' })).toEqual({ ok: true, value: { mode: 'continue', branch: 'develop', openMr: false, target: null } });
+    expect(parse({ mode: 'continue', branch: 'develop' })).toEqual({ ok: true, value: { mode: 'continue', branch: 'develop', openMr: false, review: false, target: null } });
   });
 
   it('continue with openMr and a target, and openMr as the query spells it', () => {
     expect(parse({ mode: 'continue', branch: 'x', openMr: true, target: 'release/1.2' })).toEqual({
       ok: true,
-      value: { mode: 'continue', branch: 'x', openMr: true, target: 'release/1.2' }
+      value: { mode: 'continue', branch: 'x', openMr: true, review: false, target: 'release/1.2' }
     });
-    expect(parse({ mode: 'continue', branch: 'x', openMr: 'true' })).toEqual({ ok: true, value: { mode: 'continue', branch: 'x', openMr: true, target: null } });
-    expect(parse({ mode: 'continue', branch: 'x', openMr: 'false' })).toEqual({ ok: true, value: { mode: 'continue', branch: 'x', openMr: false, target: null } });
+    expect(parse({ mode: 'continue', branch: 'x', openMr: 'true' })).toEqual({ ok: true, value: { mode: 'continue', branch: 'x', openMr: true, review: false, target: null } });
+    expect(parse({ mode: 'continue', branch: 'x', openMr: 'false' })).toEqual({ ok: true, value: { mode: 'continue', branch: 'x', openMr: false, review: false, target: null } });
+  });
+
+  it('review as the body and the query spell it; absent and null are false', () => {
+    const value = (review?: unknown) => {
+      const r = parse({ mode: 'continue', branch: 'x', ...(review === undefined ? {} : { review }) });
+      return r.ok && r.value.mode === 'continue' ? r.value.review : 'refused';
+    };
+    expect([true, 'true', false, 'false', null, undefined].map(value)).toEqual([true, true, false, false, false, false]);
+    expect(parse({ mode: 'new', branch: 'timify-123-x', base: 'develop', review: true })).toEqual({
+      ok: true,
+      value: { mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: false, review: true }
+    });
   });
 
   it('null counts as absent, so a client that serialises its unused fields as null is not refused for them', () => {
     expect(parse({ mode: 'none', branch: null, base: null, openMr: null, target: null }, 'context')).toEqual({ ok: true, value: { mode: 'none' } });
     expect(parse({ mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: false, target: null })).toEqual({
       ok: true,
-      value: { mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: false }
+      value: { mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: false, review: false }
     });
   });
 });
 
 describe('resolveWorkspace', () => {
+  it('carries review through for both modes', () => {
+    const r = (c: JiraBranchChoice) => resolveWorkspace(c, 'TIMIFY-123', REPO, { available: true, branches: [], mainBranch: 'main' } as never);
+    expect(r({ mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: false, review: true })).toMatchObject({ ok: true, workspace: { review: true } });
+    expect(r({ mode: 'continue', branch: 'timify-123-x', openMr: false, review: true, target: null })).toMatchObject({ ok: true, workspace: { review: true } });
+  });
+
   const branch = (name: string, worktree: string | null = null): JiraRefBranch => ({
     name,
     local: true,
@@ -130,8 +153,8 @@ describe('resolveWorkspace', () => {
   const down: JiraRepoRefs = { repo: REPO, available: false, reason: 'not mounted into the board' };
   const resolve = (choice: JiraBranchChoice, r: JiraRepoRefs) => resolveWorkspace(choice, KEY, REPO, r);
 
-  const newChoice: JiraBranchChoice = { mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: false };
-  const contChoice: JiraBranchChoice = { mode: 'continue', branch: 'timify-123-x', openMr: false, target: null };
+  const newChoice: JiraBranchChoice = { mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: false, review: false };
+  const contChoice: JiraBranchChoice = { mode: 'continue', branch: 'timify-123-x', openMr: false, review: false, target: null };
 
   it('none is no workspace, whatever the refs say', () => {
     expect(resolve({ mode: 'none' }, refs([]))).toEqual({ ok: true, workspace: null });
@@ -149,7 +172,7 @@ describe('resolveWorkspace', () => {
   it('a new branch nobody lists gets the conventional worktree and carries base and the MR flag; target is never set', () => {
     expect(resolve({ ...newChoice, branch: 'feature/timify-123-x', openMr: true }, refs([branch('develop', REPO)]))).toEqual({
       ok: true,
-      workspace: { mode: 'new', branch: 'feature/timify-123-x', base: 'develop', worktree: `${REPO}/.worktrees/feature-timify-123-x`, openMr: true, target: null }
+      workspace: { mode: 'new', branch: 'feature/timify-123-x', base: 'develop', worktree: `${REPO}/.worktrees/feature-timify-123-x`, openMr: true, review: false, target: null }
     });
   });
 
@@ -164,14 +187,14 @@ describe('resolveWorkspace', () => {
   it('a continued branch a linked worktree holds is that worktree, not a refusal', () => {
     expect(resolve({ ...contChoice, openMr: true, target: 'develop' }, refs([branch('develop', REPO), branch('timify-123-x', '/elsewhere/hand-made')]))).toEqual({
       ok: true,
-      workspace: { mode: 'continue', branch: 'timify-123-x', base: null, worktree: '/elsewhere/hand-made', openMr: true, target: 'develop' }
+      workspace: { mode: 'continue', branch: 'timify-123-x', base: null, worktree: '/elsewhere/hand-made', openMr: true, review: false, target: 'develop' }
     });
   });
 
   it('a continued branch no tree holds gets the conventional path', () => {
     expect(resolve(contChoice, refs([branch('develop', REPO), branch('timify-123-x')]))).toEqual({
       ok: true,
-      workspace: { mode: 'continue', branch: 'timify-123-x', base: null, worktree: `${REPO}/.worktrees/timify-123-x`, openMr: false, target: null }
+      workspace: { mode: 'continue', branch: 'timify-123-x', base: null, worktree: `${REPO}/.worktrees/timify-123-x`, openMr: false, review: false, target: null }
     });
   });
 
@@ -191,11 +214,11 @@ describe('resolveWorkspace', () => {
   it('unavailable refs: the conventional path, and neither refusal can be made', () => {
     expect(resolve(newChoice, down)).toEqual({
       ok: true,
-      workspace: { mode: 'new', branch: 'timify-123-x', base: 'develop', worktree: `${REPO}/.worktrees/timify-123-x`, openMr: false, target: null }
+      workspace: { mode: 'new', branch: 'timify-123-x', base: 'develop', worktree: `${REPO}/.worktrees/timify-123-x`, openMr: false, review: false, target: null }
     });
     expect(resolve({ ...contChoice, branch: 'develop' }, down)).toEqual({
       ok: true,
-      workspace: { mode: 'continue', branch: 'develop', base: null, worktree: `${REPO}/.worktrees/develop`, openMr: false, target: null }
+      workspace: { mode: 'continue', branch: 'develop', base: null, worktree: `${REPO}/.worktrees/develop`, openMr: false, review: false, target: null }
     });
   });
 });
