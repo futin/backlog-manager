@@ -1244,9 +1244,13 @@ describe('JiraLaunchSheet — review mode', () => {
   });
 
   it('opens on Desktop when the dashboard can and defaults to it, and on Dashboard with no Open in control when it cannot', async () => {
-    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'desktop' });
+    // The Settings default is Dashboard: a review sheet still seeds Desktop (spec §6), and a non-review sheet still follows the default.
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'dashboard' });
     mount({ initialAction: 'review', review: REVIEW });
     await waitFor(() => expect(within(dialog()).getByRole('button', { name: 'Desktop' })).toHaveAttribute('aria-pressed', 'true'));
+    cleanup();
+    mount({ initialAction: 'execute' });
+    await waitFor(() => expect(within(dialog()).getByRole('button', { name: 'Dashboard' })).toHaveAttribute('aria-pressed', 'true'));
     cleanup();
     server.agents = agents({ launchSurfaceDefault: 'desktop' });
     mount({ initialAction: 'review', review: REVIEW });

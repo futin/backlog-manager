@@ -129,7 +129,11 @@ export function JiraLaunchSheet({
   // Seeded in render, not an effect, for the board sheet's reason: an effect would paint one frame of Dashboard on a sheet whose default is Desktop. `null`
   // until the status first lands — the shell's `useAgents` may still be loading when the sheet opens.
   const [pickedSurface, setSurface] = useState<LaunchSurface | null>(null);
-  if (pickedSurface === null && agents !== null) setSurface(agents.launchSurfaceDefault ?? 'dashboard');
+  // A review launch seeds Desktop whenever it is offered, whatever `launchSurfaceDefault` says (spec §5.2/§6): a review session is one a person watches and
+  // answers, so the Settings default for ordinary launches does not apply to it. Without Desktop available it seeds as any other sheet does.
+  if (pickedSurface === null && agents !== null) {
+    setSurface(review !== undefined && agents.desktopAvailable === true ? 'desktop' : (agents.launchSurfaceDefault ?? 'dashboard'));
+  }
   const offersDesktop = agents?.desktopAvailable === true;
   const desktop = offersDesktop && pickedSurface === 'desktop';
   // Where the launch that landed went — the answer alone cannot say, because today's dashboard answers a desktop launch with an id like any other.
