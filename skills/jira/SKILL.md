@@ -25,6 +25,8 @@ line means the running stack was built before the Jira routes existed; tell the 
 - Before any of that, when you are not sure Jira is usable on this machine: run `status` first.
 - A Jira Run's prompt opens with a workspace block that gives you a `worktree` command line: run it first, exactly as given, and work only in the path it
   prints.
+- A Jira Execute Run's prompt says to review the commit with this skill's review reference: read
+  `${CLAUDE_PLUGIN_ROOT}/skills/jira/references/review.md` in full and follow it before the transition and before any push or merge request.
 
 Keys are case-insensitive and trimmed (`pay-131` works). Anything that is not a key is refused before a request is made.
 
