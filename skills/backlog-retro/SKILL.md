@@ -1,10 +1,9 @@
 ---
 name: backlog-retro
 description: >
-  Sweep every orchestrator run this machine has produced into one report: what the pipeline cost, where the time went, how much of it was rework, and what
-  changed since the last sweep. Use it for /backlog-retro, retro the orchestrator, how did the runs do, sweep the runs, what did the pipeline cost, where is the
-  money going, or how much of our spend is fix loops. It proposes backlog items from what it finds and files only the ones you pick, then records the sweep so
-  the next one has something to be measured against. It reads run state and never writes it, never edits an item and never commits. Trigger: /backlog-retro
+  Sweep every orchestrator run on this machine into one report: what the pipeline cost, where the time went, how much was rework, what changed since the last
+  sweep. Use it for /backlog-retro, retro the orchestrator, how did the runs do, sweep the runs, what did the pipeline cost, where is the money going, or how
+  much of our spend is fix loops. Files only the backlog items you pick; never writes run state and never commits. Trigger: /backlog-retro
 trigger: /backlog-retro
 ---
 

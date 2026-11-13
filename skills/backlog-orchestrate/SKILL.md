@@ -1,13 +1,10 @@
 ---
 name: backlog-orchestrate
 description: >
-  Drain a project's groomed backlog unattended: every ready bug and task, one at a time, each in its own git worktree and its own headless backlog-execute
-  session, then committed, reviewed, verified and merged into the run's base branch before the next item starts — main unless the run was told otherwise, so a
-  whole phased feature can be drained onto a branch without main being written at all — or, told to leave branches instead, stopped at a reviewed git branch per
-  item with nothing merged. Use it to drain the backlog, work the whole queue, run the backlog while I'm away, orchestrate tasks 3-7, drain the backlog onto
-  feature/x, work the queue on a branch instead of main, drain the backlog but leave me branches to merge by hand, or to --resume or --abort a run that was
-  interrupted. It is the only skill that merges into a base, and inside a run the only one that commits — execute
-  still does the work, groom still writes the plans, and neither of them touches git here. Trigger: /backlog-orchestrate
+  Drain a project's groomed backlog unattended, one item per worktree and headless backlog-execute session, each reviewed and verified, then merged into the
+  run's base (main or a branch) or left as a branch. Use it to drain the backlog, work the whole queue, run the backlog while I'm away, orchestrate tasks 3-7,
+  drain the backlog onto feature/x, work the queue on a branch instead of main, drain the backlog but leave me branches to merge by hand, or to --resume or
+  --abort an interrupted run. The only skill that merges into a base. Trigger: /backlog-orchestrate
 trigger: /backlog-orchestrate
 ---
 

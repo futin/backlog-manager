@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.ts", "docker-compose.yml", "skills/backlog-orchestrate/tools/orchestrate.mjs", "server/src/orchestrator/watchdog-*.ts", "server/src/orchestrator/orchestrator.controller.ts"]
+paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.ts", "docker-compose.yml", "skills/backlog-orchestrate/tools/orchestrate.mjs", "server/src/orchestrator/watchdog-*.ts", "server/src/orchestrator/orchestrator.controller.ts", "client/src/components/RunControls.tsx", "client/src/hooks/useOrchestratorRuns.ts"]
 ---
 
 # Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md

@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/gitlab/**"]
+paths: ["server/src/gitlab/**", "docker-compose.yml"]
 ---
 
 # Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md

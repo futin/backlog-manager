@@ -1,5 +1,5 @@
 ---
-paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/agent.ts", "skills/backlog-retro/tools/lib/paths.mjs", "skills/backlog-retro/tools/lib/reviews.mjs", "server/src/agents/agents.*.ts", "server/src/agents/orchestrate-args.service.ts", "server/src/tracker/map-issue.ts", "client/src/lib/remote-starting.ts", "client/src/components/RunControls.tsx"]
+paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/agent.ts", "skills/backlog-retro/tools/lib/paths.mjs", "skills/backlog-retro/tools/lib/reviews.mjs", "server/src/agents/agents.*.ts", "server/src/agents/orchestrate-args.service.ts", "server/src/tracker/map-issue.ts", "client/src/lib/remote-starting.ts", "client/src/components/RunControls.tsx", "server/src/agents/watchdog.service.ts"]
 ---
 
 # Rules scoped to these paths, mechanism included — CLAUDE.md repeats only the cross-cutting ones' headlines; the reasoning is in docs/subsystems/invariants.md

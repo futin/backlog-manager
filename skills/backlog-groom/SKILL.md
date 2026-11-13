@@ -1,12 +1,10 @@
 ---
 name: backlog-groom
 description: >
-  Turn an open bug, idea, refactor, or task into something the next skill can act on: promote an idea or a refactor into a task with a real plan, fill in a
-  bug's cause and fix without moving it, or close anything out as decided against. Use it to groom the backlog, plan idea 3, plan ref 2, reject task 5, say this
-  is out of scope, or make this executable. It only ever edits and moves existing items — filing a new one is backlog-capture's job, and doing the actual work
-  once it's groomed is backlog-execute's, and it never commits: a groom lands on disk only, so the item has to be committed before an orchestrator run can read
-  it — unless the trigger says `--finish pr`, where it works in a worktree of its own and ends in a commit, a push and a PR it never merges; with
-  `--auto-merge` it arms GitHub auto-merge on its own PR and GitHub merges. Trigger: /backlog-groom
+  Turn an open bug, idea, refactor or task into something executable: promote an idea or refactor into a planned task, fill in a bug's cause and fix, or close
+  it as decided against. Use it to groom the backlog, plan idea 3, plan ref 2, reject task 5, say this is out of scope, or make this executable. Never files new
+  items (backlog-capture) or does the work (backlog-execute); a groom lands on disk only, uncommitted, unless the trigger says `--finish pr`.
+  Trigger: /backlog-groom
 trigger: /backlog-groom
 ---
 

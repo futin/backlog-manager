@@ -1,12 +1,7 @@
 # backlog-manager
 
-Claude Code plugin repo: nine skills, eight of them backlog skills — `backlog`, `backlog-capture`, `backlog-groom`, `backlog-execute`, `backlog-orchestrate`
-(drains a project's groomed queue, one item per git worktree, each reviewed and verified before it merges), `backlog-retro` (sweeps every orchestrator run on
-the machine into a report, a pick-list of items and a record the next sweep is measured against), `backlog-tick` (a dashboard job's one unattended unit per
-tick: an execute to a PR, or a groom into a plan a person must approve), `backlog-review` (a grouped review of a checkout's change, also the gate's) — and
-a ninth, `jira`, which reads and moves a Jira ticket through `/api/jira` —
-plus a local NestJS + React app that shows every registered project's backlog on one kanban-by-type board. No database: the registry file
-and each project's `backlog/` directory are the data.
+Claude Code plugin repo: nine skills under `skills/` (eight backlog skills and `jira`) plus a local NestJS + React app that shows every registered project's
+backlog on one kanban-by-type board. No database: the registry file and each project's `backlog/` directory are the data.
 
 ## Commands
 
@@ -65,12 +60,12 @@ brief — read that rule file.**
 
 | Rule file (in `.claude/rules/`) | paths |
 | --------- | ----- |
-| `board.md` | `client/src/**`, `shared/agent.ts`, `shared/theme.css`, `client/index.html`, `server/src/security.ts`, `server/src/agents/agents.service.ts`, `server/src/orchestrator/remote-runs.util.ts` |
-| `dispatch-watchdog.md` | `server/src/agents/**`, `shared/agent.ts`, `server/src/jira/prompt.util.ts`, `docker-compose.yml`, `skills/backlog-orchestrate/tools/orchestrate.mjs`, `server/src/orchestrator/watchdog-*.ts`, `server/src/orchestrator/orchestrator.controller.ts` |
-| `gitlab.md` | `server/src/gitlab/**` |
+| `board.md` | `client/src/**`, `shared/agent.ts`, `shared/theme.css`, `client/index.html`, `server/src/security.ts`, `server/src/agents/agents.service.ts`, `server/src/orchestrator/remote-runs.util.ts`, `server/src/agents/watchdog.service.ts`, `server/src/orchestrator/watchdog-state.service.ts` |
+| `dispatch-watchdog.md` | `server/src/agents/**`, `shared/agent.ts`, `server/src/jira/prompt.util.ts`, `docker-compose.yml`, `skills/backlog-orchestrate/tools/orchestrate.mjs`, `server/src/orchestrator/watchdog-*.ts`, `server/src/orchestrator/orchestrator.controller.ts`, `client/src/components/RunControls.tsx`, `client/src/hooks/useOrchestratorRuns.ts` |
+| `gitlab.md` | `server/src/gitlab/**`, `docker-compose.yml` |
 | `items.md` | `server/src/items/**`, `server/src/git-run.util.ts`, `server/src/releases/**`, `server/src/agents/items-abort.*.ts`, `server/src/tracker/tracker.controller.ts`, `shared/types.ts`, `Dockerfile` |
 | `jira.md` | `server/src/jira/**`, `server/src/agents/jira-*.ts`, `skills/jira/**`, `docker-compose.yml`, `shared/jira-branch.ts`, `server/src/agents/session-stop.util.ts` |
-| `orchestrator.md` | `skills/backlog-orchestrate/**`, `server/src/orchestrator/**`, `shared/agent.ts`, `skills/backlog-retro/tools/lib/paths.mjs`, `skills/backlog-retro/tools/lib/reviews.mjs`, `server/src/agents/agents.*.ts`, `server/src/agents/orchestrate-args.service.ts`, `server/src/tracker/map-issue.ts`, `client/src/lib/remote-starting.ts`, `client/src/components/RunControls.tsx` |
+| `orchestrator.md` | `skills/backlog-orchestrate/**`, `server/src/orchestrator/**`, `shared/agent.ts`, `skills/backlog-retro/tools/lib/paths.mjs`, `skills/backlog-retro/tools/lib/reviews.mjs`, `server/src/agents/agents.*.ts`, `server/src/agents/orchestrate-args.service.ts`, `server/src/tracker/map-issue.ts`, `client/src/lib/remote-starting.ts`, `client/src/components/RunControls.tsx`, `server/src/agents/watchdog.service.ts` |
 | `scripts.md` | `scripts/**`, `package.json`, `pnpm-workspace.yaml`, `docker-compose*.yml` |
 | `security.md` | `server/src/*.ts`, `vite.config.ts`, `docker-compose.yml`, `server/src/jira/env.util.ts`, `server/src/jira/refs.util.ts`, `server/src/hub/**`, `server/src/gitlab/**` |
 | `skills.md` | `skills/**`, `agents/**`, `server/src/tick/tick.service.ts`, `server/src/tick/tick-breaker.util.ts`, `scripts/sync-plugin.mjs` |
@@ -106,8 +101,6 @@ happened.
 - **Every server route lives under `/api`**; the Vite proxy has exactly one entry, asserted by `test/guards/vite-proxy.test.ts`.
 - **The GitHub token never leaves the server, and the poller is armed only while something is connected.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
-- **The GitLab token never leaves the server, never follows a redirect, and the poller is armed only while a mapped repo is on the site.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-gitlab-token-never-leaves-the-server-never-follows-a-redirect-and-the-poller-is-armed-only-while-a-mapped-repo-is-on-the-site)
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-repo-whose-sync-is-off-refuses-every-write-path-and-cannot-be-switched-off-under-a-live-or-paused-run)
 - **The tracker, Jira, pull-request and GitLab caches are the four caches in this server whose age is a rendered value.**
@@ -147,13 +140,6 @@ happened.
 - **pnpm only**, pinned by `packageManager`, enforced via corepack in the image.
 - **Backlog items move `open/` → `done/`; `out-of-scope/` is flat.**
 - **Dispatch derives the action; it never accepts one.** Why: [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
-- **A stop is the control file's SECOND `kind`, and nothing resumes a stopped run**
-  Why: [invariants.md](docs/subsystems/invariants.md#a-stop-is-the-control-files-second-kind-and-nothing-resumes-a-stopped-run)
-- **A resume is serialized at three layers, and only the third one can refuse a resume this app never asked for**
-  Why: [invariants.md](docs/subsystems/invariants.md#a-resume-is-serialized-at-three-layers)
-- **The board offers a hand resume exactly when the watchdog will not spawn one — absent a stop request, which suppresses both sides — and that is one function,
-  not two agreeing expressions.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-resume-coupling-the-board-offers-a-hand-resume-exactly-when-the-sweeper-will-not)
 - **A session's cost is recorded per transcript, and a transcript's identity is its file name, not its session id**
   Why: [invariants.md](docs/subsystems/invariants.md#a-sessions-cost-is-recorded-per-transcript-and-a-transcripts-identity-is-its-file-name)
 - **Every `.claude/rules/` file carries `paths:` and is the one home of its rules' mechanism — never the reasoning.**

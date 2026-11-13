@@ -1,11 +1,9 @@
 ---
 name: backlog-review
 description: >
-  Review the change in this checkout against its base — committed, uncommitted and untracked work alike — with one backlog-reviewer per file group,
-  dispatched in parallel, every changed file proven covered and every finding pinned to a quoted line. Incremental by default: a branch reviewed before is
-  re-reviewed only for what changed since, with the earlier findings re-checked. Use it for /backlog-review, review my changes, review this branch, review
-  task 12 / bug 7 against its plan, code review before I push, or re-review after a fix. Given an item id it also checks the change keeps that item's promise.
-  It offers to fix what it found and never commits. Trigger: /backlog-review
+  Review this checkout's change against its base — committed, uncommitted and untracked — with one backlog-reviewer per file group in parallel; incremental when
+  the branch was reviewed before. Use it for /backlog-review, review my changes, review this branch, review task 12 / bug 7 against its plan, code review before
+  I push, or re-review after a fix. Offers to fix; never commits. Trigger: /backlog-review
 trigger: /backlog-review
 ---
 

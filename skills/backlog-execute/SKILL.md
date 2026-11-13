@@ -1,11 +1,9 @@
 ---
 name: backlog-execute
 description: >
-  Do the actual work on a groomed bug or task — debug and fix, or build out a planned task — then archive it once verification proves it worked. Refuses
-  anything ungroomed: a task with no real plan, or a bug whose fix is still unknown. Use it to execute task 12, fix bug 7, work the backlog, or do the next
-  thing. Never touches ideas or already-rejected items, and never commits or pushes on its own — unless the trigger says `--finish pr`, where it
-  works in a worktree of its own and ends in a commit, a review, a push and a PR it never merges; with `--auto-merge` it arms GitHub auto-merge on its
-  own PR and GitHub merges. Trigger: /backlog-execute
+  Do the actual work on a groomed bug or task — debug and fix, or build out its plan — then archive it once verification proves it worked; refuses anything
+  ungroomed. Use it to execute task 12, fix bug 7, work the backlog, or do the next thing. Never touches ideas or rejected items, and never commits unless the
+  trigger says `--finish pr`, which ends in a PR it never merges. Trigger: /backlog-execute
 trigger: /backlog-execute
 ---
 
