@@ -40,7 +40,7 @@
  * was pushed, with no build step and no path back into `server/`, and
  * CLAUDE.md forbids one skill's tools reaching into another's for the same
  * reason. So the agreement is enforced the other way round, mechanically:
- * `test/tracker-labels.test.ts` reads the skill's SOURCE and asserts the
+ * `test/tracker/tracker-labels.test.ts` reads the skill's SOURCE and asserts the
  * `type:*` labels its forms apply are exactly the four named here. A test
  * rather than an import, because the boundary is real and a comment asking
  * two files to stay in step is what drifted in the first place.

@@ -1,0 +1,552 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Test } from '@nestjs/testing';
+import type { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+
+import { ItemsModule } from '../../server/src/items/items.module';
+import { REGISTRY_FILE } from '../../server/src/registry/registry.service';
+import { listenLoopback } from '../helpers/app';
+import { item, makeProject, makeRegistry } from '../helpers/store';
+import type { BacklogItem, ItemsIndex, ProjectSummary } from '../../shared/types';
+
+describe('GET /api/items and /api/projects', () => {
+  let app: INestApplication;
+
+  const alpha = makeProject('alpha', [
+    { leaf: 'bugs/open', filename: 'bug-1-it-breaks.md', content: item('bug-1', 'it breaks', '## Symptom\n\nx\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n') },
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-2-groomed.md',
+      content: item('bug-2', 'groomed bug', '## Symptom\n\nx\n\n## Cause\n\noff by one\n\n## Fix\n\nuse <=\n')
+    },
+    { leaf: 'tasks/open', filename: 'task-1-build-it.md', content: item('task-1', 'build it', '## Goal\n\ng\n\n## Plan\n\n1. step\n', 'tags: ui, board\n') },
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-3-in-progress.md',
+      content: item('bug-3', 'someone is on it', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'started: 2026-08-28T14:03:07Z\n')
+    },
+    // The shape `start` wrote before it stamped a time. Nothing rewrites an
+    // existing item's frontmatter, so this is on disk permanently and the
+    // scanner has to keep surfacing it — the client is what knows a bare date
+    // can only be aged in days.
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-4-legacy-start.md',
+      content: item('bug-4', 'started the old way', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'started: 2026-08-24\n')
+    },
+    // Task 4 fixtures: every new key present at once — proves the scan still
+    // parses, still derives section/status from the directory, and doesn't
+    // add itself to errors[].
+    //
+    // Task 11 adds the two token buckets to the same fixture, for the same
+    // reason: they are a second pair of kebab keys that has to reach a second
+    // pair of camelCase fields, and nothing but a real file carrying them
+    // proves the mapping exists.
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-5-live-groom.md',
+      content: item(
+        'bug-5',
+        'mid groom',
+        '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
+        'phase: groom\nupdated: 2026-08-30T12:00:00Z\ngroom-elapsed: 90\nexecute-elapsed: 7\ngroom-tokens: 4200\nexecute-tokens: 7\n'
+      )
+    },
+    // execute-elapsed present without groom-elapsed: the two buckets are
+    // independent counters, not a shared one that both keys feed.
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-6-live-execute.md',
+      content: item('bug-6', 'mid execute', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'phase: execute\nexecute-elapsed: 7\n')
+    },
+    // An unrecognised phase and a negative elapsed value, both only reachable
+    // by hand-editing the file — the CLI never writes either.
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-7-bad-values.md',
+      content: item(
+        'bug-7',
+        'hand-edited',
+        '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
+        'phase: wat\ngroom-elapsed: -5\ngroom-tokens: 4.2\nexecute-tokens: abc\n'
+      )
+    },
+    { leaf: 'tasks/done', filename: 'task-2-shipped.md', content: item('task-2', 'shipped', '## Goal\n\ng\n\n## Plan\n\ndone\n') },
+    { leaf: 'out-of-scope', filename: 'oos-1-nope.md', content: item('oos-1', 'nope', '## What was proposed\n\nx\n\n## Why rejected\n\ny\n') },
+    // Task 2 fixtures. The store on disk is what proves the scanner picks the
+    // new leaf directories up at all — LEAVES in scan.util.ts is a hand-written
+    // mirror of backlog.mjs's LEAF_DIRS, so nothing but a real refactors/ file
+    // arriving in the index shows the two lists still agree.
+    {
+      leaf: 'refactors/open',
+      filename: 'ref-1-split-the-scanner.md',
+      content: item(
+        'ref-1',
+        'split the scanner',
+        '## What exists today\n\nscan.util.ts does three things\n\n## Why it should change\n\nc\n\n## Rough shape\n\ns\n',
+        'kind: debt\n'
+      )
+    },
+    // An unrecognised kind, only reachable by hand or by a newer capture: it
+    // must arrive verbatim rather than being clamped to '' the way `phase` is.
+    // The client is the only thing that decides a value means nothing, and it
+    // decides that by not rendering a badge — see REFACTOR_KINDS in ItemCard.
+    { leaf: 'refactors/open', filename: 'ref-2-odd-kind.md', content: item('ref-2', 'odd kind', '## What exists today\n\nx\n', 'kind: whatever\n') },
+    { leaf: 'refactors/done', filename: 'ref-3-already-split.md', content: item('ref-3', 'already split', '## What exists today\n\nx\n', 'kind: chore\n') },
+    { leaf: 'ideas/open', filename: 'idea-1-broken.md', content: 'no frontmatter at all\n' }
+  ]);
+  const beta = makeProject('beta', [{ leaf: 'ideas/open', filename: 'idea-1-someday.md', content: item('idea-1', 'someday', '## Problem\n\np\n') }]);
+  // task-43's two source-marker fixtures, both carrying a real store on disk so
+  // that what the marker changes is visible against a project that would
+  // otherwise scan perfectly well.
+  //
+  // `sourceless` names a kind no adapter in this build serves. Its items —
+  // there is one, deliberately — must NOT reach the index: the whole point of
+  // `unsupported` is that a project whose owner this build cannot identify
+  // contributes nothing rather than its stale files.
+  const sourceless = makeProject(
+    'sourceless',
+    [{ leaf: 'bugs/open', filename: 'bug-9-ghost.md', content: item('bug-9', 'a ghost', '## Symptom\n\nx\n') }],
+    '{"kind":"nope"}'
+  );
+  // `epsilon` spells out the implicit source. It must behave exactly like a
+  // project with no marker at all — writing the default down is not a way to
+  // opt out of it.
+  const epsilon = makeProject(
+    'epsilon',
+    [{ leaf: 'ideas/open', filename: 'idea-2-explicit.md', content: item('idea-2', 'explicit files', '## Problem\n\np\n') }],
+    '{"kind":"files"}'
+  );
+
+  beforeAll(async () => {
+    const registry = makeRegistry([
+      { name: 'alpha', path: alpha },
+      { name: 'beta', path: beta },
+      { name: 'ghost', path: '/nowhere/ghost' },
+      { name: 'sourceless', path: sourceless },
+      { name: 'epsilon', path: epsilon }
+    ]);
+    const moduleRef = await Test.createTestingModule({ imports: [ItemsModule] })
+      .overrideProvider(REGISTRY_FILE)
+      .useValue(registry)
+      .compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+    await listenLoopback(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('indexes every readable item across projects with derived fields', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const index = res.body as ItemsIndex;
+    const byId = new Map(index.items.map((i) => [`${i.project}/${i.id}`, i]));
+
+    // 14 as before, plus epsilon's one idea. `sourceless`'s bug-9 is NOT in
+    // here: its marker names a kind no adapter serves, so the project
+    // contributes no items at all.
+    expect(byId.size).toBe(15);
+    const bug1 = byId.get('alpha/bug-1') as BacklogItem;
+    expect(bug1.section).toBe('bugs');
+    expect(bug1.status).toBe('open');
+    expect(bug1.groomed).toBe(false);
+    expect((byId.get('alpha/bug-2') as BacklogItem).groomed).toBe(true);
+    const task1 = byId.get('alpha/task-1') as BacklogItem;
+    expect(task1.tags).toEqual(['ui', 'board']);
+    expect(task1.groomed).toBe(true);
+    expect((byId.get('alpha/task-2') as BacklogItem).status).toBe('done');
+    const oos = byId.get('alpha/oos-1') as BacklogItem;
+    expect(oos.status).toBe('terminal');
+    expect(oos.groomed).toBeNull();
+    expect((byId.get('beta/idea-1') as BacklogItem).projectPath).toBe(beta);
+    // Every item carries both token fields, present or absent on disk — a
+    // consumer never has to handle undefined for one and a number for another.
+    expect(index.items.every((i) => typeof i.groomTokens === 'number' && typeof i.executeTokens === 'number')).toBe(true);
+  });
+
+  it('reports the malformed file in errors[] and still returns the rest', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const index = res.body as ItemsIndex;
+    // Two now: the malformed item file, and `sourceless`'s unreadable marker.
+    // Both found by their content rather than by index — the order is the
+    // registry's, which is not what either case is about.
+    expect(index.errors).toHaveLength(2);
+    expect(index.errors.some((e) => e.includes('idea-1-broken.md'))).toBe(true);
+  });
+
+  // The seam's whole acceptance test (task-43): every row says which adapter
+  // produced it, and in this build there is only one answer.
+  it('stamps every item with its source', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const index = res.body as ItemsIndex;
+    expect(index.items.every((i) => i.source === 'files')).toBe(true);
+  });
+
+  // An unsupported marker contributes NO items and exactly one error, and the
+  // error is prefixed with the marker's own path the way a scan error is
+  // prefixed with the item file's. Never a fallback to files: the item under
+  // `sourceless` is real, readable and deliberately absent from the payload.
+  it('drops an unsupported project entirely and reports its marker once', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const index = res.body as ItemsIndex;
+
+    expect(index.items.some((i) => i.projectPath === sourceless)).toBe(false);
+    const reported = index.errors.filter((e) => e.startsWith(join(sourceless, 'backlog', 'source.json')));
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toContain('nope');
+  });
+
+  // The explicit spelling of the implicit source behaves exactly like no
+  // marker at all — writing the default down is not a way to opt out of it.
+  it('honours an explicit files marker like no marker at all', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const idea = (res.body as ItemsIndex).items.find((i) => i.project === 'epsilon' && i.id === 'idea-2') as BacklogItem;
+    expect(idea.section).toBe('ideas');
+    expect(idea.status).toBe('open');
+    expect(idea.source).toBe('files');
+  });
+
+  it('summarises projects with open counts and flags missing ones', async () => {
+    const res = await request(app.getHttpServer()).get('/api/projects').expect(200);
+    const projects = res.body as ProjectSummary[];
+    const byName = new Map(projects.map((p) => [p.name, p]));
+
+    expect(byName.size).toBe(5);
+    const a = byName.get('alpha') as ProjectSummary;
+    expect(a.missing).toBe(false);
+    expect(a.source).toBe('files');
+    // done task-2 is not counted; the malformed idea is not an item
+    // refactors counts 2, not 3: ref-3 is done, and done items are history.
+    expect(a.counts).toEqual({ bugs: 7, ideas: 0, tasks: 1, refactors: 2, 'out-of-scope': 1 });
+    const ghost = byName.get('ghost') as ProjectSummary;
+    expect(ghost.missing).toBe(true);
+    expect(ghost.counts).toEqual({ bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 });
+    // null, not a fifth string: "no store at all" is already `missing`'s news.
+    expect(ghost.source).toBeNull();
+  });
+
+  // `unsupported` is a summary state of its own: the store IS there (so
+  // `missing` stays false, which is what that flag has always meant), the
+  // counts are all zero because no adapter listed anything, and the source
+  // reads `unsupported` rather than `files` — the negative the whole seam
+  // rests on. The REASON is not here; it travels in ItemsIndex.errors.
+  it('summarises an unsupported project as present, empty and unsupported', async () => {
+    const res = await request(app.getHttpServer()).get('/api/projects').expect(200);
+    const byName = new Map((res.body as ProjectSummary[]).map((p) => [p.name, p]));
+
+    const unsupported = byName.get('sourceless') as ProjectSummary;
+    expect(unsupported.source).toBe('unsupported');
+    expect(unsupported.source).not.toBe('files');
+    expect(unsupported.missing).toBe(false);
+    expect(unsupported.counts).toEqual({ bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 });
+
+    const eps = byName.get('epsilon') as ProjectSummary;
+    expect(eps.source).toBe('files');
+    expect(eps.missing).toBe(false);
+    expect(eps.counts.ideas).toBe(1);
+  });
+
+  // `started` is stored, not derived — the scanner's job is only to surface it
+  // verbatim, leaving "is this actually in progress" (which also depends on the
+  // item still being open) to the client. Absent means '', matching how a
+  // missing `created` is reported, so no consumer has to handle undefined.
+  it('surfaces started verbatim in either shape, and empty for an item nobody has picked up', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const byId = new Map((res.body as ItemsIndex).items.map((i) => [`${i.project}/${i.id}`, i]));
+
+    // Verbatim means the timestamp arrives with its seconds intact: the client
+    // reads this down to the minute, so anything truncated here is information
+    // it cannot get back.
+    expect((byId.get('alpha/bug-3') as BacklogItem).started).toBe('2026-08-28T14:03:07Z');
+    expect((byId.get('alpha/bug-4') as BacklogItem).started).toBe('2026-08-24');
+    expect((byId.get('alpha/bug-1') as BacklogItem).started).toBe('');
+  });
+
+  // phase, updated, and the two elapsed buckets, wired end to end from
+  // kebab-case frontmatter through the scan to the API response. Exhaustive
+  // clamping behaviour (what "-5", "1.5", "abc", or "wat" become) is
+  // unit-tested directly against clampPhase/parseElapsed in parse.test.ts;
+  // this is the proof the scan actually reads the right kebab keys into the
+  // right camelCase fields, and that a bad value clamps instead of 500ing
+  // the whole index or dropping the item.
+  it('surfaces phase, updated, and the elapsed buckets, clamping bad values instead of erroring', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const index = res.body as ItemsIndex;
+    const byId = new Map(index.items.map((i) => [`${i.project}/${i.id}`, i]));
+
+    // Nobody has touched bug-1: every new field sits at its absent-default.
+    const bug1 = byId.get('alpha/bug-1') as BacklogItem;
+    expect(bug1.phase).toBe('');
+    expect(bug1.updated).toBe('');
+    expect(bug1.groomElapsed).toBe(0);
+    expect(bug1.executeElapsed).toBe(0);
+    expect(bug1.groomTokens).toBe(0);
+    expect(bug1.executeTokens).toBe(0);
+    // A temp store is not a git repo, so the whole index exercises the degrade
+    // path: no history to read, and the scan still answers rather than throwing.
+    expect(index.items.every((i) => i.lastCommit === '')).toBe(true);
+
+    // Every new key present at once: still parses, still bugs/open, groomed
+    // still derives from the body — none of it lands in errors[] (asserted
+    // below).
+    const bug5 = byId.get('alpha/bug-5') as BacklogItem;
+    expect(bug5.phase).toBe('groom');
+    expect(bug5.updated).toBe('2026-08-30T12:00:00Z');
+    expect(bug5.groomElapsed).toBe(90);
+    expect(bug5.executeElapsed).toBe(7);
+    expect(bug5.groomTokens).toBe(4200);
+    expect(bug5.executeTokens).toBe(7);
+    expect(bug5.section).toBe('bugs');
+    expect(bug5.status).toBe('open');
+    expect(bug5.groomed).toBe(true);
+
+    // execute-elapsed present without groom-elapsed: the buckets don't share
+    // a counter — the absent one still reads 0, not the other's value.
+    const bug6 = byId.get('alpha/bug-6') as BacklogItem;
+    expect(bug6.phase).toBe('execute');
+    expect(bug6.executeElapsed).toBe(7);
+    expect(bug6.groomElapsed).toBe(0);
+
+    // An unrecognised phase and a negative elapsed value both clamp to their
+    // empty/zero default rather than erroring the whole index.
+    const bug7 = byId.get('alpha/bug-7') as BacklogItem;
+    expect(bug7.phase).toBe('');
+    expect(bug7.groomElapsed).toBe(0);
+    // The token buckets clamp through the very same parseElapsed: a fractional
+    // and a non-numeric value both read 0, and — the part that matters — the
+    // item is still in the index rather than dropped or in errors[].
+    expect(bug7.groomTokens).toBe(0);
+    expect(bug7.executeTokens).toBe(0);
+    expect(byId.has('alpha/bug-7')).toBe(true);
+
+    // Still only the one pre-existing malformed file (idea-1-broken.md) plus
+    // `sourceless`'s marker — none of the fixtures above added themselves to
+    // errors[].
+    expect(index.errors).toHaveLength(2);
+  });
+
+  it('serves an item body as text/plain with the frontmatter stripped', async () => {
+    const items = (await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex;
+    const bug = items.items.find((i) => i.id === 'bug-2' && i.project === 'alpha') as BacklogItem;
+    const res = await request(app.getHttpServer())
+      .get('/api/items/body')
+      .query({ path: bug.path })
+      .expect(200)
+      .expect('content-type', /text\/plain/);
+    expect(res.text).toContain('## Cause');
+    expect(res.text).not.toContain('id: bug-2');
+  });
+
+  it('404s a path outside every registered store, and a missing param', async () => {
+    await request(app.getHttpServer()).get('/api/items/body').query({ path: '/etc/hosts' }).expect(404);
+    await request(app.getHttpServer()).get('/api/items/body').expect(404);
+  });
+
+  // `null`, never `false`. The distinction is the whole reason this is asserted
+  // separately from "groomed is derived": `false` would put an ungroomed marker
+  // on a card and route the board's own label at a groom gate a refactor can
+  // never pass, because what a refactor waits for is being PROMOTED. It reaches
+  // null through deriveGroomed's fall-through rather than a branch of its own —
+  // see the note there on why that is deliberate.
+  it('derives a refactor section and status from the directory, with groomed null', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const byId = new Map((res.body as ItemsIndex).items.map((i) => [`${i.project}/${i.id}`, i]));
+
+    const ref1 = byId.get('alpha/ref-1') as BacklogItem;
+    expect(ref1.section).toBe('refactors');
+    expect(ref1.status).toBe('open');
+    expect(ref1.groomed).toBeNull();
+    expect(ref1.groomed).not.toBe(false);
+    expect((byId.get('alpha/ref-3') as BacklogItem).status).toBe('done');
+  });
+
+  it('surfaces kind verbatim, including a value it does not recognise, and empty elsewhere', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const byId = new Map((res.body as ItemsIndex).items.map((i) => [`${i.project}/${i.id}`, i]));
+
+    expect((byId.get('alpha/ref-1') as BacklogItem).kind).toBe('debt');
+    expect((byId.get('alpha/ref-2') as BacklogItem).kind).toBe('whatever');
+    expect((byId.get('alpha/ref-3') as BacklogItem).kind).toBe('chore');
+    // Absent on every other section, reported as '' rather than undefined —
+    // the same contract `started` and `created` keep.
+    expect((byId.get('alpha/bug-1') as BacklogItem).kind).toBe('');
+  });
+
+  // The allowlist is built from each registered project's backlog/ directory
+  // rather than from a list of sections, so a new section needs nothing from it.
+  // Asserted rather than assumed: "it should just work" is exactly the claim
+  // that turned out to be half wrong for the scanner one file over.
+  it('serves a body from under refactors/ and still 404s outside the store', async () => {
+    const items = (await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex;
+    const ref = items.items.find((i) => i.id === 'ref-1' && i.project === 'alpha') as BacklogItem;
+    expect(ref.path).toContain('/refactors/open/');
+
+    const res = await request(app.getHttpServer())
+      .get('/api/items/body')
+      .query({ path: ref.path })
+      .expect(200)
+      .expect('content-type', /text\/plain/);
+    expect(res.text).toContain('## What exists today');
+    expect(res.text).not.toContain('kind: debt');
+
+    await request(app.getHttpServer()).get('/api/items/body').query({ path: '/etc/hosts' }).expect(404);
+  });
+});
+
+/**
+ * `plan-review:` (backlog-tick): a files item's frontmatter line is read by PRESENCE, the way the tool reads `runner-fix:` — any value but `false` counts —
+ * and mapped to `planReview: true` or an absent key, never `false`. The scan reads the working tree, so this is also the board's view of an uncommitted edit.
+ */
+describe('planReview on a files item', () => {
+  let app: INestApplication;
+  const bug = (n: number, extra: string) => ({
+    leaf: 'bugs/open',
+    filename: `bug-${n}-x.md`,
+    content: item(`bug-${n}`, `bug ${n}`, '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', extra)
+  });
+
+  beforeAll(async () => {
+    const root = makeProject('planreview', [bug(1, 'plan-review: true\n'), bug(2, 'plan-review: yes\n'), bug(3, 'plan-review: false\n'), bug(4, ''), bug(5, 'plan-review: FALSE\n')]);
+    const moduleRef = await Test.createTestingModule({ imports: [ItemsModule] })
+      .overrideProvider(REGISTRY_FILE)
+      .useValue(makeRegistry([{ name: 'planreview', path: root }]))
+      .compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+    await listenLoopback(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  async function find(id: string): Promise<BacklogItem> {
+    const index = (await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex;
+    return index.items.find((i) => i.id === id) as BacklogItem;
+  }
+
+  it('is true for `plan-review: true`', async () => {
+    expect((await find('bug-1')).planReview).toBe(true);
+  });
+
+  it('is true for any value but false — presence, like runner-fix', async () => {
+    expect((await find('bug-2')).planReview).toBe(true);
+  });
+
+  it('omits the key for `plan-review: false`, in any case, rather than carrying false', async () => {
+    expect('planReview' in (await find('bug-3'))).toBe(false);
+    expect('planReview' in (await find('bug-5'))).toBe(false);
+  });
+
+  it('omits the key when there is no line', async () => {
+    expect('planReview' in (await find('bug-4'))).toBe(false);
+  });
+});
+
+describe('malformed registry entries and unreadable item paths', () => {
+  let app: INestApplication;
+
+  // A directory whose name ends in .md, sitting inside a registered store.
+  // It clears the allowlist and the .md check, and readFileSync then throws
+  // EISDIR — which used to escape ItemsService.body() as a 500 with a stack
+  // trace, telling the caller the path IS inside an allowlisted store.
+  const gamma = makeProject('gamma', [{ leaf: 'bugs/open', filename: 'bug-1-real.md', content: item('bug-1', 'real', '## Symptom\n\nx\n') }]);
+  const dirNamedMd = join(gamma, 'backlog', 'bugs', 'open', 'not-a-file.md');
+
+  beforeAll(async () => {
+    mkdirSync(dirNamedMd, { recursive: true });
+
+    // Hand-edited registry: backlog.mjs never writes this, but the file is
+    // plain JSON in $HOME and the board's contract is an empty board, not a
+    // 500, for anything it cannot make sense of.
+    const dir = mkdtempSync(join(tmpdir(), 'bm-badreg-'));
+    const registry = join(dir, 'registry.json');
+    writeFileSync(
+      registry,
+      JSON.stringify({
+        projects: [
+          { name: 1, path: 2 },
+          { name: 'gamma', path: gamma, createdAt: '2026-08-26T00:00:00.000Z' }
+        ]
+      })
+    );
+
+    const moduleRef = await Test.createTestingModule({ imports: [ItemsModule] })
+      .overrideProvider(REGISTRY_FILE)
+      .useValue(registry)
+      .compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+    await listenLoopback(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('serves the well-formed projects and drops the mis-shaped entry — never a 500', async () => {
+    const items = (await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex;
+    expect(items.items.map((i) => i.id)).toEqual(['bug-1']);
+    const projects = (await request(app.getHttpServer()).get('/api/projects').expect(200)).body as ProjectSummary[];
+    expect(projects.map((p) => p.name)).toEqual(['gamma']);
+  });
+
+  it('404s a directory named *.md inside a registered store, not a 500', async () => {
+    await request(app.getHttpServer()).get('/api/items/body').query({ path: dirNamedMd }).expect(404);
+  });
+});
+
+describe('a registry that cannot be read (#349)', () => {
+  let app: INestApplication;
+  let registry: string;
+  let warn: jest.SpyInstance;
+
+  const delta = makeProject('delta', [{ leaf: 'bugs/open', filename: 'bug-1-real.md', content: item('bug-1', 'real', '## Symptom\n\nx\n') }]);
+  const good = JSON.stringify({ projects: [{ name: 'delta', path: delta, createdAt: '2026-08-26T00:00:00.000Z' }] });
+
+  beforeAll(async () => {
+    registry = join(mkdtempSync(join(tmpdir(), 'bm-brokenreg-')), 'registry.json');
+    const moduleRef = await Test.createTestingModule({ imports: [ItemsModule] })
+      .overrideProvider(REGISTRY_FILE)
+      .useValue(registry)
+      .compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+    await listenLoopback(app);
+  });
+
+  beforeEach(() => {
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => warn.mockRestore());
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('a missing file is an empty board, 200 on both routes', async () => {
+    rmSync(registry, { force: true });
+    expect((await request(app.getHttpServer()).get('/api/projects').expect(200)).body).toEqual([]);
+    expect(((await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex).items).toEqual([]);
+  });
+
+  it.each([['{"projects": ['], ['[]'], ['null'], ['{"projects": 1}']])('%s is a 503 naming registry.json on both routes', async (content) => {
+    writeFileSync(registry, content);
+    for (const route of ['/api/projects', '/api/items']) {
+      const res = await request(app.getHttpServer()).get(route).expect(503);
+      expect((res.body as { error: string }).error).toContain('registry.json');
+    }
+  });
+
+  it('a repaired file serves the projects again on the next request', async () => {
+    writeFileSync(registry, '{"projects": [');
+    await request(app.getHttpServer()).get('/api/projects').expect(503);
+    writeFileSync(registry, good);
+    const projects = (await request(app.getHttpServer()).get('/api/projects').expect(200)).body as ProjectSummary[];
+    expect(projects.map((p) => p.name)).toEqual(['delta']);
+  });
+});

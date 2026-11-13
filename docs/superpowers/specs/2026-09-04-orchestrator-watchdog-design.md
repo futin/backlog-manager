@@ -312,7 +312,7 @@ untouched.
 
 Test _cases_, not code — the implementer owns the shape. Jest, flat in `test/`, the existing `stubDashboard` pattern for anything that spawns.
 
-**Sweeper** (`test/watchdog-sweep.test.ts`, fake timers, `orchHome` pointed at a temp dir with hand-written `run.json`s):
+**Sweeper** (`test/watchdog/watchdog-sweep.test.ts`, fake timers, `orchHome` pointed at a temp dir with hand-written `run.json`s):
 
 - crashed run, defaults → exactly one `/api/spawn` POST; its prompt is the literal `/backlog-orchestrate --resume`; `permissionMode` is `auto` clamped to the
   stub's ceiling; the entry reads `attempts: 1`.
@@ -330,27 +330,27 @@ Test _cases_, not code — the implementer owns the shape. Jest, flat in `test/`
 - a tick whose spawn is still pending when its interval elapses schedules no overlapping tick.
 - config file changed between ticks → the next tick uses the new `graceMs`.
 
-**`resume` route** (`test/agents-resume.test.ts`, supertest against `AppModule`):
+**`resume` route** (`test/agents/agents-resume.test.ts`, supertest against `AppModule`):
 
 - empty `project` → 400. `BM_AGENTS` off → 404. no run / run `done` → 409 without `code`. run fresh → 409 with `RUN_IN_PROGRESS_CODE`. project not in
   `projectPaths` → 409. crashed run → 200 `{ sessionId }`, one POST with the exact prompt and a `name` starting `resume ` (plain space — see §3). Cross-origin
   POST → the guard's rejection.
 
-**Config** (`test/watchdog-config.test.ts`):
+**Config** (`test/watchdog/watchdog-config.test.ts`):
 
 - missing file → defaults. each field below floor → floor; above ceiling → ceiling; non-numeric → default. `enabled: "no"` → `true`; `false` → `false`.
 - `POST` with `{ graceMs: 1 }` → file holds `300000`, response `config.graceMs` is `300000`. unknown key dropped. non-object body → 400. `BM_WATCHDOG_FILE`
   honoured. write is atomic (no partial file observable — assert via a rename spy or by reading mid-write).
 
-**Payload** (`test/orchestrator-runs.test.ts`, extend): `watchdog` present only on crashed runs; absent on fresh and on finished ones.
+**Payload** (`test/orchestrator/orchestrator-runs.test.ts`, extend): `watchdog` present only on crashed runs; absent on fresh and on finished ones.
 
 **Strip** (`test/orchestrator-strip.test.tsx`): replace "renders no strip for a stale run" with: stale + `running` renders `crashed`, the heartbeat age,
 `last reported <id> at <stage>`, and the watchdog clause for each of the five states; stale + `done` renders nothing; Resume button present only for `exhausted`
 and `!enabled`; clicking it posts and does not call `onOpen`; a 409 with `RUN_IN_PROGRESS_CODE` shows no error.
 
-**Hook** (`test/orchestrator-hook.test.tsx`, extend): polls while a run is `running` and stale; stops when it turns `done`.
+**Hook** (`test/orchestrator/orchestrator-hook.test.tsx`, extend): polls while a run is `running` and stale; stops when it turns `done`.
 
-**Settings** (`test/settings-watchdog.test.tsx`): state line per phase; select ladders contain only values inside `WATCHDOG_LIMITS`; a change posts one field
+**Settings** (`test/settings/settings-watchdog.test.tsx`): state line per phase; select ladders contain only values inside `WATCHDOG_LIMITS`; a change posts one field
 and redraws from the response; activity renders newest first and its empty state.
 
 ## 9. Decisions taken, and what they cost

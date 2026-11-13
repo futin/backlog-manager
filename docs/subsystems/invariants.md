@@ -270,7 +270,7 @@ tracker the `body` route adds the label itself BEFORE the patch and refuses with
 the mark the tick's read-back sees.
 A person approves by removing it, and there is no `--no-plan-review` anywhere: approval is `backlog.mjs plan-review <id> off`, or deleting the line and
 committing. Every gate that could execute the item reads the one flag and refuses with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON` in
-`shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and in the execute skill's text, pinned to it by `test/agents-shared.test.ts`): the board's Run
+`shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and in the execute skill's text, pinned to it by `test/agents/agents-shared.test.ts`): the board's Run
 button, the server's `plan` and `dispatch` ladder (an uncoded 409), the orchestrator's queue — which turns the item `ungroomed` with that reason, the way
 `in-review` does, so no new verdict reaches the run's stages — and `backlog-execute`'s own refusal. The rung is `planReviewBlock`, always AFTER `inReviewBlock`
 (`itemLadderBlock` is the one home of the order):
@@ -366,7 +366,7 @@ never be too short to see a streak.
 
 **The rule has two copies, pinned by one table.** `skills/backlog-tick/tools/tick-breaker.mjs` (`streakOf`) and `server/src/tick/tick-breaker.util.ts` each
 carry it, because a skill's `tools/` never imports from `server/` or `shared/` and the server never imports from `skills/` — the `pauseRequestEffective`
-precedent. The guard against drift is a suite on each side holding the SAME `streakOf` table row for row (`tick-breaker.test.mjs`, `test/tick-breaker.test.ts`),
+precedent. The guard against drift is a suite on each side holding the SAME `streakOf` table row for row (`tick-breaker.test.mjs`, `test/tick/tick-breaker.test.ts`),
 so changing the rule on one side fails the other side's tests instead of letting `decide` stop a project the board shows as healthy, or the reverse. "Parseable"
 is `Date.parse` not being `NaN` in both, for the same reason.
 
@@ -443,7 +443,7 @@ freshness is measured from, and two readings would open a window in which a requ
 
 **The watchdog needs no change, and two tests say so.** The sweeper walks `running` runs; a paused run is not one. That is the whole reason `paused` is a fifth
 STATUS rather than a flag beside `running` — everything that already branches on "is this run still going" (the sweeper, `init`'s archive rule, `runClaimBlock`)
-gets the right answer for free. `test/watchdog-sweep.test.ts` pins both halves: a paused run stands the sweeper down with one `idle` event, and a CRASHED run
+gets the right answer for free. `test/watchdog/watchdog-sweep.test.ts` pins both halves: a paused run stands the sweeper down with one `idle` event, and a CRASHED run
 with a pause request waiting for it is still resumed — a request is not a pause, and a run that crashed before reaching a gate never saw it.
 
 **`init` archives a `paused` run like a `done` one.** It refuses only a file that still says `running`, so a person who gives up on resuming can start fresh
@@ -536,7 +536,7 @@ a re-stop control and a stale-stop respawn rule — three layers to save one red
 writing anything; one on a run already `aborted` is a one-line no-op `0`. A stop's `force` overrides a driver's lease and never an abort's, because a stop is
 on file for both aborts. The same session, a hand-run terminal and a stale mark are the three exemptions: finishing your own interrupted abort, the person at
 the keyboard being the authority, and an abort that died mid-way not locking the run for longer than any other lease does. There is no lock under the
-read-modify-write; the two aborts arrive ~25s apart and a doubled abort stays safe, so a lock is not bought. `test/agents-stop.test.ts` pins the spawn
+read-modify-write; the two aborts arrive ~25s apart and a doubled abort stays safe, so a lock is not bought. `test/agents/agents-stop.test.ts` pins the spawn
 staying unconditional for a fresh run with a named driver, so a server-side liveness gate cannot come back without the re-stop control it needs.
 
 **`stopRequested: boolean` joins `pauseRequested` on the runs payload** — mandatory, derived per request from the SAME single control-file read (which is what
@@ -548,7 +548,7 @@ wire, read verbatim by two readers, is stronger than two expressions that agree.
 **The coupling's biconditional narrows to an implication, and that is deliberate.** "The board offers a hand resume exactly when the sweeper will not spawn
 one" holds whenever no stop is on file; under a stop, neither side acts. The set of runs offering a Resume is now a SUBSET of the set the sweeper declines to
 spawn for, never a superset — which is the safe direction, and the only direction, since the hazard the coupling exists for is a second spawn.
-`test/watchdog-coupling.test.tsx` and `test/watchdog-sweep.test.ts` each sweep `COUPLING_ROWS` a second time under a stop rather than growing a
+`test/watchdog/watchdog-coupling.test.tsx` and `test/watchdog/watchdog-sweep.test.ts` each sweep `COUPLING_ROWS` a second time under a stop rather than growing a
 `stopRequested` column: the answer does not vary by row, so a column would be one rule written out seven times.
 
 **Three readers in the tool, three different refusals.**
@@ -882,7 +882,7 @@ The cheaper option was to reuse `merged` and relabel it in the UI from the run's
 when `main` never received it. This repo has repeatedly paid for honesty in derived state over cheapness (`itemDurationMs`, `lastTouched`, `isStale`), and a run
 archive that lies about what reached `main` is worse than a mechanical sweep across the classification sites.
 
-What keeps that sweep from being a checklist someone forgets is `test/agents-shared.test.ts`'s `Record<RunStage, true>` literal: the compiler demands an entry
+What keeps that sweep from being a checklist someone forgets is `test/agents/agents-shared.test.ts`'s `Record<RunStage, true>` literal: the compiler demands an entry
 for every union member, and the test then forces each member into one side of both partitions. The one place the mode alone is not enough is `stepperDots`'
 terminal word — an item that has already reached one of the two success exits answers with its **own** stage, and only an item still in flight falls back to the
 run's `mergeModeEffective`, because a run downgraded at item 3 must not redraw items 1 and 2 as having branched when they merged.
@@ -1285,8 +1285,9 @@ of a sentence in it is therefore the sentence times the turns, whether or not th
 2026-09-01 floor trim took it to **60,168**, and by 2026-10-05 it stood at **150,227** (151,246 bytes) — 2.5 times as large in five weeks. The growth was the
 habit, not the rules: each new rule landed with the incident that motivated it written out beside it (the bug number, what the first version did wrong, the
 measurement that proved it), each failure path landed inline in the section it interrupted, and each fixed sequence of repository and file checks landed as
-prose the driver re-derived into commands every time. The run read all of it, all the time. `docs/superpowers/plans/2026-10-05-orchestrate-body-shrink.md` is
-the shrink; this section is what stops the next one.
+prose the driver re-derived into commands every time. The run read all of it, all the time.
+[The shrink's plan](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-10-05-orchestrate-body-shrink.md) is the shrink; this
+section is what stops the next one.
 
 The three levers, and why exactly these three. **A story moves to `references/rationale.md`**, because the reader of the body needs the instruction and the
 reader of the rationale needs the evidence, and they are different readers at different moments. **A branch a clean run never takes moves to its own
@@ -1335,8 +1336,12 @@ indistinguishable at `pnpm test` from a file never written. That has happened in
 is the fix, and it names files by shape on purpose — which is why placement is stated as a convention every session loads rather than left to the globs:
 they cannot report what they did not match, so the path has to be right by construction.
 
-"Flat in `test/`" is convention rather than mechanism — jest's glob would descend — and it is kept so that the two subdirectories that do exist,
-`test/helpers/` and `test/fixtures/`, read as "not suites" from the path alone. The node side is the mirror image: `skills/*/tools/*.test.mjs` does not
+Jest's side is convention rather than mechanism, because its glob descends: suites sit one level down, in a directory named for the feature they cover
+(`test/jira/`, `test/runs/`, …) or in `test/guards/` for a source guard that reads across the repo. Until 2026-11-13 the convention was the opposite — flat
+in `test/` — and 293 suites in one directory had stopped being navigable; the move kept `test/helpers/` and `test/fixtures/` as the two directories that
+read as "not suites" from the path alone. One level, not more: a suite's repo-relative paths are all `../../`, and two guards
+(`test/guards/fixture-clock.test.ts`, `test/guards/supertest-bind.test.ts`) walk `test/` recursively, so a deeper suite would still be found but would make
+every relative path in it a special case. The node side is the mirror image: `skills/*/tools/*.test.mjs` does not
 descend, so there the same property is enforced rather than kept. `backlog-retro`'s suite is split in two — `retro.test.mjs` for the CLI, spawned as a child
 process, and `retro-lib.test.mjs` for the modules under `tools/lib/` — and BOTH sit at the `tools/` level for exactly this reason:
 `tools/lib/retro-lib.test.mjs` would read as the natural home, match neither glob, and never run, with no red anywhere to say so.
@@ -1388,7 +1393,7 @@ was a sound inference about a response this app never produced); a listener that
 
 **Measured**, not inferred. A 20,000-iteration probe replaying supertest's pattern exactly, against this machine as it stood (40 loopback listeners, 4 of them
 on `127.0.0.1` inside the ephemeral range — two `java`, Postman, WebStorm): 13 anomalies, ~1 in 1,540 — 8 wrong statuses, 2 parse errors, 3 connect timeouts.
-The identical probe with the single change `listen(0, '127.0.0.1')`: zero. `test/supertest-bind.test.ts` reproduces the same thing deterministically in
+The identical probe with the single change `listen(0, '127.0.0.1')`: zero. `test/guards/supertest-bind.test.ts` reproduces the same thing deterministically in
 milliseconds — a wildcard `listen(P)` succeeds on a port `127.0.0.1` already holds and reports `::`, the IPv4 dial to it comes back `HPE_INVALID_CONSTANT`, and
 the same bind written with the host is refused `EADDRINUSE`. That overlap is a BSD-stack behaviour (macOS, where this was measured), not a universal one:
 Linux refuses the wildcard bind itself with `EADDRINUSE`, so the two overlap cases run off Linux only, and on Linux a case in their place asserts the refusal —
@@ -1418,7 +1423,7 @@ real timers — pass it. Moving `jest.useFakeTimers()` after `createApp()` to av
 and those cases exist to drive that chain from the fake clock.
 
 **Pinned by source guard, because behaviour cannot reach it.** A suite that forgets the helper stays green roughly 1,499 runs in 1,500 — that is the defect
-itself. So `test/supertest-bind.test.ts` reads every file under `test/` and asserts that each one importing supertest also calls `listenLoopback(`, and that a
+itself. So `test/guards/supertest-bind.test.ts` reads every file under `test/` and asserts that each one importing supertest also calls `listenLoopback(`, and that a
 bare `.listen(0)` appears nowhere at all, comments blanked first (the same precaution `server-bind.test.ts` takes, and for the same reason: several files quote
 the bad spelling while explaining it). What the guard cannot catch, stated so a green is not over-read: a suite that builds a **second** app and listens only
 the first. Two such pairs exist today (`csp`, `allowed-hosts`) and both listen every app they hand to `request(...)`.
@@ -1447,7 +1452,7 @@ was `bug-14` at `merged` — terminal, therefore not held, therefore stale — a
 deliberate control in both failing cases. The predicate was working exactly as specified; all five rules above were doing their job. The defect was entirely in
 the fixtures.
 
-**The rule.** `daysAgoDate` and `daysAgoStamp` (`test/helpers/dates.ts`) are the one home for a fixture date, and no `test/*.test.tsx` writes an absolute
+**The rule.** `daysAgoDate` and `daysAgoStamp` (`test/helpers/dates.ts`) are the one home for a fixture date, and no `test/**/*.test.tsx` writes an absolute
 `created`/`updated`/`lastCommit`/`started` literal outside the guard's allowlist. Both read `Date.now()` at CALL time rather than at module load, which is what
 lets a suite install a fake clock in `beforeEach` and still get a date that agrees with it. Two functions rather than one because the shapes are not
 interchangeable — a files item's `created` is a `YYYY-MM-DD` date, the other three are second-precision UTC stamps (and so, since #237, is a tracker item's
@@ -1456,7 +1461,7 @@ before this file existed, spelled `daysAgoDate` in `board.test.tsx` (first shape
 shape). Two near-identical names returning two different shapes is its own trap, so the exported pair keeps the distinction visible. Same "one implementation"
 rule `listenLoopback` follows one section above.
 
-**Pinned by source guard, because behaviour cannot reach it.** `test/fixture-clock.test.ts` reads the source of every `test/*.test.tsx`, comments blanked first,
+**Pinned by source guard, because behaviour cannot reach it.** `test/guards/fixture-clock.test.ts` reads the source of every `test/**/*.test.tsx`, comments blanked first,
 and fails on any of the four keys carrying a `YYYY-MM-DD` literal. A behavioural test could not be this guard: a fresh absolute date is green on the day it is
 written and for thirty days afterwards, so the suite that introduces the next one passes every check on the way in — the same argument `supertest-bind.test.ts`
 makes for reading source rather than measuring a bind. A red names the file and line, and the fix is a `daysAgo*` call or an allowlist entry with the reason
@@ -1488,8 +1493,8 @@ also fronts a POST that spawns a Claude Code session with file-write permission 
 respect at all, which is exactly why the origin and content-type guard on those two routes exists — the bind and the guard cover different attackers, and
 neither substitutes for the other.
 
-**Both halves are pinned**, and asymmetrically for a reason: the dev server's bind is an ordinary import (`test/vite-proxy.test.ts`), while the API entrypoint's
-is read out of `server/src/main.ts`'s SOURCE (`test/server-bind.test.ts`) because `main.ts` calls `bootstrap()` at top level with no `require.main` guard, so
+**Both halves are pinned**, and asymmetrically for a reason: the dev server's bind is an ordinary import (`test/guards/vite-proxy.test.ts`), while the API entrypoint's
+is read out of `server/src/main.ts`'s SOURCE (`test/guards/server-bind.test.ts`) because `main.ts` calls `bootstrap()` at top level with no `require.main` guard, so
 importing it opens a real socket. The source test resolves the `.listen(...)` arguments through the consts they name and evaluates them against a fabricated
 `process.env`, so it asserts what the expression computes rather than that a `127.0.0.1` string appears somewhere — and a bare `app.listen(PORT)`, the refactor
 that silently binds the wildcard, fails it on the argument count.
@@ -1523,7 +1528,7 @@ original asset open to the same page.
 **Registered by the same applier as the CSP**, host gate first (`applySecurityMiddleware`, `security.ts`). One applier, so no app built in this repo — the one
 `main.ts` boots, the ones the suites build — can carry the CSP without also carrying the gate; and that applier already sits ahead of `ServeStaticModule`, which
 the gate needs for the same reason the CSP does: serve-static streams `index.html` itself, so middleware behind it never runs for that request.
-`test/allowed-hosts.test.ts` pins that ordering behaviourally — a rebound `GET /` comes back 403 without the page's bytes — rather than by reading source. The
+`test/server/allowed-hosts.test.ts` pins that ordering behaviourally — a rebound `GET /` comes back 403 without the page's bytes — rather than by reading source. The
 applier was renamed from `applySecurityHeaders` when the gate landed, because it no longer only applies headers.
 
 **What the list accepts, and why each entry cannot be rebound:**
@@ -1590,7 +1595,7 @@ existing `scripts/*.test.mjs` glob.
 `server/src/security.ts` sets the header from Nest, so it rides on `client/dist` and on `/api` alike. It is deliberately not a `<meta>` tag in
 `client/index.html`: that would apply in dev too, where Vite injects an inline React-refresh preamble a strict `script-src` would block. Dev binds loopback
 only, so the build is where the policy earns its keep. `script-src` carries the sha256 of the pre-paint theme script instead of `'unsafe-inline'` — edit that
-script and `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows.
+script and `test/server/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows.
 
 `style-src` is `'self'` alone (#454). It carried `'unsafe-inline'` for a reason that was never true: the comment named the pre-paint script's `--font-scale` and
 React's inline styles, and both are CSSOM writes, `style.setProperty` and an assignment to `element.style`, which the directive does not govern. It governs a
@@ -1598,7 +1603,7 @@ React's inline styles, and both are CSSOM writes, `style.setProperty` and an ass
 as parsed markup, and `marked` writes a table's alignment as `align=` and the renderer escapes raw HTML. That was checked in the built app under the served
 header — every sheet, the item modal, Jira Detail, the Releases drawer and a font-scale change, with a console watcher, and an injected `<style>` as the control
 to prove the policy was live. jsdom enforces no CSP and dev serves none, so a refused style shows only as one console line in the build and an element that lost
-its look; that is why `test/csp.test.ts` also reads the source for the refused shapes.
+its look; that is why `test/server/csp.test.ts` also reads the source for the refused shapes.
 
 ## Dispatch derives the action; it never accepts one
 
@@ -1757,12 +1762,12 @@ trailing copy is stripped first, so an old tab's groom sends the bytes it always
 never client-supplied: there is deliberately no request shape in which a browser names the host this server will call. `BM_AGENTS` defaults to off, so an
 unconfigured install makes no outbound request at all.
 
-`BM_AGENTS` defaults to off — and **compose passes that one through as `${BM_AGENTS:-off}`, never as a literal** (bug-25, pinned by `test/compose-env.test.ts`).
+`BM_AGENTS` defaults to off — and **compose passes that one through as `${BM_AGENTS:-off}`, never as a literal** (bug-25, pinned by `test/guards/compose-env.test.ts`).
 A literal there wins outright: the `environment:` block IS `process.env` in the container and dotenv never overwrites a key already in it, so `BM_AGENTS: 'on'`
 made the documented default unreachable from the documented Quick start — dispatch buttons _and_ the watchdog sweeper armed, from a `cp .env.example .env`.
 `BM_AGENTS_URL` beside it is overridable for the opposite reason, and under a **second key**: it is stack topology, not a policy default, so a passthrough of
 `BM_AGENTS_URL` itself would let the host-oriented `.env` line — loopback, which inside a container means the container — break dispatch in the stack. Compose
-therefore reads `${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}` and never interpolates `BM_AGENTS_URL` at all, which `test/compose-env.test.ts` pins
+therefore reads `${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}` and never interpolates `BM_AGENTS_URL` at all, which `test/guards/compose-env.test.ts` pins
 from both directions: the exact default string, and a whole-file assertion that no `${BM_AGENTS_URL…}` appears anywhere in it. That second case is the
 load-bearing one — collapsing the two names back into one looks exactly like the line it replaces and would read as a cleanup.
 
@@ -1904,7 +1909,7 @@ there than here in one respect: a project-scoped control is the entry point to a
 fallback for the whole queue, and the message sends them to fix something that is already fine.
 
 The mechanism is now shared rather than written twice. `useReverify` (`client/src/hooks/useReverify.ts`) owns "ask once, mark `aria-busy`, act on the fresh
-answer"; both `DispatchButton` and `BoardView`'s toolbar call it, and `test/dispatch-button.test.tsx` passing unchanged is what makes that extraction a refactor
+answer"; both `DispatchButton` and `BoardView`'s toolbar call it, and `test/agents/dispatch-button.test.tsx` passing unchanged is what makes that extraction a refactor
 rather than a rewrite. Since #272 the hook has one caller, `GatedChip` (`client/src/components/ui/GatedChip.tsx`), which both controls compose: it owns the
 rest of the disabled half too — which block shows, `aria-disabled` and the described reason — with the re-ask rule itself in `gateView`
 (`client/src/lib/gate-view.ts`). What the hook deliberately does NOT own is the gate check: the two callers derive different answers (`dispatchGate(item, fresh)` versus
@@ -2159,7 +2164,7 @@ arbitrary registered item and reaches the dashboard; `orchestrate` and `resume` 
 `watchdog/config` carries it because it writes a settings file that changes this server's own spawn cadence, and because a save there can itself kick an
 immediate spawn (see "The watchdog spawns" below) — a cross-origin page must not drive either effect. The set has grown from one route to five without the guard
 itself ever changing, which is exactly why this section's own heading used to name a count ("the two agents POSTs…") and went stale the moment a third route
-(`resume`) landed, then again when a fourth and fifth did: `test/agents-origin-guard.test.ts`'s own parametrized route list — `plan`, `dispatch`, `orchestrate`,
+(`resume`) landed, then again when a fourth and fifth did: `test/agents/agents-origin-guard.test.ts`'s own parametrized route list — `plan`, `dispatch`, `orchestrate`,
 `resume`, `watchdog/config` — is where the actual set lives now, not a number carried in this prose.
 
 That list has since outgrown those five, which is the point of keeping it there: `pause` and `stop`, the item writes, Jira's `dispatch-jira` (the second
@@ -2174,7 +2179,7 @@ per-device like every other key there, default to `''` — no pick — and are c
 never be one the selects cannot show. For the model, "no pick" does not mean the CLI decides: `AgentsService` fills `DEFAULT_MODEL` (`shared/agent.ts`, `opus`)
 at both spawn sites when the request names no valid model, because a bare `claude -p` takes the host CLI's own default — Sonnet on this machine — and the
 orchestrator's execute sessions were running on a different model from the driver the board launched. `backlog-orchestrate`'s dispatch lines and the reviewer
-agent carry the same value literally, since neither can import from `shared/`; `test/default-model.test.ts` holds them to the constant. Remembering the _last pick_ stays rejected: a sticky `max` from last week quietly spending on a trivial
+agent carry the same value literally, since neither can import from `shared/`; `test/agents/default-model.test.ts` holds them to the constant. Remembering the _last pick_ stays rejected: a sticky `max` from last week quietly spending on a trivial
 groom is the failure a per-launch control exists to prevent, and a default you set once in a row you can go and read is the opposite arrangement. Permission
 mode deliberately has no stored default — it comes from the server's `plan.defaultMode` and is clamped to the host ceiling, and a remembered mode would fight
 that ladder. That server-side default is `auto`, because a dispatched session runs unattended: nobody is necessarily at the terminal a permission prompt would
@@ -2221,7 +2226,7 @@ sheet — so one press ran both callbacks and took the modal with the sheet (bug
 
 Since task-40 the dialogs do not call the hook themselves either: the two overlay SHELLS do. `ui/Modal.tsx` is the item modal's, `ui/FormSheet.tsx` is both
 sheets', and each calls `useDialogEscape` once, so a fourth surface opened through either shell joins the stack by construction rather than by remembering to.
-The count was three while the shells had three composers, and `test/dialog-escape.test.tsx` mounts those three together to prove the ranking holds across
+The count was three while the shells had three composers, and `test/board/dialog-escape.test.tsx` mounts those three together to prove the ranking holds across
 them.
 
 Jira phase 2 is that construction paying out, twice. `JiraDetail` composes `Modal` — `Modal`'s composers are `ItemModal` and `JiraDetail` — and
@@ -2236,7 +2241,7 @@ releases drawer — and `Drawer` called `useDialogEscape` once, as `Modal` and `
 hook changed. Since #298 that shell is ui-kit's (`ReleasesDrawer` from release-kit's shared releases UI, spec D15), which owns no stack and by default binds a
 `keydown` listener of its own — the exact two-listeners defect of bug-23. So the shape inverted for this one surface: the wrapper,
 `components/ReleasesDrawer.tsx`, calls `useDialogEscape(onClose)` itself and passes `closeOnEscape={false}`, and ui-kit's drawer handles no key at all. It is the one dialog that opens from the rail, so it can land over any of the other five (an item modal left open, then the chip), and that is
-the case the stack exists for: `test/dialog-escape.test.tsx` mounts the item modal and then the drawer and proves one Escape closes only the drawer, and its
+the case the stack exists for: `test/board/dialog-escape.test.tsx` mounts the item modal and then the drawer and proves one Escape closes only the drawer, and its
 stack case now mounts all six in order and hands the key down them one at a time.
 
 The Jira launch sheet makes it seven, and through the same construction with nothing in the hook changing: `JiraLaunchSheet` composes `FormSheet`, which makes
@@ -2341,7 +2346,7 @@ details:
 
 A consequence to leave alone: with `graceMs` at ten minutes and the lock at fifteen, the sweeper's second attempt is refused at t+10m (no attempt spent, grace
 re-stamped) and lands nearer t+20m. That is correct — the first resume was still inside its own liveness window — and it is pinned by
-`test/watchdog-sweep.test.ts`. What is NOT correct, and was until #268, is counting that refusal: it used to log a `failed` line and move bug-35's
+`test/watchdog/watchdog-sweep.test.ts`. What is NOT correct, and was until #268, is counting that refusal: it used to log a `failed` line and move bug-35's
 `consecutiveFailures`, so at the five-minute `graceMs` floor and the default cap of 2 the refusals at t+5m and t+10m stood a run down as "stalled" after ONE
 real attempt — the sweeper's own successful spawn spending its refusal ceiling. The watchdog now reads `RESUME_LOCKED_CODE` as "not yet": neither counter
 moves and nothing is logged, and the next try is one grace window on. Raising `graceMs`'s floor to `RUN_STALE_MS` instead was rejected: it would move design
@@ -2388,8 +2393,8 @@ lease the thing that strands a run.
 entry whose run was not `running` — which a `paused` run never is. Any tick, including one armed by a completely different project, deleted the entry and the
 lock with it, and the next Resume click spawned a second session into a run already being resumed. Crashed runs were never exposed, since a crashed run IS
 `status: 'running'`. The keep set now includes `paused`, built in `sweep()` where the payload is read rather than inside `prune()`, so retirement policy stays
-in one place and every genuinely finished status still prunes on the next tick. `test/agents-resume.test.ts`'s paused-lock case passes with or without this — no
-sweep runs inside it — so the pin is `test/watchdog-sweep.test.ts`'s own case, which ticks between the two resumes.
+in one place and every genuinely finished status still prunes on the next tick. `test/agents/agents-resume.test.ts`'s paused-lock case passes with or without this — no
+sweep runs inside it — so the pin is `test/watchdog/watchdog-sweep.test.ts`'s own case, which ticks between the two resumes.
 
 Exit `7` rather than `1` for exit `6`'s reason: the reaction is not "fix this call and retry" but stop, write nothing more, exit. `references/recovery.md` says
 so in as many words, and it is the loser stopping on the first refusal that makes the whole thing a guarantee rather than a delay.
@@ -2506,7 +2511,7 @@ So the rule is now one function, `watchdogStoodDown` (`shared/agent.ts`), called
 `watchdog.service.ts`'s `visit()` to decide whether to return without spawning. The client caller was `RunStrip.tsx`; task-37 deleted it, leaving the sweeper
 the only caller for two merges, and task-38 restored it where §8.4.1 says it belongs: **`RunControls` (`client/src/components/RunControls.tsx`)**, drawn in the
 Runs detail sheet's head. That component is also the Watchdog page's Resume (§8.4.2) — the same component rather than a second control agreeing with it, which
-is why `WatchdogMonitor.tsx` does NOT call the predicate and must not start to: two surfaces, one caller. `test/watchdog-coupling.test.tsx`'s reader-list case
+is why `WatchdogMonitor.tsx` does NOT call the predicate and must not start to: two surfaces, one caller. `test/watchdog/watchdog-coupling.test.tsx`'s reader-list case
 is what holds that, and it is written as an exact set precisely so a third caller cannot be added quietly. Its inputs are single implementations for the
 same reason. `WatchdogStateService.spawningEnabled(config)` is the one answer to "may the watchdog spawn" — it fills the wire's `RunWatchdog.enabled` AND is
 what the sweeper's own gate calls, rather than the sweeper re-testing `config.enabled` under an env check made separately in `sweep()`; that was the second copy
@@ -2525,9 +2530,9 @@ input here: this predicate being TRUE is what makes the board offer the control,
 a person just stopped. See "A stop is the control file's second kind" above.
 
 Pinned by two suites and one table, because no single `it` can hold both halves (one needs jsdom and a React tree, the other a real Nest app):
-`test/watchdog-coupling.test.tsx` drives the predicate against every row of `test/helpers/watchdog-coupling.ts`, renders `RunControls` for a crashed run in each
+`test/watchdog/watchdog-coupling.test.tsx` drives the predicate against every row of `test/helpers/watchdog-coupling.ts`, renders `RunControls` for a crashed run in each
 row's state and asserts the Resume appears on exactly that row's verdict, and pins WHO reads `watchdogStoodDown` as an exact set.
-`test/watchdog-sweep.test.ts`'s own table case arranges the sweeper for the same rows and asserts it spawns iff the row does not stand down. Each row carries a
+`test/watchdog/watchdog-sweep.test.ts`'s own table case arranges the sweeper for the same rows and asserts it spawns iff the row does not stand down. Each row carries a
 hand-checked `standsDown` literal rather than a derived one: without it, both halves would assert only that they agree with `watchdogStoodDown`, which a
 `watchdogStoodDown` broken into a constant would also satisfy — the two sides would move together and stay "coupled" while saying something false. Sharing a
 fixture across suites is against this repo's usual convention, and is the point here: two copies of the table would be two copies of the rule. Each
@@ -2980,7 +2985,7 @@ every registered project on both `/api/items` and `/api/projects`.
 
 `git status --porcelain` is the obvious implementation and the wrong one. It compares against `HEAD`, which is the right ref only while the main tree happens to
 be sitting on `main` — and an item committed on a branch that `main` does not contain is _precisely_ one of the cases that gets skipped, which `status` reports
-as a perfectly clean tree. `test/uncommitted.test.ts` case 4 asserts both halves of that: the util reports the file, and `status --porcelain` prints nothing.
+as a perfectly clean tree. `test/orchestrator/uncommitted.test.ts` case 4 asserts both halves of that: the util reports the file, and `status --porcelain` prints nothing.
 
 Diffing against `main` also covers the sibling case `buildGatedQueue`'s own comment describes without a second question. An item committed while ungroomed and
 groomed only in the working copy _is_ present at `main`, so it never earns the "not committed" verdict — the run gates the stale bytes and reports plain
@@ -3029,7 +3034,7 @@ authoritative — the same reasoning `emptySelection`'s comment already gives fo
 
 It also buys almost nothing. The run skips a flagged item at the cost of one gate verdict: no dispatch, no worktree, no session. What the person actually lacked
 was the information, so they get the chip, the run's own verdict string verbatim, and a `deselect uncommitted (N)` button that narrows the selection the same
-way unticking the rows by hand does. The person's act, not the sheet's. `test/orchestrate-uncommitted.test.tsx` case 18 pins it as an assertion about the ABSENT
+way unticking the rows by hand does. The person's act, not the sheet's. `test/orchestrator/orchestrate-uncommitted.test.tsx` case 18 pins it as an assertion about the ABSENT
 `ids` key, not about its value.
 
 ### What deliberately does not read this
@@ -3137,12 +3142,12 @@ than assumed.
 
 **Why `paths:` is mandatory.** A rule file with no frontmatter is loaded at `session_start`, in _every_ session, whether or not it is relevant — a permanent
 context-floor increase on all of them. That is exactly what the rule files must not cost, so an always-loaded rule file is the one failure mode this mechanism
-can introduce, and `test/claude-rules.test.ts` fails naming any file that has no non-empty `paths:` list.
+can introduce, and `test/guards/claude-rules.test.ts` fails naming any file that has no non-empty `paths:` list.
 
 **Why one home for the mechanism.** Three STATEMENTS of one rule was the drift the pointer design avoided: a rule file that restated a rule would have been a
 third copy, free to drift from both CLAUDE.md and this file, and `backlog-execute`'s contract sweep would have had to visit it. Three TIERS is not that. Each
 tier says something the other two do not — the headline that the rule exists and what it forbids, the mechanism how it is implemented, this file why — and
-`test/claude-rules.test.ts` pins the seams: a rule file is bullets and nothing else, each anchored into this file at most once; CLAUDE.md's headlines are a
+`test/guards/claude-rules.test.ts` pins the seams: a rule file is bullets and nothing else, each anchored into this file at most once; CLAUDE.md's headlines are a
 subset of the rule files' bullets, byte-equal, with one home per anchor, or per headline for an unanchored bullet; CLAUDE.md's `## Rule files` table equals the
 rule files' `paths:`; a linked CLAUDE.md bullet is a headline and a link, and any other one is at most 80 words, so mechanism cannot creep back into CLAUDE.md
 by any door. Because tier two states contract, the contract sweep visits `.claude/rules/*.md` — the one cost the pointer design declined, paid knowingly.
@@ -3241,12 +3246,12 @@ path_glob_match  <repo>/.claude/rules/orchestrator.md
                  globs:   ['skills/backlog-orchestrate', 'server/src/orchestrator', 'shared/agent.ts']
 ```
 
-Note what the loader reports back: `skills/backlog-orchestrate/**` is normalised to the directory itself, which is why `test/claude-rules.test.ts`'s own glob
+Note what the loader reports back: `skills/backlog-orchestrate/**` is normalised to the directory itself, which is why `test/guards/claude-rules.test.ts`'s own glob
 matcher treats `dir/**` as "the directory and everything under it".
 
 ### What the suite pins, and why it passes on nothing
 
-`test/claude-rules.test.ts` reads `.claude/rules/*.md` and CLAUDE.md as SOURCE — no YAML parser, no glob library; the frontmatter under test is one inline array
+`test/guards/claude-rules.test.ts` reads `.claude/rules/*.md` and CLAUDE.md as SOURCE — no YAML parser, no glob library; the frontmatter under test is one inline array
 a parser would hand back verbatim, and a multi-line `paths:` list deliberately reads as empty and fails the first case loudly, because nobody has proved the
 loader accepts that shape. These guards run over the real tree. Every file declares a non-empty `paths:`, because a rule file without one loads at
 `session_start` in every session. Every `docs/subsystems/invariants.md#…` anchor a rule file cites resolves to a real `##`/`###` heading of this file, with the
@@ -3303,7 +3308,7 @@ page that promises everything on it is the host's; and beside the field that set
 the same subject read at two scopes — what a run is STARTED with, then what happens to one that has already crashed — met in that order. The split puts them on
 different pages, and that is the cost paid for a page that is honestly one backend throughout.
 
-It is recorded here because a test used to protect it. `test/settings-view.test.tsx`'s `renders above the watchdog group` asserted the DOM order of those two
+It is recorded here because a test used to protect it. `test/settings/settings-view.test.tsx`'s `renders above the watchdog group` asserted the DOM order of those two
 cards, and after the split neither page can be asked the question. It was restated rather than deleted outright — the half that survives is that `Orchestrator`
 is on Local and still holds its own two rows — because the adjacency is gone by design, and a test asserting a layout the design deliberately dropped is worse
 than no test at all.
@@ -3328,14 +3333,14 @@ second wording free to disagree with the tree's. Spec §3 of `docs/superpowers/s
 carries a `Segmented` `Local | Shared | Dashboards`, because the page is the one place a reader changes where a setting saves and the switch belongs where the
 question is asked. It is not a second wording — both controls write `settingsScope`, the tree through `setSettingsScope` and the switch through `update` — and
 the override does not travel: Runs' three pages (task-38 deleted `runs-mode.ts`'s `MODE_BUTTON` pair) and Jira's are still switched by the rail's tree or a link
-threaded down from it. `test/settings-view.test.tsx` pins the switch (it used to pin the absence), so "remove the duplicate control" is as much a decision as
+threaded down from it. `test/settings/settings-view.test.tsx` pins the switch (it used to pin the absence), so "remove the duplicate control" is as much a decision as
 "add one" was.
 
 ### The scope pill is the existing primitive, at `neutral`, on every page
 
 Each card's title row holds one `Pill` (`SettingsGroup`'s `pill`) — `this browser` on Local's cards, `this machine` on Shared's and on the Dashboards page, which saves `on this machine` in the band's sub-line — and the WORD carries the distinction, not a tone. `PillTone`'s five
 members each name a *reading* (`live`, `warn`, `bad`, `done`, `neutral`); none of them means "shared", and minting a sixth look inside the settings block would
-be a second home for a primitive, which `test/design-guards.test.ts`'s guard 7 exists to refuse.
+be a second home for a primitive, which `test/guards/design-guards.test.ts`'s guard 7 exists to refuse.
 
 ### The rail reads a SETTING, which moved `SECTIONS` out of the rail
 
@@ -3492,7 +3497,7 @@ and fails silently back to the default the same way.
 
 The effect's dependency list is the other half, and it is load-bearing rather than tidy. A stamp whose value is missing from the deps still works on RELOAD —
 the pre-paint script wrote it — and silently does nothing when the control is clicked. That is the one shape of this bug that survives being developed against,
-because reloading is what you do next anyway. `test/settings-view.test.tsx` asserts `document.documentElement.dataset.width` after a click for exactly that
+because reloading is what you do next anyway. `test/settings/settings-view.test.tsx` asserts `document.documentElement.dataset.width` after a click for exactly that
 reason.
 
 ### Why both wraps
@@ -3505,12 +3510,12 @@ the right from the rail rather than re-centring on the window, which would read 
 
 `server/src/security.ts`'s `THEME_SCRIPT_SHA256` pins the sha256 of that inline script's exact bytes. Editing the script without recomputing the hash ships a
 served build whose theme script the browser refuses to run: the page paints in the `:root` palette (Midnight) at 100%, even for a Daylight default,
-on every load, and **nothing in dev shows it**, because dev has no CSP (see `security.ts`'s own comment for why the policy is a response header rather than a `<meta>` tag). `test/csp.test.ts` recomputes the
+on every load, and **nothing in dev shows it**, because dev has no CSP (see `security.ts`'s own comment for why the policy is a response header rather than a `<meta>` tag). `test/server/csp.test.ts` recomputes the
 hash from `client/index.html` and is the proof the step was taken.
 
 ### Why a source guard, and not behaviour
 
-`test/content-width-style.test.ts` reads files rather than rendering, because both halves of this feature are invisible to a component suite. jsdom applies no
+`test/guards/content-width-style.test.ts` reads files rather than rendering, because both halves of this feature are invisible to a component suite. jsdom applies no
 stylesheet, so a rendered assertion on the released measure would pass whether or not the CSS rule existed — and the failure mode is a segmented control that
 toggles cleanly and changes nothing on screen. `client/index.html` is never loaded by any suite at all, so React's own stamp would keep every case green while
 the pre-paint half was missing. Neither is a detail a reader would think to check by hand, which is exactly why they are checked mechanically.
@@ -3529,12 +3534,12 @@ it, no payload carries it, and the browser never talks to `api.github.com` at al
 That is deliberately the same SHAPE as "the browser never talks to the dashboard", stated separately rather than assumed to be covered by it. The dashboard rule
 is about an ORIGIN the browser must not reach; this one is about a SECRET that must not reach the browser. Neither implies the other, and this app now has both.
 `GET /api/trackers` is what the Sources card and GitHub › Settings read, and it carries `hasToken` and a `login` — whether a credential is loaded, and whose —
-because those are what an operator needs in order to know the right one is in place. `test/tracker-items.test.ts` asserts the value appears in no response of
+because those are what an operator needs in order to know the right one is in place. `test/tracker/tracker-items.test.ts` asserts the value appears in no response of
 any route this module serves.
 
 **`docker-compose.yml` passes it through as an interpolation with a default, never a literal** — bug-25's rule, applied to a variable where the stake is higher.
 A literal `BM_AGENTS: 'on'` was a wrong default; a literal token would be a credential committed to a repository, and the fix for that is revoking it rather
-than editing the line. Pinned by `test/compose-env.test.ts`, which also asserts the key compose uses is the constant the server reads
+than editing the line. Pinned by `test/guards/compose-env.test.ts`, which also asserts the key compose uses is the constant the server reads
 (`GITHUB_TOKEN_ENV`), so a rename that missed one half fails here rather than on a machine with a token set.
 
 **Outbound calls go to one constant host.** `API` in `server/src/tracker/github.client.ts` is the only host any request this module makes can
@@ -3679,7 +3684,7 @@ common one; the fallback is what makes the answer safe to act on.
 **The comments request is made on every tick, and since task-46 it has a reader.** One conditional request covers every comment in the repo, including edits,
 which is what makes per-item claim watching cheap. Phase 2 made the call with nothing reading it, deliberately, so that the polling loop's shape, its budget and
 its tests would not move in the phase that also introduced the protocol they feed — and that bet paid: task-46 added `TrackerPollerService.comments()` over the
-same cache and changed nothing about the loop. `test/tracker-poll.test.ts` asserted the call explicitly while it had no reader, precisely because a call with no
+same cache and changed nothing about the loop. `test/tracker/tracker-poll.test.ts` asserted the call explicitly while it had no reader, precisely because a call with no
 reader is what a later edit deletes as dead. Task-48 gave `comments()` its second reader, `RemoteRunsService`, which derives other machines' runs from the same
 cached comments on every `GET /api/orchestrator/runs` and keeps no cache of its own — this stays the one tracker cache.
 
@@ -3695,7 +3700,7 @@ are missing on the first successful sync of a repo — idempotently, case-insens
 as success because another machine's poller winning the race still leaves the label there. This is phase 2's ONE write to GitHub, and it is a bootstrap rather
 than a lifecycle write: the issue→item mapping cannot work without the set. `skills/backlog/tools/backlog.mjs`'s `connect` writes issue forms that pre-apply the
 four `type:*` labels and CANNOT import that module — a skill's `tools/` is a standalone copy of what was pushed — so the agreement is enforced the other way
-round: `test/tracker-labels.test.ts` reads the skill's source as text and asserts the two lists match. A comment asking two files to stay in step is what drifts.
+round: `test/tracker/tracker-labels.test.ts` reads the skill's source as text and asserts the two lists match. A comment asking two files to stay in step is what drifts.
 
 ## `jira.json` has exactly one writer, and a file that cannot be read is never replaced
 
@@ -3855,13 +3860,13 @@ quote them. The repo path is the one value that can hold anything, and it alone 
 
 **The third hand cannot import, so it copies.** A skill's `tools/` is a standalone copy of what was pushed, with no build step and no path back into this
 repo (the reason `backlog.mjs` restates `resolveSource`), so `jira.mjs` re-implements Tables A and B and says so above each. The drift guard is the tests:
-`skills/jira/tools/jira.test.mjs` pins the same rows `test/jira-branch.test.ts` does, so a rule changed in one place and not the other fails on the side left
+`skills/jira/tools/jira.test.mjs` pins the same rows `test/jira/jira-branch.test.ts` does, so a rule changed in one place and not the other fails on the side left
 behind. The tool's copy is not redundant with the server's check: the person can paste the prompt into a terminal and edit the line, and the tool is the
 last thing between that line and `git worktree add`.
 
 ## The board's Jira writes are assign and transition, nothing else
 
-Until phase 3 this server wrote to Jira nowhere: every call was a read and the only file it changed was `jira.json`. Phase 3 ([plan](../superpowers/plans/2026-10-19-jira-phase-3-writes.md),
+Until phase 3 this server wrote to Jira nowhere: every call was a read and the only file it changed was `jira.json`. Phase 3 ([plan](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-10-19-jira-phase-3-writes.md),
 spec §8, §13) adds the first two calls that change anything on Atlassian's side — **assign the issue to me** and **transition it** — and this rule is what keeps
 the list at two. A third (comment, edit a field, create, unassign, assign someone else) is a new rule and a new section here, never another route that "fits
 the pattern": a credential that can write to a person's tracker is the sharpest thing this server holds, and the size of what it may do with it should be a
@@ -3932,7 +3937,7 @@ merged into the head), not a rebase, and it runs on GitHub after the `202`.
 **Guarded like every write, tailnet included.** Each POST carries `SameOriginPostGuard` per route (`application/json` and a same-origin `Origin`), and the
 global Host allowlist has already answered — so a tailnet host the allowlist admits may merge exactly as loopback may. There is no loopback-only rule for
 these: the person on the tailnet is the same person, and a write the board offers on one host and refuses on another would be a board that lies about what
-its buttons do. `test/agents-origin-guard.test.ts` holds the three routes in `GUARDED`.
+its buttons do. `test/agents/agents-origin-guard.test.ts` holds the three routes in `GUARDED`.
 
 **Serialised per `<repo>#<number>`.** `PullRequestsService.serialise` is `GithubSource.serialise`'s shape — `previous.then(fn, fn)`, the entry dropped once it
 is the tail again — keyed by the PR, never by the repo (a merge of #12 is never queued behind one of #7) and never by the GraphQL node id, which the auto-merge
@@ -4084,7 +4089,7 @@ cannot do, since a rejected item moves into a flat directory that forgets it.
 Task-46, spec §6.2. Until this branch every route in this server either read something or spawned a session; these seven CREATE AND CLOSE ISSUES in somebody's
 repository, with a credential the browser never sees. That is a strictly larger consequence than the dispatch route the origin guard was written for, which is
 why every one of them carries `@UseGuards(SameOriginPostGuard)` — one decorator on `ItemsWriteController`, so "is this route guarded" cannot become a
-per-method question. `test/agents-origin-guard.test.ts`'s list is where the guarded set lives, now keyed by full path because it spans two controllers.
+per-method question. `test/agents/agents-origin-guard.test.ts`'s list is where the guarded set lives, now keyed by full path because it spans two controllers.
 
 A JSON POST with NO `Origin` still passes, by the guard's existing rule, and that is not a hole this branch widened: `backlog.mjs` in API mode is exactly that
 caller. It is a Node process, not a browser; requiring an origin would break every skill while adding nothing a browser cannot forge anyway. The check that
@@ -4640,7 +4645,7 @@ Three more commands publish to the issue, each after the run file is written and
   finished run from a crashed one. `at` is the run file's own `updatedAt`, so the stamp and the journal name one instant.
 - **`attention` posts a comment** — `<!-- bm:attention kind=<kind> run=<runId> -->` on line 1, then `@<login> <detail>` — so a phone notification replaces the
   strip badge. The login comes from `GET /api/trackers`; without one the mention is omitted, never guessed. The marker's CLI literal and the server's
-  `ATTENTION_LINE` cannot import each other and agree through a source-reading guard (`test/remote-runs.test.ts`, G-1). The server reads one only from an
+  `ATTENTION_LINE` cannot import each other and agree through a source-reading guard (`test/runs/remote-runs.test.ts`, G-1). The server reads one only from an
   author `trustedAssociation` accepts (#266), the rule a claim comment is held to — anyone can comment on a public repo. **Known risk:** GitHub may not notify
   a user of their own `@mention`, and the token is the user's own; the fix for that is a GitHub App identity (spec §15), not a workaround here.
 - **`heartbeat` heartbeats every claim the run still holds** — `claim` set and the stage not in `CLAIM_RELEASE_STAGES`, so `needs-answers` is included. Before
@@ -4714,7 +4719,7 @@ releases it first, #240) moves it to the server's clock, milliseconds after `fin
 **A `stale` release is not the run's own stamp, so it never moves `updatedAt`** (#295). `updatedAt` — what the Runs detail sheet's "last heartbeat" and the
 elapsed time are read from — is the newest of every claim's `heartbeat`, `released.at` and `finished.at`, skipping `released.at` when its `reason` is `stale`.
 That release is written by whoever retired the claim as dead — `GithubSource.claim` in ANOTHER session's takeover, or a person's release route — so counting
-it stretched a run that died 19 s after its claim to the reaper's clock, a day later (run-20261016-163408). `test/remote-runs.test.ts` R-11b pins the case.
+it stretched a run that died 19 s after its claim to the reaper's clock, a day later (run-20261016-163408). `test/runs/remote-runs.test.ts` R-11b pins the case.
 
 **A remote run is read-only, and says so.** Pause, resume, abort and the watchdog are all local mechanisms on the machine holding the run file, so the Runs
 detail sheet draws `Remote run: its controls are on the machine that ran it.` in the controls' slot and never fetches `archive/run`. A queue holds only what
@@ -4832,7 +4837,7 @@ files' history is worth keeping in git rather than deleting the whole `backlog/`
 
 Every git read the server makes goes through `runGit` (`server/src/git-run.util.ts`): `execFile`, promisified, so the event loop keeps turning while git runs,
 with a 10 s timeout, and a `null` answer for every failure alike. The rule is that no `execFileSync`, `spawnSync` or `execSync` exists anywhere under
-`server/src`, and `test/git-run.test.ts` fails on one.
+`server/src`, and `test/server/git-run.test.ts` fails on one.
 
 ### The incident
 
@@ -4840,7 +4845,7 @@ with a 10 s timeout, and a `null` answer for every failure alike. The rule is th
 and because every git call in a request path was `execFileSync` or `spawnSync`, each one froze the whole Node process for as long as it ran. `/api/health` —
 which does no I/O at all — took 23 s, `/api/projects` 16 s, `/api/agents/status` 20 s. The slow part was one repository's git; the outage was the entire API's,
 and it looked like a hung server rather than a slow disk, which is the worst thing a loopback-only tool can look like. An async spawn trades that for the honest
-shape: the routes that need git are slow, every other route answers normally. After the fix the route case in `test/git-run.test.ts` has `/api/health` answering
+shape: the routes that need git are slow, every other route answers normally. After the fix the route case in `test/server/git-run.test.ts` has `/api/health` answering
 in 58 ms while `/api/items` waits 1.1 s on a fake `git` that sleeps for a second.
 
 ### Failure is a value, and a timeout is just another failure
@@ -4869,7 +4874,7 @@ left pending, so the next call retries instead of the project being pinned to th
 
 `uncommittedItemPaths` and `originRepo` have no such sharing and must not get it. The uncommitted read's whole contract is "per request, memoised nowhere" — its
 subject is the working tree, which the fingerprint does not watch — and a request that arrives after an edit must not be handed a read that began before it. Two
-concurrent calls spawn git twice; `test/git-run.test.ts` pins that.
+concurrent calls spawn git twice; `test/server/git-run.test.ts` pins that.
 
 **`ReleasesService` is the one later sharer, on the same terms, so the heading above is narrower than the code** (the release chip, #290; since #301 the read
 is release-kit's `createReleasesReader`). Its key is cheap and trustworthy for the same reason — the root, HEAD and the mtimes of `packed-refs` and `refs/tags`
@@ -4962,9 +4967,9 @@ kit's default is a light well that would show on a dark rail; `--uk-zoom` is map
 meaning the unzoomed screen, and the kit divides its drawer's size by it — undivided, the panel overhangs the screen by the text scale. Notes go through the
 kit's own escape-first `renderNotesHtml`, so a PR body is safe to set as HTML with no sanitiser here and a `###` line reads as a heading in every app.
 
-**How a regression is caught.** `test/ui-kit-guard.test.ts` runs `ui-kit/guard`'s `checkHostCss` over each stylesheet this board ships (listed in the test, so a
+**How a regression is caught.** `test/guards/ui-kit-guard.test.ts` runs `ui-kit/guard`'s `checkHostCss` over each stylesheet this board ships (listed in the test, so a
 new sheet is a deliberate add) and fails on any rule that restyles a `.uk-*` class or sets a `--uk-*` property that is not a public token. It cannot see a token
-nobody mapped, so the same suite asserts the mapping sets `--uk-chip-bg` and `--uk-zoom`; `test/ui-kit-tokens.test.ts` holds every token the kit reads to being
+nobody mapped, so the same suite asserts the mapping sets `--uk-chip-bg` and `--uk-zoom`; `test/guards/ui-kit-tokens.test.ts` holds every token the kit reads to being
 mapped. If the board's look needs to differ from the kit, the change is a token or a prop in ui-kit, never a `.uk-*` rule here.
 
 **The phone chip's hit area must not be clipped.** On a narrow layout the chip is passed `narrow`, which gives the 28 px pill a transparent 44 x 44 hit area that

@@ -4,11 +4,11 @@ import type { RunWatchdog } from '../../shared/types';
 /**
  * The one table of watchdog states both halves of the Resume coupling are
  * driven from — `test/watchdog-coupling.test.ts` (the client's half)
- * and `test/watchdog-sweep.test.ts`'s own table case (the sweeper's per-run
+ * and `test/watchdog/watchdog-sweep.test.ts`'s own table case (the sweeper's per-run
  * pass).
  *
  * **Why this is shared, against this repo's usual "every suite owns its
- * fixtures" convention** (stated at length in `test/board-live-cards.test.tsx`
+ * fixtures" convention** (stated at length in `test/board/board-live-cards.test.tsx`
  * and honoured everywhere else): the thing under test here is not a shape, it
  * is an AGREEMENT between two components that live in different jest
  * environments — a React tree in jsdom, and a Nest app in node — and can

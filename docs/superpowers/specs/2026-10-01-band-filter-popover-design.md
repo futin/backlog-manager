@@ -189,7 +189,7 @@ project picked gain the suffix (`2 done` after picking `alpha` becomes `2 done i
 **Design guards**
 
 - Guard 7's `FAMILIES` list gains `.ui-popover` (entries carry the leading dot), declared once inside the primitives block; no 700 px block restates it.
-- `test/dialog-count-docs.test.ts` and `test/claude-rules.test.ts` stay green after the doc edits in §5 — the first pins the Escape bullet's and entry's
+- `test/guards/dialog-count-docs.test.ts` and `test/guards/claude-rules.test.ts` stay green after the doc edits in §5 — the first pins the Escape bullet's and entry's
   wording (`three dialogs`, `never a dialog`, …) and the hook comment's `Three of them now, not four`.
 - No px-literal font size in the new rules is under 11 (guard 3, unchanged — it will catch a copied 10 px badge).
 
@@ -213,7 +213,7 @@ project picked gain the suffix (`2 done` after picking `alpha` becomes `2 done i
   admitting `Popover`'s panels, which float without a scrim.
 - `.claude/rules/board.md` — the Escape bullet's list of non-dialog stack entries reads `Confirm` and `Popover` (the tracker's, and the band's two) instead
   of naming `TrackerPopover`; still three dialogs counted. Its reasoning section in `docs/subsystems/invariants.md` (`## Escape has one owner…`) gets the
-  same correction. CLAUDE.md's headline is unchanged, so `test/claude-rules.test.ts` keeps passing byte-for-byte.
+  same correction. CLAUDE.md's headline is unchanged, so `test/guards/claude-rules.test.ts` keeps passing byte-for-byte.
 
 ## Out of scope
 

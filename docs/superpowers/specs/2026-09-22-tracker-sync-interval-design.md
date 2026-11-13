@@ -135,7 +135,7 @@ Every refusal names the repo and the fix: `sync is off for <owner/name> — turn
 - `docs/subsystems/invariants.md`: the entry listing the files the server writes gains `tracker-sync.json`; the poller-is-armed entry gains the narrowed
   condition and the cold-boot sync; a new entry for §8's refusals and the §6 409.
 - CLAUDE.md: one new invariant headline for the refusal rule, linked to that entry; the existing token/poller headline is unchanged.
-- `.claude/rules/tracker.md`: the mechanism bullets for the file, the due-check and the refusals — anchored per `test/claude-rules.test.ts`.
+- `.claude/rules/tracker.md`: the mechanism bullets for the file, the due-check and the refusals — anchored per `test/guards/claude-rules.test.ts`.
 - `docs/subsystems/api.md`: the new route, the new field on both payloads.
 - `.claude/DESIGN.md` §8.6: the Trackers card now sets one thing.
 
@@ -144,7 +144,7 @@ Every refusal names the repo and the fix: `sync is off for <owner/name> — turn
 Jest, flat in `test/`, supertest suites through `listenLoopback`.
 
 - **Config reader**: every row of §4's table, each as its own case; a write followed by a read round-trips; a write preserves a disconnected repo's key.
-- **Scheduling** (`test/tracker-sync-interval.test.ts`, driving `tick()` with a controlled clock):
+- **Scheduling** (`test/tracker/tracker-sync-interval.test.ts`, driving `tick()` with a controlled clock):
   - two repos at `15s` and `1m`: over four ticks the first syncs four times, the second once;
   - a repo at `off` with an empty cache syncs exactly once, then never, over the following ticks;
   - every repo `off` after their cold syncs: `armed` reads false;

@@ -54,7 +54,8 @@ there, and the reasoning behind the rules below in [docs/subsystems/invariants.m
 - `.claude/rules/` — the path-scoped mechanism files, listed in the next section.
 - `backlog/` — this repo's own backlog, self-registered and tracker-backed: its items are GitHub issues.
 - `scripts/` — `sync-plugin.mjs`, `test-all.mjs`, `test-tmpdir.mjs`, `tailnet.mjs`, `ci-scope.mjs`. → [docs/workflows/](docs/workflows/development.md)
-- `docs/` — the reference docs; `docs/superpowers/` holds the specs and plans this repo was built from.
+- `docs/` — the reference docs; `docs/superpowers/` holds the design specs code comments cite, decision logs and in-flight plans — a merged plan and every
+  review report leave it ([README](docs/superpowers/README.md)).
 
 ## Rule files
 
@@ -102,7 +103,7 @@ happened.
   Why: [invariants.md](docs/subsystems/invariants.md#an-outsiders-tracker-issue-is-executable-only-while-its-body-matches-a-pin-a-groom-of-ours-wrote)
 - **`orchestrator:queued` is a plan, never a claim: the driver adds it, the claim and the Stop remove it, and no reader treats it as exclusion.**
   Why: [invariants.md](docs/subsystems/invariants.md#orchestratorqueued-is-a-plan-never-a-claim)
-- **Every server route lives under `/api`**; the Vite proxy has exactly one entry, asserted by `test/vite-proxy.test.ts`.
+- **Every server route lives under `/api`**; the Vite proxy has exactly one entry, asserted by `test/guards/vite-proxy.test.ts`.
 - **The GitHub token never leaves the server, and the poller is armed only while something is connected.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
 - **The GitLab token never leaves the server, never follows a redirect, and the poller is armed only while a mapped repo is on the site.**
@@ -159,8 +160,6 @@ happened.
   Why: [invariants.md](docs/subsystems/invariants.md#path-scoped-clauderules-reach-a-headless-run-in-a-linked-worktree-task-35)
 - **`agents/`, `tracker/`, `jira/` and `gitlab/` are the server's only outbound-calling modules**; `agents/dashboards/` is part of `agents/`, not a fifth, and
   `releases/` and `tick/` call out to nothing.
-- **`agents/` reads the GitLab poller's cache and calls GitLab never.**
-  Why: [invariants.md](docs/subsystems/invariants.md#agents-reads-the-gitlab-pollers-cache-and-never-calls-gitlab)
 - **Start orchestrator runs from the board, not by typing the trigger into a terminal.**
 
 ## Conventions
@@ -172,7 +171,8 @@ happened.
   template, and Claude Code's own `## Summary` / `## Test plan` default is not this repo's shape. A `feat`/`fix`/`perf` body without `## What's new` fails
   `ci / pr-title` (its lines become the release notes, [ci.md](docs/workflows/ci.md#releases)). Why: #448 was the 4th or 5th PR opened with the default
   body, because only the title was a written rule here.
-- **Tests are flat in `test/` under jest and beside the tool they cover under node; the node globs do not descend, so a suite one level deeper never runs**
+- **Jest suites sit one level down in `test/<feature>/`; node suites sit beside the tool they cover, and the node globs do not descend, so a node suite one
+  level deeper never runs**
   Why: [invariants.md](docs/subsystems/invariants.md#where-a-test-file-sits-decides-which-runner-executes-it)
 
 <!-- docs-sync:

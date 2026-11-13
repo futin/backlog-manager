@@ -23,7 +23,7 @@ test('deriveGroomed matches the server', () => {
   assert.equal(deriveGroomed('refactors', '## Plan\nx'), null);
 });
 
-// #348: the twin of `sectionText`'s indented-boundary case in test/parse.test.ts — an indented `  ## Fix` ends Cause, so Cause reads empty and the bug is
+// #348: the twin of `sectionText`'s indented-boundary case in test/items/parse.test.ts — an indented `  ## Fix` ends Cause, so Cause reads empty and the bug is
 // not groomed. Untrimmed, Cause swallowed the heading and a tick could pick a bug the orchestrate gate refuses.
 test('deriveGroomed ends a section at an indented ## heading', () => {
   assert.equal(deriveGroomed('bugs', '## Cause\n\n  ## Fix\nreal fix\n'), false);

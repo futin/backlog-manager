@@ -657,7 +657,7 @@ rule](invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-on
 
 ## Tests
 
-jest, flat in `test/`, none reaching a real Jira: `jira-env`, `jira-config`, `jira-client`, `jira-adf`, `jira-map-issue`, `jira-block`, `jira-poller` and
+jest, in `test/jira/`, none reaching a real Jira: `jira-env`, `jira-config`, `jira-client`, `jira-adf`, `jira-map-issue`, `jira-block`, `jira-poller` and
 `jira-routes` (supertest through `listenLoopback`); phase 2 adds `jira-config-write` (the writers), `jira-write-routes` (the config POSTs, supertest; three in phase 2, five since 5a), the pure
 `jira-lib` (`lib/jira.ts`), and the jsdom suites `use-jira`, `jira-sections`, `jira-board`, `jira-detail`, `jira-setup` and `jira-chip`, which mock `fetch`. Phase 3 adds `jira-issue-writes` (the two routes, supertest: the guard, validation, the refusals, the 429 window, a 401 on the
 write, the identity gate) and widens `jira-client` (the two calls), `jira-poller` (the splice, in-place-never-add, newest-wins) and `jira-detail` (the controls row, the
@@ -676,7 +676,7 @@ The CodeRabbit review work adds `review-state`, `review-copy` and `gitlab-review
 gate), `agents-jira-live`, `jira-prompt`, `jira-routes`, `jira-launch` (the review sheet), `jira-delivery-pane`, `jira-delivery-surfaces`, `jira-board`,
 `jira-lib` and `delivery-lib`.
 `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a per-request failure hook; `test/helpers/env.ts` blanks
-the three keys so no suite inherits a developer's credentials. `test/compose-env.test.ts` pins the compose passthrough.
+the three keys so no suite inherits a developer's credentials. `test/guards/compose-env.test.ts` pins the compose passthrough.
 The Jira sessions work adds `jira-sessions-state` (`sessionState` and `needsYou`) and widens `jira-live` (the store, its file, retention, the one-run gate),
 `agents-jira-live` (the quiet clock, re-attach, the pace), `agents-jira-stop` (`{ key, sessionId }`) and `jira-routes` (`GET /sessions`),
 and adds `agents-jira-link` (the link and unlink routes, supertest), the pure `jira-sessions-lib` (`lib/jira-sessions.ts`: the Open buttons, durations, the

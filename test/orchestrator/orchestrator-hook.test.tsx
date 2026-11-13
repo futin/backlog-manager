@@ -1,0 +1,863 @@
+/**
+ * @jest-environment jsdom
+ */
+import { StrictMode } from 'react';
+import { act, render, renderHook, screen } from '@testing-library/react';
+
+import { RESUME_POLL_GRACE_MS, useOrchestratorRuns } from '../../client/src/hooks/useOrchestratorRuns';
+import { OrchestratorRunsProvider, useOrchestratorRunsContext } from '../../client/src/hooks/OrchestratorRunsContext';
+import rawFixture from '../fixtures/orchestrator-run.json';
+import type { OrchestratorRun, OrchestratorRunsPayload } from '../../shared/types';
+
+// Same translation orchestrator-shapes.test.ts (Task 8) and
+// orchestrator-runs.test.ts already use: the fixture is plain JSON, so TS
+// would otherwise widen its string fields to `string` instead of the
+// narrower literal unions (`RunStage`, etc). rawFixture is a bare
+// OrchestratorRun; every case below wraps it in the endpoint's own payload
+// shape (Task 8: `{ runs: Array<OrchestratorRun & { fresh; pastRuns }> }`).
+const fixture = rawFixture as OrchestratorRun;
+
+/**
+ * The endpoint's exact answer shape for one project's run, `fresh` toggled
+ * per case. `pastRuns` is irrelevant to every case here (the hook never
+ * reads it), so it is pinned at 0 rather than threaded through as a
+ * parameter nobody would vary.
+ */
+function payload(fresh: boolean): OrchestratorRunsPayload {
+  return { runs: [{ ...fixture, fresh, pastRuns: 0, pauseRequested: false, stopRequested: false }], starting: [], remote: [], remoteStarting: [] };
+}
+
+/**
+ * Same shape as `payload` above, with `status` overridable too — needed for
+ * the crashed-run polling cases below, which are exactly the case `payload`
+ * cannot express: `fresh: false` alone reuses the fixture's own
+ * `status: 'running'`, which after the orchestrator-watchdog feature is no
+ * longer "a finished run", it is a CRASHED one (`isCrashed`,
+ * lib/run-watchdog.ts) — the poll must still be running for it.
+ */
+function payloadWith(status: OrchestratorRun['status'], fresh: boolean): OrchestratorRunsPayload {
+  return { runs: [{ ...fixture, status, fresh, pastRuns: 0, pauseRequested: false, stopRequested: false }], starting: [], remote: [], remoteStarting: [] };
+}
+
+/** Same shape as test/agents/agents-client.test.ts's own `stub`: every call answers
+ *  the same body, for the cases that only care about CALL COUNT in one
+ *  unchanging world. */
+/** task-48: one `remote` entry — another machine's run, as the server derives
+ *  it from claim comments. */
+function remoteEntry(status: OrchestratorRun['status']): OrchestratorRunsPayload['remote'][number] {
+  return { ...fixture, runId: 'run-20260919-110000', status, fresh: status === 'running', remote: true, repo: 'futin/x', host: null };
+}
+
+function stubFetch(body: OrchestratorRunsPayload): jest.Mock {
+  const fn = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response));
+  global.fetch = fn as unknown as typeof fetch;
+  return fn;
+}
+
+/**
+ * Answers a DIFFERENT body per call, clamped to the last one once the list
+ * runs out — for the cases below that exist specifically to prove a
+ * fresh→stale or stale→fresh TRANSITION, not just a static world. A stub
+ * that always answers the same body (`stubFetch` above) cannot exercise
+ * these: the polling effect only ever reruns in response to `anyFresh`
+ * actually changing value between one landed payload and the next.
+ */
+function stubFetchSequence(bodies: OrchestratorRunsPayload[]): jest.Mock {
+  let call = 0;
+  const fn = jest.fn(() => {
+    const body = bodies[Math.min(call, bodies.length - 1)];
+    call += 1;
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response);
+  });
+  global.fetch = fn as unknown as typeof fetch;
+  return fn;
+}
+
+// Captured once and restored after every case, the same hazard
+// test/agents/agents-client.test.ts and test/agents/dispatch-button.test.tsx already guard
+// against: a mock left on global.fetch is inherited by whatever runs next in
+// this worker.
+const realFetch = global.fetch;
+
+// Flushes a promise chain hanging off a mocked (synchronously-resolving)
+// fetch. jest's *Async timer helpers reach the fake clock's next tick via a
+// REAL setTimeout(0) under the hood (see @sinonjs/fake-timers'
+// tickAsync) — and a real setTimeout callback never runs until the
+// microtask queue (where our fetch().then(...) chain lives) is fully
+// drained, so `advanceTimersByTimeAsync(0)` reliably settles a pending fetch
+// with no fake time actually elapsing. Wrapped in `act` because the
+// resulting setState has to be flushed before any assertion reads
+// `result.current`.
+async function flush(): Promise<void> {
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(0);
+  });
+}
+
+describe('useOrchestratorRuns', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    global.fetch = realFetch;
+  });
+
+  // --- Test case 1: mount fetch lands in state ------------------------------
+
+  it('fetches once on mount and lands the payload in state', async () => {
+    const fetchMock = stubFetch(payload(true));
+    const { result } = renderHook(() => useOrchestratorRuns());
+
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('/api/orchestrator/runs');
+    expect(result.current.runs).toEqual(payload(true).runs);
+  });
+
+  /**
+   * Regression test for fix round 1's Critical finding. client/src/main.tsx
+   * wraps the whole app in `<StrictMode>`, which in development mounts every
+   * component TWICE on purpose — mount, run every effect's cleanup, mount
+   * again — specifically to surface effects that misbehave across that
+   * cycle. Every other case in this file renders bare (matching this
+   * repo's other hook suites, none of which hit this class of bug), which
+   * is exactly why the original bug went uncaught: `mountedRef.current` used
+   * to be set to `true` only inside `useRef`'s initializer, which React
+   * calls exactly once for the life of the fiber — never again on the
+   * remount's own effect run. StrictMode's first (throwaway) cleanup set the
+   * flag `false`, and with nothing left to set it back to `true`, it stayed
+   * `false` for the rest of the component's real, on-screen life — so
+   * `refresh()`'s `setRuns` was skipped forever, from the very first real
+   * mount onward, the moment this app is ever actually rendered.
+   *
+   * Verified empirically before writing this test (see the fix report for
+   * the full method): reverting the hook's effect body to only
+   * `useRef(true)`'s initializer — i.e. `useEffect(() => () => {
+   * mountedRef.current = false; }, [])` — makes this exact case fail with
+   * `result.current.runs` stuck at `[]` forever, confirming this case would
+   * have caught the bug had it existed from Task 10's first draft.
+   */
+  it("lands data normally after React StrictMode's dev-only mount, cleanup, remount cycle", async () => {
+    const fetchMock = stubFetch(payload(true));
+    const { result } = renderHook(() => useOrchestratorRuns(), { wrapper: StrictMode });
+
+    await flush();
+
+    expect(result.current.runs).toEqual(payload(true).runs);
+
+    // The stuck-false flag would have skipped every FUTURE poll too, not
+    // just the first landing — so prove polling still works post-StrictMode,
+    // not only the initial fetch.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // --- Test case 2: a fresh run polls every 5s, and stops on going stale ----
+
+  it('polls again 5s after landing a fresh run, and again 5s after that', async () => {
+    const fetchMock = stubFetch(payload(true));
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The scheduled tick this whole hook exists to arm — proof it actually
+    // armed, not just that a second fetch happens to follow.
+    expect(jest.getTimerCount()).toBe(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // A one-shot timeout, re-armed by each answer rather than a repeating
+    // interval: the next tick must be scheduled again once this one's answer
+    // lands, since a run in progress keeps needing a live queue for more than
+    // one tick.
+    expect(jest.getTimerCount()).toBe(1);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  /**
+   * The fresh→done transition, missing from fix round 1's original
+   * suite (every case there answered the SAME body on every call, so the
+   * polling effect's dependency on `anyFresh` actually changing value was
+   * never exercised — only the two static worlds either side of it). A run
+   * finishing for real must clear the scheduled tick on the very render that
+   * discovers it, not merely stop scheduling new ones from that point while
+   * an old one silently keeps ticking.
+   *
+   * `payloadWith('done', false)`, not `payload(false)` — orchestrator-watchdog
+   * (§6.3) widened `anyLive` to also cover a run that is `status: 'running'`
+   * but no longer `fresh` (a CRASHED run, `isCrashed` in lib/run-watchdog.ts),
+   * which is exactly the shape `payload(false)` produces off this fixture
+   * (whose own `status` is `'running'`) — that shape must now keep polling,
+   * not stop it. This case needs the run to actually be OVER, so it says so
+   * with `status: 'done'` rather than relying on `fresh` alone.
+   */
+  it('stops polling the instant a poll discovers every run has genuinely finished', async () => {
+    const fetchMock = stubFetchSequence([payload(true), payloadWith('done', false)]);
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(1);
+
+    // This tick's answer (the sequence's second body) is truly done.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(0);
+
+    // And with the timer actually gone, nothing fires again on its own.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // --- Test case 3: an all-done payload never polls -------------------------
+
+  it('never polls when every known run has genuinely finished', async () => {
+    // `payloadWith('done', false)`, not `payload(false)` — see the comment
+    // on the case just above for why: this fixture's own `status` is
+    // `'running'`, so `payload(false)` alone is a CRASHED run post-watchdog,
+    // which must keep polling, not the truly-inert shape this case means to
+    // test.
+    const fetchMock = stubFetch(payloadWith('done', false));
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // --- Test case 4: window focus refetches in both worlds -------------------
+
+  it.each([
+    ['a fresh', true],
+    ['a stale', false]
+  ])('refetches on window focus in %s world', async (_label, fresh) => {
+    const fetchMock = stubFetch(payload(fresh));
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * The done→fresh transition via focus, the other half of the gap fix
+   * round 1 flagged: a board sitting quiet (nothing live, no tick scheduled) must
+   * resume polling the instant a focus refetch discovers a run has gone
+   * live — not wait for some later mount/focus to notice.
+   *
+   * `payloadWith('done', false)` for the starting state, not `payload(false)`
+   * — see the two comments above for why this fixture's own `status:
+   * 'running'` makes `payload(false)` alone a CRASHED (still-polling) shape
+   * post-watchdog, not the truly-quiet starting point this case needs.
+   */
+  it('a focus refetch that discovers a newly-fresh run re-arms the poll timer', async () => {
+    const fetchMock = stubFetchSequence([payloadWith('done', false), payload(true)]);
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0); // done on arrival: nothing armed
+
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(1); // now fresh: next tick scheduled
+
+    // And it is a genuinely live timer, not a count that happens to read
+    // 1 for an unrelated reason — prove it actually polls from here.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  // --- Test case 5: unmount leaves nothing running --------------------------
+
+  it('leaves no pending timer and no focus listener behind on unmount', async () => {
+    const fetchMock = stubFetch(payload(true));
+    const { unmount } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    // One pending timer — proof the fresh-world poll actually armed, so the
+    // count going to zero below is unmount clearing something real rather
+    // than a timer that was never scheduled to begin with.
+    expect(jest.getTimerCount()).toBe(1);
+
+    act(() => {
+      unmount();
+    });
+    expect(jest.getTimerCount()).toBe(0);
+
+    // The listener side of the same claim: fire the exact event the case
+    // above proved triggers a refetch, and show it no longer does — and
+    // advance well past a poll period too, proving neither survived.
+    const callsAtUnmount = fetchMock.mock.calls.length;
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(callsAtUnmount);
+  });
+
+  /**
+   * Fix round 1's other IMPORTANT finding: no case here ever unmounted with
+   * a fetch genuinely still in flight — the one scenario the `mountedRef`
+   * guard's own doc comment says it exists for. This pins that literal
+   * contract: start a fetch, unmount before it resolves, resolve it only
+   * afterward, and confirm nothing breaks.
+   *
+   * One finding reported honestly rather than glossed over: this specific
+   * case CANNOT be made to fail by removing the guard, in the React version
+   * this repo has installed (18.3). Checked by hand before writing this
+   * (full method in the fix report): a throwaway probe calling a captured
+   * `useState` setter — both synchronously and via an async `.then()`,
+   * both inside and outside `act()` — after a real `unmount()` produced
+   * zero console output and no change to the rendered value, every time.
+   * Stripping this hook's own guard entirely and re-running an equivalent
+   * case against the REAL hook produced byte-identical output to the
+   * guarded version. React 18 already treats an update targeting a truly
+   * unmounted fiber as a fully silent no-op on its own, guard or not — so
+   * there is no black-box way to observe the guard's absence once a
+   * component is genuinely, finally gone. (The StrictMode case above is the
+   * one that actually failed without this round's fix, because a StrictMode
+   * remount is NOT a final unmount — the fiber is genuinely still mounted
+   * a moment later, which is exactly why an update landing late there is
+   * both possible and, without the guard, wrongly suppressed forever.) This
+   * case still earns its place: it pins the intended contract in an
+   * executable form, and it is the only case in this file that exercises
+   * the `false` branch of the guard's own `if` at all.
+   */
+  it('does not update state, throw, or warn for a fetch that resolves after a genuine unmount', async () => {
+    let resolveFetch!: (body: OrchestratorRunsPayload) => void;
+    const fetchMock = jest.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = (body) =>
+            resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve(body)
+            } as Response);
+        })
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const { result, unmount } = renderHook(() => useOrchestratorRuns());
+    // The mount effect has fired (fetch() was called synchronously), but the
+    // response has not arrived yet — the exact race the guard is for.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.runs).toEqual([]);
+
+    act(() => {
+      unmount();
+    });
+
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Only now, after the component is gone, does the in-flight request
+    // resolve.
+    await act(async () => {
+      resolveFetch(payload(true));
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(result.current.runs).toEqual([]);
+
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  // --- refresh() is callable directly, not just wired to the two effects ----
+
+  it('exposes a refresh() a caller can invoke on demand', async () => {
+    const fetchMock = stubFetch(payload(false));
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      result.current.refresh();
+    });
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // --- a failed poll keeps the last good queue on screen ------------------
+
+  /* A dropped request keeps the last good queue on screen and the poll alive: the hook's `.catch` swallows it, and the coalesced poll re-arms on a
+     rejection exactly as on an answer (`p.then(settled, settled)`, lib/coalesced-poll.ts). Blanking a run that is still running because one request
+     dropped, or a poll that never ticks again after one, are the two ways this path could regress. */
+  it('keeps the last landed runs through a failed poll, and the next tick lands normally', async () => {
+    const good = payload(true);
+    let call = 0;
+    const fetchMock = jest.fn(() => {
+      call += 1;
+      // The second request is the one that drops: a network error, the shape a mid-restart box answers with.
+      if (call === 2) return Promise.reject(new TypeError('fetch failed'));
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(good) } as Response);
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(result.current.runs).toEqual(good.runs);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.runs).toEqual(good.runs);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current.runs).toEqual(good.runs);
+  });
+
+  // --- orchestrator-watchdog design §6.3: a CRASHED run still polls -------
+  //
+  // `status: 'running', fresh: false` is exactly `isCrashed` (lib/run-watchdog.ts):
+  // the run file still claims to be working, but the heartbeat has gone
+  // stale. Before this feature that shape was indistinguishable, from this
+  // hook's own vantage point, from a run that simply finished — both read
+  // `fresh: false` — so `anyFresh` (now `anyLive`) stopped polling either
+  // way. A crashed run left unpolled is a screenshot: the watchdog's own
+  // attempt counter and any recovery would sit unseen until a window-focus
+  // event that might not come for hours, the exact gap the whole feature
+  // exists to close.
+  it('keeps polling for a run that is crashed (status running, stale heartbeat)', async () => {
+    const fetchMock = stubFetch(payloadWith('running', false));
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // The other half of the same case: once the crashed run is truly over —
+  // `status` moves off `'running'` (here: `'done'`, the way a resumed run
+  // that finally finishes leaves it) — polling must stop again, the same
+  // "nothing live, no timer" contract every other case in this file already
+  // pins for the plain stale case.
+  it('stops polling once a crashed run is reconciled and reported done', async () => {
+    const fetchMock = stubFetchSequence([payloadWith('running', false), payloadWith('done', false)]);
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(1);
+
+    // This tick's answer (the sequence's second body) is truly done.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // task-14: a starting entry is `anyLive` too. Without this the placeholder
+  // sits on screen until a window-focus event even after the real run lands
+  // — the same "screenshot, not a live view" failure the crashed case above
+  // fixes, at the other end of a run's life. Asserted through the observable
+  // effect (a second fetch after the timer advances), never by reaching into
+  // the predicate.
+  it('polls while a starting entry is present with no runs at all', async () => {
+    const fetchMock = stubFetch({
+      runs: [],
+      starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }],
+      remote: [],
+      remoteStarting: []
+    });
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // task-48: another machine's run can only be watched by asking again, so a
+  // `running` remote entry keeps the poll going on its own — and a finished
+  // one does not, or every Runs page with a tracker history would poll forever.
+  it('U-4: polls while only a remote run is running', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [remoteEntry('running')], remoteStarting: [] });
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.remote.map((r) => r.runId)).toEqual(['run-20260919-110000']);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('U-4: does not poll for a remote run that has finished', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [remoteEntry('done')], remoteStarting: [] });
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('does not poll when runs, starting and remote are all empty', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [], remoteStarting: [] });
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  /*
+    Multi-dashboard task 10: a launch sent to another machine has no claim yet, and `RemoteStartingService` is swept only when this payload is read — so a poll that
+    stood down while `remoteStarting` was non-empty would leave the entry on screen until something else woke the hook. It keeps polling exactly as long as the
+    array holds an entry, and the one-in-flight coalescing is untouched: the follow-up fetch is armed by the answer, never by the timer alone.
+  */
+  const remoteStartingEntry = { kind: 'orchestrate', project: '/abs/alpha', machine: 'Pro', itemId: null, requestedAt: '2026-09-19T11:00:00.000Z' } as const;
+
+  it('polls while only a remote launch is starting, and surfaces the array', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [], remoteStarting: [remoteStartingEntry] });
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.remoteStarting).toEqual([remoteStartingEntry]);
+    expect(result.current.starting).toEqual([]);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops polling once the remote starting entry is swept', async () => {
+    const fetchMock = stubFetchSequence([
+      { runs: [], starting: [], remote: [], remoteStarting: [remoteStartingEntry] },
+      { runs: [], starting: [], remote: [], remoteStarting: [] }
+    ]);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(jest.getTimerCount()).toBe(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.remoteStarting).toEqual([]);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('treats a payload with no remoteStarting key as an empty one', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [] } as unknown as OrchestratorRunsPayload);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(result.current.remoteStarting).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('stops polling once the starting entry is replaced by a finished run', async () => {
+    // The whole point of the widening: the placeholder's own poll is what
+    // notices the real run landing, and the timer chain has to stand back down
+    // once that run is over rather than outliving both shapes.
+    const fetchMock = stubFetchSequence([
+      { runs: [], starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }], remote: [], remoteStarting: [] },
+      payloadWith('done', false)
+    ]);
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(jest.getTimerCount()).toBe(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('surfaces the starting array to its caller', async () => {
+    const entry = { project: '/abs/alpha', requestedAt: new Date().toISOString() };
+    const { result } = renderHook(() => useOrchestratorRuns());
+    stubFetch({ runs: [], starting: [entry], remote: [], remoteStarting: [] });
+    result.current.refresh();
+    await flush();
+
+    expect(result.current.starting).toEqual([entry]);
+  });
+
+  /* task-17 — `noteResume`, the one mark that keeps this poll alive for a
+     run that is neither fresh nor running. A `paused` run polls nothing by
+     the ordinary rule (that is the whole point of it being a distinct
+     status), so after a Resume click the board would sit on a paused strip
+     until a focus event — for the 90s-to-several-minutes it takes a resumed
+     session to reach its first heartbeat. The mark closes exactly that
+     window and expires on its own, so a resume that never starts cannot pin
+     a tab to polling forever. */
+
+  it('polls immediately and then every 5s after noteResume on a paused run', async () => {
+    const fetchMock = stubFetch(payloadWith('paused', false));
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The ordinary rule: nothing here is live, so no tick is scheduled.
+    expect(jest.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // At once, not on the next tick — a click has to show something moving.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.resuming.has(fixture.project)).toBe(true);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('drops the mark the moment the run comes back running, and keeps polling by the ordinary rule', async () => {
+    const fetchMock = stubFetchSequence([payloadWith('paused', false), payloadWith('running', true)]);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // The second fetch answered `running` — the mark has done its job.
+    expect(result.current.resuming.has(fixture.project)).toBe(false);
+
+    const before = fetchMock.mock.calls.length;
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock.mock.calls.length).toBe(before + 1);
+  });
+
+  /* bug-19 — the same mark, on the surface it was silently useless on. A
+     CRASHED run is `status: 'running'` with a stale heartbeat, so the
+     end condition "the payload says running" was already true the instant the
+     mark was written: it evaporated on the very next payload and the crashed
+     strip got its button straight back, ~90s before the resumed session could
+     possibly have heartbeated. Freshness is the condition that tells the two
+     apart, and it costs the paused case nothing — `unpause` re-stamps
+     `updatedAt` in the same write that sets `running`. */
+
+  it('keeps the mark on a crashed run until its heartbeat comes back', async () => {
+    const fetchMock = stubFetchSequence([
+      payloadWith('running', false), // crashed: running, stale heartbeat
+      payloadWith('running', false), // still crashed — the resumed session has not heartbeated yet
+      payloadWith('running', true) // heartbeating again
+    ]);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.resuming.has(fixture.project)).toBe(true);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(result.current.resuming.has(fixture.project)).toBe(false);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+  });
+
+  it('expires the mark after the grace window and stops polling a run that never came back', async () => {
+    const fetchMock = stubFetch(payloadWith('paused', false));
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(RESUME_POLL_GRACE_MS + 5_000);
+    });
+    const settled = fetchMock.mock.calls.length;
+    expect(result.current.resuming.has(fixture.project)).toBe(false);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchMock.mock.calls.length).toBe(settled);
+  });
+
+  it('restarts the grace clock on a second noteResume', async () => {
+    stubFetch(payloadWith('paused', false));
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(120_000);
+    });
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // 4 minutes after the FIRST call is only 2 minutes after the second, so
+    // the mark is still live — a stored deadline that was never rewritten
+    // would already have expired here.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(120_000);
+    });
+    expect(result.current.resuming.has(fixture.project)).toBe(true);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(RESUME_POLL_GRACE_MS);
+    });
+    expect(result.current.resuming.has(fixture.project)).toBe(false);
+  });
+
+  // Both are dependencies of effects and props of memoised children; a new
+  // identity every render would re-arm the poll effect on every tick.
+  it('keeps refresh and noteResume stable across a poll tick', async () => {
+    stubFetch(payload(true));
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+
+    const { refresh, noteResume } = result.current;
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(result.current.refresh).toBe(refresh);
+    expect(result.current.noteResume).toBe(noteResume);
+  });
+
+  // spec §4.9a: `runs` is `[]` both before and after an empty first answer, so `answered` is the only way to tell "nobody knows" from "nothing running".
+  it('answered is false before the first fetch resolves, true after an empty answer, and stays true after a later failure', async () => {
+    const empty: OrchestratorRunsPayload = { runs: [], starting: [], remote: [], remoteStarting: [] };
+    const fetchMock = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(empty) } as Response));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { result } = renderHook(() => useOrchestratorRuns());
+    expect(result.current.answered).toBe(false);
+
+    await flush();
+    expect(result.current.answered).toBe(true);
+    expect(result.current.runs).toEqual([]);
+
+    fetchMock.mockImplementation(() => Promise.reject(new Error('down')));
+    act(() => {
+      result.current.refresh();
+    });
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.answered).toBe(true);
+  });
+});
+
+describe('OrchestratorRunsProvider', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    global.fetch = realFetch;
+  });
+
+  function Probe({ id }: { id: string }) {
+    const { working, liveCount } = useOrchestratorRunsContext();
+    return <span data-testid={id}>{`${String(working)}/${liveCount}`}</span>;
+  }
+
+  it('polls once for two consumers', async () => {
+    const fetchMock = stubFetch(payload(true));
+    render(
+      <OrchestratorRunsProvider>
+        <Probe id="a" />
+        <Probe id="b" />
+      </OrchestratorRunsProvider>
+    );
+    await flush();
+    // Each 5 s tick re-arms only after the previous answer settled (useRefreshing), so flush between advances.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    await flush();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports working as undefined until the first answer, then derives it and the live count', async () => {
+    stubFetch(payload(true));
+    render(
+      <OrchestratorRunsProvider>
+        <Probe id="a" />
+      </OrchestratorRunsProvider>
+    );
+    expect(screen.getByTestId('a').textContent).toBe('undefined/0');
+    await flush();
+    expect(screen.getByTestId('a').textContent).toBe('true/1');
+  });
+
+  it('throws outside the provider', () => {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => render(<Probe id="a" />)).toThrow(/OrchestratorRunsProvider/);
+    spy.mockRestore();
+  });
+});

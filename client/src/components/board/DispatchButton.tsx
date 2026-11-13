@@ -80,7 +80,7 @@ export function dispatchAvailable(item: BacklogItem, status: AgentsStatus | null
  * action tone on the word (DESIGN.md §8.2 keeps all three: groom `--mustard`,
  * execute `--cyan`, capture `--magenta`) — carried by the label's own class
  * rather than by a rule reaching into `.ui-chip`, which is the restatement
- * `test/design-guards.test.ts`'s guard 7 exists to refuse.
+ * `test/guards/design-guards.test.ts`'s guard 7 exists to refuse.
  *
  * A FOURTH reading since #367 (DESIGN.md §8.3): on the card, when the plan-review rung is the one speaking, the disabled chip becomes an enabled
  * **Review plan** that opens the item modal, where the plan is rendered and Approve lives. See `onReview`.

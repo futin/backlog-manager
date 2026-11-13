@@ -1,5 +1,5 @@
 // Cases for `tick-breaker.mjs` — the streak rule and the `tick.json` reader. The streak table below is PINNED: the server's copy of the rule
-// (`server/src/tick/tick-breaker.util.ts`, suite `test/tick-breaker.test.ts`) carries the same table in its own suite, so a drift on either side fails a suite
+// (`server/src/tick/tick-breaker.util.ts`, suite `test/tick/tick-breaker.test.ts`) carries the same table in its own suite, so a drift on either side fails a suite
 // rather than letting `decide` and the board disagree about whether a project is halted. Every file case works in its own throwaway directory.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -88,7 +88,7 @@ test('readTickSettings — a file is read, haltAfter clamped and non-integers re
   assert.deepEqual(readTickSettings(withFile(t, {})), { ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'file' });
 });
 
-// PINNED: `test/tick-breaker.test.ts` carries the same rows for the server's `readTickFile`, so the two readers cannot disagree about a hand-edited cap.
+// PINNED: `test/tick/tick-breaker.test.ts` carries the same rows for the server's `readTickFile`, so the two readers cannot disagree about a hand-edited cap.
 const CAP_CLAMP = [
   [0, 1],
   [11, 10],

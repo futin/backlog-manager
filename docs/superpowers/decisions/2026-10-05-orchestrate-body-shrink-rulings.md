@@ -1,8 +1,8 @@
 # Orchestrate body shrink — execution rulings
 
-Plan: [2026-10-05-orchestrate-body-shrink.md](../plans/2026-10-05-orchestrate-body-shrink.md) (no spec — the plan is its own record). Final whole-branch
+Plan: [2026-10-05-orchestrate-body-shrink.md](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-10-05-orchestrate-body-shrink.md) (no spec — the plan is its own record). Final whole-branch
 review (Opus, `0f8e83a..5b96f99`, with fixes, 0 Critical / 4 Important / 11 Minor):
-[2026-10-05-orchestrate-body-shrink-final-review.md](../reviews/2026-10-05-orchestrate-body-shrink-final-review.md).
+[2026-10-05-orchestrate-body-shrink-final-review.md](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/reviews/2026-10-05-orchestrate-body-shrink-final-review.md).
 
 Rulings made during subagent-driven execution, each as what was decided, why, and what it costs if wrong. The per-task ledger, reports and reviews lived
 under the git-ignored `.superpowers/` and are not kept. Rulings without a spec are provisional against the plan's Why, Global constraints and Review focus.

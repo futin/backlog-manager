@@ -226,7 +226,7 @@ The plan names exact cases; the shape is:
 - **jest:** `resolveMergeMode` gives a 400 for `pr` on a files project and appends `--merge-mode pr` for a tracker one. `sanitizeMergeFields` resolves an
   absent `prTarget`/`prUrl` to `null` and drops a non-GitHub `prUrl`. The sheet offers `pr` only for a tracker project and falls back from a `pr` default on
   a files one. `mergeModeLabel('pr','pr')` is `PR mode`. RunDetail renders the link only for a valid `prUrl`.
-- **`test/agents-shared.test.ts`**'s `expect(MERGE_MODES).toEqual(['merge', 'branch'])`, `test/settings-view.test.tsx`'s option list and
+- **`test/agents/agents-shared.test.ts`**'s `expect(MERGE_MODES).toEqual(['merge', 'branch'])`, `test/settings/settings-view.test.tsx`'s option list and
   `mergeModeOptionLabels`' `Record<MergeMode, string>` (`client/src/lib/merge-mode.ts`) go red until `pr` is classified. That is the forcing function, and no test is
   weakened to get past it.
 
@@ -241,7 +241,7 @@ The plan names exact cases; the shape is:
   pushes the run branch through the same §9 command and adds no fourth push.
 - `docs/subsystems/invariants.md`: a new anchor, *PR mode drains onto a run branch and opens one PR per run*, with P2's and P4's reasoning. It gets a
   **new bullet of its own** in `.claude/rules/orchestrator.md` (one anchor per bullet) and a CLAUDE.md headline byte-equal with that bullet's
-  (`test/claude-rules.test.ts`); the existing merge-mode bullet only gains `pr` in its vocabulary.
+  (`test/guards/claude-rules.test.ts`); the existing merge-mode bullet only gains `pr` in its vocabulary.
 - `skills/backlog-orchestrate/SKILL.md`: the trigger line, §2's mode list, the §4 pull skip, and §10's three PR steps, each entering as one statement.
   `references/tracker.md` carries the rare branches: the `ls-remote` fallback, a denied `gh`, and the nothing-merged branch delete. This follows the
   "a new orchestrate rule enters SKILL.md as one statement" invariant.

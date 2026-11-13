@@ -76,7 +76,7 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   `JiraModule`, which imports neither, so there is no cycle and no `forwardRef`. A GitLab call from `agents/` — the session's own `mr-review-loop` token does
   that — would make a second GitLab client. Why: [invariants.md](docs/subsystems/invariants.md#agents-reads-the-gitlab-pollers-cache-and-never-calls-gitlab)
 - **The browser never talks to the dashboard.** Every call goes board → this API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off — and
-  **compose passes that one through as `${BM_AGENTS:-off}`, never as a literal** (bug-25, pinned by `test/compose-env.test.ts`). `BM_AGENTS_URL` beside it is
+  **compose passes that one through as `${BM_AGENTS:-off}`, never as a literal** (bug-25, pinned by `test/guards/compose-env.test.ts`). `BM_AGENTS_URL` beside it is
   stack topology, not a policy default, so compose overrides it under a **second key** and never interpolates `BM_AGENTS_URL` itself:
   `${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}`. Both halves are pinned — the default string, and that no `${BM_AGENTS_URL…}` appears anywhere in
   the file. Do not collapse the two names back into one. Why: [invariants.md](docs/subsystems/invariants.md#the-browser-never-talks-to-the-dashboard)
@@ -118,7 +118,7 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   `noteBoardResume`. Raising "Give up after" revives a stalled run exactly as it revives an exhausted one. Why:
   [invariants.md](docs/subsystems/invariants.md#grace-any-attempt-starts-the-clock-only-a-success-counts)
 - **Every agents POST is guarded by content-type and origin** (`server/src/agents/origin.guard.ts`) — the one place loopback is NOT the access control.
-  `test/agents-origin-guard.test.ts`'s route list is where the guarded set lives, never a count in prose. Absent `Origin` stays allowed; the guard compares host
+  `test/agents/agents-origin-guard.test.ts`'s route list is where the guarded set lives, never a count in prose. Absent `Origin` stays allowed; the guard compares host
   and port, not scheme. Why: [invariants.md](docs/subsystems/invariants.md#every-agents-post-is-guarded-by-content-type-and-origin)
 - **`~/.backlog-manager/settings/dashboards.json` has exactly one writer, the server, and a file that cannot be read is never replaced.** The file is
   `$BM_DASHBOARDS_FILE` (read per call), else `~/.backlog-manager/settings/dashboards.json`, shaped `{ home?, dashboards: [{ name, url, bmUrl, host, account?,

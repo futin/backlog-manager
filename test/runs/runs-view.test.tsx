@@ -1,0 +1,3008 @@
+/**
+ * @jest-environment jsdom
+ */
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { act, render, screen, waitFor, within, type RenderResult } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import '@testing-library/jest-dom';
+
+import {
+  fetchAgentsStatus,
+  fetchArchivedRun,
+  fetchOrchestratorArchive,
+  fetchOrchestratorRuns,
+  fetchWatchdog,
+  pauseOrchestrate,
+  stopOrchestrate
+} from '../../client/src/lib/agents';
+import RunsView, { RUNS_PAGE_SIZE } from '../../client/src/components/runs/RunsView';
+import { RANGE_BUTTON, RUN_RANGES } from '../../client/src/lib/run-range';
+import type { RunRange } from '../../client/src/lib/run-range';
+import { RUNS_MODE_KEY } from '../../client/src/lib/runs-mode';
+import { setRunsMode } from '../../client/src/hooks/useRunsMode';
+import { MACHINE_STAGES, dayKey, dayLabel } from '../../client/src/lib/run-stats';
+import { TimeZoneProvider } from '../../client/src/hooks/TimeZoneContext';
+import { fetchTimeZone } from '../../client/src/lib/settings-api';
+import type {
+  AgentsStatus,
+  ArchiveQueueItem,
+  DashboardsView,
+  OrchestratorArchivePayload,
+  OrchestratorArchiveRun,
+  OrchestratorRun,
+  OrchestratorRunsPayload,
+  RemoteStarting,
+  RunQueueItem,
+  RunSessionUsage,
+  RunStage,
+  RunVerification,
+  StartingRun,
+  VerificationSummary,
+  WatchdogStatus
+} from '../../shared/types';
+import { DEFAULT_WATCHDOG_CONFIG } from '../../shared/types';
+import { OrchestratorRunsProvider } from '../../client/src/hooks/OrchestratorRunsContext';
+
+/**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+// Task 6 consumes the two archive/live fetchers through the real hooks
+// (useOrchestratorArchive, useOrchestratorRuns) rather than through fetch
+// directly, so mocking at the lib/agents module boundary — the brief's own
+// instruction — lets this suite drive RunsView exactly as the browser will:
+// the hooks' mount-time fetch, their promise resolution, and their own
+// state plumbing all run for real, and only the network edge is faked.
+//
+// `fetchArchivedRun` joins the other two here for Task 7: the detail pane
+// RunsView now mounts behind the selected row calls it directly (not through
+// a hook), and with no entry for it in this factory the real module's
+// export would be `undefined` — every RunDetail render for an archived
+// selection would throw the instant its effect tried to call it.
+jest.mock('../../client/src/lib/agents', () => ({
+  __esModule: true,
+  fetchArchivedRun: jest.fn(),
+  fetchOrchestratorArchive: jest.fn(),
+  fetchOrchestratorRuns: jest.fn(),
+  // task-17: this section now reads `useAgents` (for the resume gate) and
+  // hosts `RunControls` (for the three calls). A mocked module hands an
+  // un-listed export back as `undefined`, so omitting any of these four is
+  // not "the feature is untested here" — it is a TypeError inside a hook
+  // during the first render of every case in this file.
+  fetchAgentsStatus: jest.fn(),
+  // task-18: the Watchdog mode mounts `WatchdogMonitor`, which owns the real
+  // `useWatchdog` — and that hook reaches the network through this same
+  // mocked module. Without an entry here the export is `undefined` and the
+  // hook's mount effect throws the first time anyone clicks the switch.
+  fetchWatchdog: jest.fn(),
+  pauseOrchestrate: jest.fn(),
+  // #344: the Stop confirm cases below. Never resolved by any case — each one asserts the call was NOT made — but listed for the same reason as the
+  // rest: an un-listed export is `undefined`, and a regression that did fire it should fail on the assertion, not on a TypeError.
+  stopOrchestrate: jest.fn(),
+  cancelPauseOrchestrate: jest.fn(),
+  resumeOrchestrate: jest.fn(),
+  ApiError: class ApiError extends Error {
+    constructor(
+      message: string,
+      public readonly status: number,
+      public readonly code?: string
+    ) {
+      super(message);
+      this.name = 'ApiError';
+    }
+  }
+}));
+
+/*
+  Multi-dashboard task 10: `RunsView` reads the dashboards view for the machine labels. The real hook reaches `fetch` through the mocked `lib/agents` module above
+  (`unwrap` is `undefined` here), so it is replaced by a holder a case fills — `null` is the view-less state every pre-existing case already ran in.
+*/
+const mockDashboardsView: { current: DashboardsView | null } = { current: null };
+// #241: the shared-zone case at the foot of this file mounts `TimeZoneProvider`, whose one read is this call. Mocked rather than answered through `fetch`:
+// it unwraps through `lib/agents`' `unwrap`, which the mock above leaves out.
+jest.mock('../../client/src/lib/settings-api', () => ({
+  __esModule: true,
+  fetchTimeZone: jest.fn(),
+  updateTimeZone: jest.fn()
+}));
+
+jest.mock('../../client/src/hooks/useDashboards', () => ({
+  __esModule: true,
+  useDashboards: () => ({ view: mockDashboardsView.current, error: null, refresh: () => Promise.resolve() })
+}));
+
+const mockArchive = fetchOrchestratorArchive as jest.Mock;
+const mockRuns = fetchOrchestratorRuns as jest.Mock;
+const mockFetchArchivedRun = fetchArchivedRun as jest.Mock;
+const mockPause = pauseOrchestrate as jest.Mock;
+const mockWatchdog = fetchWatchdog as jest.Mock;
+
+/** task-18: the same "defaults everywhere a case does not care" factory the
+ *  monitor's own suite carries. */
+function watchdogStatus(over: Partial<WatchdogStatus> = {}): WatchdogStatus {
+  return {
+    phase: 'idle',
+    nextTickAt: null,
+    config: DEFAULT_WATCHDOG_CONFIG,
+    watching: [],
+    events: [],
+    ...over
+  };
+}
+
+/**
+ * One queue item, archive-shaped (verification already summarised — the
+ * exact shape `GET /api/orchestrator/archive` answers with). Defaults are
+ * deliberately inert (no fix loops, no verification, no stage timestamps) so
+ * every fixture item below states only the fields its own case actually
+ * cares about, the same "narrow the default, override what matters" shape
+ * the rest of this repo's test fixtures use (see board-live-cards.test.tsx's
+ * `fakeItem`).
+ */
+function item(
+  id: string,
+  stage: RunStage,
+  over: { fixLoops?: number; stageAt?: Partial<Record<RunStage, string>>; verification?: VerificationSummary[] } = {}
+): ArchiveQueueItem {
+  return {
+    id,
+    title: `${id} title`,
+    stage,
+    sessionId: null,
+    worktree: null,
+    branch: null,
+    pid: null,
+    permissionMode: null,
+    fixLoops: over.fixLoops ?? 0,
+    stageAt: over.stageAt ?? {},
+    verification: over.verification ?? [],
+    questions: [],
+    note: null,
+    assumptions: []
+  };
+}
+
+/**
+ * The full-shaped (tail-bearing) counterpart to `item()` above — what the
+ * LIVE poll payload's own `queue` actually carries (`RunQueueItem`, not the
+ * tail-stripped `ArchiveQueueItem`). Takes the same narrow "only override
+ * what this case cares about" `over` shape as `item()`, for the same
+ * reason: fix round 3's own `LIVE_RUNS` fixture (below) now needs a live
+ * queue with real verification entries of its own, not just a bare stage,
+ * to exercise the aggregate-tile fix the same way the I2 test's own
+ * bespoke fixture already exercises the row fix.
+ */
+function liveQueueItem(
+  id: string,
+  stage: RunStage,
+  over: { fixLoops?: number; stageAt?: Partial<Record<RunStage, string>>; verification?: RunVerification[] } = {}
+): RunQueueItem {
+  return {
+    id,
+    title: `${id} title`,
+    stage,
+    sessionId: null,
+    worktree: null,
+    branch: null,
+    pid: null,
+    permissionMode: null,
+    fixLoops: over.fixLoops ?? 0,
+    stageAt: over.stageAt ?? {},
+    verification: over.verification ?? [],
+    questions: [],
+    note: null,
+    assumptions: []
+  };
+}
+
+function run(
+  over: Partial<OrchestratorArchiveRun> & Pick<OrchestratorArchiveRun, 'runId' | 'project' | 'status' | 'startedAt' | 'updatedAt' | 'queue'>
+): OrchestratorArchiveRun {
+  return {
+    maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    mergeModeNote: null,
+    prTarget: null,
+    prUrl: null,
+    base: 'main',
+    questionMode: 'park',
+    attention: [],
+    current: false,
+    ...over
+  };
+}
+
+/** task-17: an archived `paused` run in beta, on the earlier of the two day
+ *  groups — deliberately not `current`, so it reads as history with no live
+ *  entry behind it, which is the shape the detail pane has to synthesise a
+ *  `RunControls` run from. */
+function pausedRun(): OrchestratorArchiveRun {
+  return run({
+    runId: 'run-paused-1',
+    project: '/abs/beta',
+    status: 'paused',
+    startedAt: '2026-08-28T13:00:00.000Z',
+    updatedAt: '2026-08-28T13:20:00.000Z',
+    queue: [item('p-1', 'merged'), item('p-2', 'pending')]
+  });
+}
+
+/**
+ * The fixture the brief calls for: two projects, four runs, one of them
+ * (RUN_LIVE) running and also present in the live poll payload so it reads
+ * as "live-backed" — everything else only ever lives in the archive. Two
+ * distinct days, each holding two runs, spaced three calendar days apart
+ * (Aug 31 vs Aug 28) rather than adjacent — `dayKey`/`dayLabel` bucket by
+ * LOCAL time (their own doc comments explain why), and a three-day gap
+ * cannot be pushed across a group boundary by any real timezone offset the
+ * way one calendar day apart marginally could, which is what keeps this
+ * suite's grouping assertions honest regardless of which timezone actually
+ * runs the test.
+ *
+ * RUN_LIVE's own `startedAt` is fix round 1's deliberate change: it is set
+ * BEFORE both day groups (Aug 25, three days ahead of the earlier of the
+ * two), not after them — the fixture equivalent of "a run that has been
+ * going since three days ago, sitting beside a run that merely finished
+ * more recently". A fixture where the live run also happened to be the
+ * chronologically newest one would let every ordering/selection assertion
+ * below pass whether or not RunsView actually pins fresh runs above
+ * history, since a plain `startedAt` sort would put it first anyway — this
+ * is exactly the case the review that prompted this fix round called out by
+ * name ("a fixture where the live run is also the newest proves nothing").
+ *
+ * Every number below (merged counts, wall times, fix loops, verification
+ * pass/fail) was chosen so `aggregateRuns`' own arithmetic lands on a clean,
+ * hand-checked value — see the comment beside each assertion below for the
+ * exact sum. The point is that this suite is pinning RunsView's *rendering*
+ * of aggregateRuns' output, not re-deriving aggregateRuns' own math (that is
+ * run-stats.test.ts's job) — a fixture whose numbers required re-deriving
+ * fractions in the assertions would blur that line.
+ */
+const RUN_LIVE = run({
+  runId: 'run-20260825-090000',
+  project: '/abs/alpha',
+  status: 'running',
+  startedAt: '2026-08-25T09:00:00.000Z',
+  updatedAt: '2026-08-31T12:05:00.000Z',
+  current: true,
+  queue: [
+    // merged, 10-minute wall time
+    item('a-1', 'merged', {
+      stageAt: { pending: '2026-08-25T09:00:00.000Z', merged: '2026-08-25T09:10:00.000Z' },
+      verification: [{ cmd: 'pnpm test', ok: true }]
+    }),
+    // still moving — two fix loops already spent on it, no verification yet.
+    // `stageAt` carries a real `reviewing` arrival (final-review wave,
+    // Important 1's own fixture fix) rather than the bare default `{}`
+    // `item()` would otherwise leave it at: an empty `stageAt` meant this
+    // was, and always had been, the ONLY `status: 'running'` archive fixture
+    // in this whole suite that could never actually reach `runStageTotals`'
+    // open-span arithmetic no matter what that arithmetic did — a whole-
+    // branch review named this exact gap as the reason nothing here would
+    // have caught a crashed run inflating the wide tile without bound. See
+    // "freezes the wide tile's open span..." below for the case this now
+    // makes possible.
+    item('a-2', 'reviewing', {
+      fixLoops: 2,
+      stageAt: { pending: '2026-08-25T09:00:00.000Z', reviewing: '2026-08-25T12:05:00.000Z' }
+    })
+  ]
+});
+
+const RUN_DONE_ALPHA = run({
+  runId: 'run-20260831-100000',
+  project: '/abs/alpha',
+  status: 'done',
+  startedAt: '2026-08-31T10:00:00.000Z',
+  updatedAt: '2026-08-31T10:45:00.000Z',
+  queue: [
+    // merged, 5-minute wall time
+    item('a-3', 'merged', {
+      stageAt: { pending: '2026-08-31T07:00:00.000Z', merged: '2026-08-31T07:05:00.000Z' },
+      verification: [{ cmd: 'pnpm test', ok: true }]
+    }),
+    // merged, 15-minute wall time
+    item('a-4', 'merged', {
+      stageAt: { pending: '2026-08-31T07:00:00.000Z', merged: '2026-08-31T07:15:00.000Z' },
+      verification: [{ cmd: 'pnpm test', ok: true }]
+    })
+  ]
+});
+
+const RUN_DONE_BETA = run({
+  runId: 'run-20260828-120000',
+  project: '/abs/beta',
+  status: 'done',
+  startedAt: '2026-08-28T12:00:00.000Z',
+  updatedAt: '2026-08-28T12:10:00.000Z',
+  queue: [
+    // merged, 10-minute wall time
+    item('b-1', 'merged', {
+      stageAt: { pending: '2026-08-28T09:00:00.000Z', merged: '2026-08-28T09:10:00.000Z' },
+      verification: [{ cmd: 'pnpm test', ok: true }]
+    })
+  ]
+});
+
+const RUN_FAILED_BETA = run({
+  runId: 'run-20260828-100000',
+  project: '/abs/beta',
+  status: 'failed',
+  startedAt: '2026-08-28T10:00:00.000Z',
+  updatedAt: '2026-08-28T10:10:00.000Z',
+  queue: [
+    // never merged, one failing verification
+    item('b-2', 'failed', { verification: [{ cmd: 'pnpm test', ok: false }] })
+  ]
+});
+
+const ARCHIVE_RUNS = [RUN_LIVE, RUN_DONE_ALPHA, RUN_DONE_BETA, RUN_FAILED_BETA];
+
+/**
+ * The one entry the live poll payload carries — RUN_LIVE's own runId and
+ * project, `fresh: true`. Its `queue` used to be `[]` on the theory that
+ * "the archive listing is the master list" meant every row read merged/
+ * total off the ARCHIVE entry above, never off this one — that was true of
+ * the FIRST version of this file, but fix round 2 made a fresh live entry's
+ * queue exactly what `RunRow` reads through `pickAuthority`, and round 3
+ * made it what the aggregate tiles read too. A `queue: []` fixture renders
+ * `0/0` for RUN_LIVE's own numbers, which is not just unrealistic (no real
+ * orchestrator run ever reports an empty queue) but actively hides bugs in
+ * either fix: a row or a tile that regressed to reading the archive instead
+ * of this entry would print RUN_LIVE's real archive numbers, and nothing
+ * here would notice the swap if this queue could never disagree with it.
+ *
+ * So this queue is deliberately AHEAD of `RUN_LIVE`'s own archive snapshot
+ * (which has `a-1` merged, `a-2` still `reviewing`) rather than mirroring
+ * it: here `a-2` has ALSO merged, modelling the live poll knowing about
+ * progress the last archive fetch could not yet have seen. Any assertion
+ * anywhere in this file that reads RUN_LIVE's merged/total or the aggregate
+ * tiles is therefore already proof the fix reads live, not archive — see
+ * "renders the aggregate tile numbers for the current filter" below for the
+ * hand-checked arithmetic this produces.
+ */
+const LIVE_RUNS: OrchestratorRunsPayload['runs'] = [
+  {
+    runId: RUN_LIVE.runId,
+    project: RUN_LIVE.project,
+    status: 'running',
+    startedAt: RUN_LIVE.startedAt,
+    updatedAt: RUN_LIVE.updatedAt,
+    maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    questionMode: 'park',
+    mergeModeNote: null,
+    prTarget: null,
+    prUrl: null,
+    base: 'main',
+    queue: [
+      liveQueueItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] }),
+      // live-ahead-of-archive: the archive's own a-2 is still "reviewing".
+      liveQueueItem('a-2', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] })
+    ],
+    attention: [],
+    fresh: true,
+    pastRuns: 2,
+    pauseRequested: false,
+    stopRequested: false
+  }
+];
+
+/**
+ * Task 7's own fixtures for the range control (`lib/run-range.ts`) and the
+ * wide "machine time by stage" tile it feeds — built from the REAL
+ * `Date.now()` at test-run time, unlike every fixed-date fixture above,
+ * because `rangeStart`/`inRange` compute their windows against the actual
+ * wall clock `RunsView` reads via its own `now = Date.now()`; a literal past
+ * date could never honestly exercise "is this inside TODAY".
+ *
+ * `RUN_A` started 60 seconds ago: inside every one of the four windows,
+ * `today` included. `RUN_B` started 40 days ago: outside `today`, `week`
+ * AND `month` no matter what day this suite happens to run on — 40 days
+ * exceeds the longest possible month (31 days) and the longest possible walk
+ * back to a Monday (6 days), so it always crosses at least one month
+ * boundary and at least one Monday regardless of where "today" falls in
+ * either. Only `all` ever shows both. Different projects, so a project
+ * filter can isolate one from the other (case 3 below).
+ *
+ * Each carries one merged item whose OWN internal timing is independent of
+ * its run's `startedAt` above — nothing in this codebase cross-checks that
+ * an item's `stageAt` falls within its run's start/end window;
+ * `runStageTotals` only ever compares an item's own stamps against each
+ * other and against `now`. `dispatched` and `merged` sit one second and then
+ * five (A) or ten (B) minutes apart on a fixed, literal 2026-01-01 timeline,
+ * chosen only to give the wide tile's `dispatched` row a clean, hand-checked
+ * sum once both runs are in scope (case 6 below) — the run's own real-time
+ * `startedAt` above is what the RANGE control reads, this timeline is what
+ * `runStageTotals` reads, and neither has any reason to agree with the
+ * other.
+ */
+const RUN_A_STARTED_AT = new Date(Date.now() - 60_000).toISOString();
+const RUN_B_STARTED_AT = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+
+const RUN_A = run({
+  runId: 'run-range-a',
+  project: '/abs/range-a',
+  status: 'done',
+  startedAt: RUN_A_STARTED_AT,
+  updatedAt: RUN_A_STARTED_AT,
+  queue: [
+    // dispatched -> merged: exactly 5 minutes, the span `runStageTotals`
+    // credits to the `dispatched` stage (`pending` -> `dispatched` is also
+    // a recorded span, but MACHINE_STAGES drops every `pending` span).
+    item('ra-1', 'merged', {
+      stageAt: {
+        pending: '2026-01-01T00:00:00.000Z',
+        dispatched: '2026-01-01T00:00:01.000Z',
+        merged: '2026-01-01T00:05:01.000Z'
+      }
+    })
+  ]
+});
+
+const RUN_B = run({
+  runId: 'run-range-b',
+  project: '/abs/range-b',
+  status: 'done',
+  startedAt: RUN_B_STARTED_AT,
+  updatedAt: RUN_B_STARTED_AT,
+  queue: [
+    // dispatched -> merged: exactly 10 minutes.
+    item('rb-1', 'merged', {
+      stageAt: {
+        pending: '2026-01-01T00:00:00.000Z',
+        dispatched: '2026-01-01T00:00:01.000Z',
+        merged: '2026-01-01T00:10:01.000Z'
+      }
+    })
+  ]
+});
+
+/** task-21 added the third parameter. It defaults to `[]` so every existing
+ *  call site keeps meaning exactly what it meant, and the settle condition
+ *  below takes it into account for the reason the case list at the foot of
+ *  this file exists: a payload with a starting entry and nothing else no
+ *  longer renders "no runs yet", so waiting for that string would hang. */
+async function renderRunsView(
+  archiveRuns: OrchestratorArchiveRun[],
+  liveRuns: OrchestratorRunsPayload['runs'] = [],
+  starting: OrchestratorRunsPayload['starting'] = [],
+  remote: OrchestratorRunsPayload['remote'] = [],
+  remoteStarting: OrchestratorRunsPayload['remoteStarting'] = []
+): Promise<RenderResult> {
+  mockArchive.mockResolvedValue({ runs: archiveRuns } satisfies OrchestratorArchivePayload);
+  mockRuns.mockResolvedValue({ runs: liveRuns, starting, remote, remoteStarting } satisfies OrchestratorRunsPayload);
+  const result = render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
+  if (archiveRuns.length === 0 && liveRuns.length === 0 && starting.length === 0 && remote.length === 0 && remoteStarting.length === 0) {
+    await screen.findByText('no runs yet');
+  } else {
+    await screen.findByTestId('runs-list');
+  }
+  return result;
+}
+
+/**
+ * task-38's own selector helpers, and the reason they are helpers: every
+ * control this suite drives is a ui primitive now, so the queries are by ROLE
+ * and accessible name rather than by a page-local `data-testid`. Naming them
+ * once keeps the cases reading as what they are about — "click This week" —
+ * rather than as four lines of DOM archaeology each.
+ */
+/** One of `RUN_RANGES`' four steps in the band's segmented control. */
+function rangeButton(r: RunRange): HTMLElement {
+  return within(screen.getByRole('group', { name: 'Range' })).getByRole('button', { name: RANGE_BUTTON[r] });
+}
+
+/** The Live sheet's rows box, or `null` when the sheet is not drawn at all —
+ *  which is itself a reading: no live run and nothing starting. */
+function liveRows(): HTMLElement | null {
+  return screen.queryByTestId('runs-live-rows');
+}
+
+/** Every row currently in the History sheet, in render order. The Live sheet's
+ *  rows are deliberately excluded: the two lists answer different questions
+ *  and a case that meant one must never accidentally count the other. */
+function historyRowIds(container: HTMLElement): (string | null)[] {
+  return Array.from(container.querySelectorAll('.runs-history-sheet .runs-row')).map((el) => el.getAttribute('data-testid'));
+}
+
+/** True when this run's row is in the LIVE sheet — which is what "live" means
+ *  on this page since task-38 replaced the pinned region and its `.runs-row-
+ *  live` accent with a sheet of its own. */
+function isLiveRow(runId: string): boolean {
+  const rows = liveRows();
+  return rows !== null && rows.querySelector(`[data-testid="runs-row-${runId}"]`) !== null;
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockDashboardsView.current = null;
+  // The Runs view persists (see `lib/runs-mode.ts`), so a case that switches
+  // it would otherwise leak its choice into every case that runs after it.
+  localStorage.clear();
+  // Inert default for every case that does not care about the monitor: idle,
+  // nothing watched, no events.
+  mockWatchdog.mockResolvedValue(watchdogStatus());
+  // A safe, inert default for every test in this file that does not care
+  // about the detail pane's own fetch: RunDetail (Task 7) now mounts behind
+  // whatever row is selected, and the default selection lands on an
+  // ARCHIVED row in more than one existing test below once a project filter
+  // removes the pinned live run from scope (see "narrows both the row list
+  // and the tiles"). Without an implementation here that row's RunDetail
+  // would call a bare `jest.fn()`, get back `undefined`, and throw the
+  // instant its effect called `.then()` on it — a suite whose own subject is
+  // the run LIST, not the detail pane, should not have to know that detail
+  // about Task 7's own effect to keep passing. A promise that never resolves
+  // is enough: nothing here asserts on the fetched tail text.
+  (fetchArchivedRun as jest.Mock).mockImplementation(() => new Promise(() => {}));
+  // task-17: an enabled status that can see both fixture projects, so the
+  // resume gate is open by default and a case that cares about a BLOCKED
+  // gate states that for itself. Same "inert but valid default" shape as the
+  // archived-run stub above.
+  (fetchAgentsStatus as jest.Mock).mockResolvedValue({
+    enabled: true,
+    reachable: true,
+    remoteAnswer: true,
+    spawnAvailable: true,
+    spawnMaxPermission: 'auto',
+    projectPaths: [RUN_LIVE.project, RUN_DONE_BETA.project]
+  } satisfies AgentsStatus);
+});
+
+describe('RunsView', () => {
+  // Also the "would fail without the pin" case the review asked for: RUN_LIVE's
+  // own `startedAt` (2026-08-25) is BEFORE both day groups' runs, so a plain
+  // startedAt-descending sort with no pinning would print it LAST, under its
+  // own day heading — not first, and not under a "live" heading at all. The
+  // self-check below pins that premise so a future edit that accidentally
+  // makes RUN_LIVE the chronologically newest run again cannot silently
+  // defeat what this test is actually proving.
+  /* task-38 turned the pinned region into a sheet of its own above the
+     History sheet (§8.4.1), which is a stronger form of the same rule rather
+     than a replacement for it: a going run is not merely first in one list,
+     it is in a different list. The case moved with the shape — the premise it
+     turns on (RUN_LIVE's startedAt is the OLDEST in scope, so a plain
+     chronological sort would print it last) is unchanged and still stated. */
+  it('puts the live run in the Live sheet, even though its startedAt is the oldest in scope', async () => {
+    expect(Date.parse(RUN_LIVE.startedAt)).toBeLessThan(Date.parse(RUN_DONE_BETA.startedAt));
+
+    const { container } = await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    expect(isLiveRow(RUN_LIVE.runId)).toBe(true);
+    // And in NEITHER list twice, which is the other half of the split.
+    expect(historyRowIds(container)).not.toContain(`runs-row-${RUN_LIVE.runId}`);
+
+    // The whole list column in render order: the Live sheet's rows lead.
+    const rowIds = Array.from(container.querySelectorAll('.runs-list .runs-row')).map((el) => el.getAttribute('data-testid'));
+    expect(rowIds[0]).toBe(`runs-row-${RUN_LIVE.runId}`);
+
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(RUN_LIVE.runId);
+  });
+
+  it('groups history by day under the Live sheet, newest first, with rows inside a day ordered by startedAt desc', async () => {
+    const { container } = await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    // The day kickers are `DayKicker` now (`.ui-ledger-day`), and there is no
+    // `live` kicker among them: that region is a sheet with its own head, not
+    // a group pretending to be a calendar day, which is exactly what task-38
+    // separated. Read off the real `dayLabel` function against this fixture's
+    // own timestamps, never hand-typed: a hand-typed "tue 1 sep" would
+    // silently pass or fail depending on the machine's timezone, exactly the
+    // flakiness dayLabel's own doc comment warns about.
+    const kickers = Array.from(container.querySelectorAll('.ui-ledger-day')).map((el) => el.textContent);
+    expect(kickers).toEqual([dayLabel(RUN_DONE_ALPHA.startedAt, ZONE), dayLabel(RUN_DONE_BETA.startedAt, ZONE)]);
+
+    expect(historyRowIds(container)).toEqual([`runs-row-${RUN_DONE_ALPHA.runId}`, `runs-row-${RUN_DONE_BETA.runId}`, `runs-row-${RUN_FAILED_BETA.runId}`]);
+  });
+
+  it('defaults selection to the live run', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(RUN_LIVE.runId);
+  });
+
+  /* The `.runs-row-live` accent's replacement: membership in the Live sheet.
+     A stronger claim than the class was — an accent could be painted on a row
+     sitting anywhere, where being in that sheet is what the split decides —
+     and the one this page now makes. */
+  it('puts only the going run in the Live sheet, and every finished one in History', async () => {
+    const { container } = await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    expect(isLiveRow(RUN_LIVE.runId)).toBe(true);
+    for (const finished of [RUN_DONE_ALPHA, RUN_DONE_BETA, RUN_FAILED_BETA]) {
+      expect(isLiveRow(finished.runId)).toBe(false);
+      expect(historyRowIds(container)).toContain(`runs-row-${finished.runId}`);
+    }
+  });
+
+  /* The Runs tile's status bar: one segment per status that has runs, in STATUS_ORDER, width proportional to the count, toned by `runTone`. Three done and one
+     failed is 75 / 25, and the glyph line under it still states the same counts in words. */
+  it('draws the Runs tile status bar, one toned segment per status with a count', async () => {
+    const doneAgain = { ...RUN_DONE_ALPHA, runId: 'run-20260830-100000' };
+    const doneThird = { ...RUN_DONE_BETA, runId: 'run-20260827-120000' };
+    await renderRunsView([RUN_DONE_ALPHA, doneAgain, doneThird, RUN_FAILED_BETA], []);
+
+    const bar = screen.getByTestId('runs-tile-runs').querySelector('.runs-status-bar') as HTMLElement;
+    const segs = Array.from(bar.children) as HTMLElement[];
+    expect(segs.map((seg) => seg.getAttribute('data-tone'))).toEqual(['grey', 'red']);
+    expect(segs.map((seg) => seg.style.width)).toEqual(['75.0%', '25.0%']);
+    expect(screen.getByTestId('runs-figure-runs-line')).toHaveTextContent('3 done');
+    expect(screen.getByTestId('runs-figure-runs-line')).toHaveTextContent('1 failed');
+  });
+
+  it('narrows both the row list and the tiles to the selected project', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), '/abs/beta');
+
+    // Only beta's two runs remain on screen.
+    expect(screen.queryByTestId(`runs-row-${RUN_LIVE.runId}`)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(`runs-row-${RUN_DONE_ALPHA.runId}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`runs-row-${RUN_FAILED_BETA.runId}`)).toBeInTheDocument();
+
+    // aggregateRuns([RUN_DONE_BETA, RUN_FAILED_BETA], now).runs === 2.
+    expect(screen.getByTestId('runs-tile-runs')).toHaveTextContent('2');
+  });
+
+  it('renders the aggregate tile numbers for the current filter', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    // RUN_LIVE is live-backed, so it contributes its LIVE_RUNS queue (a-1
+    // merged, a-2 ALSO merged — ahead of the archive's a-2 "reviewing")
+    // through `pickAuthority`, not its archive snapshot. itemsMerged=5
+    // (a-1, a-2, a-3, a-4, b-1) of itemsQueued=6 (2+2+1+1). Before fix round
+    // 3 this read the archive record for every run, including RUN_LIVE, and
+    // printed 4/6 (a-2 still counted as "reviewing") — a number that would
+    // have disagreed with RUN_LIVE's own row, which round 2 already fixed
+    // to print 2/2.
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('5/6');
+
+    // avgItemWorkMs (Task 7's own addition — this assertion did not exist
+    // before this task; CONSTRAINTS.md's R2/amendments deferred it here on
+    // purpose). `itemDurationMs` (run-time.ts) measures from an item's
+    // FIRST NON-PENDING `stageAt` arrival — `startedAtMs`'s own rule, which
+    // skips only `pending` and keeps everything else, `preflight` included —
+    // to its terminal stamp, never from `dispatched` specifically. RUN_LIVE's
+    // own two merged items (a-1, a-2, read live through `pickAuthority`)
+    // carry NO `stageAt` at all in the `LIVE_RUNS` fixture above (only
+    // `verification` was ever given them), so `startedAtMs` finds nothing to
+    // call "earliest" and `itemDurationMs` returns `null` for both —
+    // EXCLUDED from the average entirely, not counted as a zero. The three
+    // ARCHIVE-only merged items (a-3, a-4, b-1) each recorded only `pending`
+    // and their own terminal `merged` stamp, with no intermediate arrival of
+    // any kind in between — so `startedAtMs`, skipping `pending` and taking
+    // the earliest of whatever remains, finds only `merged` ITSELF, and
+    // measures an item's "start" and "end" off the identical stamp: end -
+    // start = 0 for all three. avgItemWorkMs = (0 + 0 + 0) / 3 = 0 ->
+    // formatSpanCompact(0) = "0s" — a degenerate number, but the honest one
+    // this fixture's own stageAt data (never a `dispatched` entry) actually
+    // produces once the correct rule is applied to it.
+    expect(screen.getByTestId('runs-tile-avg-item')).toHaveTextContent('avg item work');
+    expect(screen.getByTestId('runs-tile-avg-item')).toHaveTextContent('0s');
+
+    // verifyOk=5 of verifyTotal=6 (a-1 ok, a-2 ok [live], a-3 ok, a-4 ok,
+    // b-1 ok, b-2 failed) => 83%, rounded to 0 decimals. Before fix round 3:
+    // verifyOk=4 of verifyTotal=5 (a-2's live verification entry was never
+    // counted at all) => 80%.
+    expect(screen.getByTestId('runs-tile-verify')).toHaveTextContent('83%');
+  });
+
+  // Task 7's own case: `runStageTotals`' open span (Task 2's own fix-round-1
+  // rule) is gated on the RUN's status being `running` — RUN_LIVE's live
+  // authority already satisfies that half, but neither of ITS two queue
+  // items (a-1, a-2, both `merged` in the `LIVE_RUNS` fixture above) is
+  // itself in a non-terminal MACHINE_STAGES stage for the open span to ever
+  // fire against, so nothing built on the shared fixtures proves this path
+  // actually reaches the WIDE tile the way `run-stats.test.ts` already
+  // proves it for `runStageTotals` in isolation.
+  //
+  // This test extends that same live-backed scenario with its OWN LOCAL
+  // copy of the live queue — `a-2` moves from `merged` to `fixing` here —
+  // rather than editing the shared `LIVE_RUNS` constant every other test in
+  // this file (this one included, immediately above) also renders against:
+  // doing that globally would also change the "renders the aggregate tile
+  // numbers" test's own pinned 5/6 merged and 83% verify totals, two
+  // hand-checked numbers that test's own comments derive in full and that
+  // this case has no reason to disturb just to prove a different, orthogonal
+  // property of a different tile.
+  it("extends the live-backed run's queue so a fixing item's open span reaches the wide tile", async () => {
+    const liveRunsWithFixingItem: OrchestratorRunsPayload['runs'] = [
+      {
+        ...LIVE_RUNS[0],
+        queue: [
+          LIVE_RUNS[0].queue[0],
+          // No later stamp than `fixing` itself — this is what makes it
+          // "still open": `runStageTotals` credits it `now - stageAt.fixing`
+          // rather than a closed span between two recorded arrivals.
+          liveQueueItem('a-2', 'fixing', { fixLoops: 2, stageAt: { fixing: '2026-08-25T09:20:00.000Z' } })
+        ]
+      }
+    ];
+
+    await renderRunsView(ARCHIVE_RUNS, liveRunsWithFixingItem);
+
+    const fixingValue = screen.getByTestId('runs-tile-machine-bars-fixing').querySelector('.run-bars-value')?.textContent;
+    expect(fixingValue).not.toBe('—');
+  });
+
+  // Final-review wave, Important 1: the SAME "does not pin or accent..."
+  // (I4) scenario above — RUN_LIVE's own live-payload entry gone stale
+  // (`fresh: false`) — but read through the WIDE tile this time, not the row.
+  // What this case exists to pin is `runStageTotals`' open-span arithmetic
+  // against a DEAD heartbeat: an item still sitting in a MACHINE_STAGES stage
+  // must have its open span frozen at the run's last heartbeat rather than
+  // credited all the way to `Date.now()`.
+  //
+  // bug-29 moved WHICH object supplies that open span, and the fixture had to
+  // follow it. A stale live entry is now the row's data authority (it is
+  // still arriving every 5s; the archive snapshot beside it is not), so the
+  // open `reviewing` arrival that used to live on RUN_LIVE's ARCHIVE-shaped
+  // `a-2` is stated on the stale LIVE queue here instead. The stamps, the
+  // arithmetic and the assertion are unchanged — only the source of the
+  // queue moved, which is exactly what the fix changed.
+  //
+  // RUN_LIVE's own `updatedAt` (2026-08-31T12:05, unchanged from every other
+  // test in this file) is a fixed past date no real run of this suite can
+  // ever land on, so `runStageTotals` must read it as a dead heartbeat —
+  // always, regardless of which real day actually executes this file — and
+  // freeze `a-2`'s open span there rather than at `RunsView`'s own
+  // `Date.now()`. `a-2`'s `reviewing` arrival (2026-08-25T12:05) is chosen
+  // to make that frozen span a clean, hand-checked 144 hours (exactly 6
+  // days) to `updatedAt`. Were the pre-fix code path still active, this same
+  // fixture would instead credit `Date.now() - reviewing` — a number that
+  // grows with the real calendar and could never be pinned to a fixed string
+  // at all, which is exactly the "passes by accident" gap this case closes:
+  // nobody could have written a deterministic assertion against the OLD
+  // formula for a fixed-past fixture like this one.
+  it("freezes the wide tile's open span at a stale run's last heartbeat, not real time", async () => {
+    const staleLive: OrchestratorRunsPayload['runs'] = [
+      {
+        ...LIVE_RUNS[0],
+        fresh: false,
+        queue: [
+          liveQueueItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] }),
+          liveQueueItem('a-2', 'reviewing', {
+            fixLoops: 2,
+            stageAt: { pending: '2026-08-25T09:00:00.000Z', reviewing: '2026-08-25T12:05:00.000Z' }
+          })
+        ]
+      }
+    ];
+
+    await renderRunsView(ARCHIVE_RUNS, staleLive);
+
+    const reviewingValue = screen.getByTestId('runs-tile-machine-bars-reviewing').querySelector('.run-bars-value')?.textContent;
+    expect(reviewingValue).toBe('144h 00m');
+  });
+
+  // bug-14. A crashed orchestrator leaves run.json at `status: "running"`
+  // forever and the archive serves it verbatim, with no live entry to back
+  // it (mergeRuns keeps a live entry only while its server-computed `fresh`
+  // flag holds), so `runWallMs` is the only place that can notice the
+  // process is dead. No unit test can prove the ROW stopped growing, which
+  // is what this case is for.
+  //
+  // No fake timers needed, and that is the point: the real `Date.now()`
+  // RunsView reads is months past this fixture's September 1st heartbeat,
+  // so the run is stale by construction on every day this suite ever runs.
+  // Pre-fix, the row prints the whole span since that date — a number that
+  // grows with the real calendar and could not be pinned to a fixed string
+  // at all; post-fix it freezes at `updatedAt - startedAt`, exactly 42m.
+  it('freezes a crashed archived run at its own last heartbeat rather than growing', async () => {
+    const crashed = run({
+      runId: 'run-20260901-090000',
+      project: '/repo/alpha',
+      status: 'running',
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:42:00.000Z',
+      queue: [item('bug-1', 'fixing', { stageAt: { pending: '2026-09-01T09:00:00.000Z', fixing: '2026-09-01T09:10:00.000Z' } })]
+    });
+
+    await renderRunsView([crashed], []);
+
+    expect(screen.getByTestId(`runs-row-${crashed.runId}`).querySelector('.runs-row-wall')?.textContent).toBe('42m');
+  });
+
+  it('renders the empty state and nothing else for empty payloads', async () => {
+    await renderRunsView([], []);
+    expect(screen.getByText('no runs yet')).toBeInTheDocument();
+    expect(screen.queryByTestId('runs-tiles')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('runs-list')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Project' })).not.toBeInTheDocument();
+  });
+
+  it('moves the selection when a different row is clicked', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(RUN_LIVE.runId);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`));
+
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(RUN_DONE_BETA.runId);
+    expect(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`)).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).not.toHaveAttribute('aria-current', 'true');
+  });
+
+  // Task 7's own integration case: RunDetail is mounted by RunsView, not
+  // tested standalone here (test/runs/run-detail.test.tsx already covers its
+  // internals in isolation) — what this suite is responsible for proving is
+  // the WIRING, specifically that clicking an ARCHIVED row (one with no
+  // fresh live entry backing it) is what makes RunsView pass `live={null}`
+  // down, which is what makes RunDetail decide to fetch at all. RUN_LIVE
+  // itself is the wrong row to click for this: it IS live-backed, so
+  // selecting it must resolve to a non-null `live` prop and no fetch should
+  // fire — that half of the contract belongs to run-detail.test.tsx's own
+  // "live run renders tails without fetching" case, not this one.
+  it('selecting an archived run mounts RunDetail which fetches that project+runId', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`));
+
+    await waitFor(() => {
+      expect(mockFetchArchivedRun).toHaveBeenCalledWith(RUN_DONE_BETA.project, RUN_DONE_BETA.runId);
+    });
+  });
+
+  // I4: `LIVE_RUNS` (used by every test above) has exactly one entry and it
+  // is always `fresh: true` — no fixture anywhere before this test supplied
+  // the ONE case `mergeRuns`' freshness gate exists to reject: a run that IS
+  // in the live payload (the board has heard from it) but is NOT fresh (its
+  // heartbeat has gone stale — RUN_STALE_MS). Without this test, deleting
+  // that gate leaves every other test in this file green: the row would
+  // still gain the live class and get pinned, since nothing before this
+  // exercised the `fresh: false` branch at all.
+  //
+  // bug-29 moved the gate from `MergedRun.live` (the DATA authority, which no
+  // longer filters on freshness at all) down onto `MergedRun.isLive` (the
+  // PRESENTATION gate, which still does). This case is unchanged by that and
+  // deliberately so — but what it means moved with task-38, and the move is
+  // worth stating: `isLive` no longer decides which SHEET a row is in
+  // (`splitLive` does that on presence and status, so a crashed run is a Live
+  // row, which is the whole point of §8.4.1's moved-rules table). What it
+  // still decides is the breathing dot, which is the one mark that asserts
+  // "this board is hearing from the process right now" — and a `running` run
+  // with a silent heartbeat is a crashed process, so breathing for it would
+  // present a guess as a fact.
+  it('does not breathe the dot of a run whose live-payload entry has gone stale (fresh: false)', async () => {
+    const staleLive: OrchestratorRunsPayload['runs'] = [{ ...LIVE_RUNS[0], fresh: false }];
+
+    const { container } = await renderRunsView(ARCHIVE_RUNS, staleLive);
+
+    // No "live" pinned heading at all — RUN_LIVE sorts into ordinary
+    // history by its own startedAt (the oldest run in this fixture — see
+    // the pin test's own premise assertion above), not pinned above every
+    // day group the way a naive "present in the live payload at all" check
+    // would render it.
+    const headings = Array.from(container.querySelectorAll('.runs-day-heading')).map((el) => el.textContent);
+    expect(headings).not.toContain('live');
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).not.toHaveClass('runs-row-live');
+  });
+
+  // I2: a whole-branch review found that a live-backed row's merged/total
+  // and status read the ARCHIVE snapshot (`mergeRuns` used to drop the live
+  // payload's queue entirely) while `RunDetail` beside it reads the 5s live
+  // poll — same run, two different merged counts on one screen. This
+  // fixture makes the archive snapshot deliberately STALE (1/2 merged,
+  // `running`) and the live entry deliberately AHEAD of it (2/2 merged,
+  // `done`), so a row still reading the archive would print `1/2` and
+  // `running` where the fix makes it print `2/2` and `done`.
+  it('a live-backed row reads its merged/total and status off the live entry, not the stale archive snapshot', async () => {
+    const archiveEntry = run({
+      runId: 'run-20260901-090000',
+      project: '/abs/gamma',
+      status: 'running', // stale: this archive snapshot predates what the live poll now knows
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:05:00.000Z',
+      current: true,
+      queue: [
+        item('g-1', 'merged'),
+        item('g-2', 'reviewing') // archive's stale snapshot: still "in progress"
+      ]
+    });
+    const liveEntry: OrchestratorRunsPayload['runs'][number] = {
+      runId: archiveEntry.runId,
+      project: archiveEntry.project,
+      status: 'done', // the live poll already knows it finished
+      startedAt: archiveEntry.startedAt,
+      updatedAt: '2026-09-01T09:10:00.000Z',
+      maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      questionMode: 'park',
+      mergeModeNote: null,
+      prTarget: null,
+      prUrl: null,
+      base: 'main',
+      attention: [],
+      queue: [
+        liveQueueItem('g-1', 'merged'),
+        liveQueueItem('g-2', 'merged') // live: g-2 has ALSO merged now (2/2), unlike the archive's 1/2
+      ],
+      fresh: true,
+      pastRuns: 0,
+      pauseRequested: false,
+      stopRequested: false
+    };
+
+    await renderRunsView([archiveEntry], [liveEntry]);
+
+    const row = screen.getByTestId(`runs-row-${archiveEntry.runId}`);
+    expect(row).toHaveTextContent('2 / 2');
+    expect(row).not.toHaveTextContent('1 / 2');
+    expect(row).toHaveTextContent('done');
+  });
+
+  // Fix round 3: a follow-up re-review found the row fix above (I2) did not
+  // reach the aggregate tiles a few pixels away — `aggregateRuns` was still
+  // fed `filtered.map((m) => m.run)`, the raw archive record, so a
+  // live-backed run's items merging mid-run moved the ROW's own count
+  // (I3's refresh effect does not re-fire for this — merges don't change
+  // the FRESH set, only starts/finishes/staleness do) while the "merged /
+  // queued" tile stayed frozen at whatever the last archive fetch saw.
+  // With exactly one run in scope (as here) that is a flat contradiction:
+  // one screen printing two different merged counts for the same run.
+  //
+  // Reuses the identical archive-behind/live-ahead fixture the row test
+  // above already built (archive: g-1 merged, g-2 still reviewing = 1/2;
+  // live: g-1 AND g-2 merged = 2/2) specifically so this test is provably
+  // the SAME scenario, just asserting the OTHER surface — a reader who
+  // sees this test pass and the row test above pass has direct proof the
+  // two can no longer disagree, which neither test alone would establish.
+  it('the aggregate merged/queued tile agrees with a live-backed row instead of freezing on the archive snapshot', async () => {
+    const archiveEntry = run({
+      runId: 'run-20260901-090000',
+      project: '/abs/gamma',
+      status: 'running',
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:05:00.000Z',
+      current: true,
+      queue: [
+        item('g-1', 'merged'),
+        item('g-2', 'reviewing') // archive's stale snapshot: still "in progress"
+      ]
+    });
+    const liveEntry: OrchestratorRunsPayload['runs'][number] = {
+      runId: archiveEntry.runId,
+      project: archiveEntry.project,
+      status: 'done',
+      startedAt: archiveEntry.startedAt,
+      updatedAt: '2026-09-01T09:10:00.000Z',
+      maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      questionMode: 'park',
+      mergeModeNote: null,
+      prTarget: null,
+      prUrl: null,
+      base: 'main',
+      attention: [],
+      queue: [
+        liveQueueItem('g-1', 'merged'),
+        liveQueueItem('g-2', 'merged') // live: g-2 has ALSO merged now (2/2), unlike the archive's 1/2
+      ],
+      fresh: true,
+      pastRuns: 0,
+      pauseRequested: false,
+      stopRequested: false
+    };
+
+    await renderRunsView([archiveEntry], [liveEntry]);
+
+    // Single run in scope, so the tile's own denominator is unambiguous:
+    // it must read the same 2/2 the row reads, never the archive's 1/2.
+    // Before the fix, this tile printed "1/2" while the row (asserted the
+    // same way as the test above) printed "2/2" on the same screen.
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('2/2');
+    expect(screen.getByTestId('runs-tile-merged')).not.toHaveTextContent('1/2');
+    expect(screen.getByTestId(`runs-row-${archiveEntry.runId}`)).toHaveTextContent('2 / 2');
+  });
+
+  // M3: `mergeRuns` used to dedupe on bare `runId`, contradicting
+  // `Selection` (and the detail-slot lookup) elsewhere in this same file —
+  // both of which key on `{project, runId}` precisely because a `runId` is
+  // a second-precision timestamp, not a global counter, and could in
+  // principle collide across two different projects' state directories.
+  // This fixture IS that collision. A `runId`-only dedupe would silently
+  // drop one of these two rows from the list entirely.
+  it('keeps both runs when two different projects happen to share a runId ({project, runId} dedupe)', async () => {
+    const sharedRunId = 'run-20260901-120000';
+    const runOne = run({
+      runId: sharedRunId,
+      project: '/abs/collide-one',
+      status: 'done',
+      startedAt: '2026-09-01T12:00:00.000Z',
+      updatedAt: '2026-09-01T12:05:00.000Z',
+      queue: [item('c1-1', 'merged')]
+    });
+    const runTwo = run({
+      runId: sharedRunId,
+      project: '/abs/collide-two',
+      status: 'done',
+      startedAt: '2026-09-01T12:00:00.000Z',
+      updatedAt: '2026-09-01T12:05:00.000Z',
+      queue: [item('c2-1', 'merged')]
+    });
+
+    await renderRunsView([runOne, runTwo], []);
+
+    // Both rows render, sharing the same `data-testid` (it is built off the
+    // bare `runId` too, unaffected by this fix) — a `runId`-only dedupe
+    // would keep only the FIRST and this would find one, not two.
+    expect(screen.getAllByTestId(`runs-row-${sharedRunId}`)).toHaveLength(2);
+  });
+
+  // I3: `useOrchestratorArchive`'s own `refresh()` used to be returned and
+  // never called by this view, so a run starting (or a fresh set otherwise
+  // changing) while the tab stayed open and focused never updated the
+  // archive listing at all — no focus event, no new mount, nothing. This
+  // test proves the fix WITHOUT relying on a focus event (which would also
+  // trigger `useOrchestratorArchive`'s own independent focus listener,
+  // masking whether RunsView's own new effect fired): it arms
+  // `useOrchestratorRuns`' 5s poll with an already-fresh run at mount, then
+  // has that poll's NEXT tick report a SECOND project's run as newly fresh
+  // — a state change with no focus event anywhere in the sequence.
+  it("refetches the archive listing when the live poll's set of fresh runs changes, with no focus event", async () => {
+    jest.useFakeTimers();
+    try {
+      const archiveAlpha = run({
+        runId: 'run-20260901-090000',
+        project: '/abs/alpha-i3',
+        status: 'running',
+        startedAt: '2026-09-01T09:00:00.000Z',
+        updatedAt: '2026-09-01T09:00:00.000Z',
+        queue: []
+      });
+      const liveAlpha: OrchestratorRunsPayload['runs'][number] = {
+        runId: archiveAlpha.runId,
+        project: archiveAlpha.project,
+        status: 'running',
+        startedAt: archiveAlpha.startedAt,
+        updatedAt: archiveAlpha.updatedAt,
+        maxItems: null,
+        mergeMode: 'merge',
+        mergeModeEffective: 'merge',
+        questionMode: 'park',
+        mergeModeNote: null,
+        prTarget: null,
+        prUrl: null,
+        base: 'main',
+        queue: [],
+        attention: [],
+        fresh: true,
+        pastRuns: 0,
+        pauseRequested: false,
+        stopRequested: false
+      };
+
+      mockArchive.mockResolvedValue({ runs: [archiveAlpha] } satisfies OrchestratorArchivePayload);
+      mockRuns.mockResolvedValue({ runs: [liveAlpha], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
+
+      render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
+      // Flushes the mount-time fetches (both hooks') and whatever effects
+      // their landed state triggers — `advanceTimersByTimeAsync(0)` reaches
+      // a real microtask-queue drain without any fake time actually
+      // elapsing, the same technique test/orchestrator/orchestrator-hook.test.tsx uses
+      // for the identical reason.
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(0);
+      });
+
+      const archiveCallsAfterMount = mockArchive.mock.calls.length;
+      // `useOrchestratorRuns`' own polling interval is armed here (a fresh
+      // run already exists from mount), so a real 5s tick — not a focus
+      // event — is what makes it notice this SECOND project's run.
+      const liveBeta: OrchestratorRunsPayload['runs'][number] = {
+        runId: 'run-20260901-093000',
+        project: '/abs/beta-i3',
+        status: 'running',
+        startedAt: '2026-09-01T09:30:00.000Z',
+        updatedAt: '2026-09-01T09:30:00.000Z',
+        maxItems: null,
+        mergeMode: 'merge',
+        mergeModeEffective: 'merge',
+        questionMode: 'park',
+        mergeModeNote: null,
+        prTarget: null,
+        prUrl: null,
+        base: 'main',
+        queue: [],
+        attention: [],
+        fresh: true,
+        pastRuns: 0,
+        pauseRequested: false,
+        stopRequested: false
+      };
+      mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(5_000);
+      });
+
+      // The archive listing was re-fetched strictly because the live poll's
+      // OWN set of fresh runs changed — no focus event fired anywhere in
+      // this test. Without the fix, `refreshArchive` is never called after
+      // mount, so this count would never move no matter how many poll
+      // ticks pass.
+      expect(mockArchive.mock.calls.length).toBeGreaterThan(archiveCallsAfterMount);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  // Task 7: the range control (design doc: "Range") — a segmented Today /
+  // This week / This month / All group that scopes the figure strip and the
+  // list together, composed with (not instead of) the project filter beside
+  // it. task-38 moved it into the band and drew it with the `Segmented`
+  // primitive; the four steps and what they scope are unchanged.
+  it('renders the four range buttons, defaulting to All', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    expect(screen.getByRole('group', { name: 'Range' })).toBeInTheDocument();
+
+    for (const r of RUN_RANGES) {
+      expect(rangeButton(r)).toHaveAttribute('aria-pressed', r === 'all' ? 'true' : 'false');
+    }
+  });
+
+  it('narrows the run list to the clicked range, and restores it on clicking back to All', async () => {
+    await renderRunsView([RUN_A, RUN_B], []);
+
+    await userEvent.click(rangeButton('today'));
+
+    // RUN_B started 40 days ago — out of `today`'s window regardless of
+    // which day this suite runs on (see RUN_A/RUN_B's own fixture comment).
+    expect(screen.getByTestId(`runs-row-${RUN_A.runId}`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`runs-row-${RUN_B.runId}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId('runs-tile-runs')).toHaveTextContent('1');
+    expect(rangeButton('today')).toHaveAttribute('aria-pressed', 'true');
+    expect(rangeButton('all')).toHaveAttribute('aria-pressed', 'false');
+
+    await userEvent.click(rangeButton('all'));
+
+    // Widening back to `all` restores both rows — this is not merely "the
+    // filter cleared", it is proof the range narrowing above never dropped
+    // RUN_B from `merged` (the unfiltered corpus), only from `filtered`.
+    expect(screen.getByTestId(`runs-row-${RUN_A.runId}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`runs-row-${RUN_B.runId}`)).toBeInTheDocument();
+  });
+
+  it('composes the range filter with the project filter down to the range-empty state', async () => {
+    await renderRunsView([RUN_A, RUN_B], []);
+
+    await userEvent.click(rangeButton('today'));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), RUN_B.project);
+
+    // `today` already excludes RUN_B on its own (case above); narrowing the
+    // PROJECT filter to RUN_B's project on top of it excludes RUN_A too
+    // (different project), so the intersection is empty even though neither
+    // filter alone would be.
+    expect(screen.getByTestId('runs-empty-range')).toHaveTextContent('no runs in this range');
+    // task-38: the figure strip HIDES with the list rather than rendering a
+    // row of zeros and dashes (§4.1 items 2 and 7). The case moved with that
+    // decision rather than being deleted, and the reason it changed is worth
+    // stating: six readings about a set the page has just said is empty are
+    // not honest zeros, they are six answers to a question nobody asked. The
+    // CONTROLS still stay mounted — which is the half of the old case that is
+    // load-bearing, because a person needs them on screen to widen back out
+    // of the empty combination they just created — and that is asserted
+    // directly below.
+    for (const tile of ['runs-tile-runs', 'runs-tile-avg-item', 'runs-tile-fixloops', 'runs-tile-verify', 'runs-tile-machine']) {
+      expect(screen.queryByTestId(tile)).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole('group', { name: 'Range' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Project' })).toBeInTheDocument();
+
+    // The combination emptied the visible rows, but the project SELECT still
+    // offers both projects — `projects` derives from `merged`, never from
+    // the range/project-filtered list, so a range that empties a project
+    // must not also remove the option that would switch back to it.
+    const optionValues = Array.from(screen.getByRole('combobox', { name: 'Project' }).querySelectorAll('option')).map((o) => o.getAttribute('value'));
+    expect(optionValues).toEqual(expect.arrayContaining([RUN_A.project, RUN_B.project]));
+  });
+
+  it('sums machine time by stage across the runs in range, in the wide tile', async () => {
+    const { container } = await renderRunsView([RUN_A, RUN_B], []);
+
+    // All seven MACHINE_STAGES rows always render, in pipeline order,
+    // whether or not this fixture recorded a millisecond in every one of
+    // them — StageBars.tsx's own "always seven, always ordered" contract.
+    const barRowIds = Array.from(container.querySelectorAll('[data-testid^="runs-tile-machine-bars-"]')).map((el) => el.getAttribute('data-testid'));
+    expect(barRowIds).toEqual(MACHINE_STAGES.map((stage) => `runs-tile-machine-bars-${stage}`));
+
+    const dispatchedValue = () => screen.getByTestId('runs-tile-machine-bars-dispatched').querySelector('.run-bars-value')?.textContent;
+
+    // A's own `dispatched` span is 5 minutes, B's is 10 (see their shared
+    // fixture comment above). Summed under `all` (both runs in scope):
+    // 5 + 10 = 15 minutes. Read off the row's own `.run-bars-value` text
+    // node directly, not the row's whole `toHaveTextContent`, because "5m"
+    // is a substring of "15m" — a stale, unfiltered "15m" left on screen by
+    // a broken range filter would falsely satisfy a plain substring check
+    // against "5m" below.
+    expect(dispatchedValue()).toBe('15m');
+    expect(screen.getByTestId('runs-tile-machine')).toHaveTextContent('all runs · queue wait excluded');
+
+    await userEvent.click(rangeButton('today'));
+
+    // B (40 days ago) drops out of scope under `today` — only A's own
+    // 5-minute span remains.
+    expect(dispatchedValue()).toBe('5m');
+    expect(screen.getByTestId('runs-tile-machine')).toHaveTextContent('today · queue wait excluded');
+  });
+
+  // Task 9, brief case a applied to the list row: the real overnight run
+  // this feature traces back to finished four items — all reviewed, all
+  // green — and merged none, because the classifier refused every merge.
+  // A row reading `0/2` for a fully successful branch-mode run would be the
+  // identical "looks like a failure" bug RunStrip's own case pins, on the
+  // history surface instead of the live one. `queueCounts`' own `completed`
+  // counts both success exits, so this run's row must read `2/2`, and the
+  // mode badge (design §7: "a branch-mode run says so", extended to the
+  // list per that section's own "RunsView list ... same") must be visible
+  // without opening the detail pane.
+  it("reads a fully successful branch-mode run's row as done, with a branch-mode badge", async () => {
+    const branchRun = run({
+      runId: 'run-20260901-133000',
+      project: '/abs/alpha',
+      status: 'done',
+      startedAt: '2026-09-01T13:30:00.000Z',
+      updatedAt: '2026-09-01T13:45:00.000Z',
+      mergeMode: 'branch',
+      mergeModeEffective: 'branch',
+      mergeModeNote: null,
+      base: 'main',
+      current: false,
+      queue: [item('c-1', 'branched'), item('c-2', 'branched')]
+    });
+
+    await renderRunsView([branchRun]);
+
+    const row = screen.getByTestId(`runs-row-${branchRun.runId}`);
+    expect(row).toHaveTextContent('2 / 2');
+    expect(row).not.toHaveTextContent('0 / 2');
+    // task-38 moved the mode reading off the row and into the detail sheet's
+    // facts strip (§8.4.1: the row carries the dot, the status word, the
+    // project, the count and the wall/cost — and nothing else survives 420
+    // px). The case moved with it rather than being deleted: the run is
+    // selected by default here, so the sheet beside the row is describing
+    // this same run, and the claim — "a branch-mode run says so, and does not
+    // say downgraded" — is unchanged.
+    expect(screen.getByTestId('run-detail-mode')).toHaveTextContent('branch mode');
+    expect(screen.getByTestId('run-detail-mode')).not.toHaveTextContent('downgraded');
+
+    // Final whole-branch review, finding 1: the aggregate tile beside the
+    // list counts `branched` into `itemsMerged` exactly as the row does
+    // (`aggregateRuns`'s own doc comment), but until this fix its LABEL still
+    // read "merged / queued" — so this same fully-successful branch-mode run
+    // rendered "2/2 merged" over a queue that reached `main` zero times. No
+    // test asserted the tile at all before this one; it now pins the same
+    // "done, not 0%" claim the row assertions above make, one surface over.
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('2/2');
+    expect(screen.getByTestId('runs-tile-merged')).not.toHaveTextContent('0/2');
+
+    // Cleanup pass: the assertions above pin the tile's VALUE, which was
+    // already correct before finding 1 — the defect finding 1 fixed was the
+    // LABEL, one level up from the number, and a value-only assertion cannot
+    // catch a caption that lies about what the value means (it was pinning
+    // the wrong half of the same bug). Pin the label text itself now, for
+    // this tile and its sibling below: "completed / queued" here, and
+    // "rework / completed" on the fix-loops tile (RunsView's own comment
+    // above `runs-tile-fixloops` has that half's reasoning — it was fixed
+    // one wave after this one, the same mislabel one tile over). Neither
+    // says "merge" any more, because a branch-mode completion never reached
+    // one.
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('completed / queued');
+    expect(screen.getByTestId('runs-tile-merged')).not.toHaveTextContent('merged / queued');
+    expect(screen.getByTestId('runs-tile-fixloops')).toHaveTextContent('rework / completed');
+    expect(screen.getByTestId('runs-tile-fixloops')).not.toHaveTextContent('rework / merge');
+  });
+
+  // Brief case 2: a run that ASKED for `merge` but is actually running
+  // `branch` (design §5.2's mid-queue denial) must show the two-field
+  // distinction rather than collapse it into the same badge a deliberately-
+  // chosen branch-mode run wears — `mergeModeLabel` (lib/run-stage.ts)
+  // appends "(downgraded)" for exactly this shape. task-38 moved that badge
+  // from the row to the detail sheet's facts strip, which is beside the row
+  // rather than behind a click, so "legible at a glance in history" (design
+  // §7) still holds; the full `mergeModeNote` prose stays the sheet's body,
+  // pinned separately in run-detail.test.tsx.
+  it('marks a downgraded run distinctly from a deliberately-chosen branch-mode one', async () => {
+    const downgraded = run({
+      runId: 'run-20260901-100000',
+      project: '/abs/alpha',
+      status: 'done',
+      startedAt: '2026-09-01T10:00:00.000Z',
+      updatedAt: '2026-09-01T10:20:00.000Z',
+      mergeMode: 'merge',
+      mergeModeEffective: 'branch',
+      mergeModeNote: 'classifier denied the merge on d-2',
+      base: 'main',
+      current: false,
+      queue: [item('d-1', 'merged'), item('d-2', 'branched')]
+    });
+
+    await renderRunsView([downgraded]);
+
+    expect(screen.getByTestId('run-detail-mode')).toHaveTextContent('branch mode (downgraded)');
+  });
+
+  // Brief case 5, at the row level: a run holding items in BOTH success
+  // exits at once (the shape design §5.2 actually leaves behind) must count
+  // both toward the row's own ratio, hiding neither — the identical rule
+  // RunStrip.tsx's ruling defect #2 fixes for the live strip, pinned here
+  // for `queueCounts`' own `completed` instead.
+  it('counts merged and branched items together in a mixed row, hiding neither', async () => {
+    const mixed = run({
+      runId: 'run-20260901-110000',
+      project: '/abs/alpha',
+      status: 'done',
+      startedAt: '2026-09-01T11:00:00.000Z',
+      updatedAt: '2026-09-01T11:30:00.000Z',
+      mergeMode: 'merge',
+      mergeModeEffective: 'branch',
+      mergeModeNote: 'classifier denied the merge on e-3',
+      base: 'main',
+      current: false,
+      queue: [item('e-1', 'merged'), item('e-2', 'merged'), item('e-3', 'branched'), item('e-4', 'branched')]
+    });
+
+    await renderRunsView([mixed]);
+
+    expect(screen.getByTestId(`runs-row-${mixed.runId}`)).toHaveTextContent('4 / 4');
+  });
+
+  // Brief case 3, the regression guard: a plain merge-mode run adds nothing —
+  // `mergeModeLabel` returns `null` for one, so the detail sheet draws no mode
+  // fact at all rather than an empty one. Moved from the row to the sheet with
+  // the badge itself (task-38); the claim is unchanged.
+  it('renders a merge-mode run byte-identically to before this feature: no mode fact', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    expect(screen.queryByTestId('run-detail-mode')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * task-16: history is rendered as a WINDOW of the newest runs with a counted
+ * `load more` control at the foot of the list, so the initial render is a
+ * page rather than the whole corpus.
+ *
+ * The rule these cases exist to pin is not "a slice happens" but WHERE the
+ * slice happens and what it is deliberately not allowed to touch: it lands
+ * between `splitPinned` and `groupByDay`, so the pinned live region is never
+ * paged (case: "leaves the pinned live region outside the window") and a
+ * boundary falling mid-day extends one group rather than emitting a second
+ * heading for the same key (case: "renders a day split across the window
+ * boundary as one group"). Selection is resolved against the UNWINDOWED
+ * ordered list, which is what lets a window reset leave a pane describing a
+ * run whose row it just pushed out of view.
+ */
+describe('RunsView history paging (task-16)', () => {
+  const PAGED_PROJECT = '/abs/paged';
+  const OTHER_PROJECT = '/abs/other';
+
+  /**
+   * Timestamps are built two different ways below, deliberately.
+   *
+   * `noonDaysAgo` anchors to 12:00 LOCAL on a given past day, which is the
+   * only honest way to write a fixture whose assertions are about DAY
+   * GROUPING: `dayKey`/`dayLabel` bucket by local time, and a fixture built
+   * from bare "N hours ago" offsets silently changes shape depending on what
+   * time of day the suite happens to run at. Noon is far enough from either
+   * midnight that no DST shift can move a run into a neighbouring day.
+   *
+   * `minutesAgo` is for the cases that care about ROW COUNTS and range
+   * RESETS, not grouping. Note what those cases do NOT assume: nothing below
+   * depends on the intermediate range (`today`, `month`) actually containing
+   * these runs. The rule under test is that a range CHANGE resets the
+   * window, and the assertion is always taken back on `all` — which is what
+   * keeps these cases from turning flaky for a run that starts within an
+   * hour of a month boundary.
+   */
+  function noonDaysAgo(daysAgo: number, minutes = 0): string {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - daysAgo);
+    return new Date(d.getTime() + minutes * 60_000).toISOString();
+  }
+
+  function minutesAgo(minutes: number): string {
+    return new Date(Date.now() - minutes * 60_000).toISOString();
+  }
+
+  /** One archived, done run per timestamp, ids ordered so `runs-row-paged-000` is always the one at index 0 of the fixture as written. */
+  function pagedRuns(startedAts: readonly string[], project: string = PAGED_PROJECT): OrchestratorArchiveRun[] {
+    return startedAts.map((startedAt, i) =>
+      run({
+        runId: `paged-${project === PAGED_PROJECT ? '' : 'o-'}${String(i).padStart(3, '0')}`,
+        project,
+        status: 'done',
+        startedAt,
+        updatedAt: startedAt,
+        queue: [item(`p-${i}`, 'merged')]
+      })
+    );
+  }
+
+  /** `count` runs, newest first, one minute apart — the plain "a lot of history" fixture. */
+  function minuteSeries(count: number, project: string = PAGED_PROJECT): OrchestratorArchiveRun[] {
+    return pagedRuns(
+      Array.from({ length: count }, (_, i) => minutesAgo(i + 1)),
+      project
+    );
+  }
+
+  /* task-38: the Live sheet is a sheet rather than a `.runs-day` group with a
+     `live` heading, so "history rows" is now simply the rows inside the
+     History sheet — a plainer expression of the same set. */
+  const historyRows = (container: HTMLElement): Element[] => Array.from(container.querySelectorAll('.runs-history-sheet .runs-row'));
+
+  it('renders one page of history with a counted load-more control', async () => {
+    const { container } = await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+    // The label states what the click will do, not merely "more" — and the
+    // count is what tells a reader with a selection below the window that
+    // there is still list underneath it.
+    expect(screen.getByTestId('runs-load-more')).toHaveTextContent('5 older');
+  });
+
+  it('reveals the rest and removes the control when the window is exhausted', async () => {
+    const { container } = await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE + 5);
+    expect(screen.queryByTestId('runs-load-more')).not.toBeInTheDocument();
+  });
+
+  it('renders no load-more control at all when history fits in one page', async () => {
+    await renderRunsView(minuteSeries(3));
+    expect(screen.queryByTestId('runs-load-more')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The case §0.2 of the plan turns on: window FIRST, group SECOND. 24 runs
+   * on 24 distinct days fill all but one slot of the first page, so the
+   * 25th row is the newest of four runs sharing a much older day — the
+   * boundary falls inside that day. The wrong order (group, then window)
+   * would either reveal all four of that day's runs or emit a second
+   * heading for the same key on the next click.
+   */
+  it('renders a day split across the window boundary as one group that grows', async () => {
+    const distinctDays = Array.from({ length: RUNS_PAGE_SIZE - 1 }, (_, i) => noonDaysAgo(i + 1));
+    const boundaryDay = Array.from({ length: 4 }, (_, k) => noonDaysAgo(RUNS_PAGE_SIZE, -k));
+    const { container } = await renderRunsView(pagedRuns([...distinctDays, ...boundaryDay]));
+
+    const key = dayKey(boundaryDay[0], ZONE) as string;
+    expect(key).not.toBeNull();
+
+    const group = () => container.querySelectorAll(`[data-testid="runs-day-${key}"]`);
+    expect(group()).toHaveLength(1);
+    expect(group()[0].querySelectorAll('.runs-row')).toHaveLength(1);
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+
+    // Still ONE element for that key — the next page extended the group it
+    // had already opened rather than starting a second one under the same
+    // heading.
+    expect(group()).toHaveLength(1);
+    expect(group()[0].querySelectorAll('.runs-row')).toHaveLength(4);
+  });
+
+  it('leaves the pinned live region outside the window', async () => {
+    const live = run({
+      runId: 'paged-live',
+      project: OTHER_PROJECT,
+      status: 'running',
+      startedAt: minutesAgo(5_000),
+      updatedAt: minutesAgo(0),
+      current: true,
+      queue: [item('pl-1', 'dispatched')]
+    });
+    const liveEntry: OrchestratorRunsPayload['runs'][number] = {
+      runId: live.runId,
+      project: live.project,
+      status: 'running',
+      startedAt: live.startedAt,
+      updatedAt: live.updatedAt,
+      maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      questionMode: 'park',
+      mergeModeNote: null,
+      prTarget: null,
+      prUrl: null,
+      base: 'main',
+      queue: [liveQueueItem('pl-1', 'dispatched')],
+      attention: [],
+      fresh: true,
+      pastRuns: 0,
+      pauseRequested: false,
+      stopRequested: false
+    };
+
+    const { container } = await renderRunsView([live, ...minuteSeries(RUNS_PAGE_SIZE + 5)], [liveEntry]);
+
+    // The live run renders whole AND consumes no slot of the history
+    // window — a run still going since days ago is exactly the row
+    // `splitPinned` exists to keep visible, so paging it away would defeat
+    // that split.
+    expect(screen.getByTestId('runs-live-rows').querySelectorAll('.runs-row')).toHaveLength(1);
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+  });
+
+  it('resets the window to one page when the range changes', async () => {
+    const { container } = await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE + 5);
+
+    await userEvent.click(rangeButton('today'));
+    await userEvent.click(rangeButton('all'));
+
+    // Not "the same view at two heights depending on the path taken to it".
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+  });
+
+  it('resets the window to one page when the project filter changes', async () => {
+    const { container } = await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE + 5);
+
+    const select = screen.getByRole('combobox', { name: 'Project' });
+    await userEvent.selectOptions(select, PAGED_PROJECT);
+    await userEvent.selectOptions(select, 'all');
+
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+  });
+
+  it('never disturbs the selection when load more only adds rows', async () => {
+    const runs = minuteSeries(RUNS_PAGE_SIZE + 5);
+    await renderRunsView(runs);
+
+    const chosen = runs[3];
+    await userEvent.click(screen.getByTestId(`runs-row-${chosen.runId}`));
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+
+    expect(screen.getByTestId(`runs-row-${chosen.runId}`)).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(chosen.runId);
+  });
+
+  /**
+   * The consequence §0.5 of the plan calls out by name and rules INTENDED: a
+   * reset can push the selected row below the window, and the pane must keep
+   * describing it anyway. The pane describes a RUN; the list is a WINDOW.
+   * The deliberately-rejected alternative — auto-growing the window until
+   * the selected row is included — would let a selection 400 rows deep
+   * silently re-inflate the list to 400 and defeat the paging entirely.
+   */
+  it('keeps a selection whose row a window reset pushed out of view', async () => {
+    const runs = minuteSeries(60);
+    const { container } = await renderRunsView(runs);
+
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+    const chosen = runs[30];
+    await userEvent.click(screen.getByTestId(`runs-row-${chosen.runId}`));
+
+    await userEvent.click(rangeButton('month'));
+    await userEvent.click(rangeButton('all'));
+
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+    expect(screen.queryByTestId(`runs-row-${chosen.runId}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(chosen.runId);
+  });
+
+  /**
+   * The other half of the same rule, unchanged by this task: a selection
+   * that leaves the FILTER entirely (not merely the window) still falls back
+   * to the newest visible row. Windowing must not have quietly become a
+   * second way for `selectedRow` to resolve.
+   */
+  it('still falls back to the newest visible run when the selection leaves the filter', async () => {
+    const mine = minuteSeries(RUNS_PAGE_SIZE + 5);
+    const theirs = pagedRuns([minutesAgo(2), minutesAgo(3)], OTHER_PROJECT);
+    await renderRunsView([...mine, ...theirs]);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${mine[3].runId}`));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), OTHER_PROJECT);
+
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(theirs[0].runId);
+  });
+
+  it('renders no load-more control in the range-empty state', async () => {
+    await renderRunsView(pagedRuns(Array.from({ length: RUNS_PAGE_SIZE + 5 }, (_, i) => noonDaysAgo(40 + i))));
+
+    await userEvent.click(rangeButton('today'));
+
+    expect(screen.getByTestId('runs-empty-range')).toBeInTheDocument();
+    expect(screen.queryByTestId('runs-load-more')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The exhausting click unmounts the button from under the pointer, which
+   * drops focus to <body> and strands a keyboard reader at the top of the
+   * document. Focus goes to the list container they were just reading.
+   */
+  it('hands focus to the list when the click that exhausts the window removes the button', async () => {
+    await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+
+    expect(document.activeElement).toBe(screen.getByTestId('runs-list'));
+  });
+
+  /**
+   * A window is a RENDERING decision. The aggregate tiles and the wide
+   * machine-time tile read the unwindowed `filtered` list, so no number on
+   * the page may move when the window does — the same class of mistake as
+   * this file's fix rounds 2 and 3 (a call site quietly reading a different
+   * source than its neighbours), which is why it is asserted rather than
+   * left to the comment that states it.
+   */
+  it('moves no aggregate number when the window grows', async () => {
+    await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+
+    const before = screen.getByTestId('runs-tiles').textContent;
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+
+    expect(screen.getByTestId('runs-tiles').textContent).toBe(before);
+  });
+  /* task-17 — the Runs view's own half: a `pausing` badge on a live row, the
+     `paused` status reading through the shared chip vocabulary, and the same
+     `RunControls` the board's drawer hosts, in the detail pane. */
+
+  /* task-38 moved the `pausing` reading off the row and into the detail
+     sheet's `status` fact, where it names the item the run will finish before
+     it stops (§8.4.1) — a strictly fuller reading than the one-word badge,
+     and the row at 420 px has no slot for either. The case moved with it: the
+     run is selected by default, so the sheet beside the row is describing
+     this same run. */
+  it('says a run has been asked to pause, and which item it will finish first', async () => {
+    const liveEntry = { ...LIVE_RUNS[0], pauseRequested: true };
+    await renderRunsView(ARCHIVE_RUNS, [liveEntry]);
+
+    expect(screen.getByTestId('run-detail-status-note')).toHaveTextContent('pausing · finishes');
+  });
+
+  it('says nothing about pausing when nothing is pausing', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    expect(screen.queryByTestId('run-detail-status-note')).not.toHaveTextContent('pausing');
+  });
+
+  // A paused run with no live entry is history as far as this list is
+  // concerned: it reads through the same status chip every other row uses,
+  // and it is NOT pinned above the day groups (that pin is for fresh runs).
+  it('renders an archived paused run with its own status class, in History rather than Live', async () => {
+    const paused = pausedRun();
+    const { container } = await renderRunsView([...ARCHIVE_RUNS, paused], []);
+
+    const row = screen.getByTestId('runs-row-run-paused-1');
+    expect(row.querySelector('.runs-status-paused')).not.toBeNull();
+    expect(row).toHaveTextContent('paused');
+    const liveGroup = container.querySelector('[data-testid="runs-live-rows"]');
+    expect(liveGroup?.contains(row) ?? false).toBe(false);
+  });
+
+  it('counts a paused run in the by-status breakdown, between running and done', async () => {
+    const paused = pausedRun();
+    await renderRunsView([...ARCHIVE_RUNS, paused], []);
+
+    expect(screen.getByText(/1 paused/)).toBeInTheDocument();
+  });
+
+  it('offers Resume in the detail pane for a selected paused run', async () => {
+    const paused = pausedRun();
+    await renderRunsView([...ARCHIVE_RUNS, paused], []);
+
+    await userEvent.click(screen.getByTestId('runs-row-run-paused-1'));
+
+    expect(await screen.findByTestId('run-controls-resume')).toBeInTheDocument();
+  });
+
+  it('offers no Resume when the dashboard is off', async () => {
+    (fetchAgentsStatus as jest.Mock).mockResolvedValue({
+      enabled: false,
+      reachable: false,
+      remoteAnswer: false,
+      spawnAvailable: false,
+      spawnMaxPermission: 'auto',
+      projectPaths: []
+    } satisfies AgentsStatus);
+    const paused = pausedRun();
+    await renderRunsView([...ARCHIVE_RUNS, paused], []);
+
+    await userEvent.click(screen.getByTestId('runs-row-run-paused-1'));
+
+    expect(screen.queryByTestId('run-controls-resume')).toBeNull();
+  });
+
+  it('pauses from the detail pane and re-reads the live payload', async () => {
+    mockPause.mockResolvedValue({ pauseRequested: true });
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`));
+    const before = mockRuns.mock.calls.length;
+    await userEvent.click(await screen.findByTestId('run-controls-pause'));
+
+    await waitFor(() => expect(mockPause).toHaveBeenCalledWith(LIVE_RUNS[0].project));
+    await waitFor(() => expect(mockRuns.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  /*
+    #344: the detail sheet is keyed on project + runId. Unkeyed, React reused the one `RunDetail` — and the `RunControls` inside it — across a selection
+    change, swapping only the props, so run A's open Stop confirm was drawn on run B's sheet and its accept, closing over the CURRENT props, stopped B. A
+    stop cannot be undone, so the case pins the remount from the outside: the confirm is gone the moment another row is selected.
+
+    Two live, `running` runs in different projects, because a Stop control is drawn only for a run that has one — a selection that moved onto a finished run
+    would lose the confirm through a different branch of `RunControls` and prove nothing about the key.
+  */
+  const RUN_LIVE_BETA = run({
+    runId: 'run-20260826-090000',
+    project: '/abs/beta',
+    status: 'running',
+    startedAt: '2026-08-26T09:00:00.000Z',
+    updatedAt: '2026-08-31T12:05:00.000Z',
+    current: true,
+    queue: [item('b-9', 'reviewing', { stageAt: { pending: '2026-08-26T09:00:00.000Z', reviewing: '2026-08-26T09:05:00.000Z' } })]
+  });
+  const TWO_LIVE: OrchestratorRunsPayload['runs'] = [
+    LIVE_RUNS[0],
+    {
+      ...LIVE_RUNS[0],
+      runId: RUN_LIVE_BETA.runId,
+      project: RUN_LIVE_BETA.project,
+      startedAt: RUN_LIVE_BETA.startedAt,
+      updatedAt: RUN_LIVE_BETA.updatedAt,
+      queue: [liveQueueItem('b-9', 'reviewing')]
+    }
+  ];
+
+  it('drops an open Stop confirm when the selection moves to another run (#344)', async () => {
+    await renderRunsView([...ARCHIVE_RUNS, RUN_LIVE_BETA], TWO_LIVE);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`));
+    const slot = screen.getByTestId('run-detail-slot');
+    await userEvent.click(within(slot).getByTestId('run-controls-stop'));
+    expect(within(slot).getByTestId('run-controls-stop-confirm')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE_BETA.runId}`));
+
+    expect(within(slot).queryByTestId('run-controls-stop-confirm')).not.toBeInTheDocument();
+    expect(within(slot).getByTestId('run-controls-stop')).toBeInTheDocument();
+    expect(stopOrchestrate as jest.Mock).not.toHaveBeenCalled();
+  });
+
+  it("keeps an open Stop confirm across a poll that re-renders the same run (#344)", async () => {
+    await renderRunsView([...ARCHIVE_RUNS, RUN_LIVE_BETA], TWO_LIVE);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`));
+    const slot = screen.getByTestId('run-detail-slot');
+    await userEvent.click(within(slot).getByTestId('run-controls-stop'));
+    expect(within(slot).getByTestId('run-controls-stop-confirm')).toBeInTheDocument();
+
+    // A refreshed payload — new objects, a moved `updatedAt` — for the same project + runId: what the 5 s poll hands over while a person reads the
+    // question. A key built from anything that changes per poll would remount here and drop the confirm out from under them.
+    const before = mockRuns.mock.calls.length;
+    mockRuns.mockResolvedValue({
+      runs: TWO_LIVE.map((r) => ({ ...r, updatedAt: '2026-08-31T12:06:00.000Z' })),
+      starting: [],
+      remote: [],
+      remoteStarting: []
+    } satisfies OrchestratorRunsPayload);
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(mockRuns.mock.calls.length).toBeGreaterThan(before));
+
+    expect(within(slot).getByTestId('run-controls-stop-confirm')).toBeInTheDocument();
+    expect(stopOrchestrate as jest.Mock).not.toHaveBeenCalled();
+  });
+  // --- task-18/38: the section's two PAGES -----------------------------------
+  //
+  // task-38 took the in-page segmented control away: the rail's sub-nav tree
+  // (task-36, DESIGN.md §8.0) is the one place the two views are switched,
+  // and two controls doing one job is exactly what that rail work was for.
+  // So these cases drive the shared value the way the rail does — through
+  // `setRunsMode` (hooks/useRunsMode), the module-level store BOTH mounted
+  // readers subscribe to — rather than by clicking a control this page no
+  // longer owns. The tree's own rendering is `test/ui/rail.test.tsx`'s.
+  //
+  // Not `localStorage.setItem` for the mid-test switches: that is how the
+  // value is PERSISTED, not how it is published, and a write that never
+  // reached the mounted page would leave these cases passing against a page
+  // that had silently stopped listening — which is the exact failure
+  // `useRunsMode` exists to prevent.
+
+  it('opens on History, with the range control, the project filter and the list', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    expect(screen.getByRole('group', { name: 'Range' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Project')).toBeInTheDocument();
+    expect(screen.getByTestId('runs-list')).toBeInTheDocument();
+    // And no in-page mode control: the rail owns that now, and leaving this
+    // one behind would be the two-controls-one-job the redraw removed.
+    expect(screen.queryByRole('group', { name: 'View' })).not.toBeInTheDocument();
+  });
+
+  it('renders the band with no controls for an empty payload', async () => {
+    await renderRunsView([], []);
+
+    expect(screen.getByText('no runs yet')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Range' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Project')).not.toBeInTheDocument();
+  });
+
+  it('swaps the whole page for the monitor in Watchdog mode', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    act(() => setRunsMode('watchdog'));
+
+    // Range and project scope run HISTORY; the Watchdog page has none to
+    // scope, and it carries its own band rather than sharing History's.
+    expect(screen.queryByRole('group', { name: 'Range' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Project')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('runs-tiles')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('runs-list')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-slot')).not.toBeInTheDocument();
+    // `watchdog-phase`, not `watchdog-state`: the page renders a
+    // `watchdog-state` box in BOTH of its states — the could-not-reach notice
+    // and the loaded figures — so a `findBy` on it resolves against the
+    // notice's node and then fails `toBeInTheDocument` the moment the landed
+    // fetch replaces it. The phase word exists only once the status is here,
+    // which is the thing being waited for.
+    await screen.findByTestId('watchdog-phase');
+    expect(screen.getByTestId('watchdog-state')).toBeInTheDocument();
+  });
+
+  // 2026-09-17: the measuring frame the wide-board container query reads (styles.css `.runs-frame`, DESIGN.md §8.4.1 "Wide") wraps HISTORY alone —
+  // Watchdog has no strip to stand as a rail and renders none. A frame is a plain block a later edit can drop without any render changing under 1400 px,
+  // which is every jsdom width, so the wrapping itself is pinned here rather than left to the stylesheet guard alone.
+  it('History renders inside the measuring frame; Watchdog does not', async () => {
+    const { container } = await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    expect(container.querySelector('.runs-frame > .board.runs-board')).not.toBeNull();
+
+    act(() => setRunsMode('watchdog'));
+    await screen.findByTestId('watchdog-phase');
+    expect(container.querySelector('.runs-frame')).toBeNull();
+  });
+
+  it('keeps the selection across a trip through Watchdog', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`));
+    expect(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`)).toHaveAttribute('aria-current', 'true');
+
+    act(() => setRunsMode('watchdog'));
+    await screen.findByTestId('watchdog-phase');
+    act(() => setRunsMode('runs'));
+
+    expect(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`)).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('opens on Watchdog when that is what was stored', async () => {
+    localStorage.setItem(RUNS_MODE_KEY, JSON.stringify('watchdog'));
+    // Not `renderRunsView`: that helper waits on `runs-list`, which is
+    // exactly what this page does not render.
+    mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
+    mockRuns.mockResolvedValue({ runs: LIVE_RUNS, starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
+    render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
+
+    // `watchdog-phase`, not `watchdog-state`: the page renders a
+    // `watchdog-state` box in BOTH of its states — the could-not-reach notice
+    // and the loaded figures — so a `findBy` on it resolves against the
+    // notice's node and then fails `toBeInTheDocument` the moment the landed
+    // fetch replaces it. The phase word exists only once the status is here,
+    // which is the thing being waited for.
+    await screen.findByTestId('watchdog-phase');
+    expect(screen.getByTestId('watchdog-state')).toBeInTheDocument();
+    expect(screen.queryByTestId('runs-list')).not.toBeInTheDocument();
+  });
+
+  // The guard is on the READ, so what this pins is the rendered page — not
+  // whether the bad value was rewritten on the way past.
+  it('clamps a stored value outside the union back to History', async () => {
+    localStorage.setItem(RUNS_MODE_KEY, JSON.stringify('banana'));
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    expect(screen.getByTestId('runs-list')).toBeInTheDocument();
+  });
+
+  // The one link between the two pages, and the one write this component
+  // still makes to the shared value: a row in the monitor IS a run in
+  // History, so clicking it lands on that run's detail sheet rather than
+  // leaving a person to find it again by hand. Under shape D that is the only
+  // place it could send anyone — the run's detail IS that page's sheet.
+  it("lands on a run's detail sheet when its Watchdog row is clicked", async () => {
+    mockWatchdog.mockResolvedValue(
+      watchdogStatus({
+        phase: 'armed',
+        watching: [RUN_LIVE.runId]
+      })
+    );
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    act(() => setRunsMode('watchdog'));
+    await userEvent.click(await screen.findByTestId('watchdog-row'));
+
+    expect(screen.getByTestId('runs-list')).toBeInTheDocument();
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveAttribute('aria-current', 'true');
+    // And it persists, because the rail's own tree has to come back showing
+    // History too — the two readers share one value.
+    await waitFor(() => expect(localStorage.getItem(RUNS_MODE_KEY)).toBe(JSON.stringify('runs')));
+  });
+
+  /* The divider and the far-right pinning of the mode switch (task-26) were
+     both about ONE problem: three controls in a right-anchored toolbar, one
+     of which unmounted the other two and slid itself out from under the
+     pointer that had just clicked it. task-38 removed the cause rather than
+     the symptom — the switch is in the rail, so the band's right slot holds
+     only the two controls that scope history, and neither unmounts the other.
+     The cases move to that, which is the claim worth keeping: the band offers
+     exactly the two filters, and nothing that could move them. */
+  it('carries exactly the two history filters in the band, in reading order', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    const right = screen.getByRole('group', { name: 'Range' }).parentElement as HTMLElement;
+    expect(right).toHaveClass('ui-band-right');
+    const order = Array.from(right.children);
+    expect(order).toHaveLength(2);
+    expect(order[0]).toBe(screen.getByRole('group', { name: 'Range' }));
+    expect(order[1].contains(screen.getByLabelText('Project'))).toBe(true);
+  });
+});
+
+/**
+ * bug-29 — a `running` run whose heartbeat has gone stale.
+ *
+ * `mergeRuns` used to build its live map from `liveRuns.filter((r) => r.fresh)`,
+ * so a run that is still `status: "running"` but has not stamped a heartbeat
+ * inside `RUN_STALE_MS` got `live: null` and the whole row — and the detail
+ * pane behind it — fell back to `useOrchestratorArchive`, which by design
+ * carries no poll at all. The 5s live poll kept arriving (`useOrchestratorRuns`'
+ * own `anyLive` deliberately keeps polling for `status === 'running'` whether
+ * fresh or not) and kept being thrown away, so the stage readout froze until a
+ * reload or a window focus. That state is not exotic: 57 gaps of over 15
+ * minutes between consecutive stage stamps were counted across this machine's
+ * archived run files, the worst two 249 and 206 minutes, both
+ * `reviewing -> fixing`.
+ *
+ * The split these cases pin: `MergedRun.live` is the DATA authority and is now
+ * "this run's live entry, if the payload has one at all"; `MergedRun.isLive` is
+ * the PRESENTATION gate and stays `fresh`. So a stale-but-running run's numbers
+ * move, and it still does not get pinned, accented, or described as something
+ * anyone is still hearing from — it is described as `crashed`, in the Board
+ * strip's own word, off the Board strip's own `isCrashed`.
+ */
+describe('RunsView · a running run whose heartbeat has gone stale', () => {
+  /** RUN_LIVE's own live entry, heartbeat stale. Its queue is deliberately
+   *  AHEAD of RUN_LIVE's archive snapshot (both items merged, where the
+   *  archive still has `a-2` at `reviewing`) — see `LIVE_RUNS`' own comment —
+   *  so any row or tile that regressed to reading the archive prints a
+   *  different, hand-checkable number. */
+  const STALE_LIVE: OrchestratorRunsPayload['runs'] = [{ ...LIVE_RUNS[0], fresh: false }];
+
+  it("keeps the stale live entry as the row's data authority instead of falling back to the archive", async () => {
+    await renderRunsView(ARCHIVE_RUNS, STALE_LIVE);
+
+    // 2/2 is the LIVE queue (a-1 and a-2 both merged); the archive snapshot
+    // beside it still says 1/2. Pre-fix this row read the archive.
+    // The Live card reads `N of M items` over its meter (spec §4.6); the claim is still the number.
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveTextContent('2 of 2 items');
+  });
+
+  it("freezes the row wall time at the stale live entry's own last heartbeat", async () => {
+    // The live entry is ahead of the archive on `updatedAt` too, so this
+    // number can only come from the live entry — and it must stay frozen
+    // there rather than climbing toward the real `Date.now()`, which is
+    // months past this fixture on every day this suite ever runs.
+    const archiveEntry = run({
+      runId: 'run-20260901-090000',
+      project: '/abs/delta',
+      status: 'running',
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:05:00.000Z',
+      current: true,
+      queue: [item('d-1', 'reviewing')]
+    });
+    const staleLive: OrchestratorRunsPayload['runs'] = [
+      {
+        runId: archiveEntry.runId,
+        project: archiveEntry.project,
+        status: 'running',
+        startedAt: archiveEntry.startedAt,
+        updatedAt: '2026-09-01T09:42:00.000Z',
+        maxItems: null,
+        mergeMode: 'merge',
+        mergeModeEffective: 'merge',
+        questionMode: 'park',
+        mergeModeNote: null,
+        prTarget: null,
+        prUrl: null,
+        base: 'main',
+        queue: [liveQueueItem('d-1', 'reviewing')],
+        attention: [],
+        fresh: false,
+        pastRuns: 0,
+        pauseRequested: false,
+        stopRequested: false
+      }
+    ];
+
+    await renderRunsView([archiveEntry], staleLive);
+
+    expect(screen.getByTestId(`runs-row-${archiveEntry.runId}`).querySelector('.runs-row-wall')?.textContent).toBe('42m');
+  });
+
+  it("advances the detail pane's stage readout on every live poll, with no archive refetch", async () => {
+    // The whole bug, end to end. Pre-fix the pane sat on `inspecting`
+    // through four polls that each reported something different, because
+    // `live` was `null` and `RunDetail`'s one-shot `fetchArchivedRun`
+    // fallback had already landed and stood still.
+    jest.useFakeTimers();
+    try {
+      const archiveEntry = run({
+        runId: 'run-20260901-100000',
+        project: '/abs/epsilon',
+        status: 'running',
+        startedAt: '2026-09-01T10:00:00.000Z',
+        updatedAt: '2026-09-01T10:01:00.000Z',
+        current: true,
+        queue: [item('e-1', 'inspecting')]
+      });
+      const staleAt = (stage: RunStage): OrchestratorRunsPayload => ({
+        runs: [
+          {
+            runId: archiveEntry.runId,
+            project: archiveEntry.project,
+            status: 'running',
+            startedAt: archiveEntry.startedAt,
+            updatedAt: '2026-09-01T10:01:00.000Z',
+            maxItems: null,
+            mergeMode: 'merge',
+            mergeModeEffective: 'merge',
+            questionMode: 'park',
+            mergeModeNote: null,
+            prTarget: null,
+            prUrl: null,
+            base: 'main',
+            queue: [liveQueueItem('e-1', stage)],
+            attention: [],
+            fresh: false,
+            pastRuns: 0,
+            pauseRequested: false,
+            stopRequested: false
+          }
+        ],
+        starting: [],
+        remote: [],
+        remoteStarting: []
+      });
+
+      mockArchive.mockResolvedValue({ runs: [archiveEntry] } satisfies OrchestratorArchivePayload);
+      mockRuns.mockResolvedValue(staleAt('inspecting'));
+
+      render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(0);
+      });
+
+      // Read off the item HEAD's own stage chip, not the whole row: the
+      // seven-node `StageTrack` below it prints every stage name on every
+      // render by construction, so a whole-row assertion would match
+      // `inspecting` forever no matter what the item's actual stage is.
+      const stageChip = (): string => screen.getByTestId('run-detail-item-e-1').querySelector('.run-drawer-item-head')?.textContent ?? '';
+
+      expect(stageChip()).toContain('inspecting');
+
+      // The next 5s poll reports the run has moved on. `useOrchestratorRuns`
+      // keeps polling a `running` run whether or not it is fresh, so this
+      // tick fires without any focus event or remount.
+      mockRuns.mockResolvedValue(staleAt('merging'));
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(5_000);
+      });
+
+      expect(stageChip()).toContain('merging');
+      expect(stageChip()).not.toContain('inspecting');
+      // Nothing here came from the archive: `RunDetail` stands down from its
+      // one-shot fetch the moment a live entry exists, stale or not.
+      expect(mockFetchArchivedRun).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('reads crashed on both status badges — the list row and the detail head', async () => {
+    // Both in one case on purpose: these are the two sites that print the
+    // status word, and a test covering one would pass on a half-applied fix.
+    await renderRunsView(ARCHIVE_RUNS, STALE_LIVE);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`));
+
+    // task-38: a crashed run is a LIVE row (§8.4.1's moved-rules table), and
+    // a Live row's earned status reading is a `Pill` rather than the
+    // `.runs-status` word a History row carries — a running, fresh run draws
+    // no pill at all, so the word only appears where it is earned. The detail
+    // sheet's head keeps `.runs-status` in its `status` fact. Both surfaces
+    // still read `runStatusChip`, which is the thing this case exists to pin.
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`).textContent).toContain('crashed');
+    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent).toContain('crashed');
+  });
+
+  it('reads running on both status badges while the live entry is fresh', async () => {
+    // The pair that fails if the substitution is keyed on `status` alone
+    // rather than on `isCrashed`.
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    const row = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    // The Live row draws NO status word for a running, fresh run — the
+    // breathing dot and the elapsed reading already carry that state, and a
+    // pill is only drawn where one is earned (§8.4.1). What the case is
+    // really about is that nothing says `crashed`, and that the sheet's own
+    // badge agrees.
+    expect(row.textContent).not.toContain('crashed');
+    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent).toContain('running');
+  });
+
+  it("leaves an archive-only row's recorded running status alone on both badges", async () => {
+    // A run whose file is gone or superseded: it appears in the archive at
+    // `status: "running"` and in no live payload at all. There is no
+    // heartbeat here to judge, so nothing may reclassify it — the case that
+    // fails if the derivation is taken from `authority` rather than from the
+    // live entry.
+    const orphan = run({
+      runId: 'run-20260901-110000',
+      project: '/abs/zeta',
+      status: 'running',
+      startedAt: '2026-09-01T11:00:00.000Z',
+      updatedAt: '2026-09-01T11:20:00.000Z',
+      queue: [item('z-1', 'reviewing')]
+    });
+
+    await renderRunsView([orphan], []);
+
+    expect(screen.getByTestId(`runs-row-${orphan.runId}`).querySelector('.runs-status')?.textContent).toContain('running');
+    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent).toContain('running');
+  });
+
+  it('drops the active and queued chips for a stale live entry and marks the pane crashed', async () => {
+    // The two chips count what the run is doing THIS INSTANT, which a stale
+    // entry cannot claim — so they move from `live !== null` to
+    // `live.fresh === true`, and the pane says outright that what it is
+    // showing is last-reported.
+    await renderRunsView(ARCHIVE_RUNS, STALE_LIVE);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`));
+
+    expect(screen.queryByTestId('run-detail-chip-active')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-chip-queued')).not.toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-crashed')).toBeInTheDocument();
+  });
+
+  it('keeps the active and queued chips, and no crashed marker, while the live entry is fresh', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    expect(screen.getByTestId('run-detail-chip-active')).toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-chip-queued')).toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-crashed')).not.toBeInTheDocument();
+  });
+
+  it('still counts a stale running run under `running` in the aggregate tile', async () => {
+    // Step 3's stated out-of-scope, pinned so a later reader does not
+    // "finish the job" at RunsView's `byStatus` substat: that is a tally over
+    // the archived corpus, not a claim about any run right now, and
+    // re-bucketing history behind a freshness flag would make the tile
+    // disagree with the archive it summarises.
+    await renderRunsView(ARCHIVE_RUNS, STALE_LIVE);
+
+    expect(screen.getByTestId('runs-tile-runs')).toHaveTextContent('1 running');
+    expect(screen.getByTestId('runs-tile-runs')).not.toHaveTextContent('crashed');
+  });
+});
+
+/**
+ * task-21 — the starting placeholder in the Runs view.
+ *
+ * A run started from the Board is visible on the Board's own strip within a
+ * second (task-14) and invisible here for the 1–5 minutes it takes the spawned
+ * session to boot, read SKILL.md and reach `orchestrate.mjs init`. Runs is the
+ * surface a person actually watches a run from, so pressing Orchestrate and
+ * switching to it showed either "no runs yet" (a project's first run) or the
+ * PREVIOUS run sitting at the top of history — both of which read as "the click
+ * did nothing", which is the exact failure task-14 exists to close, on the one
+ * surface it did not cover.
+ *
+ * What these cases pin is as much what the row is NOT as what it is. It is a
+ * feedback row, not a run: no runId, no queue, no stages, no history — so it
+ * stays out of `orderedRows`, out of the selection, out of every aggregate and
+ * out of the project select's options, and it moves no number anywhere on this
+ * page.
+ *
+ * **No collision case here, deliberately.** The plan for this task asked for a
+ * shared predicate dropping an entry whose project already has a `running` run
+ * (fresh or crashed), hoisted out of `BoardView` into `lib/`. That predicate no
+ * longer exists to hoist: bug-21 moved the rule server-side into
+ * `StartingRunsService.expired()` (its third eviction rule, tested in
+ * test/orchestrator/orchestrator-starting.test.ts) and deleted the board's client-side copy,
+ * and CLAUDE.md now records "the board maps `StartingStrip` straight over
+ * `starting`, with no client-side filter" as an invariant. Re-introducing that
+ * expression here — in a second view — would be the two-agreeing-expressions
+ * shape this repo pins tests against everywhere else (`watchdogStoodDown`,
+ * `isStale`), so `RunsView` reads `starting` straight too and the guarantee is
+ * tested once, where the rule lives.
+ */
+describe('RunsView · a starting run (task-21)', () => {
+  /** 2m05s ago, not 2m00s: `elapsedSince` floors, so a fixture built exactly on
+   *  the boundary would print `1m` whenever the few milliseconds between this
+   *  expression and RunsView's own `Date.now()` pushed it over. */
+  const startingAt = (): string => new Date(Date.now() - 125_000).toISOString();
+
+  const STARTING_ALPHA: StartingRun = { project: '/abs/alpha', requestedAt: startingAt() };
+
+  it('renders a starting row instead of the "no runs yet" empty state', async () => {
+    // The case the whole task exists for: a project's FIRST run, in the window
+    // before `run.json` exists. Empty archive, empty live payload, one entry.
+    await renderRunsView([], [], [STARTING_ALPHA]);
+
+    const row = screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`);
+    expect(row).toHaveTextContent('starting');
+    expect(row).toHaveTextContent('alpha');
+    expect(row).toHaveTextContent('2m');
+
+    expect(screen.queryByText('no runs yet')).not.toBeInTheDocument();
+    // The range-empty note is suppressed on the same rule: an empty state
+    // describes a list with nothing in it, and this list has a row.
+    expect(screen.queryByTestId('runs-empty-range')).not.toBeInTheDocument();
+
+    // Nothing that would require a run file: no completed/queued count, no
+    // wall time, no stage. Those all come off `run.json`, and the entire point
+    // of this row is the window in which that file does not exist.
+    expect(row).not.toHaveTextContent('0 / 0');
+    expect(row.querySelector('.runs-count')).toBeNull();
+    expect(row.querySelector('.runs-row-wall')).toBeNull();
+
+    // And no detail pane: `RunDetail` is keyed on project + runId, and there is
+    // no runId to give it. An empty pane beats a pane inventing a run.
+    expect(screen.getByTestId('run-detail-slot')).toBeEmptyDOMElement();
+  });
+
+  it('is not a button and does not become or change the selection', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS, [STARTING_ALPHA]);
+
+    const row = screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`);
+    expect(row.tagName).toBe('DIV');
+    // Not merely "no handler": nothing focusable, so a keyboard reader never
+    // lands on a stop that does nothing when they activate it.
+    expect(row.closest('button')).toBeNull();
+    expect(row.querySelector('button')).toBeNull();
+
+    // The default selection is the pinned live run (fix round 1's own rule),
+    // and clicking the placeholder must leave it exactly there.
+    const detailBefore = screen.getByTestId('run-detail-slot').textContent;
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveAttribute('aria-current', 'true');
+
+    await userEvent.click(row);
+
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('run-detail-slot').textContent).toBe(detailBefore);
+  });
+
+  /* task-38: the placeholder is the Live sheet's FIRST row rather than a
+     `starting` group of its own above a `live` one. Same reading order, one
+     fewer region — and the reason is §8.4.1's: a starting entry and a going
+     run are both "something is happening in this project right now", which is
+     what the Live sheet is, where a day group is a calendar bucket. */
+  it('leads the Live sheet, above every run in it', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS, [STARTING_ALPHA]);
+
+    const rows = screen.getByTestId('runs-live-rows');
+    const order = Array.from(rows.children).map((el) => el.getAttribute('data-testid'));
+    expect(order[0]).toBe(`runs-starting-${STARTING_ALPHA.project}`);
+    expect(order[1]).toBe(`runs-row-${RUN_LIVE.runId}`);
+    // And the sheet's own head counts both states rather than leaving a
+    // reader to count rows.
+    expect(screen.getByTestId('runs-live-rows').parentElement).toHaveTextContent('1 run · 1 starting');
+  });
+
+  it('is hidden by the project filter and restored by widening it back', async () => {
+    await renderRunsView([RUN_A, RUN_B], [], [STARTING_ALPHA]);
+
+    expect(screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`)).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), RUN_A.project);
+    expect(screen.queryByTestId(`runs-starting-${STARTING_ALPHA.project}`)).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), 'all');
+    expect(screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`)).toBeInTheDocument();
+  });
+
+  it('adds no option to the project select', async () => {
+    // `projects` derives from `merged` alone. A placeholder project has no run
+    // to filter TO, so offering it would produce a filter that hides
+    // everything including the row that put the option there.
+    await renderRunsView([RUN_A, RUN_B], [], [STARTING_ALPHA]);
+
+    const optionValues = Array.from(screen.getByRole('combobox', { name: 'Project' }).querySelectorAll('option')).map((o) => o.getAttribute('value'));
+    expect(optionValues).toEqual(['all', RUN_A.project, RUN_B.project]);
+  });
+
+  it('renders in every one of the four ranges', async () => {
+    // `inRange` reads `startedAt` and a starting entry has only `requestedAt`,
+    // so the range control deliberately does not scope these rows — which is
+    // correct rather than an exemption: every window this view offers ends at
+    // now, so an entry marked seconds ago is inside all four by construction.
+    await renderRunsView([RUN_A, RUN_B], [], [STARTING_ALPHA]);
+
+    for (const r of RUN_RANGES) {
+      await userEvent.click(rangeButton(r));
+      expect(screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`)).toBeInTheDocument();
+    }
+  });
+
+  it('moves no number in the aggregate tiles', async () => {
+    // Two renders of the SAME archive and live payload, differing only in
+    // whether a starting entry rides along. Every tile — including the wide
+    // machine-time one — has to read identically, because a placeholder
+    // contributes no run, no queue and no stage span to sum.
+    const tileText = (): string[] =>
+      Array.from(document.querySelectorAll('[data-testid^="runs-tile-"]')).map((el) => `${el.getAttribute('data-testid')}=${el.textContent}`);
+
+    // RUN_A/RUN_B are both `done`, so every span these tiles sum is closed and
+    // two renders taken milliseconds apart cannot disagree.
+    const first = await renderRunsView([RUN_A, RUN_B], []);
+    const without = tileText();
+    first.unmount();
+
+    await renderRunsView([RUN_A, RUN_B], [], [STARTING_ALPHA]);
+    expect(tileText()).toEqual(without);
+    expect(screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`)).toBeInTheDocument();
+  });
+
+  it('renders one row per starting project', async () => {
+    // Two projects can be booting at once — the server's map is keyed by
+    // project, and nothing serialises two different projects' spawns.
+    const beta: StartingRun = { project: '/abs/beta', requestedAt: startingAt() };
+    await renderRunsView([], [], [STARTING_ALPHA, beta]);
+
+    expect(screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`runs-starting-${beta.project}`)).toBeInTheDocument();
+  });
+
+  it('prints an em dash for an unparseable requestedAt rather than NaN', async () => {
+    await renderRunsView([], [], [{ project: '/abs/alpha', requestedAt: 'not-a-date' }]);
+
+    const row = screen.getByTestId('runs-starting-/abs/alpha');
+    expect(row).toHaveTextContent('—');
+    expect(row).not.toHaveTextContent('NaN');
+  });
+
+  it('renders exactly as before when the payload omits `starting` entirely', async () => {
+    // An older server. `isOrchestratorRunsPayload` accepts the field absent and
+    // `useOrchestratorRuns` defaults it to `[]`, so this view may never assume
+    // it is present — the cast is what the wire can actually hand back, which
+    // the compile-time type deliberately does not model.
+    mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
+    mockRuns.mockResolvedValue({ runs: LIVE_RUNS } as unknown as OrchestratorRunsPayload);
+
+    render(<OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>);
+    await screen.findByTestId('runs-list');
+
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`runs-starting-${STARTING_ALPHA.project}`)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-testid^="runs-starting-"]')).toBeNull();
+  });
+
+  it('keeps the range-empty note when a filter empties the list and nothing is starting', async () => {
+    // The companion to the first case: the note is suppressed BY the row, not
+    // deleted. Same fixture, no starting entry.
+    await renderRunsView([RUN_A, RUN_B], []);
+
+    await userEvent.click(rangeButton('today'));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), RUN_B.project);
+
+    expect(screen.getByTestId('runs-empty-range')).toHaveTextContent('no runs in this range');
+  });
+});
+
+// --- task-27: what a run cost, on the row and in the pane -----------------
+describe('session usage', () => {
+  function usageEntry(over: Partial<RunSessionUsage> = {}): RunSessionUsage {
+    return {
+      sessionId: 'sess-1',
+      kind: 'execute',
+      costUsd: 2,
+      turns: 20,
+      inputTokens: 100,
+      outputTokens: 2000,
+      cacheReadTokens: 900_000,
+      cacheCreationTokens: 12_000,
+      durationMs: 60_000,
+      model: 'claude-opus-5[1m]',
+      endedAt: '2026-08-31T09:30:00.000Z',
+      ...over
+    };
+  }
+
+  /** Two items, three transcripts: $2 + $2 + $1.25 = $5.25, 20 + 20 + 8 = 48 turns. */
+  function runWithUsage(): OrchestratorArchiveRun {
+    const first = item('bug-1', 'merged');
+    const second = item('task-2', 'merged');
+    return run({
+      runId: 'run-20260831-140000',
+      project: '/abs/alpha',
+      status: 'done',
+      startedAt: '2026-08-31T14:00:00.000Z',
+      updatedAt: '2026-08-31T14:40:00.000Z',
+      queue: [
+        { ...first, usage: [usageEntry(), usageEntry({ kind: 'fix', loop: 1, costUsd: 2, turns: 20 })] },
+        { ...second, usage: [usageEntry({ costUsd: 1.25, turns: 8 })] }
+      ]
+    });
+  }
+
+  it('prints the run total on the list row, beside its wall time', async () => {
+    await renderRunsView([runWithUsage()]);
+
+    expect(screen.getByTestId('runs-row-foot-run-20260831-140000')).toHaveTextContent('40m · $5.25');
+  });
+
+  it('prints the run total, its turns and its session count in the detail pane head', async () => {
+    await renderRunsView([runWithUsage()]);
+
+    await userEvent.click(screen.getByTestId('runs-row-run-20260831-140000'));
+
+    expect(await screen.findByTestId('run-detail-usage')).toHaveTextContent('$5.25 · 48 turns · 3 sessions');
+  });
+
+  it("prints each item's own total, with a session count only where there was more than one", async () => {
+    await renderRunsView([runWithUsage()]);
+
+    await userEvent.click(screen.getByTestId('runs-row-run-20260831-140000'));
+
+    // The item that took a fix loop says so; the one that did not stays quiet
+    // about a count of one, which every dispatched item has.
+    expect(await screen.findByTestId('run-detail-usage-bug-1')).toHaveTextContent('$4.00 · 40 turns · 2 sessions');
+    expect(screen.getByTestId('run-detail-usage-task-2')).toHaveTextContent('$1.25 · 8 turns');
+    expect(screen.getByTestId('run-detail-usage-task-2')).not.toHaveTextContent('session');
+  });
+
+  it('renders nothing at all for a run archived before usage was ever recorded', async () => {
+    // Every run already on disk when this shipped. The foot line still
+    // carries the wall time it always did — what must not appear anywhere is
+    // a `$0.00`, which would read as "this run was free" rather than "nobody
+    // measured it".
+    await renderRunsView([RUN_DONE_ALPHA]);
+
+    expect(screen.getByTestId(`runs-row-foot-${RUN_DONE_ALPHA.runId}`)).not.toHaveTextContent('$');
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_DONE_ALPHA.runId}`));
+
+    await screen.findByTestId('run-detail-items');
+    expect(screen.queryByTestId('run-detail-usage')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-testid^="run-detail-usage-"]')).toBeNull();
+  });
+});
+
+/**
+ * task-38's own acceptance surface (DESIGN.md §8.4.1, spec §4.1) — the
+ * readings shape D introduced, and the moved-rules table's client half.
+ *
+ * These sit in their own describe rather than being folded into the blocks
+ * above because what they pin is the SHAPE of the page: which sheet a row is
+ * in, what a row of each kind is allowed to carry, and which of the three
+ * statuses a word rather than a dot has to tell apart. The blocks above pin
+ * the arithmetic, and the arithmetic did not change.
+ */
+describe('RunsView · shape D (task-38)', () => {
+  /**
+   * The figure strip, and the one rule that decides its contents: it reads
+   * what `aggregateRuns` returns and nothing else. The lines are asserted
+   * verbatim because §8.4.1 fixes them — each one says what the figure above
+   * it MEANS, which is the only thing a line here is allowed to be — and
+   * because the three that are new are exactly the three a later edit would
+   * be tempted to replace with a prior-period delta, a parked count or an
+   * invented ratio, none of which the aggregate can answer.
+   */
+  it('composes six figures off aggregateRuns alone, each with the line the design fixes', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    const strip = screen.getByTestId('runs-tiles');
+    expect(Array.from(strip.children)).toHaveLength(6);
+
+    expect(screen.getByTestId('runs-tile-runs')).toHaveTextContent('runs');
+    // The five-status breakdown, in STATUS_ORDER — active state first, then
+    // the three ways a run can have left it.
+    expect(screen.getByTestId('runs-figure-runs-line')).toHaveTextContent('running');
+    expect(screen.getByTestId('runs-figure-runs-line')).toHaveTextContent('paused');
+    expect(screen.getByTestId('runs-figure-runs-line')).toHaveTextContent('failed');
+
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('merged or branched');
+    expect(screen.getByTestId('runs-tile-avg-item')).toHaveTextContent('queue wait excluded');
+    expect(screen.getByTestId('runs-tile-fixloops')).toHaveTextContent('fix loops per completed item');
+    expect(screen.getByTestId('runs-tile-verify')).toHaveTextContent('of every verification run');
+
+    // Nothing the aggregate cannot answer.
+    expect(strip).not.toHaveTextContent(/vs prior/i);
+    expect(strip).not.toHaveTextContent(/parked/i);
+
+    // The sixth cell is the wide one, and it is the LAST — the five read as a
+    // row and the chart sits under them.
+    expect(strip.lastElementChild).toHaveClass('ui-figure-wide');
+    expect(screen.getByTestId('runs-tile-machine')).toHaveTextContent('all runs · queue wait excluded');
+  });
+
+  /**
+   * The crashed Live row, and the reason this is ONE assertion over one
+   * element rather than three: §8.4.1's moved-rules table says the three
+   * readings "travel together or the row says less than the strip it
+   * replaces did", and three independent `toHaveTextContent` calls would let
+   * a future edit drop one of them silently while the other two kept the case
+   * green.
+   */
+  it('carries all three of a crashed run’s readings together on one line', async () => {
+    const crashedLive: OrchestratorRunsPayload['runs'] = [
+      {
+        ...LIVE_RUNS[0],
+        fresh: false,
+        // `reviewing` on a-2, so there IS a last-reported entry to name.
+        queue: [liveQueueItem('a-1', 'merged'), liveQueueItem('a-2', 'reviewing')],
+        watchdog: {
+          enabled: true,
+          attempts: 2,
+          maxAttempts: 2,
+          lastSpawnAt: null,
+          lastSessionId: null,
+          lastError: null,
+          exhausted: true,
+          failures: 0,
+          failing: false
+        }
+      }
+    ];
+    await renderRunsView(ARCHIVE_RUNS, crashedLive);
+
+    const line = screen.getByTestId(`runs-live-crashed-${RUN_LIVE.runId}`).textContent ?? '';
+    expect(line).toContain('no heartbeat for');
+    expect(line).toContain('last reported a-2 at reviewing');
+    // `watchdogClause`'s own sentence, verbatim — the one this page and the
+    // Watchdog console both print, so neither can disagree about one run.
+    expect(line).toContain('watchdog: exhausted after 2 — resume by hand');
+
+    // And the row is in the LIVE sheet, never in History: a run reaches
+    // History when it has FINISHED, not when it has stopped reporting.
+    expect(isLiveRow(RUN_LIVE.runId)).toBe(true);
+    // The earned pill, which a running-and-fresh row does not draw.
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveTextContent('crashed');
+  });
+
+  /**
+   * The History row's status WORD. A dot alone cannot tell `done`, `aborted`
+   * and `failed` apart, and three colours of the same dot is the encoding §5
+   * rules out — so the word is not decoration, and one case per status is
+   * what keeps it from being dropped for whichever one a future edit happens
+   * to be looking at.
+   *
+   * `paused` is in the table for a reason worth stating: it is NOT a
+   * contradiction of the Live sheet. A paused run whose `run.json` has been
+   * archived (`init` archives a paused run like a done one) has no live entry
+   * at all, so it is a past run — which is the only way a `paused` History row
+   * can arise, and it does arise.
+   */
+  it.each([
+    ['done', 'runs-status-done'],
+    ['aborted', 'runs-status-warn'],
+    ['failed', 'runs-status-bad'],
+    ['paused', 'runs-status-paused']
+  ] as const)('prints %s as a word on its History row, toned by runStatusChip', async (status, className) => {
+    const past = run({
+      runId: `run-word-${status}`,
+      project: '/abs/alpha',
+      status,
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:30:00.000Z',
+      queue: [item('w-1', 'merged')]
+    });
+    await renderRunsView([past], []);
+
+    const word = screen.getByTestId(`runs-row-status-${past.runId}`);
+    expect(word).toHaveTextContent(status);
+    expect(word).toHaveClass(className);
+  });
+
+  /**
+   * Selection is ONE run across both sheets — the first live run on arrival,
+   * so the Board's own run chip lands a reader on the current item's stage
+   * track with no second click, and the newest History row when nothing is
+   * live.
+   */
+  it('shares one selection across the Live and History sheets', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    // On arrival: the live run, even though its startedAt is the oldest.
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveAttribute('aria-current', 'true');
+
+    // A History row takes it, and the live row gives it up — one selection,
+    // not one per sheet.
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`));
+    expect(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`)).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).not.toHaveAttribute('aria-current');
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(RUN_DONE_BETA.runId);
+  });
+
+  it('falls back to the newest History row when nothing is live', async () => {
+    await renderRunsView(ARCHIVE_RUNS, []);
+
+    expect(liveRows()).toBeNull();
+    // ARCHIVE_RUNS' newest by startedAt — asserted against the fixture rather
+    // than hand-named, so a fixture edit cannot quietly make this vacuous.
+    const newest = [...ARCHIVE_RUNS].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
+    expect(screen.getByTestId(`runs-row-${newest.runId}`)).toHaveAttribute('aria-current', 'true');
+  });
+
+  /**
+   * A `starting` row cannot be selected, and the assertion is a CLICK rather
+   * than the absence of a handler: there is no run file yet, so the detail
+   * sheet has nothing to show for it, and a row that quietly became the
+   * selection would blank the sheet beside it.
+   */
+  it('refuses to select a starting row, leaving the selection where it was', async () => {
+    const starting: StartingRun[] = [{ project: '/abs/alpha', requestedAt: new Date(Date.now() - 60_000).toISOString() }];
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS, starting);
+
+    const before = screen.getByTestId('run-detail-slot').textContent;
+    await userEvent.click(screen.getByTestId('runs-starting-/abs/alpha'));
+
+    expect(screen.getByTestId('run-detail-slot').textContent).toBe(before);
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveAttribute('aria-current', 'true');
+  });
+});
+
+/**
+ * Two guards task-38's own plan asks for, written as claims about the tree
+ * rather than about this task's diff — a suite cannot see a diff, and a
+ * guard that could only fail once is worth less than one that keeps failing.
+ *
+ * Both are the same rule in two places: **every derivation has one home**
+ * (`.claude/rules/board.md`'s `lib/` rule), and the redraw of a surface is exactly when a
+ * second home gets added by accident — a page that needs "is this run
+ * claimed" or "which dialog owns Escape" and writes the expression inline
+ * rather than importing the one implementation.
+ */
+describe('Runs · one home per derivation (task-38)', () => {
+  const ROOT = join(__dirname, '..', '..');
+
+  /** Every `.ts`/`.tsx` under a root, as text. */
+  function sources(...roots: string[]): { path: string; text: string }[] {
+    const out: { path: string; text: string }[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name)) out.push({ path: full.slice(ROOT.length + 1), text: readFileSync(full, 'utf8') });
+      }
+    };
+    for (const r of roots) walk(join(ROOT, r));
+    return out;
+  }
+
+  /**
+   * The predicates this redraw READS and may never grow a second copy of.
+   * `runStatusChip` and `aggregateRuns` are the two the Runs page leans on
+   * hardest; `runClaimBlock`, `runHoldsItem`, `itemDurationMs` and
+   * `watchdogStoodDown` are the four `.claude/rules/board.md` names outright as single
+   * implementations, each because two expressions that merely agreed once
+   * survived a whole branch while one of them was widened.
+   */
+  it.each(['runClaimBlock', 'runHoldsItem', 'itemDurationMs', 'watchdogStoodDown', 'runStatusChip', 'aggregateRuns'])(
+    'declares %s exactly once across client/src and shared',
+    (name) => {
+      const declarations = sources('client/src', 'shared')
+        .filter((f) => new RegExp(`export function ${name}\\s*[(<]`).test(f.text))
+        .map((f) => f.path);
+      expect(declarations).toHaveLength(1);
+    }
+  );
+
+  /**
+   * Escape has one owner, and the topmost dialog is the only one that closes
+   * (bug-23). The COUNT of dialogs on the stack is `task-40`'s to restate in
+   * the docs; what matters here, and what this task's redraw could have
+   * broken, is that the Runs section put nothing new on it: the detail is a
+   * sheet rendered inline, never a dialog, which is the whole reason
+   * `RunDrawer` left the stack.
+   */
+  it('puts nothing in the Runs section on the Escape stack', () => {
+    const readers = sources('client/src')
+      .filter((f) => /\buseDialogEscape\s*\(/.test(f.text.replace(/export function useDialogEscape\s*\(/g, '')))
+      .map((f) => f.path)
+      .sort();
+
+    expect(readers.every((p) => !p.startsWith('client/src/components/runs/'))).toBe(true);
+    // And the owner itself is still one module, so "one owner" is a fact
+    // about the tree rather than a sentence in a doc.
+    expect(sources('client/src').filter((f) => /export function useDialogEscape\s*\(/.test(f.text))).toHaveLength(1);
+  });
+});
+
+/* task-48: a run another machine drove, assembled by the server from a tracker
+ * repo's claim comments and delivered in the payload's `remote` array. The page
+ * draws it with the same rows and sheet as a local run, tagged, read-only, and
+ * without ever asking for a file this machine does not have. */
+describe('RunsView · a remote run (task-48)', () => {
+  function remoteRun(status: OrchestratorRunsPayload['remote'][number]['status'], fresh: boolean): OrchestratorRunsPayload['remote'][number] {
+    const at = new Date(Date.now() - 60_000).toISOString();
+    return {
+      runId: 'run-20260919-110000',
+      project: '/abs/gamma',
+      status,
+      startedAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+      updatedAt: at,
+      maxItems: null,
+      base: 'main',
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
+      prTarget: null,
+      prUrl: null,
+      questionMode: 'park',
+      driver: null,
+      queue: [{ ...liveQueueItem('3', status === 'running' ? 'reviewing' : 'merged'), claim: { commentId: 501 } }],
+      attention: [],
+      fresh,
+      remote: true,
+      repo: 'futin/x',
+      host: null
+    };
+  }
+
+  it('U-1: a running remote run is a tagged Live row whose sheet has no controls and fetches no file', async () => {
+    const remote = remoteRun('running', true);
+    await renderRunsView([], [], [], [remote]);
+
+    expect(isLiveRow(remote.runId)).toBe(true);
+    expect(screen.getByTestId(`runs-row-remote-${remote.runId}`)).toHaveTextContent('remote');
+
+    await userEvent.click(screen.getByTestId(`runs-row-${remote.runId}`));
+    expect(await screen.findByTestId('run-detail-remote')).toHaveTextContent('controls live on the machine that ran it');
+    expect(screen.getByTestId('run-detail-remote-queue')).toHaveTextContent('Items this run has not claimed yet are not visible from here.');
+    expect(document.querySelector('[data-testid^="run-controls-"]')).toBeNull();
+    expect(mockFetchArchivedRun).not.toHaveBeenCalled();
+  });
+
+  it('U-2: a finished remote run is a tagged History row', async () => {
+    const remote = remoteRun('done', false);
+    const { container } = await renderRunsView([], [], [], [remote]);
+
+    expect(isLiveRow(remote.runId)).toBe(false);
+    expect(historyRowIds(container)).toEqual([`runs-row-${remote.runId}`]);
+    expect(screen.getByTestId(`runs-row-remote-${remote.runId}`)).toBeInTheDocument();
+  });
+
+  /*
+    Multi-dashboard task 10. `host` is what the claims carry, `DashboardsView.dashboards[].host` is what ties it to a configured remote, and the row and the sheet
+    both say the remote's NAME — `Pro`, not `pro-mac`. A host nobody configured is printed raw (a name the person did not choose is still better than nothing), and
+    a run with no claim host yet prints no machine at all.
+  */
+  const PRO_VIEW: DashboardsView = {
+    source: 'file',
+    file: '/x/dashboards.json',
+    home: { label: 'Home', url: 'http://127.0.0.1:4310', account: null, models: [], efforts: [], tokenVar: 'BM_AGENTS_TOKEN', tokenSet: false },
+    dashboards: [
+      { name: 'Pro', url: 'http://pro:4310', bmUrl: 'http://pro:4322', host: 'pro-mac', tokenVar: 'BM_AGENTS_TOKEN_PRO', tokenSet: true, models: [], efforts: [] }
+    ],
+    order: ['home', 'Pro'],
+    strategy: 'prefer',
+    threshold: 80
+  };
+
+  it('names the machine on a remote run row and on its sheet', async () => {
+    mockDashboardsView.current = PRO_VIEW;
+    const remote = { ...remoteRun('running', true), host: 'pro-mac' };
+    await renderRunsView([], [], [], [remote]);
+
+    expect(screen.getByTestId(`runs-row-machine-${remote.runId}`)).toHaveTextContent('Pro');
+    await userEvent.click(screen.getByTestId(`runs-row-${remote.runId}`));
+    expect(await screen.findByTestId('run-detail-on-machine')).toHaveTextContent('Pro');
+  });
+
+  it('prints the raw host when no remote owns it, and no machine for a run with no host', async () => {
+    mockDashboardsView.current = PRO_VIEW;
+    const unmapped = { ...remoteRun('running', true), runId: 'run-unmapped', host: 'box-7' };
+    const hostless = { ...remoteRun('done', false), runId: 'run-hostless', host: null };
+    await renderRunsView([], [], [], [unmapped, hostless]);
+
+    expect(screen.getByTestId('runs-row-machine-run-unmapped')).toHaveTextContent('box-7');
+    expect(screen.queryByTestId('runs-row-machine-run-hostless')).toBeNull();
+  });
+
+  it('draws no machine on a local row', async () => {
+    mockDashboardsView.current = PRO_VIEW;
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    expect(document.querySelector('[data-testid^="runs-row-machine-"]')).toBeNull();
+  });
+
+  describe('Starting on <machine> (remoteStarting)', () => {
+    const entry = (over: Partial<RemoteStarting> = {}): RemoteStarting => ({
+      kind: 'orchestrate',
+      project: '/abs/gamma',
+      machine: 'Pro',
+      itemId: null,
+      requestedAt: new Date(Date.now() - 20_000).toISOString(),
+      ...over
+    });
+
+    it('draws an orchestrate launch as a Live row that says where, with no control and nothing to select', async () => {
+      mockDashboardsView.current = PRO_VIEW;
+      await renderRunsView([], [], [], [], [entry()]);
+
+      const row = screen.getByTestId('runs-starting-remote-Pro-/abs/gamma');
+      expect(row).toHaveTextContent('Starting on Pro');
+      expect(within(row).queryByRole('button')).toBeNull();
+      expect(screen.getByTestId('runs-live-rows')).toContainElement(row);
+    });
+
+    it('counts it in the Live sheet and the band without ever touching the local starting count', async () => {
+      await renderRunsView([], [], [], [], [entry()]);
+      expect(screen.getByTestId('runs-live-rows')).toHaveTextContent('Starting on Pro');
+      expect(screen.queryByText(/\b1 starting\b/)).toBeNull();
+    });
+
+    it('leaves a card dispatch to the card — the Live list lists launches of a run only', async () => {
+      // A run beside it so the page has a list to look in: a dispatch entry alone draws nothing here, which is the very thing asserted.
+      await renderRunsView(ARCHIVE_RUNS, [], [], [], [entry({ kind: 'dispatch', itemId: '#7' })]);
+      expect(document.querySelector('[data-testid^="runs-starting-remote-"]')).toBeNull();
+    });
+
+    it('falls back to the machine id when the dashboards view is not loaded', async () => {
+      mockDashboardsView.current = null;
+      await renderRunsView([], [], [], [], [entry({ machine: 'Mini' })]);
+      expect(screen.getByTestId('runs-starting-remote-Mini-/abs/gamma')).toHaveTextContent('Starting on Mini');
+    });
+
+    it('stays beside a local starting placeholder rather than replacing it', async () => {
+      await renderRunsView([], [], [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }], [], [entry()]);
+      expect(screen.getByTestId('runs-starting-/abs/alpha')).toBeInTheDocument();
+      expect(screen.getByTestId('runs-starting-remote-Pro-/abs/gamma')).toBeInTheDocument();
+    });
+  });
+
+  describe('U-3: a local run that has claimed nothing', () => {
+    const realFetch = global.fetch;
+    afterEach(() => {
+      global.fetch = realFetch;
+    });
+
+    function stubProjects(source: 'github' | 'files'): void {
+      global.fetch = jest.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve([{ name: 'alpha', path: RUN_LIVE.project, source }]) } as Response)
+      ) as jest.Mock;
+    }
+
+    it('says it is not visible from other machines on a tracker project', async () => {
+      stubProjects('github');
+      await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+      await userEvent.click(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`));
+      expect(await screen.findByTestId('run-detail-invisible')).toHaveTextContent('Not visible from other machines: this run has not claimed an issue yet.');
+      // A local run keeps its controls; the tag is for remote runs only.
+      expect(screen.queryByTestId('run-detail-remote')).toBeNull();
+      expect(screen.queryByTestId(`runs-row-remote-${LIVE_RUNS[0].runId}`)).toBeNull();
+    });
+
+    it('says nothing of the kind on a files project', async () => {
+      stubProjects('files');
+      await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+      await userEvent.click(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`));
+      await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+      await act(async () => {});
+      expect(screen.queryByTestId('run-detail-invisible')).toBeNull();
+    });
+
+    // #285: `useProjectSources` is a `useFetched` read — a failed one reads as the empty map, so the page loses that one line and nothing else.
+    it('still renders, with no note, when /api/projects answers 500', async () => {
+      global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response)) as jest.Mock;
+      await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+      await userEvent.click(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`));
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/projects'));
+      await act(async () => {});
+      expect(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId('run-detail-invisible')).toBeNull();
+    });
+  });
+});
+
+/**
+ * #241's own reading on this page: the day a run is grouped under is read in the SHARED zone the provider fetched, not the browser's. 23:30 UTC is already
+ * the next day in Belgrade in every season (UTC+1 or +2) and still the same day in New York (UTC−4 or −5), so one run draws two different day headings.
+ *
+ * The run is three days old rather than a literal date — the convention for a jsdom fixture (`test/helpers/dates.ts`) — and the expected headings are
+ * spelled off the stamp's UTC date by hand rather than through `dayLabel`, so the case does not grade the function with itself.
+ */
+describe('RunsView · the shared time zone (#241)', () => {
+  const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const label = (ms: number): string => {
+    const d = new Date(ms);
+    return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+  };
+
+  function lateRun(): { startedAt: string; utcDay: number } {
+    const d = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    d.setUTCHours(23, 30, 0, 0);
+    return { startedAt: d.toISOString(), utcDay: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) };
+  }
+
+  async function renderInZone(zone: string, startedAt: string): Promise<RenderResult> {
+    (fetchTimeZone as jest.Mock).mockResolvedValue({ timeZone: zone });
+    mockArchive.mockResolvedValue({
+      runs: [run({ runId: 'tz-run', project: RUN_DONE_BETA.project, status: 'done', startedAt, updatedAt: startedAt, queue: [item('tz-1', 'merged')] })]
+    } satisfies OrchestratorArchivePayload);
+    mockRuns.mockResolvedValue({ runs: [], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
+    const result = render(
+      <TimeZoneProvider>
+        <OrchestratorRunsProvider><RunsView /></OrchestratorRunsProvider>
+      </TimeZoneProvider>
+    );
+    await screen.findByTestId('runs-list');
+    return result;
+  }
+
+  const kickers = (container: HTMLElement): (string | null)[] => Array.from(container.querySelectorAll('.ui-ledger-day')).map((el) => el.textContent);
+
+  it('Belgrade reads the next day', async () => {
+    const { startedAt, utcDay } = lateRun();
+    const { container } = await renderInZone('Europe/Belgrade', startedAt);
+    await waitFor(() => expect(kickers(container)).toEqual([label(utcDay + 24 * 60 * 60 * 1000)]));
+  });
+
+  it('New York reads the same day', async () => {
+    const { startedAt, utcDay } = lateRun();
+    const { container } = await renderInZone('America/New_York', startedAt);
+    await waitFor(() => expect(kickers(container)).toEqual([label(utcDay)]));
+  });
+});
+
+/*
+  Plan 3 task 6 (spec §4.6): a Live run is a card — a `ui-stripe` edge in the run's tone, the state pill, `N of M items` over a 4 px progress fill — and
+  a crashed one keeps its second line. Selecting a card still opens the detail beside it.
+*/
+describe('RunsView — live run cards', () => {
+  const threeItems = [liveQueueItem('a-1', 'merged'), liveQueueItem('a-2', 'reviewing'), liveQueueItem('a-3', 'pending')];
+
+  it('draws a paused run as an amber-edged card with a paused pill and its progress', async () => {
+    await renderRunsView(ARCHIVE_RUNS, [{ ...LIVE_RUNS[0], status: 'paused', queue: threeItems }]);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card).toHaveClass('ui-stripe');
+    expect(card).toHaveAttribute('data-tone', 'amber');
+    expect(card.querySelector('.ui-pill')).toHaveTextContent('paused');
+    expect(card).toHaveTextContent('1 of 3 items');
+    expect(card.querySelector('.ui-meter[data-height="4"]')).not.toBeNull();
+    expect(card).toHaveTextContent(RUN_LIVE.runId);
+  });
+
+  it('draws a fresh running run green with a live pill', async () => {
+    await renderRunsView(ARCHIVE_RUNS, [{ ...LIVE_RUNS[0], queue: threeItems }]);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card).toHaveAttribute('data-tone', 'green');
+    expect(card.querySelector('.ui-pill-live')).toHaveTextContent('running');
+    expect(screen.queryByTestId(`runs-live-crashed-${RUN_LIVE.runId}`)).toBeNull();
+  });
+
+  it('draws a crashed run red, with the crashed pill and its second line', async () => {
+    await renderRunsView(ARCHIVE_RUNS, [{ ...LIVE_RUNS[0], fresh: false, queue: threeItems }]);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card).toHaveAttribute('data-tone', 'red');
+    expect(card.querySelector('.ui-pill')).toHaveTextContent('crashed');
+    expect(screen.getByTestId(`runs-live-crashed-${RUN_LIVE.runId}`)).toHaveTextContent('no heartbeat for');
+  });
+
+  it('puts no stripe inside another stripe', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    const card = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(card.querySelector('.ui-stripe')).toBeNull();
+  });
+});

@@ -27,15 +27,15 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
 - **ui-kit draws the version chip and the What's new drawer; this board only maps its tokens and places the chip.** Since ui-kit v0.3.0 every shape of the chip and the drawer — size, radius, spacing, the phone layout, the badge and baseline drawing — is
   ui-kit's, so the board's look matches the other two apps. `client/src/styles.css` carries the `--uk-*` mapping block and `.rail-foot`, a wrapper that
   places `VersionChip` and styles nothing of it (the chip takes no `className`); a rule that restyles a `.uk-*` class, or sets a `--uk-*` property that is not
-  one of the kit's public tokens, fails `test/ui-kit-guard.test.ts` (`ui-kit/guard`'s `checkHostCss` over every sheet this board ships, listed there so a new one
+  one of the kit's public tokens, fails `test/guards/ui-kit-guard.test.ts` (`ui-kit/guard`'s `checkHostCss` over every sheet this board ships, listed there so a new one
   is a deliberate add). The guard cannot see an unmapped token, so the same suite asserts the mapping sets `--uk-chip-bg` (the pill's well, per palette) and
-  `--uk-zoom` (`--font-scale`, so the drawer fits the screen at any text size), and `test/ui-kit-tokens.test.ts` holds every token the kit reads to being mapped.
+  `--uk-zoom` (`--font-scale`, so the drawer fits the screen at any text size), and `test/guards/ui-kit-tokens.test.ts` holds every token the kit reads to being mapped.
   The narrow chip's 44 px hit area overhangs the pill by 8 px, so no ancestor of `.rail-foot` may clip (`overflow: hidden`/`clip`). Notes render through the
   kit's own `renderNotesHtml`; the wrapper passes no `renderNotes`. Why: [invariants.md](docs/subsystems/invariants.md#ui-kit-draws-the-version-chip-and-the-whats-new-drawer-this-board-only-maps-its-tokens-and-places-the-chip)
 - **The strip's height and the well's gap are one token, `--main-gap`, read by the strip and the Runs page — never a px literal.** `--main-gap` is declared on
   `:root` (`50px`) and overridden to `0px` in the 700 px block, where `.topstrip` is `display: none`; `.topstrip`'s height is `var(--main-gap)`,
   `.runs-board`'s height subtracts it, and `.main` carries no `margin-top` (the strip IS the gap). `App.tsx` renders the tracker chip in ONE of two homes
-  chosen by `useNarrow` — `.topstrip`, or `SideRail`'s `chipSlot` in the phone bar — never both hidden by CSS. Design guard 9 (`test/design-guards.test.ts`)
+  chosen by `useNarrow` — `.topstrip`, or `SideRail`'s `chipSlot` in the phone bar — never both hidden by CSS. Design guard 9 (`test/guards/design-guards.test.ts`)
   pins the two declarations and the two readers. Why:
   [invariants.md](docs/subsystems/invariants.md#the-strips-height-and-the-wells-gap-are-one-token)
 - **Board-versus-Archive is derived from `updated ?? lastCommit ?? created` and the run payload, never stored.** `isStale`/`leavesBoard`
@@ -90,7 +90,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   Files and GitHub only while drawn (`landingOptions`), keeping a stored pin's option. Why:
   [invariants.md](docs/subsystems/invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree)
 - **The served build carries a CSP (`server/src/security.ts`); dev does not.** `script-src` pins the pre-paint theme script's sha256 — edit that script and
-  `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows. `style-src` is `'self'` alone: write inline styles through CSSOM, never a `<style>` element
+  `test/server/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows. `style-src` is `'self'` alone: write inline styles through CSSOM, never a `<style>` element
   or a `style=` attribute in markup. Why:
   [invariants.md](docs/subsystems/invariants.md#the-served-build-carries-a-csp-dev-does-not)
 - **`contentWidth` is stamped before first paint, and the CSP hash travels with the script that stamps it.** `data-width` on `<html>`, written twice — by
@@ -149,11 +149,11 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   function, not two agreeing expressions.** `watchdogStoodDown`
   (`shared/agent.ts`) is read by `watchdog.service.ts`'s `visit()` and by whichever surface offers the click — `RunStrip` until task-37, NOTHING in between, and
   `RunControls` from task-38, which is ONE reader for both surfaces that offer it (the Runs detail head and the Watchdog page's rows draw the same component, so
-  `WatchdogMonitor` must never call the predicate itself). `test/watchdog-coupling.test.tsx`'s reader list is an exact set for that reason. Its three inputs
+  `WatchdogMonitor` must never call the predicate itself). `test/watchdog/watchdog-coupling.test.tsx`'s reader list is an exact set for that reason. Its three inputs
   `spawningEnabled()`, `watchdogExhausted` (`attempts >= maxAttempts`) and bug-35's `watchdogFailing` (`consecutiveFailures >= maxAttempts`) are single
   implementations too, all three DERIVED and never stored; `failing` is a REQUIRED property with no default, so a caller cannot opt out of the third and put
   the board back to offering Resume while the sweeper still spawns. Pinned by
-  `test/watchdog-coupling.test.tsx` and `test/watchdog-sweep.test.ts` driving both sides from one table of hand-checked verdicts. Why:
+  `test/watchdog/watchdog-coupling.test.tsx` and `test/watchdog/watchdog-sweep.test.ts` driving both sides from one table of hand-checked verdicts. Why:
   [invariants.md](docs/subsystems/invariants.md#the-resume-coupling-the-board-offers-a-hand-resume-exactly-when-the-sweeper-will-not)
 - **The launch sheet's model/effort pickers seed from Settings, never the last launch** (`dispatchDefaultModel` / `dispatchDefaultEffort` in
   `client/src/lib/settings.ts`, clamped against `MODELS`/`EFFORTS`). Permission mode has no stored default — it comes from `plan.defaultMode`, clamped to the

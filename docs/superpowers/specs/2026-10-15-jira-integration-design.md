@@ -372,14 +372,14 @@ Shared › Trackers gains one read-only Jira row (`<site> · N boards · interva
 2. **Jira section** — rail entry and tree, `JiraProvider`, Board page, read-only modal (the `Fact` and `marked` hoists land here), Setup with the board
    sheet, Repositories and Connection — so the boards and repos write routes and the `jira.json` writers land here — the chip, the Trackers row; the section-and-tree
    rule of §13 (the Run ▾ rule waits for phase 5); DESIGN.md gains §8.9 for the Jira surfaces (every component cites its subsection), and §8.7's composer count and its two "only modal" / "not by two" sentences, `board.md`'s Escape
-   bullet, `invariants.md`'s Escape section and `test/dialog-count-docs.test.ts` move from three composers to five (the issue modal and the board sheet).
+   bullet, `invariants.md`'s Escape section and `test/guards/dialog-count-docs.test.ts` move from three composers to five (the issue modal and the board sheet).
 3. **Writes** — assign and transition routes, the modal controls, the splice; the write rule of §13.
 4. **Skill** — `skills/jira` (over phase 1's `?format=text`), docs, publish, and `skills/jira/**` added to `jira.md`'s `paths:`; the widened exit-5 bullet and the token rule's `jira.mjs` half.
 5. **Run** — Skills card and its two routes, `jiraDefaultAction`, the menu, the launch sheet, the prompt route, `dispatch-jira`, `jira-stop`, the live map, its agents-side
    reconciler and the strip; the Run ▾ rule, the live-map rule, the dispatch and spawn-prompt widenings of §13; the composer count moves to six (the launch sheet).
 
 Every phase lands its own docs (CLAUDE.md line, rule bullets, invariants anchors, `docs/subsystems/*`) with the mechanism it introduces, so
-`test/claude-rules.test.ts` and `/docs-sync` stay green at every merge.
+`test/guards/claude-rules.test.ts` and `/docs-sync` stay green at every merge.
 
 ## 13. Invariants this design adds — headline, mechanism home, reasoning anchor
 
@@ -388,7 +388,7 @@ claude-rules suite enforces that all three exist and agree.
 
 | headline                                                                                                                                    | rules file     |
 | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.                 | `jira.md` (new, `paths: ["server/src/jira/**"]` until phase 4 creates `skills/jira/` and adds it — `test/claude-rules.test.ts` fails a glob that matches no tracked file; the tenth rule file; CLAUDE.md's count follows) |
+| `~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.                 | `jira.md` (new, `paths: ["server/src/jira/**"]` until phase 4 creates `skills/jira/` and adds it — `test/guards/claude-rules.test.ts` fails a glob that matches no tracked file; the tenth rule file; CLAUDE.md's count follows) |
 | The Jira token never leaves the server: the browser and `jira.mjs` both go through `/api/jira`, and the poller is armed only while a board syncs. | `jira.md`  |
 | The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key. | `jira.md`  |
 | Jira's Done column is a window, not a store: a done issue whose resolution — or, lacking one, whose last update — is older than 14 days is dropped at map time.                                 | `jira.md`      |

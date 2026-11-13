@@ -141,7 +141,7 @@ test('sweep carries the driver lease when a run recorded one', (t) => {
 test('sweep extracts failures from a failing verification entry only', (t) => {
   const fx = retroFixture(t);
   const tail = [
-    '\x1b[31mFAIL\x1b[0m test/agents-origin-guard.test.ts',
+    '\x1b[31mFAIL\x1b[0m test/agents/agents-origin-guard.test.ts',
     '  ● the agents POST guard › 403s an Origin: null POST to plan',
     'sh: jest: command not found'
   ].join('\n');
@@ -159,7 +159,7 @@ test('sweep extracts failures from a failing verification entry only', (t) => {
   const item = sweepJson(fx).items[0];
   assert.equal(item.verification.length, 2);
   assert.deepEqual(item.verification[0].failures, {
-    files: ['test/agents-origin-guard.test.ts'],
+    files: ['test/agents/agents-origin-guard.test.ts'],
     tests: ['the agents POST guard › 403s an Origin: null POST to plan'],
     errors: ['sh: jest: command not found']
   });
@@ -463,7 +463,7 @@ test('sweep finds transcripts archived under runs/<stem>/ as well as the live on
 // --- Task 4: totals ------------------------------------------------------
 
 const FAIL_TAIL = [
-  '\x1b[31mFAIL\x1b[0m test/agents-origin-guard.test.ts',
+  '\x1b[31mFAIL\x1b[0m test/agents/agents-origin-guard.test.ts',
   '  ● the agents POST guard › 403s an Origin: null POST to plan',
   'sh: jest: command not found'
 ].join('\n');

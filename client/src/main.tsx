@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 // .claude/DESIGN.md §1 and §8.1. Self-hosted rather than linked from Google
 // Fonts the way the reference design's own foundation does: the served build's
 // CSP is `default-src 'self'` with no `font-src` (server/src/security.ts, pinned
-// by test/csp.test.ts), and the tailnet/phone use case this board is built for
+// by test/server/csp.test.ts), and the tailnet/phone use case this board is built for
 // wants the board to render with no third-party fetch at all.
 //
 // Four weights, and only four: §1's "Weights in use" table allows nothing

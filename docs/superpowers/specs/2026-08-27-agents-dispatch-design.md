@@ -175,7 +175,7 @@ the bookkeeping.
 `SpawnRequest.name` is set to `bl <project> <id>` so the dashboard's row is legible at a glance, and `effort` is left unset — the session inherits the host
 default. Spaces rather than the `bl:<project>/<id>` first drafted here: that app's `NAME_RE` (`server/lib/spawn.ts`) allows neither `:` nor `/`, and it
 fail-softs an invalid name to `undefined`, so the punctuated form was silently dropped on every dispatch and every row fell back to the bare project name.
-`test/agents-prompt.test.ts` now asserts the composed name against a copy of that regex.
+`test/agents/agents-prompt.test.ts` now asserts the composed name against a copy of that regex.
 
 ## UI
 

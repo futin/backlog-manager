@@ -6,7 +6,7 @@ import type { StepProps } from './types';
 /**
  * ItemsStep — the Orchestrate sheet's step 1, `items` (.claude/DESIGN.md §8.7 Overlays): the queue preview, its selection controls and the uncommitted note.
  * Presentational over the `OrchestrateDraft` it is handed (#306) — no state, no fetch, no `useSettings`; every value and every action is the draft's, so the
- * step renders alone in `test/orchestrate-steps.test.tsx`. The words each comment below calls "above" or "this file" are the derivations' and the state's,
+ * step renders alone in `test/orchestrator/orchestrate-steps.test.tsx`. The words each comment below calls "above" or "this file" are the derivations' and the state's,
  * which live in `lib/orchestrate-draft.ts` and `hooks/useOrchestrateDraft.ts`.
  */
 export function ItemsStep({ draft }: StepProps) {

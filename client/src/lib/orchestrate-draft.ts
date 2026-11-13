@@ -13,7 +13,7 @@ import { modelEffortFlags, reviewOverride } from './agents';
 
 /**
  * orchestrate-draft.ts — the Orchestrate sheet's derivations, pure (#306). Every value here used to be computed inline in `OrchestrateSheet`'s render body;
- * they moved out whole, comments with them, so each can be unit-tested without jsdom (`test/orchestrate-draft.test.ts`) — the board's "every derivation has
+ * they moved out whole, comments with them, so each can be unit-tested without jsdom (`test/orchestrator/orchestrate-draft.test.ts`) — the board's "every derivation has
  * one home in `lib/`" rule. `hooks/useOrchestrateDraft.ts` holds the state these read and calls them every render; nothing here is memoised, and nothing
  * here may be, for the reason each derivation's own comment gives: the inputs are props BoardView re-polls, and a stored answer is a stale one.
  */

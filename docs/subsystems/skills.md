@@ -109,7 +109,7 @@ linked-worktree discriminator (the `commondir` entry in a `gitdir:` target, neve
 The Jira repo/branch work added two more pairs, each across a different border: `orchestrate.mjs` and `jira.mjs` each carry `ensureExcludeLines` (the
 idempotent append to `<common dir>/info/exclude` that keeps `.worktrees/` and the `node_modules` link out of `git status`), and `jira.mjs` carries Tables A
 and B — `branchNameProblem` and `branchCarriesKey` — whose other home is not a tool at all but `shared/jira-branch.ts`, which the server and the client import
-and no skill can. `jira.test.mjs` pins the same Table A and B rows as `test/jira-branch.test.ts`.
+and no skill can. `jira.test.mjs` pins the same Table A and B rows as `test/jira/jira-branch.test.ts`.
 `tick.mjs` carries the most, in `tick-lib.mjs` and its own source — `orchHome()` and `projectDir()` among them, so that pair has a third copy — each with a
 comment naming its original ([`backlog-tick`](#backlog-tick)).
 `retro.mjs` has no discriminator at all — it needs no git root, because its subject is every project at once — and `backlog.mjs` has neither path helper,
@@ -331,7 +331,7 @@ skill's text when it loads the skill, and exports no such variable to the Bash t
 the empty string in the shell, and every `node` line becomes `node "/skills/…"`. Sessions noticed and fell back to guessing the plugin cache path by hand.
 A file read with `Read` (the `references/` files, a SKILL.md re-read from the repo after a runner fix) is never substituted; `backlog-orchestrate` says what
 to replace the placeholder with there, and those files spell it braced too, so there is one placeholder to recognise. Guarded by
-`test/skill-plugin-root.test.ts`, which refuses the bare spelling in every `.md` and `.mjs` under `skills/` — prose and usage headers included.
+`test/guards/skill-plugin-root.test.ts`, which refuses the bare spelling in every `.md` and `.mjs` under `skills/` — prose and usage headers included.
 
 **Start orchestrator runs from the board, not by typing the trigger into a terminal** — the board spawns `claude -p`, and headless sessions were measured
 flooring well below an interactive session's context.

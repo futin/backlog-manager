@@ -156,7 +156,7 @@ test('prFiles diffs the merge commit against its first parent, renames split, an
 
 test('the suite lists come from the real tree: jest from test/, node from test:skills in package.json', () => {
   const jest = jestSuitePaths();
-  assert.ok(jest.includes('test/claude-rules.test.ts'));
+  assert.ok(jest.includes('test/guards/claude-rules.test.ts'));
   assert.ok(jest.every((f) => /^test\/.+\.test\.tsx?$/.test(f)));
   const node = nodeSuitePaths();
   assert.ok(node.includes('scripts/ci-scope.test.mjs'));
@@ -167,14 +167,14 @@ test("this repo's doc and skill guards are selected by the files they read", () 
   const { jest, node } = readSuites();
   const picks = (file) => selectSuites([file], jest, { wide: file.startsWith('skills/') || file.startsWith('agents/') });
   const expect = {
-    'CLAUDE.md': ['test/claude-rules.test.ts'],
-    '.claude/rules/board.md': ['test/claude-rules.test.ts', 'test/dialog-count-docs.test.ts'],
-    'docs/subsystems/invariants.md': ['test/dialog-count-docs.test.ts'],
-    'skills/backlog-orchestrate/SKILL.md': ['test/default-model.test.ts', 'test/skills-plugin-root.test.ts', 'test/skill-plugin-root.test.ts'],
-    'skills/backlog-execute/SKILL.md': ['test/agents-shared.test.ts'],
-    'skills/backlog-orchestrate/tools/orchestrate.mjs': ['test/remote-runs.test.ts', 'test/uncommitted.test.ts'],
-    'skills/backlog/tools/backlog.mjs': ['test/tracker-labels.test.ts'],
-    'agents/backlog-reviewer.md': ['test/default-model.test.ts']
+    'CLAUDE.md': ['test/guards/claude-rules.test.ts'],
+    '.claude/rules/board.md': ['test/guards/claude-rules.test.ts', 'test/guards/dialog-count-docs.test.ts'],
+    'docs/subsystems/invariants.md': ['test/guards/dialog-count-docs.test.ts'],
+    'skills/backlog-orchestrate/SKILL.md': ['test/agents/default-model.test.ts', 'test/guards/skills-plugin-root.test.ts', 'test/guards/skill-plugin-root.test.ts'],
+    'skills/backlog-execute/SKILL.md': ['test/agents/agents-shared.test.ts'],
+    'skills/backlog-orchestrate/tools/orchestrate.mjs': ['test/runs/remote-runs.test.ts', 'test/orchestrator/uncommitted.test.ts'],
+    'skills/backlog/tools/backlog.mjs': ['test/tracker/tracker-labels.test.ts'],
+    'agents/backlog-reviewer.md': ['test/agents/default-model.test.ts']
   };
   for (const [file, guards] of Object.entries(expect)) {
     const picked = picks(file);
@@ -225,7 +225,7 @@ test('the CLI prints the plan under --dry-run and runs nothing', () => {
   const docs = spawnSync(process.execPath, [CLI, '--dry-run', '--files', 'CLAUDE.md'], { encoding: 'utf8', env });
   assert.equal(docs.status, 0, docs.stderr);
   assert.match(docs.stdout, /ci-scope: docs-only/);
-  assert.match(docs.stdout, /would run: pnpm exec jest --runTestsByPath .*test\/claude-rules\.test\.ts/);
+  assert.match(docs.stdout, /would run: pnpm exec jest --runTestsByPath .*test\/guards\/claude-rules\.test\.ts/);
   assert.doesNotMatch(docs.stdout, /pnpm typecheck/);
 
   const full = spawnSync(process.execPath, [CLI, '--dry-run'], { encoding: 'utf8', env });

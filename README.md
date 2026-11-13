@@ -480,7 +480,7 @@ that command, see [Read it from your phone](#8-optional-read-it-from-your-phone)
 | Types (`tsc --noEmit`)                  | `pnpm run typecheck`                            |
 | Production build (nest + vite)          | `pnpm run build`                                |
 
-Jest suites are flat in `test/`; node suites sit beside the tool they cover. Component suites opt into jsdom with a `@jest-environment jsdom` docblock;
+Jest suites sit in `test/<feature>/` (`test/jira/`, `test/runs/`, `test/guards/` …); node suites sit beside the tool they cover. Component suites opt into jsdom with a `@jest-environment jsdom` docblock;
 everything else runs in node.
 
 Ports, binds, what the container mounts and the failure modes each of those has are in [`docs/workflows/development.md`](docs/workflows/development.md).
@@ -528,8 +528,7 @@ Four workflow docs cover the procedures: [running the app](docs/workflows/develo
 | `backlog/` | This repo's own backlog marker — its items are GitHub issues since the repo connected itself to a tracker                                                                                                                                |
 | `scripts/` | `sync-plugin.mjs` ([doc](docs/workflows/publishing.md)), `test-all.mjs` and `test-tmpdir.mjs`, the per-run temp root `test:skills` runs through ([doc](docs/workflows/development.md)), `tailnet.mjs`, the `tailscale serve` wrapper, and `ci-scope.mjs`, CI's one check command ([doc](docs/workflows/ci.md)) |
 | `test/`    | Jest suites, flat; many read the client or server tree and pin its shape ([doc](docs/workflows/development.md))                                                                                                                         |
-| `docs/`    | The reference docs — start at [`overview.md`](docs/overview.md); `superpowers/` is the design spec and implementation plans                                                                                                              |
-| `audits/`  | Dated whole-repo audit reports                                                                                                                                                                                                           |
+| `docs/`    | The reference docs — start at [`overview.md`](docs/overview.md); `superpowers/` is the design spec and implementation plans, `audits/` the dated whole-repo audit reports                                                                |
 
 <!-- docs-sync:
   sources:

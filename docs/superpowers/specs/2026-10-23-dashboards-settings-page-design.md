@@ -50,7 +50,7 @@ picture.
 - A slow or dead remote holding the page hostage: the machine list and every control must draw from `GET /api/dashboards` alone, at today's speed, with
   health and usage filling in when they arrive.
 - A token's value reaching the payload or the DOM.
-- A second look for an existing primitive (`test/design-guards.test.ts` guard 7): meters are `Meter`, dots `Dot`, pills `Pill`, buttons `Chip`, the
+- A second look for an existing primitive (`test/guards/design-guards.test.ts` guard 7): meters are `Meter`, dots `Dot`, pills `Pill`, buttons `Chip`, the
   cards `Sheet`/`SettingsGroup`.
 
 ## The page
@@ -161,7 +161,7 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
   `pickOne`, so an old stored value still clamps.
 - `client/src/components/SideRail.tsx`: `RAIL_SCOPE_LABEL.dashboards = 'Dashboards'`. The tree stays the only switch.
 - `client/src/lib/deep-link.ts`: `settings=dashboards` is accepted the moment `SETTINGS_SCOPES` grows (it checks `SETTINGS_SCOPES.includes`); the work is its
-  doc comment ("`shared` or `local`", "points at the Dashboards card") and `test/deep-link.test.ts`.
+  doc comment ("`shared` or `local`", "points at the Dashboards card") and `test/ui/deep-link.test.ts`.
 - `client/src/lib/dashboards.ts`: `SETTINGS_HREF` (the Run on card's Settings link) becomes `/?section=settings&settings=dashboards`.
 - `client/src/components/settings/SettingsView.tsx`: a third page component; the band's subtitle and pill per page; the Shared page drops `DashboardsGroup`
   and rebalances — the watchdog and tick breaker on the left, `Trackers` on the right — with its header comment rewritten to say why.
@@ -171,7 +171,7 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
 - Styles: the `.dash-*` rules in `client/src/styles.css` that `DashboardSheet` does not use go — `.dash-machine` (its three rules), `.dash-line`,
   `.dash-strategies`, `.dash-strategy`, `.dash-strategy input`, `.dash-strategy-text`, `.dash-threshold`, and the `.dash-strategy input` half of the shared
   `.dash-check input, .dash-strategy input` rule unless the restyled radios keep it; the sheet's `.dash-field/-text/-checks/-check/-actions/-sheet-*` stay.
-  New rules live beside them. The `.set-dot-*` rules go with the local `Dot`, and `test/daylight-contrast.test.ts`'s `.set-dot-green`/`.set-dot-amber`
+  New rules live beside them. The `.set-dot-*` rules go with the local `Dot`, and `test/guards/daylight-contrast.test.ts`'s `.set-dot-green`/`.set-dot-amber`
   entries follow.
 
 ## Invariants and docs touched
@@ -179,7 +179,7 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
 - **"Settings is two pages, the page is the scope, and the rail is the only thing that switches them."** Becomes three pages. The rule that survives: a page
   is ONE scope and no card mixes two — Dashboards and Shared are both `this machine`, which is allowed (two pages may share a scope; a page may never hold two).
   The headline changes in all three homes at once — `CLAUDE.md`, `.claude/rules/board.md` and `docs/subsystems/invariants.md` — because
-  `test/claude-rules.test.ts` holds the headlines byte-equal.
+  `test/guards/claude-rules.test.ts` holds the headlines byte-equal.
 - `.claude/DESIGN.md` §8.6: a paragraph for the Dashboards page (list + detail, the Suggest card on top, the fold), and the Shared page's balance sentence
   updated now that `Dashboards · this machine` is no longer on it.
 - `docs/subsystems/board.md` (Settings), `docs/subsystems/api.md` (the new route). The mechanism and body text that say two pages also change:
@@ -235,7 +235,7 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
 - The `Pill`'s "off" treatment, from existing tokens.
 - Where the old lead line lands (subtitle or footer).
 - Test layout, following `CLAUDE.md`'s rules on where a test sits. Expected at least: the rail tree's three items and labels; the deep link; `SETTINGS_HREF`;
-  the moved Dashboards-card assertions (today's `test/settings-dashboards.test.tsx`, plus the page-level ones in `test/settings-view.test.tsx`); the old href
-  pinned at `test/run-on.test.tsx`; the route (unreachable remote is a 200 with an error; no token in the body; `BM_AGENTS` off calls no remote and none of
+  the moved Dashboards-card assertions (today's `test/settings/settings-dashboards.test.tsx`, plus the page-level ones in `test/settings/settings-view.test.tsx`); the old href
+  pinned at `test/ui/run-on.test.tsx`; the route (unreachable remote is a 200 with an error; no token in the body; `BM_AGENTS` off calls no remote and none of
   Home's usage endpoints; an unreadable file answers Home only; an unreachable machine's usage is not read); the health predicate's four rungs; the reset
   helper (today, another day, passed, missing); selection fallback after a remove.

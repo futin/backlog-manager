@@ -699,7 +699,7 @@ export class GithubSource implements ItemSource, ItemWriter {
          release that did occur as one that did not — and the caller's retry
          would then hit `claim … is already released`, wedging the item shut.
 
-         `test/tracker-write.test.ts` pins the 404 half against an issue with no
+         `test/tracker/tracker-write.test.ts` pins the 404 half against an issue with no
          `in-progress` label, because "the result is ignored" is exactly the
          shape a green suite cannot protect: adding a plausible-looking
          `if (removed.status !== 200) return refusal` here would break every

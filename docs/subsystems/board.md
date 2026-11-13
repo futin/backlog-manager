@@ -100,7 +100,7 @@ JavaScript knows that breakpoint; everything else reads it from there or from a 
 
 `client/src/components/ui/` holds the patterns more than one surface draws. Each is one component owning one class family, declared once inside `styles.css`'s
 `/* ── ui primitives` block: page CSS lays a primitive out — grid, gap, width — and never restates its look, which is the same rule `lib/` follows for
-derivations and for the same reason. A surface that needs a variant adds a prop, never a second family. `test/design-guards.test.ts`'s guard 7 is the
+derivations and for the same reason. A surface that needs a variant adds a prop, never a second family. `test/guards/design-guards.test.ts`'s guard 7 is the
 enforcement half of that rule — it pins the family list, the block's two delimiters, and that no selector outside the block starts with a family name — and this
 table is the documentation half. The two are meant to agree; a primitive added to one belongs in the other in the same change.
 
@@ -460,7 +460,7 @@ the wire. It writes `settings/timezone.json` through `POST /api/settings/timezon
 same one red line. The value is the zone EVERY reading on the board is drawn in — a run's clocks, the Runs list's day groups and headings, the range windows,
 the tracker's and a machine's reset clocks, a card's created date for a full stamp, Archive's month groups — so a phone, a laptop and a tailnet browser read one
 clock for one run. It is read once per page load by the shell's `TimeZoneProvider` and handed out by `useTimeZone()`; `lib/time-zone.ts` is the one home of the
-zone math, and `test/time-zone-guard.test.ts` refuses a `Date`'s local getters and setters and the locale date/time formatters in every other client file.
+zone math, and `test/guards/time-zone-guard.test.ts` refuses a `Date`'s local getters and setters and the locale date/time formatters in every other client file.
 
 The `Reviewer` card (`ReviewerGroup`) closes that column, with the same `this machine` pill: which model and effort review a change, `Same for all groups`
 (one `Model` and `Effort`) or `Big and small groups` (two pairs and the changed-line limit under which a group takes the small pair). It reads and writes
@@ -655,20 +655,20 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 
 - `lib/agents.ts` — same-origin fetches against `/api`.
 - `lib/board-sort.ts` (#258) — the Board's sort pipeline, pure: `SortKey`/`SortDir`, `NATURAL_DIR`, `COMPARATORS`, `resolveSortKey`, `liveRank` and
-  `sortItems`, pinned directly by `test/board-sort.test.ts`; `BoardView` keeps the storage keys, the popover's labels and the stored state.
+  `sortItems`, pinned directly by `test/board/board-sort.test.ts`; `BoardView` keeps the storage keys, the popover's labels and the stored state.
 - `lib/orchestrate-draft.ts` and `hooks/useOrchestrateDraft.ts` (#306) — the Orchestrate sheet's derivations, pure (`orchestrateQueue`, `resolveSelection`,
   `arrangeOrder`, `moveRow`, `toggleSelected`, `withoutIds`, `uncommittedFates`, `branchOptions`, `effectiveMergeMode`, `buildStartRequest`), pinned by
-  `test/orchestrate-draft.test.ts`; and the hook that holds the sheet's run state, its three `useFetched` reads and `start`, returning the one `OrchestrateDraft`
-  the three step views render from (`test/orchestrate-steps.test.tsx` renders each alone).
+  `test/orchestrator/orchestrate-draft.test.ts`; and the hook that holds the sheet's run state, its three `useFetched` reads and `start`, returning the one `OrchestrateDraft`
+  the three step views render from (`test/orchestrator/orchestrate-steps.test.tsx` renders each alone).
 - `lib/runs-list.ts` (#284) — the Runs page's run-list derivations, pure: `mergeRuns` (the archive listing, the live poll and other machines' runs folded into
   one row list), `splitLive`, `sortByStartedAtDesc`, `groupByDay`, `queueCounts`, and since #376 the composition RunsView strings them into — `freshRunKey`
   (the archive-refresh signal), `scopeRuns` (range before project, the starting placeholders filtered by project only, the split after filtering),
-  `windowHistory` (task-16's window, History alone) and `pickSelected` — pinned directly by `test/runs-list.test.ts`; `RunsView` is the one consumer.
+  `windowHistory` (task-16's window, History alone) and `pickSelected` — pinned directly by `test/runs/runs-list.test.ts`; `RunsView` is the one consumer.
 - `lib/time-zone.ts` (#241) — the one home of wall-clock and calendar math: `zonedParts`, `startOfZonedDay`, `zonedDayStart` (a calendar date's first
   instant, DST and midnight-skipping days included), `formatZonedClock`, `browserTimeZone` and `timeZoneOptions`, every one taking the zone as an argument.
   `run-time`, `run-stats`, `run-range`, `runs-list`, `run-detail`, `run-watchdog`, `tracker`, `dashboards`, `item-age`, `item-month` and `jira` read dates
   through it and take `zone` as a required parameter, never a default — so a caller cannot fall back to the browser's zone by forgetting it.
-  `test/time-zone-guard.test.ts` reads every other client source for a `Date`'s local getters and setters and the locale date/time formatters.
+  `test/guards/time-zone-guard.test.ts` reads every other client source for a `Date`'s local getters and setters and the locale date/time formatters.
 - `hooks/TimeZoneContext.tsx` (#241) — `TimeZoneProvider`, the shell's one read of `GET /api/settings/timezone` (through `useRefreshing` with no `armed`: mount
   and window focus, never a poll — the value changes on a person's pick), and `useTimeZone()`: `{ zone, stored, browser, save, saveError }`, `zone` being
   `stored ?? browser`. A component mounted without the provider reads the browser's zone, which is what the jsdom suites rely on.

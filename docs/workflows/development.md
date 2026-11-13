@@ -127,14 +127,14 @@ inodes and broke every `Bash` call on the machine (#243).
 A suite that hands a Nest app to supertest listens once through `listenLoopback` (`test/helpers/app.ts`), never with a bare `app.listen(0)` and never by leaving
 the bind to supertest. A host-less bind lands on the IPv6 wildcard while supertest dials `127.0.0.1`, so another process holding that port on loopback answers
 instead — about one request in 1,500 on a loaded machine, which is one unreproducible failure per full run and therefore a false red at the merge gate (bug-33;
-the reasoning is in [invariants.md](../subsystems/invariants.md#a-supertest-suite-listens-once-on-127001-through-listenloopback)). `test/supertest-bind.test.ts`
+the reasoning is in [invariants.md](../subsystems/invariants.md#a-supertest-suite-listens-once-on-127001-through-listenloopback)). `test/guards/supertest-bind.test.ts`
 fails the suite if a new one forgets.
 
 A jsdom suite's fixture dates are relative, never literal: `daysAgoDate(2)` / `daysAgoStamp(0)` from `test/helpers/dates.ts`, both read at call time. An
 absolute `created` is an expiry date rather than a constant — the card renders until the real clock passes `created + staleDays`, then `leavesBoard` moves the
 item to the Archive and the query that wanted it throws, on a tree nobody touched (bug-44; the reasoning is in
-[invariants.md](../subsystems/invariants.md#a-fixture-date-is-relative-to-the-clock-the-assertion-runs-under)). `test/fixture-clock.test.ts` reads every
-`test/*.test.tsx` and fails on a literal, because a new one is green for thirty days and no behavioural test can be the guard.
+[invariants.md](../subsystems/invariants.md#a-fixture-date-is-relative-to-the-clock-the-assertion-runs-under)). `test/guards/fixture-clock.test.ts` reads every
+`test/**/*.test.tsx` and fails on a literal, because a new one is green for thirty days and no behavioural test can be the guard.
 
 A suite that needs a run file on disk writes it through `writeRunFile(orchHome, project, run)` (`test/helpers/store.ts`), which puts `run.json` where
 `orchestrate.mjs`'s own `runFilePath()` does and writes a string verbatim for the corrupt-file cases; `runStateDir` is the same directory for a suite that
@@ -168,10 +168,10 @@ derives each item's `lastCommit` through `git log` and **degrades silently** to 
 fix. The image installs `git` and adds `safe.directory` to _system_ config — `safe.directory` is honoured only from protected configuration, so neither `-c` nor
 `GIT_CONFIG_*` would work.
 
-**A new route 404s in dev — or worse, doesn't.** The Vite proxy has exactly one entry, `/api`, asserted by `test/vite-proxy.test.ts`. A route outside that
+**A new route 404s in dev — or worse, doesn't.** The Vite proxy has exactly one entry, `/api`, asserted by `test/guards/vite-proxy.test.ts`. A route outside that
 prefix is answered by Vite's SPA fallback with `index.html` rather than a 404, which reads as a broken response body instead of a missing route.
 
-**`test/csp.test.ts` goes red after a theme change.** The served build carries a CSP whose `script-src` pins the pre-paint theme script's sha256
+**`test/server/csp.test.ts` goes red after a theme change.** The served build carries a CSP whose `script-src` pins the pre-paint theme script's sha256
 ([`server/src/security.ts`](../../server/src/security.ts)). Editing that script means updating `THEME_SCRIPT_SHA256`; dev serves no CSP, so this only ever shows
 up in the build path.
 

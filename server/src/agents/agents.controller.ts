@@ -10,7 +10,7 @@ import { isAgentAction } from '../../../shared/agent';
 import type { AgentBranchesPayload, AgentDispatchRequest, AgentDispatchResult, AgentPlan, ItemDispatchResult, AgentsStatus, MergeCheckResult, PauseResult, StopResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 
 /**
- * Under /api like every other controller — test/vite-proxy.test.ts asserts it
+ * Under /api like every other controller — test/guards/vite-proxy.test.ts asserts it
  * from Nest's own route metadata, because a route outside /api would not 404
  * in dev, it would be answered by Vite's SPA fallback with index.html.
  */
@@ -407,7 +407,7 @@ export class AgentsController {
    * unawaited tick, read the status back — is `WatchdogService.configure`
    * (#388), which says why each step is there. It used to be sequenced here,
    * a controller doing the watchdog's own domain work; the guard in
-   * `test/server-layering.test.ts` keeps it from coming back. `@HttpCode(200)`
+   * `test/guards/server-layering.test.ts` keeps it from coming back. `@HttpCode(200)`
    * overrides Nest's POST default of 201: this route redraws an existing
    * setting rather than creating a resource, the same distinction a PUT would
    * carry if this app used one.
@@ -423,7 +423,7 @@ export class AgentsController {
    * reach, would mean a malformed request (a bug in a future client, or a
    * probe) silently succeeds with no config change and no error — the
    * caller would have no way to learn its request never took effect. See
-   * this route's own test suite (`test/watchdog-routes.test.ts`) for why an
+   * this route's own test suite (`test/watchdog/watchdog-routes.test.ts`) for why an
    * HTTP-level test cannot actually observe this branch for a bare string
    * or `null` body: Express's own strict-mode JSON parser rejects those
    * before Nest's routing ever sees them, with a different error shape —

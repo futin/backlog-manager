@@ -34,7 +34,7 @@ import type { OrchestratorRun, RunQueueItem, RunWatchdog } from '../../../shared
  * says the sweeper will not spawn one itself, because the watchdog may be
  * about to resume that run on its own and a click plus a sweep both driving
  * `--resume` into one `run.json` is the race that gate exists to prevent
- * (bug-19's hazard; `test/watchdog-coupling.test.tsx` drives this head from
+ * (bug-19's hazard; `test/watchdog/watchdog-coupling.test.tsx` drives this head from
  * one table of hand-checked verdicts). A `paused` run was never a watchdog
  * subject — the sweeper only walks `running` runs — so there is no automation
  * to coordinate with and no equivalent condition to check. Do NOT "align" the

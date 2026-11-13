@@ -55,12 +55,12 @@ The Jira spec §3 applies in full (uppercase, 11 px floor, tint form, primitives
   menu-less, as the Jira spec §4.1 defines it — each menu is its own `Popover` composer — so the PR split Merge's menu is the ninth and the deck card's split
   Open menu the tenth.
   The plan states the final number and moves it in the same three places the Jira spec names (`.claude/rules/board.md`, `useDialogEscape`'s comment,
-  `test/dialog-count-docs.test.ts`). The DIALOG count does not move: nothing here adds a `Modal`, `FormSheet` or `Confirm`.
+  `test/guards/dialog-count-docs.test.ts`). The DIALOG count does not move: nothing here adds a `Modal`, `FormSheet` or `Confirm`.
 - **The server never writes git.** The worktree list's `Remove` keeps copying `removeCommand` and running nothing.
-- **Source guards over shared hooks.** `test/run-pulse.test.ts` pins every `useOrchestratorRuns()` caller and bars `App` from calling it; the shell has
+- **Source guards over shared hooks.** `test/runs/run-pulse.test.ts` pins every `useOrchestratorRuns()` caller and bars `App` from calling it; the shell has
   only a boolean `working` today. Any reader §4.9's counts need moves that guard in the same commit with the reason. The same check
   (`grep -l <symbol> test/`) runs for every hook or poller a new view reads.
-- **Two documented rules this spec overrides** (the user adopted both mocks; §9 lists them): DESIGN §8.6 / `board.md` "the rail is the only switch" (pinned by `test/settings-view.test.tsx`) — the
+- **Two documented rules this spec overrides** (the user adopted both mocks; §9 lists them): DESIGN §8.6 / `board.md` "the rail is the only switch" (pinned by `test/settings/settings-view.test.tsx`) — the
   Settings page gains an in-page `Local | Shared | Dashboards` switch; DESIGN §8.0 / §8.9.4 "a reading with no links and no buttons" — the status popover
   gains `Sync now`, per-row sync icons and the setup link (the user asked for the sync button on the canvas).
 - **The pollers stay armed only while something is connected**, and the tracker, Jira and PR cache ages stay rendered values. Sync now (§5) runs one sweep
@@ -96,7 +96,7 @@ The Jira spec §3 applies in full (uppercase, 11 px floor, tint form, primitives
 The table keeps today's columns (Session, Key, Summary, Type, Status, Assignee, Sprint, Updated) and gains Priority after Status, as the mock draws. Each
 cell uses the card's marks from the Jira spec §4.2: type tile in the Type cell, status dot + raw status word, the three-tone priority pill (`Not
 prioritised` grey), the 22 px initials disc. The Session cell (filled today) takes the session's state word and tone: today's
-`STATE_LABEL` words (`shared/jira-sessions.ts`, pinned by `test/jira-sessions-state.test.ts`) unchanged, plus the age (`Working · 12m`, `Waiting for plan
+`STATE_LABEL` words (`shared/jira-sessions.ts`, pinned by `test/jira/jira-sessions-state.test.ts`) unchanged, plus the age (`Working · 12m`, `Waiting for plan
 approval · 3m`, `Ended · 2h`, `—`). No label is renamed; `Needs you · plan` is mock wording. The split Run shows on row hover and on keyboard focus
 within the row only, so a page of ink buttons never stacks up; it is always in the DOM and tabbable. The summary is one line with an ellipsis and the full
 text as its title. The band's `FilterBar` takes the §4.1 restyle; the band's sub-line keeps `JiraBandSub`.
@@ -203,7 +203,7 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
   (`server/src/tracker/pulls.service.ts`'s header comment, `.claude/rules/tracker.md`'s PR-cache bullet); both move in the same commit, with this section
   as the reason. The count is the Inbox's `Needs you` number, amber; 0 hides the pill.
 - **Runs**: one `useOrchestratorRuns()` poll per tab moves up into a shell-level context, and every view that calls the hook today (Board,
-  Archive, PRs, Runs — `test/run-pulse.test.ts`'s `VIEWS`) reads the context instead, so the shell's count and every view share one 5 s request, never
+  Archive, PRs, Runs — `test/runs/run-pulse.test.ts`'s `VIEWS`) reads the context instead, so the shell's count and every view share one 5 s request, never
   two. That keeps the guard's purpose (no second poller for the shell) and changes its shape: the caller list becomes the one provider, and the `App` bar
   becomes "only the provider calls the hook". The provider also derives `working` for the wordmark cursor, so the four views' `useReportWorking`
   calls and the guard's "each view reports" case (`run-pulse.test.ts`) leave in the same commit. Both move in the same commit, with this section as the reason. The count is
@@ -277,9 +277,9 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
   `/api/prs/*` call assertions keep their payloads.
 - **`FilterBar` restyle**: existing FilterBar tests keep passing (Files, Archive, Jira band); the popover shows chip groups, `Showing N of M`
   and `Clear`, which resets every group; Escape closes and returns focus to the chip. Sessions: the window, Repository, Run and `All tickets` groups drive
-  the existing state, and `Show 30 days` in the empty state sets the window; the Sessions cases in `test/jira-list.test.tsx` that click the `All tickets` chip (:271, :361, :420) now open the Filter popover and pick the chip
+  the existing state, and `Show 30 days` in the empty state sets the window; the Sessions cases in `test/jira/jira-list.test.tsx` that click the `All tickets` chip (:271, :361, :420) now open the Filter popover and pick the chip
   (no existing case picks from the selects; the window is set programmatically).
-  The Session cell and State column assert today's `STATE_LABEL` words with the age; `test/jira-sessions-state.test.ts` is unchanged.
+  The Session cell and State column assert today's `STATE_LABEL` words with the age; `test/jira/jira-sessions-state.test.ts` is unchanged.
 - **Segmented counts**: the count renders beside each label and is part of the option's accessible name.
 - **Stepper**: − and + change the value by one step, clamp at min and max (the button at a bound is disabled), typing still works, and the existing
   NumberField tests keep passing against the new look.
@@ -287,13 +287,13 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
   names time, kind, id and outcome; a halted project draws the red pill and Reset; no row carries the old fill class.
 - **Watchdog**: the three policy figures render in their own row under the status line.
 - **Rail**: every count is the same pill class; the Jira pill is a button that opens Sessions filtered to needs-you, as today; the current page row carries `aria-current="page"`;
-  the guard in `test/run-pulse.test.ts` still lists the same callers (or moves with a stated reason).
+  the guard in `test/runs/run-pulse.test.ts` still lists the same callers (or moves with a stated reason).
 - **Status pill**: green, amber and red by sweep age and connection; the popover's `Sync now` posts once, disables while running, and shows the new age.
 - **Sweep routes** (jest, server): an `off` repo is skipped; 409 when the poller is not armed; a concurrent second call joins the first sweep (one outbound call); a call inside the
   floor returns the cached result without calling out; an unknown `repo` is a 404, a malformed body a 400 (the Jira route reads no body, so no `boardId` case); Jira inside a 429 window answers 429 with the
   stored `retryAt` and makes no call; GitHub with an asleep `repo` answers 429 with the later of `sleepUntil` / `secondaryUntil`, and without `repo` skips
   asleep repos with a 200; a 401 answers 200 with the cache unchanged; a cross-origin POST is refused by the guard.
-- **Settings**: `test/settings-view.test.tsx`'s "no in-page switch" assertions (and the comment that states that rule) invert to the
+- **Settings**: `test/settings/settings-view.test.tsx`'s "no in-page switch" assertions (and the comment that states that rule) invert to the
   `Local | Shared | Dashboards` switch, with §3's override as the reason. The info toggle has `aria-expanded` and reveals the long text; the theme cards set the theme; the merge-mode cards set
   `orchestrateDefaultMergeMode`; every card has its scope pill.
 - **Dashboards**: ↑ on the first row and ↓ on the last are disabled; a move reorders the list and persists; a disallowed model renders struck through with

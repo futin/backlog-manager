@@ -169,10 +169,10 @@ the foundation project 2 hangs the review loop on.
 
 - This is a **fourth cache whose age is a rendered value** (the board shows `polled 2m`), kept honest the same way: in memory, lost on restart, `polledAt`
   per GitLab project. The headline "The tracker, Jira and pull-request caches are the three caches…" lives in three places that must change together:
-  CLAUDE.md, its rule-file copy in `.claude/rules/tracker.md` (pinned byte-equal to CLAUDE.md's by `test/claude-rules.test.ts`), and the heading of
+  CLAUDE.md, its rule-file copy in `.claude/rules/tracker.md` (pinned byte-equal to CLAUDE.md's by `test/guards/claude-rules.test.ts`), and the heading of
   `docs/subsystems/invariants.md` — whose heading is also the anchor every `Why:` link uses, so the anchor rename is followed in every link to it. The
   GitLab cache's own mechanism rules go in a new rule file, `.claude/rules/gitlab.md` (`paths:` `server/src/gitlab/**`), added to CLAUDE.md's rule-file
-  table. `test/claude-rules.test.ts` allows one rule-file home per anchor (`.claude/rules/tests.md`), and the four-caches anchor's home stays
+  table. `test/guards/claude-rules.test.ts` allows one rule-file home per anchor (`.claude/rules/tests.md`), and the four-caches anchor's home stays
   `tracker.md`; so each `gitlab.md` bullet cites its own anchor — a new `invariants.md` section, **"The GitLab token never leaves the server, never
   follows a redirect, and the poller is armed only while a mapped repo is on the site"** — or stays unanchored and under 80 words. CLAUDE.md gets that new
   section's headline in its Invariants list, the GitHub token's headline beside it.

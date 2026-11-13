@@ -30,12 +30,12 @@ are GitHub issues rather than files: there the skills still decide every write, 
 
 `.claude/rules/` sits beside that table rather than in it: eleven path-scoped files that a session loads automatically when it reads a file under their `paths:`
 glob, each the one home of the rules scoped to its paths, mechanism included — CLAUDE.md keeps only the cross-cutting rules' headlines and a table of which file
-covers which paths, `subsystems/invariants.md` the reasoning. They are guarded by `test/claude-rules.test.ts` rather than by `/docs-sync`, because what can rot
+covers which paths, `subsystems/invariants.md` the reasoning. They are guarded by `test/guards/claude-rules.test.ts` rather than by `/docs-sync`, because what can rot
 in them is mechanical: a dead anchor, a glob that matches nothing, a CLAUDE.md headline with no byte-equal copy in a rule file, a rule homed in two files, a
 table row that no longer matches its file's `paths:`.
 
 Deliberately not tracked, and each for a stated reason in [`.docs-sync.yml`](.docs-sync.yml): `backlog/` (the store's own items and README), `docs/superpowers/`
-(specs, plans, decision logs), `audits/` (dated findings), and `skills/` + `agents/` — those are the product, not documentation about it.
+(specs, plans, decision logs), `docs/audits/` (dated findings), and `skills/` + `agents/` — those are the product, not documentation about it.
 
 ## Architecture
 
@@ -226,7 +226,7 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge, and `backlog-execute` before a `pr`-mode push.
 - `.claude/rules/` — eleven path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
   mechanism text for the rules scoped to its paths; CLAUDE.md keeps the cross-cutting rules' headlines, `docs/subsystems/invariants.md` the reasoning. Guarded
-  by `test/claude-rules.test.ts`: bullets only, each anchored at most once, one home per linked rule, CLAUDE.md's headlines byte-equal with their rule-file
+  by `test/guards/claude-rules.test.ts`: bullets only, each anchored at most once, one home per linked rule, CLAUDE.md's headlines byte-equal with their rule-file
   copies.
 - `backlog/` — this repo's own backlog, self-registered like any project. Tracker-backed: it holds the `source.json` marker, and its items are GitHub issues.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD, → [docs/workflows/publishing.md](workflows/publishing.md)), `test-all.mjs`

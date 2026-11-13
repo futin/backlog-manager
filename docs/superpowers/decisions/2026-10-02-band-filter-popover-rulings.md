@@ -1,15 +1,15 @@
 # Band filter track and shared Popover — execution rulings
 
 Spec: [2026-10-01-band-filter-popover-design.md](../specs/2026-10-01-band-filter-popover-design.md). Plan:
-[2026-10-02-band-filter-popover.md](../plans/2026-10-02-band-filter-popover.md). Final whole-branch review (Fable, `cb98630..7fca6c0`, ready to merge, 0
-Critical / 0 Important / 13 Minor): [2026-10-02-band-filter-popover-final-review.md](../reviews/2026-10-02-band-filter-popover-final-review.md).
+[2026-10-02-band-filter-popover.md](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-10-02-band-filter-popover.md). Final whole-branch review (Fable, `cb98630..7fca6c0`, ready to merge, 0
+Critical / 0 Important / 13 Minor): [2026-10-02-band-filter-popover-final-review.md](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/reviews/2026-10-02-band-filter-popover-final-review.md).
 
 Rulings made during subagent-driven execution, each as what was decided, why, and what it costs if wrong. The per-task ledger, reports and reviews lived
 under the git-ignored `.superpowers/` and are not kept.
 
 ## Baseline
 
-- **Proceed with one red case on the base commit.** `test/tracker-write.test.ts` › "body › patches after a claim, a heartbeat, its late stamp bump and a
+- **Proceed with one red case on the base commit.** `test/tracker/tracker-write.test.ts` › "body › patches after a claim, a heartbeat, its late stamp bump and a
   poll, on the stamp read after the claim" fails deterministically on `cb98630` (expected `2026-09-30T12:00:00Z`, received wall-clock time). It is a
   server tracker-write test no task touches, so every task was judged on "no NEW red". Cost if wrong: a real regression could have hidden behind that
   one case name. Filed as a separate task.
@@ -18,7 +18,7 @@ under the git-ignored `.superpowers/` and are not kept.
 
 - **`resolveSortKey` instead of `?? COMPARATORS.created` in `sortItems` (Task 4).** The stored sort key is checked once, and the sort, the track label,
   the ticked row and the default direction all read the checked key. The plan's form keeps the order right but prints `Sort: newest ()` for a stale key,
-  `Sort: 42 ()` for a number, and throws on render for a stored object. Tests in `test/board.test.tsx` were proven red against the plan's form. The spec's
+  `Sort: 42 ()` for a number, and throws on render for a stored object. Tests in `test/board/board.test.tsx` were proven red against the plan's form. The spec's
   pointer (the status-unvalidated comment) was retargeted to `resolveSortKey`. Cost if wrong: one helper to fold back into `sortItems`.
 - **`white-space: nowrap` on the Status switch buttons (Task 3).** Measured on the real stylesheet: the panel's content box is 266 px, and "In progress"
   wrapped inside the 28 px pill without it. Pinned by a stylesheet test; the browser check found no overflow at 320 px either. Cost if wrong: one

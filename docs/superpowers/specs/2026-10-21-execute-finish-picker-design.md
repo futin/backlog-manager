@@ -125,7 +125,7 @@ error naming both, rather than picking one.
   validated field the way `--merge-mode` is, and an unknown or doubled `--finish` stops execute rather than falling back to either mode.
 - The exit-5 headline — "**`backlog.mjs` in a tracker project and `jira.mjs` always need the stack up, and say so with exit `5` — save `backlog.mjs config`
   and `jira.mjs worktree`.**" — names the verb being deleted. Rewrite it to drop `backlog.mjs config` **in both homes at once** (CLAUDE.md:127 and
-  `.claude/rules/skills.md:19`, which `test/claude-rules.test.ts` holds byte-equal), drop the two `config` sentences inside that bullet (skills.md:23–24,
+  `.claude/rules/skills.md:19`, which `test/guards/claude-rules.test.ts` holds byte-equal), drop the two `config` sentences inside that bullet (skills.md:23–24,
   including "routes every command but `config`"), and rewrite `invariants.md` ~3972–3978 under the same anchor (~3942), plus its ~3944 "every command but `config`". The exit-5 rule itself stays.
 - The prompt-composition invariant ("The orchestrate and Jira spawn prompts are composed server-side") gains execute's finish flag as a third
   server-composed piece; its reasoning entry should say so.
@@ -143,12 +143,12 @@ error naming both, rather than picking one.
   body containing `--finish` or `--base`), that an execute plan's prompt carries no closing clause, and that the spawned prompt ends with `finishClause` for
   each mode; for the client, the seed-from-Settings, the base select appearing only under PR, the read-only clause line tracking both selects, and that
   `finish` is sent on every execute launch and never on groom or capture.
-- Notes that go stale: `AgentPlan.prompt`'s doc comment (`shared/types.ts`, "The composed default. The sheet may edit it…") and `test/agents-prompt.test.ts`'s
+- Notes that go stale: `AgentPlan.prompt`'s doc comment (`shared/types.ts`, "The composed default. The sheet may edit it…") and `test/agents/agents-prompt.test.ts`'s
   per-action closing-rule assertion both describe the closing rule as part of every plan; execute's no longer is.
 - If `<base>`'s fallback becomes a `backlog.mjs` helper, it is a local git read in both modes — no stack, never exit `5` — or the exit-5 headline needs a new
   exception in place of the one this removes.
 - `pr-mode.md` §1 quotes `finishClause`'s pr sentence exactly as it ships (the skill text and the constant drifted once already, #326 review 2). The existing
-  guard, `test/agents-shared.test.ts` ~836–840, asserts SKILL.md `toContain(PR_FINISH_RULE)`; re-aim it at whichever file quotes the sentence, asserting it
+  guard, `test/agents/agents-shared.test.ts` ~836–840, asserts SKILL.md `toContain(PR_FINISH_RULE)`; re-aim it at whichever file quotes the sentence, asserting it
   contains `finishClause('pr', '<base>')` after whitespace collapse — the quote spells the base as the literal placeholder `<base>`.
 - The execute sheet (body editable, clause read-only below) and the groom/capture sheets (closing rule inside the editable text) look different on purpose.
 - The rule that item dispatch's prompt is "taken outright" (`.claude/rules/dispatch-watchdog.md` lines 16 and 54, reasoning at `invariants.md` ~1456) gains

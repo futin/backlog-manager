@@ -75,7 +75,7 @@ export function projectsIn(projects: readonly ProjectSummary[], source: SourceSe
 
 /**
  * The URN prefix a GitHub issue's row carries in place of a file path — `gh:<owner>/<name>#<n>`, minted by the server's `issueUrn`
- * (`server/src/tracker/map-issue.ts`, `URN_PREFIX`). A hand copy because the client imports nothing from `server/`; `test/sources-lib.test.ts` builds its
+ * (`server/src/tracker/map-issue.ts`, `URN_PREFIX`). A hand copy because the client imports nothing from `server/`; `test/tracker/sources-lib.test.ts` builds its
  * URN through the server's own `issueUrn`, so a change to the prefix there turns that suite red instead of quietly sending every GitHub warning to Files.
  */
 const ISSUE_URN_PREFIX = 'gh:';

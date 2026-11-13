@@ -26,7 +26,7 @@ import type { ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueu
  * rule they apply is written down once, in RunDetail.tsx's file header.
  *
  * Imports nothing from `components/` and nothing from React — asserted by
- * `test/run-detail-model.test.ts` — which is why `ACTIVE_RUN_STAGES` and
+ * `test/runs/run-detail-model.test.ts` — which is why `ACTIVE_RUN_STAGES` and
  * `inFlightItemId` moved into `lib/` alongside this file.
  */
 

@@ -16,7 +16,7 @@ import type { ItemsIndex, ProjectSummary } from '../../../shared/types';
  *
  * Not imported from the server's constant: this module is bundled into the
  * browser and `poller.service.ts` imports Nest. The number is small, the two
- * are pinned together by `test/tracker-board.test.tsx`.
+ * are pinned together by `test/tracker/tracker-board.test.tsx`.
  */
 export const BOARD_TRACKER_POLL_MS = 15_000;
 

@@ -11,7 +11,7 @@ import type { BacklogItem, ExecuteFinish, FinishFlags } from '../../../shared/ty
  * expands a `/skill` in a prompt piped on stdin is unverified against this
  * CLI, and the skills' own descriptions are written to trigger on exactly this
  * phrasing ("groom the backlog", "use the backlog-execute skill"), so the
- * documented path is also the safe one. test/agents-prompt.test.ts asserts no
+ * documented path is also the safe one. test/agents/agents-prompt.test.ts asserts no
  * slash command ever appears.
  *
  * Lifecycle bookkeeping is not mentioned: backlog-execute runs `backlog.mjs
@@ -133,7 +133,7 @@ function instruction(item: BacklogItem, action: AgentAction): string {
  * project name — indistinguishable from a terminal-started session, which is
  * the entire affordance this function exists to buy.
  *
- * test/agents-prompt.test.ts asserts the composed name against a copy of that
+ * test/agents/agents-prompt.test.ts asserts the composed name against a copy of that
  * regex, so the cross-app contract is pinned rather than assumed. It is a
  * copy on purpose: importing from a sibling repo would make this repo's tests
  * depend on a checkout of another one.
@@ -159,7 +159,7 @@ export function sessionName(item: BacklogItem): string {
  * on 100% of dispatches without a single request actually failing. Space-
  * separated for that reason, not the more obvious `orchestrate:<project>`.
  * Sliced to the same 60-character cap `sessionName` uses, for the same
- * reason: over the cap is the same silent drop. Exported for test/agents-prompt.test.ts, which pins the cap beside `resumeSessionName`'s.
+ * reason: over the cap is the same silent drop. Exported for test/agents/agents-prompt.test.ts, which pins the cap beside `resumeSessionName`'s.
  */
 export function orchestrateSessionName(projectPath: string): string {
   return `orchestrate ${basename(projectPath)}`.slice(0, 60);

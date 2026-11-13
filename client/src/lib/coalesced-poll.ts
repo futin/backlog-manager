@@ -17,7 +17,7 @@
  * The timer re-arms from the LAST request of a chain — the follow-up if there is one — never from the one it queued behind, so a focus storm cannot make
  * the poll tick sooner than `intervalMs` after the answer the screen is actually showing.
  *
- * Pure of React on purpose: it is tested directly (`test/coalesced-poll.test.ts`) with fake timers and a promise the test resolves by hand.
+ * Pure of React on purpose: it is tested directly (`test/board/coalesced-poll.test.ts`) with fake timers and a promise the test resolves by hand.
  */
 export interface CoalescedPoll<T> {
   /**

@@ -209,7 +209,7 @@ separate gate beside it.
   `new` that groom uses. Every site that states the route count or the label count moves with it — including `CLAUDE.md`'s Layout line that still says
   "nine guarded write routes" (nine `items-write.controller.ts` routes, `abort` the tenth write), the "ten" counts in CLAUDE.md and the rules file,
   `docs/subsystems/invariants.md`'s already-stale "The nine `/api/items/*` writes", "a closed ten" in `skills/backlog/SKILL.md`, and
-  `test/tracker-labels.test.ts`'s `toHaveLength(10)` with its `describe('the ten labels')`.
+  `test/tracker/tracker-labels.test.ts`'s `toHaveLength(10)` with its `describe('the ten labels')`.
 
 **Readers, both sources:** the item mapping exposes a `planReview` flag (files: parsed from frontmatter; tracker: beside `queued` / `inReview` in
 `map-issue.ts`); the orchestrator's queue excludes such items; execute's refusal gate refuses one ("this plan awaits review"); the board's per-item dispatch

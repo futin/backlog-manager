@@ -1,0 +1,1399 @@
+/**
+ * @jest-environment jsdom
+ */
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import '@testing-library/jest-dom';
+
+import { JiraLaunchSheet, PREVIEW_SETTLE_MS } from '../../client/src/components/jira/JiraLaunchSheet';
+import JiraView from '../../client/src/components/jira/JiraView';
+import { GitlabContext } from '../../client/src/hooks/GitlabContext';
+import { JiraContext } from '../../client/src/hooks/JiraContext';
+import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
+import { setJiraPage } from '../../client/src/hooks/useJiraPage';
+import { SettingsProvider } from '../../client/src/hooks/useSettings';
+import { daysAgoStamp } from '../helpers/dates';
+import type {
+  AgentsStatus,
+  GitlabMr,
+  JiraBoardStatus,
+  GitlabPayload,
+  JiraAction,
+  JiraDispatchResult,
+  JiraIssue,
+  JiraIssueDetail,
+  JiraRefBranch,
+  JiraRepoRefs,
+  JiraStatusPayload,
+  ReviewHalf
+} from '../../shared/types';
+
+/*
+  Jira › the launch sheet (Jira phase 5, Task 9; spec §7, §8; DESIGN.md §8.7 Sheet and §8.9) — the real sheet over a mocked `fetch`, rendered directly:
+  the sheet is not mounted anywhere yet (Task 10 hosts it in `JiraBoardView`). What it owns: the action and the preview that follows it, the repository,
+  the two Jira writes Start may ask for, the launch controls, the gate that decides whether Start is drawn at all, and the two exits — Start and Copy
+  prompt.
+*/
+
+const ADA = { accountId: 'acc-ada', name: 'Ada Lovelace' };
+const SKILL = { id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' };
+
+const CARD: JiraIssue = {
+  key: 'PAY-131',
+  id: '10131',
+  url: 'https://acme.atlassian.net/browse/PAY-131',
+  summary: 'Refund partial captures',
+  project: { key: 'PAY', name: 'Payments' },
+  type: { name: 'Story', level: 0, subtask: false },
+  status: { name: 'To Do', category: 'new' },
+  priority: 'High',
+  assignee: null,
+  reporter: 'Grace Hopper',
+  parent: null,
+  subtasks: 0,
+  labels: [],
+  sprint: null,
+  created: daysAgoStamp(10),
+  updated: daysAgoStamp(1),
+  resolved: null
+};
+
+const TRANSITIONS: JiraIssueDetail['transitions'] = [
+  { id: '31', name: 'Start', to: { name: 'In Progress', category: 'indeterminate' } },
+  { id: '41', name: 'Finish', to: { name: 'Done', category: 'done' } }
+];
+
+function detail(over: Partial<JiraIssueDetail> = {}): JiraIssueDetail {
+  return { ...CARD, description: '', children: [], transitions: TRANSITIONS, boards: [], session: null, ...over };
+}
+
+function jiraStatus(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
+  return {
+    configured: true,
+    configUnreadable: null,
+    site: 'acme.atlassian.net',
+    me: ADA,
+    tokenKind: 'classic',
+    access: 'ok',
+    detail: null,
+    boards: [],
+    repos: { PAY: ['/Users/ada/pay'] },
+    repoDefaults: {},
+    projects: [{ key: 'PAY', name: 'Payments' }],
+    skills: [SKILL],
+    calls: { sweep: 0, last429At: null },
+    live: {},
+    armed: true,
+    home: '/Users/ada',
+    ...over
+  };
+}
+
+function agents(over: Partial<AgentsStatus> = {}): AgentsStatus {
+  return {
+    enabled: true,
+    reachable: true,
+    remoteAnswer: true,
+    spawnAvailable: true,
+    spawnMaxPermission: 'acceptEdits',
+    projectPaths: ['/Users/ada/pay', '/Users/ada/pay-web'],
+    ...over
+  };
+}
+
+/** What a request answers. `prompt` is the text/plain preview, or a refusal; `dispatch` the POST. Each can be replaced per case. */
+interface Server {
+  agents: AgentsStatus;
+  detail: JiraIssueDetail | { status: number; error: string };
+  prompt: (url: URL) => { status: number; body: string };
+  /** `GET /api/jira/refs`, per repository: refs, a refusal, or `'pending'` for a read that never answers (a slow git read held open). */
+  refs: (repo: string) => { status: number; body: unknown } | 'pending';
+  dispatch: { status: number; body: unknown };
+  /** When set, the detail read answers only once this settles — a case's way to act before the detail lands. */
+  detailGate?: Promise<void>;
+}
+
+let server: Server;
+let calls: { url: string; init?: RequestInit }[];
+
+function refBranch(name: string, over: Partial<JiraRefBranch> = {}): JiraRefBranch {
+  return { name, local: true, remote: true, sync: 'same', committedAt: daysAgoStamp(3), worktree: null, ticket: false, ...over };
+}
+
+/** A readable repository: `develop` checked out in the mapped checkout and the default base, never fetched, plus whatever `branches` a case adds. */
+function refsOf(repo: string, branches: JiraRefBranch[] = [], over: Partial<{ fetchedAt: string | null; defaultBase: string | null }> = {}): JiraRepoRefs {
+  return {
+    repo,
+    available: true,
+    fetchedAt: null,
+    mainBranch: 'develop',
+    defaultBase: 'develop',
+    branches: [...branches, refBranch('develop', { worktree: repo })],
+    ...over
+  };
+}
+
+const okPrompt = (url: URL): { status: number; body: string } => ({
+  status: 200,
+  body: `prompt for ${url.searchParams.get('action')} in ${url.searchParams.get('repo')}`
+});
+
+function res(status: number, body: unknown, text?: string): Response {
+  // A plain object, not `new Response`: jsdom has none (the other jira suites' mocks are this shape too).
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(text ?? (typeof body === 'string' ? body : JSON.stringify(body)))
+  } as Response;
+}
+
+const realFetch = global.fetch;
+
+beforeEach(() => {
+  localStorage.clear();
+  calls = [];
+  server = {
+    agents: agents(),
+    detail: detail(),
+    prompt: okPrompt,
+    refs: (repo) => ({ status: 200, body: refsOf(repo) }),
+    dispatch: {
+      status: 200,
+      body: {
+        sessionId: 'sess-9',
+        assigned: false,
+        transitioned: null,
+        session: { name: 'jira PAY-131', startedAt: daysAgoStamp(0), repo: '/Users/ada/pay' }
+      } satisfies JiraDispatchResult
+    }
+  };
+  global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const raw = String(input);
+    calls.push({ url: raw, init });
+    const url = new URL(raw, 'http://x');
+    if (url.pathname === '/api/agents/status') return Promise.resolve(res(200, server.agents));
+    if (url.pathname === '/api/jira/prompt') {
+      const p = server.prompt(url);
+      return Promise.resolve(p.status === 200 ? res(200, null, p.body) : res(p.status, { error: p.body }));
+    }
+    if (url.pathname === '/api/jira/refs') {
+      const r = server.refs(url.searchParams.get('repo') ?? '');
+      if (r === 'pending') return new Promise<Response>(() => undefined);
+      return Promise.resolve(r.status === 200 ? res(200, r.body) : res(r.status, { error: r.body }));
+    }
+    if (url.pathname.startsWith('/api/jira/issue/')) {
+      const d = server.detail;
+      const answer = 'error' in d ? res(d.status, { error: d.error }) : res(200, d);
+      return server.detailGate ? server.detailGate.then(() => answer) : Promise.resolve(answer);
+    }
+    if (url.pathname === '/api/agents/dispatch-jira') return Promise.resolve(res(server.dispatch.status, server.dispatch.body));
+    return Promise.reject(new Error(`unexpected ${raw}`));
+  }) as jest.Mock;
+  setClipboard(undefined);
+});
+
+afterEach(() => {
+  global.fetch = realFetch;
+  jest.useRealTimers();
+});
+
+function setClipboard(value: { writeText: jest.Mock } | undefined): void {
+  Object.defineProperty(navigator, 'clipboard', { value, configurable: true });
+}
+
+let onClose: jest.Mock;
+let onStarted: jest.Mock;
+let onWrote: jest.Mock;
+
+type ReviewProp = { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] };
+
+function mount(opts: { initialAction?: JiraAction; status?: Partial<JiraStatusPayload>; issue?: JiraIssue; review?: ReviewProp } = {}) {
+  onClose = jest.fn();
+  onStarted = jest.fn();
+  onWrote = jest.fn();
+  const tree = (status?: Partial<JiraStatusPayload>) => (
+    <SettingsProvider>
+      <JiraContext.Provider value={{ data: jiraStatus(status), loading: false, error: false, reload: jest.fn() }}>
+        <JiraLaunchSheet issue={opts.issue ?? CARD} initialAction={opts.initialAction ?? 'execute'} review={opts.review} onClose={onClose} onStarted={onStarted} onWrote={onWrote} />
+      </JiraContext.Provider>
+    </SettingsProvider>
+  );
+  const view = render(tree(opts.status));
+  /** The shell's status landing after the sheet is open — the same sheet, a new context value. */
+  return { ...view, withStatus: (status: Partial<JiraStatusPayload>) => view.rerender(tree(status)) };
+}
+
+const dialog = (): HTMLElement => screen.getByRole('dialog');
+const promptBox = (): HTMLTextAreaElement => within(dialog()).getByLabelText('Prompt') as HTMLTextAreaElement;
+const startButton = (): HTMLElement => within(dialog()).getByRole('button', { name: 'Start session' });
+const tile = (name: string): HTMLElement => within(within(dialog()).getByRole('group', { name: 'Action' })).getByRole('button', { name });
+const repoPick = (name: string): HTMLElement => within(within(dialog()).getByRole('group', { name: 'Repository' })).getByRole('button', { name });
+const copyButton = (): HTMLElement => within(dialog()).getByRole('button', { name: /^Copy prompt$|^Copied$/ });
+const promptReads = (): URL[] => calls.filter((c) => c.url.startsWith('/api/jira/prompt')).map((c) => new URL(c.url, 'http://x'));
+const dispatchBody = (): Record<string, unknown> => JSON.parse(String(calls.filter((c) => c.url === '/api/agents/dispatch-jira')[0].init?.body));
+
+/** Mounted, the status answered and the preview landed — what nearly every case starts from. */
+async function ready(opts: Parameters<typeof mount>[0] = {}): Promise<void> {
+  mount(opts);
+  await waitFor(() => expect(promptBox().value).not.toBe(''));
+  await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/status')).toBe(true));
+}
+
+describe('JiraLaunchSheet — the gate', () => {
+  it('draws no Start while agents are off, and keeps Copy prompt', async () => {
+    server.agents = agents({ enabled: false });
+    setClipboard({ writeText: jest.fn().mockResolvedValue(undefined) });
+    await ready();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Start session' })).not.toBeInTheDocument());
+    expect(copyButton()).toBeEnabled();
+  });
+
+  it('draws no Start before the dashboard has answered, rather than a dead one', async () => {
+    mount();
+    expect(screen.queryByRole('button', { name: 'Start session' })).not.toBeInTheDocument();
+    await waitFor(() => expect(startButton()).toBeInTheDocument());
+  });
+
+  it('draws no Start with agents off while several paths are mapped and none is picked, and keeps Copy prompt', async () => {
+    server.agents = agents({ enabled: false });
+    setClipboard({ writeText: jest.fn().mockResolvedValue(undefined) });
+    mount({ status: { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } } });
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/status')).toBe(true));
+    await within(dialog()).findByRole('group', { name: 'Repository' });
+    expect(screen.queryByRole('button', { name: 'Start session' })).not.toBeInTheDocument();
+    expect(copyButton()).toBeInTheDocument();
+  });
+
+  it('disables Start with the choose-a-repository reason while agents are on, several paths are mapped and none is picked', async () => {
+    mount({ status: { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } } });
+    await waitFor(() => expect(startButton()).toBeDisabled());
+    expect(startButton()).toHaveAttribute('title', expect.stringContaining('choose a repository'));
+  });
+
+  it('disables Start with the gate\'s reason as its title when the dashboard does not list the repository', async () => {
+    server.agents = agents({ projectPaths: [] });
+    await ready();
+    await waitFor(() => expect(startButton()).toBeDisabled());
+    expect(startButton()).toHaveAttribute('title', expect.stringContaining('the dashboard does not list /Users/ada/pay'));
+  });
+});
+
+describe('JiraLaunchSheet — the repository', () => {
+  it('preselects the one mapped path, shown with ~, and previews against it', async () => {
+    await ready();
+    expect(within(dialog()).getByText('~/pay')).toBeInTheDocument();
+    expect(within(dialog()).queryByRole('combobox', { name: 'Repository' })).not.toBeInTheDocument();
+    expect(within(dialog()).queryByRole('group', { name: 'Repository' })).not.toBeInTheDocument();
+    expect(promptReads()[0].searchParams.get('repo')).toBe('/Users/ada/pay');
+  });
+
+  it('preselects a single mapped path whose mapping arrives after the sheet is open', async () => {
+    const view = mount({ status: { repos: {} } });
+    expect(within(dialog()).queryByText('~/pay')).not.toBeInTheDocument();
+    expect(promptReads()).toHaveLength(0);
+    view.withStatus({ repos: { PAY: ['/Users/ada/pay'] } });
+    await waitFor(() => expect(promptBox().value).toBe('prompt for execute in /Users/ada/pay'));
+    expect(promptReads()[0].searchParams.get('repo')).toBe('/Users/ada/pay');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+  });
+
+  it('offers a segmented control of basenames for two paths, none pressed, and previews nothing until one is picked', async () => {
+    mount({ status: { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } } });
+    const group = await within(dialog()).findByRole('group', { name: 'Repository' });
+    expect(within(group).getAllByRole('button').map((b) => [b.textContent, b.getAttribute('aria-pressed'), b.getAttribute('title')])).toEqual([
+      ['pay', 'false', '/Users/ada/pay'],
+      ['pay-web', 'false', '/Users/ada/pay-web']
+    ]);
+    expect(promptReads()).toHaveLength(0);
+    await waitFor(() => expect(startButton()).toBeDisabled());
+    await userEvent.click(repoPick('pay-web'));
+    expect(repoPick('pay-web')).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(promptBox().value).toContain('/Users/ada/pay-web'));
+    await waitFor(() => expect(startButton()).toBeEnabled());
+  });
+});
+
+describe('JiraLaunchSheet — repository control shape', () => {
+  it('falls back to a select when there are five paths', async () => {
+    mount({ status: { repos: { PAY: ['/a/one', '/a/two', '/a/three', '/a/four', '/a/five'] } } });
+    expect(await within(dialog()).findByRole('combobox', { name: 'Repository' })).toBeInTheDocument();
+    expect(within(dialog()).queryByRole('group', { name: 'Repository' })).not.toBeInTheDocument();
+  });
+
+  it('falls back to a select when two paths share a basename, so the labels stay distinguishable', async () => {
+    mount({ status: { repos: { PAY: ['/a/api', '/b/api'] } } });
+    expect(await within(dialog()).findByRole('combobox', { name: 'Repository' })).toBeInTheDocument();
+    expect(within(dialog()).queryByRole('group', { name: 'Repository' })).not.toBeInTheDocument();
+  });
+});
+
+describe('JiraLaunchSheet — the action tiles', () => {
+  it('draws three tiles with their sub-lines, described by them', async () => {
+    await ready();
+    const group = within(dialog()).getByRole('group', { name: 'Action' });
+    expect(within(group).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['End to end', 'Ticket loaded', 'A skill']);
+    expect(tile('End to end')).toHaveAccessibleDescription('plan, change, test, PR');
+    expect(tile('Ticket loaded')).toHaveAccessibleDescription('you drive');
+    expect(tile('A skill')).toHaveAccessibleDescription('1 on this machine');
+    expect(tile('End to end')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dialog()).queryByRole('combobox', { name: 'Skill' })).not.toBeInTheDocument();
+  });
+
+  it('lands a skill launch on the third tile, named, with the Skill select on that skill', async () => {
+    await ready({ initialAction: { skill: SKILL.id } });
+    expect(tile('A skill')).toHaveAttribute('aria-pressed', 'true');
+    expect(tile('A skill')).toHaveAccessibleDescription(SKILL.name);
+    expect(within(dialog()).getByRole('combobox', { name: 'Skill' })).toHaveValue(`skill:${SKILL.id}`);
+  });
+
+  it('keeps the stale skill of a deleted action as the Skill select\'s value', async () => {
+    mount({ initialAction: { skill: 's_deadbeef' } });
+    expect(within(dialog()).getByRole('combobox', { name: 'Skill' })).toHaveValue('skill:s_deadbeef');
+    expect(tile('A skill')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('disables A skill with a reason when the machine has none', async () => {
+    await ready({ status: { skills: [] } });
+    expect(tile('A skill')).toBeDisabled();
+    expect(tile('A skill')).toHaveAttribute('title', 'no skills on this machine');
+  });
+});
+
+describe('JiraLaunchSheet — the foot line and Copy', () => {
+  it('reads where the session starts, for a new worktree', async () => {
+    await ready();
+    expect(within(dialog()).getByText('Starts in pay on a new worktree')).toBeInTheDocument();
+  });
+
+  it('Copy and Copy prompt write the same text', async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    await ready();
+    const text = promptBox().value;
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'Copy' }));
+    await userEvent.click(copyButton());
+    expect(writeText).toHaveBeenNthCalledWith(1, text);
+    expect(writeText).toHaveBeenNthCalledWith(2, text);
+  });
+});
+
+// The prompt box is editable: only an edit is sent (absent, the server composes after its writes), a later preview never overwrites it, Reset takes the
+// generated text back, and Start's last reason is the dispatch route's own refusal of the edited text.
+describe('JiraLaunchSheet — the editable prompt', () => {
+  const resetButton = (): HTMLElement | null => within(dialog()).queryByRole('button', { name: 'Reset' });
+  const edit = (text: string): void => {
+    fireEvent.change(promptBox(), { target: { value: text } });
+  };
+
+  it('an untouched box sends no prompt and draws no Reset', async () => {
+    await ready();
+    expect(promptBox()).not.toHaveAttribute('readonly');
+    expect(resetButton()).toBeNull();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).not.toHaveProperty('prompt');
+  });
+
+  it('an edit is what Start sends and both Copy chips copy, counted against the cap', async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    await ready();
+    edit('Only summarise PAY-131, change nothing.');
+    expect(within(dialog()).getByText('edited · 39 / 4000')).toBeInTheDocument();
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'Copy' }));
+    await userEvent.click(copyButton());
+    expect(writeText).toHaveBeenNthCalledWith(1, 'Only summarise PAY-131, change nothing.');
+    expect(writeText).toHaveBeenNthCalledWith(2, 'Only summarise PAY-131, change nothing.');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toMatchObject({ key: 'PAY-131', repo: '/Users/ada/pay', action: 'execute', prompt: 'Only summarise PAY-131, change nothing.' });
+  });
+
+  it('a new preview keeps the edit and says so; Reset takes the new generated text', async () => {
+    await ready();
+    expect(promptBox().value).toBe('prompt for execute in /Users/ada/pay');
+    edit('my own words');
+    await userEvent.click(tile('Ticket loaded'));
+    await waitFor(() => expect(promptReads().at(-1)?.searchParams.get('action')).toBe('context'));
+    await waitFor(() => expect(within(dialog()).getByText('the generated prompt changed — Reset to take it')).toBeInTheDocument());
+    expect(promptBox().value).toBe('my own words');
+    await userEvent.click(resetButton() as HTMLElement);
+    expect(promptBox().value).toBe('prompt for context in /Users/ada/pay');
+    expect(resetButton()).toBeNull();
+  });
+
+  it('typing the generated text back drops the edit', async () => {
+    await ready();
+    const generated = promptBox().value;
+    edit(`${generated} and more`);
+    expect(resetButton()).not.toBeNull();
+    edit(generated);
+    expect(resetButton()).toBeNull();
+  });
+
+  it.each([
+    ['a blank edit', ' \n ', 'the prompt is empty'],
+    ['an edit over the cap', 'x'.repeat(4001), 'prompt too long']
+  ])('%s disables Start with the route\'s sentence', async (_label, text, reason) => {
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    edit(text);
+    expect(startButton()).toBeDisabled();
+    expect(startButton()).toHaveAttribute('title', reason);
+  });
+});
+
+describe('JiraLaunchSheet — the action and the preview', () => {
+  it('seeds the action from initialAction and refetches the preview, stale answer dropped, when it changes', async () => {
+    await ready({ initialAction: 'context' });
+    expect(tile('Ticket loaded')).toHaveAttribute('aria-pressed', 'true');
+    expect(tile('End to end')).toHaveAttribute('aria-pressed', 'false');
+    expect(promptReads()[0].searchParams.get('action')).toBe('context');
+
+    await userEvent.click(tile('A skill'));
+    expect(within(dialog()).getByRole('combobox', { name: 'Skill' })).toHaveValue(`skill:${SKILL.id}`);
+    await waitFor(() => expect(promptBox().value).toBe(`prompt for skill:${SKILL.id} in /Users/ada/pay`));
+    // The skill is treated as execute by the Branch section: no ticket branch here, so a New one from the default pattern, cut from `develop`.
+    expect(calls.map((c) => c.url)).toContain(
+      `/api/jira/prompt?key=PAY-131&action=skill%3A${SKILL.id}&repo=%2FUsers%2Fada%2Fpay&mode=new&branch=pay-131-refund-partial-captures&base=develop`
+    );
+  });
+
+  it('ignores jiraDefaultAction — the menu reads it, and the sheet opens on exactly the action it was handed', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction: 'context' }));
+    await ready({ initialAction: 'execute' });
+    expect(tile('End to end')).toHaveAttribute('aria-pressed', 'true');
+    expect(promptReads()[0].searchParams.get('action')).toBe('execute');
+  });
+
+  it('shows a refusal in the preview\'s place and keeps Start disabled for a skill that is gone', async () => {
+    server.prompt = () => ({ status: 400, body: 'unknown skill s_deadbeef' });
+    mount({ initialAction: { skill: 's_deadbeef' } });
+    expect(await within(dialog()).findByText('unknown skill s_deadbeef')).toBeInTheDocument();
+    expect(within(dialog()).queryByLabelText('Prompt')).not.toBeInTheDocument();
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/status')).toBe(true));
+    await waitFor(() => expect(startButton()).toBeDisabled());
+  });
+});
+
+describe('JiraLaunchSheet — permissions', () => {
+  const modeSelect = (): HTMLSelectElement => within(dialog()).getByRole('combobox', { name: 'Permissions' }) as HTMLSelectElement;
+
+  it('offers only the modes up to the ceiling and seeds execute with acceptEdits', async () => {
+    await ready();
+    expect([...modeSelect().options].map((o) => o.value)).toEqual(['plan', 'acceptEdits']);
+    expect(modeSelect().value).toBe('acceptEdits');
+  });
+
+  it('seeds context with plan', async () => {
+    await ready({ initialAction: 'context' });
+    expect(modeSelect().value).toBe('plan');
+  });
+
+  it('never seeds above the ceiling', async () => {
+    server.agents = agents({ spawnMaxPermission: 'plan' });
+    await ready();
+    await waitFor(() => expect(modeSelect().value).toBe('plan'));
+    expect([...modeSelect().options].map((o) => o.value)).toEqual(['plan']);
+  });
+
+  it('seeds every action, context included, from a fixed Jira default permission', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultPermission: 'auto' }));
+    server.agents = agents({ spawnMaxPermission: 'bypassPermissions' });
+    await ready({ initialAction: 'context' });
+    await waitFor(() => expect(modeSelect().value).toBe('auto'));
+    await userEvent.click(tile('End to end'));
+    expect(modeSelect().value).toBe('auto');
+  });
+
+  it('clamps a fixed default to the ceiling rather than dropping it', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultPermission: 'bypassPermissions' }));
+    server.agents = agents({ spawnMaxPermission: 'auto' });
+    await ready();
+    await waitFor(() => expect(modeSelect().value).toBe('auto'));
+  });
+});
+
+describe('JiraLaunchSheet — assign and move', () => {
+  const assign = (): HTMLElement => within(dialog()).getByRole('switch', { name: 'Assign to me' });
+  const move = (): HTMLSelectElement => within(dialog()).getByRole('combobox', { name: 'Move to' }) as HTMLSelectElement;
+
+  it('disables Assign to me, with a reason, when the ticket is already mine', async () => {
+    server.detail = detail({ assignee: ADA });
+    await ready({ issue: { ...CARD, assignee: ADA } });
+    expect(assign()).toBeDisabled();
+    expect(assign()).toHaveAttribute('title', 'already assigned to you');
+  });
+
+  it('disables Assign to me while the identity is unknown', async () => {
+    await ready({ status: { me: null } });
+    expect(assign()).toBeDisabled();
+    expect(assign()).toHaveAttribute('title', expect.stringMatching(/identity/));
+  });
+
+  it('sends assign false when the detail lands as already mine after the switch was toggled', async () => {
+    let land: () => void = () => undefined;
+    server.detailGate = new Promise<void>((resolve) => (land = resolve));
+    server.detail = detail({ assignee: ADA });
+    await ready();
+    await userEvent.click(assign());
+    expect(assign()).toBeChecked();
+    land();
+    await waitFor(() => expect(assign()).toBeDisabled());
+    expect(assign()).not.toBeChecked();
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody().assign).toBe(false);
+  });
+
+  it('names Move to like the modal does — by the status landed in — with leave as is first', async () => {
+    await ready();
+    await waitFor(() => expect(move()).toBeEnabled());
+    expect([...move().options].map((o) => o.textContent)).toEqual(['leave as is', 'In Progress', 'Done']);
+    expect(move().value).toBe('');
+  });
+
+  it('sends transitionId null for leave as is, assign false, and no model or effort flag', async () => {
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toEqual({
+      key: 'PAY-131',
+      repo: '/Users/ada/pay',
+      action: 'execute',
+      assign: false,
+      transitionId: null,
+      mode: 'new',
+      branch: 'pay-131-refund-partial-captures',
+      base: 'develop',
+      openMr: false,
+      permissionMode: 'acceptEdits',
+      remoteControl: true
+    });
+  });
+
+  it('sends the picked transition, the assign switch, the picked model and effort, and a skill action', async () => {
+    await ready({ initialAction: { skill: SKILL.id } });
+    await waitFor(() => expect(move()).toBeEnabled());
+    await userEvent.click(assign());
+    await userEvent.selectOptions(move(), '31');
+    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Model' }), 'opus');
+    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Effort' }), 'high');
+    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Permissions' }), 'plan');
+    await userEvent.click(within(dialog()).getByRole('switch', { name: 'Remote control' }));
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toEqual({
+      key: 'PAY-131',
+      repo: '/Users/ada/pay',
+      action: { skill: SKILL.id },
+      assign: true,
+      transitionId: '31',
+      mode: 'new',
+      branch: 'pay-131-refund-partial-captures',
+      base: 'develop',
+      openMr: false,
+      model: 'opus',
+      effort: 'high',
+      permissionMode: 'plan',
+      remoteControl: false
+    });
+  });
+});
+
+describe('JiraLaunchSheet — Start', () => {
+  it('shows the server\'s sentence on a 409 and keeps Copy prompt', async () => {
+    server.dispatch = { status: 409, body: { error: 'PAY-131 already has a live Run session' } };
+    setClipboard({ writeText: jest.fn().mockResolvedValue(undefined) });
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByRole('alert')).toHaveTextContent('PAY-131 already has a live Run session');
+    expect(copyButton()).toBeInTheDocument();
+    expect(onStarted).not.toHaveBeenCalled();
+  });
+
+  // M1 (final review): the server does assign, then transition, THEN the spawn (jira-dispatch.service.ts), so a spawn refused after a landed write says the write
+  // stands. The ticket has moved though the sheet shows a refusal: it must tell the board and drop the `Move to` pick (the next Start would be a 400
+  // `transition not offered`, since the fresh read no longer offers it).
+  it('a refusal that says the writes stand reloads the board and puts Move to back to leave as is, the sheet staying open on the refusal', async () => {
+    server.dispatch = { status: 502, body: { error: 'dashboard unreachable — the Jira writes stand' } };
+    await ready();
+    const moveTo = within(dialog()).getByRole('combobox', { name: 'Move to' }) as HTMLSelectElement;
+    await waitFor(() => expect(moveTo).toBeEnabled());
+    await userEvent.selectOptions(moveTo, '31');
+    expect(moveTo.value).toBe('31');
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByRole('alert')).toHaveTextContent('dashboard unreachable — the Jira writes stand');
+    expect(onWrote).toHaveBeenCalledTimes(1);
+    expect(onStarted).not.toHaveBeenCalled();
+    expect(moveTo.value).toBe('');
+    expect(startButton()).toBeInTheDocument();
+  });
+
+  it('a failed transition after a landed assign ("the assign stands") counts the same', async () => {
+    server.dispatch = { status: 502, body: { error: 'transition: Jira refused — the assign stands' } };
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await within(dialog()).findByRole('alert');
+    expect(onWrote).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refusal before any write (400) changes nothing: no reload, and Move to keeps its pick', async () => {
+    server.dispatch = { status: 400, body: { error: 'transition not offered' } };
+    await ready();
+    const moveTo = within(dialog()).getByRole('combobox', { name: 'Move to' }) as HTMLSelectElement;
+    await waitFor(() => expect(moveTo).toBeEnabled());
+    await userEvent.selectOptions(moveTo, '31');
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByRole('alert')).toHaveTextContent('transition not offered');
+    expect(onWrote).not.toHaveBeenCalled();
+    expect(moveTo.value).toBe('31');
+  });
+
+  it('on success links to the session and calls onStarted once', async () => {
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    const link = await within(dialog()).findByRole('link', { name: /open in dashboard/ });
+    expect(link).toHaveAttribute('href', 'http://127.0.0.1:5174/?session=sess-9');
+    expect(onStarted).toHaveBeenCalledTimes(1);
+    // The form is gone on purpose: a second Start would be a second session on the same ticket (409 server side, but never offered).
+    expect(screen.queryByRole('button', { name: 'Start session' })).not.toBeInTheDocument();
+  });
+
+  it('sends one request for two clicks inside one tick', async () => {
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    const el = startButton();
+    act(() => {
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await waitFor(() => expect(onStarted).toHaveBeenCalled());
+    expect(calls.filter((c) => c.url === '/api/agents/dispatch-jira')).toHaveLength(1);
+  });
+});
+
+/*
+  Open in: Dashboard | Desktop — the board LaunchSheet's control, drawn from the agents status alone (home's dashboard says `desktopAvailable`) and preselected
+  from its `launchSurfaceDefault`. Under Desktop only remote control is disabled: the dashboard runs the first turn headless with the sheet's permissions,
+  model and effort, then hands the session to the app.
+*/
+describe('JiraLaunchSheet — Open in', () => {
+  const openIn = (): HTMLElement | null => within(dialog()).queryByRole('group', { name: 'Open in' });
+  const remote = (): HTMLElement => within(dialog()).getByRole('switch', { name: 'Remote control' });
+
+  it('draws no control and sends no surface while the dashboard does not say desktopAvailable', async () => {
+    await ready();
+    expect(openIn()).not.toBeInTheDocument();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).not.toHaveProperty('surface');
+  });
+
+  it('preselects Dashboard when the dashboard names no default, and sends it with remote control as picked', async () => {
+    server.agents = agents({ desktopAvailable: true });
+    await ready();
+    await waitFor(() => expect(openIn()).toBeInTheDocument());
+    expect(within(dialog()).getByRole('button', { name: 'Dashboard' })).toHaveAttribute('aria-pressed', 'true');
+    expect(remote()).toBeEnabled();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toMatchObject({ surface: 'dashboard', remoteControl: true });
+  });
+
+  it('preselects Desktop from the dashboard default, for a skill action too: remote control disabled and Off, the rest still live, and the surface sent', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'desktop' });
+    await ready({ initialAction: { skill: SKILL.id } });
+    await waitFor(() => expect(openIn()).toBeInTheDocument());
+    expect(within(dialog()).getByRole('button', { name: 'Desktop' })).toHaveAttribute('aria-pressed', 'true');
+    expect(remote()).toBeDisabled();
+    expect(remote()).toHaveAttribute('aria-checked', 'false');
+    expect(within(dialog()).getByRole('combobox', { name: 'Model' })).toBeEnabled();
+    expect(within(dialog()).getByRole('combobox', { name: 'Permissions' })).toBeEnabled();
+    expect(within(dialog()).getByText(/opens in the desktop app — remote control does not apply/)).toBeInTheDocument();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByText(/then it opens in the desktop app on this Mac/)).toBeInTheDocument();
+    expect(dispatchBody()).toMatchObject({ action: { skill: SKILL.id }, surface: 'desktop', remoteControl: false });
+    expect(within(dialog()).getByRole('link', { name: /open in dashboard/ })).toHaveAttribute('href', 'http://127.0.0.1:5174/?session=sess-9');
+  });
+
+  it('switching back to Dashboard gives remote control back as it was', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'desktop' });
+    await ready();
+    await waitFor(() => expect(openIn()).toBeInTheDocument());
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'Dashboard' }));
+    expect(remote()).toBeEnabled();
+    expect(remote()).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('an answer with no session id (a dashboard from before the hand-over) says it opened in the app, with no link', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'desktop' });
+    server.dispatch = {
+      status: 200,
+      body: { surface: 'desktop', assigned: false, transitioned: null, session: null } satisfies JiraDispatchResult
+    };
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByText('Opened in the desktop app')).toBeInTheDocument();
+    expect(within(dialog()).queryByRole('link', { name: /open in dashboard/ })).not.toBeInTheDocument();
+    expect(onStarted).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('JiraLaunchSheet — the branch', () => {
+  const TWO = { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } };
+  const modeButton = (name: string): HTMLElement => within(within(dialog()).getByRole('group', { name: 'Branch mode' })).getByRole('button', { name });
+  const pressed = (): string | null =>
+    within(within(dialog()).getByRole('group', { name: 'Branch mode' }))
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('aria-pressed') === 'true')?.textContent ?? null;
+  const field = (name: string): HTMLInputElement | HTMLSelectElement => within(dialog()).getByLabelText(name) as HTMLInputElement | HTMLSelectElement;
+  const mrSwitch = (): HTMLElement | null => within(dialog()).queryByRole('switch', { name: 'Open MR when done' });
+
+  it('puts A\'s defaults back after A → B → A, not B\'s, and asks refs for each repository it lands on', async () => {
+    server.refs = (repo) =>
+      repo === '/Users/ada/pay'
+        ? { status: 200, body: refsOf(repo, [refBranch('pay-131-a', { ticket: true })]) }
+        : { status: 200, body: refsOf(repo, [], { defaultBase: 'main' }) };
+    mount({ status: TWO });
+    await within(dialog()).findByRole('group', { name: 'Repository' });
+    expect(modeButton('New')).toBeDisabled();
+
+    await userEvent.click(repoPick('pay'));
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(field('Branch').value).toBe('pay-131-a');
+
+    await userEvent.click(repoPick('pay-web'));
+    await waitFor(() => expect(pressed()).toBe('New'));
+    expect(field('Name').value).toBe('pay-131-refund-partial-captures');
+    expect(field('Base').value).toBe('main');
+
+    await userEvent.click(repoPick('pay'));
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(field('Branch').value).toBe('pay-131-a');
+    const asked = calls.filter((c) => c.url.startsWith('/api/jira/refs')).map((c) => new URL(c.url, 'http://x').searchParams.get('repo'));
+    expect(asked).toEqual(['/Users/ada/pay', '/Users/ada/pay-web', '/Users/ada/pay']);
+  });
+
+  // I1 (Task 8 review): going back to A before B's refs answer is still a repo change — A's refs landing again re-seed, whatever the person typed in A.
+  it('puts A\'s defaults back after an edit in A and a quick A → B → A, B\'s refs never answering', async () => {
+    server.refs = (repo) => (repo === '/Users/ada/pay' ? { status: 200, body: refsOf(repo) } : 'pending');
+    mount({ status: TWO });
+    await within(dialog()).findByRole('group', { name: 'Repository' });
+    await userEvent.click(repoPick('pay'));
+    await waitFor(() => expect(pressed()).toBe('New'));
+    await userEvent.clear(field('Name'));
+    await userEvent.type(field('Name'), 'pay-131-edited');
+    await userEvent.click(repoPick('pay-web'));
+    expect(within(dialog()).getByText('loading branches…')).toBeInTheDocument();
+    await userEvent.click(repoPick('pay'));
+    await waitFor(() => expect(field('Name').value).toBe('pay-131-refund-partial-captures'));
+  });
+
+  it('an action change while B is pending does not leave B\'s stored defaults on A', async () => {
+    server.refs = (repo) => (repo === '/Users/ada/pay' ? { status: 200, body: refsOf(repo, [refBranch('pay-131-a', { ticket: true })]) } : 'pending');
+    mount({ status: { ...TWO, repoDefaults: { '/Users/ada/pay-web': { base: 'main', namePattern: 'feature/{key}-{slug}' } } } });
+    await within(dialog()).findByRole('group', { name: 'Repository' });
+    await userEvent.click(repoPick('pay'));
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(repoPick('pay-web'));
+    await userEvent.click(tile('A skill'));
+    await userEvent.click(repoPick('pay'));
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(field('Branch').value).toBe('pay-131-a');
+  });
+
+  it('falls back to the unavailable form, seeded from the stored defaults, when the refs request fails', async () => {
+    server.refs = () => ({ status: 500, body: 'boom' });
+    await ready({ status: { repoDefaults: { '/Users/ada/pay': { base: 'main', namePattern: 'feature/{key}-{slug}' } } } });
+    expect(await within(dialog()).findByText(/branches unavailable/)).toBeInTheDocument();
+    expect(field('Name').value).toBe('feature/pay-131-refund-partial-captures');
+    expect(field('Base')).toHaveAttribute('type', 'text');
+    expect(field('Base').value).toBe('main');
+  });
+
+  it('execute with ticket branches continues on the newest', async () => {
+    server.refs = (repo) => ({
+      status: 200,
+      body: refsOf(repo, [refBranch('feature/pay-131-newest', { ticket: true }), refBranch('pay-131-older', { ticket: true })])
+    });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(field('Branch').value).toBe('feature/pay-131-newest');
+    // Ticket branches first, in their own group, then the rest.
+    const groups = [...(field('Branch') as HTMLSelectElement).querySelectorAll('optgroup')];
+    expect(groups.map((g) => [...g.querySelectorAll('option')].map((o) => o.value))).toEqual([
+      ['feature/pay-131-newest', 'pay-131-older'],
+      ['develop']
+    ]);
+  });
+
+  it('execute with no ticket branch opens New, named from the pattern and cut from develop', async () => {
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('New'));
+    expect(field('Name').value).toBe('pay-131-refund-partial-captures');
+    expect(field('Base').value).toBe('develop');
+  });
+
+  it('context opens on No branch; execute offers no No branch at all', async () => {
+    await ready({ initialAction: 'context' });
+    await waitFor(() => expect(pressed()).toBe('No branch'));
+    await userEvent.click(tile('End to end'));
+    await waitFor(() => expect(pressed()).toBe('New'));
+    expect(within(within(dialog()).getByRole('group', { name: 'Branch mode' })).queryByRole('button', { name: 'No branch' })).not.toBeInTheDocument();
+  });
+
+  it('refuses a typed name without the key, disabling Start and Copy prompt', async () => {
+    setClipboard({ writeText: jest.fn().mockResolvedValue(undefined) });
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.clear(field('Name'));
+    await userEvent.type(field('Name'), 'fix-login');
+    expect(await within(dialog()).findByText('branch must carry PAY-131')).toBeInTheDocument();
+    expect(startButton()).toBeDisabled();
+    expect(startButton()).toHaveAttribute('title', 'branch must carry PAY-131');
+    expect(copyButton()).toBeDisabled();
+  });
+
+  it('a name that exists offers the switch to Continue on it', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(modeButton('New'));
+    await userEvent.clear(field('Name'));
+    await userEvent.type(field('Name'), 'pay-131-x');
+    expect(await within(dialog()).findByText('pay-131-x exists')).toBeInTheDocument();
+    await waitFor(() => expect(startButton()).toBeDisabled());
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'switch to Continue' }));
+    expect(pressed()).toBe('Continue');
+    expect(field('Branch').value).toBe('pay-131-x');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+  });
+
+  it('refuses Continue on the branch the mapped checkout holds', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.selectOptions(field('Branch'), 'develop');
+    expect(await within(dialog()).findByText('develop is checked out in the mapped checkout /Users/ada/pay')).toBeInTheDocument();
+    expect(startButton()).toBeDisabled();
+  });
+
+  it('says where it will work when a linked tree holds the branch, and marks a behind copy', async () => {
+    server.refs = (repo) => ({
+      status: 200,
+      body: refsOf(repo, [refBranch('pay-131-x', { ticket: true, worktree: '/r/.worktrees/x', sync: 'behind' })])
+    });
+    await ready();
+    expect(await within(dialog()).findByText('will work in /r/.worktrees/x')).toBeInTheDocument();
+    expect(within(dialog()).getByText('behind')).toBeInTheDocument();
+  });
+
+  it('the Continue picker groups worktrees and local branches over remote-only ones, and its search narrows them without changing the choice', async () => {
+    server.refs = (repo) => ({
+      status: 200,
+      body: refsOf(repo, [
+        refBranch('pay-131-x', { ticket: true }),
+        refBranch('feature/aaa-remote', { local: false }),
+        refBranch('feature/held', { worktree: '/r/.worktrees/held' })
+      ])
+    });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    const groupsOf = () =>
+      [...(field('Branch') as HTMLSelectElement).querySelectorAll('optgroup')].map((g) => [g.label, [...g.querySelectorAll('option')].map((o) => o.value)]);
+    expect(groupsOf()).toEqual([
+      ['this ticket', ['pay-131-x']],
+      ['worktrees', ['feature/held']],
+      ['local', ['develop']],
+      ['remote', ['feature/aaa-remote']]
+    ]);
+
+    const search = within(dialog()).getByLabelText('Search branches');
+    await userEvent.type(search, 'FEAT');
+    // The choice stands, drawn first and outside the groups, while it does not match.
+    expect(field('Branch').value).toBe('pay-131-x');
+    expect(groupsOf()).toEqual([
+      ['worktrees', ['feature/held']],
+      ['remote', ['feature/aaa-remote']]
+    ]);
+    expect(within(dialog()).getByText('2 of 4')).toBeInTheDocument();
+
+    await userEvent.type(search, ' held{Enter}');
+    expect(field('Branch').value).toBe('feature/held');
+    expect(await within(dialog()).findByText('will work in /r/.worktrees/held')).toBeInTheDocument();
+
+    await userEvent.clear(search);
+    await userEvent.type(search, 'zzz');
+    expect(within(dialog()).getByText('no branch matches')).toBeInTheDocument();
+  });
+
+  // M7 (final review): the card and the modal find a tree by the key its branch carries, so a Continue on a key-less branch is said, not refused.
+  it('says a Continue on a branch without the key makes a tree only Setup lists — never beside a refusal, and Start still goes', async () => {
+    const hint = "this tree won't show on the card — it's listed under the repo in Setup";
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true }), refBranch('release-2')]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(within(dialog()).queryByText(hint)).toBeNull();
+
+    await userEvent.selectOptions(field('Branch'), 'release-2');
+    expect(within(dialog()).getByText(hint)).toHaveClass('sheet-note');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+
+    // `develop` carries no key either, but the mapped checkout holds it: the refusal is the one sentence drawn.
+    await userEvent.selectOptions(field('Branch'), 'develop');
+    expect(await within(dialog()).findByText('develop is checked out in the mapped checkout /Users/ada/pay')).toBeInTheDocument();
+    expect(within(dialog()).queryByText(hint)).toBeNull();
+  });
+
+  it('unavailable refs: the warning sentence, two text fields, and Start enabled', async () => {
+    server.refs = (repo) => ({ status: 200, body: { repo, available: false, reason: 'not mounted into the board' } });
+    await ready({ status: { repoDefaults: { '/Users/ada/pay': { base: 'develop' } } } });
+    expect(await within(dialog()).findByText('branches unavailable — ~/pay not mounted into the board')).toBeInTheDocument();
+    expect(field('Name')).toHaveAttribute('type', 'text');
+    expect(field('Base')).toHaveAttribute('type', 'text');
+    expect(field('Base').value).toBe('develop');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+  });
+
+  it('an empty base in the unavailable form is refused before Start', async () => {
+    server.refs = (repo) => ({ status: 200, body: { repo, available: false, reason: 'does not exist' } });
+    mount();
+    expect(await within(dialog()).findByText('base is required for a new branch')).toBeInTheDocument();
+    await waitFor(() => expect(startButton()).toBeDisabled());
+    // A refused choice asks for no preview: the server would refuse it with the same sentence.
+    expect(promptReads()).toHaveLength(0);
+    expect(within(dialog()).getByText('fix the branch above to see the prompt')).toBeInTheDocument();
+  });
+
+  it('prints how old the branch list is: never fetched, or the fetch age', async () => {
+    await ready();
+    expect(await within(dialog()).findByText('never fetched')).toBeInTheDocument();
+  });
+
+  it('prints the age of the last fetch', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [], { fetchedAt: new Date(Date.now() - 7 * 60_000).toISOString() }) });
+    await ready();
+    expect(await within(dialog()).findByText('as of last fetch, 7 min ago')).toBeInTheDocument();
+  });
+
+  it('draws Open MR only for execute with a branch, and Target only with Continue', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready({ initialAction: 'context' });
+    await waitFor(() => expect(pressed()).toBe('No branch'));
+    expect(mrSwitch()).not.toBeInTheDocument();
+    await userEvent.click(modeButton('New'));
+    expect(mrSwitch()).not.toBeInTheDocument();
+
+    await userEvent.click(tile('End to end'));
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(modeButton('New'));
+    expect(mrSwitch()).not.toBeChecked();
+    await userEvent.click(mrSwitch() as HTMLElement);
+    expect(within(dialog()).queryByLabelText('Target')).not.toBeInTheDocument();
+    await userEvent.click(modeButton('Continue'));
+    expect(field('Target').value).toBe('develop');
+  });
+
+  // M1 (Task 8 review): a default base the list does not hold by name is still what the Target select shows — displayed is what Start sends.
+  it('shows a default target the list lacks rather than the first option', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })], { defaultBase: 'origin/develop' }) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(mrSwitch() as HTMLElement);
+    expect(field('Target').value).toBe('origin/develop');
+  });
+
+  // M3 (Task 8 review): Continue on a repo with no ticket branch opens on `choose…`, and says so in those words rather than as Table A's `branch is empty`.
+  it('asks for a branch to continue when none is chosen', async () => {
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('New'));
+    await userEvent.click(modeButton('Continue'));
+    expect(within(dialog()).getByText('choose a branch to continue')).toBeInTheDocument();
+    expect(startButton()).toBeDisabled();
+  });
+
+  it('Start sends the five flat fields, and the preview asked with the same choice', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(mrSwitch() as HTMLElement);
+    await waitFor(() => expect(promptReads().at(-1)?.searchParams.get('openMr')).toBe('true'));
+    const last = promptReads().at(-1) as URL;
+    expect(Object.fromEntries(last.searchParams)).toEqual({
+      key: 'PAY-131',
+      action: 'execute',
+      repo: '/Users/ada/pay',
+      mode: 'continue',
+      branch: 'pay-131-x',
+      openMr: 'true',
+      target: 'develop'
+    });
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toEqual({
+      key: 'PAY-131',
+      repo: '/Users/ada/pay',
+      action: 'execute',
+      assign: false,
+      transitionId: null,
+      mode: 'continue',
+      branch: 'pay-131-x',
+      openMr: true,
+      target: 'develop',
+      permissionMode: 'acceptEdits',
+      remoteControl: true
+    });
+  });
+});
+
+/*
+  I1 (final review): the preview is keyed on the branch choice, and every keystroke in Name, Base or Target used to be a fresh `GET /api/jira/prompt` — an
+  issue read (three Jira calls) and a refs read (several git spawns) per character. A typed choice now settles for `PREVIEW_SETTLE_MS` before it is asked
+  about, and Start stays gated on a prompt composed for the CURRENT choice. Fake timers from the moment the first preview has landed: the debounce is the
+  clock under test, and `fireEvent.change` is five keystrokes inside one tick of it.
+*/
+describe('JiraLaunchSheet — the preview settles before it is asked', () => {
+  const nameField = (): HTMLInputElement => within(dialog()).getByLabelText('Name') as HTMLInputElement;
+  const modeButton = (name: string): HTMLElement => within(within(dialog()).getByRole('group', { name: 'Branch mode' })).getByRole('button', { name });
+  const typeFast = (base: string, chars: string): void => {
+    for (let i = 1; i <= chars.length; i++) fireEvent.change(nameField(), { target: { value: base + chars.slice(0, i) } });
+  };
+  /** Advances the fake clock and lets the mocked fetch's promise chain settle inside the same act. */
+  const advance = async (ms: number): Promise<void> => {
+    await act(async () => {
+      jest.advanceTimersByTime(ms);
+    });
+  };
+
+  it('settles on a constant between 300 and 400 ms', () => {
+    expect(PREVIEW_SETTLE_MS).toBeGreaterThanOrEqual(300);
+    expect(PREVIEW_SETTLE_MS).toBeLessThanOrEqual(400);
+  });
+
+  it('typing five characters fast asks for exactly one preview, after the debounce, for the last value', async () => {
+    await ready();
+    await waitFor(() => expect(nameField().value).toBe('pay-131-refund-partial-captures'));
+    const before = promptReads().length;
+    jest.useFakeTimers();
+    typeFast('pay-131-', 'abcde');
+    await advance(PREVIEW_SETTLE_MS - 1);
+    expect(promptReads()).toHaveLength(before);
+    await advance(1);
+    expect(promptReads()).toHaveLength(before + 1);
+    expect(promptReads().at(-1)?.searchParams.get('branch')).toBe('pay-131-abcde');
+    // Nothing else is queued behind it: a further wait asks nothing more.
+    await advance(PREVIEW_SETTLE_MS * 4);
+    expect(promptReads()).toHaveLength(before + 1);
+  });
+
+  it('keeps Start disabled through the debounce window and enables it once the preview answers', async () => {
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    jest.useFakeTimers();
+    typeFast('pay-131-', 'xy');
+    // The previous preview was for another name: Start never offers it, not even for the first frame.
+    expect(startButton()).toBeDisabled();
+    expect(startButton()).toHaveAttribute('title', 'the prompt has not loaded');
+    await advance(1);
+    expect(startButton()).toBeDisabled();
+    await advance(PREVIEW_SETTLE_MS - 2);
+    expect(startButton()).toBeDisabled();
+    await advance(1);
+    expect(startButton()).toBeEnabled();
+    expect(promptBox().value).toBe('prompt for execute in /Users/ada/pay');
+  });
+
+  it('Start sends exactly the choice the preview was composed for', async () => {
+    await ready();
+    jest.useFakeTimers();
+    typeFast('pay-131-', 'fix');
+    await advance(PREVIEW_SETTLE_MS);
+    expect(startButton()).toBeEnabled();
+    await act(async () => {
+      fireEvent.click(startButton());
+    });
+    const previewed = Object.fromEntries((promptReads().at(-1) as URL).searchParams);
+    const body = dispatchBody();
+    expect(previewed).toEqual({ key: 'PAY-131', action: 'execute', repo: '/Users/ada/pay', mode: 'new', branch: 'pay-131-fix', base: 'develop' });
+    expect({ key: body.key, action: body.action, repo: body.repo, mode: body.mode, branch: body.branch, base: body.base }).toEqual(previewed);
+  });
+
+  it('a mode switch is asked about at once — only typing waits', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    const before = promptReads().length;
+    jest.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(modeButton('New'));
+    });
+    expect(promptReads()).toHaveLength(before + 1);
+    expect(promptReads().at(-1)?.searchParams.get('mode')).toBe('new');
+    expect(startButton()).toBeEnabled();
+  });
+});
+
+describe('JiraLaunchSheet — Copy prompt', () => {
+  it('copies the preview and reads Copied for two seconds', async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    await ready();
+    jest.useFakeTimers();
+    const text = promptBox().value;
+    await act(async () => {
+      fireEvent.click(copyButton());
+    });
+    expect(writeText).toHaveBeenCalledWith(text);
+    expect(within(dialog()).getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    act(() => {
+      jest.advanceTimersByTime(1999);
+    });
+    expect(within(dialog()).getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    act(() => {
+      jest.advanceTimersByTime(2);
+    });
+    expect(within(dialog()).getByRole('button', { name: 'Copy prompt' })).toBeInTheDocument();
+  });
+
+  it('is absent without a clipboard API, and the preview stays selectable text', async () => {
+    await ready();
+    expect(within(dialog()).queryByRole('button', { name: /Copy prompt|Copied/ })).not.toBeInTheDocument();
+    expect(promptBox()).not.toBeDisabled();
+  });
+
+  it('is disabled while there is no prompt to copy', async () => {
+    server.prompt = () => ({ status: 400, body: 'prompt too long' });
+    setClipboard({ writeText: jest.fn().mockResolvedValue(undefined) });
+    mount();
+    await within(dialog()).findByText('prompt too long');
+    expect(copyButton()).toBeDisabled();
+  });
+});
+
+/*
+  The launch sheet in review mode (CodeRabbit review spec §5.4): the MR's button opens the one sheet pre-set to the `review` action. The three usual tiles give
+  way to ONE pressed tile, the branch is the MR's own (Continue, locked, no open-MR control), the repository is one of the MR's candidates, and the preview and
+  Start both carry the MR and the half.
+*/
+describe('JiraLaunchSheet — review mode', () => {
+  const REVIEW: ReviewProp = { half: 'fix', mr: { project: 'dev/pay', iid: 15958, sourceBranch: 'PAY-131-x' }, repos: ['/Users/ada/pay', '/Users/ada/pay-web'] };
+  const reviewReady = async (over: Partial<Parameters<typeof mount>[0]> = {}, repoName = 'pay'): Promise<void> => {
+    mount({ initialAction: 'review', review: REVIEW, ...over });
+    await userEvent.click(repoPick(repoName));
+    await waitFor(() => expect(promptBox().value).not.toBe(''));
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/status')).toBe(true));
+  };
+
+  it('draws exactly one pressed tile, titled for the half, with the skill named in its sub-line, and none of the usual three', () => {
+    mount({ initialAction: 'review', review: REVIEW });
+    const tiles = within(within(dialog()).getByRole('group', { name: 'Action' })).getAllByRole('button');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveAccessibleName('Fix review');
+    expect(tiles[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(tiles[0]).toHaveTextContent('mr-review-loop on !15958');
+    expect(within(dialog()).queryByRole('button', { name: 'End to end' })).not.toBeInTheDocument();
+    expect(within(dialog()).queryByRole('button', { name: 'Ticket loaded' })).not.toBeInTheDocument();
+    expect(within(dialog()).queryByRole('button', { name: 'A skill' })).not.toBeInTheDocument();
+  });
+
+  it('titles the tile Request review for the request half', () => {
+    mount({ initialAction: 'review', review: { ...REVIEW, half: 'request' } });
+    expect(tile('Request review')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('without a review there are the three usual tiles and no review tile', () => {
+    mount();
+    const tiles = within(within(dialog()).getByRole('group', { name: 'Action' })).getAllByRole('button');
+    expect(tiles.map((t) => t.getAttribute('aria-label'))).toEqual(['End to end', 'Ticket loaded', 'A skill']);
+  });
+
+  it('lists exactly the review candidates as the repositories, not the project\'s other mapped paths', () => {
+    mount({ initialAction: 'review', review: { ...REVIEW, repos: ['/Users/ada/pay-web', '/Users/ada/pay'] }, status: { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web', '/Users/ada/other'] } } });
+    const group = within(dialog()).getByRole('group', { name: 'Repository' });
+    expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['pay-web', 'pay']);
+  });
+
+  it('shows the branch as Continue on the MR\'s source branch, not editable, with no open-MR control', async () => {
+    await reviewReady();
+    const sheet = dialog();
+    expect(within(sheet).getByText('Continue')).toBeInTheDocument();
+    expect(within(sheet).getByText('PAY-131-x')).toBeInTheDocument();
+    expect(within(sheet).queryByRole('group', { name: 'Branch mode' })).not.toBeInTheDocument();
+    expect(within(sheet).queryByRole('switch', { name: 'Open MR when done' })).not.toBeInTheDocument();
+    expect(within(sheet).queryByRole('textbox', { name: 'Branch' })).not.toBeInTheDocument();
+    expect(within(sheet).queryByRole('combobox', { name: 'Branch' })).not.toBeInTheDocument();
+  });
+
+  it('leaves Assign to me and Move to off', async () => {
+    await reviewReady();
+    expect(within(dialog()).getByRole('switch', { name: 'Assign to me' })).toHaveAttribute('aria-checked', 'false');
+    expect(within(dialog()).getByRole('combobox', { name: 'Move to' })).toHaveValue('');
+  });
+
+  it('opens on Desktop when the dashboard can and defaults to it, and on Dashboard with no Open in control when it cannot', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'desktop' });
+    mount({ initialAction: 'review', review: REVIEW });
+    await waitFor(() => expect(within(dialog()).getByRole('button', { name: 'Desktop' })).toHaveAttribute('aria-pressed', 'true'));
+    cleanup();
+    server.agents = agents({ launchSurfaceDefault: 'desktop' });
+    mount({ initialAction: 'review', review: REVIEW });
+    await waitFor(() => expect(calls.filter((c) => c.url === '/api/agents/status').length).toBeGreaterThan(1));
+    expect(within(dialog()).queryByRole('group', { name: 'Open in' })).not.toBeInTheDocument();
+  });
+
+  it('seeds the permission from defaultModeFor: acceptEdits by default, a fixed Settings default otherwise', async () => {
+    await reviewReady();
+    expect(within(dialog()).getByRole('combobox', { name: 'Permissions' })).toHaveValue('acceptEdits');
+  });
+
+  it('previews with the MR and the half on the query', async () => {
+    await reviewReady();
+    const read = promptReads().find((u) => u.searchParams.get('action') === 'review');
+    expect(read).toBeDefined();
+    expect(read?.searchParams.get('mrProject')).toBe('dev/pay');
+    expect(read?.searchParams.get('mrIid')).toBe('15958');
+    expect(read?.searchParams.get('half')).toBe('fix');
+    expect(read?.searchParams.get('mode')).toBe('continue');
+    expect(read?.searchParams.get('branch')).toBe('PAY-131-x');
+  });
+
+  it('a non-review preview carries none of the three', async () => {
+    await ready();
+    const read = promptReads()[0];
+    expect(read.searchParams.has('mrProject')).toBe(false);
+    expect(read.searchParams.has('mrIid')).toBe(false);
+    expect(read.searchParams.has('half')).toBe(false);
+  });
+
+  it('Start posts the review action with the MR, the half and a continue on the source branch with openMr off', async () => {
+    await reviewReady();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toMatchObject({
+      key: 'PAY-131',
+      repo: '/Users/ada/pay',
+      action: 'review',
+      mr: { project: 'dev/pay', iid: 15958 },
+      half: 'fix',
+      mode: 'continue',
+      branch: 'PAY-131-x',
+      openMr: false,
+      assign: false,
+      transitionId: null
+    });
+    expect(dispatchBody()).not.toHaveProperty('base');
+    expect(dispatchBody()).not.toHaveProperty('target');
+    expect(dispatchBody().mr).toEqual({ project: 'dev/pay', iid: 15958 });
+  });
+
+  it('a normal Start sends neither mr nor half', async () => {
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).not.toHaveProperty('mr');
+    expect(dispatchBody()).not.toHaveProperty('half');
+  });
+
+  it('shows a 409 answer\'s error in the sheet, as for any Run', async () => {
+    server.dispatch = { status: 409, body: { error: 'a session is live on PAY-131-x' } };
+    await reviewReady();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByRole('alert')).toHaveTextContent('a session is live on PAY-131-x');
+    expect(onStarted).not.toHaveBeenCalled();
+  });
+});
+
+/*
+  The button's whole path (spec §5.4): the CodeRabbit row in Jira Detail's Delivery pane, through `JiraView`, opens the launch sheet over the dialog. The
+  ruling this pins: `onReview` is threaded from `JiraView`'s launch state through `JiraDetail` into `DeliveryPane`; without that the row's button did nothing.
+*/
+describe('JiraView — the review button opens the launch sheet', () => {
+  const now = Date.now();
+  const iso = (minutes: number): string => new Date(now - minutes * 60_000).toISOString();
+  const LEAD: GitlabMr = {
+    project: 'dev/pay',
+    iid: 15958,
+    title: 'PAY-131 | refunds',
+    webUrl: 'https://gitlab.example.test/dev/pay/-/merge_requests/15958',
+    state: 'opened',
+    draft: false,
+    sourceBranch: 'PAY-131-x',
+    targetBranch: 'develop',
+    createdAt: iso(120),
+    updatedAt: iso(30),
+    mergedAt: null,
+    pipeline: 'success',
+    keys: ['PAY-131'],
+    review: {
+      open: 2,
+      resolved: 3,
+      worst: 'major',
+      bySeverity: { critical: 0, major: 1, minor: 1, trivial: 0, other: 0 },
+      triggeredAt: iso(30),
+      landedAt: iso(4),
+      commitsSince: 0,
+      capped: false,
+      readAt: iso(1),
+      failed: false
+    }
+  };
+  const GITLAB = {
+    status: { state: 'connected', site: 'gitlab.example.test', malformedSite: false, user: { username: 'ada', name: 'Ada' }, httpStatus: null, reason: null, armed: true, retryAt: null, mappedRepos: 1, foundHosts: [], problems: [] },
+    jiraProjects: { PAY: [{ path: 'dev/pay', repo: 'pay', polledAt: iso(2), capped: false, failed: false, repos: ['/Users/ada/pay'] }] },
+    mrs: [LEAD]
+  } as unknown as GitlabPayload;
+  const BOARD: JiraBoardStatus = { id: 'b_0a1b2c3d', name: 'Payments', roots: ['PAY-120'], queries: [], interval: '1m', polledAt: daysAgoStamp(0), count: 1, truncated: false, failures: [] };
+
+  it('opens one pressed Fix review tile, the right half, on the MR, over the dialog', async () => {
+    localStorage.clear();
+    setJiraPage('board');
+    const board = jiraStatus({ boards: [BOARD] });
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/jira/issue/')) return Promise.resolve(res(200, detail({ boards: [BOARD.id] })));
+      if (url.includes('/issues')) return Promise.resolve(res(200, { issues: [CARD], polledAt: daysAgoStamp(0) }));
+      if (url.startsWith('/api/jira/')) return base(input, init);
+      if (url.startsWith('/api/agents/')) return base(input, init);
+      return Promise.resolve(res(200, board));
+    }) as unknown as typeof fetch;
+    render(
+      <SettingsProvider>
+        <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: jest.fn() }}>
+          <JiraSessionsContext.Provider value={{ data: { links: [], reachable: true, rowsAt: null }, reload: jest.fn(() => Promise.resolve()) }}>
+            <GitlabContext.Provider value={{ data: GITLAB, error: null, refresh: () => Promise.resolve(GITLAB) }}>
+              <JiraView onOpenJiraPage={jest.fn()} />
+            </GitlabContext.Provider>
+          </JiraSessionsContext.Provider>
+        </JiraContext.Provider>
+      </SettingsProvider>
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
+    const modal = await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' });
+    await userEvent.click(await within(modal).findByRole('button', { name: 'Fix review' }));
+
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    const tiles = within(within(sheet).getByRole('group', { name: 'Action' })).getAllByRole('button');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0]).toHaveAccessibleName('Fix review');
+    expect(tiles[0]).toHaveTextContent('mr-review-loop on !15958');
+    expect(within(sheet).getByText('PAY-131-x')).toBeInTheDocument();
+  });
+});

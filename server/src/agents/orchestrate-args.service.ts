@@ -515,7 +515,7 @@ export class OrchestrateArgsService {
    * `dispatchGate`'s membership check. That choice is load-bearing here in
    * a way it merely mirrors there: realpath-ing an unregistered path
    * before comparing it would itself BE the filesystem touch
-   * test/merge-check.test.ts's unregistered-project case proves never
+   * test/orchestrator/merge-check.test.ts's unregistered-project case proves never
    * happens — the gate has to stay a pure in-memory compare against a
    * registry already loaded into this process, or the ordering the test
    * checks collapses back into "eventually degrades to false", which is a

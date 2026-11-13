@@ -1,0 +1,777 @@
+/**
+ * @jest-environment jsdom
+ */
+import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import '@testing-library/jest-dom';
+
+import { ItemModal } from '../../client/src/components/board/ItemModal';
+import { renderMarkdown } from '../../client/src/lib/markdown';
+import { buildProjectHues } from '../../client/src/lib/project-hue';
+import type { BacklogItem } from '../../shared/types';
+
+const ITEM: BacklogItem = {
+  id: 'bug-2',
+  title: 'groomed bug',
+  created: '2026-08-20',
+  tags: ['ui'],
+  updated: '',
+  lastCommit: '',
+  phase: '',
+  groomElapsed: 0,
+  executeElapsed: 0,
+  groomTokens: 0,
+  executeTokens: 0,
+  kind: '',
+  section: 'bugs',
+  status: 'open',
+  project: 'alpha',
+  projectPath: '/abs/alpha',
+  groomed: true,
+  started: '',
+  path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md',
+  source: 'files',
+  url: null,
+  assignee: null,
+  untyped: false
+};
+
+/* The modal renders whatever assignment the board hands it, so the suite
+   builds one from a one-project registry rather than hard-coding a class —
+   which keeps this test about the modal and leaves the hue arithmetic to
+   test/board/project-hue.test.ts. */
+const HUES = buildProjectHues([{ name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }]);
+
+/**
+ * The value of one labelled fact, or `null` when that fact is not drawn at all.
+ *
+ * `null` rather than a throw because absence is half of what this suite
+ * asserts — a zero counter, an unset `updated`, an idea's `groomed` — and a
+ * helper that threw would force every one of those cases into a different
+ * shape than its present-value twin. Addressed through the label's own row so
+ * a value that merely appears somewhere else in the modal (the path, say, also
+ * printed in a body) cannot satisfy a fact assertion.
+ */
+function factValue(label: string): string | null {
+  const dt = Array.from(document.querySelectorAll('.item-fact-label')).find((el) => el.textContent === label);
+  return dt?.parentElement?.querySelector('.item-fact-value')?.textContent ?? null;
+}
+
+describe('ItemModal', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve('## Cause\n\noff by one\n') } as Response)) as jest.Mock;
+  });
+
+  // The card has room only for an elapsed reading; the modal is where the
+  // stored value belongs, since "in progress 47d" invites the follow-up question
+  // "since when" and the answer is right there in the file. It prints BOTH: the
+  // elapsed for reading, the raw value because that is what is on disk.
+  it('names the moment an in-progress item was picked up, and says nothing when it was not', async () => {
+    const { unmount } = render(<ItemModal item={{ ...ITEM, started: '2026-08-24' }} hues={HUES} onClose={() => {}} />);
+    expect(screen.getByText(/^\d+d \(since 2026-08-24\)$/)).toBeInTheDocument();
+    unmount();
+
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    expect(screen.queryByText(/in progress/)).not.toBeInTheDocument();
+    // The first render was unmounted, so its `alive` flag swallowed its own
+    // resolution; this second one is still mounted and its body fetch lands
+    // either way, which is an un-acted state update unless the test waits for
+    // it. Same reason as the two cases below.
+    await screen.findByText('off by one');
+  });
+
+  // A timestamped value reads to the hour or minute, and the parenthetical
+  // carries it verbatim — the modal is the one surface with room to be exact,
+  // and someone reconciling a card against the file needs the exact bytes.
+  it('reads a timestamped start to the hour and still prints the stored value', async () => {
+    const threeHoursAgo = `${new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`;
+    render(<ItemModal item={{ ...ITEM, started: threeHoursAgo }} hues={HUES} onClose={() => {}} />);
+
+    expect(factValue('in progress')).toBe(`3h (since ${threeHoursAgo})`);
+    await screen.findByText('off by one');
+  });
+
+  /**
+   * The accumulated buckets are history, not a live-only reading: unlike the
+   * "in progress" segment above, which is gated on `isInProgress`, these are
+   * not gated on status at all. `move` never rewrites an item's content, so a
+   * done item's groomed/executed seconds are exactly as true after archiving
+   * as before — the drawer is where that kind of history belongs, same
+   * reasoning as the verbatim `started` value beside it. Each bucket is
+   * independent (an item can carry both, either, or neither) and a zero
+   * bucket renders nothing rather than "groomed for 0s", since `0` is also
+   * what an item that was never groomed carries — there is nothing true to
+   * say about it.
+   */
+  describe('accumulated time', () => {
+    it('shows "groomed for" with the formatted total, and hides "worked for" when execute is zero', async () => {
+      render(<ItemModal item={{ ...ITEM, groomElapsed: 3660, executeElapsed: 0 }} hues={HUES} onClose={() => {}} />);
+      expect(factValue('groomed for')).toBe('1h 1m');
+      expect(factValue('worked for')).toBeNull();
+      await screen.findByText('off by one');
+    });
+
+    it('shows neither bucket when both are zero', async () => {
+      render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+      expect(factValue('groomed for')).toBeNull();
+      expect(factValue('worked for')).toBeNull();
+      await screen.findByText('off by one');
+    });
+
+    // The regression guard for the "history, not live-only" claim above: this
+    // item is done, and rendering nothing here at all would be the bug the
+    // isInProgress-gated segment already correctly opts out of for a done
+    // item — this bucket must not inherit that gate by accident.
+    it('shows accumulated execute time on a done item, not gated behind in-progress', async () => {
+      render(<ItemModal item={{ ...ITEM, status: 'done', executeElapsed: 90 }} hues={HUES} onClose={() => {}} />);
+      expect(factValue('worked for')).toBe('1m');
+      await screen.findByText('off by one');
+    });
+  });
+
+  it('fetches the body by path and renders the markdown', async () => {
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    expect(global.fetch).toHaveBeenCalledWith(`/api/items/body?path=${encodeURIComponent(ITEM.path)}`);
+    await waitFor(() => expect(screen.getByText('Cause')).toBeInTheDocument());
+    expect(screen.getByText('off by one')).toBeInTheDocument();
+  });
+
+  /**
+   * Test case 3 of the brief: every fact the old right-hand drawer rendered is
+   * still rendered, now one labelled row each in the modal's facts slot, plus
+   * the three §6.1 names that were in `BacklogItem` all along and had nowhere
+   * to go on a single run-on meta line. Asserted as ONE case because it is one
+   * claim — the move is like-for-like and then some — rather than eleven cases
+   * that could each be deleted on its own.
+   */
+  it('renders every fact §6.1 lists, in the modal facts slot', async () => {
+    const item = {
+      ...ITEM,
+      updated: '2026-08-30T10:00:00Z',
+      lastCommit: '2026-08-29T09:00:00+02:00',
+      groomElapsed: 60,
+      executeElapsed: 120,
+      groomTokens: 1234567,
+      executeTokens: 42
+    };
+    render(<ItemModal item={item} hues={HUES} onClose={() => {}} />);
+
+    expect(screen.getByRole('dialog', { name: 'groomed bug' })).toBeInTheDocument();
+    // The project reads as a hue dot plus its name, from the same assignment
+    // the card's own dot takes — never a second colour table here.
+    expect(document.querySelector(`.item-facts-proj .ui-dot-proj-${HUES.hueFor('alpha')}`)).not.toBeNull();
+    expect(screen.getByText('alpha')).toHaveClass('item-facts-proj-name');
+    expect(factValue('id')).toBe('bug-2');
+    expect(factValue('section')).toBe('bugs');
+    expect(factValue('created')).toBe('2026-08-20');
+    expect(factValue('updated')).toBe('2026-08-30T10:00:00Z');
+    expect(factValue('last commit')).toBe('2026-08-29T09:00:00+02:00');
+    expect(factValue('groomed')).toBe('yes');
+    expect(factValue('tags')).toBe('ui');
+    expect(factValue('groomed for')).toBe('1m');
+    expect(factValue('worked for')).toBe('2m');
+    expect(factValue('groom tokens')).toBe('1,234,567');
+    expect(factValue('execute tokens')).toBe('42');
+    expect(factValue('file')).toBe(ITEM.path);
+    expect(factValue('issue')).toBeNull();
+    // Lets the mocked fetch's state update land inside act() before the test
+    // ends — otherwise React logs an act() warning on every run because
+    // nothing above this line waits on the body fetch this component always
+    // fires on mount.
+    await screen.findByText('off by one');
+  });
+
+  it('closes on Escape, on the close button, and on the scrim', async () => {
+    const onClose = jest.fn();
+    render(<ItemModal item={ITEM} hues={HUES} onClose={onClose} />);
+    // Same reason as the case above: the mount fetch resolves whether or not
+    // this test cares about the body, and letting it land after the last
+    // assertion is an un-acted state update React warns about. It was the one
+    // remaining act() warning in the suite.
+    await screen.findByText('off by one');
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(screen.getByRole('button', { name: 'close' }));
+    await userEvent.click(screen.getByTestId('modal-scrim'));
+    expect(onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it('shows an unavailable state when the body fetch fails', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: false, status: 404 } as Response));
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('item file unavailable')).toBeInTheDocument());
+  });
+
+  // #285: the body is a `useFetched` read keyed on the path. Opening another item must drop the first body on the render that carries the new path —
+  // not keep drawing it until the second answer happens to land.
+  it('opening a second item clears the first body before the second one lands', async () => {
+    let releaseSecond: (text: string) => void = () => {};
+    (global.fetch as jest.Mock).mockImplementation((url: string) =>
+      url.includes(encodeURIComponent(ITEM.path))
+        ? Promise.resolve({ ok: true, text: () => Promise.resolve('first body') } as Response)
+        : new Promise<Response>((resolve) => {
+            releaseSecond = (text) => resolve({ ok: true, text: () => Promise.resolve(text) } as Response);
+          })
+    );
+    const { rerender } = render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await screen.findByText('first body');
+
+    rerender(<ItemModal item={{ ...ITEM, id: 'bug-3', path: '/abs/other/backlog/bugs/open/bug-3.md' }} hues={HUES} onClose={() => {}} />);
+    expect(screen.queryByText('first body')).not.toBeInTheDocument();
+    expect(screen.getByText('loading…')).toBeInTheDocument();
+
+    await act(async () => releaseSecond('second body'));
+    expect(screen.getByText('second body')).toBeInTheDocument();
+  });
+
+  it('never passes raw HTML to dangerouslySetInnerHTML as markup', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('safe text\n\n<img src=x onerror="window.__pwned=1">')
+      } as Response)
+    );
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('safe text')).toBeInTheDocument());
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    // No ELEMENT carries the handler. Since #350 the tag renders as escaped literal text, so the word `onerror` is on screen as prose — which is
+    // inert: it is a text node, and the browser's parser never builds an attribute out of `&lt;img … onerror=…&gt;`.
+    expect(document.querySelector('.item-body [onerror]')).toBeNull();
+    expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+  });
+
+  /* #350 — marked reads prose like `Promise<void>` as an inline HTML tag, and the renderer used to drop every HTML token, so the generic vanished from the
+     body. Raw HTML now renders as escaped text — never as markup, so the case above still holds — and only a comment span renders as nothing, because tracker
+     bodies end in `<!-- bm:… -->` footers that are bookkeeping, not prose; text around it in the same token renders as Markdown (#419). */
+  describe('raw HTML in a body (#350)', () => {
+    it('keeps a generic in prose as literal text', () => {
+      expect(renderMarkdown('returns Promise<void> here')).toContain('Promise&lt;void&gt;');
+    });
+
+    it('renders a tag as escaped text, never as an element', () => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown('<img src=x onerror="window.__pwned=1">');
+      expect(host.querySelector('img')).toBeNull();
+      expect(host.querySelector('[onerror]')).toBeNull();
+    });
+
+    it('renders a block HTML comment as nothing', () => {
+      const html = renderMarkdown('text\n\n<!-- bm:groomed-at abc -->\n');
+      expect(html).not.toContain('bm:groomed-at');
+      expect(html).not.toContain('&lt;!--');
+    });
+
+    it('renders an inline HTML comment as nothing', () => {
+      const html = renderMarkdown('a <!-- x --> b');
+      expect(html).not.toMatch(/\bx\b/);
+      expect(html).not.toContain('&lt;!--');
+    });
+
+    // #419 — a block html token runs to the end of the line holding `-->`, and an unclosed `<!--` runs to the end of the document, so a token that opens
+    // with a comment can hold prose. Each string is exact, because the shape of what survives (one paragraph or two, no `<pre>`) is the behaviour.
+    it.each([
+      ['prose after a comment on its line', '<!-- note --> visible text\n\nnext para', '<p>visible text</p>\n<p>next para</p>\n'],
+      ['paragraphs after an unclosed comment', 'first\n\n<!--\nsecond para\n\nthird para', '<p>first</p>\n<p>&lt;!--\nsecond para</p>\n<p>third para</p>\n'],
+      ['the tail of a multi-line comment', '<!-- a\nb --> tail\nnext line\n\nnew para', '<p>tail</p>\n<p>next line</p>\n<p>new para</p>\n'],
+      ['text between two comments', '<!-- a --> x <!-- b --> y', '<p>x  y</p>\n'],
+      ['an unclosed comment after a closed one', '<!-- a --> x <!-- tail', '<p>x &lt;!-- tail</p>\n'],
+      // A groomed tracker body ends in a `bm:groomed-at` footer, so a stray opener above it is not unclosed to marked: the token runs to the footer's `-->`.
+      ['paragraphs between a stray opener and a footer', 'body\n\n<!--\nprose\n\nmore\n\n<!-- bm:groomed-at abc -->\n', '<p>body</p>\n<p>&lt;!--\nprose</p>\n<p>more</p>\n'],
+      ['nothing for an empty comment mid-paragraph', 'a <!--> b', '<p>a  b</p>\n'],
+      ['no new comment formed by stripping inside the token', '<!-- a --> <!<!-- x -->-- y -->', '<p>&lt;!-- y --&gt;</p>\n'],
+      ['nothing when only comments remain', '<!-- a --> <!-- b -->', ''],
+      ['Markdown in the text after a comment', '<!-- a --> **bold** tail', '<p><strong>bold</strong> tail</p>\n'],
+      ['no code block from the gap after a comment', '<!-- a -->     indented', '<p>indented</p>\n'],
+      ['no new comment formed by stripping one', '<!<!-- x -->-- y -->', '<p>&lt;!-- y --&gt;</p>\n']
+    ])('renders %s', (_name, source, expected) => {
+      expect(renderMarkdown(source)).toBe(expected);
+    });
+
+    it('leaves a comment inside a code fence as literal text', () => {
+      expect(renderMarkdown('```\n<!-- keep -->\n```')).toContain('&lt;!-- keep --&gt;');
+    });
+
+    // The text around a comment is rendered by a nested parse, and it stays inert only because that parse is a full `marked.parse`. The second row is the
+    // one a `this.parser.parse(marked.lexer(rest))` route gets wrong: `walkTokens` never runs there, so an `escaped` text token is emitted verbatim.
+    it.each([
+      ['a tag after a comment', '<!-- a --> <img src=x onerror="window.__pwned=1">', 'img, [onerror]'],
+      ['an unclosed tag in an inline <script> after a comment', '<!-- a --> a <script> <img src=x onerror="window.__pwned=1"// </script> b', 'img, [onerror]'],
+      ['tags after an unclosed comment', '<!--\n<script>alert(1)</script>\n\n<img src=x onerror=a>', 'script, img, [onerror]']
+    ])('never builds an element from %s', (_name, source, query) => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown(source);
+      expect(host.querySelector(query)).toBeNull();
+    });
+
+    it('renders a disallowed link scheme after a comment as plain text', () => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown('<!-- a --> [x](javascript:alert(1))');
+      expect(host.querySelector('a')).toBeNull();
+      expect(host.textContent).toContain('x');
+    });
+
+    // marked flags every text token lexed between an inline raw-block opener (`<script>`, `<pre>`, `<style>`, `<textarea>`) and its closer as
+    // `escaped`, and its default text renderer emits such a token verbatim. A tag that does not close before the closer is lexed as text, not html, so the
+    // `html` renderer never sees it — the text path has to escape too (#350 review).
+    it.each([
+      ['script', 'a <script> <img src=x onerror="window.__pwned=1"// </script> b'],
+      ['pre', 'a <pre> <svg onload="window.__pwned=1"// </pre> b']
+    ])('renders a tag inside an inline <%s> as escaped text', (_raw, source) => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown(source);
+      expect(host.querySelector('[onerror], [onload]')).toBeNull();
+      expect(host.querySelector('img, svg')).toBeNull();
+    });
+
+    it('escapes plain text exactly once', () => {
+      expect(renderMarkdown('a & b < c')).toBe('<p>a &amp; b &lt; c</p>\n');
+    });
+
+    // marked builds a loose task item's checkbox into a token it marks `escaped` after lexing; escaping every text token at render time instead of at
+    // walk time would print that checkbox as `&lt;input …&gt;`.
+    it('keeps a loose task list checkbox as an input', () => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown('- [x] done & dusted\n\n- [ ] next\n');
+      expect(host.querySelectorAll('input[type="checkbox"]')).toHaveLength(2);
+      expect(host.textContent).not.toContain('<input');
+      expect(host.textContent).toContain('done & dusted');
+    });
+  });
+
+  it('neutralizes a javascript: href instead of rendering it as a clickable link', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('[click](javascript:alert(1))')
+      } as Response)
+    );
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(document.querySelector('.item-body')?.innerHTML).not.toContain('javascript:');
+  });
+
+  // Task 4 hoisted the renderer out of the modal into `lib/markdown.ts`; calling it directly proves the hoist kept the sanitiser, with no component between.
+  it('renderMarkdown renders no javascript: href', () => {
+    const html = renderMarkdown('[x](javascript:alert(1))');
+    expect(html).not.toContain('javascript:');
+    expect(html).not.toContain('<a');
+    expect(html).toContain('x');
+  });
+
+  // Round 2: a scheme hidden behind an HTML character reference reads as "no
+  // scheme, therefore relative" to any check that runs before the entities
+  // are decoded — which is every check that runs on marked's output, since
+  // decoding only happens later, when dangerouslySetInnerHTML hands the
+  // string to jsdom's (the browser's, in production) own HTML parser. That
+  // is exactly why these assertions read the parsed DOM's `a.protocol`
+  // rather than grepping the HTML string: the string form of every one of
+  // these bodies never contains the literal substring "javascript:" even
+  // when the rendered anchor is fully executable.
+  it.each([
+    ['decimal entity', '[click](&#106;avascript:alert(1))'],
+    ['zero-padded decimal entity', '[click](&#0000106;avascript:alert(1))'],
+    ['hex entity', '[click](&#x6A;avascript:alert(1))'],
+    ['colon hidden as an entity', '[click](javascript&#58;alert(1))'],
+    ['tab as a decimal entity', '[click](java&#9;script:alert(1))'],
+    ['tab as a named entity', '[click](java&Tab;script:alert(1))'],
+    ['newline as a named entity', '[click](java&NewLine;script:alert(1))'],
+    ['reference-style definition', '[click][r]\n\n[r]: &#106;avascript:alert(1)\n']
+  ])('neutralizes a javascript: scheme hidden behind an entity — %s', async (_desc, body) => {
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
+    const link = document.querySelector('.item-body a') as HTMLAnchorElement | null;
+    // A real anchor still renders (the scheme check alone can't see through
+    // the entity, same as before) — the fix is that escaping `&` when the
+    // href is interpolated stops the browser from ever reconstituting the
+    // entity into a `j`, a `:`, or a stripped-out tab, so whatever scheme
+    // the parser resolves is never javascript:.
+    expect(link).not.toBeNull();
+    expect(link!.protocol).not.toBe('javascript:');
+  });
+
+  it('never requests a script-scheme image src', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('![logo](javascript:alert(1))')
+      } as Response)
+    );
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    // Waits on the loading state clearing rather than the alt text becoming
+    // visible: alt text is only ever *visible* text in the disallowed-src
+    // fallback this test is trying to prove exists — waiting on it directly
+    // would make a pre-fix run (where the src renders as a real, invisible
+    // <img alt> attribute) hang until timeout instead of failing cleanly.
+    await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
+    expect(document.querySelector('.item-body img')).not.toBeInTheDocument();
+  });
+
+  it('never requests a remote image src — this board only ever talks to its own origin', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('![logo](https://evil.example/tracker.gif)')
+      } as Response)
+    );
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
+    expect(document.querySelector('.item-body img')).not.toBeInTheDocument();
+  });
+
+  // The other half of the fix: none of the above should come at the cost of
+  // ordinary Markdown. These exercise exactly the branch round 2 rewrote
+  // (link/image now hand-build their tag instead of deferring to marked's
+  // default), so a regression here would be silent otherwise.
+  it.each([
+    ['https:', '[docs](https://example.com/page)'],
+    ['http:', '[docs](http://example.com/page)'],
+    ['mailto:', '[docs](mailto:team@example.com)']
+  ])('still renders an ordinary %s link as clickable', async (protocol, body) => {
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('docs')).toBeInTheDocument());
+    const link = document.querySelector('.item-body a') as HTMLAnchorElement | null;
+    expect(link?.protocol).toBe(protocol);
+  });
+
+  it.each([
+    ['relative', '[docs](./other.md)', './other.md'],
+    ['anchor', '[docs](#section)', '#section']
+  ])('still renders an ordinary %s link with its href intact', async (_kind, body, href) => {
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('docs')).toBeInTheDocument());
+    const link = document.querySelector('.item-body a');
+    expect(link?.getAttribute('href')).toBe(href);
+  });
+
+  it('still renders a relative image as a real img tag', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('![diagram](./diagram.png)')
+      } as Response)
+    );
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(document.querySelector('.item-body img')).not.toBeNull());
+    const img = document.querySelector('.item-body img') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('./diagram.png');
+    expect(img.getAttribute('alt')).toBe('diagram');
+  });
+
+  // Round 3: a protocol-relative src (`//host/...`) has no `scheme:` for
+  // isDisallowedScheme to match, so it read as "relative" and slipped past
+  // the round-2 image guard — a real third-party fetch (leaking the
+  // viewer's IP/UA/referrer) from a board whose own comments say it only
+  // ever talks to its own origin. `/\host` and reference-definition forms
+  // reach the same renderer the same way; a browser treats `\` the same as
+  // `/` in a URL, and marked resolves a `[x][r]` / `[r]: <src>` reference
+  // before the renderer ever runs.
+  it.each([
+    ['protocol-relative', '![logo](//evil.example/p.png)'],
+    ['backslash variant of protocol-relative', '![logo](/\\evil.example/p.png)'],
+    ['reference-definition form', '![logo][r]\n\n[r]: //evil.example/p.png\n']
+  ])('never requests a protocol-relative image src — %s', async (_desc, body) => {
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
+    // No <img> at all — same fallback as the scheme-based cases above, and
+    // for the same reason: there is no safe src to neutralize this src down
+    // to, so it renders as its alt text instead.
+    expect(document.querySelector('.item-body img')).not.toBeInTheDocument();
+  });
+
+  it('still renders an absolute-path (single-slash) image as a real img tag', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('![diagram](/abs/path.png)')
+      } as Response)
+    );
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(document.querySelector('.item-body img')).not.toBeNull());
+    const img = document.querySelector('.item-body img') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('/abs/path.png');
+  });
+
+  // Round 4: whitespace *inside* the destination. `schemeOf` stripped it
+  // before sniffing a scheme; the protocol-relative check did not, so it saw
+  // "starts with a tab, not a slash" and let the src through — and the URL
+  // parser then deleted the tab and fetched from evil.example. Both guards
+  // are now one `classifyTarget`, so there is a single normalization to get
+  // right. Characters that matter are built by code point rather than written
+  // as escapes, so the vector in the source is unambiguous.
+  const TAB = String.fromCharCode(9);
+  const FORM_FEED = String.fromCharCode(12);
+  const C0_CONTROL = String.fromCharCode(1);
+
+  it.each([
+    ['leading space', '![logo](< //evil.example/p.png>)'],
+    ['leading tab', `![logo](<${TAB}//evil.example/p.png>)`],
+    ['leading tab, backslash spelling', `![logo](<${TAB}/\\evil.example/p.png>)`],
+    ['leading tab, reference-definition form', `![logo][r]\n\n[r]: <${TAB}//evil.example/p.png>\n`],
+    ['tab between the two slashes', `![logo](</${TAB}/evil.example/p.png>)`],
+    ['leading form feed', `![logo](<${FORM_FEED}//evil.example/p.png>)`],
+    ['leading C0 control', `![logo](<${C0_CONTROL}//evil.example/p.png>)`],
+    ['leading tab, triple slash', `![logo](<${TAB}///evil.example/p.png>)`]
+  ])('never requests an off-origin image src hidden behind whitespace — %s', async (_desc, body) => {
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
+    const img = document.querySelector('.item-body img') as HTMLImageElement | null;
+    // `.src` is the resolved property, not the attribute and not the HTML
+    // string: only that form shows where the request would actually go. The
+    // attribute still reads as a relative-looking path in every one of these,
+    // which is exactly why a string check on the markup passes while the DOM
+    // holds a live cross-origin fetch.
+    expect(img?.src ?? '').not.toContain('evil.example');
+    expect(img).not.toBeInTheDocument();
+  });
+
+  it('neutralizes a javascript: scheme split by whitespace', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve(`[click](<java${TAB}script:alert(1)>)`)
+      } as Response)
+    );
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
+    // Same normalization as the image cases above — a browser ignores the tab
+    // when it sniffs the scheme, so the guard has to as well.
+    expect(document.querySelector('.item-body a')).not.toBeInTheDocument();
+  });
+
+  it('still renders a nested relative image path as a real img tag', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('![diagram](sub/dir/x.png)')
+      } as Response)
+    );
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(document.querySelector('.item-body img')).not.toBeNull());
+    const img = document.querySelector('.item-body img') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('sub/dir/x.png');
+    expect(new URL(img.src).origin).toBe(window.location.origin);
+  });
+});
+
+/* #225 — the claim control under the facts column. The label is `claimControl`'s (pinned case by case in tracker-lib.test.ts); what this suite pins is
+   that the modal draws it, gates both labels behind the inline confirm, and posts only on accept. */
+/** Two clicks that both land before React re-renders — `test/runs/run-controls.test.tsx`'s `doubleClick`, for the same reason: `userEvent.click` awaits between
+ *  clicks, so the second lands on a re-rendered (disabled) control and the case would pass with the guard deleted. Only a raw dispatch pair inside one `act`
+ *  reaches `useAction`'s ref guard (#286). */
+function doubleClick(el: HTMLElement): void {
+  act(() => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
+describe('ItemModal issue link', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve('body') } as Response)) as jest.Mock;
+  });
+
+  // A tracker row's path is a URN nobody can open; the issue's own page is where it lives, so the fact links there instead of printing static text.
+  it("links a tracker item's issue in place of the file fact, opening a new tab", async () => {
+    const item: BacklogItem = { ...ITEM, id: '#58', path: 'gh:futin/ixray#58', source: 'github', url: 'https://github.com/futin/ixray/issues/58' };
+    render(<ItemModal item={item} hues={HUES} onClose={() => {}} />);
+    expect(factValue('file')).toBeNull();
+    const link = screen.getByRole('link', { name: 'gh:futin/ixray#58' });
+    expect(link.getAttribute('href')).toBe('https://github.com/futin/ixray/issues/58');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noreferrer');
+    expect(factValue('issue')).toBe('gh:futin/ixray#58');
+    await screen.findByText('body');
+  });
+});
+
+describe('ItemModal claim control', () => {
+  const TRACKER: BacklogItem = {
+    ...ITEM,
+    id: '#31',
+    project: 'alpha',
+    path: 'gh:futin/x#31',
+    source: 'github',
+    url: 'https://github.com/futin/x/issues/31'
+  };
+  const held = (over: Partial<NonNullable<BacklogItem['holder']>> = {}): BacklogItem => ({
+    ...TRACKER,
+    holder: { session: 'b1c2d3e4-5555-6666-7777-888899990000', host: 'laptop', heartbeat: new Date().toISOString(), ...over }
+  });
+
+  let abortAnswer: { status: number; body: unknown };
+  let posts: { url: string; body: unknown }[];
+
+  beforeEach(() => {
+    posts = [];
+    abortAnswer = { status: 201, body: { id: '#31', released: true, stopped: true } };
+    global.fetch = jest.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push({ url, body: JSON.parse(String(init.body)) });
+        return Promise.resolve({ ok: abortAnswer.status < 300, status: abortAnswer.status, json: () => Promise.resolve(abortAnswer.body) } as Response);
+      }
+      return Promise.resolve({ ok: true, text: () => Promise.resolve('body') } as Response);
+    }) as jest.Mock;
+  });
+
+  it('draws Stop & release for a session the board dispatched, and asks before it posts', async () => {
+    const onReleased = jest.fn();
+    render(<ItemModal item={held({ dispatched: true })} hues={HUES} onClose={() => {}} onReleased={onReleased} />);
+    await screen.findByText('body');
+
+    await userEvent.click(screen.getByTestId('claim-release'));
+    expect(posts).toEqual([]);
+    expect(screen.getByTestId('claim-release-confirm').textContent).toMatch(/Stop session b1c2d3e4 and release its claim on #31/);
+    expect(screen.getByTestId('claim-release-confirm-accept').textContent).toBe('Stop & release');
+
+    await userEvent.click(screen.getByTestId('claim-release-confirm-accept'));
+    await waitFor(() => expect(screen.getByTestId('claim-released')).toBeInTheDocument());
+    expect(posts).toEqual([{ url: '/api/items/abort', body: { project: '/abs/alpha', id: '#31' } }]);
+    expect(onReleased).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('claim-release')).toBeNull();
+  });
+
+  it('draws Release claim for any other live claim, and its confirm warns that a waiting session looks stopped', async () => {
+    render(<ItemModal item={held()} hues={HUES} onClose={() => {}} onReleased={() => {}} />);
+    await screen.findByText('body');
+
+    expect(screen.getByTestId('claim-release').textContent).toBe('Release claim');
+    await userEvent.click(screen.getByTestId('claim-release'));
+    expect(screen.getByTestId('claim-release-confirm').textContent).toMatch(/waiting on a reply also looks stopped/);
+  });
+
+  it('puts the chip back and posts nothing when the confirm is dismissed', async () => {
+    render(<ItemModal item={held()} hues={HUES} onClose={() => {}} onReleased={() => {}} />);
+    await screen.findByText('body');
+
+    await userEvent.click(screen.getByTestId('claim-release'));
+    await userEvent.click(screen.getByTestId('claim-release-confirm-dismiss'));
+    expect(screen.queryByTestId('claim-release-confirm')).toBeNull();
+    expect(screen.getByTestId('claim-release')).toBeInTheDocument();
+    expect(posts).toEqual([]);
+  });
+
+  // The confirm is on the escape stack above the modal it sits in, so one Escape takes back the question and leaves the modal open.
+  it('lets Escape dismiss the confirm and nothing under it', async () => {
+    const onClose = jest.fn();
+    render(<ItemModal item={held()} hues={HUES} onClose={onClose} onReleased={() => {}} />);
+    await screen.findByText('body');
+
+    await userEvent.click(screen.getByTestId('claim-release'));
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByTestId('claim-release-confirm')).toBeNull();
+    expect(screen.getByTestId('claim-release')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(posts).toEqual([]);
+  });
+
+  // #286 — before useAction, `accept` guarded with `setStage('busy')` alone, which the second click of the same tick never sees: both sent `abortClaim`.
+  it('sends one release for a double-click on the confirm', async () => {
+    render(<ItemModal item={held()} hues={HUES} onClose={() => {}} onReleased={() => {}} />);
+    await screen.findByText('body');
+    const answered = global.fetch as jest.Mock;
+    // The release never answers, so the in-flight window stays open for the whole case and nothing settles after it ends.
+    global.fetch = jest.fn((url: string, init?: RequestInit) => {
+      if (init?.method !== 'POST') return answered(url, init);
+      posts.push({ url, body: JSON.parse(String(init.body)) });
+      return new Promise(() => {});
+    }) as jest.Mock;
+
+    await userEvent.click(screen.getByTestId('claim-release'));
+    doubleClick(screen.getByTestId('claim-release-confirm-accept'));
+
+    expect(posts).toHaveLength(1);
+  });
+
+  it('prints the server refusal verbatim, keeps the chip, and does not re-read the board', async () => {
+    abortAnswer = { status: 409, body: { error: 'session b1c2 is working — stop it before releasing its claim' } };
+    const onReleased = jest.fn();
+    render(<ItemModal item={held()} hues={HUES} onClose={() => {}} onReleased={onReleased} />);
+    await screen.findByText('body');
+
+    await userEvent.click(screen.getByTestId('claim-release'));
+    await userEvent.click(screen.getByTestId('claim-release-confirm-accept'));
+    await waitFor(() => expect(screen.getByTestId('claim-release-error').textContent).toBe('session b1c2 is working — stop it before releasing its claim'));
+    expect(screen.getByTestId('claim-release')).toBeInTheDocument();
+    expect(onReleased).not.toHaveBeenCalled();
+  });
+
+  it('draws nothing for a files item, a run-held claim — live or stale — or an unheld issue', () => {
+    const cases: BacklogItem[] = [
+      { ...ITEM, holder: { session: 's', heartbeat: new Date().toISOString(), dispatched: true } },
+      held({ run: 'run-9' }),
+      held({ run: 'run-9', heartbeat: new Date(Date.now() - 16 * 60_000).toISOString() }),
+      TRACKER
+    ];
+    for (const item of cases) {
+      const { unmount } = render(<ItemModal item={item} hues={HUES} onClose={() => {}} onReleased={() => {}} />);
+      expect(screen.queryByTestId('claim-release')).toBeNull();
+      unmount();
+    }
+  });
+
+  /*
+   * #227: a stale hand claim used to draw nothing here, which left an item nobody was on reading as held with no way to let go of it. It draws Release
+   * claim now, with a confirm about the stale claim itself — its age, its machine, and what happens to a session that is somehow still alive.
+   */
+  it('draws Release claim for a stale hand claim, with a confirm naming its age and host, and posts abort once', async () => {
+    const onReleased = jest.fn();
+    render(
+      <ItemModal
+        item={held({ heartbeat: new Date(Date.now() - 42 * 60_000).toISOString(), host: 'aj_linux' })}
+        hues={HUES}
+        onClose={() => {}}
+        onReleased={onReleased}
+      />
+    );
+    await screen.findByText('body');
+
+    expect(screen.getByTestId('claim-release').textContent).toBe('Release claim');
+    await userEvent.click(screen.getByTestId('claim-release'));
+    expect(screen.getByTestId('claim-release-confirm').textContent).toMatch(
+      /^Release session b1c2d3e4's stale claim on #31\? No heartbeat for 4\dm on aj_linux\. If that session is still running, its next heartbeat is refused and it stops\./
+    );
+    await userEvent.click(screen.getByTestId('claim-release-confirm-accept'));
+    await waitFor(() => expect(screen.getByTestId('claim-released')).toBeInTheDocument());
+    expect(posts).toEqual([{ url: '/api/items/abort', body: { project: '/abs/alpha', id: '#31' } }]);
+    expect(onReleased).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Stop & release for a stale claim the board dispatched', async () => {
+    render(
+      <ItemModal
+        item={held({ dispatched: true, heartbeat: new Date(Date.now() - 42 * 60_000).toISOString() })}
+        hues={HUES}
+        onClose={() => {}}
+        onReleased={() => {}}
+      />
+    );
+    await screen.findByText('body');
+    expect(screen.getByTestId('claim-release').textContent).toBe('Stop & release');
+  });
+
+  it('reads a stale claim as a stale claim, not as in progress', async () => {
+    const beat = new Date(Date.now() - 42 * 60_000).toISOString();
+    render(
+      <ItemModal
+        item={{ ...held({ heartbeat: beat, host: 'aj_linux' }), started: beat, phase: 'execute' }}
+        hues={HUES}
+        onClose={() => {}}
+        onReleased={() => {}}
+      />
+    );
+    await screen.findByText('body');
+    expect(factValue('in progress')).toBeNull();
+    expect(factValue('stale claim')).toMatch(new RegExp(`^no heartbeat 4\\dm \\(since ${beat.replace(/[.]/g, '\\.')}\\) · aj_linux$`));
+  });
+
+  it('draws nothing when the render site has no payload to re-read', async () => {
+    render(<ItemModal item={held({ dispatched: true })} hues={HUES} onClose={() => {}} />);
+    await screen.findByText('body');
+    expect(screen.queryByTestId('claim-release')).toBeNull();
+  });
+});
