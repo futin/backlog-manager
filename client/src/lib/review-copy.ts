@@ -23,6 +23,16 @@ const commits = (n: number): string => `${n} ${n === 1 ? 'commit' : 'commits'}`;
 
 /** An age through the board's ladder; an unparseable stamp reads as the stamp itself rather than `NaN`, which is what `pollAge`'s callers do. */
 const age = (iso: string, now: number): string => elapsedSince(iso, now) ?? iso;
+/** `<age> ago` for the row's `reviewed` clause: under a minute `elapsedSince` says `now`, and `now ago` is not English. */
+const agoText = (iso: string, now: number): string => {
+  const a = age(iso, now);
+  return a === 'now' ? 'just now' : `${a} ago`;
+};
+/** `since <age>` for the not-refreshed suffix, with the same under-a-minute case: `since just now` reads, `since now` does not. */
+const sinceText = (iso: string, now: number): string => {
+  const a = age(iso, now);
+  return a === 'now' ? 'just now' : a;
+};
 
 /**
  * The word under Detail's Review step; `null` when the step draws none (no review read). `reviewing` counts from `triggeredAt`, which is non-null whenever
@@ -52,7 +62,7 @@ export function reviewStepWord(review: GitlabReview | null, now: number): string
 
 /** ` · not refreshed since <age>` when the latest read failed, from `readAt` (the last GOOD read); empty otherwise. The row and the step's title share it. */
 export function reviewStepTitleSuffix(review: GitlabReview | null, now: number): string {
-  return review !== null && review.failed ? ` · not refreshed since ${age(review.readAt, now)}` : '';
+  return review !== null && review.failed ? ` · not refreshed since ${sinceText(review.readAt, now)}` : '';
 }
 
 /**
@@ -71,7 +81,7 @@ export function reviewRowText(review: GitlabReview | null, now: number): string 
         .join(', ');
       // A thread count of exactly 1 is the singular, even capped (`1+ open findings` reads as plural-ish, but the cap says "at least" and 1 is the floor).
       const noun = review.open === 1 && !review.capped ? 'finding' : 'findings';
-      const reviewed = review.landedAt === null ? '' : ` · reviewed ${age(review.landedAt, now)} ago`;
+      const reviewed = review.landedAt === null ? '' : ` · reviewed ${agoText(review.landedAt, now)}`;
       body = `${n} open ${noun}${breakdown === '' ? '' : ` · ${breakdown}`}${reviewed}`;
       break;
     }

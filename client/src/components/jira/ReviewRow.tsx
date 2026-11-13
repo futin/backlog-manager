@@ -89,7 +89,7 @@ export function ReviewRow({
         {text}
       </span>
       {showButton && (
-        <span className="ui-split ui-split-28">
+        <span className="ui-split ui-split-28" title={blocked ?? undefined}>
           <button type="button" className="ui-split-main" disabled={blocked !== null} title={blocked ?? undefined} onClick={() => onReview(half, lead, repos)}>
             <span className="ui-split-icon" aria-hidden="true">
               <Glyph name="play" />

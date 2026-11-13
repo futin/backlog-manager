@@ -22,7 +22,7 @@ import { daysAgoStamp } from '../helpers/dates';
 
 // The CodeRabbit row asks the dashboard whether agents are on (`useAgents`); the hook fetches, so it is replaced by a status this suite sets per case.
 let mockAgents: AgentsStatus | null = { enabled: true } as AgentsStatus;
-jest.mock('../client/src/hooks/useAgents', () => ({ useAgents: () => ({ status: mockAgents, reload: jest.fn() }) }));
+jest.mock('../../client/src/hooks/useAgents', () => ({ useAgents: () => ({ status: mockAgents, reload: jest.fn() }) }));
 
 const now = Date.now();
 const ago = (minutes: number): string => new Date(now - minutes * 60_000).toISOString();
@@ -405,6 +405,8 @@ describe('the CodeRabbit row', () => {
       const btn = screen.getByRole('button', { name: 'Fix review' });
       expect(btn).toBeDisabled();
       expect(btn).toHaveAttribute('title', title);
+      // A disabled button takes no hover, so the wrapper carries the same sentence for the pointer.
+      expect(btn.parentElement).toHaveAttribute('title', title);
     };
 
     it('a live `run` link on the key disables it, naming the session', () => {

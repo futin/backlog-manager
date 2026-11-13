@@ -66,6 +66,11 @@ describe('reviewRowText', () => {
     expect(reviewRowText(review({ commitsSince: 1 }), NOW)).toBe('CodeRabbit · 1 commit since the last review');
     expect(reviewRowText(review({ triggeredAt: minutesAgo(90), landedAt: minutesAgo(120) }), NOW)).toBe("CodeRabbit · the last review didn't land");
   });
+  it('under a minute reads "just now", never "now ago"', () => {
+    const fresh = { ...open4, landedAt: minutesAgo(0), readAt: minutesAgo(0), failed: true };
+    expect(reviewRowText(fresh, NOW)).toBe('CodeRabbit · 4 open findings · 1 major, 1 minor, 2 other · reviewed just now · not refreshed since just now');
+    expect(reviewStepTitleSuffix(fresh, NOW)).toBe(' · not refreshed since just now');
+  });
   it('a failed read adds the not-refreshed suffix, aged from readAt', () => {
     expect(reviewRowText({ ...open4, failed: true }, NOW)).toBe(
       'CodeRabbit · 4 open findings · 1 major, 1 minor, 2 other · reviewed 2h ago · not refreshed since 1h'
