@@ -82,11 +82,16 @@ The user picked A.
 
 ### 4.1 What CodeRabbit leaves on an MR (observed on Timify GitLab, `!15958`)
 
-- It never reviews on its own. A person posts a note whose body is `@coderabbitai review`. That note is the **trigger**.
-- It answers with an immediate acknowledgement note, then, when the review is done, a note containing `Actionable comments posted: N`. That second note is
-  the **landing**.
-- Each finding is a **resolvable discussion** opened by the bot. Its first note's body carries `**<category>** | **<severity>**`, with severity one of
-  `Major`, `Minor`, `Trivial`, often after a 🔴/🟠/🟡/🔵 emoji.
+- It never reviews on its own. A person posts a note that starts `@coderabbitai review`. That note is the **trigger**, and it opens a resolvable discussion of
+  its own. Real triggers read `@coderabbitai review`, `@coderabbitai review changes`, `@coderabbitai review chnages` (sic) and
+  `@coderabbitai review changes from the following commits only` followed by a commit list.
+- It answers at once with a reply **inside the trigger's discussion** (the acknowledgement: `Action performed … Review finished`, `I'll review the changes…`,
+  or an analysis chain), and **edits that reply when the review ends**. A review with findings also posts a top-level note containing
+  `Actionable comments posted: N`, created the same minute as the edit. A review that finds nothing posts no such note: the edit is all it leaves.
+  Observed on 12 rounds across `!15958`, `!15976`, `!15993`, `!15998` and `!16022` (builder check, §9).
+- Each finding is a **resolvable discussion** opened by the bot. Its first note's first line reads `**<emoji> <category>** | **<emoji> <severity>** | …`,
+  e.g. `**🔒 Security & Privacy** | **🟠 Major** | **⚡ Quick win**`: the emoji sits **inside** the bold. Severity is one of `Critical` (🔴), `Major` (🟠),
+  `Minor` (🟡) or `Trivial` (🔵).
 - The person replies `Addressed in <sha>.` or `Skipped: …` and resolves the thread.
 - An MR can have several rounds, each a trigger followed by a landing. `!15958` had three.
 - Pushing commits leaves a system note, `added N commit(s)`.
@@ -100,7 +105,7 @@ never means "no review"; that is the `none` state.
 
 - `open`: the number of unresolved bot threads
 - `resolved`: the number of resolved bot threads
-- `worst`: `'major' | 'minor' | 'trivial' | null`, the worst severity among the unresolved threads (`null` when there are none, or none parse)
+- `worst`: `'critical' | 'major' | 'minor' | 'trivial' | null`, the worst severity among the unresolved threads (`null` when there are none, or none parse)
 - `bySeverity`: counts of unresolved threads per severity, plus `other` for a thread whose severity did not parse
 - `triggeredAt`: the latest trigger, or `null`
 - `landedAt`: the latest landing, or `null`
@@ -110,7 +115,7 @@ never means "no review"; that is the `none` state.
 - `failed`: the latest read attempt failed, so these are the last good facts
 
 **The cache stores those raw facts, never a frozen state.** The state is derived from them against the clock by one pure function in `shared/`,
-`reviewState(review, now)`. The client calls it to draw, the poller calls it to decide re-reads (§4.3), and dispatch calls it to pick the half (§6). Rule 2
+`reviewState(review, now)`. The client calls it to draw, the poller calls it to decide re-reads (§4.3), and dispatch calls it to pick the half (§6). Rule 1
 below depends on the time, so a review that never lands stops reading `reviewing` once 30 minutes pass, whether or not anything re-reads the MR. *(My call,
 after the builder check: a state folded once at read time would keep a stuck review `reviewing` forever, with the button hidden.)*
 
@@ -119,33 +124,38 @@ The state is derived in this order. The first rule that matches wins:
 | # | Condition | State | Step word | Tone |
 |---|-----------|-------|-----------|------|
 | 0 | `capped` and `open === 0` | `unknown` | `too long to read` | off |
-| 1 | no trigger note | `none` | `not reviewed` | off |
-| 2 | latest trigger is newer than the latest landing (or there is no landing), and is under 30 min old | `reviewing` | `reviewing… 4m` | grey |
-| 3 | no landing at all (the only trigger is over 30 min old) | `none` | `not reviewed` | off |
-| 4 | `open > 0` | `open` | `2 open · 1 major` | amber |
-| 5 | `commitsSince > 0` | `stale` | `3 commits since review` | grey |
-| 6 | latest trigger is newer than the latest landing and over 30 min old (a later round never landed) | `stale` | `last review didn't land` | grey |
-| 7 | otherwise (a landing exists, nothing open, no commits since) | `clean` | `0 open · 25 resolved` | green |
+| 1 | latest trigger is newer than the latest landing (or there is no landing), and is under 30 min old | `reviewing` | `reviewing… 4m` | grey |
+| 2 | `open > 0` | `open` | `2 open · 1 major` | amber |
+| 3 | no landing at all (no trigger, or the only rounds are over 30 min old and never landed) | `none` | `not reviewed` | off |
+| 4 | `commitsSince > 0` | `stale` | `3 commits since review` | grey |
+| 5 | latest trigger is newer than the latest landing and over 30 min old (a later round never landed) | `stale` | `last review didn't land` | grey |
+| 6 | otherwise (a landing exists, nothing open, no commits since) | `clean` | `0 open · 25 resolved` | green |
 
-`clean` therefore always has a landing behind it. A review that never landed, or whose page budget ran out, never reads green. *(Review 1-1, 1-3, 1-19.)*
+`clean` therefore always has a landing behind it. A review that never landed, or whose page budget ran out, never reads green. Open bot threads read `open`
+whatever else the fold saw or missed — a landing in wording the match does not know, or a trigger past the page cap — so the button never offers Request
+review over open findings. *(Review 1-1, 1-3, 1-19, 2-1.)*
 
 Details:
 
-- **A stuck review.** A trigger older than 30 minutes with no landing after it is caught by rule 3 (no round ever landed) or rule 6 (an earlier round
-  landed). Either way the button offers Request review again, unless rule 4's open findings come first. 30 min is my call: the skill itself gives up at 15.
+- **A stuck review.** A trigger older than 30 minutes with no landing after it is caught by rule 3 (no round ever landed) or rule 5 (an earlier round
+  landed). Either way the button offers Request review again, unless rule 2's open findings come first. 30 min is my call: the skill itself gives up at 15.
 - **Six states, not five.** `reviewState` returns `'none' | 'reviewing' | 'open' | 'stale' | 'clean' | 'unknown'`. `unknown` (rule 0) gets no CodeRabbit
   row, and dispatch refuses it (§6). A capped review with open findings still reads `open`, with a `+` on its count.
-- **Landing match.** A note by the bot, not a system note, whose body contains `Actionable comments posted:`. A review that finds nothing may post a
-  different sentence, so the builder records the bot's zero-findings wording from a real MR and adds it to the match (§9). A landing counts for the
-  latest trigger only when it was created after that trigger.
+- **Landing match.** A round lands at the **earlier** of two times, each after its trigger was created:
+  - the `created_at` of a bot note, not a system note, whose body contains `Actionable comments posted:`;
+  - the `updated_at` of the bot's first reply inside the trigger's own discussion, when that `updated_at` is later than its `created_at` (the bot edits
+    its acknowledgement when the review ends; a review that finds nothing leaves only this). `landedAt` is the latest such landing over all rounds.
 - **Open beats stale.** Unresolved findings are still the next thing to do even after a push, and the fix session's own push is what makes a round stale
   until it resolves the threads.
 - **Bot identity.** A note is the bot's when its author's username is the CodeRabbit account. The username is a server constant with an env override,
   `BM_GITLAB_REVIEW_BOT`. The builder confirms the real username on `!15958` before writing the constant (§9).
-- **Trigger match.** A note by anyone, not a system note, whose body contains `@coderabbitai review` (case-insensitive) on a line of its own or as the
-  whole body. `@coderabbitai full review` counts too.
-- **Severity parse.** A thread's first note, matched against `| **Major**` / `**Minor**` / `**Trivial**`, case-insensitive. Anything else is `other`.
-  An unparsed thread still counts in `open` (unknown never reads as clean) and never sets `worst`.
+- **Trigger match.** A note by anyone but the bot, not a system note, with a line that **starts** `@coderabbitai review` or `@coderabbitai full review`
+  (case-insensitive) followed by the end of the line or whitespace. So `@coderabbitai review changes …` counts, `@coderabbitai reviewer` does not, and a
+  sentence that only mentions the command mid-line does not. The trigger's own discussion is a person's, so it never counts in `open`.
+- **Severity parse.** The first line of a bot thread's first note, matched case-insensitively against a bold run holding one of the four words after an
+  optional emoji and space — `**🟠 Major**` and `**Major**` both parse. Anything else is `other`. An unparsed thread still counts in `open` (unknown never
+  reads as clean) and never sets `worst`.
+- **Resolved.** A discussion is resolved when GitLab marks its resolvable notes resolved; `open` and `resolved` count only discussions the bot opened.
 
 ### 4.3 When it is read
 
@@ -207,12 +217,19 @@ by opening their tickets or their MR.
 
 **Pressing the button opens the existing Run launch sheet, pre-set to the review action** (the user's pick). It does not dispatch on its own. In the sheet:
 
-- The Action select gains the built-in `review`. Its label follows the state: `Fix review` or `Request review`.
+- The Action field is three picture tiles today (`JiraLaunchSheet.tsx`). Opened from this button, it draws **one** tile instead, pressed and not
+  switchable: title `Fix review` or `Request review` by the half, sub-line `mr-review-loop on !<iid>`, the `play` glyph. The three usual tiles are not drawn,
+  so no switch can unlock the branch or change the half. The ordinary Run entry never offers `review`. *(Review 2-2.)*
 - The branch section is locked to `continue` on the MR's source branch, with no "open MR" option.
 - The repo select lists the review candidates (below).
 - Assign and transition default to off. A review does not move the ticket.
-- Model, permission mode and surface take the sheet's usual defaults.
-- The prompt preview and edit work as they do for every action. The preview is `GET /api/jira/prompt` with `action=review` plus the MR.
+- Model takes the sheet's usual default. Permission mode defaults as for `execute` (`defaultModeFor`: the Settings value, else `acceptEdits`), because the
+  session edits code and pushes; the spawn ceiling still clamps it.
+- Surface defaults to `desktop` whenever the dashboard offers it (`desktopAvailable`), whatever `launchSurfaceDefault` says, so `mr-review-loop`'s
+  question gate is answered in the app after the hand-over (§6). Without desktop it is `dashboard` and the `Open in` control stays hidden, as today.
+  *(Review 2-3.)*
+- The prompt preview and edit work as they do for every action. The preview is `GET /api/jira/prompt` with `action=review`, `mrProject`, `mrIid` and
+  `half` added to its query (§6).
 
 **Review candidates.**
 
@@ -225,10 +242,23 @@ by opening their tickets or their MR.
 - The button is hidden when there are no candidates. With several, the sheet's repo select chooses. *(My call: `mrRepo()` falls back to a path segment
   and never answers "none", so it cannot decide this.)*
 
-**Live-session gate.** The button is disabled, with a tooltip naming the session, while a session is live on the ticket. That is the same rule Run
-follows. It is also disabled while a live session's `gitBranch` is the MR's source branch in a candidate repo, because a sub-task's review continues its
-parent's branch, possibly in the very worktree the parent's session is using. Dispatch enforces both checks as 409s. *(My call: two sessions pushing one
-MR branch is the failure to prevent. `jira-live.service.ts` already reads each session's `gitBranch`.)*
+**Live-session gate.** Two sessions pushing one MR branch is the failure to prevent. A sub-task's review continues its parent's branch, possibly in the
+very worktree the parent's session is using. *(My call.)* The button is disabled, with a tooltip naming the session, while either holds:
+
+- **On the ticket:** a live `run` link or a `starting` reservation on the key — exactly the one-run gate `reserve` already applies to every Run. A
+  `branch` or `manual` link on the key does not count here; it is caught by the branch check when it is on the MR's branch.
+- **On the branch:** any of
+  - a live link of any `how` (`run`, `branch`, `manual`) on any key whose stored `branch` is the MR's source branch and whose `repo` is a candidate;
+  - an ACTIVE dashboard row (`working` or `question`, the rows `JiraLiveService` keeps) whose `gitBranch` is the source branch and whose `projectPath`,
+    or that path's main checkout (`mainCheckoutOf`, as detection maps a worktree today), is a candidate;
+  - an in-flight review dispatch on the same (candidate main checkout, source branch) pair. A dashboard row has no `gitBranch` until the session starts,
+    and a reservation holds only a key, so dispatch also holds a memory-only branch reservation from its key reservation until `confirm` or `release`.
+    After `confirm`, the `run` link's stored `branch` (the workspace's) takes over. Two sub-tasks of one parent pressed together therefore cannot both
+    start.
+
+Dispatch enforces both as 409s: the existing `<KEY> is starting` / `<KEY> already has a session`, and `a session is live on <branch>`. The client draws
+the same two checks from the links and rows it already reads. It cannot see another tab's in-flight reservation; dispatch's 409 covers that.
+*(Review 2-5.)*
 
 The button is hidden when agents are off.
 
@@ -248,6 +278,9 @@ Worst first:
 4. otherwise the pipeline word, as today
 
 *(Review 1-14.)*
+
+`DeliveryLook.word` is also Detail's head word, so Detail reads `2 to fix` in amber the same way, over a passed or running pipeline. The track itself is
+unchanged by this: the Pipeline step keeps its own mark from the pipeline, and the Review step carries the review (§5.1). *(Review 2-7.)*
 
 *Drafts (my call):* a draft is an open MR. It is read for review, draws the Review step, and gets the CodeRabbit row and button, so people can review
 before marking it ready. Only its chip keeps saying `draft`.
@@ -278,7 +311,7 @@ Counts take the singular at 1 (`1 open`, `1 commit since review`, `1 open findin
 | Step word | stale (unlanded) | `last review didn't land` |
 | Step word | clean | `0 open · <r> resolved` |
 | Step word | unknown | `too long to read` |
-| Row | open | `CodeRabbit · <n> open findings · <breakdown> · reviewed <age> ago`, where `<breakdown>` is the non-zero severities in the order major, minor, trivial, other (`1 major, 1 minor, 2 other`), and the age counts from `landedAt` |
+| Row | open | `CodeRabbit · <n> open findings · <breakdown> · reviewed <age> ago`, where `<breakdown>` is the non-zero severities in the order critical, major, minor, trivial, other (`1 major, 1 minor, 2 other`), and the age counts from `landedAt`. With `landedAt` null, the ` · reviewed <age> ago` part is left out |
 | Row | none | `CodeRabbit · not reviewed yet` |
 | Row | stale (commits) | `CodeRabbit · <c> commits since the last review` |
 | Row | stale (unlanded) | `CodeRabbit · the last review didn't land` |
@@ -292,6 +325,7 @@ Dispatch refusals, each `{ error }` (§6):
 | Status | Text |
 |---|---|
 | 400 | `mr must be { project, iid }`, when `project` is not a non-empty string or `iid` is not a positive integer |
+| 400 | `half must be request or fix` |
 | 400 | `!<iid> is not an open merge request of <key>` |
 | 400 | `<repo> is not a review candidate for !<iid>` |
 | 400 | `a review continues <sourceBranch>`, when the branch choice is not `continue` on the MR's source branch with `openMr` off |
@@ -310,7 +344,14 @@ The button goes through the existing Jira Run dispatch (`POST /api/agents/dispat
 - `JiraAction` becomes `'execute' | 'context' | 'review' | { skill: string }`.
 - The client sends `review`, the MR it drew as `{ project, iid }`, and the half the sheet previewed, `half: 'request' | 'fix'`. The sheet's other fields
   (repo, branch choice, model, surface, prompt) are sent as for any Run.
-- The preview takes the same `mr` and returns the half it composed for, and that half is what the sheet sends.
+- **The preview composes; it does not derive.** `GET /api/jira/prompt` takes `mrProject`, `mrIid` and `half` beside `action=review` and composes the half it
+  was sent, still `text/plain`. It never reads the GitLab cache: `jira/` cannot import `gitlab/`, since `GitlabModule` already imports `JiraModule`. The
+  client picks the half from `reviewState` over the review it drew (`open` → `fix`, `none` or `stale` → `request`), the same function dispatch runs. The
+  preview's 400s: `mr must be { project, iid }` (`mrProject` fails the GitLab path shape `remote.util.ts` accepts, or `mrIid` is not a positive integer),
+  `half must be request or fix`, plus the existing ones; the route's action sentence becomes `action must be execute, context, review or skill:<id>`.
+- **Dispatch reads the cache.** `GitlabModule` exports `GitlabPollerService` and `AgentsModule` imports `GitlabModule`; the edge agents → gitlab is new and
+  one-way, like agents → jira. Dispatch composes the prompt from the cached MR's own project path and iid, never the request's spelling, and requires the
+  request's `{ project, iid }` to match a cached MR exactly, so the composed text equals the preview the sheet showed. *(Review 2-4.)*
 - An edited prompt spawns as written (`jira-dispatch.service.ts`), so the half is the only thing that ties the click to the state. If the server derives a
   different half at dispatch, it answers 409 rather than starting a session whose prompt says the opposite. *(Review 1-11.)*
 - **The server checks that MR, then derives which half from its own GitLab cache at dispatch time**, the same way item dispatch derives its action.
@@ -341,7 +382,8 @@ The button goes through the existing Jira Run dispatch (`POST /api/agents/dispat
   was pressed on.
 - The session is linked to the ticket the button was pressed on, like any Jira Run.
 
-The prompt comes from a new built-in composer in `prompt.util.ts`, after the workspace block:
+The prompt comes from a new built-in composer in `prompt.util.ts`. Like `execute` and `context`, it opens with `readTicket(key)` (the ticket the button
+was pressed on), then the workspace block, then the half *(Review 2-6)*:
 
 - **request**: Use the `mr-review-loop` skill on merge request `!<iid>` in `<project>`, which already exists for this branch. Run its discovery step
   (Step 1) for the host, project and token only. Skip push and MR creation (Steps 2–3). Start at the trigger step: post `@coderabbitai review`, wait for
@@ -377,7 +419,8 @@ is the same skill reached from a different starting point.
 - `.claude/rules/gitlab.md`: the request budget, the `review` fold and its failure rule.
 - `.claude/rules/jira.md`: the `review` action and its server-side derivation.
 - `.claude/rules/dispatch-watchdog.md`: its closed action set and the controller's 400 sentence `action must be execute, context or { skill: <id> }`,
-  which gains `review` (`jira-agents.controller.ts`).
+  which gains `review` (`jira-agents.controller.ts`); the `review` composition and what a caller can influence in it (`mr` and `half` are validated, the
+  prompt names only the cached MR's project and iid); and the new module edge agents → gitlab. *(Review 2-4.)*
 - `.claude/rules/board.md`: the Run ▾ / launch-sheet rule, which gains the review entry point.
 - `docker-compose.yml`: pass `BM_GITLAB_REVIEW_BOT: '${BM_GITLAB_REVIEW_BOT:-}'` through beside the GitLab pair, and add it to
   `test/compose-env.test.ts`'s pinned spellings. *(Review 1-17.)*
@@ -413,5 +456,15 @@ is the same skill reached from a different starting point.
 7. That `jira-live.service.ts`'s session rows expose `gitBranch` for every live session, Runs included, so the branch gate in §5.2 can be computed on
    both sides. If Runs lack it, use the Run's workspace branch, which the dispatcher knows.
 8. Prompt wording, test cases, and the exact constant and type names.
+
+**Results, 2026-11-13** (read-only GETs with the server's `read_api` token on `development/backend/microservice`, 40 recent MRs):
+
+- **1:** the bot is `coderabbitai`.
+- **2:** not run — it needs a write on GitLab, held. Until it is, §4.3 rule 2 stays as written.
+- **3:** `added N commit(s)` system notes are in `/discussions` as individual notes, `system: true`; a merge push reads `added 91 commits`. The
+  `/commits` fallback is not needed.
+- **5:** there is no zero-findings wording; such a round posts no landing note at all. §4.1 and §4.2's landing match were rewritten on that evidence.
+- **7:** every dashboard row carries `gitBranch` and `projectPath` (`dashboard-sessions.util.ts`), Runs included. The branch gate in §5.2 stands.
+- **4 and 6** need a real `mr-review-loop` run and stay with the builder.
 
 The last task of the plan is `/ui-verify` against the mocks above.
