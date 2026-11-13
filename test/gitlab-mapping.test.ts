@@ -14,13 +14,26 @@ describe('resolveGitlabProjects', () => {
     const result = await resolveGitlabProjects({ TIMIFY: ['/r/microservice', '/r/proxy', '/r/gh'], PAY: ['/r/microservice', '/r/none'] }, SITE, read);
     expect(result).toEqual({
       projects: [
-        { path: 'development/backend/microservice', repo: 'microservice', jiraKeys: ['PAY', 'TIMIFY'] },
-        { path: 'development/dev-api-graphql-proxy', repo: 'proxy', jiraKeys: ['TIMIFY'] }
+        { path: 'development/backend/microservice', repo: 'microservice', jiraKeys: ['PAY', 'TIMIFY'], repos: { PAY: ['/r/microservice'], TIMIFY: ['/r/microservice'] } },
+        { path: 'development/dev-api-graphql-proxy', repo: 'proxy', jiraKeys: ['TIMIFY'], repos: { TIMIFY: ['/r/proxy'] } }
       ],
       foundHosts: ['github.com'],
       originFailures: ['none']
     });
     expect(JSON.stringify(result)).not.toContain('glpat-x');
+  });
+
+  it('lists every repo path per Jira key that resolved to a project, in the file order, never another key\'s', async () => {
+    const origins: Record<string, string> = {
+      '/a/one': 'git@www.gitlab.timify.io:grp/proj.git',
+      '/a/two': 'git@www.gitlab.timify.io:grp/proj.git',
+      '/a/three': 'git@www.gitlab.timify.io:grp/other.git',
+      '/b/four': 'git@www.gitlab.timify.io:grp/proj.git'
+    };
+    const result = await resolveGitlabProjects({ PAY: ['/a/one', '/a/two', '/a/three'], OPS: ['/b/four'] }, SITE, async (p) => origins[p]);
+    const by = new Map(result.projects.map((p) => [p.path, p.repos]));
+    expect(by.get('grp/proj')).toEqual({ PAY: ['/a/one', '/a/two'], OPS: ['/b/four'] });
+    expect(by.get('grp/other')).toEqual({ PAY: ['/a/three'] });
   });
 
   it('answers empty for no repos without reading any origin', async () => {

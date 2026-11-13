@@ -121,6 +121,9 @@ services:
       # (`GITLAB_ENV`) by test/compose-env.test.ts.
       BM_GITLAB_SITE: '${BM_GITLAB_SITE:-}'
       BM_GITLAB_TOKEN: '${BM_GITLAB_TOKEN:-}'
+      # The CodeRabbit review bot's GitLab username (spec 4.2). Same rule: an interpolation with an empty default, so blank reads as the server's default
+      # (`coderabbitai`); it is a username, not a secret, but a literal would still pin one machine's choice into the repository.
+      BM_GITLAB_REVIEW_BOT: '${BM_GITLAB_REVIEW_BOT:-}'
       # The name this machine's tracker claims record (#225). backlog.mjs and
       # orchestrate.mjs read it on the host; the server reads it only for the
       # board's Release claim on a session it did not dispatch, which releases
