@@ -1122,6 +1122,8 @@ describe('resolveJiraAction and jiraSettingOf', () => {
     expect(resolveJiraAction('s_ffffffff', skills)).toBe('execute');
     expect(resolveJiraAction('', skills)).toBe('execute');
     expect(resolveJiraAction('skill:s_0123abcd', skills)).toBe('execute');
+    // A stored review is not a setting: it never resolves, so the default reads execute (the review action is a button's, never a default).
+    expect(resolveJiraAction('review', skills)).toBe('execute');
   });
 
   it('jiraSettingOf is its inverse', () => {
@@ -1195,6 +1197,8 @@ describe('defaultModeFor', () => {
   it('per action (the setting is empty): plan for context and acceptEdits for execute and for a skill', () => {
     expect(defaultModeFor('context', '')).toBe('plan');
     expect(defaultModeFor('execute', '')).toBe('acceptEdits');
+    expect(defaultModeFor('review', '')).toBe('acceptEdits');
+    expect(defaultModeFor('review', 'plan')).toBe('plan');
     expect(defaultModeFor({ skill: 's_0123abcd' }, '')).toBe('acceptEdits');
   });
 
@@ -1904,5 +1908,8 @@ describe('launchFootLine', () => {
 describe('clampJiraPanelFilters keeps every Delivery filter value the UI offers', () => {
   it.each(Object.keys(DELIVERY_FILTER_LABELS))('keeps `%s`', (value) => {
     expect(clampJiraPanelFilters({ ...NO_JIRA_PANEL_FILTERS, delivery: value }).delivery).toBe(value);
+  });
+  it('keeps `review-open` by name', () => {
+    expect(clampJiraPanelFilters({ delivery: 'review-open' }).delivery).toBe('review-open');
   });
 });

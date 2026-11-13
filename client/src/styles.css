@@ -1579,6 +1579,15 @@ button.rail-count { cursor: pointer }
 .jira-dlv-track.compact .jira-dlv-bar { width: 6px; height: 2px }
 /* `Also:` — the other MRs, each its link, its state word on a tint of its tone (the `Pill` shape, page-local because `Pill` has no magenta), and
    `<repo> · <age>`. */
+/* The CodeRabbit row (`ReviewRow`, spec §5.2, mocks `opt-b-*.png`): a hairline above, the state's sentence on a tint of its tone filling the left, the ink button at
+   the right. Amber is findings to fix, grey everything the row offers a request for. The sentence ellipsises before the button gives any width. */
+.jira-dlv-review { display: flex; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--hairline) }
+.jira-dlv-review-text {
+  flex: 1; min-width: 0; display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 500;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis
+}
+.jira-dlv-review-text[data-tone='amber'] { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
+.jira-dlv-review-text[data-tone='grey'] { color: var(--ink2); background: var(--strip-hi) }
 .jira-dlv-also { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding-top: 10px; border-top: 1px solid var(--hairline) }
 .jira-dlv-also-mr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0 }
 .jira-dlv-word { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 500; white-space: nowrap }

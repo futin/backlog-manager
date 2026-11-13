@@ -57,3 +57,17 @@ export function remoteOnSite(remote: ParsedRemote, site: string): boolean {
 export function gitlabProjectId(path: string): string {
   return encodeURIComponent(path);
 }
+
+const PROJECT_SEGMENT = /^[A-Za-z0-9_.-]+$/;
+
+/**
+ * Whether `path` is a GitLab project path as this server accepts one from a request: at most 255 characters, two or more `/`-separated segments (a namespace
+ * and a project, nested namespaces allowed), each `[A-Za-z0-9_.-]+` and neither `.` nor `..`, no leading or trailing `/` (which an empty segment would make).
+ * Pure and Nest-free on purpose: `jira/` validates a review's MR with it and must never reach `gitlab/`'s poller or module. It only ever shapes a value that
+ * is later percent-encoded by `gitlabProjectId` or printed in a prompt, so it errs narrow — a path outside it is refused, never repaired.
+ */
+export function isGitlabProjectPath(path: string): boolean {
+  if (typeof path !== 'string' || path.length === 0 || path.length > 255) return false;
+  const segments = path.split('/');
+  return segments.length >= 2 && segments.every((segment) => PROJECT_SEGMENT.test(segment) && segment !== '.' && segment !== '..');
+}

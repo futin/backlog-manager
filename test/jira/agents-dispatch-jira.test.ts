@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -7,13 +7,14 @@ import request from 'supertest';
 
 import { JiraLiveReconciler } from '../../server/src/agents/jira-live.service';
 import { AppModule } from '../../server/src/app.module';
+import { GitlabPollerService } from '../../server/src/gitlab/poller.service';
 import { JiraClient } from '../../server/src/jira/jira.client';
 import { JIRA_LIVE_CAP, JiraLiveService } from '../../server/src/jira/live.service';
 import { JiraPollerService } from '../../server/src/jira/poller.service';
 import * as refsUtil from '../../server/src/jira/refs.util';
 import { REGISTRY_FILE } from '../../server/src/registry/registry.service';
 import { DEFAULT_MODEL } from '../../shared/agent';
-import type { JiraRefBranch, JiraRepoRefs, JiraStatusPayload } from '../../shared/types';
+import type { DashboardRow, GitlabMr, GitlabReview, JiraRefBranch, JiraRepoRefs, JiraStatusPayload } from '../../shared/types';
 import { listenLoopback } from '../helpers/app';
 import { FakeJira, makeRawIssue, RUN_META } from '../helpers/jira';
 import type { FailNext } from '../helpers/jira';
@@ -63,6 +64,11 @@ interface Dashboard {
   projectPaths?: string[];
   /** The health answer says `desktopAvailable: true` — a Mac whose dashboard can hand a launch to the desktop app. */
   desktop?: boolean;
+  /**
+   * The FIRST spawn answers only once this settles; later spawns answer at once. A race case needs the first dispatch held mid-spawn — its key reserved, its
+   * branch held, no link yet — while a second one runs every gate, and a second spawn that would hang on the same gate would turn a red case into a timeout.
+   */
+  firstSpawnGate?: Promise<void>;
 }
 
 /** What the dashboard stub saw: every URL, the spawn bodies, and the Jira write log as it stood at the moment each spawn arrived. */
@@ -87,11 +93,12 @@ function stubDashboard(opts: Dashboard = {}): Sent {
       sent.spawns.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       sent.writesAtSpawn.push(writes());
       const ok = opts.spawn?.ok ?? true;
-      return Promise.resolve({
+      const answer = {
         ok,
         status: opts.spawn?.status ?? (ok ? 200 : 500),
         json: () => Promise.resolve(opts.spawn?.body ?? { sessionId: 'sess-1' })
-      } as Response);
+      } as Response;
+      return opts.firstSpawnGate !== undefined && sent.spawns.length === 1 ? opts.firstSpawnGate.then(() => answer) : Promise.resolve(answer);
     }
     if (url.endsWith('/api/health') && opts.healthDown) return Promise.reject(new TypeError('fetch failed'));
     return Promise.resolve({
@@ -186,8 +193,8 @@ describe('refusals before the reservation — no Jira write, no spawn, nothing r
   it.each([
     ['a lower-case key', { key: 'pay-1' }, 'invalid issue key'],
     ['no key', { key: undefined }, 'invalid issue key'],
-    ['an unknown action', { action: 'nope' }, 'action must be execute, context or { skill: <id> }'],
-    ['the query spelling of a skill', { action: 'skill:s_0123abcd' }, 'action must be execute, context or { skill: <id> }'],
+    ['an unknown action', { action: 'nope' }, 'action must be execute, context, review or { skill: <id> }'],
+    ['the query spelling of a skill', { action: 'skill:s_0123abcd' }, 'action must be execute, context, review or { skill: <id> }'],
     ['a blank repo', { repo: '  ' }, 'repo is required'],
     ['a string assign', { assign: 'yes' }, 'assign must be true or false'],
     ['a numeric transitionId', { transitionId: 31 }, 'transitionId must be null or a non-empty string'],
@@ -667,5 +674,355 @@ describe('Open in: the surface', () => {
     const res = await post({ ...BODY, ...NONE, action: 'context', assign: false, transitionId: null, surface: 'desktop' }).expect(502);
     expect(res.body).toEqual({ error: 'the desktop app is not available on this Mac — launch on Dashboard instead' });
     expect(live.get('PAY-1')).toBeNull();
+  });
+});
+
+/**
+ * The `review` action (CodeRabbit review, Task 5; spec §5.2 live-session gate, §5.5's refusal table, §6). The GitLab side is the poller's CACHE only, so the
+ * suite seeds it by replacing `findMr` / `reposFor` on the app's own `GitlabPollerService` — no GitLab is dialled, and what dispatch sees is what the board drew.
+ *
+ * Every field distinct: two sub-tasks (PAY-2, PAY-3) of one story (PAY-1), whose MR !42 in `grp/pay` is on `pay-1-export`; two mapped repos, MAIN (the one
+ * review candidate, a real directory so `mainCheckoutOf` can map a linked worktree of it) and CLONE (mapped to PAY, origin elsewhere, so never a candidate).
+ */
+describe('review', () => {
+  const PROJECT = 'grp/pay';
+  const IID = 42;
+  const SOURCE = 'pay-1-export';
+  let MAIN: string;
+  let CLONE: string;
+  let WORKTREE: string;
+  let mrs: Map<string, GitlabMr>;
+  let candidates: string[];
+  let reposForCalls: [string, string][];
+
+  const review = (over: Partial<GitlabReview> = {}): GitlabReview => ({
+    open: 2,
+    resolved: 1,
+    worst: 'major',
+    bySeverity: { critical: 0, major: 1, minor: 1, trivial: 0, other: 0 },
+    triggeredAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
+    landedAt: new Date(Date.now() - 2 * 3600_000).toISOString(),
+    commitsSince: 0,
+    capped: false,
+    readAt: new Date().toISOString(),
+    failed: false,
+    ...over
+  });
+  const mr = (over: Partial<GitlabMr> = {}): GitlabMr => ({
+    project: PROJECT,
+    iid: IID,
+    title: 'PAY-1 export',
+    webUrl: `https://gitlab.test/${PROJECT}/-/merge_requests/${IID}`,
+    state: 'opened',
+    draft: false,
+    sourceBranch: SOURCE,
+    targetBranch: 'develop',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-02T00:00:00.000Z',
+    mergedAt: null,
+    pipeline: null,
+    keys: ['PAY-1'],
+    review: review(),
+    ...over
+  });
+  const seed = (m: GitlabMr): void => {
+    mrs.set(`${m.project}\u0000${m.iid}`, m);
+  };
+  const body = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    key: 'PAY-2',
+    repo: MAIN,
+    action: 'review',
+    mr: { project: PROJECT, iid: IID },
+    half: 'fix',
+    assign: false,
+    transitionId: null,
+    mode: 'continue',
+    branch: SOURCE,
+    permissionMode: 'acceptEdits',
+    remoteControl: false,
+    ...over
+  });
+  const subtask = (key: string) =>
+    makeRawIssue({ key, fields: { parent: { key: 'PAY-1', fields: { summary: 'The story' } }, issuetype: { name: 'Sub-task', hierarchyLevel: -1, subtask: true } } });
+  const manual = (key: string, repo: string, branch: string) => ({
+    key,
+    sessionId: `sess-${key}`,
+    how: 'manual' as const,
+    action: null,
+    name: `by hand ${key}`,
+    repo,
+    branch,
+    surface: null,
+    model: null,
+    effort: null,
+    snapshot: { summary: 'x', type: 'Sub-task', parentKey: 'PAY-1' },
+    startedAt: new Date().toISOString()
+  });
+  const row = (over: Partial<DashboardRow>): DashboardRow => ({ id: 'row-1', status: 'working', ...over }) as DashboardRow;
+
+  beforeAll(() => {
+    MAIN = join(dir, 'pay-main');
+    CLONE = join(dir, 'pay-clone');
+    WORKTREE = join(MAIN, '.worktrees', SOURCE);
+    mkdirSync(join(MAIN, '.git', 'worktrees', SOURCE), { recursive: true });
+    mkdirSync(join(CLONE, '.git'), { recursive: true });
+    mkdirSync(WORKTREE, { recursive: true });
+    writeFileSync(join(WORKTREE, '.git'), `gitdir: ${join(MAIN, '.git', 'worktrees', SOURCE)}\n`);
+  });
+
+  let sent: Sent;
+  beforeEach(async () => {
+    writeConfig({ repos: { PAY: [MAIN, CLONE] } });
+    await build();
+    fake.issues.set('PAY-2', subtask('PAY-2'));
+    fake.issues.set('PAY-3', subtask('PAY-3'));
+    fake.transitions.set('PAY-2', [START]);
+    mrs = new Map();
+    seed(mr());
+    candidates = [MAIN];
+    reposForCalls = [];
+    const gitlab = app.get(GitlabPollerService);
+    jest.spyOn(gitlab, 'findMr').mockImplementation((project: string, iid: number) => mrs.get(`${project}\u0000${iid}`) ?? null);
+    jest.spyOn(gitlab, 'reposFor').mockImplementation((jiraProject: string, gitlabProject: string) => {
+      reposForCalls.push([jiraProject, gitlabProject]);
+      return jiraProject === 'PAY' && gitlabProject === PROJECT ? [...candidates] : [];
+    });
+    sent = stubDashboard({ projectPaths: [MAIN, CLONE], desktop: true });
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  /** Refused before the reservation: nothing reserved on the key, nothing spawned, nothing written to Jira. */
+  function untouched(key = 'PAY-2'): void {
+    expect(sent.spawns).toEqual([]);
+    expect(writes()).toEqual([]);
+    expect(live.get(key)).toBeNull();
+  }
+
+  describe('the controller — shape, before anything else', () => {
+    it.each([
+      ['no mr', { mr: undefined }, 'mr must be { project, iid }'],
+      ['an mr that is a string', { mr: 'grp/pay!42' }, 'mr must be { project, iid }'],
+      ['an empty project', { mr: { project: '', iid: IID } }, 'mr must be { project, iid }'],
+      ['a zero iid', { mr: { project: PROJECT, iid: 0 } }, 'mr must be { project, iid }'],
+      ['a fractional iid', { mr: { project: PROJECT, iid: 4.2 } }, 'mr must be { project, iid }'],
+      ['a string iid', { mr: { project: PROJECT, iid: '42' } }, 'mr must be { project, iid }'],
+      ['no half', { half: undefined }, 'half must be request or fix'],
+      ['a capitalised half', { half: 'Fix' }, 'half must be request or fix'],
+      ['openMr on a review', { openMr: true }, 'openMr is only for execute with a branch'],
+      ['an unknown action, mr and half present', { action: 'reveiw' }, 'action must be execute, context, review or { skill: <id> }']
+    ])('400 for %s', async (_label, over, error) => {
+      expect((await post(body(over)).expect(400)).body).toEqual({ error });
+      untouched();
+      expect(reposForCalls).toEqual([]);
+    });
+
+    it('mr is read before half', async () => {
+      expect((await post(body({ mr: undefined, half: undefined })).expect(400)).body).toEqual({ error: 'mr must be { project, iid }' });
+    });
+  });
+
+  describe('the cached MR, the candidate and the choice — 400s in that order, before the reservation', () => {
+    it.each([
+      ['an MR the cache does not hold', () => mrs.clear(), {}, `!${IID} is not an open merge request of PAY-2`],
+      ['a merged MR', () => seed(mr({ state: 'merged' })), {}, `!${IID} is not an open merge request of PAY-2`],
+      ['a closed MR', () => seed(mr({ state: 'closed' })), {}, `!${IID} is not an open merge request of PAY-2`],
+      ['another spelling of the project (the cache match is exact)', () => undefined, { mr: { project: 'GRP/pay', iid: IID } }, `!${IID} is not an open merge request of PAY-2`],
+      ['a repo that is mapped but not a candidate', () => undefined, () => ({ repo: CLONE }), ''],
+      ['a new branch', () => undefined, { mode: 'new', branch: 'pay-2-fix', base: 'develop' }, `a review continues ${SOURCE}`],
+      ['no branch', () => undefined, { mode: 'none', branch: undefined }, `a review continues ${SOURCE}`],
+      ['continue on another branch', () => undefined, { branch: 'pay-1-other' }, `a review continues ${SOURCE}`],
+      ['an MR not open AND a wrong choice — the MR sentence', () => seed(mr({ state: 'merged' })), { branch: 'pay-1-other' }, `!${IID} is not an open merge request of PAY-2`],
+      ['not a candidate AND a wrong choice — the candidate sentence', () => undefined, () => ({ repo: CLONE, branch: 'pay-1-other' }), '']
+    ])('400 for %s', async (_label, arrange, over, error) => {
+      arrange();
+      const expected = error === '' ? `${CLONE} is not a review candidate for !${IID}` : error;
+      // A thunk where the override names `CLONE`, which is only assigned in `beforeEach` — read at table time it would still be undefined.
+      const fields = typeof over === 'function' ? over() : over;
+      expect((await post(body(fields)).expect(400)).body).toEqual({ error: expected });
+      untouched();
+    });
+
+    it("the candidates are asked for the key's Jira project and the CACHED MR's project", async () => {
+      await post(body()).expect(200);
+      expect(reposForCalls).toEqual([['PAY', PROJECT]]);
+    });
+
+    it("continue on the mapped checkout's own branch, which is not the source branch: the choice's 400, not resolveWorkspace's 409", async () => {
+      jest.spyOn(refsUtil, 'readRepoRefs').mockResolvedValue({
+        repo: MAIN,
+        available: true,
+        fetchedAt: null,
+        mainBranch: 'develop',
+        defaultBase: 'develop',
+        branches: []
+      });
+      expect((await post(body({ branch: 'develop' })).expect(400)).body).toEqual({ error: `a review continues ${SOURCE}` });
+      untouched();
+    });
+  });
+
+  describe('the review state — 409s, before the reservation', () => {
+    const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+    it.each([
+      ['reviewing', { open: 0, triggeredAt: ago(60_000), landedAt: null }, 'fix', `nothing to review on !${IID}`],
+      ['clean', { open: 0 }, 'fix', `nothing to review on !${IID}`],
+      ['unknown (capped, nothing open)', { open: 0, capped: true }, 'request', `!${IID} has too many threads to read`],
+      ['none, the sheet sent fix', { open: 0, triggeredAt: null, landedAt: null }, 'fix', `the review on !${IID} moved on — reopen the sheet`],
+      ['open, the sheet sent request', {}, 'request', `the review on !${IID} moved on — reopen the sheet`]
+    ])('409 for %s', async (_label, over, half, error) => {
+      seed(mr({ review: review(over as Partial<GitlabReview>) }));
+      expect((await post(body({ half })).expect(409)).body).toEqual({ error });
+      untouched();
+    });
+
+    it('409 when the review has not been read (review: null)', async () => {
+      seed(mr({ review: null }));
+      expect((await post(body()).expect(409)).body).toEqual({ error: `no review state for !${IID} yet` });
+      untouched();
+    });
+
+    it('a stale review starts the request half', async () => {
+      seed(mr({ review: review({ open: 0, commitsSince: 3 }) }));
+      await post(body({ half: 'request' })).expect(200);
+      expect(sent.spawns[0].prompt).toContain('`@coderabbitai review`');
+    });
+  });
+
+  describe('the ticket and the MR', () => {
+    it("400 when the MR's keys carry neither the key nor its parent — after the detail read, before any Jira write", async () => {
+      seed(mr({ keys: ['PAY-9'] }));
+      expect((await post(body({ assign: true, transitionId: '31' })).expect(400)).body).toEqual({
+        error: `!${IID} is not an open merge request of PAY-2`
+      });
+      untouched();
+    });
+
+    it("a sub-task whose parent's key is on the MR passes, and so does a ticket whose own key is", async () => {
+      await post(body()).expect(200);
+      // The first session holds the branch until it ends; then PAY-3, named on the MR itself, passes.
+      live.end('PAY-2', 'sess-1', 'stopped');
+      seed(mr({ keys: ['PAY-3'] }));
+      await post(body({ key: 'PAY-3' })).expect(200);
+      expect(sent.spawns).toHaveLength(2);
+    });
+
+    it('409 <KEY> already has a session for a live run link on the key — the ticket gate is unchanged', async () => {
+      live.reserve('PAY-2', MAIN);
+      live.confirm('PAY-2', 'sess-old', RUN_META);
+      expect((await post(body()).expect(409)).body).toEqual({ error: 'PAY-2 already has a session' });
+      expect(sent.spawns).toEqual([]);
+    });
+  });
+
+  describe('the branch gate', () => {
+    const busy = { error: `a session is live on ${SOURCE}` };
+
+    it('409 for a live manual link on another key with that branch in a candidate repo; the key it reserved is released', async () => {
+      live.addLink(manual('PAY-3', MAIN, SOURCE));
+      expect((await post(body()).expect(409)).body).toEqual(busy);
+      untouched();
+      // The refused key was released: once the branch is free, the same key passes — not `PAY-2 is starting`.
+      live.unlink('PAY-3', 'sess-PAY-3');
+      await post(body()).expect(200);
+    });
+
+    it('no 409 for a live link with that branch in a repo that is not a candidate, or with another branch', async () => {
+      live.addLink(manual('PAY-3', CLONE, SOURCE));
+      live.addLink(manual('PAY-4', MAIN, 'pay-4-other'));
+      await post(body()).expect(200);
+    });
+
+    it("409 for an ACTIVE row on the branch in a linked worktree of the candidate (mainCheckoutOf maps it), working or question", async () => {
+      live.setRows([row({ id: 'row-q', status: 'question', gitBranch: SOURCE, projectPath: WORKTREE })], Date.now());
+      expect((await post(body()).expect(409)).body).toEqual(busy);
+      live.setRows([row({ id: 'row-w', status: 'working', gitBranch: SOURCE, projectPath: MAIN })], Date.now());
+      expect((await post(body()).expect(409)).body).toEqual(busy);
+      untouched();
+    });
+
+    it('no 409 for an idle row, a row in a repo that is not a candidate, or a row on another branch', async () => {
+      live.setRows(
+        [
+          row({ id: 'row-idle', status: 'idle', gitBranch: SOURCE, projectPath: WORKTREE }),
+          row({ id: 'row-clone', status: 'working', gitBranch: SOURCE, projectPath: CLONE }),
+          row({ id: 'row-other', status: 'working', gitBranch: 'pay-1-other', projectPath: MAIN })
+        ],
+        Date.now()
+      );
+      await post(body()).expect(200);
+    });
+
+    it('two sub-tasks of one parent on the same MR branch, the second while the first is still spawning: it 409s on the hold, not on a link', async () => {
+      // `Promise.all` over two posts does not race them: supertest's first request usually finishes before the second reaches the gate, so the second 409s
+      // on the first one's LINK and the hold is never exercised. Here the first dispatch is parked inside its spawn — key reserved, branch held, no link —
+      // and the second runs every gate in that window, so the only thing that can refuse it is the hold.
+      let open!: () => void;
+      sent = stubDashboard({ projectPaths: [MAIN, CLONE], firstSpawnGate: new Promise<void>((resolve) => (open = resolve)) });
+      const first = post(body()).then((res) => res);
+      // `finally`, so a failed assertion still lets the parked request answer: left parked, it holds the app open and the case reads as a 30 s timeout.
+      try {
+        for (let waited = 0; sent.spawns.length === 0; waited += 5) {
+          if (waited > 5_000) throw new Error('the first dispatch never reached its spawn');
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        expect(live.liveLinks()).toEqual([]);
+        expect(live.get('PAY-2')).toMatchObject({ sessionId: null });
+        expect((await post(body({ key: 'PAY-3' })).expect(409)).body).toEqual(busy);
+        expect(live.get('PAY-3')).toBeNull();
+      } finally {
+        open();
+      }
+      expect((await first).status).toBe(200);
+      expect(sent.spawns).toHaveLength(1);
+      // Bounded on its own: a red state must fail here, never park the suite behind a request that never answers.
+    }, 5_000);
+
+    it('a failed spawn releases the branch reservation: a third dispatch passes', async () => {
+      sent = stubDashboard({ projectPaths: [MAIN, CLONE], spawn: { ok: false, status: 500, body: { error: 'boom' } } });
+      await post(body()).expect(502);
+      sent = stubDashboard({ projectPaths: [MAIN, CLONE] });
+      await post(body({ key: 'PAY-3' })).expect(200);
+      expect(sent.spawns).toHaveLength(1);
+    });
+
+    it('on success the link holds the branch: a second dispatch 409s, and once the link ends a third passes', async () => {
+      await post(body()).expect(200);
+      expect((await post(body({ key: 'PAY-3' })).expect(409)).body).toEqual(busy);
+      expect(live.get('PAY-3')).toBeNull();
+      live.end('PAY-2', 'sess-1', 'stopped');
+      await post(body({ key: 'PAY-3' })).expect(200);
+    });
+
+    it('a no-id desktop spawn drops the branch reservation at once: the next dispatch on that branch passes', async () => {
+      sent = stubDashboard({ projectPaths: [MAIN, CLONE], desktop: true, spawn: { body: { surface: 'desktop' } } });
+      expect((await post(body({ surface: 'desktop' })).expect(200)).body).toMatchObject({ session: null });
+      sent = stubDashboard({ projectPaths: [MAIN, CLONE] });
+      await post(body({ key: 'PAY-3' })).expect(200);
+    });
+  });
+
+  describe('Start', () => {
+    it('spawns the composition over the cached MR — the preview for the same request, byte for byte — and links it as a review on the branch', async () => {
+      const res = await post(body()).expect(200);
+      expect(res.body).toMatchObject({ sessionId: 'sess-1', assigned: false, transitioned: null });
+      const query = new URLSearchParams({ key: 'PAY-2', action: 'review', repo: MAIN, mode: 'continue', branch: SOURCE, mrProject: PROJECT, mrIid: String(IID), half: 'fix' });
+      const preview = (await request(app.getHttpServer()).get(`/api/jira/prompt?${query.toString()}`).expect(200)).text;
+      expect(sent.spawns[0].prompt).toBe(preview);
+      expect(preview).toContain(`!${IID}`);
+      expect(preview).toContain(PROJECT);
+      expect(sent.spawns[0]).toMatchObject({ name: 'jira PAY-2', permissionMode: 'acceptEdits' });
+      const link = live.links().find((l) => l.key === 'PAY-2');
+      expect(link).toMatchObject({ how: 'run', action: 'review', branch: SOURCE, repo: MAIN, sessionId: 'sess-1' });
+    });
+
+    it('with assign false and no transition, nothing is written to Jira', async () => {
+      await post(body()).expect(200);
+      expect(writes()).toEqual([]);
+    });
+
+    it('an edited prompt spawns as written', async () => {
+      await post(body({ prompt: 'Fix the review on !42 my way.' })).expect(200);
+      expect(sent.spawns[0].prompt).toBe('Fix the review on !42 my way.');
+    });
   });
 });

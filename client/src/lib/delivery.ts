@@ -1,5 +1,6 @@
 import { polledPhrase, repoBasename } from './jira';
-import type { GitlabMr, GitlabPayload, GitlabProjectView, JiraIssue } from '../../../shared/types';
+import { reviewState } from '../../../shared/review';
+import type { GitlabMr, GitlabReview, GitlabPayload, GitlabProjectView, JiraIssue } from '../../../shared/types';
 
 /**
  * What a Jira ticket's delivery is — its merge requests on GitLab, as the board, the List and Detail draw them (GitLab connection spec §7). Pure and
@@ -140,7 +141,7 @@ export type DeliveryTone = 'green' | 'red' | 'amber' | 'magenta' | 'grey';
  * takes the place of `merged`.
  */
 export interface TrackStep {
-  step: 'pushed' | 'open' | 'pipeline' | 'merged' | 'closed';
+  step: 'pushed' | 'open' | 'pipeline' | 'review' | 'merged' | 'closed';
   mark: 'on' | 'off' | DeliveryTone;
 }
 
@@ -148,57 +149,102 @@ export interface TrackStep {
 export interface DeliveryLook {
   chip: string;
   word: string;
+  /**
+   * The pipeline's word alone, never `<n> to fix`: Detail's Pipeline step reads it, so `pipeline passed` stays on that step while the Review step beside it
+   * says `2 open · 1 major` (spec §5.3). For a merged or closed MR it is the same as `word`.
+   */
+  pipelineWord: string;
   tone: DeliveryTone;
   track: TrackStep[];
 }
 
-const openTrack = (open: TrackStep['mark'], pipeline: TrackStep['mark']): TrackStep[] => [
+/**
+ * The Review step's mark from the review's state (spec §5.1): nothing to say (`none`, `unknown`, or not read) is `off`, a round in flight or a stale review is
+ * `grey`, findings to fix are `amber`, a clean review is `green`.
+ */
+function reviewMark(review: GitlabReview | null, now: number): TrackStep['mark'] {
+  if (review === null) return 'off';
+  switch (reviewState(review, now)) {
+    case 'open':
+      return 'amber';
+    case 'clean':
+      return 'green';
+    case 'reviewing':
+    case 'stale':
+      return 'grey';
+    default:
+      return 'off';
+  }
+}
+
+const openTrack = (open: TrackStep['mark'], pipeline: TrackStep['mark'], review: TrackStep['mark']): TrackStep[] => [
   { step: 'pushed', mark: 'on' },
   { step: 'open', mark: open },
   { step: 'pipeline', mark: pipeline },
+  { step: 'review', mark: review },
   { step: 'merged', mark: 'off' }
 ];
 
 /**
- * Spec §7's one table, row for row. A draft is grey `draft` whatever its pipeline — a draft's red pipeline is work in progress, not a signal. An open MR
- * whose pipeline is `null` (not read) reads as `none`: an unknown pipeline must read as absent, never as passing. Merged and closed MRs carry no pipeline
- * (§6.3 reads it only for open ones): merged draws the step reached, in magenta like the rest; closed draws it `off`.
+ * Spec §7's one table, row for row, with CodeRabbit's findings folded in (CodeRabbit spec §5.3). A draft is grey `draft` whatever its pipeline or findings — a
+ * draft's red pipeline is work in progress, not a signal — but it still draws the Review step. An open MR whose pipeline is `null` (not read) reads as `none`:
+ * an unknown pipeline must read as absent, never as passing. Word precedence for an open MR, worst first: draft, failed pipeline, findings open (`<n> to fix`,
+ * `<n>+` when capped, amber), then the pipeline's own word; `pipelineWord` is that last one always. Merged and closed MRs carry no pipeline (§6.3 reads it only
+ * for open ones) and no review: merged draws every step in magenta, closed draws Pipeline and Review `off` and ends on `closed`. `now` is a parameter because
+ * the review's state depends on the clock (a stuck round stops reading `reviewing` by itself).
  */
-export function deliveryLook(mr: GitlabMr): DeliveryLook {
+export function deliveryLook(mr: GitlabMr, now: number): DeliveryLook {
   const iid = `!${mr.iid}`;
   if (mr.state === 'merged') {
     return {
       chip: `${iid} · merged`,
       word: 'merged',
+      pipelineWord: 'merged',
       tone: 'magenta',
-      track: (['pushed', 'open', 'pipeline', 'merged'] as const).map((step) => ({ step, mark: 'magenta' }))
+      track: (['pushed', 'open', 'pipeline', 'review', 'merged'] as const).map((step) => ({ step, mark: 'magenta' }))
     };
   }
   if (mr.state === 'closed') {
     return {
       chip: `${iid} · closed`,
       word: 'closed',
+      pipelineWord: 'closed',
       tone: 'grey',
       track: [
         { step: 'pushed', mark: 'on' },
         { step: 'open', mark: 'on' },
         { step: 'pipeline', mark: 'off' },
+        { step: 'review', mark: 'off' },
         { step: 'closed', mark: 'grey' }
       ]
     };
   }
-  if (mr.draft) return { chip: `${iid} · draft`, word: 'draft', tone: 'grey', track: openTrack('grey', 'off') };
-  switch (mr.pipeline) {
+  const review = reviewMark(mr.review, now);
+  if (mr.draft) {
+    return { chip: `${iid} · draft`, word: 'draft', pipelineWord: 'draft', tone: 'grey', track: openTrack('grey', 'off', review) };
+  }
+  const p = pipelineLook(mr.pipeline);
+  const track = openTrack('on', p.mark, review);
+  if (p.failed || mr.review === null || reviewState(mr.review, now) !== 'open') {
+    return { chip: `${iid} · ${p.chip}`, word: p.word, pipelineWord: p.word, tone: p.tone, track };
+  }
+  const toFix = `${mr.review.open}${mr.review.capped ? '+' : ''} to fix`;
+  return { chip: `${iid} · ${toFix}`, word: toFix, pipelineWord: p.word, tone: 'amber', track };
+}
+
+/** The pipeline half of an open MR's look, so the findings branch above can lay its own word over it without a second table. */
+function pipelineLook(pipeline: GitlabMr['pipeline']): { chip: string; word: string; tone: DeliveryTone; mark: TrackStep['mark']; failed: boolean } {
+  switch (pipeline) {
     case 'success':
-      return { chip: `${iid} · ✓ pipeline`, word: 'pipeline passed', tone: 'green', track: openTrack('on', 'green') };
+      return { chip: '✓ pipeline', word: 'pipeline passed', tone: 'green', mark: 'green', failed: false };
     case 'failed':
-      return { chip: `${iid} · ✕ pipeline failed`, word: 'pipeline failed', tone: 'red', track: openTrack('on', 'red') };
+      return { chip: '✕ pipeline failed', word: 'pipeline failed', tone: 'red', mark: 'red', failed: true };
     case 'running':
-      return { chip: `${iid} · ◷ running`, word: 'pipeline running', tone: 'amber', track: openTrack('on', 'amber') };
+      return { chip: '◷ running', word: 'pipeline running', tone: 'amber', mark: 'amber', failed: false };
     case 'canceled':
-      return { chip: `${iid} · pipeline canceled`, word: 'pipeline canceled', tone: 'grey', track: openTrack('on', 'grey') };
+      return { chip: 'pipeline canceled', word: 'pipeline canceled', tone: 'grey', mark: 'grey', failed: false };
     default:
-      return { chip: `${iid} · open`, word: 'open, no pipeline', tone: 'grey', track: openTrack('on', 'off') };
+      return { chip: 'open', word: 'open, no pipeline', tone: 'grey', mark: 'off', failed: false };
   }
 }
 
@@ -245,14 +291,15 @@ export function bandTotals(tops: readonly JiraIssue[], index: DeliveryIndex, now
 }
 
 /** The quick filter's one value (spec §7.4), persisted with the panel filters. */
-export type DeliveryFilter = 'all' | 'has-mr' | 'failing' | 'done-not-merged';
+export type DeliveryFilter = 'all' | 'has-mr' | 'failing' | 'done-not-merged' | 'review-open';
 
 /** The words both controls draw for each value, in the order they draw them. */
 export const DELIVERY_FILTER_LABELS: Record<DeliveryFilter, string> = {
   all: 'All',
   'has-mr': 'Has MR',
   failing: 'Pipeline failing',
-  'done-not-merged': 'Done, not merged'
+  'done-not-merged': 'Done, not merged',
+  'review-open': 'Review open'
 };
 
 /**
@@ -267,9 +314,10 @@ export function effectiveDeliveryFilter(stored: DeliveryFilter, shown: boolean):
  * Does a ticket's delivery match a filter value (spec §7.4)? `all` always does. A `hidden` or `unknown` ticket matches no other value — an unknown one may
  * well have an MR the list did not reach, and a filter that claimed otherwise would be guessing. `has-mr` is any opened or merged MR, own or inherited —
  * since the lead is the newest opened, else merged, else closed, that is "the lead is not closed". `failing` reads the lead only, own or inherited, through
- * the band's `isFailing`; `done-not-merged` is `notMerged` exactly, so inherited never matches.
+ * the band's `isFailing`; `done-not-merged` is `notMerged` exactly, so inherited never matches. `review-open` reads the lead only, own or inherited, and
+ * needs the clock because the review's state does (CodeRabbit spec §5.4).
  */
-export function matchesDelivery(filter: DeliveryFilter, d: TicketDelivery): boolean {
+export function matchesDelivery(filter: DeliveryFilter, d: TicketDelivery, now: number): boolean {
   if (filter === 'all') return true;
   if (d.kind !== 'mrs') return false;
   switch (filter) {
@@ -279,5 +327,7 @@ export function matchesDelivery(filter: DeliveryFilter, d: TicketDelivery): bool
       return isFailing(d.lead);
     case 'done-not-merged':
       return d.notMerged;
+    case 'review-open':
+      return d.lead.state === 'opened' && d.lead.review !== null && reviewState(d.lead.review, now) === 'open';
   }
 }

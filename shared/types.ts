@@ -695,6 +695,28 @@ export const GITLAB_FINISHED_DAYS = 30;
 /** How long an unanswered or `unreachable` identity read waits before it is asked again — the tracker's `IDENTITY_RETRY_MS`, for the same reason. */
 export const GITLAB_IDENTITY_RETRY_MS = 60_000;
 
+/** A CodeRabbit finding's severity, parsed from its thread's first note; a thread whose severity did not parse counts under `other` (spec 4.2). */
+export type ReviewSeverity = 'critical' | 'major' | 'minor' | 'trivial';
+
+/**
+ * The facts of one MR's CodeRabbit review (spec 4.2), and never a state: the state is `reviewState(review, now)` in `shared/review.ts`, derived against the
+ * clock because a stuck review must stop reading `reviewing` on its own. `worst` is the worst severity among the unresolved threads (`null` for none or none
+ * parsed); `triggeredAt`/`landedAt` are the latest trigger and landing; `commitsSince` sums the N of `added N commit(s)` notes after `landedAt`; `capped` says the
+ * discussions ran past the page budget; `readAt` is the last successful read and `failed` says the latest attempt failed, so these are the last good facts.
+ */
+export interface GitlabReview {
+  open: number;
+  resolved: number;
+  worst: ReviewSeverity | null;
+  bySeverity: Record<ReviewSeverity | 'other', number>;
+  triggeredAt: string | null;
+  landedAt: string | null;
+  commitsSince: number;
+  capped: boolean;
+  readAt: string;
+  failed: boolean;
+}
+
 /**
  * One merge request, as the board draws it. `project` is the GitLab namespace path it lives in. `pipeline` is the head pipeline folded to five, read only
  * for an OPEN MR — a merged or closed one carries `null` (not read), never `none` (read, and there is no pipeline). `keys` are the Jira keys its source
@@ -714,6 +736,8 @@ export interface GitlabMr {
   mergedAt: string | null;
   pipeline: GitlabPipeline | null;
   keys: string[];
+  /** The CodeRabbit review's facts; `null` is NOT READ (merged, closed, not read yet, never read successfully) and never means "no review" (spec 4.2). */
+  review: GitlabReview | null;
 }
 
 /**
@@ -726,6 +750,8 @@ export interface GitlabProjectView {
   polledAt: string | null;
   capped: boolean;
   failed: boolean;
+  /** The local repos this project maps to — the review candidates the launch sheet offers (spec 5.2). */
+  repos: string[];
 }
 
 /** A per-repository line under a `connected` Sources row (spec §5.2). Paths and basenames only — never a remote URL, which can carry a PAT. */
@@ -899,16 +925,21 @@ export interface JiraSkill {
 }
 
 /**
- * What Run ▾ starts: one of the two built-ins, or one of this machine's skills by id. Spec §4. A SHAPE, not a lookup — whether the skill exists is the
+ * What Run ▾ starts: one of the three built-ins (`review` is never a menu row), or one of this machine's skills by id. Spec §4. A SHAPE, not a lookup — whether the skill exists is the
  * server's question (`GET /api/jira/prompt` and `dispatch-jira` each answer 400 `unknown skill <id>` for an id `jira.json` lacks).
  */
-export type JiraAction = 'execute' | 'context' | { skill: string };
+export type JiraAction = 'execute' | 'context' | 'review' | { skill: string };
 
-/** The built-ins' menu words (spec §7), one home so the menu, the launch sheet's Action select and a test read the same two strings. */
-export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context', string> = {
+/** The built-ins' menu words (spec §7), one home so the menu, the launch sheet's Action select and a test read the same strings. */
+export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context' | 'review', string> = {
   execute: 'Work it end to end',
-  context: 'Open with the ticket loaded'
+  context: 'Open with the ticket loaded',
+  // The label a review link shows on Sessions and the List. Never a menu row: Run ▾ does not offer review, the MR's own button does.
+  review: 'Review the MR'
 };
+
+/** Which half of the review a `review` Run does: ask CodeRabbit to review, or fix what it found (spec 6). The server derives it and 409s a mismatch. */
+export type ReviewHalf = 'request' | 'fix';
 
 /**
  * The workspace a Jira Run is told to work in (spec §5.4, §5.6): `null` where it is carried means mode `none` — no branch, no worktree, no block. `branch`,
@@ -929,11 +960,11 @@ export interface JiraWorkspace {
 const JIRA_SKILL_ID_RE = /^s_[0-9a-f]{8}$/;
 
 /**
- * `?action=` on `GET /api/jira/prompt`: `execute`, `context` or `skill:<s_ id>`. Anything else — including a `skill:` with no id or a `b_` id — is `null`. Shape
+ * `?action=` on `GET /api/jira/prompt`: `execute`, `context`, `review` or `skill:<s_ id>`. Anything else — including a `skill:` with no id or a `b_` id — is `null`. Shape
  * checks only; see `JiraAction`. The inverse is `jiraActionParam`.
  */
 export function parseJiraActionParam(raw: unknown): JiraAction | null {
-  if (raw === 'execute' || raw === 'context') return raw;
+  if (raw === 'execute' || raw === 'context' || raw === 'review') return raw;
   if (typeof raw !== 'string' || !raw.startsWith('skill:')) return null;
   const id = raw.slice('skill:'.length);
   return JIRA_SKILL_ID_RE.test(id) ? { skill: id } : null;
@@ -945,11 +976,11 @@ export function jiraActionParam(action: JiraAction): string {
 }
 
 /**
- * `action` in a JSON body: `'execute'`, `'context'`, or `{ skill: '<s_ id>' }` with no other key. The body shape and the query shape differ on purpose — a body
+ * `action` in a JSON body: `'execute'`, `'context'`, `'review'`, or `{ skill: '<s_ id>' }` with no other key. The body shape and the query shape differ on purpose — a body
  * has structure, a query string does not — and neither accepts the other's spelling.
  */
 export function parseJiraAction(raw: unknown): JiraAction | null {
-  if (raw === 'execute' || raw === 'context') return raw;
+  if (raw === 'execute' || raw === 'context' || raw === 'review') return raw;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
   const keys = Object.keys(raw);
   const skill = (raw as { skill?: unknown }).skill;
@@ -1492,6 +1523,9 @@ export interface JiraDispatchRequest {
   key: string;
   repo: string;
   action: JiraAction;
+  /** With `action: 'review'` only: the MR the button drew and the half the sheet previewed (spec 6). The server checks both against its own cache. */
+  mr?: { project: string; iid: number };
+  half?: ReviewHalf;
   assign: boolean;
   transitionId: string | null;
   mode: 'new' | 'continue' | 'none';

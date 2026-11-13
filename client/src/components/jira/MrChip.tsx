@@ -16,9 +16,9 @@ import { deliveryLook, type TicketDelivery } from '../../lib/delivery';
  * Both are spans and not links: the card is a `role="button"` that opens Detail, where the MR's link out lives, and a link inside it would be a second
  * target competing for the same click. Each ellipsises before `Run ▾` gives any width (`.jira-mr-chip`, the worktree chip's rule).
  */
-export function MrChip({ delivery }: { delivery: TicketDelivery }) {
+export function MrChip({ delivery, now }: { delivery: TicketDelivery; now: number }) {
   if (delivery.kind !== 'mrs') return null;
-  const look = deliveryLook(delivery.lead);
+  const look = deliveryLook(delivery.lead, now);
   return (
     <>
       <span className="jira-mr-chip" data-tone={look.tone} title={delivery.via === null ? undefined : `via ${delivery.via}`}>

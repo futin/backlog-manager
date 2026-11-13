@@ -3,9 +3,11 @@ import { useMemo } from 'react';
 import { useGitlabContext } from '../../hooks/GitlabContext';
 import { deliveryIndex, deliveryLook, deliveryShown, mrRepo, ticketDelivery, type TrackStep } from '../../lib/delivery';
 import { polledPhrase } from '../../lib/jira';
+import { reviewStepTitleSuffix, reviewStepWord } from '../../lib/review-copy';
 import { pollAge } from '../../lib/tracker';
-import type { GitlabMr, JiraIssue } from '../../../../shared/types';
+import type { GitlabMr, JiraIssue, ReviewHalf } from '../../../../shared/types';
 import { DeliveryTrack } from '../ui/DeliveryTrack';
+import { ReviewRow } from './ReviewRow';
 
 /**
  * DeliveryPane — Jira Detail's Delivery pane (GitLab connection spec §7.1, mock `OptionC.dc.html`; DESIGN.md §8.9.2's Agent column, in its
@@ -21,6 +23,11 @@ import { DeliveryTrack } from '../ui/DeliveryTrack';
  * browser could not fetch — `deliveryShown`) or for a ticket whose Jira project maps no GitLab project (`hidden`): one rule for all four surfaces (spec §7,
  * "Which tickets draw delivery at all"), and an empty pane would read as a claim that there is nothing to deliver. Nothing here waits on GitLab — a payload
  * not yet arrived is `null`, which draws nothing, and the rest of the dialog renders as it always has.
+ *
+ * **The Review step and the CodeRabbit row** (CodeRabbit review spec §5.1–§5.2, DESIGN.md §8.9.2 › Delivery track › Review step / CodeRabbit row): the step's word
+ * is `reviewStepWord`'s and its `title` carries `reviewStepTitleSuffix` when the latest read failed; Pipeline keeps its own word whatever the review says, so
+ * `pipeline passed` and `2 open · 1 major` sit side by side. The head draws no review word (the mock shows none). `ReviewRow` sits between the track and the
+ * `Also:` line and acts on the lead only; `onReview` is the Run launch sheet's opener, threaded from the page by the review launch (absent, no button).
  *
  * Links go out in a new tab with no referrer, the `Open in Jira ↗` link's rule: the dialog is the board's, and a GitLab page must not learn the board's
  * address from the click.
@@ -40,9 +47,19 @@ function stepWords(mr: GitlabMr, now: number): Partial<Record<TrackStep['step'],
     if (merged !== null) words.merged = merged;
   } else if (mr.state === 'opened') {
     if (mr.draft) words.open = 'draft';
-    else words.pipeline = deliveryLook(mr).word;
+    else words.pipeline = deliveryLook(mr, now).pipelineWord;
+    // A draft is read for review too (spec §5.3), so its Review step carries the word as an open MR's does.
+    const review = reviewStepWord(mr.review, now);
+    if (review !== null) words.review = review;
   }
   return words;
+}
+
+/** The Review step's hover text: its word and, when the latest read failed, how old the facts are — so a stale count never reads as current. */
+function stepTitles(mr: GitlabMr, now: number): Partial<Record<TrackStep['step'], string>> {
+  const suffix = mr.state === 'opened' ? reviewStepTitleSuffix(mr.review, now) : '';
+  const word = suffix === '' ? null : reviewStepWord(mr.review, now);
+  return word === null ? {} : { review: `${word}${suffix}` };
 }
 
 /** An MR's link out: `!iid` with the arrow beside it, `aria-hidden` so the link's name is the MR it opens and not a glyph. */
@@ -62,7 +79,7 @@ const UNKNOWN_LINE = {
   capped: 'more merge requests than were read — some may be missing'
 } as const;
 
-export function DeliveryPane({ issue, now }: { issue: JiraIssue; now: number }) {
+export function DeliveryPane({ issue, now, onReview }: { issue: JiraIssue; now: number; onReview?: (half: ReviewHalf, mr: GitlabMr, repos: string[]) => void }) {
   const { data } = useGitlabContext();
   // Built once per payload, not per render: the dialog re-renders every clock tick, and the index is a scan of every MR the server holds.
   const index = useMemo(() => (data === null || !deliveryShown(data) ? null : deliveryIndex(data)), [data]);
@@ -84,7 +101,9 @@ export function DeliveryPane({ issue, now }: { issue: JiraIssue; now: number }) 
   }
 
   const { lead, also, via } = d;
-  const look = deliveryLook(lead);
+  const look = deliveryLook(lead, now);
+  // The review candidates: the lead's GitLab project, as the ISSUE's Jira project sees it (a sub-task's inherited MR shares its parent's project).
+  const reviewRepos = data?.jiraProjects[issue.project.key]?.find((p) => p.path === lead.project)?.repos ?? [];
   return (
     <section className="jira-detail-pane jira-dlv" aria-label="Delivery">
       <div className="jira-dlv-head">
@@ -94,12 +113,13 @@ export function DeliveryPane({ issue, now }: { issue: JiraIssue; now: number }) 
         <span className="jira-dlv-meta jira-dlv-target">{`${mrRepo(lead, index)} → ${lead.targetBranch}`}</span>
         <span className="jira-dlv-meta jira-dlv-polled">{polledPhrase(d.polledAt, now)}</span>
       </div>
-      <DeliveryTrack track={look.track} words={stepWords(lead, now)} compact={false} />
+      <DeliveryTrack track={look.track} words={stepWords(lead, now)} titles={stepTitles(lead, now)} compact={false} />
+      <ReviewRow issue={issue} lead={lead} now={now} repos={reviewRepos} onReview={onReview} />
       {also.length > 0 && (
         <div className="jira-dlv-also">
           <span className="jira-dlv-meta">Also:</span>
           {also.map((mr) => {
-            const other = deliveryLook(mr);
+            const other = deliveryLook(mr, now);
             // `updatedAt`'s age: the time the lead order reads, so the line's ages explain why these are not the lead.
             const age = pollAge(mr.updatedAt, now);
             return (

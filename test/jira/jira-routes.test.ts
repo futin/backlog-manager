@@ -486,7 +486,7 @@ describe('GET /api/jira/prompt', () => {
     async (_label, action) => {
       const params: Record<string, string> = { key: 'PAY-131' };
       if (action !== undefined) params.action = action;
-      expect((await get(q(params)).expect(400)).body).toEqual({ error: 'action must be execute, context or skill:<id>' });
+      expect((await get(q(params)).expect(400)).body).toEqual({ error: 'action must be execute, context, review or skill:<id>' });
     }
   );
 
@@ -548,6 +548,28 @@ describe('GET /api/jira/prompt', () => {
     expect(res.text).toContain('Work on Jira ticket PAY-131 in this repository, end to end');
     expect(res.text).toContain('`jira.mjs show PAY-131`');
     expect(res.text).not.toContain('TICKET');
+  });
+
+  describe('action=review', () => {
+    const review = { ...NONE, action: 'review', mrProject: 'grp/proj', mrIid: '15958', half: 'fix' };
+
+    it('200 text/plain naming the MR, and no GitLab call (the module has no GitLab provider here)', async () => {
+      const res = await get(q(review)).expect(200);
+      expect(res.headers['content-type']).toBe('text/plain; charset=utf-8');
+      expect(res.text).toContain('!15958');
+      expect(res.text).toContain('grp/proj');
+    });
+
+    it('400 mr must be { project, iid } for a missing or malformed MR', async () => {
+      const { mrIid: _drop, ...noIid } = review;
+      expect((await get(q(noIid)).expect(400)).body).toEqual({ error: 'mr must be { project, iid }' });
+      expect((await get(q({ ...review, mrIid: '1e3' })).expect(400)).body).toEqual({ error: 'mr must be { project, iid }' });
+      expect((await get(q({ ...review, mrProject: '../x' })).expect(400)).body).toEqual({ error: 'mr must be { project, iid }' });
+    });
+
+    it('400 half must be request or fix', async () => {
+      expect((await get(q({ ...review, half: 'both' })).expect(400)).body).toEqual({ error: 'half must be request or fix' });
+    });
   });
 
   it('the context built-in answers its own text', async () => {

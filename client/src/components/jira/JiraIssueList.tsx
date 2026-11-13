@@ -109,12 +109,12 @@ export function JiraIssueList({
  * The Delivery cell (spec §7.3). Every word, tone and dot is `lib/delivery.ts`'s; the cell only arranges them. The word ellipsises before anything else, so
  * the link, the `not merged` chip and `+N MR` — the facts a person acts on — keep their width in a narrow column; the full word is still the cell's `title`.
  */
-function DeliveryCell({ top, index }: { top: JiraIssue; index: DeliveryIndex }) {
+function DeliveryCell({ top, index, now }: { top: JiraIssue; index: DeliveryIndex; now: number }) {
   const d = ticketDelivery(top, index);
   if (d.kind === 'hidden') return <td />;
   if (d.kind === 'unknown') return <td className="jira-issues-muted">—</td>;
   if (d.kind === 'none') return <td className="jira-issues-muted">no MR</td>;
-  const look = deliveryLook(d.lead);
+  const look = deliveryLook(d.lead, now);
   return (
     <td className="jira-issues-dlv" title={d.via === null ? look.word : `${look.word} · via ${d.via}`}>
       <span className="jira-issues-flex">
@@ -213,7 +213,7 @@ function IssueRow({
           <span className="jira-issues-cut">{top.status.name}</span>
         </span>
       </td>
-      {index !== null && <DeliveryCell top={top} index={index} />}
+      {index !== null && <DeliveryCell top={top} index={index} now={now} />}
       <td>
         {/* The card's pill, with the grey `low` look and no glyph for an issue Jira left unprioritised: the cell is never blank, so the column reads as a column. */}
         <span className="jira-card-prio jira-issues-prio" data-tone={prio ?? 'low'} title={`priority ${top.priority ?? 'none'}`}>

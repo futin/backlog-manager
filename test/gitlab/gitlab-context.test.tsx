@@ -59,3 +59,31 @@ it('throws outside the provider', () => {
   expect(() => render(<Probe />)).toThrow('useGitlabContext must be used inside <GitlabProvider>');
   spy.mockRestore();
 });
+
+/**
+ * An API one release older than the client (a rebuilt client against a stack not yet rebuilt, or the reverse mid-`docker:sync`) sends no `review` on an
+ * MR and no `repos` on a project view. Every review reader types `review` as `GitlabReview | null`, and `reviewState` dereferences it, so a missing one must
+ * land as `null`, or one MR chip throws and takes the whole Jira section with it (/ui-verify, 2026-11-13). `repos` lands as `[]`: no candidates, no button.
+ */
+it('normalises an MR without `review` to null and a project view without `repos` to []', async () => {
+  const old = {
+    status: { configured: true, mappedRepos: 1, foundHosts: [], problems: [] },
+    jiraProjects: { PAY: [{ path: 'g/p', repo: 'p', polledAt: null, capped: false, failed: false }] },
+    mrs: [{ iid: 1, state: 'opened', keys: ['PAY-1'] }]
+  };
+  global.fetch = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(old) } as Response)) as unknown as typeof fetch;
+  let seen: GitlabPayload | null = null;
+  function Grab() {
+    seen = useGitlabContext().data;
+    return null;
+  }
+  render(
+    <GitlabProvider>
+      <Grab />
+    </GitlabProvider>
+  );
+  await waitFor(() => expect(seen).not.toBeNull());
+  const got = seen as unknown as GitlabPayload;
+  expect(got.mrs[0].review).toBeNull();
+  expect(got.jiraProjects.PAY[0].repos).toEqual([]);
+});

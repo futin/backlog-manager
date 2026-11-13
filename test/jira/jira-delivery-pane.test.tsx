@@ -1,12 +1,15 @@
 /**
  * @jest-environment jsdom
  */
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import type { ReactNode } from 'react';
 
 import { DeliveryPane } from '../../client/src/components/jira/DeliveryPane';
 import { GitlabContext } from '../../client/src/hooks/GitlabContext';
-import type { GitlabMr, GitlabPayload, GitlabProjectView, GitlabStatus, JiraIssue } from '../../shared/types';
+import { JiraContext } from '../../client/src/hooks/JiraContext';
+import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
+import type { AgentsStatus, GitlabMr, GitlabPayload, GitlabProjectView, GitlabReview, GitlabStatus, JiraIssue, JiraSessionsPayload, JiraStatusPayload } from '../../shared/types';
 import { ruleBlocks, readStyles } from '../helpers/css-rule';
 import { daysAgoStamp } from '../helpers/dates';
 
@@ -16,6 +19,10 @@ import { daysAgoStamp } from '../helpers/dates';
  * the pane is read exactly as the shell's one answer would hand it over. Every MR stamp is relative to `now`, which the pane takes as a prop, so the ages
  * asserted here are fixed whatever the real clock says; the issue's own `created`/`updated` go through `daysAgoStamp` for the fixture-clock guard.
  */
+
+// The CodeRabbit row asks the dashboard whether agents are on (`useAgents`); the hook fetches, so it is replaced by a status this suite sets per case.
+let mockAgents: AgentsStatus | null = { enabled: true } as AgentsStatus;
+jest.mock('../../client/src/hooks/useAgents', () => ({ useAgents: () => ({ status: mockAgents, reload: jest.fn() }) }));
 
 const now = Date.now();
 const ago = (minutes: number): string => new Date(now - minutes * 60_000).toISOString();
@@ -36,12 +43,13 @@ function mr(over: Partial<GitlabMr> = {}): GitlabMr {
     mergedAt: null,
     pipeline: 'success',
     keys: ['TIMIFY-123'],
+    review: null,
     ...over
   };
 }
 
-const MICRO: GitlabProjectView = { path: 'development/backend/microservice', repo: 'microservice', polledAt: ago(5), capped: false, failed: false };
-const PROXY: GitlabProjectView = { path: 'development/graphql/dev-api-graphql-proxy', repo: 'dev-api-graphql-proxy', polledAt: ago(3), capped: false, failed: false };
+const MICRO: GitlabProjectView = { path: 'development/backend/microservice', repo: 'microservice', polledAt: ago(5), capped: false, failed: false, repos: [] };
+const PROXY: GitlabProjectView = { path: 'development/graphql/dev-api-graphql-proxy', repo: 'dev-api-graphql-proxy', polledAt: ago(3), capped: false, failed: false, repos: [] };
 
 function status(over: Partial<GitlabStatus> = {}): GitlabStatus {
   return {
@@ -104,10 +112,13 @@ const step = (label: string): HTMLElement => {
 };
 const stepWord = (label: string): string | null => step(label).querySelector('.jira-dlv-step-word')?.textContent ?? null;
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mockAgents = { enabled: true } as AgentsStatus;
+});
 
 describe('DeliveryPane', () => {
-  it('draws an open MR with a passing pipeline: head, link, repo → target, polled age, and the four-step track', () => {
+  it('draws an open MR with a passing pipeline: head, link, repo → target, polled age, and the five-step track', () => {
     const { container } = draw(payload([mr()]));
     expect(screen.getByText('Delivery')).toBeInTheDocument();
     const link = screen.getByRole('link', { name: '!412' });
@@ -119,7 +130,7 @@ describe('DeliveryPane', () => {
     expect(screen.getByText('polled 5m ago')).toBeInTheDocument();
 
     const labels = [...container.querySelectorAll('.jira-dlv-step-label')].map((n) => n.textContent);
-    expect(labels).toEqual(['Pushed', 'MR open', 'Pipeline', 'Merged']);
+    expect(labels).toEqual(['Pushed', 'MR open', 'Pipeline', 'Review', 'Merged']);
     expect(stepWord('Pushed')).toBe('2h');
     expect(stepWord('MR open')).toBe('2h');
     expect(stepWord('Pipeline')).toBe('pipeline passed');
@@ -127,8 +138,9 @@ describe('DeliveryPane', () => {
     expect(step('Pipeline').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'green');
     expect(step('Merged').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'off');
 
-    // v1 draws no Review step and no CodeRabbit placeholder (spec §7, "Delivery track").
-    expect(container.textContent).not.toMatch(/Review/);
+    // The Review step is in the track (CodeRabbit spec §5.1), off with no word for `review: null`, and `review: null` draws no CodeRabbit row (§5.2).
+    expect(stepWord('Review')).toBeNull();
+    expect(step('Review').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'off');
     expect(container.textContent).not.toMatch(/CodeRabbit/);
     expect(screen.queryByText(/Also:/)).not.toBeInTheDocument();
   });
@@ -222,5 +234,217 @@ describe('delivery track paint order', () => {
   });
   it('keeps that z-index inside the track', () => {
     expect(ruleBlocks(css, '.jira-dlv-track').some((b) => /isolation:\s*isolate/.test(b))).toBe(true);
+  });
+});
+
+
+/** A review fact set; defaults to two open findings (one major, one minor) landed 4m ago, the `opt-b-open.png` state. */
+function review(over: Partial<GitlabReview> = {}): GitlabReview {
+  return {
+    open: 2,
+    resolved: 25,
+    worst: 'major',
+    bySeverity: { critical: 0, major: 1, minor: 1, trivial: 0, other: 0 },
+    triggeredAt: ago(30),
+    landedAt: ago(4),
+    commitsSince: 0,
+    capped: false,
+    readAt: ago(1),
+    failed: false,
+    ...over
+  };
+}
+const NONE = review({ open: 0, resolved: 0, worst: null, bySeverity: { critical: 0, major: 0, minor: 0, trivial: 0, other: 0 }, triggeredAt: null, landedAt: null });
+
+const REPOS = ['/a/one', '/a/two'];
+const MICRO_R: GitlabProjectView = { ...MICRO, repos: REPOS };
+
+function link(over: Partial<JiraSessionsPayload['links'][number]> = {}): JiraSessionsPayload['links'][number] {
+  return {
+    key: 'TIMIFY-123',
+    sessionId: 's1',
+    how: 'run',
+    action: 'execute',
+    name: 'TIMIFY-123 execute',
+    repo: '/a/one',
+    branch: null,
+    surface: 'desktop',
+    model: null,
+    effort: null,
+    snapshot: { summary: 's', type: 'Story', parentKey: null },
+    startedAt: ago(20),
+    endedAt: null,
+    endReason: null,
+    quietSince: null,
+    reattachedAt: null,
+    state: 'working',
+    row: null,
+    stateSince: ago(20),
+    ...over
+  } as JiraSessionsPayload['links'][number];
+}
+
+/** The pane under every context the row reads: GitLab, the Jira status (its `live` map) and the sessions payload. */
+function drawRow(mrs: GitlabMr[], opts: { links?: JiraSessionsPayload['links']; live?: JiraStatusPayload['live']; onReview?: jest.Mock; projects?: GitlabProjectView[]; of?: JiraIssue } = {}) {
+  const data = payload(mrs, { TIMIFY: opts.projects ?? [MICRO_R, PROXY] });
+  const jira = { repos: { TIMIFY: REPOS }, live: opts.live ?? {} } as unknown as JiraStatusPayload;
+  const wrap = (children: ReactNode) => (
+    <JiraContext.Provider value={{ data: jira, loading: false, error: false, reload: jest.fn() }}>
+      <JiraSessionsContext.Provider value={{ data: { links: opts.links ?? [], reachable: true, rowsAt: null }, reload: jest.fn(() => Promise.resolve()) }}>
+        <GitlabContext.Provider value={{ data, error: null, refresh: () => Promise.resolve(data) }}>{children}</GitlabContext.Provider>
+      </JiraSessionsContext.Provider>
+    </JiraContext.Provider>
+  );
+  return render(wrap(<DeliveryPane issue={opts.of ?? issue()} now={now} onReview={opts.onReview} />));
+}
+const rowEl = (): HTMLElement | null => document.querySelector('.jira-dlv-review');
+
+describe('the Review step', () => {
+  it.each<[string, GitlabReview | null, string, string | null]>([
+    ['none', NONE, 'off', 'not reviewed'],
+    ['reviewing', review({ open: 0, triggeredAt: ago(4), landedAt: null }), 'grey', 'reviewing… 4m'],
+    ['open', review(), 'amber', '2 open · 1 major'],
+    ['clean', review({ open: 0, worst: null, resolved: 25, bySeverity: { critical: 0, major: 0, minor: 0, trivial: 0, other: 0 } }), 'green', '0 open · 25 resolved'],
+    ['stale', review({ open: 0, worst: null, commitsSince: 3 }), 'grey', '3 commits since review'],
+    ['not read', null, 'off', null]
+  ])('draws the %s state with its mark and word', (_n, r, mark, word) => {
+    drawRow([mr({ review: r })]);
+    expect(step('Review').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', mark);
+    expect(stepWord('Review')).toBe(word);
+  });
+
+  it('puts the failed-read suffix in the step’s title', () => {
+    drawRow([mr({ review: review({ failed: true, readAt: ago(7) }) })]);
+    expect(step('Review').getAttribute('title')).toContain('not refreshed since 7m');
+    expect(step('Pipeline')).not.toHaveAttribute('title');
+  });
+
+  it('reads `pipeline passed` at Pipeline while Review shows open findings, and the head draws no word', () => {
+    const { container } = drawRow([mr({ review: review() }), mr({ iid: 415, updatedAt: ago(90), review: review() })]);
+    expect(stepWord('Pipeline')).toBe('pipeline passed');
+    expect(stepWord('Review')).toBe('2 open · 1 major');
+    expect(container.querySelector('.jira-dlv-head .jira-dlv-word')).toBeNull();
+    const also = screen.getByText('Also:').parentElement as HTMLElement;
+    expect(within(also).getByText('2 to fix')).toHaveAttribute('data-tone', 'amber');
+  });
+
+  it('draws a merged lead’s Review step magenta with no word', () => {
+    drawRow([mr({ state: 'merged', pipeline: null, mergedAt: ago(60), review: null })]);
+    expect(step('Review').querySelector('.jira-dlv-dot')).toHaveAttribute('data-mark', 'magenta');
+    expect(stepWord('Review')).toBeNull();
+  });
+});
+
+describe('the CodeRabbit row', () => {
+  it('open: the sentence in amber and a `Fix review` button, which launches the fix half on the lead with the candidate repos', () => {
+    const onReview = jest.fn();
+    const lead = mr({ review: review() });
+    drawRow([lead], { onReview });
+    expect(rowEl()?.textContent).toContain('CodeRabbit · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
+    expect(rowEl()?.querySelector('[data-tone]')).toHaveAttribute('data-tone', 'amber');
+    // The sentence ellipsises before the button gives way (a failed read's suffix overflowed 505 > 495 at 1440 in /ui-verify), so it is its own title.
+    expect(rowEl()?.querySelector('.jira-dlv-review-text')).toHaveAttribute('title', 'CodeRabbit · 2 open findings · 1 major, 1 minor · reviewed 4m ago');
+    const btn = screen.getByRole('button', { name: 'Fix review' });
+    expect(btn).toBeEnabled();
+    expect(btn.closest('.ui-split')).toHaveClass('ui-split-28');
+    fireEvent.click(btn);
+    expect(onReview).toHaveBeenCalledWith('fix', expect.objectContaining({ iid: 412, project: lead.project }), ['/a/one', '/a/two']);
+  });
+
+  it('none: `not reviewed yet` and `Request review`, launching the request half', () => {
+    const onReview = jest.fn();
+    drawRow([mr({ review: NONE })], { onReview });
+    expect(rowEl()?.textContent).toContain('CodeRabbit · not reviewed yet');
+    fireEvent.click(screen.getByRole('button', { name: 'Request review' }));
+    expect(onReview).toHaveBeenCalledWith('request', expect.objectContaining({ iid: 412 }), REPOS);
+  });
+
+  it('stale offers `Request review` too', () => {
+    drawRow([mr({ review: review({ open: 0, worst: null, commitsSince: 3 }) })], { onReview: jest.fn() });
+    expect(rowEl()?.textContent).toContain('3 commits since the last review');
+    expect(screen.getByRole('button', { name: 'Request review' })).toBeInTheDocument();
+  });
+
+  it.each<[string, GitlabMr]>([
+    ['reviewing', mr({ review: review({ open: 0, triggeredAt: ago(4), landedAt: null }) })],
+    ['clean', mr({ review: review({ open: 0, worst: null }) })],
+    ['unknown', mr({ review: review({ open: 0, capped: true }) })],
+    ['not read', mr({ review: null })],
+    ['a merged lead', mr({ state: 'merged', pipeline: null, mergedAt: ago(60), review: review() })]
+  ])('draws no row for %s', (_n, lead) => {
+    drawRow([lead]);
+    expect(rowEl()).toBeNull();
+    expect(screen.queryByRole('button', { name: /review/i })).not.toBeInTheDocument();
+  });
+
+  it('draws the row without a button when no repo is a candidate', () => {
+    drawRow([mr({ review: review() })], { projects: [{ ...MICRO, repos: [] }] });
+    expect(rowEl()?.textContent).toContain('CodeRabbit · 2 open findings');
+    expect(screen.queryByRole('button', { name: 'Fix review' })).not.toBeInTheDocument();
+  });
+
+  it('draws no button while agents are off or not yet answered', () => {
+    mockAgents = { enabled: false } as AgentsStatus;
+    drawRow([mr({ review: review() })]);
+    expect(rowEl()).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Fix review' })).not.toBeInTheDocument();
+    cleanup();
+    mockAgents = null;
+    drawRow([mr({ review: review() })]);
+    expect(screen.queryByRole('button', { name: 'Fix review' })).not.toBeInTheDocument();
+  });
+
+  it('draws no button without an `onReview` to call', () => {
+    drawRow([mr({ review: review() })]);
+    expect(screen.queryByRole('button', { name: 'Fix review' })).not.toBeInTheDocument();
+  });
+
+  describe('the live-session gate', () => {
+    const open = (): GitlabMr => mr({ review: review() });
+    const blocked = (title: string) => {
+      const btn = screen.getByRole('button', { name: 'Fix review' });
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAttribute('title', title);
+      // A disabled button takes no hover, so the wrapper carries the same sentence for the pointer.
+      expect(btn.parentElement).toHaveAttribute('title', title);
+    };
+
+    it('a live `run` link on the key disables it, naming the session', () => {
+      drawRow([open()], { onReview: jest.fn(), links: [link({ name: 'TIMIFY-123 execute' })] });
+      blocked('TIMIFY-123 execute is live on this ticket');
+    });
+
+    it('a `starting` reservation on the key disables it the same way', () => {
+      drawRow([open()], {
+        onReview: jest.fn(),
+        live: { 'TIMIFY-123': { name: 'TIMIFY-123 execute', sessionId: null, startedAt: ago(1), repo: '/a/one', starting: true } }
+      });
+      blocked('TIMIFY-123 execute is live on this ticket');
+    });
+
+    it('a live link on another key whose stored branch is the MR’s source branch disables it, naming the branch', () => {
+      drawRow([open()], { onReview: jest.fn(), links: [link({ key: 'TIMIFY-9', how: 'branch', name: 'my session', branch: 'timify-123-change-412', repo: '/a/two' })] });
+      blocked('my session is live on timify-123-change-412');
+    });
+
+    it('a live link whose dashboard row is on the source branch in a candidate checkout disables it', () => {
+      const row = { status: 'working', gitBranch: 'timify-123-change-412', projectPath: '/a/one/.worktrees/x' } as JiraSessionsPayload['links'][number]['row'];
+      drawRow([open()], { onReview: jest.fn(), links: [link({ key: 'TIMIFY-9', how: 'manual', name: 'hand session', row })] });
+      blocked('hand session is live on timify-123-change-412');
+    });
+
+    it('does not block on an ended link, a branch link on another branch, or a branch outside the candidates', () => {
+      drawRow([open()], {
+        onReview: jest.fn(),
+        links: [
+          link({ key: 'TIMIFY-9', how: 'branch', branch: 'timify-123-change-412', endedAt: ago(1) }),
+          link({ key: 'TIMIFY-8', how: 'branch', branch: 'other', repo: '/a/one' }),
+          link({ key: 'TIMIFY-7', how: 'branch', branch: 'timify-123-change-412', repo: '/elsewhere' }),
+          // A `branch` link on THIS key is not the ticket gate's (only `run` is), and this one is on another branch.
+          link({ how: 'branch', branch: 'x' })
+        ]
+      });
+      expect(screen.getByRole('button', { name: 'Fix review' })).toBeEnabled();
+    });
   });
 });

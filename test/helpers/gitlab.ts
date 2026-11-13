@@ -1,4 +1,5 @@
 import type { FetchLike, RawMr } from '../../server/src/gitlab/gitlab.client';
+import type { RawDiscussion, RawNote } from '../../server/src/gitlab/review.util';
 
 /** One call the fake saw: the URL as dialled and the init it was given, so a test can prove the token went in one header and `redirect` was `manual`. */
 export interface GitlabCall {
@@ -34,6 +35,25 @@ export function rawMr(iid: number, partial: Partial<RawMr> = {}): RawMr {
   };
 }
 
+/** A discussion note with the fields the review fold needs; a test overrides what it cares about. */
+export function rawNote(id: number, username: string, body: string, partial: Partial<RawNote> = {}): RawNote {
+  return {
+    id,
+    body,
+    author: { username },
+    system: false,
+    resolvable: false,
+    created_at: '2026-11-12T09:00:00.000Z',
+    updated_at: '2026-11-12T09:00:00.000Z',
+    ...partial
+  };
+}
+
+/** A discussion of one or more notes; `individual_note` is true for a lone note, as GitLab marks a loose comment. */
+export function rawDiscussion(id: string, notes: RawNote[]): RawDiscussion {
+  return { id, individual_note: notes.length === 1 && !notes[0].resolvable, notes };
+}
+
 /**
  * An in-memory GitLab, the shape of `FakeJira`: `fetch` records every call and serves `/user`, the MR list per project/state/page and MR detail, and a test
  * scripts a status, `Retry-After`, 3xx, delay or thrown network error for a path in `script`. A real GitLab can schedule none of those failures.
@@ -42,7 +62,9 @@ export class FakeGitlab {
   user = { username: 'ada', name: 'Ada Lovelace' };
   /** `projectPath` -> state -> every MR of that state; paged by `per_page` on read. */
   mrs = new Map<string, Map<string, RawMr[]>>();
-  /** Keyed by the URL's path, e.g. `/api/v4/user`. */
+  /** `<projectPath>!<iid>` -> every discussion of that MR, oldest first; paged by `per_page` on read. An MR with none answers `[]`. */
+  discussions = new Map<string, RawDiscussion[]>();
+  /** Keyed by the URL's path, e.g. `/api/v4/user`, or by `<path>?page=N` for one page of a paged read. */
   script = new Map<string, Scripted>();
   readonly calls: GitlabCall[] = [];
 
@@ -59,7 +81,8 @@ export class FakeGitlab {
   fetch: FetchLike = async (url, init) => {
     this.calls.push({ url, init });
     const u = new URL(url);
-    const scripted = this.script.get(u.pathname);
+    // A `<path>?page=N` key scripts ONE page of a paged read and wins over the plain path key, which (query stripped) answers every page alike.
+    const scripted = this.script.get(`${u.pathname}?page=${u.searchParams.get('page')}`) ?? this.script.get(u.pathname);
     if (scripted?.throws) throw scripted.throws;
     if (scripted?.delay !== undefined) await new Promise<void>((resolve) => (scripted.delay === Infinity ? undefined : setTimeout(resolve, scripted.delay)));
     if (scripted?.opaqueRedirect) {
@@ -80,6 +103,13 @@ export class FakeGitlab {
     const list = /^\/api\/v4\/projects\/([^/]+)\/merge_requests$/.exec(u.pathname);
     if (list) {
       const all = this.mrs.get(decodeURIComponent(list[1]))?.get(u.searchParams.get('state') ?? '') ?? [];
+      const perPage = Number(u.searchParams.get('per_page') ?? 20);
+      const page = Number(u.searchParams.get('page') ?? 1);
+      return this.json(200, all.slice((page - 1) * perPage, page * perPage));
+    }
+    const disc = /^\/api\/v4\/projects\/([^/]+)\/merge_requests\/(\d+)\/discussions$/.exec(u.pathname);
+    if (disc) {
+      const all = this.discussions.get(`${decodeURIComponent(disc[1])}!${disc[2]}`) ?? [];
       const perPage = Number(u.searchParams.get('per_page') ?? 20);
       const page = Number(u.searchParams.get('page') ?? 1);
       return this.json(200, all.slice((page - 1) * perPage, page * perPage));
