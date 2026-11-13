@@ -987,7 +987,7 @@ describe('JiraLaunchSheet — the branch', () => {
     await waitFor(() => expect(pressed()).toBe('New'));
     expect(reviewSwitch()).toBeChecked();
     expect(
-      within(dialog()).getByText('review before finishing — run the reviewer over the change and fix what it finds before the work is called done')
+      within(dialog()).getByText('review before finishing — review the commit against the ticket, fix what it finds, and only then push or move the ticket')
     ).toBeInTheDocument();
     expect((reviewSwitch() as HTMLElement).compareDocumentPosition(mrSwitch() as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await userEvent.click(reviewSwitch() as HTMLElement);

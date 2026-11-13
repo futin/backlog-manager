@@ -233,7 +233,7 @@ export function JiraBranchSection({
         <>
           <div className="sheet-check">
             <Switch checked={draft.review} onChange={(review) => set({ review })} label="Review before finishing" />
-            <span>review before finishing — run the reviewer over the change and fix what it finds before the work is called done</span>
+            <span>review before finishing — review the commit against the ticket, fix what it finds, and only then push or move the ticket</span>
           </div>
           <div className="sheet-check">
             <Switch checked={draft.openMr} onChange={(openMr) => set({ openMr })} label="Open MR when done" />
