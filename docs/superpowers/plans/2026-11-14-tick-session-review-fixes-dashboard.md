@@ -46,8 +46,9 @@ template's code blocks). Disagree with the plan when the code says otherwise, an
   `no such cwd` failure, checked before the gate, and its `step-start` carries no `session`.
 - **The `when:` value is the raw rest of its line, trimmed — no ` #` comment cut and no unquoting.** Every other key goes through `scalarEnd` + `unquote`
   (`routine-file.ts:80-81`, `frontmatter.ts:71-82`), which would cut `echo "a #b"` at the `#` and turn `"$HOME/x" decide --base "main"` into
-  `$HOME/x" decide --base "main`; shell syntax is the payload here. The editor reads and writes it the same raw way (`routineForm.ts:86`, `:154` are the
-  paths that would otherwise mangle it).
+  `$HOME/x" decide --base "main`; shell syntax is the payload here. The editor reads and writes it the same raw way: every editor path that cuts
+  or unquotes must bypass it for `when` — the read in `fmValue`/`scalar` (`routineForm.ts:99`, `:129`), the quoting in `writeKeys` (`:154`), and
+  `setKey` → `writeFrontmatterLine` (`routineForm.ts:114`, `frontmatter.ts:110-114`), which re-appends everything after ` #` when replacing a value.
 
 ## Review Focus
 
@@ -90,8 +91,12 @@ template's code blocks). Disagree with the plan when the code says otherwise, an
   - F4 `when:` with an empty value → the parser's existing empty-value error on that line, text `when is empty` (`routine-file.ts:109`).
   - F5 serializer: setting `when` on a claude job writes `when: <value>` after `timeout` in key order; clearing it removes the line; editing `timeout` on
     a file that carries `when:` leaves the `when:` line byte-identical.
-  - F6 `when: "$HOME/x" decide --base "main"` parses to exactly `"$HOME/x" decide --base "main"`, and the editor round-trips it byte-identical.
-  - F7 `when: echo "a #b"; exit 10` parses to exactly `echo "a #b"; exit 10` (no comment cut).
+  - F6 `when: "$HOME/x" decide --base "main"` parses to exactly `"$HOME/x" decide --base "main"`; the Limits read returns exactly that string; and
+    setting that value through the Limits write on a file WITHOUT `when:` writes it verbatim, which re-parses to the same string (a no-op round-trip
+    proves nothing: `writeKeys` skips unchanged values, `routineForm.ts:153-154`).
+  - F7 `when: echo "a #b"; exit 10` parses to exactly `echo "a #b"; exit 10` (no comment cut); the Limits read returns it exactly; setting it on a
+    file without `when:` writes it verbatim and re-parses to the same string.
+  - F8 a file carrying `when: echo "a #b"; exit 10`, Limits write with `when` = `true` → the line is exactly `when: true` (nothing re-appended).
 - [ ] **Step 2: Run, expect FAIL** — the repo's per-file command (`pnpm exec tsx test/routines/routine-file.test.ts` and the form suite; confirm the
   command from `test/run-all.ts`).
 - [ ] **Step 3: Implement**, then `pnpm plugin:gen`.
@@ -109,7 +114,8 @@ template's code blocks). Disagree with the plan when the code says otherwise, an
 - Consumes: Task 1's `job.when`; the existing `spawnStep(cmd, args, opts, input, timeoutMs, combine)`, `short`, `tailOf`, `lastLine`.
 
 - [ ] **Step 1: Failing tests.** Each builds a claude job with a `when:` line; the fake claude records argv, so "launched" = `argv` file exists.
-  - G1 `when: printf '%s %s' "$PWD" "$CLAUDE_DASHBOARD_ROUTINE" > "$FAKE_REC/gate"` → the `gate` file holds the step's cwd and the job name (the gate
+  - G1 `when: printf '%s %s' "$PWD" "$CLAUDE_DASHBOARD_ROUTINE" > "$FAKE_REC/gate"` → the `gate` file holds `fs.realpathSync(<step cwd>)` (bash reports the physical path; the fixture home sits under macOS's `/var` → `/private/var`
+    symlink, `run-routine.test.ts:43`) and the job name (the gate
     ran, where and with what env); claude launched once; `step-start` carries a `session`; argv carries `--session-id` with that same value.
   - G2 `when: printf '%s\n\n' '{"verdict":"idle","reason":"nothing to do: x"}'; exit 10` → not launched; `step-end` `outcome: 'skipped'`,
     `exit: 10`, `why: 'nothing to do: x'`, `tail` contains the JSON line; `end.skipped === 1`, `end.failed === 0`.
