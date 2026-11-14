@@ -87,8 +87,9 @@ when the code says otherwise, and record the deviation in the task's report.
   - P3 `--peek` with a lock older than `--lock-ttl` → exit `0`; `verdict: 'recover'`; the lock file's bytes equal what was written before; `state.json`
     unchanged (bytes equal, or still absent if the fixture had none).
   - P4 `--peek` with a fresh lock held for another id → exit `10`; `verdict: 'busy'`.
-  - P5 `--peek --dry-run` and `--dry-run --peek` → each exit `1`, nothing on stdout, and stderr names both `--peek` and `--dry-run` (exit `1` alone passes
-    today, since `--peek` is an unknown argument, `tick.mjs:340`; the stderr assertion is what makes this case fail first).
+  - P5 `--peek --dry-run` and `--dry-run --peek` → each exit `1`, nothing on stdout, and stderr's FIRST line (the `tick.mjs: …` message, not the USAGE block
+    after it, which already contains `[--dry-run]`) names both `--peek` and `--dry-run` and does not contain `unknown argument` — today `--peek` is an
+    unknown argument (`tick.mjs:340`), so that line is what fails first.
   - P6 plain `decide` with nothing to do → exit `0` (unchanged; pins that `10` is peek-only).
   - P7 `--peek` on a tracker fixture with `/api/health` unreachable (`DEAD_PORT`) → exit `10`, `verdict: 'idle'`, `reason: 'stack down'`.
 - [ ] **Step 2: Run, expect FAIL** — `node --test --test-name-pattern=peek skills/backlog-tick/tools/tick.test.mjs`.
