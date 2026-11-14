@@ -87,7 +87,8 @@ when the code says otherwise, and record the deviation in the task's report.
   - P3 `--peek` with a lock older than `--lock-ttl` → exit `0`; `verdict: 'recover'`; the lock file's bytes equal what was written before; `state.json`
     unchanged (bytes equal, or still absent if the fixture had none).
   - P4 `--peek` with a fresh lock held for another id → exit `10`; `verdict: 'busy'`.
-  - P5 `--peek --dry-run` and `--dry-run --peek` → each exit `1`, nothing on stdout.
+  - P5 `--peek --dry-run` and `--dry-run --peek` → each exit `1`, nothing on stdout, and stderr names both `--peek` and `--dry-run` (exit `1` alone passes
+    today, since `--peek` is an unknown argument, `tick.mjs:340`; the stderr assertion is what makes this case fail first).
   - P6 plain `decide` with nothing to do → exit `0` (unchanged; pins that `10` is peek-only).
   - P7 `--peek` on a tracker fixture with `/api/health` unreachable (`DEAD_PORT`) → exit `10`, `verdict: 'idle'`, `reason: 'stack down'`.
 - [ ] **Step 2: Run, expect FAIL** — `node --test --test-name-pattern=peek skills/backlog-tick/tools/tick.test.mjs`.
@@ -120,7 +121,7 @@ Record decision table (only when outcome is `failed`, the project is a tracker p
 | JSON | A | A | any | `failed` + hash, reason unchanged |
 | JSON | absent | any | any | `failed` + hash, reason unchanged |
 | JSON | A | absent | any | `failed` + hash, reason unchanged |
-| any environment row above | | | `released` | `failed` + hash, `environment twice: <reason>` |
+| any environment row above | | | `released` | `failed` (hashed as today — so no hash when the API is down, `tick.mjs:300-306`), `environment twice: <reason>` |
 
 `released` writes no hash (skip `hashFor` — it may itself need the API), releases the lock, prints the exact stdout line from Global Constraints plus ONE
 stderr line naming why it was not `failed` (wording yours, starting `tick.mjs: `), and exits `0`. When `--reason` was omitted, the part after ` — ` is
@@ -132,9 +133,10 @@ whatever the record would have stored as its reason today.
     `'2026-11-13T17:58:00.000Z'`.
   - L2 same, health body `{ status: 'ok' }` → the lock has no `bootedAt` key (`'bootedAt' in lock === false`).
   - R1 record `failed`, lock ours with `bootedAt` `17:58…`, health on `DEAD_PORT` → stdout `recorded #<n> released (execute); lock released`, exit `0`;
-    `state.items['#<n>']` has `outcome: 'released'`, no `hash`, reason starting `environment: api down — `; no lock file; a following `decide --dry-run`
-    against a live stub offers that item (not skipped).
-  - R2 lock `bootedAt: '2026-11-13T17:58:00.000Z'`, health `bootedAt: '2026-11-13T18:01:30.000Z'` → `released`, reason starts
+    `state.items['#<n>']` has `outcome: 'released'`, no `hash`, reason starting `environment: api down — `; no lock file.
+  - R2 lock `bootedAt: '2026-11-13T17:58:00.000Z'`, health `bootedAt: '2026-11-13T18:01:30.000Z'`, the body route live → `released`, no `hash`, and a
+    following `decide --dry-run` against the same stub offers that item (a `failed` here would carry a hash and be skipped — that is what makes this
+    assertion discriminate; on R1 the item is eligible either way, because a down API already yields no hash). Reason starts
     `environment: api restarted at 2026-11-13T18:01:30.000Z — `.
   - R3 both `bootedAt` `'2026-11-13T17:58:00.000Z'` → `failed` with a `hash`, reason exactly the `--reason` given.
   - R4 health answers `500` → `released`, `environment: api down — `.
