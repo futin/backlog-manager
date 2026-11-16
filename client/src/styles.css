@@ -1588,6 +1588,11 @@ button.rail-count { cursor: pointer }
 }
 .jira-dlv-review-text[data-tone='amber'] { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
 .jira-dlv-review-text[data-tone='grey'] { color: var(--ink2); background: var(--strip-hi) }
+/* The blocked button's reason under the row: a green live dot (the session holding it is running), the session's name at 500 --ink, the rest --ink2. It
+   wraps rather than ellipsising — a branch name is long and this sentence is the only on-screen answer to "why can't I click it". */
+.jira-dlv-review-why { display: flex; align-items: baseline; gap: 6px; margin: 8px 0 0; font-size: 12px; line-height: 1.45; color: var(--ink2) }
+.jira-dlv-review-why::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green-solid); transform: translateY(-1px) }
+.jira-dlv-review-why strong { font-weight: 500; color: var(--ink) }
 .jira-dlv-also { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding-top: 10px; border-top: 1px solid var(--hairline) }
 .jira-dlv-also-mr { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0 }
 .jira-dlv-word { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 500; white-space: nowrap }

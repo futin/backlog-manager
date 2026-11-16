@@ -97,6 +97,22 @@ export function reviewRowText(review: GitlabReview | null, now: number): string 
   return `CodeRabbit · ${body}${reviewStepTitleSuffix(review, now)}`;
 }
 
+/**
+ * The live-session gate's sentence (`<name> is live on this ticket` / `<name> is live on <branch>`) — the blocked button's title, and the head of the reason
+ * line under the row. `where` is `null` for the ticket and the MR's source branch otherwise; `reviewGate` decides which.
+ */
+export function reviewGateText(gate: { name: string; where: string | null }): string {
+  return `${gate.name} is live on ${gate.where ?? 'this ticket'}`;
+}
+
+/**
+ * The reason line's tail after the gate's sentence: what the blocked button is waiting for and the one thing the reader can do about it. Said on screen
+ * because a disabled ink button drew exactly like an enabled one and the title alone needed a hover to find (2026-11-16, TIMIFY-27764).
+ */
+export function reviewBlockedTail(label: 'Fix review' | 'Request review'): string {
+  return ` — ${label} waits until it ends or you stop it.`;
+}
+
 /** The row's button label by state: `Fix review` fixes the open findings, `Request review` asks for one; no button otherwise (`reviewHalf`'s two halves). */
 export function reviewButtonLabel(state: ReviewState): 'Fix review' | 'Request review' | null {
   const half = reviewHalf(state);
