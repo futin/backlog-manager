@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 
 import { App } from '../../client/src/App';
 import { JiraChip } from '../../client/src/components/JiraChip';
+import { TimeZoneContext } from '../../client/src/hooks/TimeZoneContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import type { JiraState } from '../../client/src/hooks/useJira';
 import { NARROW_QUERY } from '../../client/src/hooks/useNarrow';
@@ -64,9 +65,12 @@ let reloadMock: jest.Mock;
 function wrap(data: JiraStatusPayload | null, section: Section) {
   const value: JiraState = { data, loading: false, error: false, reload: reloadMock };
   return (
-    <JiraContext.Provider value={value}>
-      <JiraChip section={section} onOpenSetup={openSetup} />
-    </JiraContext.Provider>
+    // Pinned to UTC so a wait end reads one clock, as `jira-mentions-page.test.tsx` does.
+    <TimeZoneContext.Provider value={{ zone: 'UTC', stored: 'UTC', browser: 'UTC', save: () => Promise.resolve(), saveError: null }}>
+      <JiraContext.Provider value={value}>
+        <JiraChip section={section} onOpenSetup={openSetup} />
+      </JiraContext.Provider>
+    </TimeZoneContext.Provider>
   );
 }
 
@@ -425,7 +429,7 @@ describe('the Mentions row', () => {
     await open(summary());
     await user.click(icon());
     await act(async () => answer({ ok: false, status: 429, body: { message: 'rate limited', retryAt: new Date(NOW + 150_000).toISOString() } }));
-    expect(within(row()).getByText(/^Jira asked to wait until \d\d:\d\d$/)).toBeInTheDocument();
+    expect(within(row()).getByText('Jira asked to wait until 12:02')).toBeInTheDocument();
     await user.click(icon());
     await act(async () => answer({ ok: false, status: 409, body: { message: 'Jira is not being polled' } }));
     expect(within(row()).getByText('Jira is not being polled')).toHaveClass('jira-setup-failure');

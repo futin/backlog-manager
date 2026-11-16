@@ -1916,10 +1916,11 @@ button.rail-count { cursor: pointer }
 .jira-mentions-card-acts { display: inline-flex; gap: 6px; margin-left: auto }
 /* Sync now's refresh glyph turns while a check is out. A wrapper, because `Chip` takes no className and guard 7 keeps `.ui-*` selectors in the kit's block. */
 .jira-mentions-spin { display: inline-flex }
-/* The popover's Mentions row (Sync.dc.html): the board rows' shape under an amber wash, the colour the rail's count wears. */
-.tracker-row.jira-chip-mentions { background: linear-gradient(90deg, #fdf0e4, transparent 70%); margin: 0 -8px; padding: 6px 8px }
 .jira-mentions-spin[data-on] { animation: spin 1s linear infinite }
 @media (prefers-reduced-motion: reduce) { .jira-mentions-spin[data-on] { animation: none } }
+/* The Jira popover's Mentions row (Sync.dc.html): the board rows' shape under an amber wash, the colour the rail's count wears. Built from tokens, so a dark
+   theme gets a dark amber behind its light ink rather than the mock's pastel. */
+.tracker-row.jira-chip-mentions { background: linear-gradient(90deg, color-mix(in srgb, var(--amber-solid) 14%, var(--strip)), transparent 70%); margin: 0 -8px; padding: 6px 8px }
 /* The List's key and excerpt and a card's summary open the mention modal: buttons, for the keyboard, worn as the text they replace — the cell keeps its
    ellipsis, so the button is a block as wide as the cell and does the clipping itself. */
 .jira-mentions-open {
