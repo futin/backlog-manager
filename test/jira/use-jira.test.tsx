@@ -241,6 +241,43 @@ describe('useJira', () => {
   });
 });
 
+describe('useJira with a mentions summary', () => {
+  const summary = (agoMs: number | null) => ({
+    polledAt: agoMs === null ? null : new Date(Date.now() - agoMs).toISOString(),
+    count: 0,
+    detail: null,
+    truncated: false,
+    retryAt: null
+  });
+
+  it('with no boards, aims at the mentions poll plus the slack', async () => {
+    fetchMock.mockImplementation(() => answer(status([], { mentions: summary(60_000) })));
+    render(<Probe />);
+    await flush();
+    await advance(120_500 - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('arms nothing when every board is off and mentions is null', async () => {
+    fetchMock.mockImplementation(() => answer(status([boardPolled(1_000, 'off')], { mentions: null })));
+    render(<Probe />);
+    await flush();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('takes the sooner of the two deadlines, floored at 15 s', async () => {
+    fetchMock.mockImplementation(() => answer(status([boardPolled(50_000)], { mentions: summary(60_000) })));
+    render(<Probe />);
+    await flush();
+    await advance(JIRA_STATUS_FLOOR_MS - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('JiraProvider', () => {
   it('hands one instance to every reader — one fetch, however many consumers', async () => {
     render(

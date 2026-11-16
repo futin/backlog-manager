@@ -550,6 +550,7 @@ const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
 const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
   board: 'Board',
   sessions: 'Sessions',
+  mentions: 'Mentions',
   setup: 'Setup'
 };
 

@@ -174,7 +174,7 @@ describe('the Jira section and its tree', () => {
       within(tree)
         .getAllByRole('button')
         .map((b) => b.textContent)
-    ).toEqual(['Board', 'Sessions', 'Setup']);
+    ).toEqual(['Board', 'Sessions', 'Mentions', 'Setup']);
     expect(within(tree).getByRole('button', { name: 'Board' })).toHaveAttribute('aria-current', 'true');
 
     await userEvent.click(within(tree).getByRole('button', { name: 'Setup' }));
@@ -186,6 +186,17 @@ describe('the Jira section and its tree', () => {
     // The section's own frame restates no page switch (the Runs/Settings rule).
     expect(within(main()).queryByRole('button', { name: 'Board' })).toBeNull();
     expect(within(main()).queryByRole('button', { name: 'Setup' })).toBeNull();
+  });
+
+  it('draws the Mentions page when the tree picks it', async () => {
+    render(<App />);
+    await screen.findByText('board stub');
+    await flush();
+    await userEvent.click(within(rail()).getByRole('button', { name: 'Jira' }));
+    const tree = within(rail()).getByRole('group', { name: 'Jira pages' });
+    await userEvent.click(within(tree).getByRole('button', { name: 'Mentions' }));
+    expect(await screen.findByTestId('jira-mentions-page')).toBeInTheDocument();
+    expect(storedJiraPage()).toBe('mentions');
   });
 
   it('opens on the stored page', async () => {

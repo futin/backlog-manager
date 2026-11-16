@@ -674,7 +674,7 @@ describe('the Jira row’s Needs-you badge', () => {
     render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }]), onChange, 'jira'));
     const group = screen.getByRole('group', { name: 'Jira pages' });
     const rows = Array.from(group.querySelectorAll('.rail-sublink'));
-    expect(rows.map((b) => b.textContent)).toEqual(['Board', 'Sessions', 'Setup']);
+    expect(rows.map((b) => b.textContent)).toEqual(['Board', 'Sessions', 'Mentions', 'Setup']);
     const pill = within(group).getByRole('button', { name: '1 session needs you' });
     expect(pill).toHaveClass('rail-count');
     expect(pill).toHaveTextContent('1');

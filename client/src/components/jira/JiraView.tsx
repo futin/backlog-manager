@@ -12,6 +12,7 @@ type ReviewLaunch = { half: ReviewHalf; mr: { project: string; iid: number; sour
 import { JiraBoardView } from './JiraBoardView';
 import { JiraDetail } from './JiraDetail';
 import { JiraLaunchSheet } from './JiraLaunchSheet';
+import { JiraMentionsView } from './JiraMentionsView';
 import { JiraSessionsView } from './JiraSessionsView';
 import { JiraSetupView } from './JiraSetupView';
 
@@ -106,6 +107,8 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
     <>
       {page === 'sessions' ? (
         <JiraSessionsView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
+      ) : page === 'mentions' ? (
+        <JiraMentionsView />
       ) : (
         <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
       )}
