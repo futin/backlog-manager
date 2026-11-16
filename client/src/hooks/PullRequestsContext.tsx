@@ -27,7 +27,7 @@ function PullRequestsReader({ onRead }: { onRead: (read: Read) => void }) {
 }
 
 /**
- * The shell's one read of `GET /api/prs` (spec §4.9a): the rail counts PRs that need you on every page, so the read can no longer belong to the two pages
+ * The shell's one read of `GET /api/prs` (spec §4.9a): the rail counts open PRs on every page, so the read can no longer belong to the two pages
  * that draw PRs. It is on while a GitHub project is registered (`hasTracker`) — the PRs page's own no-token message keeps working, because a registered
  * project with no token still answers `{ token: false }` — and nothing mounts, so nothing is requested, while there is none. The server's PR cache stays on
  * demand with no timer of its own: this reader's 60 s poll is what arms it, and it is armed only while a GitHub project exists. GitHub › PRs and Settings'

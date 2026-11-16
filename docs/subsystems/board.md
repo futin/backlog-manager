@@ -85,16 +85,21 @@ What's new drawer behind it; the shell owns the read, the dot and the drawer, an
 The chip shares the rail's foot card (`.rail-foot`) with `API connected` or `API unreachable`, read in `AppShell` from the shell's one `useTrackers`
 answer — an error is `down`, an answer `ok`, nothing until either — with no poller of its own.
 
-GitHub and Runs carry counts beside their rows too (restyle spec §4.9a), handed down from `App` as `counts`, so the rail reads nothing for them: GitHub's is
-`needsYouCount` (`lib/pr-layouts.ts`) over the shell's one pull-requests answer, the PRs that need the reader, as an amber `Pill`; Runs' is the provider's
-`liveCount`, as a neutral one. Zero draws no pill.
+The rail's pending counts (restyle spec §4.9a, per page since `docs/superpowers/specs/2026-11-16-rail-pending-counts-design.md`) are built by `railCounts`
+(`lib/rail-counts.ts`) from three inputs: the PRs payload and `liveCount`, handed down from `App` as `counts` so the rail reads nothing for them, and
+`useJiraNeedsYou`, which `SideRail` reads itself because `JiraSessionsProvider` mounts inside the shell's own return and a read above it would get the
+context's empty default. Each lands as a `Pill` on the sub-row of the page that holds the items — GitHub › PRs (`openPrCount`, every open PR, amber while
+`needsYouCount` is above zero and grey otherwise), Runs › History (the live runs, grey), Jira › Sessions (amber) — and the section's top row draws
+`sectionTotal`, their sum, as an `aria-hidden` span while its tree is drawn so no count is announced twice. Zero draws no pill.
 
-The Jira row carries a Needs-you count badge (Jira sessions spec §7.4, C4): `useJiraNeedsYou` (`client/src/hooks/useJiraNeedsYou.ts`) reads the shell's one
+The Jira › Sessions row carries the Needs-you count, summed onto the Jira row (Jira sessions spec §7.4, C4): `useJiraNeedsYou`
+(`client/src/hooks/useJiraNeedsYou.ts`) reads the shell's one
 sessions answer — `JiraSessionsProvider` (`hooks/JiraSessionsContext.tsx`), hoisted out of `JiraView` into `App`'s shell around the rail AND the section, with
 `enabled` = Jira configured (no poll and no badge otherwise) and `open` = Jira is the current section, so with the section closed the request carries no
 `open=1` — and counts `needsYouCount` (`lib/jira-list.ts`): plan, permission, reply and answer across EVERY linked ticket, not the picked board's, each
 session once, by `sessionId`, even when it is linked to two tickets. Zero draws no element. While the dashboard is unreachable (`reachable: false`, every live link reads Lost contact) or a read fails, the
-hook keeps the last count it was sure of. The count is a `button.rail-count` beside the row's button, inside the row's `.rail-group` — every row has one, holding the button and its count but never
+hook keeps the last count it was sure of. The count is a `button.rail-count` beside the Sessions sub-row's button, inside that item's `.rail-group` (and on
+the Jira row's, while the tree is closed) — every row has one, holding the button and its count but never
 the open tree (a button in a button is invalid, and
 the row must still just open Jira); its click sets the Jira page to `sessions` and the filters to `{ chip: 'needs-you', allTickets: true }`
 through the two module stores, then `change('jira')`, so the Sessions page it lands on shows every session it counted; it never touches the Board page's view.

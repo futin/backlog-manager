@@ -16,7 +16,8 @@ import { JiraSessionsContext, JiraSessionsProvider } from '../../client/src/hook
 import { resetJiraListFilters, useJiraListFilters } from '../../client/src/hooks/useJiraListFilters';
 import { useJiraPage } from '../../client/src/hooks/useJiraPage';
 import { setJiraView, useJiraView } from '../../client/src/hooks/useJiraView';
-import type { JiraStatusPayload, JiraSessionsPayload } from '../../shared/types';
+import type { JiraStatusPayload, JiraSessionsPayload, PullRequestsPayload } from '../../shared/types';
+import { repo, row } from '../helpers/pr-fixtures';
 import type { DrawnSources } from '../../client/src/lib/sources';
 import { FILES_PAGE_KEY, GITHUB_PAGE_KEY } from '../../client/src/lib/source-page';
 import { RUNS_MODE_KEY, isRunsMode } from '../../client/src/lib/runs-mode';
@@ -665,17 +666,64 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(view.result.current[0]).toBe('list');
   });
 
-  it('draws Board, Sessions, Setup in the open Jira tree, carries no count on Sessions, and picking Sessions sets the page', async () => {
+  it('draws Board, Sessions, Setup in the open Jira tree; Sessions carries the count as its own button, and the row itself still just sets the page', async () => {
+    const onChange = jest.fn();
     const page = renderHook(() => useJiraPage());
+    const filters = renderHook(() => useJiraListFilters());
     act(() => page.result.current[1]('board'));
-    render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }]), jest.fn(), 'jira'));
+    render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }]), onChange, 'jira'));
     const group = screen.getByRole('group', { name: 'Jira pages' });
-    const buttons = within(group).getAllByRole('button');
-    expect(buttons.map((b) => b.textContent)).toEqual(['Board', 'Sessions', 'Setup']);
-    expect(within(buttons[1]).queryByText('1')).toBeNull();
-    expect(group.querySelector('.rail-count')).toBeNull();
-    await userEvent.click(buttons[1]);
+    const rows = Array.from(group.querySelectorAll('.rail-sublink'));
+    expect(rows.map((b) => b.textContent)).toEqual(['Board', 'Sessions', 'Setup']);
+    const pill = within(group).getByRole('button', { name: '1 session needs you' });
+    expect(pill).toHaveClass('rail-count');
+    expect(pill).toHaveTextContent('1');
+    expect(pill.parentElement).toHaveClass('rail-group');
+    expect(pill.parentElement).toContainElement(rows[1] as HTMLElement);
+    // The top row's pill is still drawn, but silent while the tree is: one count, one name, one button (spec, "No pill is announced twice").
+    expect(screen.getAllByRole('button', { name: '1 session needs you' })).toHaveLength(1);
+    const top = screen.getByRole('button', { name: 'Jira' }).parentElement?.querySelector('.rail-count');
+    expect(top).toHaveAttribute('aria-hidden', 'true');
+    expect(top?.tagName).toBe('SPAN');
+    await userEvent.click(rows[1] as HTMLElement);
     expect(page.result.current[0]).toBe('sessions');
+    expect(filters.result.current[0].chip).not.toBe('needs-you');
+    act(() => page.result.current[1]('board'));
+    await userEvent.click(pill);
+    expect(page.result.current[0]).toBe('sessions');
+    expect(filters.result.current[0]).toMatchObject({ chip: 'needs-you', allTickets: true });
+    expect(onChange).toHaveBeenLastCalledWith('jira');
+  });
+
+  it('keeps the Sessions pill’s last count while the dashboard is unreachable, with the Jira tree open', () => {
+    const sub = (): HTMLElement | null => within(screen.getByRole('group', { name: 'Jira pages' })).queryByRole('button', { name: /need/ });
+    const { rerender } = render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }, { key: 'PAY-2', id: 's2', state: 'reply' }]), jest.fn(), 'jira'));
+    expect(sub()).toHaveTextContent('2');
+    expect(sub()).toHaveAccessibleName('2 sessions need you');
+    rerender(tree(payload([{ key: 'PAY-1', id: 's1', state: 'lost' }, { key: 'PAY-2', id: 's2', state: 'lost' }], false), jest.fn(), 'jira'));
+    expect(sub()).toHaveTextContent('2');
+    expect(sub()).toHaveAccessibleName('2 sessions need you');
+    rerender(tree(payload([{ key: 'PAY-1', id: 's1', state: 'working' }]), jest.fn(), 'jira'));
+    expect(sub()).toBeNull();
+  });
+
+  it('on a phone, the open menu draws one Sessions pill button, in the Jira tree, that lands on Sessions and closes the menu', async () => {
+    await withNarrow(async () => {
+      const onChange = jest.fn();
+      const page = renderHook(() => useJiraPage());
+      const filters = renderHook(() => useJiraListFilters());
+      act(() => page.result.current[1]('board'));
+      render(tree(payload([{ key: 'PAY-1', id: 's1', state: 'plan' }]), onChange));
+      await userEvent.click(screen.getByRole('button', { name: 'Menu' }));
+      const pills = screen.getAllByRole('button', { name: '1 session needs you' });
+      expect(pills).toHaveLength(1);
+      expect(screen.getByRole('group', { name: 'Jira pages' })).toContainElement(pills[0]);
+      await userEvent.click(pills[0]);
+      expect(page.result.current[0]).toBe('sessions');
+      expect(filters.result.current[0]).toMatchObject({ chip: 'needs-you', allTickets: true });
+      expect(onChange).toHaveBeenCalledWith('jira');
+      expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'false');
+    });
   });
 
   it('is fed by the shell’s one poll: a read with no `open=1` while the section is closed, none at all while Jira is unconfigured', async () => {
@@ -719,7 +767,10 @@ describe('the Jira row’s Needs-you badge', () => {
 describe('the rail rows and footer', () => {
   beforeEach(() => localStorage.clear());
 
-  const withProps = (props: { counts?: { github?: number; runs?: number }; api?: 'ok' | 'down' | null; working?: boolean }, section: Section = 'files') => (
+  const withProps = (
+    props: { counts?: { prs?: PullRequestsPayload | null; liveRuns?: number }; api?: 'ok' | 'down' | null; working?: boolean },
+    section: Section = 'files'
+  ) => (
     <SettingsProvider>
       <ProjectsContext.Provider value={{ data: null, drawn: BOTH, reload: () => {} }}>
         <SideRail section={section} onChange={jest.fn()} provisional={false} {...props} />
@@ -727,19 +778,45 @@ describe('the rail rows and footer', () => {
     </SettingsProvider>
   );
   const rowOf = (name: string): HTMLElement => screen.getByRole('button', { name }).closest('div') as HTMLElement;
+  /** One repo with `total` open PRs; it lists two (so `total` is visibly what counts), the first `needYou` of them ranking Needs you. */
+  const prs = (total: number, needYou: number): PullRequestsPayload => ({
+    token: true,
+    repos: [
+      repo({
+        repo: 'a/x',
+        total,
+        truncated: total > 2,
+        prs: Array.from({ length: Math.min(total, 2) }, (_, i) =>
+          i < needYou ? row({ number: i + 1, review: 'changes-requested' }) : row({ number: i + 1, review: 'approved', checks: 'success' })
+        )
+      })
+    ]
+  });
 
-  it('draws GitHub’s count as an amber pill and nothing at zero', () => {
-    const { rerender } = render(withProps({ counts: { github: 3 } }));
-    const pill = rowOf('GitHub').querySelector('.ui-pill');
+  it('draws GitHub’s count of open PRs: grey while none needs you, amber when one does, nothing without an answer', () => {
+    const { rerender } = render(withProps({ counts: { prs: prs(3, 0) } }));
+    let pill = rowOf('GitHub').querySelector('.ui-pill');
+    expect(pill).toHaveTextContent('3');
+    expect(pill).toHaveClass('ui-pill-neutral');
+    expect(screen.getByRole('img', { name: '3 open PRs' })).toBeInTheDocument();
+    rerender(withProps({ counts: { prs: prs(3, 1) } }));
+    pill = rowOf('GitHub').querySelector('.ui-pill');
     expect(pill).toHaveTextContent('3');
     expect(pill).toHaveClass('ui-pill-warn');
-    rerender(withProps({ counts: { github: 0 } }));
+    expect(screen.getByRole('img', { name: '3 open PRs, 1 needs you' })).toBeInTheDocument();
+    rerender(withProps({ counts: { prs: null } }));
     expect(rowOf('GitHub').querySelector('.ui-pill')).toBeNull();
   });
 
+  it('keeps each top row to its own section’s number', () => {
+    render(withProps({ counts: { prs: prs(3, 0), liveRuns: 2 } }));
+    expect(rowOf('GitHub').querySelector('.ui-pill')).toHaveTextContent('3');
+    expect(rowOf('Runs').querySelector('.ui-pill')).toHaveTextContent('2');
+  });
+
   it('names each count by its meaning and lets a click on a plain count through to the row', () => {
-    render(withProps({ counts: { github: 3, runs: 1 } }));
-    expect(screen.getByRole('img', { name: '3 PRs need you' })).toBeInTheDocument();
+    render(withProps({ counts: { prs: prs(3, 0), liveRuns: 1 } }));
+    expect(screen.getByRole('img', { name: '3 open PRs' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: '1 live run' })).toBeInTheDocument();
     // jsdom applies no stylesheet, so the pass-through is pinned at its source: the rule that keeps a plain count from swallowing the row's click.
     const css = readFileSync(join(__dirname, '../../client/src/styles.css'), 'utf8');
@@ -747,10 +824,55 @@ describe('the rail rows and footer', () => {
   });
 
   it('draws Runs’ count as a neutral pill', () => {
-    render(withProps({ counts: { runs: 2 } }));
+    render(withProps({ counts: { liveRuns: 2 } }));
     const pill = rowOf('Runs').querySelector('.ui-pill');
     expect(pill).toHaveTextContent('2');
     expect(pill).toHaveClass('ui-pill-neutral');
+    expect(screen.getByRole('img', { name: '2 live runs' })).toBeInTheDocument();
+  });
+
+  it('hangs the PRs count on the PRs row of the open GitHub tree, and on no other page', () => {
+    render(withProps({ counts: { prs: prs(3, 0) } }, 'github'));
+    const group = screen.getByRole('group', { name: 'GitHub pages' });
+    const wrapper = within(group).getByRole('button', { name: 'PRs' }).parentElement as HTMLElement;
+    expect(wrapper).toHaveClass('rail-group');
+    const pill = wrapper.querySelector('.rail-count');
+    expect(pill).toHaveTextContent('3');
+    expect(pill).toHaveAccessibleName('3 open PRs');
+    for (const name of ['Board', 'Archive', 'Settings']) {
+      expect((within(group).getByRole('button', { name }).parentElement as HTMLElement).querySelector('.rail-count')).toBeNull();
+    }
+  });
+
+  it('hangs the live-runs count on History, and names it once while the tree is open', () => {
+    render(withProps({ counts: { liveRuns: 2 } }, 'runs'));
+    const group = screen.getByRole('group', { name: 'Runs views' });
+    const history = (within(group).getByRole('button', { name: 'History' }).parentElement as HTMLElement).querySelector('.rail-count');
+    expect(history).toHaveTextContent('2');
+    expect(history?.parentElement).toHaveClass('rail-group');
+    expect(screen.getAllByRole('img', { name: '2 live runs' })).toEqual([history]);
+    const top = rowOf('Runs').querySelector('.rail-count');
+    expect(top).toHaveTextContent('2');
+    expect(top).toHaveAttribute('aria-hidden', 'true');
+    for (const name of ['Watchdog', 'Ticks']) {
+      expect((within(group).getByRole('button', { name }).parentElement as HTMLElement).querySelector('.rail-count')).toBeNull();
+    }
+  });
+
+  it('on a phone, draws both the top-row sum and the sub-row count', async () => {
+    await withNarrow(async () => {
+      render(withProps({ counts: { liveRuns: 1 } }));
+      await userEvent.click(screen.getByRole('button', { name: 'Menu' }));
+      expect(rowOf('Runs').querySelector('.rail-count')).toHaveTextContent('1');
+      const group = screen.getByRole('group', { name: 'Runs views' });
+      expect((within(group).getByRole('button', { name: 'History' }).parentElement as HTMLElement).querySelector('.rail-count')).toHaveTextContent('1');
+    });
+  });
+
+  // A regression guard rather than a new behaviour: it passes before the change too, and must keep passing after it.
+  it('draws no count anywhere when nothing is pending', () => {
+    render(withProps({ counts: { prs: null, liveRuns: 0 } }, 'runs'));
+    expect(document.querySelector('.rail-count')).toBeNull();
   });
 
   it('puts a tile on every row and keeps the page and item marks apart', () => {

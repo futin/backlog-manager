@@ -4,7 +4,8 @@ import { needsYouCount } from '../lib/jira-list';
 import { useJiraSessionsContext } from './JiraSessionsContext';
 
 /**
- * useJiraNeedsYou — the rail badge's count (Jira sessions spec §7.4, C4), read from the shell's one sessions answer (`JiraSessionsContext`) and never from a
+ * useJiraNeedsYou — the rail's Jira › Sessions count (Jira sessions spec §7.4, C4; on the Sessions row since rail pending counts), read from the shell's
+ * one sessions answer (`JiraSessionsContext`) and never from a
  * poll of its own. The hold is the point of the hook: `needsYouCount` is `null` while the dashboard is unreachable (every live session then reads Lost
  * contact, which cannot say who is waiting), and a failed read of the route keeps the previous payload (`useJiraSessions`), so in both cases the badge keeps
  * the last number it was sure of — a flicker to nothing would tell a person nobody needs them at exactly the moment nobody can say. Before any answer, and

@@ -183,7 +183,8 @@ board` (through the `onOpenJiraPage` link the rail already threads down) and `Sh
   quiet sub-list; the current page is a white (`--strip`) row, not a dot. The rail stays always open.
 - **Counts** share one shape, the plain `.pill` with a number: amber when the number is things waiting on the user, grey otherwise. Jira keeps today's
   badge: the needs-you count, amber, and its click still opens Sessions filtered to needs-you; `rail-badge` becomes this pill and stays a button. GitHub
-  (PRs that need you) and Runs (live runs): see §4.9a.
+  (PRs that need you) and Runs (live runs): see §4.9a. (Superseded on 2026-11-16 by the rail pending-counts spec: GitHub counts open PRs, and each count
+  sits on its page's tree row, summed onto the section row.)
 - **Footer**: version with a status dot, `API connected` beside it, keeping today's version click (the releases drawer) and its unseen-release dot. The
   client talks to its own origin through the proxy and never sees 4322, so the mock's port is not drawn. The dot reads whether the client's existing reads are answering — red with `API unreachable` when they fail; no new poller is added
   for it, and the builder picks which existing read it follows.
@@ -201,7 +202,9 @@ the boolean `working` for runs. The user chose counts on every page, so the shel
   `GET /api/prs` read the PRs page runs today, mounted whenever a board tab is open and GitHub is connected (never while nothing is connected), shared with
   the PRs page so one tab makes one read a minute. This overturns the stated reason "nothing reads pull requests except the PRs page"
   (`server/src/tracker/pulls.service.ts`'s header comment, `.claude/rules/tracker.md`'s PR-cache bullet); both move in the same commit, with this section
-  as the reason. The count is the Inbox's `Needs you` number, amber; 0 hides the pill.
+  as the reason. The count is the Inbox's `Needs you` number, amber; 0 hides the pill. (Superseded on 2026-11-16 by
+  [2026-11-16-rail-pending-counts-design.md](2026-11-16-rail-pending-counts-design.md): the count is every open PR, grey unless one needs you, on the
+  GitHub › PRs row and summed onto the GitHub row. The always-on read above stands.)
 - **Runs**: one `useOrchestratorRuns()` poll per tab moves up into a shell-level context, and every view that calls the hook today (Board,
   Archive, PRs, Runs — `test/runs/run-pulse.test.ts`'s `VIEWS`) reads the context instead, so the shell's count and every view share one 5 s request, never
   two. That keeps the guard's purpose (no second poller for the shell) and changes its shape: the caller list becomes the one provider, and the `App` bar

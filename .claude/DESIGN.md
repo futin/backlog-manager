@@ -188,15 +188,23 @@ The sub-nav tree is drawn only for the open section, as quiet 28 px rows, the op
 
 Since the source-sections change the rail lists five sections — Files, GitHub, Jira, Runs, Settings, in `SECTIONS` order — and draws three of them only when they have something to show: Files and GitHub while a registered project has that source, Jira while `GET /api/jira` says the site is configured (each also while a section the reader chose is being held for its answer; §8.9 for Jira). A machine without Jira credentials or without a GitHub project sees only the rows it can fill, and nothing in the rail moves to make room for an absent one. A load with no stored section, or one that stored the old root Board or Archive, paints the section's loading shape and no source row until the projects answer settles where it lands, so a files-only machine never flashes a GitHub row and board.
 
-**The counts** (restyle spec §4.9; they replace the Needs-you disc of Jira sessions spec §7.4, C4) are one `Pill` each on a row's right end and nowhere else:
-amber (`warn`) when the number is people waiting, grey (`neutral`) when it is only a quantity. Jira's counts the sessions that need you — plan, permission,
-reply and answer, across every linked ticket, each session once; GitHub's the pull requests that need you (`needsYouCount`, Inbox's Needs-you level), read from
-the shell's one `PullRequestsProvider` so it is true on every section and not only while GitHub › PRs is open; Runs' the live runs, grey, from the shell's one
-`OrchestratorRunsProvider`. `.rail-count` hangs over the row's right end, 10 px in and vertically centred: every row's button and its count share one
-`.rail-group`, the count's positioning parent, with the open tree outside it so the count centres on the row alone; the row is full width. Jira's is a real
-`<button>` beside the row's button (a button in a button is invalid) — the row opens Jira, the count opens the Sessions page (§8.9.1) filtered to Needs you with All tickets —
-and the other two are plain `role="img"` spans that let the click through to their row. Each is named in words (`4 sessions need you`, `2 PRs need you`, `1 live
-run`). Zero draws no element, not an empty pill; while the dashboard is unreachable Jira's keeps the last count rather than showing a false zero.
+**The counts** (restyle spec §4.9, per page since the rail pending-counts spec, `docs/superpowers/specs/2026-11-16-rail-pending-counts-design.md`; they
+replace the Needs-you disc of Jira sessions spec §7.4, C4) are one `Pill` each — on a tree's sub-row, for the page that holds the items, and on the section's
+top row as their sum — and nowhere else. `railCounts` (`lib/rail-counts.ts`) is their one home: a map section → page → `{ n, tone, label, onOpen? }` holding an
+entry only while its number is above zero, so a new count is one entry there and no rail markup. Three today. **GitHub › PRs**: every open PR the PRs page
+lists (`openPrCount`, the same `N` as the band's `N open in M repos`), read from the shell's one `PullRequestsProvider` so it is true on every section.
+**Runs › History**: the live runs, running and paused, local and remote, from the shell's one `OrchestratorRunsProvider`. **Jira › Sessions**: the sessions
+that need you — plan, permission, reply and answer, across every linked ticket, each session once. The tone: amber (`warn`) when the count includes something
+waiting on the reader, grey (`neutral`) when it is only a quantity — PRs amber while any PR ranks Needs you (`needsYouCount`), History grey, Sessions amber.
+The top row draws `sectionTotal`: the sum of its section's entries, amber if any is, named by their labels joined with `; ` in tree order. `.rail-count` hangs
+over the row's right end, 10 px in and vertically centred: every top row's button and its count share one `.rail-group`, the count's positioning parent, with
+the open tree outside it so the count centres on the row alone, and each tree item is a `.rail-group` of its own holding the full-width `.rail-sublink` and its
+pill. An entry with `onOpen` (Jira › Sessions, the only one today) draws a real `<button>` beside the row's (a button in a button is invalid) — the row opens
+the page, the count opens the Sessions page (§8.9.1) filtered to Needs you with All tickets — and every other pill is a plain `role="img"` span that lets the
+click through to its row; a top row's pill is that button only while its section has exactly one entry and that entry has `onOpen`. No pill is announced
+twice: while a section's tree is drawn (open at desktop width, always below 700 px) its top-row pill is an `aria-hidden` span and only the sub-rows carry
+names and buttons. Each is named in words (`5 open PRs, 2 need you`, `1 live run`, `3 sessions need you`). Zero draws no element, not an empty pill, on a top
+row and a sub-row alike; while the dashboard is unreachable Jira's keeps the last count rather than showing a false zero.
 
 **The foot.** `.rail-foot`, sunk to the rail's bottom by `margin: auto 0 0`, is a `--strip` card with a hairline border and a 12 px radius holding the version
 chip (§8.10) and, at its right, `.rail-api`: an 8 px dot — `--green-solid`, or `--red` when the server is unreachable — and `API connected` or `API unreachable`

@@ -102,6 +102,9 @@ Clicking the Jira row's `N need you` badge opens **Jira › Sessions** with `Nee
 the view to List. It no longer touches the Board page's view. **The badge stays on the Jira row**, where it is today, so it shows with the Jira tree
 collapsed; the Sessions tree entry carries no count.
 
+Superseded on 2026-11-16 by [2026-11-16-rail-pending-counts-design.md](2026-11-16-rail-pending-counts-design.md): the count sits on the Sessions tree
+entry, with the same click, and the Jira row keeps a badge as the sum of its section's counts, so it still shows with the tree collapsed.
+
 ### Stored view
 
 `backlog-manager.jira-view` keeps its two values. A browser that stored `list` lands on the issue table after this ships, not on sessions — accepted; the
@@ -142,7 +145,8 @@ badge and the rail are the routes to sessions now.
 - C3. No `+ N more` cut in the issue List — a list is where you go to see them all.
 - C4. Sessions page shares the Board page's stored board pick rather than having its own.
 - C5. A stored `list` view silently becomes the issue table; no migration.
-- C6. The `N need you` badge stays on the Jira rail row, not on the Sessions entry.
+- C6. The `N need you` badge stays on the Jira rail row, not on the Sessions entry. (Superseded 2026-11-16 by the rail pending-counts spec: on the
+  Sessions entry, summed onto the Jira row.)
 - C7. The issue List's live dot is display only, not a link to the Sessions page.
 - C8. With `All tickets` on, Sessions draws its table even while the board is loading, unavailable or absent.
 - C9. The issue List's Updated column shows the rolled-up time (newest across the fold), matching the sort.
