@@ -269,7 +269,7 @@ export function adfToMarkdown(doc: unknown): { markdown: string; placeholders: n
   return { markdown, placeholders: markdown === '' ? 0 : ctx.placeholders };
 }
 
-/** Nodes `adfToText` drops outright, children included: an attachment has no words, and a table cell's text out of its grid reads as noise. */
+/** Nodes `adfToText` drops outright, children included: an attachment has no words to show. */
 const TEXT_DROPPED = new Set(['media', 'mediaSingle', 'mediaGroup', 'mediaInline']);
 
 function textOf(node: AdfNode, depth: number): string {
@@ -290,10 +290,11 @@ function textOf(node: AdfNode, depth: number): string {
     case 'hardBreak':
       return ' ';
     default:
-      // Any other node contributes its children, each set off by a space so a block boundary is a word boundary; the caller collapses the runs.
+      // Inline children concatenate as written (`@Mara` + `, can you`, or a word split by a bold mark, must not gain a space); a BLOCK child is set off by
+      // spaces so a block boundary is a word boundary. The caller collapses the runs.
       return childrenOf(node)
-        .map((c) => textOf(c, depth + 1))
-        .join(' ');
+        .map((c) => (typeof c.type === 'string' && INLINE_TYPES.has(c.type) ? textOf(c, depth + 1) : ` ${textOf(c, depth + 1)} `))
+        .join('');
   }
 }
 

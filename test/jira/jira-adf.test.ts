@@ -378,6 +378,11 @@ describe('adfToText', () => {
     expect(txt(para({ type: 'mention', attrs: { id: 'a1', text: 'Mara Ilić' } }))).toBe('@Mara Ilić');
   });
 
+  it('concatenates inline siblings without adding spaces', () => {
+    expect(txt(para({ type: 'mention', attrs: { id: 'a1', text: '@Mara' } }, text(', can you')))).toBe('@Mara, can you');
+    expect(txt(para(text('bo'), text('ld', [{ type: 'strong' }])))).toBe('bold');
+  });
+
   it('writes an emoji as its text', () => {
     expect(txt(para({ type: 'emoji', attrs: { text: ':)' } }))).toBe(':)');
   });
