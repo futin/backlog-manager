@@ -540,8 +540,13 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     return issue?.candidates.find((m) => m.commentId === commentId) ?? null;
   }
 
-  /** The status payload's slice: `count` is the payload's `issues.length` (TICKETS waiting, the rail's unit), `null` until a check has succeeded. */
-  private mentionsSummary(): JiraMentionsSummary {
+  /**
+   * The status payload's slice: `count` is the payload's `issues.length` (TICKETS waiting, the rail's unit), `null` until a check has succeeded. The whole
+   * slice is `null` while no check is owed (`!mentionsArmed()`: unconfigured, or an `unsupported` site): nothing will ever stamp `polledAt`, and a
+   * `polledAt: null` summary would keep the shell's status read on its 15 s floor and the popover on "not checked yet" for good.
+   */
+  private mentionsSummary(): JiraMentionsSummary | null {
+    if (!this.mentionsArmed()) return null;
     const { polledAt, detail, truncated } = this.mentions;
     const count = polledAt === null ? null : applyDismissals(this.mentions.issues, this.dismissedPredicate()).issues.length;
     return { polledAt, count, detail, truncated, retryAt: this.windowEnd() };

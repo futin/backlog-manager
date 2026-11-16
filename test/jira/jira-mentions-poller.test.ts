@@ -134,6 +134,8 @@ describe('arming (spec "Poller arming")', () => {
     expect(poller.mentionsArmed()).toBe(false);
     expect(poller.armed).toBe(false);
     expect(mentionSearches()).toBe(0);
+    // No check will ever stamp the cache, so the status carries no summary: a `polledAt: null` one would hold the shell on its 15 s floor for good.
+    expect(poller.status().mentions).toBeNull();
 
     process.env.BM_JIRA_TOKEN = '';
     const fresh = new JiraPollerService(new JiraClient(fake.fetch));
