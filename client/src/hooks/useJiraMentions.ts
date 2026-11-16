@@ -52,7 +52,14 @@ export function useJiraMentions(): JiraMentionsState {
     error: null
   });
   const [sweeping, setSweeping] = useState(false);
-  const access = useJiraContext().data?.access;
+  const status = useJiraContext();
+  const access = status.data?.access;
+  // The shell's `reload` is a fresh closure per render in some providers; a ref keeps `write` stable.
+  const reloadStatus = useRef(status.reload);
+  reloadStatus.current = status.reload;
+  // Keys whose dismiss or restore is still out: a double click would send a second POST that the server answers 400 ("not an open mention"), and that
+  // refusal would land in the band over a click that had in fact worked.
+  const writing = useRef(new Set<string>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
   const latest = useRef(0);
@@ -93,7 +100,9 @@ export function useJiraMentions(): JiraMentionsState {
 
   useWindowFocus(reload);
 
-  // A write's answer replaces `data` and re-arms the timer from its stamp. Taking a sequence number here retires any read still in flight.
+  // A write's answer replaces `data` and re-arms the timer from its stamp. Taking a sequence number here retires any read still in flight. A success
+  // also re-reads the SHELL status: the rail's Jira › Mentions count and the popover's `Mentions · N` come from `status.mentions.count`, which would
+  // otherwise disagree with this page for up to a poll interval after the reader's own click.
   const write = useCallback(
     async (path: 'sweep' | 'dismiss' | 'restore', body: object): Promise<JiraMentionsWrite> => {
       try {
@@ -104,6 +113,7 @@ export function useJiraMentions(): JiraMentionsState {
         clear();
         const ms = nextDelay(data, Date.now());
         if (ms !== null) timer.current = setTimeout(reload, ms);
+        reloadStatus.current();
         return { ok: true };
       } catch (e) {
         const failure = asMentionsFailure(e);
@@ -123,8 +133,21 @@ export function useJiraMentions(): JiraMentionsState {
     }
   }, [write]);
 
-  const dismiss = useCallback((key: string, ids: string[]) => write('dismiss', { key, commentIds: ids }), [write]);
-  const restore = useCallback((key: string) => write('restore', { key }), [write]);
+  // A second dismiss or restore for a key already out resolves `ok` without posting: the first one's answer is the one the caller is waiting on.
+  const once = useCallback(
+    async (key: string, send: () => Promise<JiraMentionsWrite>): Promise<JiraMentionsWrite> => {
+      if (writing.current.has(key)) return { ok: true };
+      writing.current.add(key);
+      try {
+        return await send();
+      } finally {
+        writing.current.delete(key);
+      }
+    },
+    []
+  );
+  const dismiss = useCallback((key: string, ids: string[]) => once(key, () => write('dismiss', { key, commentIds: ids })), [once, write]);
+  const restore = useCallback((key: string) => once(key, () => write('restore', { key })), [once, write]);
 
   const d = state.data;
   const blocked = (access !== undefined && access !== 'ok') || (d !== null && d.configured && d.retryAt !== null);

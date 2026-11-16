@@ -29,6 +29,7 @@ function deferred() {
 let fetchMock: jest.Mock;
 let last: ReturnType<typeof useJiraMentions>;
 let access: JiraStatusPayload['access'] = 'ok';
+let statusReload: jest.Mock;
 
 function Probe() {
   last = useJiraMentions();
@@ -37,7 +38,7 @@ function Probe() {
 }
 
 const tree = () => (
-  <JiraContext.Provider value={{ data: { access } as JiraStatusPayload, loading: false, error: false, reload: () => {} }}>
+  <JiraContext.Provider value={{ data: { access } as JiraStatusPayload, loading: false, error: false, reload: statusReload }}>
     <Probe />
   </JiraContext.Provider>
 );
@@ -59,6 +60,7 @@ const calls = (): number => fetchMock.mock.calls.filter(([u, init]) => u === '/a
 beforeEach(() => {
   jest.useFakeTimers();
   access = 'ok';
+  statusReload = jest.fn();
   fetchMock = jest.fn(() => res(payload()));
   global.fetch = fetchMock as unknown as typeof fetch;
 });
@@ -222,6 +224,54 @@ describe('useJiraMentions', () => {
       await last.restore('PAY-1');
     });
     expect(last.error?.message).toBe('could not save — nothing changed');
+  });
+
+  it('a successful write re-reads the shell status, so the rail and popover counts follow the page; a refused one does not', async () => {
+    render(tree());
+    await flush();
+    expect(statusReload).not.toHaveBeenCalled();
+    fetchMock.mockImplementation(() => res(payload({ me: 'dismissed' })));
+    await act(async () => {
+      await last.dismiss('PAY-1', ['10']);
+    });
+    expect(statusReload).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await last.restore('PAY-1');
+    });
+    await act(async () => {
+      await last.sweep();
+    });
+    expect(statusReload).toHaveBeenCalledTimes(3);
+    fetchMock.mockImplementation(() => res({ error: 'nope' }, 400));
+    await act(async () => {
+      await last.dismiss('PAY-1', ['10']);
+    });
+    expect(statusReload).toHaveBeenCalledTimes(3);
+  });
+
+  it('ignores a second dismiss or restore for a key whose write is still out', async () => {
+    render(tree());
+    await flush();
+    const d = deferred();
+    fetchMock.mockImplementation(() => d.promise);
+    let first!: Promise<unknown>;
+    let second: unknown;
+    await act(async () => {
+      first = last.dismiss('PAY-1', ['10']);
+      second = await last.dismiss('PAY-1', ['10']);
+    });
+    expect(second).toEqual({ ok: true });
+    const posts = () => fetchMock.mock.calls.filter(([, init]) => init !== undefined).length;
+    expect(posts()).toBe(1);
+    await act(async () => {
+      d.resolve(await res(payload()) as unknown as Response);
+      await first;
+    });
+    fetchMock.mockImplementation(() => res(payload()));
+    await act(async () => {
+      await last.dismiss('PAY-1', ['10']);
+    });
+    expect(posts()).toBe(2);
   });
 
   it('dismiss and restore resolve their own outcome — ok, or the refusal sentence — so a caller over the band can say it; they never reject', async () => {
