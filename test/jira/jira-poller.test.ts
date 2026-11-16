@@ -716,7 +716,7 @@ describe('due intervals', () => {
 });
 
 describe('armed', () => {
-  it('is true after a tick with a 1m board', async () => {
+  it('is true after a tick for any configured site — a 1m board no longer decides it (Jira › Mentions spec "Poller arming")', async () => {
     writeConfig([board()]);
     await poller.tick();
     expect(poller.armed).toBe(true);
@@ -728,7 +728,7 @@ describe('armed', () => {
     expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
   });
 
-  it('is true while boot is unanswered, whatever the boards', async () => {
+  it('is true while boot is unanswered: configured and not unsupported is the whole rule (Jira › Mentions spec "Poller arming")', async () => {
     writeConfig([board({ interval: 'off' })]);
     fake.failWith = 'transport';
     await poller.tick();

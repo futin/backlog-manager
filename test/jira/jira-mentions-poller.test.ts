@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { JIRA_MENTIONS_ISSUE_CAP, JIRA_MENTIONS_POLL_MS, JIRA_THREAD_MAX, type JiraBoard } from '../../shared/types';
 import { JiraClient } from '../../server/src/jira/jira.client';
 import { MENTION_SEARCH_FIELDS, mentionsJql } from '../../server/src/jira/mentions.util';
-import { JiraPollerService, SWEEP_FLOOR_MS } from '../../server/src/jira/poller.service';
+import { JIRA_POLL_MS, JiraPollerService, SWEEP_FLOOR_MS } from '../../server/src/jira/poller.service';
 import { FakeJira, makeRawIssue, type SeededComment } from '../helpers/jira';
 
 /**
@@ -251,13 +251,15 @@ describe('failures', () => {
   it('5xx keeps rows: issues and polledAt unchanged, detail set, site access still ok', async () => {
     mentionIssue('SUP-208', [comment(MARA, 20, ME)]);
     await poller.tick();
-    const good = poller.mentionsCache();
-    expect(good.issues).toHaveLength(1);
+    // A deep clone, not the accessor's live object: an in-place clear (`issues = []` on the same cache) must fail this, not compare equal to itself.
+    const good = structuredClone(poller.mentionsCache());
+    expect(good.issues.map((i) => i.key)).toEqual(['SUP-208']);
 
     now = T0 + JIRA_MENTIONS_POLL_MS;
     failMentions(503);
     await poller.tick();
     const after = poller.mentionsCache();
+    expect(after.issues.map((i) => i.key)).toEqual(['SUP-208']);
     expect(after.issues).toEqual(good.issues);
     expect(after.polledAt).toBe(iso(T0));
     expect(after.detail).toBe('Jira answered 503');
@@ -268,6 +270,32 @@ describe('failures', () => {
     now = T0 + 2 * JIRA_MENTIONS_POLL_MS;
     await poller.tick();
     expect(poller.mentionsCache()).toMatchObject({ detail: null, polledAt: iso(now) });
+  });
+
+  it('the cadence runs from the failed ATTEMPT: no search one poll after the 503, one exactly 180 000 ms after it', async () => {
+    mentionIssue('SUP-208', [comment(MARA, 20, ME)]);
+    await poller.tick();
+    const attempt = T0 + JIRA_MENTIONS_POLL_MS;
+    now = attempt;
+    failMentions(503);
+    await poller.tick();
+    expect(poller.mentionsCache().detail).toBe('Jira answered 503');
+    fake.failNext = null;
+    expect(mentionSearches()).toBe(2);
+
+    // A build that stamped the cadence only on success would be due again here (its last stamp is T0, 180 s ago) and send a third search.
+    now = attempt + JIRA_POLL_MS;
+    await poller.tick();
+    expect(mentionSearches()).toBe(2);
+
+    now = attempt + JIRA_MENTIONS_POLL_MS - 1;
+    await poller.tick();
+    expect(mentionSearches()).toBe(2);
+
+    now = attempt + JIRA_MENTIONS_POLL_MS;
+    await poller.tick();
+    expect(mentionSearches()).toBe(3);
+    expect(poller.mentionsCache().detail).toBeNull();
   });
 
   it.each([
@@ -323,6 +351,39 @@ describe('failures', () => {
     expect(poller.status().access).toBe('unreachable');
     expect(mentionSearches()).toBe(1);
     expect(poller.mentionsCache().polledAt).toBe(iso(T0));
+  });
+
+  it('a board 429 mid-tick skips the step without stamping the attempt, so the check runs on the first tick after the window', async () => {
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
+    writeConfig([board({ roots: ['PAY-1'] })]);
+    fake.answers.set(JQL, []);
+    fake.failNext = ({ body: b }) =>
+      (b as { jql?: string } | undefined)?.jql === 'key = "PAY-1"' ? { status: 429, headers: { 'retry-after': '60' } } : null;
+    await poller.tick();
+    expect(poller.status().access).toBe('rate-limited');
+    expect(mentionSearches()).toBe(0);
+    fake.failNext = null;
+
+    // 60 s on, well inside the 3-minute cadence: never attempted, so due at once.
+    now = T0 + MIN;
+    await poller.tick();
+    expect(mentionSearches()).toBe(1);
+  });
+
+  it('a site sweep that joins an in-flight tick forces nothing: one mentions search, and none on the next tick', async () => {
+    writeConfig([board({ interval: 'off' })]);
+    await poller.tick();
+    expect(mentionSearches()).toBe(1);
+
+    now = T0 + JIRA_MENTIONS_POLL_MS;
+    const tick = poller.tick();
+    expect(await poller.sweepNow()).toEqual({ kind: 'done' });
+    await tick;
+    expect(mentionSearches()).toBe(2);
+
+    now += JIRA_POLL_MS;
+    await poller.tick();
+    expect(mentionSearches()).toBe(2);
   });
 
   it('a board 401 ends the tick before mentions: the boot is not answered', async () => {

@@ -11,8 +11,11 @@ import { MENTION_SEARCH_FIELDS, judgeComments, mentionsJql, type RawComment } fr
  * without the poller's file growing a second hundred lines, and without a second Nest provider that would need the poller's private state passed to it.
  */
 
-/** A cached ticket: the row's fields, `candidates` every open mention BEFORE dismissals (Task 6 applies those on read), and `mentions` the same list. */
-export type JiraMentionCacheIssue = JiraMentionIssue & { candidates: JiraMention[] };
+/**
+ * A cached ticket: the row's fields, `candidates` every open mention BEFORE dismissals (Task 6 applies those on read), and `mentions` a COPY of that list —
+ * a separate array, so a reader that filters `mentions` can never reach the candidates, and `candidates` is read-only in the type besides.
+ */
+export type JiraMentionCacheIssue = JiraMentionIssue & { readonly candidates: readonly JiraMention[] };
 
 export type MentionsCheckResult = { ok: true; issues: JiraMentionCacheIssue[]; truncated: boolean } | { ok: false; response: JiraResponse<unknown> };
 
@@ -105,7 +108,7 @@ export async function runMentionsCheck(input: MentionsCheckInput): Promise<Menti
       type: str(isObj(fields.issuetype) ? fields.issuetype.name : undefined),
       status: { name: str(status.name), category: categoryOf(isObj(status.statusCategory) ? status.statusCategory.key : undefined) },
       boards: boardsOf(key),
-      mentions: candidates,
+      mentions: [...candidates],
       candidates
     };
     // `candidates` is newest first, so its head is the ticket's newest mention — the ticket's place in the list.

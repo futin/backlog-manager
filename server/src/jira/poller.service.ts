@@ -153,7 +153,8 @@ export interface MentionsCache {
   polledAt: string | null;
   detail: string | null;
   truncated: boolean;
-  issues: JiraMentionCacheIssue[];
+  /** Read-only to every reader: Task 6 filters a COPY on read, never these arrays in place (an in-place filter would eat the candidates). */
+  readonly issues: readonly JiraMentionCacheIssue[];
 }
 
 /** One board's last good sweep. Replaced whole, or not at all. */
@@ -328,12 +329,12 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   }
 
   /**
-   * `POST /api/jira/sweep`, the popover head's site-wide `Sync now`. Everything is decided synchronously before the first await, so two presses in one tick
-   * see the same `inFlight` and join it rather than each forcing a sweep. Order: nothing armed and nothing running → `not-armed` (a site with only swept
-   * `off` boards has no chain, and a button that did something there would be a second polling path); a 429 window → `wait` with the STORED end, no call
-   * (the per-board `boards/sweep` is not refused in one — this button alone is); a sweep running → join it; one finished under `SWEEP_FLOOR_MS` ago → `done`,
-   * no call; else force every non-`off` board (the `boardSaved` mechanism, so a 401 or a window opening mid-sweep leaves them owed), force a mentions
-   * check (`mentionsForced`), and sweep once. An `off` board is left to its own per-row icon. With the arming widened (header), `not-armed` is now only an
+   * `POST /api/jira/sweep`, the popover head's site-wide `Sync now`. Everything is decided synchronously before the first await, so two presses in one tick see
+   * the same `inFlight` and join it rather than each forcing a sweep. Order: nothing armed and nothing running → `not-armed` (an unconfigured or `unsupported`
+   * site has no chain, and a button that did something there would be a second polling path); a 429 window → `wait` with the STORED end, no call (the per-board
+   * `boards/sweep` is not refused in one — this button alone is); a sweep running → join it; one finished under `SWEEP_FLOOR_MS` ago → `done`, no call; else
+   * force every non-`off` board (the `boardSaved` mechanism, so a 401 or a window opening mid-sweep leaves them owed), force a mentions check
+   * (`mentionsForced`), and sweep once. An `off` board is left to its own per-row icon. With the arming widened (header), `not-armed` is now only an
    * unconfigured or `unsupported` site: a site with every board `off` keeps a chain for mentions, so the press checks them and answers `done`.
    */
   async sweepNow(): Promise<SweepNowResult> {
@@ -420,8 +421,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     };
   }
 
-  /** The mentions cache as the last check left it — candidates, NOT dismissal-filtered; Task 6 derives the payload from it on read. */
-  mentionsCache(): MentionsCache {
+  /** The mentions cache as the last check left it — candidates, NOT dismissal-filtered; Task 6 derives the payload from it on read, never in place. */
+  mentionsCache(): Readonly<MentionsCache> {
     return this.mentions;
   }
 
@@ -784,11 +785,15 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
 
   /**
    * One mentions check, or the one already running — the in-flight join `tick()` gives the board sweep, kept separately because Task 6's manual check runs
-   * it outside a tick. Starting one stamps the attempt (the cadence) and spends `mentionsForced`; ending one stamps `mentionsEndAt` (the floor). Never
-   * rejects: an unexpected throw is a failed check, recorded as its detail, and must not take the tick's successor with it.
+   * it outside a tick. Starting OR joining one spends `mentionsForced`; starting one stamps the attempt (the cadence); ending one stamps `mentionsEndAt`
+   * (the floor). Never rejects: an unexpected throw is a failed check, recorded as its detail, and must not take the tick's successor with it.
    */
   private checkMentions(auth: JiraAuth): Promise<void> {
-    if (this.mentionsInFlight !== null) return this.mentionsInFlight;
+    if (this.mentionsInFlight !== null) {
+      // The running check IS the answer to a force raised while it was out: leaving the flag set would send a second search on the next 15 s tick.
+      this.mentionsForced = false;
+      return this.mentionsInFlight;
+    }
     this.mentionsAttemptAt = Date.now();
     this.mentionsForced = false;
     const running = this.runMentions(auth)
