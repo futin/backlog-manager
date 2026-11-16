@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { JiraBoard, JiraQuery } from '../../shared/types';
+import { JIRA_MENTIONS_WINDOW_DAYS, type JiraBoard, type JiraQuery } from '../../shared/types';
 import { JIRA_RATE_LIMIT_DEFAULT_MS } from '../../server/src/jira/errors.util';
 import { JIRA_BACKOFF_MAX_MS, JIRA_BACKOFF_MIN_MS, JiraBootState, nextBackoff } from '../../server/src/jira/identity';
 import { JiraClient } from '../../server/src/jira/jira.client';
@@ -19,6 +19,7 @@ import {
   JIRA_SEARCH_MAX_CHARS,
   JiraPollerService
 } from '../../server/src/jira/poller.service';
+import { mentionsJql } from '../../server/src/jira/mentions.util';
 import { FakeJira, makeRawIssue, type FakeTransition, type JiraCall } from '../helpers/jira';
 
 /**
@@ -95,9 +96,16 @@ function label(c: JiraCall): string {
   return path.slice(1);
 }
 
-const labels = () => fake.calls.map(label);
-const searches = () => fake.calls.filter((c) => c.url.endsWith('/search/jql')).map((c) => (c.body as { jql: string }).jql);
-const searchBodies = () => fake.calls.filter((c) => c.url.endsWith('/search/jql')).map((c) => c.body as Record<string, unknown>);
+/**
+ * The mentions step (Jira › Mentions) rides every tick it is due on — at once after boot, then every 3 minutes — so its search and comment reads would land
+ * in every sequence this suite pins. They are `jira-mentions-poller.test.ts`'s to assert; these helpers see the board sweep, the boot and the routes only.
+ */
+const MENTIONS_JQL = mentionsJql('acc-1', JIRA_MENTIONS_WINDOW_DAYS);
+const isMentionCall = (c: JiraCall) => (c.body as { jql?: string } | undefined)?.jql === MENTIONS_JQL || /\/issue\/[^/]+\/comment\?/.test(c.url);
+const boardCalls = () => fake.calls.filter((c) => !isMentionCall(c));
+const labels = () => boardCalls().map(label);
+const searches = () => boardCalls().filter((c) => c.url.endsWith('/search/jql')).map((c) => (c.body as { jql: string }).jql);
+const searchBodies = () => boardCalls().filter((c) => c.url.endsWith('/search/jql')).map((c) => c.body as Record<string, unknown>);
 const isGatewayMyself = (url: string) => url.startsWith('https://api.atlassian.com/') && url.endsWith('/myself');
 const isSearch = (url: string) => url.endsWith('/search/jql');
 const keysOf = (id = B1) => poller.boardIssues(id)?.issues.map((i) => i.key);
@@ -129,6 +137,17 @@ function seedMany(n: number, prefix = 'PAY', from = 1, fields: Record<string, un
 
 function query(jql: string, id = Q1, label = 'mine'): JiraQuery {
   return { id, label, jql };
+}
+
+/**
+ * The board owes nothing more: the next tick, one poll later, searches no board. `armed` used to say this, but mentions now keep the chain armed whatever
+ * the boards owe (Jira › Mentions spec "Poller arming"), so a case that pinned "nothing owed" through `armed` pins it here instead.
+ */
+async function expectBoardSpent(): Promise<void> {
+  fake.calls.length = 0;
+  now += JIRA_POLL_MS;
+  await poller.tick();
+  expect(searches()).toEqual([]);
 }
 
 /** Boot the poller with nothing configured, then forget the boot's calls. */
@@ -191,7 +210,7 @@ describe('before the first tick', () => {
 });
 
 describe('boot, no boards', () => {
-  it('asks the five boot calls once, in order, and is then owed nothing', async () => {
+  it('asks the five boot calls once, in order, then the mentions check, and is still armed for mentions', async () => {
     await poller.tick();
     expect(labels()).toEqual(BOOT);
     expect(poller.status()).toMatchObject({
@@ -199,9 +218,10 @@ describe('boot, no boards', () => {
       detail: null,
       me: { accountId: 'acc-1', name: 'Ada Lovelace' },
       tokenKind: 'classic',
-      calls: { sweep: 5, last429At: null }
+      // The five boot calls and the mentions search that runs at once after boot (Jira › Mentions spec "Poller arming").
+      calls: { sweep: 6, last429At: null }
     });
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
 
     fake.calls.length = 0;
     now += 60_000;
@@ -646,15 +666,15 @@ describe('due intervals', () => {
     expect(searches()[0]).toBe('key = "PAY-120"');
   });
 
-  it('an off board gets one cold sweep and never another, and disarms', async () => {
+  it('an off board gets one cold sweep and never another; the chain stays armed for mentions', async () => {
     writeConfig([board({ roots: ['PAY-120'], interval: 'off' })]);
     await poller.tick();
     expect(poller.boardIssues(B1)?.polledAt).toBe(iso(T0));
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
     fake.calls.length = 0;
     now = T0 + DAY;
     await poller.tick();
-    expect(fake.calls).toEqual([]);
+    expect(boardCalls()).toEqual([]);
   });
 
   it('an off board whose cold sweep failed whole-board stays owed until one succeeds', async () => {
@@ -670,7 +690,8 @@ describe('due intervals', () => {
     await poller.tick();
     expect(searches()[0]).toBe('key = "PAY-120"');
     expect(poller.boardIssues(B1)?.polledAt).toBe(iso(now));
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
+    await expectBoardSpent();
   });
 
   it('a cold sweep with only per-entry failures has succeeded', async () => {
@@ -678,7 +699,8 @@ describe('due intervals', () => {
     await poller.tick();
     expect(poller.boardIssues(B1)?.polledAt).toBe(iso(T0));
     expect(poller.status().boards[0].failures).toHaveLength(1);
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
+    await expectBoardSpent();
   });
 
   it('1m and 5m boards: at +60 s only the first is re-swept', async () => {
@@ -700,10 +722,10 @@ describe('armed', () => {
     expect(poller.armed).toBe(true);
   });
 
-  it('is false with only an off board once boot has answered', async () => {
+  it('is true with only an off board once boot has answered — mentions are owed (Jira › Mentions spec "Poller arming")', async () => {
     writeConfig([board({ interval: 'off' })]);
     await poller.tick();
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
   });
 
   it('is true while boot is unanswered, whatever the boards', async () => {
@@ -884,7 +906,7 @@ describe('issueDetail', () => {
 
   it('a 401 resets me, reads unauthorized and restarts the boot retry', async () => {
     await booted();
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
     fake.unauthorized = true;
     expect(await poller.issueDetail('PAY-131')).toMatchObject({ ok: false, response: { status: 401 } });
     expect(poller.status()).toMatchObject({ me: null, access: 'unauthorized' });
@@ -1111,7 +1133,7 @@ describe('route verdicts against the sweep (review round 1)', () => {
     await booted();
     fake.rateLimit = { retryAfter: 30 };
     expect(await poller.checkJql('assignee = currentUser()')).toMatchObject({ ok: false, response: { status: 429 } });
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
     expect(poller.status().access).toBe('rate-limited');
     fake.rateLimit = null;
     now = T0 + 29_999;
@@ -1405,22 +1427,22 @@ describe('boardSaved and boardDeleted', () => {
     expect(searches()[0]).toBe('key = "PAY-120"');
   });
 
-  it('an off board swept once is swept once more, and the chain is not left armed for it', async () => {
+  it('an off board swept once is swept once more, and nothing more for it (the chain stays armed for mentions alone)', async () => {
     writeConfig([board({ roots: ['PAY-120'], interval: 'off' })]);
     await poller.tick();
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
     now = T0 + 10_000;
     fake.calls.length = 0;
 
     await poller.boardSaved(B1);
     expect(searches()[0]).toBe('key = "PAY-120"');
     expect(poller.boardIssues(B1)?.polledAt).toBe(iso(T0 + 10_000));
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
 
     fake.calls.length = 0;
     now = T0 + DAY;
     await poller.tick();
-    expect(fake.calls).toEqual([]);
+    expect(boardCalls()).toEqual([]);
   });
 
   it('forces only the saved board: a second 5m board swept 10 s ago gets no call from that sweep', async () => {
@@ -1499,7 +1521,7 @@ describe('boardSaved and boardDeleted', () => {
   it('an edited off board whose save-sweep fails whole-board keeps its force: armed, and re-swept once Jira recovers', async () => {
     writeConfig([board({ roots: ['PAY-120'], interval: 'off' })]);
     await poller.tick();
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
     const before = keysOf();
 
     // The save: a new definition, whose sweep Jira answers with a 503.
@@ -1518,7 +1540,8 @@ describe('boardSaved and boardDeleted', () => {
     expect(searches()[0]).toBe('key = "PAY-131"');
     expect(poller.boardIssues(B1)?.polledAt).toBe(iso(now));
     expect(keysOf()).toContain('PAY-131');
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
+    await expectBoardSpent();
   });
 
   it('with the boot unanswered it resolves, the board is not polled, and it stays owed', async () => {
@@ -1554,7 +1577,8 @@ describe('boardSaved and boardDeleted', () => {
     await poller.tick();
     expect(searches()[0]).toBe('key = "PAY-120"');
     expect(poller.boardIssues(B1)?.polledAt).toBe(iso(now));
-    expect(poller.armed).toBe(false);
+    expect(poller.armed).toBe(true); // mentions keep the chain alive (Jira › Mentions spec "Poller arming")
+    await expectBoardSpent();
   });
 
   it('a sweep slower than JIRA_SAVE_SWEEP_WAIT_MS stops being waited for at the cap, and its answer still lands in the cache', async () => {
@@ -1617,7 +1641,7 @@ describe('boardSaved and boardDeleted', () => {
   it('status() carries armed from the chain and home from the host, and null home while unconfigured', async () => {
     writeConfig([board({ interval: 'off' })]);
     await poller.tick();
-    expect(poller.status()).toMatchObject({ armed: false, home: homedir() });
+    expect(poller.status()).toMatchObject({ armed: true, home: homedir() });
 
     writeConfig([board({ interval: '1m' })]);
     await poller.tick();
