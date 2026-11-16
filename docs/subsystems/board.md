@@ -564,7 +564,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   marks the PR at the head SHA it was asked from (`UpdateMark`): the row reads `updating…` while the mark is present — Matrix in its Base cell only — and a read
   that shows a new head drops it and says `branch updated`; `UPDATING_MS` (30 s, `PR_UPDATING_MS` in `shared/types.ts`) after the update the page re-reads once
   and judges that answer — a read the server answers from GitHub, because the update made the repo due at that same moment — and a same head or a failed read
-  just drops the mark. `updateBlock` reads `no permission to update` for a PR that cannot be updated while behind. Its runs come from the shell's one poll
+  just drops the mark. `updateBlock` reads `conflicts` for a conflicting PR and never refuses a behind one on GitHub's `viewerCanUpdateBranch` alone, which answered false on a
+  behind PR the token could update (claude-agents-dashboard#493): the write decides, and a real refusal comes back as the server's permission 502. Its runs come from the shell's one poll
   (`useOrchestratorRunsContext`).
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim

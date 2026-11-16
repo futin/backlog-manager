@@ -266,9 +266,11 @@ describe('primaryKey', () => {
   });
 
   it('a behind PR whose update the strip would refuse has no primary — a filled key that is disabled would be the opposite of the merge rule', () => {
-    const behind = row({ mergeState: 'behind', canUpdateBranch: false });
-    expect(updateBlock(behind, repo(), false)).toBe('no permission to update');
-    expect(primaryKey(behind, repo(), false)).toBeNull();
+    const fork = row({ mergeState: 'behind', canUpdateBranch: false, crossRepository: true, maintainerCanModify: false });
+    expect(updateBlock(fork, repo(), false)).toBe('fork does not allow edits');
+    expect(primaryKey(fork, repo(), false)).toBeNull();
+    // GitHub's `viewerCanUpdateBranch` alone no longer refuses a behind PR (claude-agents-dashboard#493), so update stays its primary.
+    expect(primaryKey(row({ mergeState: 'behind', canUpdateBranch: false }), repo(), false)).toBe('update');
     const synced = repo({ syncOff: 'sync is off for futin/x — turn it on in GitHub › Settings' });
     expect(primaryKey(row({ mergeState: 'behind', canUpdateBranch: true }), synced, false)).toBeNull();
   });

@@ -122,7 +122,7 @@ export function prChips(pr: PullRequestRow): PrChip[] {
 export function mergeBlock(pr: PullRequestRow, repo: PrRepoView): string | null {
   if (repo.syncOff !== null) return 'sync off';
   if (pr.draft) return 'draft';
-  if (pr.mergeable === 'conflicting') return 'not mergeable';
+  if (pr.mergeable === 'conflicting') return 'conflicts';
   if (pr.checks === 'failure') return 'checks failing';
   if (repo.methods.length === 0) return 'no merge method allowed';
   return null;
@@ -142,21 +142,30 @@ export function mergeMain(pr: PullRequestRow, repo: PrRepoView): { mode: 'merge'
 }
 
 /**
- * Why Update branch is disabled, or `null`. `canUpdateBranch` is GitHub's `viewerCanUpdateBranch`, which is false for "already up to date" and for "this
- * token may not" alike — so the row's `mergeState` tells them apart: a PR GitHub says is BEHIND its base is not up to date, and the only reason left is
- * that this token may not update it. Any other state reads up to date, which is what it almost always is.
+ * Why Update branch is disabled, or `null`. A conflicting PR is refused first, after `sync off` and `updating…`: GitHub's update-branch merges the base in
+ * and fails on a conflict, so the key is closed for as long as the conflict stands — a person resolves it in a checkout, and nothing on this page can — and it
+ * says `conflicts`, never `already up to date` (GitHub reports a conflicting PR `DIRTY`, not `BEHIND`, and its `viewerCanUpdateBranch` is false, which this
+ * function used to read as up to date).
+ *
+ * A PR GitHub says is BEHIND its base is updatable whatever `canUpdateBranch` says. `canUpdateBranch` is GitHub's `viewerCanUpdateBranch`, and it answers
+ * false on a behind PR the token CAN update: on a repo whose "Always suggest updating pull request branches" (`allow_update_branch`) is off and whose
+ * up-to-date rule comes from a ruleset rather than classic branch protection, it stayed false while `PUT /pulls/<n>/update-branch` would have worked
+ * (claude-agents-dashboard#493, 2026-11-16 — the page said `no permission to update` on a PR the owner's token could update). So the write is the authority:
+ * a token that really may not update gets GitHub's 401/403, which the server already answers as `the token lacks permission for this — <message>`. On any
+ * other state `canUpdateBranch` is still asked — true there means GitHub offers an update the page has no reason to hide — and false reads up to date.
  *
  * `updating` is the PRESENCE of the row's update mark, and it is asked second: GitHub answers an update-branch with a 202 and does
  * the merge later, and the moment the branch lands `viewerCanUpdateBranch` turns false — so without the mark the row would flip from a disabled `Update` to
  * `already up to date` for the whole of the wait, a claim the page cannot yet make. Asking after `sync off` (the repo's say outranks everything) and before the
- * fork rule (a mark only exists because an update was accepted, so that rule cannot have held) makes `updating…` the answer for the mark's whole life, whatever
+ * conflict and fork rules (a mark only exists because an update was accepted, so neither can have held) makes `updating…` the answer for the mark's whole life, whatever
  * `canUpdateBranch` says. Presence rather than the clock so a page tick can never free the key before the timer's own judgement lands.
  */
 export function updateBlock(pr: PullRequestRow, repo: PrRepoView, updating: boolean): string | null {
   if (repo.syncOff !== null) return 'sync off';
   if (updating) return 'updating…';
+  if (pr.mergeable === 'conflicting') return 'conflicts';
   if (pr.crossRepository && !pr.maintainerCanModify) return 'fork does not allow edits';
-  if (!pr.canUpdateBranch) return pr.mergeState === 'behind' ? 'no permission to update' : 'already up to date';
+  if (!pr.canUpdateBranch && pr.mergeState !== 'behind') return 'already up to date';
   return null;
 }
 
@@ -173,7 +182,7 @@ export function autoMergeBlock(pr: PullRequestRow, repo: PrRepoView): string | n
   if (repo.syncOff !== null) return 'sync off';
   if (pr.autoMerge !== null) return null;
   if (pr.draft) return 'draft';
-  if (pr.mergeable === 'conflicting') return 'not mergeable';
+  if (pr.mergeable === 'conflicting') return 'conflicts';
   if (pr.checks === 'failure') return 'checks failing';
   if (!repo.autoMergeAllowed) return 'auto-merge not enabled on the repo';
   return null;
@@ -190,7 +199,7 @@ export type PrKey = (typeof PR_KEYS)[number];
 
 /**
  * The reasons a row's why-line may carry: the ones that come from the REPO or from the token's permissions, rather than from the PR's own facts. A closed set
- * and not a rule over the block's text so that a new reason is a deliberate choice about whether the line says it — `draft`, `not mergeable`,
+ * and not a rule over the block's text so that a new reason is a deliberate choice about whether the line says it — `draft`, `conflicts`,
  * `checks failing` and `already up to date` are the row's facts, which its chips, cells and verdict already draw or imply, so repeating them under the keys
  * would say the same thing twice. `updating…` is in the set because it is not on a chip: the line is where it is said, unless the row's outcome says it.
  */
@@ -199,7 +208,6 @@ export const REPO_REASONS: ReadonlySet<string> = new Set([
   'no merge method allowed',
   'auto-merge not enabled on the repo',
   'fork does not allow edits',
-  'no permission to update',
   'updating…'
 ]);
 
