@@ -21,7 +21,6 @@ import { ProjectsProvider, useProjectsContext } from './hooks/ProjectsContext';
 import { OrchestratorRunsProvider, useOrchestratorRunsContext } from './hooks/OrchestratorRunsContext';
 import { setFilesPage, setGithubPage, useFilesPage, useGithubPage } from './hooks/useSourcePage';
 import { PullRequestsProvider, usePullRequestsContext } from './hooks/PullRequestsContext';
-import { needsYouCount } from './lib/pr-layouts';
 import { TrackersProvider, useTrackersContext } from './hooks/TrackersContext';
 import { TimeZoneProvider } from './hooks/TimeZoneContext';
 import { useNarrow } from './hooks/useNarrow';
@@ -361,7 +360,7 @@ function AppShell() {
           working={working}
           releases={releaseChip}
           provisional={pending !== null}
-          counts={{ github: needsYouCount(prs.data), runs: liveCount }}
+          counts={{ prs: prs.data, liveRuns: liveCount }}
           api={api}
         />
         {whatsNew.open && whatsNew.data && <ReleasesDrawer data={whatsNew.data} onClose={whatsNew.close} />}

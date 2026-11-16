@@ -219,8 +219,10 @@ button.rail-count { cursor: pointer }
    ~32 px row, since a button's line-height is the UA's `normal` rather than
    body's 1.4, in both apps; the phone block still adds its 40 px floor. */
 /* A quiet sub-list: 28 px rows at 12.5 px, the current page a white row at 600 (the white row replaces the old stem-and-tick dot). */
+/* `width: 100%` because each entry now sits in its own `.rail-group` (the positioning parent of its pending-count pill), and a `<button>` in a block wrapper
+   shrinks to its content where the old flex column stretched it. */
 .rail-sublink {
-  display: flex; align-items: center;
+  display: flex; align-items: center; width: 100%;
   height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: none;
   font-size: 12.5px; font-weight: 400; text-align: left;
   color: var(--ink2); cursor: pointer; transition: color .15s, background .15s;
