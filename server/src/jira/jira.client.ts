@@ -133,6 +133,14 @@ export class JiraClient {
     return this.request('GET', `${gatewayBase(auth.cloudId)}/issue/${encodeURIComponent(key)}?fields=${encodeURIComponent(fields.join(','))}`, auth);
   }
 
+  /**
+   * An issue's newest comments: `orderBy=-created` puts the newest first, so `maxResults` is "the last N" and `total` says how many there are in all — the
+   * mentions check reads it when the inline page a search carries (the newest 20) cannot be trusted to hold the answer.
+   */
+  async comments(auth: JiraAuth, key: string, maxResults: number): Promise<JiraResponse<{ comments: unknown[]; total: number }>> {
+    return this.request('GET', `${gatewayBase(auth.cloudId)}/issue/${encodeURIComponent(key)}/comment?orderBy=-created&maxResults=${maxResults}`, auth);
+  }
+
   /** The transitions an issue offers right now — a read, and the list `transition` below is checked against by its caller (Jira phase 3, spec §8). */
   async transitions(auth: JiraAuth, key: string): Promise<JiraResponse<{ transitions: unknown[] }>> {
     return this.request('GET', `${gatewayBase(auth.cloudId)}/issue/${encodeURIComponent(key)}/transitions`, auth);

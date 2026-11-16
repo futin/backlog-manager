@@ -8,7 +8,7 @@ import type { PullRequestsPayload } from '../../shared/types';
  * the rows instead of `openPrCount` would not pass by coincidence.
  */
 
-const NONE = { prs: null, liveRuns: 0, jiraNeedsYou: 0 };
+const NONE = { prs: null, liveRuns: 0, jiraNeedsYou: 0, jiraMentions: 0 };
 
 /** A one-repo payload with `total` open PRs, of which the first `needYou` rank Needs you (changes requested) and the rest are quiet. */
 function prs(total: number, needYou: number, listed = Math.max(needYou, Math.min(total, 2))): PullRequestsPayload {
@@ -48,9 +48,30 @@ describe('railCounts', () => {
     expect(railCounts({ ...NONE, jiraNeedsYou: 1 }).jira?.sessions?.label).toBe('1 session needs you');
   });
 
+  it('counts tickets that mention you on Mentions, amber, carrying the open handler it was given, and draws nothing for zero', () => {
+    const open = (): void => undefined;
+    expect(railCounts({ ...NONE, jiraMentions: 1, openJiraMentions: open })).toEqual({
+      jira: { mentions: { n: 1, tone: 'warn', label: '1 ticket mentions you', onOpen: open } }
+    });
+    expect(railCounts({ ...NONE, jiraMentions: 3 }).jira?.mentions?.label).toBe('3 tickets mention you');
+    expect(railCounts(NONE).jira).toBeUndefined();
+  });
+
+  it('sums Sessions and Mentions on the Jira top row in tree order, and keeps the open handler only when one of them is present', () => {
+    const openS = (): void => undefined;
+    const openM = (): void => undefined;
+    const order = ['board', 'sessions', 'mentions', 'setup'];
+    const only = railCounts({ ...NONE, jiraMentions: 2, openJiraMentions: openM }).jira;
+    expect(sectionTotal(only, order)).toEqual({ n: 2, tone: 'warn', label: '2 tickets mention you', onOpen: openM });
+    const both = railCounts({ ...NONE, jiraNeedsYou: 1, openJiraNeedsYou: openS, jiraMentions: 2, openJiraMentions: openM }).jira;
+    const total = sectionTotal(both, order);
+    expect(total).toEqual({ n: 3, tone: 'warn', label: '1 session needs you; 2 tickets mention you' });
+    expect(total?.onOpen).toBeUndefined();
+  });
+
   it('keeps each section to its own number when all three are pending', () => {
     const open = (): void => undefined;
-    const c = railCounts({ prs: prs(4, 0), liveRuns: 2, jiraNeedsYou: 1, openJiraNeedsYou: open });
+    const c = railCounts({ prs: prs(4, 0), liveRuns: 2, jiraNeedsYou: 1, jiraMentions: 0, openJiraNeedsYou: open });
     expect(c.github?.prs?.n).toBe(4);
     expect(c.runs?.runs?.n).toBe(2);
     expect(c.jira?.sessions?.n).toBe(1);

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mention modal, drafting a reply</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#2a5fae}a:hover{color:#1d4580}
+.root{--board:#F4F4F3;--strip:#fff;--strip-hi:#F2F2F1;--hairline:#EAEAE8;--hairline2:#DCDCDA;--ink:#131313;--ink2:#636363;--ink3:#8A8A8A;--green:#5FA92C;--amber:#F5A15C;--mustard:#8f6214;--red:#C8412E;--note:#2a5fae;
+  font-family:"Hanken Grotesk",Helvetica,Arial,sans-serif;color:var(--ink);font-size:14px;line-height:1.45;background:rgba(19,19,19,.32);min-height:920px;padding:40px 48px;display:flex;justify-content:center;align-items:flex-start;box-sizing:border-box}
+.root *{box-sizing:border-box}
+.sheet{background:var(--board);border-radius:20px;width:100%;max-width:1240px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.18)}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:18px 24px;background:var(--strip);border-bottom:1px solid var(--hairline)}
+.crumbs{font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:6px}
+.top h1{flex-basis:100%;margin:0;font-size:22px;font-weight:600;letter-spacing:-.02em}
+.ty{width:14px;height:14px;border-radius:3px;display:inline-block;background:var(--red)}
+.x{margin-left:auto;display:flex;gap:8px;align-items:center}
+.chip{min-height:32px;padding:0 12px;border:1px solid var(--hairline2);border-radius:11px;background:var(--strip);font:inherit;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;text-decoration:none;color:var(--ink)}
+.chip.sm{min-height:28px;padding:0 10px;border-radius:9px;font-size:12px}
+.chip.pri{background:var(--ink);color:#fff;border-color:var(--ink)}
+.ic{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.body{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:20px;padding:20px 24px 24px}
+@media (max-width:1000px){.body{grid-template-columns:minmax(0,1fr)}}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.lbl{font-size:11px;font-weight:600;color:var(--ink3);display:flex;align-items:center;gap:8px}
+.thread{background:var(--strip);border-radius:12px;padding:4px 16px}
+.cm{display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px 12px;padding:14px 0;border-bottom:1px solid var(--hairline)}
+.cm:last-child{border-bottom:0}
+.av{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+.who{font-size:13px;font-weight:600;display:flex;gap:8px;align-items:baseline}
+.who span{font-weight:400;font-size:12px;color:var(--ink2)}
+.txt{grid-column:2;font-size:13.5px}
+.at{background:#dce8f7;color:var(--note);border-radius:4px;padding:0 3px;font-weight:600}
+.ask{margin:6px -10px;padding:10px 10px 12px;border-radius:12px;background:#fdf0e4}
+.ask-strip{grid-column:1 / -1;height:24px;margin:-10px -10px 6px;padding:0 12px;border-radius:12px 12px 0 0;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;background:var(--amber)}
+.more{background:none;border:0;font:inherit;font-size:12px;font-weight:500;color:var(--note);cursor:pointer;padding:10px 0;text-align:left}
+.draft{background:var(--strip);border-radius:12px;border:1px solid var(--hairline2);display:flex;flex-direction:column;overflow:hidden}
+.draft-h{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--hairline);font-size:12px;color:var(--ink2)}
+.draft textarea{border:0;outline:0;resize:vertical;min-height:150px;padding:12px 14px;font:inherit;font-size:13.5px;line-height:1.5;color:var(--ink)}
+.draft-f{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid var(--hairline);background:var(--strip-hi)}
+.run{background:var(--strip);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;font-size:13px}
+.spin{width:10px;height:10px;border-radius:50%;background:var(--amber);flex:none}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:var(--ink2)}
+.pane{background:var(--strip);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:14px}
+.facts{display:grid;grid-template-columns:96px minmax(0,1fr);gap:9px 12px;font-size:13px;align-items:center;margin:0}
+.facts dt{color:var(--ink3);font-size:12px}
+.facts dd{margin:0;min-width:0}
+.pill{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:11px;background:#DCE8F7;font-size:12px;font-weight:500;color:var(--note)}
+.steps{display:flex;gap:6px;flex-wrap:wrap}
+.steps button{border:1px solid var(--hairline2);background:var(--strip);border-radius:8px;font:inherit;font-size:11px;padding:3px 8px;cursor:pointer;color:var(--ink2)}
+.done{background:#eaf4dd;border-radius:10px;padding:10px 12px;font-size:13px;display:flex;align-items:center;gap:10px}
+</style>
+</helmet>
+<div class="root">
+<section class="sheet" role="dialog" aria-label="SUP-208 mention, drafting a reply">
+<header class="top">
+<span class="crumbs"><i class="ty"></i><span style="font-weight: 600; color: #131313">SUP-208</span>· Bug · Support · on none of your boards</span>
+<span class="x">
+<span class="steps" aria-label="Mock states"><button type="button" onClick="{{toDrafting}}">1 drafting</button><button type="button" onClick="{{toReady}}">2 draft ready</button><button type="button" onClick="{{toPosted}}">3 posted</button></span>
+<a class="chip sm" href="ModalA.dc.html" aria-label="Close"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></a>
+</span>
+<h1>Booking widget shows wrong timezone for Lisbon branch</h1>
+</header>
+<div class="body">
+<div class="col">
+<div class="lbl">Comments · 6</div>
+<div class="thread">
+<button type="button" class="more">Show 2 earlier comments</button>
+<div class="cm"><span class="av" style="background: #cde8a8">AJ</span><div class="who">You <span>yesterday</span></div><div class="txt">Looking at it, my guess is the DST table we ship with the widget.</div></div>
+<div class="cm"><span class="av" style="background: #e8e1f5">PN</span><div class="who">Petar Novak <span>5 h ago</span></div><div class="txt">The frontend reads <code>branch.timezone</code> straight from /branches, so the widget is only echoing what it gets.</div></div>
+<div class="cm ask"><div class="ask-strip">Asks you · 2 h ago</div><span class="av" style="background: #f5a15c">MI</span><div class="who">Mara Ilić <span>2 h ago</span></div><div class="txt"><span class="at">@Andreja</span> can you confirm whether the BE stores the branch timezone or derives it from the company? Customer wants an answer by Friday.</div></div>
+<div class="cm"><span class="av" style="background: #dce8f7">IK</span><div class="who">Ines Kovač <span>1 h ago</span></div><div class="txt">+1, the Porto branch may have the same problem.</div></div>
+<sc-if value="{{posted}}" hint-placeholder-val="{{false}}">
+<div class="cm"><span class="av" style="background: #cde8a8">AJ</span><div class="who">You <span>just now</span></div><div class="txt"><span class="at">@Mara Ilić</span> {{draftShort}}</div></div>
+</sc-if>
+</div>
+<sc-if value="{{drafting}}" hint-placeholder-val="{{true}}">
+<div class="run"><span class="spin" aria-hidden="true"></span><div style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><b style="font-weight: 600">Drafting a reply</b><span class="mono">reading the thread and branch timezone code · 1 min</span></div><span style="margin-left: auto; display: flex; gap: 8px"><a class="chip sm" href="#">Open session</a><button type="button" class="chip sm">Stop</button></span></div>
+</sc-if>
+<sc-if value="{{ready}}" hint-placeholder-val="{{false}}">
+<div class="draft">
+<div class="draft-h"><span style="font-weight: 600; color: #131313">Your reply</span><span>drafted by a session 2 min ago · edit before posting</span><a href="#" style="margin-left: auto; font-size: 12px">Open session</a></div>
+<textarea aria-label="Reply to Mara Ilić">@Mara Ilić the backend stores the timezone per branch (branches.timezone), it is not derived from the company. Lisbon is set to Europe/Lisbon, which is correct. The offset comes from the widget's bundled DST table, which still has the 2025 rules. Fix is on our side; I will open a ticket and link it here today.</textarea>
+<div class="draft-f"><span style="font-size: 12px; color: #636363">Posts to SUP-208 as you and clears this mention.</span><span style="margin-left: auto; display: flex; gap: 8px"><button type="button" class="chip sm" onClick="{{toDrafting}}">Redraft</button><button type="button" class="chip sm">Discard</button><button type="button" class="chip pri" onClick="{{toPosted}}">Post reply</button></span></div>
+</div>
+</sc-if>
+<sc-if value="{{posted}}" hint-placeholder-val="{{false}}">
+<div class="done"><span>Posted to SUP-208. The mention left your list.</span><a class="chip sm" href="#" style="margin-left: auto">View in Jira</a><a class="chip sm" href="ModalA.dc.html">Next mention</a></div>
+</sc-if>
+</div>
+<div class="col">
+<div class="lbl">Ticket</div>
+<div class="pane">
+<dl class="facts">
+<dt>Status</dt><dd><span class="pill">In Progress</span></dd>
+<dt>Assignee</dt><dd>Petar Novak</dd>
+<dt>Reporter</dt><dd>Mara Ilić</dd>
+<dt>Priority</dt><dd>High</dd>
+<dt>Updated</dt><dd>1 h ago</dd>
+</dl>
+</div>
+<div class="lbl">Draft session</div>
+<div class="pane" style="font-size: 13px; gap: 8px">
+<div>Repo <b>timify-backend</b> · read only</div>
+<div style="color: #636363">The session reads the thread, the ticket and the code, and writes a draft here. It never posts; Post reply does.</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":920}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: 'ready' };
+  }
+  renderVals() {
+    const s = this.state.step;
+    return {
+      drafting: s === 'drafting',
+      ready: s === 'ready',
+      posted: s === 'posted',
+      draftShort: 'the backend stores the timezone per branch (branches.timezone), it is not derived from the company. The offset comes from the widget’s bundled DST table…',
+      toDrafting: () => this.setState({ step: 'drafting' }),
+      toReady: () => this.setState({ step: 'ready' }),
+      toPosted: () => this.setState({ step: 'posted' })
+    };
+  }
+}
+</script>
+</body>
+</html>

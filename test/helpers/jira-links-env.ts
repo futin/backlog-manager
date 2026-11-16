@@ -11,5 +11,8 @@ const base = mkdtempSync(join(tmpdir(), 'bm-jira-links-'));
 let n = 0;
 
 beforeEach(() => {
-  process.env.BM_JIRA_LINKS_FILE = join(base, `case-${n++}`, 'jira-links.json');
+  const dir = join(base, `case-${n++}`);
+  process.env.BM_JIRA_LINKS_FILE = join(dir, 'jira-links.json');
+  // The mentions store (Tasks 5-6 build the real one) gets the same per-case isolation, so no suite writes the developer's ~/.backlog-manager/settings/.
+  process.env.BM_JIRA_MENTIONS_FILE = join(dir, 'jira-mentions.json');
 });

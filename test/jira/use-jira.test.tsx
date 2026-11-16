@@ -46,6 +46,7 @@ function status(boards: JiraBoardStatus[], over: Partial<JiraStatusPayload> = {}
     live: {},
     armed: true,
     home: '/home/x',
+    mentions: null,
     ...over
   };
 }
@@ -237,6 +238,73 @@ describe('useJira', () => {
     });
     await flush();
     expect(screen.getByTestId('p')).toHaveTextContent('new.atlassian.net|false|false');
+  });
+});
+
+describe('useJira with a mentions summary', () => {
+  const summary = (agoMs: number | null) => ({
+    polledAt: agoMs === null ? null : new Date(Date.now() - agoMs).toISOString(),
+    count: 0,
+    detail: null,
+    truncated: false,
+    retryAt: null
+  });
+
+  it('with no boards, aims at the mentions poll plus the slack', async () => {
+    fetchMock.mockImplementation(() => answer(status([], { mentions: summary(60_000) })));
+    render(<Probe />);
+    await flush();
+    await advance(120_500 - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('arms nothing when every board is off and mentions is null', async () => {
+    fetchMock.mockImplementation(() => answer(status([boardPolled(1_000, 'off')], { mentions: null })));
+    render(<Probe />);
+    await flush();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('takes the sooner of the two deadlines, floored at 15 s', async () => {
+    fetchMock.mockImplementation(() => answer(status([boardPolled(50_000)], { mentions: summary(60_000) })));
+    render(<Probe />);
+    await flush();
+    await advance(JIRA_STATUS_FLOOR_MS - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // The other direction: a board on a longer interval (5 min, due at 300 500) must not hold the mentions count back for that whole interval. A board that
+  // wins whenever it is present (`board ?? mentions`) passes the case above and fails this one.
+  it('takes the mentions deadline when it is the sooner one, beside a slow board', async () => {
+    fetchMock.mockImplementation(() => answer(status([boardPolled(0, '5m')], { mentions: summary(60_000) })));
+    render(<Probe />);
+    await flush();
+    await advance(120_500 - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads the floor for a mentions summary that was never stamped', async () => {
+    fetchMock.mockImplementation(() => answer(status([], { mentions: summary(null) })));
+    render(<Probe />);
+    await flush();
+    await advance(JIRA_STATUS_FLOOR_MS - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // `isJiraStatusPayload` checks the slice: the popover prints `count` and `detail` as React children, so an object there would throw in a render.
+  it('refuses a status whose mentions slice is the wrong shape, as a failed read', async () => {
+    fetchMock.mockImplementation(() => answer(status([], { mentions: { ...summary(60_000), count: { n: 3 } } as unknown as JiraStatusPayload['mentions'] })));
+    render(<Probe />);
+    await flush();
+    expect(screen.getByTestId('p')).toHaveTextContent('none|true|false');
   });
 });
 

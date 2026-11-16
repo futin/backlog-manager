@@ -104,8 +104,8 @@ happened.
   Why: [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-repo-whose-sync-is-off-refuses-every-write-path-and-cannot-be-switched-off-under-a-live-or-paused-run)
-- **The tracker, Jira, pull-request and GitLab caches are the four caches in this server whose age is a rendered value.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-pull-request-and-gitlab-caches-are-the-four-caches-in-this-server-whose-age-is-a-rendered-value)
+- **The tracker, Jira, pull-request, GitLab and Jira-mentions caches are the five caches in this server whose age is a rendered value.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-pull-request-gitlab-and-jira-mentions-caches-are-the-five-caches-in-this-server-whose-age-is-a-rendered-value)
 - **A tracker project has no item files, and that shows up in three places — and dispatch is NOT one of them.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places)
 - **Groomed is derived** (bug: Cause+Fix filled and not a deferral — `unknown`, `Not decided`, `TBD`, …; task: Plan non-empty), never stored; status is the

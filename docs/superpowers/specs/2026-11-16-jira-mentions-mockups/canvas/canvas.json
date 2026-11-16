@@ -1,0 +1,108 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-11-16T15:00:00Z"
+  },
+  "title": "Jira Mentions",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 920,
+      "title": "List view — one row per comment (picked)",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "ListB.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 920,
+      "title": "Cards view — one card per ticket (picked)",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "ModalA.dc.html": {
+      "x": 0,
+      "y": 1320,
+      "w": 1440,
+      "h": 920,
+      "title": "Mention modal — thread first (picked)",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "ModalDraft.dc.html": {
+      "x": 1520,
+      "y": 1320,
+      "w": 1440,
+      "h": 920,
+      "title": "Phase 2 — Draft a reply: drafting / ready / posted",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "ModalB.dc.html": {
+      "x": 3040,
+      "y": 1320,
+      "w": 1440,
+      "h": 920,
+      "title": "Not picked — ticket modal + Comments pane",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "Rail.dc.html": {
+      "x": 0,
+      "y": 2620,
+      "w": 220,
+      "h": 920,
+      "title": "Part: side rail with Mentions"
+    },
+    "Sync.dc.html": {
+      "x": 300,
+      "y": 2620,
+      "w": 1440,
+      "h": 920,
+      "title": "Sync — Jira pill popover's Mentions row, band Sync now and its states",
+      "expand": "fill",
+      "is_interactive": true
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Rail.dc.html",
+    "Sync.dc.html",
+    "ListB.dc.html",
+    "ModalA.dc.html",
+    "ModalDraft.dc.html",
+    "ModalB.dc.html"
+  ],
+  "notes": {
+    "row1": {
+      "x": 0,
+      "y": -300,
+      "text": "Jira › Mentions — List and Cards views",
+      "kind": "title1",
+      "maxW": 2960
+    },
+    "row2": {
+      "x": 0,
+      "y": 1020,
+      "text": "Click a mention — the modal, and Draft a reply",
+      "kind": "title1",
+      "maxW": 4480
+    },
+    "row3": {
+      "x": 0,
+      "y": 2320,
+      "text": "Shared parts — rail and sync",
+      "kind": "title1",
+      "maxW": 1740
+    }
+  },
+  "designSystems": []
+}

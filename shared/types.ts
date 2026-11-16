@@ -1176,6 +1176,102 @@ export interface JiraStatusPayload {
    * know `$HOME`; the compose stack passes the host's `HOME` through, so the container's `homedir()` is the host's.
    */
   home: string | null;
+  /** The mentions cache's summary; `null` while no check is owed — unconfigured, or an `unsupported` site (`mentionsArmed()` false). */
+  mentions: JiraMentionsSummary | null;
+}
+
+/**
+ * Jira › Mentions cadence and bounds (spec "Routes and shapes"). The poller, the store and the client's refetch clock all read these, so none restates a
+ * number.
+ */
+export const JIRA_MENTIONS_POLL_MS = 180_000;
+/** How far back the mentions search looks, in days: long enough to cover a holiday, short enough that the list and the store stay small. */
+export const JIRA_MENTIONS_WINDOW_DAYS = 30;
+/** The most issues one mentions check keeps (one search page); `truncated` on the payload when it bites. */
+export const JIRA_MENTIONS_ISSUE_CAP = 100;
+/** The newest comments the thread route returns; `truncated` beyond. */
+export const JIRA_THREAD_MAX = 100;
+/** A mention excerpt is cut to this many characters on a word boundary, with `…`. */
+export const JIRA_MENTIONS_EXCERPT_CHARS = 280;
+/** The most comment ids one dismiss request may carry. */
+export const JIRA_MENTIONS_DISMISS_MAX = 50;
+
+/** One open mention: a comment that @-mentions the user and that they have not answered since. `url` is the focused-comment link. */
+export interface JiraMention {
+  commentId: string;
+  author: { accountId: string; name: string; avatarUrl?: string };
+  /** ISO instant the comment was created. */
+  created: string;
+  /** Plain text, one line, cut at `JIRA_MENTIONS_EXCERPT_CHARS`. */
+  excerpt: string;
+  url: string;
+}
+
+/** A ticket holding open mentions. `type` is the issue type's name (for the swatch), `boards` the names of the boards holding it (empty for none). */
+export interface JiraMentionIssue {
+  key: string;
+  summary: string;
+  type: string;
+  status: { name: string; category: JiraStatusCategory };
+  boards: string[];
+  /** Newest first. */
+  mentions: JiraMention[];
+}
+
+/** `GET /api/jira/mentions` while Jira is not configured: the same "draw nothing Jira" signal `GET /api/jira` gives, with its reason. */
+export interface JiraMentionsUnconfigured {
+  configured: false;
+  detail: string | null;
+}
+
+/**
+ * `GET /api/jira/mentions`, served from the cache with no Jira call. `polledAt: null` is "not checked yet" — the page says it is checking, never "Nothing
+ * waiting". `me` is the user's display name for the `@` chip. `issues` is ordered by each ticket's newest open mention; `dismissed` holds the tickets whose
+ * open mentions are all dismissed.
+ */
+export interface JiraMentionsConfigured {
+  configured: true;
+  polledAt: string | null;
+  detail: string | null;
+  truncated: boolean;
+  /** An ISO instant while a 429 keeps mentions from being checked, else `null`. */
+  retryAt: string | null;
+  /** The search window in days (`JIRA_MENTIONS_WINDOW_DAYS`). */
+  window: number;
+  me: string | null;
+  issues: JiraMentionIssue[];
+  dismissed: JiraMentionIssue[];
+}
+export type JiraMentionsPayload = JiraMentionsConfigured | JiraMentionsUnconfigured;
+
+/**
+ * The status payload's slice of the mentions cache, so the chip popover and the rail count draw from the read they already make. `count` is waiting tickets.
+ */
+export interface JiraMentionsSummary {
+  polledAt: string | null;
+  count: number | null;
+  detail: string | null;
+  truncated: boolean;
+  retryAt: string | null;
+}
+
+/** One comment of a ticket's thread. `open` is the same judgement the mentions check makes; `markdown` is `adfToMarkdown`'s output. */
+export interface JiraThreadComment {
+  id: string;
+  author: { accountId: string; name: string; avatarUrl?: string };
+  created: string;
+  markdown: string;
+  mine: boolean;
+  mentionsMe: boolean;
+  open: boolean;
+}
+
+/** `GET /api/jira/issue/:key/thread` — oldest first, the newest `JIRA_THREAD_MAX` of `total`. */
+export interface JiraThreadPayload {
+  key: string;
+  total: number;
+  truncated: boolean;
+  comments: JiraThreadComment[];
 }
 
 /** `GET /api/jira/boards/:id/issues` — a board's cached list, and when it was last swept (`null` before the first sweep lands). */

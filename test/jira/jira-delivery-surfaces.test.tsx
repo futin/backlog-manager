@@ -120,7 +120,8 @@ function jiraStatus(): JiraStatusPayload {
     calls: { sweep: 0, last429At: null },
     live: {},
     armed: true,
-    home: '/home/ada'
+    home: '/home/ada',
+    mentions: null
   };
 }
 

@@ -32,7 +32,7 @@ answered; the conditional half is the shell's. The rail's `drawn` skips the Jira
 still unknown while `jira` is the section on screen; `App` falls a `jira` section to the first drawn source row (`firstDrawn`, Runs when there is none) on
 `configured: false` and holds it on anything else, drawn in `JiraView`'s `loading…` or `Jira unavailable` line; and Settings' `Opens on` offers `Jira` only
 while configured. Why each half is the way it is:
-[invariants.md](invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
+[invariants.md](invariants.md#the-jira-sections-four-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 
 `files` and `github` are members of the list unconditionally for the same reason, and their conditional half is the projects answer's. `ProjectsProvider`
 (`client/src/hooks/ProjectsContext.tsx`) is the shell's one read of `GET /api/projects` — through `useRefreshing`, mount and focus, no poll — keeping its last
@@ -59,7 +59,7 @@ called by `OrchestratorRunsProvider` (`hooks/OrchestratorRunsContext.tsx`, mount
 payload (Board, Archive, GitHub › PRs, Runs) take it through `useOrchestratorRunsContext()`. The provider's `working` is `undefined` until the first answer
 (`answered`), so the cursor is solid then and on a crashed run, and a view switch — Settings included — loses nothing. Its `liveCount` (`liveRunCount`) is the Live sheet's row count.
 
-Every section has a sub-nav tree under its row: Files (Board, Archive), GitHub (Board, PRs, Archive, Settings), Jira (Board, Sessions, Setup), Runs (History, Watchdog, Ticks)
+Every section has a sub-nav tree under its row: Files (Board, Archive), GitHub (Board, PRs, Archive, Settings), Jira (Board, Sessions, Mentions, Setup), Runs (History, Watchdog, Ticks)
 and Settings (Local, Shared, Dashboards). All five are drawn by one component, `RailTree`, because the markup carries three details that must not drift — the
 `rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone menu on a pick. What each call site supplies is only what
 legitimately differs: the item list, which of them is current, and what a pick writes. In every case the tree is the **only** control that switches between the
@@ -259,7 +259,7 @@ home, with a warning note (`OFFERS_FAILED_TEXT`), because blocking a local launc
 on them. Jira's launch sheet has no picker: its Start stays home-only ([jira.md](jira.md)).
 
 Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet, since the release chip the What's new drawer, and since Jira
-phase 5 the Jira launch sheet, and since the Dashboards form stopped editing in place its add/edit sheet — are the eight dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for
+phase 5 the Jira launch sheet, and since the Dashboards form stopped editing in place its add/edit sheet, and since Jira mentions the mention modal — are the nine dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for
 whatever they wrap, and `ReleasesDrawer` calls it itself, since its shell is ui-kit's (#298) and is handed `closeOnEscape={false}`. Two further entries join the same stack
 while they are drawn and are not dialogs: `ui/Confirm` (bug-53), described with the detail sheet below, and `ui/Popover` — the tracker chip's panel, the band's
 Filters and Sort, and Jira's chip, board picker, roots search and `Run ▾` panel — which closes only itself, and whose click-outside is its own `pointerdown`, since the stack
@@ -758,10 +758,10 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 
 The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the six per-item dispatch blocks
 (the unvetted rung, `filed from outside the repo — groom it to vet the plan`, the newest, one above `this plan awaits review`) and which one lets a
-click through, the dialog escape stack and its eight dialogs, a crashed run rendering as crashed, "queue wait is not work",
+click through, the dialog escape stack and its nine dialogs, a crashed run rendering as crashed, "queue wait is not work",
 [Settings being three pages whose page IS the scope](invariants.md#settings-is-three-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
-row](invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), [the source rows' tree and
+row](invariants.md#the-jira-sections-four-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), [the source rows' tree and
 their registered-only rows](invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree), and [the content-width stamp that
 the CSP hash travels with](invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it) — are in [invariants.md](invariants.md),
 with the failure each one encodes. Not restated here.

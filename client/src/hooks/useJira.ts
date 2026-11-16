@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { isJiraStatusPayload, soonestBoard } from '../lib/jira';
-import { SYNC_INTERVALS, type JiraStatusPayload } from '../../../shared/types';
+import { SYNC_INTERVALS, JIRA_MENTIONS_POLL_MS, type JiraStatusPayload } from '../../../shared/types';
 import { TRACKER_FETCH_SLACK_MS } from './useTrackers';
 import { useWindowFocus } from './useWindowFocus';
 
@@ -40,9 +40,22 @@ export interface JiraState {
   reload: () => void;
 }
 
-/** How long after this answer to ask again, or `null` for "don't": no timer without a board that syncs. */
+/**
+ * How long after this answer to ask again, or `null` for "don't": no timer without a board that syncs or a mentions summary. The mentions summary rides
+ * this payload (the chip and the rail count read it), so its own cadence — `polledAt + JIRA_MENTIONS_POLL_MS + slack`, floored like a board's — joins the
+ * board's, and the sooner of the two wins: a mentions-only Jira (every board off) would otherwise never refresh its count.
+ */
 function nextDelay(data: JiraStatusPayload, now: number): number | null {
   if (!data.configured) return null;
+  const board = boardDelay(data, now);
+  const m = data.mentions;
+  if (m === null || m === undefined) return board;
+  const polled = m.polledAt === null ? NaN : Date.parse(m.polledAt);
+  const mentions = Number.isNaN(polled) ? JIRA_STATUS_FLOOR_MS : Math.max(polled + JIRA_MENTIONS_POLL_MS + TRACKER_FETCH_SLACK_MS - now, JIRA_STATUS_FLOOR_MS);
+  return board === null ? mentions : Math.min(board, mentions);
+}
+
+function boardDelay(data: JiraStatusPayload, now: number): number | null {
   const soonest = soonestBoard(data.boards, now);
   if (soonest === null) return null;
   const interval = SYNC_INTERVALS[soonest.interval];

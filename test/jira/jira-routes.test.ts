@@ -193,8 +193,9 @@ describe('configured, against a healthy Jira', () => {
       expect((await get('').expect(200)).body.live).toEqual({});
     });
 
-    it('arms the poller for a 1m board', () => {
-      // `armed` reads false mid-tick, so it is asked after `await poller.tick()`, which `build` did.
+    it('arms the poller for a configured site, the 1m board not deciding it (Jira › Mentions spec "Poller arming")', () => {
+      // `armed` reads false mid-tick, so it is asked after `await poller.tick()`, which `build` did. Any configured site that is not `unsupported` arms
+      // the chain now — mentions are owed — so this pins the configured case, not the board's interval.
       expect(poller.armed).toBe(true);
     });
 

@@ -262,7 +262,8 @@ const JIRA_STATUS: JiraStatusPayload = {
   calls: { sweep: 0, last429At: null },
   live: {},
   armed: false,
-  home: '/Users/ada'
+  home: '/Users/ada',
+  mentions: null
 };
 
 const RELEASES: ReleasesResponse = {

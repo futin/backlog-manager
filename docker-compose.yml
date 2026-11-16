@@ -179,7 +179,7 @@ services:
       # (tracker/sync-config.util.ts), jira.json (jira/config.util.ts),
       # tick.json (tick/tick-breaker.util.ts), dashboards.json
       # (agents/dashboards/dashboards-file.util.ts), jira-links.json
-      # (jira/links.store.ts), timezone.json
+      # (jira/links.store.ts), jira-mentions.json (jira/mentions.store.ts), timezone.json
       # (settings/timezone-config.util.ts) and review.json
       # (settings/review-config.util.ts). The whole directory has to stay
       # read-write, not any one file in it. A nested mount of a whole directory,

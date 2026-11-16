@@ -525,7 +525,7 @@ Releases are nightly rollups: `.github/workflows/release.yml` runs at 04:17 UTC 
 - [**The board**](docs/subsystems/board.md) — the React SPA: five lazy sections behind a side rail, with most of what you see derived in the browser from whole
   corpora.
 - [**The skills**](docs/subsystems/skills.md) — the nine published skills, their CLIs, and the reviewer agent every review dispatches per file group.
-- [**Jira**](docs/subsystems/jira.md) — the Jira Cloud integration: a client, a board poller and its caches, ten read routes under `/api/jira`, six guarded
+- [**Jira**](docs/subsystems/jira.md) — the Jira Cloud integration: a client, a board poller and its caches, twelve read routes under `/api/jira`, six guarded
   config writes to `jira.json`, the two writes to Jira itself (`/issue/assign` and `/issue/transition`), the Run half in `agents/` (`POST
   /api/agents/dispatch-jira` and `/jira-stop`) with a persisted store of the sessions linked to each ticket, and the `jira` skill (`jira.mjs`) that reaches those routes from any
   session and, on a Run, makes the ticket's git worktree in a mapped repo.

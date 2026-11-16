@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jira Mentions list, one row per comment</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap">
+<style>
+/* Daylight tokens and the Board › List table's own rules, copied from client/src/styles.css (.ui-band, .ui-seg-track, .board-band-search,
+   .jira-issues-*, .jira-status-dot, .jira-card-type, .jira-card-av) so this page cannot drift from the table it reuses. */
+body{margin:0;background:#f4f4f3}
+.pg{--board:#f4f4f3;--steel:#ededec;--strip:#ffffff;--strip-hi:#f2f2f1;--tile-hover:#e8e8e6;--hairline:#eaeae8;--hairline2:#dcdcda;--ink:#131313;--ink2:#525252;--ink3:#6b6b6b;
+  --red:#C8412E;--green-solid:#5FA92C;--amber-solid:#c4761f;--amber-ink:#8a5214;--magenta:#a3407e;--note:#2a5fae;--shadow:rgba(0,0,0,.08);
+  width:100%;min-height:920px;display:flex;flex-wrap:wrap;background:var(--board);font-family:'Hanken Grotesk',-apple-system,sans-serif;color:var(--ink);font-size:13px}
+.pg *{box-sizing:border-box}
+.ui-band{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px 16px;margin-bottom:16px}
+.ui-band-text{min-width:0;display:flex;flex-direction:column;gap:4px}
+.ui-band-title{margin:0;font-size:19px;font-weight:500;line-height:1.3;letter-spacing:-.01em}
+.ui-band-sub{margin:0;font-size:13px;color:var(--ink2)}
+.ui-band-right{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-left:auto}
+.ui-seg-track{display:inline-flex;gap:0;padding:3px;border-radius:12px;background:var(--hairline2)}
+.ui-seg-track a{height:30px;padding:0 12px;border-radius:9px;display:inline-flex;align-items:center;font-size:13px;font-weight:500;color:var(--ink2);text-decoration:none}
+.ui-seg-track a.on{background:var(--strip);color:var(--ink);box-shadow:0 1px 2px var(--shadow)}
+.board-band-search{font-family:inherit;font-size:13px;color:var(--ink);height:36px;width:200px;min-width:0;padding:0 14px;background:var(--strip);border:1px solid var(--hairline);border-radius:12px}
+.board-band-search::placeholder{color:var(--ink3)}
+.chip{height:32px;padding:0 11px;border-radius:12px;font:inherit;font-size:13px;font-weight:500;color:var(--ink2);background:var(--strip);border:1px solid var(--hairline2);cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-decoration:none;white-space:nowrap}
+.chip.on{color:var(--ink);background:var(--strip-hi);border-color:var(--ink3)}
+.chip.sm{height:28px;padding:0 10px;border-radius:10px;font-size:12px}
+.ic{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.jira-issues-scroll{border:1px solid var(--hairline);border-radius:12px;background:var(--strip);overflow-x:auto}
+.jira-issues-table{width:100%;min-width:1120px;table-layout:fixed;border-collapse:collapse;font-size:13px;color:var(--ink)}
+.jira-issues-table thead th{padding:8px 12px;text-align:left;font-size:12px;font-weight:500;color:var(--ink3);border-bottom:1px solid var(--hairline);white-space:nowrap}
+.jira-issues-table thead th:nth-child(1){width:108px}
+.jira-issues-table thead th:nth-child(2){width:22%}
+.jira-issues-table thead th:nth-child(3){width:150px}
+.jira-issues-table thead th:nth-child(5){width:116px}
+.jira-issues-table thead th:nth-child(6){width:124px}
+.jira-issues-table thead th:nth-child(7){width:76px}
+.jira-issues-table thead th:nth-child(8){width:132px}
+.jira-issues-row td{height:44px;padding:6px 12px;vertical-align:middle;border-top:1px solid var(--hairline);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jira-issues-row{cursor:pointer}
+.jira-issues-row:hover td{background-color:color-mix(in srgb,var(--tile-hover) 60%,transparent)}
+.jira-issues-row.is-dismissed td{opacity:.55}
+.jira-issues-row.is-dismissed td.jira-issues-act{opacity:1}
+.jira-issues-flex{display:flex;align-items:center;gap:8px;min-width:0}
+.jira-issues-key a{color:var(--ink2);text-decoration:none}
+.jira-issues-key a:hover{text-decoration:underline}
+.jira-issues-title{min-width:0;color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jira-issues-title:hover{text-decoration:underline}
+.jira-issues-cut{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.jira-issues-muted,.jira-issues-updated{color:var(--ink3)}
+.jira-issues-more{flex:none;font-size:11px;color:var(--ink3)}
+.jira-issues-act{text-align:right}
+.jira-issues-row td.jira-issues-act{overflow:visible}
+.jira-issues-act .acts{display:inline-flex;gap:6px;opacity:0;transition:opacity .12s}
+.jira-issues-row:hover .acts,.jira-issues-row:focus-within .acts,.jira-issues-row.is-dismissed .acts{opacity:1}
+.jira-status-dot{flex:none;width:6px;height:6px;border-radius:999px;background:var(--ink3)}
+.jira-status-dot[data-tone="doing"]{background:var(--amber-solid)}
+.jira-status-dot[data-tone="done"]{background:var(--green-solid)}
+.jira-card-type{display:inline-grid;place-items:center;flex:none;width:18px;height:18px;border-radius:5px}
+.jira-card-type[data-tone="bug"]{background:color-mix(in srgb,var(--red) 12%,var(--strip));color:var(--red)}
+.jira-card-type[data-tone="story"]{background:color-mix(in srgb,var(--green-solid) 14%,var(--strip));color:#38631a}
+.jira-card-type[data-tone="neutral"]{background:var(--strip-hi);color:var(--ink2)}
+.jira-card-type i{width:7px;height:7px;border-radius:2px;background:currentColor;display:block}
+.jira-card-av{display:inline-grid;place-items:center;flex:none;width:22px;height:22px;border-radius:999px;background:color-mix(in srgb,var(--magenta) 14%,var(--strip));color:var(--magenta);font-size:11px;font-weight:600}
+.m-at{background:#dce8f7;color:var(--note);border-radius:4px;padding:0 3px;font-weight:600}
+.board-empty{padding:48px 16px;text-align:center;color:var(--ink2)}
+</style>
+</helmet>
+<div class="pg">
+<dc-import name="Rail" active="mentions" hint-size="220px,920px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 24px 28px; display: flex; flex-direction: column">
+<header class="ui-band">
+<div class="ui-band-text">
+<h2 class="ui-band-title">Mentions</h2>
+<p class="ui-band-sub">{{countLine}} · last 30 days · checked 1 min ago</p>
+</div>
+<div class="ui-band-right">
+<div class="ui-seg-track" role="group" aria-label="View"><a href="Main.dc.html" class="on" aria-current="page">List</a><a href="ListB.dc.html">Cards</a></div>
+<input type="search" class="board-band-search" aria-label="Search mentions" placeholder="search mentions">
+<button type="button" class="{{toggleClass}}" aria-pressed="{{showDismissed}}" onClick="{{toggleDismissed}}">{{toggleLabel}}</button>
+<button type="button" class="chip" title="Check mentions now"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-4M4 4v4h4M4 13a8 8 0 0 0 14.9 4M20 20v-4h-4"></path></svg>Sync now</button>
+</div>
+</header>
+<div class="jira-issues-scroll" role="region" aria-label="Mentions">
+<table class="jira-issues-table">
+<thead><tr><th scope="col">Key</th><th scope="col">Summary</th><th scope="col">Asked by</th><th scope="col">Comment</th><th scope="col">Status</th><th scope="col">Boards</th><th scope="col">When</th><th scope="col" aria-label="Actions"></th></tr></thead>
+<tbody>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+<tr class="{{r.rowClass}}">
+<td class="jira-issues-key"><a href="ModalA.dc.html">{{r.key}}</a></td>
+<td><span class="jira-issues-flex"><span class="jira-card-type" data-tone="{{r.typeTone}}" aria-hidden="true"><i></i></span><a class="jira-issues-title" href="ModalA.dc.html">{{r.summary}}</a></span></td>
+<td><span class="jira-issues-flex"><span class="jira-card-av" aria-hidden="true">{{r.initials}}</span><span class="jira-issues-cut">{{r.author}}</span></span></td>
+<td title="{{r.text}}"><a class="jira-issues-title" href="ModalA.dc.html"><span class="m-at">@Andreja</span> {{r.text}}</a></td>
+<td><span class="jira-issues-flex"><span class="jira-status-dot" data-tone="{{r.statusTone}}" aria-hidden="true"></span><span class="jira-issues-cut">{{r.status}}</span></span></td>
+<td class="{{r.boardClass}}">{{r.board}}</td>
+<td class="jira-issues-updated">{{r.when}}</td>
+<td class="jira-issues-act"><span class="acts">
+<sc-if value="{{r.open}}" hint-placeholder-val="{{true}}"><button type="button" class="chip sm" onClick="{{r.dismiss}}">Dismiss</button></sc-if>
+<sc-if value="{{r.isDismissed}}" hint-placeholder-val="{{false}}"><button type="button" class="chip sm" onClick="{{r.restore}}">Restore</button></sc-if>
+<a class="chip sm" href="#" aria-label="Open {{r.key}} comment in Jira"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg></a>
+</span></td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+<sc-if value="{{empty}}" hint-placeholder-val="{{false}}"><div class="board-empty">Nothing waiting on you in the last 30 days.</div></sc-if>
+</div>
+<p style="margin: 12px 0 0; font-size: 12px; color: #6b6b6b">One row per comment. Dismiss hides every open mention on that ticket; a reply on the ticket clears them too. Actions show on row hover.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":920}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { dismissed: { 'OPS-388': true, 'WEB-61': true }, showDismissed: false };
+  }
+  renderVals() {
+    const all = [
+      { key: 'SUP-208', typeTone: 'bug', status: 'In Progress', statusTone: 'doing', summary: 'Booking widget shows wrong timezone for Lisbon branch', board: 'none', author: 'Mara Ilić', initials: 'MI', text: 'can you confirm whether the BE stores the branch timezone or derives it from the company? Customer wants an answer by Friday.', when: '2h' },
+      { key: 'PAY-131', typeTone: 'story', status: 'Code Review', statusTone: 'doing', summary: 'Refund webhook retries flood the queue', board: 'Payments Q4', author: 'Tomás Reyes', initials: 'TR', text: 'is the 3× retry from your change last sprint or from the gateway config? Seeing 40k jobs in the queue this morning.', when: '1d' },
+      { key: 'PAY-131', typeTone: 'story', status: 'Code Review', statusTone: 'doing', summary: 'Refund webhook retries flood the queue', board: 'Payments Q4', author: 'Tomás Reyes', initials: 'TR', text: 'can you take a look when you are back?', when: '2d' },
+      { key: 'WEB-77', typeTone: 'neutral', status: 'To Do', statusTone: 'todo', summary: 'Rename the Resources tab in calendar settings', board: 'none', author: 'Ines Kovač', initials: 'IK', text: 'does the API still accept the old resources key? Want to ship the copy change Monday.', when: '3d' },
+      { key: 'OPS-388', typeTone: 'neutral', status: 'Done', statusTone: 'done', summary: 'Staging DB disk at 85%', board: 'none', author: 'Lukas Brandt', initials: 'LB', text: 'FYI cleaning up old snapshots tonight, shout if any are yours.', when: '6d' },
+      { key: 'WEB-61', typeTone: 'bug', status: 'In Progress', statusTone: 'doing', summary: 'Cookie banner overlaps the booking button', board: 'none', author: 'Ines Kovač', initials: 'IK', text: 'thanks, all good now!', when: '9d' }
+    ];
+    const d = this.state.dismissed;
+    const shown = this.state.showDismissed;
+    const rows = all.filter((r) => shown || !d[r.key]).map((r) => ({
+      ...r,
+      boardClass: r.board === 'none' ? 'jira-issues-muted' : '',
+      open: !d[r.key],
+      isDismissed: !!d[r.key],
+      rowClass: d[r.key] ? 'jira-issues-row is-dismissed' : 'jira-issues-row',
+      dismiss: () => this.setState({ dismissed: { ...d, [r.key]: true } }),
+      restore: () => { const n = { ...d }; delete n[r.key]; this.setState({ dismissed: n }); }
+    }));
+    const waiting = all.filter((r) => !d[r.key]).length;
+    const nDismissed = new Set(all.filter((r) => d[r.key]).map((r) => r.key)).size;
+    return {
+      rows,
+      empty: rows.length === 0,
+      countLine: waiting + ' waiting',
+      showDismissed: shown ? 'true' : 'false',
+      toggleClass: shown ? 'chip on' : 'chip',
+      toggleLabel: shown ? 'Hide dismissed' : 'Show dismissed · ' + nDismissed,
+      toggleDismissed: () => this.setState({ showDismissed: !shown })
+    };
+  }
+}
+</script>
+</body>
+</html>

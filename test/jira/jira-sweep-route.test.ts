@@ -54,8 +54,12 @@ async function build(name: string, boards: unknown[], on = true): Promise<void> 
 }
 
 const sweep = () => request(app.getHttpServer()).post('/api/jira/sweep').set('content-type', 'application/json').send('{}');
-/** One sweep of the non-off boards costs what the cold sweep at build cost for them: the call count per board is the walk's, not this route's. */
-const onSearches = () => searches().filter((j) => !j.includes('PAY-999')).length;
+/**
+ * One sweep of the non-off boards costs what the cold sweep at build cost for them: the call count per board is the walk's, not this route's. Board
+ * searches only — the mentions check (its own JQL) rides the same ticks and is counted by `mentionSearches`.
+ */
+const onSearches = () => searches().filter((j) => !j.includes('PAY-999') && !j.startsWith('comment ~ ')).length;
+const mentionSearches = () => searches().filter((j) => j.startsWith('comment ~ ')).length;
 const searches = () => fake.calls.filter((c) => c.url.endsWith('/search/jql')).map((c) => (c.body as { jql: string }).jql);
 /** Step past the floor so the next press is a real sweep. */
 const pastFloor = () => (skew += SWEEP_FLOOR_MS + 1_000);
@@ -87,12 +91,14 @@ describe('POST /api/jira/sweep', () => {
     expect(fake.calls).toEqual([]);
   });
 
-  it('is 409 when only off boards remain, all already swept (the chain is disarmed)', async () => {
-    await build('disarmed', [OFF]);
-    const before = fake.calls.length;
+  it('is 200 when only off boards remain, all swept: the chain stays armed for mentions, and the press checks them (spec "Poller arming")', async () => {
+    await build('off-only', [OFF]);
+    const offBefore = searches().filter((j) => j.includes('PAY-999')).length;
+    const mentionsBefore = mentionSearches();
     pastFloor();
-    expect((await sweep().expect(409)).body).toEqual({ message: 'Jira is not being polled' });
-    expect(fake.calls.length).toBe(before);
+    await sweep().expect(200);
+    expect(mentionSearches()).toBe(mentionsBefore + 1);
+    expect(searches().filter((j) => j.includes('PAY-999')).length).toBe(offBefore);
   });
 
   it('sweeps every non-off board once and leaves the off one alone, answering the status payload', async () => {

@@ -4,6 +4,8 @@ import { JiraClient } from './jira.client';
 import { JiraController } from './jira.controller';
 import { JiraWriteController } from './jira-write.controller';
 import { JiraLiveService } from './live.service';
+import { JiraMentionsController } from './mentions.controller';
+import { JiraMentionsStore } from './mentions.store';
 import { JiraPollerService } from './poller.service';
 
 /**
@@ -30,11 +32,14 @@ import { JiraPollerService } from './poller.service';
  * reserve, confirm, release and read it. It is pure memory, so providing it here adds no import in either direction; the controller composes it into `live` and
  * `session`, and the poller never sees it.
  *
+ * `JiraMentionsController` (Jira › Mentions) is the third controller: the mentions payload, its check-now, dismiss and restore, and the modal's thread read.
+ * It writes the one `JiraMentionsStore` the poller reads its dismissals from — one instance, so a Dismiss is in the next payload without a reload.
+ *
  * No `RegistryModule` import, unlike the tracker's: nothing here resolves a project. `jira.json` is read straight from its own file.
  */
 @Module({
-  controllers: [JiraController, JiraWriteController],
-  providers: [JiraPollerService, JiraLiveService, { provide: JiraClient, useFactory: () => new JiraClient() }],
-  exports: [JiraPollerService, JiraClient, JiraLiveService]
+  controllers: [JiraController, JiraWriteController, JiraMentionsController],
+  providers: [JiraPollerService, JiraLiveService, JiraMentionsStore, { provide: JiraClient, useFactory: () => new JiraClient() }],
+  exports: [JiraPollerService, JiraClient, JiraLiveService, JiraMentionsStore]
 })
 export class JiraModule {}

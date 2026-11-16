@@ -146,6 +146,13 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
     onChange('jira');
     setMenuOpen(false);
   };
+  // Jira › Mentions' count: the status payload's mentions summary (`null` while unconfigured, `count` null before the first check — both read as none). Its
+  // click only moves the page and the section: unlike Sessions there is no filter store to set, the page has one list.
+  const openJiraMentions = (): void => {
+    setJiraPage('mentions');
+    onChange('jira');
+    setMenuOpen(false);
+  };
   /*
     The Jira row (Jira phase 2, spec §6.1) is drawn while `GET /api/jira` says `configured: true`, and in ONE other case: the status is still unknown (`data`
     null — not answered yet, or every read so far failed) and Jira is the section on screen. That is the shell's hold (`App`): a stored `jira` is kept until an
@@ -198,7 +205,14 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   const treeOpen = (id: Section): boolean => narrow || section === id;
 
   // Every pending count the rail draws, by section and page (`lib/rail-counts.ts`): each sub-row carries its page's own number and the top row the sum.
-  const pending = railCounts({ prs: counts?.prs ?? null, liveRuns: counts?.liveRuns ?? 0, jiraNeedsYou, openJiraNeedsYou });
+  const pending = railCounts({
+    prs: counts?.prs ?? null,
+    liveRuns: counts?.liveRuns ?? 0,
+    jiraNeedsYou,
+    openJiraNeedsYou,
+    jiraMentions: jira?.mentions?.count ?? 0,
+    openJiraMentions
+  });
   // Each section's page list, in tree order — what `sectionTotal` sums and labels by, so the top row never counts a page its tree does not draw.
   const pagesOf: Partial<Record<Section, readonly string[]>> = {
     files: FILES_PAGES,
@@ -540,7 +554,7 @@ const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
 };
 
 /**
- * The Jira tree's labels (Jira phase 2, spec §6.1; DESIGN.md §8.9) — `RAIL_SUB_LABEL`'s rule: the only labels these three pages have, because no page
+ * The Jira tree's labels (Jira phase 2, spec §6.1; DESIGN.md §8.9) — `RAIL_SUB_LABEL`'s rule: the only labels these four pages have, because no page
  * draws a switch of its own at any width. `Open board` on Setup, Sessions' `Open Setup` and the empty board's chip to Setup are this tree's own navigation handed down through
  * `App` (`onOpenJiraPage`), not second controls with wording of their own to keep in step.
  *
@@ -550,6 +564,7 @@ const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
 const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
   board: 'Board',
   sessions: 'Sessions',
+  mentions: 'Mentions',
   setup: 'Setup'
 };
 

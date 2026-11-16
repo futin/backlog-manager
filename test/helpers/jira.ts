@@ -29,6 +29,8 @@
  * `isLast: false` with no token — a Jira that would loop a naive pager forever.
  */
 
+import type { RawComment } from '../../server/src/jira/mentions.util';
+
 export interface JiraCall {
   method: string;
   url: string;
@@ -97,6 +99,9 @@ export function makeRawIssue(partial: { key?: string; id?: string; fields?: Reco
   };
 }
 
+/** A seeded comment: the server's `RawComment`, plus the `updated` a real Jira carries and the mentions code ignores — passed through untouched. */
+export type SeededComment = RawComment & { updated?: string };
+
 export class FakeJira {
   site = 'acme.atlassian.net';
   cloudId = 'c1';
@@ -115,6 +120,25 @@ export class FakeJira {
   counts = new Map<string, number>();
   parseErrors = new Map<string, string[]>();
   readonly calls: JiraCall[] = [];
+  /** Comments per issue key, in Jira's ascending time order (seed oldest first). */
+  comments = new Map<string, SeededComment[]>();
+  private searchGate: Promise<void> | null = null;
+
+  /**
+   * Appends comments to an issue, oldest first. Search carries the newest 20 inline when it asks for `comment`; the comment endpoint serves them newest first.
+   */
+  addComments(key: string, list: SeededComment[]): void {
+    this.comments.set(key, [...(this.comments.get(key) ?? []), ...list]);
+  }
+
+  /** Parks the NEXT search (and only that one) before it is answered, so a case can act while a poll is in flight; the returned function releases it. */
+  holdNextSearch(): () => void {
+    let release!: () => void;
+    this.searchGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return release;
+  }
 
   unauthorized = false;
   siteMyselfStatus = 200;
@@ -192,6 +216,11 @@ export class FakeJira {
       if (this.rateLimit !== null) {
         return this.json(429, undefined, this.rateLimit.retryAfter === null ? {} : { 'retry-after': String(this.rateLimit.retryAfter) });
       }
+      if (method === 'POST' && gw[2] === '/search/jql' && this.searchGate !== null) {
+        const gate = this.searchGate;
+        this.searchGate = null;
+        await gate;
+      }
       return this.gateway(method, gw[2] ?? '', new URLSearchParams(gw[3] ?? ''), body);
     }
 
@@ -218,7 +247,14 @@ export class FakeJira {
       const page = req.nextPageToken ? Number(req.nextPageToken.replace(/^p/, '')) : 0;
       const start = page * req.maxResults;
       const end = Math.min(start + req.maxResults, found.keys.length);
-      const issues = found.keys.slice(start, end).map((k) => this.subset(this.issues.get(k)!, req.fields));
+      const issues = found.keys.slice(start, end).map((k) => {
+        const out = this.subset(this.issues.get(k)!, req.fields);
+        // Only a search that names `comment` gets it: a board search that does not ask must see exactly what it saw before comments existed.
+        if (!req.fields.includes('comment')) return out;
+        const all = this.comments.get(k) ?? [];
+        const startAt = Math.max(0, all.length - 20);
+        return { ...out, fields: { ...out.fields, comment: { comments: all.slice(startAt), total: all.length, startAt, maxResults: 20 } } };
+      });
       // A Jira that claims more pages and names none (`omitNextPageToken`) is answered on EVERY page, last included: the caller must stop on the absent token.
       if (this.omitNextPageToken) return this.json(200, { issues, isLast: false });
       return this.json(200, end >= found.keys.length ? { issues, isLast: true } : { issues, isLast: false, nextPageToken: `p${page + 1}` });
@@ -249,6 +285,16 @@ export class FakeJira {
       if (offered.to.statusCategory.key === 'done') issue.fields.resolutiondate = new Date().toISOString();
       issue.fields.updated = new Date().toISOString();
       return this.json(204, undefined);
+    }
+
+    const commentPath = /^\/issue\/([^/]+)\/comment$/.exec(path);
+    if (method === 'GET' && commentPath) {
+      const key = decodeURIComponent(commentPath[1]);
+      if (!this.issues.has(key)) return this.refuse(404, 'Issue does not exist or you do not have permission to see it.');
+      const all = this.comments.get(key) ?? [];
+      const max = Number(query.get('maxResults') ?? 50);
+      const ordered = query.get('orderBy') === '-created' ? [...all].reverse() : all;
+      return this.json(200, { comments: ordered.slice(0, max), total: all.length, startAt: 0, maxResults: max });
     }
 
     const issuePath = /^\/issue\/([^/]+)(\/transitions)?$/.exec(path);

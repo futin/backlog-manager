@@ -21,11 +21,11 @@ import { useNarrow } from '../../hooks/useNarrow';
  * always beside the list. That sheet, and not a modal, is also the only surface
  * able to hold `RunControls` at all — a Pause or a Resume has to have a
  * standing place for the length of a run, which a surface a reader opens and
- * closes does not offer. So `Modal` is composed by exactly two surfaces, the
- * backlog item (`board/ItemModal.tsx`) and — since Jira phase 2 — the Jira
+ * closes does not offer. So `Modal` is composed by exactly three surfaces, the
+ * backlog item (`board/ItemModal.tsx`), since Jira phase 2 the Jira
  * issue (`jira/JiraDetail.tsx`, §8.9.2), which is the item modal's twin
- * and has no run to show either; a third composer is a design change, not a
- * reuse.
+ * and has no run to show either, and since Jira mentions the mention modal (`jira/JiraMentionModal.tsx`, §8.9.7) — a ticket's comment thread, with no run
+ * either. A fourth composer is a design change, not a reuse.
  *
  * **It owns the scrim, the exit and the Escape key, and its composers own
  * none of them.** `useDialogEscape` is called HERE rather than by the item
@@ -44,15 +44,20 @@ import { useNarrow } from '../../hooks/useNarrow';
  * copies of the breakpoint that had to agree is exactly what that hook exists
  * to prevent.
  *
- * **`head` is the split shape's, and only the Jira Detail passes it** (Jira sessions spec §7.3, `Detail.dc.html`; DESIGN.md §8.9.2). Given a head, the
+ * **`head` is the split shape's, and only the Jira surfaces pass it** (Jira sessions spec §7.3, `Detail.dc.html`; DESIGN.md §8.9.2). Given a head, the
  * shell draws it across both columns, and the two columns become an even split on the board's ground rather than the 290 px facts column beside a body:
  * Detail's left column is a session card with a four-up facts grid and a history timeline, which 290 px stacked into one long ribbon. It is a SHAPE of
  * this one shell, not a second shell — scrim, exit, Escape and the 700 px fold are unchanged, and under 700 px the head, the facts and the body stack in
  * that order. The item modal passes none and keeps the sidecar exactly.
+ *
+ * **`lead` weights the split toward the facts slot** (1.6 : 1 rather than Detail's 1.05 : 1), for the mention modal, whose facts slot is the comment thread
+ * — the thing the reader opened it for — and whose body is a short ticket summary (`ModalA.dc.html`). A class on the shell, so the 700 px fold, which
+ * comes later in the sheet at the same specificity, still collapses it to one column.
  */
 export function Modal({
   label,
   head,
+  lead = false,
   facts,
   children,
   onClose
@@ -60,6 +65,8 @@ export function Modal({
   label: string;
   /** The split shape's full-width head (see the header); absent, the shell is the sidecar. */
   head?: ReactNode;
+  /** The split shape only: give the facts slot the wider column (see the header). */
+  lead?: boolean;
   facts: ReactNode;
   children: ReactNode;
   onClose: () => void;
@@ -67,7 +74,7 @@ export function Modal({
   const narrow = useNarrow();
   useDialogEscape(onClose);
   const split = head !== undefined;
-  const className = ['ui-modal', split ? 'ui-modal-split' : null, narrow ? 'ui-modal-narrow' : null].filter(Boolean).join(' ');
+  const className = ['ui-modal', split ? 'ui-modal-split' : null, split && lead ? 'ui-modal-lead' : null, narrow ? 'ui-modal-narrow' : null].filter(Boolean).join(' ');
 
   return (
     <>

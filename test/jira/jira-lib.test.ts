@@ -156,6 +156,7 @@ function payload(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     live: {},
     armed: true,
     home: '/Users/ada',
+    mentions: null,
     ...over
   };
 }
@@ -744,8 +745,9 @@ describe('parseJiraBoardIssues', () => {
 });
 
 describe('jira page key', () => {
-  it('names the three pages and the stored key', () => {
-    expect(JIRA_PAGES).toEqual(['board', 'sessions', 'setup']);
+  it('names the four pages and the stored key', () => {
+    expect(JIRA_PAGES).toEqual(['board', 'sessions', 'mentions', 'setup']);
+    expect(isJiraPage('mentions')).toBe(true);
     expect(isJiraPage('sessions')).toBe(true);
     expect(JIRA_PAGE_KEY).toBe('backlog-manager.jira-page');
     expect(isJiraPage('setup')).toBe(true);

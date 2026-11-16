@@ -121,10 +121,12 @@ describe('writeJsonAtomic', () => {
 describe('the atomic write has one home under server/src', () => {
   const src = join(__dirname, '..', '..', 'server', 'src');
 
-  // The one `renameSync` that is not this write: `saveLinks` sets a file it could not parse aside as `.bad-<ISO>`. It moves the existing file and writes nothing,
-  // so there is no temp file to strand and nothing to share. The match is on the call rather than the file, so a hand copy added to that same file still fails.
+  // The `renameSync`s that are not this write: `saveLinks` and the mentions store's `save` set a file they could not parse aside as `.bad-<ISO>`. Each moves
+  // the existing file and writes nothing, so there is no temp file to strand and nothing to share. The match is on the call rather than the file, so a hand
+  // copy added to either file still fails.
+  const SET_ASIDE_FILES = [join('jira', 'links.store.ts'), join('jira', 'mentions.store.ts')];
   const isSetAside = (rel: string, line: string): boolean =>
-    rel === join('jira', 'links.store.ts') && (line.startsWith('import ') || line.includes('renameSync(file, `${file}.bad-'));
+    SET_ASIDE_FILES.includes(rel) && (line.startsWith('import ') || line.includes('renameSync(file, `${file}.bad-'));
 
   it('finds renameSync in atomic-write.util.ts and nowhere else', () => {
     const offenders: string[] = [];

@@ -1,9 +1,12 @@
 import { homedir } from 'node:os';
 
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
 import {
+  JIRA_MENTIONS_POLL_MS,
+  JIRA_MENTIONS_WINDOW_DAYS,
+  JIRA_THREAD_MAX,
   SYNC_INTERVALS,
   isJiraKey,
   type JiraAccess,
@@ -14,8 +17,12 @@ import {
   type JiraIssueDetail,
   type JiraIssueWriteResult,
   type JiraJqlCheckResult,
+  type JiraMention,
+  type JiraMentionsPayload,
+  type JiraMentionsSummary,
   type JiraProjectRef,
   type JiraStatusPayload,
+  type JiraThreadPayload,
   type JiraTransition
 } from '../../../shared/types';
 import { adfToMarkdown } from './adf';
@@ -25,6 +32,9 @@ import { JIRA_RATE_LIMIT_DEFAULT_MS, accessOf } from './errors.util';
 import { JiraBootState } from './identity';
 import { JiraClient, jqlString, type JiraAuth, type JiraResponse } from './jira.client';
 import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapContext } from './map-issue';
+import { applyDismissals, rawComments, runMentionsCheck, type JiraMentionCacheIssue } from './mentions-check.util';
+import { JiraMentionsStore } from './mentions.store';
+import { authorOf, judgeComments, mentionsUser } from './mentions.util';
 
 /**
  * poller.service.ts — the Jira ticker, the per-board caches, and the handful of fresh reads the routes make (Jira phase 1; spec §3 `poller.service.ts` and
@@ -33,23 +43,42 @@ import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapC
  * and `stopped` on shutdown. Every route answers from the cache this file fills, or from ONE fresh read this file performs — nothing else in the server
  * talks to Jira, so the 429 window and the 401 reset below have one place to be true.
  *
- * ## The arming rule — three clauses (§3)
+ * ## The arming rule (Jira › Mentions spec "Poller arming")
  *
- * The chain runs while the site is configured (all three env vars) AND any of:
- * 1. some board's interval is not `off` — it will be due again;
- * 2. some board is still owed its cold sweep — an `off` board that has never had its list replaced;
- * 3. the boot is unanswered — `cloudId`, `serverInfo`, `me` or the sprint field is still missing, so the back-off has a retry to make.
- * Clause 3 has one exception (P5): `unsupported` is a site that is not Jira Cloud, which no retry can change, so it disarms and stays disarmed until restart.
- * The rule is judged at the END of every sweep, after its awaits, against `jira.json` READ AGAIN there — the tracker poller's reasoning: `arm()` returns
- * early while a sweep is in flight, trusting that sweep to schedule its successor, so a board saved (and `arm()`ed) mid-sweep is seen only if the sweep's
- * last look at the file comes after it. Due-ness, by contrast, is judged on the file as read at the top of the sweep: a board added mid-tick is swept from
- * the next tick, never half-way through this one. A chain with nothing owed stops on the tick that finds it.
+ * The chain runs while the site is configured (all three env vars) and is not `unsupported` — whatever the boards say. It used to need a syncing board, an
+ * `off` board still owed its cold sweep, or an unanswered boot; mentions widened that, because they are owed every `JIRA_MENTIONS_POLL_MS` for as long as
+ * the site is configured, so a site with no boards, or with every board `off`, still keeps a chain alive to check them. `unsupported` (P5) is a site that
+ * is not Jira Cloud, which no retry can change, so it disarms and stays disarmed until restart. The rule is judged at the END of every sweep, after its
+ * awaits — the tracker poller's reasoning: `arm()` returns early while a sweep is in flight, trusting that sweep to schedule its successor. Due-ness is
+ * judged on `jira.json` as read at the top of the sweep: a board added mid-tick is swept from the next tick, never half-way through this one.
+ *
+ * ## The mentions step (Jira › Mentions spec "How a check works", "Failure handling")
+ *
+ * One check rides each tick it is due on — at once after boot, then `JIRA_MENTIONS_POLL_MS` after the last ATTEMPT (a failing Jira is asked again on the
+ * cadence, not on every 15 s tick) — AFTER the board loop, so its calls land in `sweepCalls` and the CALLS meter shows them. It is not starved by the
+ * boards: a board's whole-board failure ends the board loop, not the tick, and the step still runs unless a 429 window is open or the boot is unanswered
+ * (a 401 reset `me`, which the JQL needs) — the gate every call obeys. A 401 or 429 on its calls is the site's (`boardFailed`); any other failure is the
+ * mentions cache's own `detail`, rows and `polledAt` kept, `access` untouched, because a mentions search failing says little about the boards and the next
+ * board sweep is the better judge of the site. The calls and judgement are `mentions-check.util.ts`'s; the state and every verdict are here.
+ *
+ * ## The mentions routes (Jira › Mentions spec "Routes and shapes", "Sync now, two ways")
+ *
+ * The payload and the status summary are DERIVED on read: the cache keeps every candidate, and `applyDismissals` filters a copy against the store each
+ * time, so a Dismiss that lands while a check is out cannot be undone by that check's swap. The manual check (`mentionsSweepNow`) does NOT go through
+ * `tick()` — boards are not swept, and its calls are a route's, never the CALLS meter's: between ticks the next tick's opening `takeCalls()` discards them
+ * like any fresh read's, and while a tick IS in flight (the client's counter is one number for the process) its `refuse` hook counts each call it sends
+ * into `pressCalls`, which that tick subtracts from its own figure — counted at the hook because the hook is asked synchronously right before the call,
+ * so no tick can open or close between the two. It shares exactly three
+ * things with the tick-borne check: the in-flight join (`checkMentions`), the `SWEEP_FLOOR_MS` floor (measured from `mentionsEndAt`, whichever caller ran
+ * the check), and the cadence (starting a check stamps the attempt, so a press puts the next background check 3 minutes after it). Its failures get the
+ * check's own verdicts (`runMentions`: 401/429 to the site, anything else to the mentions `detail`); it then `wake()`s the chain, as `routeFailed` does, so
+ * a 401's boot retry has a link coming — the widened arming already keeps one for any site it accepts a press on, and the wake makes that explicit.
  *
  * ## Why `off` still gets one cold sweep
  *
  * `off` means "do not poll", not "show nothing": a board whose list was never fetched would render empty, which reads as "nothing on this board" — a lie.
  * One sweep per process gives it a real list with an honest `polledAt` age beside it. A cold sweep that failed whole-board (Jira unreachable) has not
- * replaced anything, so the board is still owed and the chain stays armed for it; one that got far enough to replace the list has succeeded, per-entry
+ * replaced anything, so the board is still owed and `due()` keeps answering yes for it; one that got far enough to replace the list has succeeded, per-entry
  * `failures` included, because those are part of the answer, not a reason to ask again.
  *
  * ## Why the Done window applies at map time
@@ -93,8 +122,8 @@ import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapC
  * save has still landed and the sweep still runs to its end, and the next status poll catches the list up. It never rejects.
  *
  * "Now" is `forced`, a map from board id to the generation of the save that asked — NOT a reset of the cache's `polledAt`, which would empty the board's last
- * good list (`coldOwed` reads it, and an edit that fails to sweep must keep showing what the board last knew). `due()` honours it and `owed()` counts it. A
- * sweep spends the force only when it SUCCEEDS on the board, so every way of not getting an answer — the boot unanswered, a 429 window caught at the top of
+ * good list (`coldOwed` reads it, and an edit that fails to sweep must keep showing what the board last knew). `due()` honours it. A sweep spends the
+ * force only when it SUCCEEDS on the board, so every way of not getting an answer — the boot unanswered, a 429 window caught at the top of
  * the loop or opened mid-board, a 401, a 5xx, a transport error — leaves the board forced, owed, and retried on the next tick until Jira answers; for an `off`
  * board that is the only thing that would ever replace the list swept from the pre-edit definition.
  *
@@ -139,6 +168,15 @@ export const JIRA_SEARCH_MAX_CHARS = 100;
 export const JIRA_PAGE_SIZE = 100;
 
 const UNSUPPORTED = 'Jira Server/DC is not supported';
+
+/** The mentions check's cache: `polledAt` moves only on a successful check, and `detail` says why the latest one failed (`null` after a success). */
+export interface MentionsCache {
+  polledAt: string | null;
+  detail: string | null;
+  truncated: boolean;
+  /** Read-only to every reader: `applyDismissals` filters a COPY on read, never these arrays in place (an in-place filter would eat the candidates). */
+  readonly issues: readonly JiraMentionCacheIssue[];
+}
 
 /** One board's last good sweep. Replaced whole, or not at all. */
 export interface JiraBoardCache {
@@ -214,7 +252,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private readonly boot = new JiraBootState();
   private readonly caches = new Map<string, JiraBoardCache>();
   /**
-   * Boards a save asked to have swept now (header), each with the generation (`forceSeq`) of the save that asked. `due()` honours it, `owed()` counts it,
+   * Boards a save asked to have swept now (header), each with the generation (`forceSeq`) of the save that asked. `due()` honours it,
    * and a sweep spends it only when it SUCCEEDS on the board and read `jira.json` after that save (`run()`).
    */
   private readonly forced = new Map<string, number>();
@@ -222,13 +260,36 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private forceSeq = 0;
   /** The calls the last sweep made, for the chip's CALLS meter (§6). */
   private sweepCalls = 0;
+  /**
+   * Calls a `mentionsSweepNow` check sent since the running tick's opening `takeCalls()` — the press's, not the tick's, so the tick subtracts them (header,
+   * "The mentions routes"). Reset at every tick's start; a press between ticks only grows it until the next start resets it with the counter it shadows.
+   */
+  private pressCalls = 0;
   /** When the last sweep finished, for `SWEEP_FLOOR_MS`. `null` until one has. */
   private lastSweepEndAt: number | null = null;
   private last429At: string | null = null;
+  /** The mentions check's last good answer, plus why the latest check (if it failed) is not newer. Replaced whole on success (`checkMentions`). */
+  private mentions: MentionsCache = { polledAt: null, detail: null, truncated: false, issues: [] };
+  /** The check running now, tick-borne or not: a second caller joins it rather than sending a second search (header; `mentionsSweepNow` joins too). */
+  private mentionsInFlight: Promise<void> | null = null;
+  /** When the last check STARTED — the cadence runs from the attempt, not the success. `null` until one has: due at once after boot. */
+  private mentionsAttemptAt: number | null = null;
+  /** When the last check ended, for `mentionsSweepNow`'s `SWEEP_FLOOR_MS` (spec "Sync now, two ways"). `null` until one has. */
+  private mentionsEndAt: number | null = null;
+  /** The site sweep asked for a check now (`sweepNow`). `mentionsDue` honours it; starting a check spends it, whatever the check then answers. */
+  private mentionsForced = false;
+
   /** The verdict a 429 window covered, restored when the window ends with the boot still unanswered (header). `null` while no window is open. */
   private beforeWindow: { access: JiraAccess; detail: string | null } | null = null;
 
-  constructor(private readonly client: JiraClient) {}
+  /**
+   * The dismissals the payload and the summary are filtered against. Optional so a suite can build a poller on a bare client (`new JiraPollerService(client)`)
+   * — it then reads as no dismissals; the module always provides the one store, the same instance the mentions controller writes.
+   */
+  constructor(
+    private readonly client: JiraClient,
+    @Optional() @Inject(JiraMentionsStore) private readonly store: JiraMentionsStore | null = null
+  ) {}
 
   /** A tick is scheduled. Derived from the timer, for the reason the tracker poller gives: two sources of truth for "is a tick coming" drift apart. */
   get armed(): boolean {
@@ -247,7 +308,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   /** Start the chain if anything is owed, or confirm it is running. Idempotent — phase 2's board saves call it after they write. */
   arm(): void {
     if (this.stopped) return;
-    if (!jiraEnv().configured || !this.owed(readJiraConfig())) {
+    if (!jiraEnv().configured || !this.owed()) {
       this.clearTimer();
       return;
     }
@@ -301,12 +362,13 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   }
 
   /**
-   * `POST /api/jira/sweep`, the popover head's site-wide `Sync now`. Everything is decided synchronously before the first await, so two presses in one tick
-   * see the same `inFlight` and join it rather than each forcing a sweep. Order: nothing armed and nothing running → `not-armed` (a site with only swept
-   * `off` boards has no chain, and a button that did something there would be a second polling path); a 429 window → `wait` with the STORED end, no call
-   * (the per-board `boards/sweep` is not refused in one — this button alone is); a sweep running → join it; one finished under `SWEEP_FLOOR_MS` ago → `done`,
-   * no call; else force every non-`off` board (the `boardSaved` mechanism, so a 401 or a window opening mid-sweep leaves them owed) and sweep once.
-   * An `off` board is left to its own per-row icon.
+   * `POST /api/jira/sweep`, the popover head's site-wide `Sync now`. Everything is decided synchronously before the first await, so two presses in one tick see
+   * the same `inFlight` and join it rather than each forcing a sweep. Order: nothing armed and nothing running → `not-armed` (an unconfigured or `unsupported`
+   * site has no chain, and a button that did something there would be a second polling path); a 429 window → `wait` with the STORED end, no call (the per-board
+   * `boards/sweep` is not refused in one — this button alone is); a sweep running → join it; one finished under `SWEEP_FLOOR_MS` ago → `done`, no call; else
+   * force every non-`off` board (the `boardSaved` mechanism, so a 401 or a window opening mid-sweep leaves them owed), force a mentions check
+   * (`mentionsForced`), and sweep once. An `off` board is left to its own per-row icon. With the arming widened (header), `not-armed` is now only an
+   * unconfigured or `unsupported` site: a site with every board `off` keeps a chain for mentions, so the press checks them and answers `done`.
    */
   async sweepNow(): Promise<SweepNowResult> {
     const now = Date.now();
@@ -319,7 +381,32 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     }
     if (this.lastSweepEndAt !== null && now - this.lastSweepEndAt < SWEEP_FLOOR_MS) return { kind: 'done' };
     for (const board of readJiraConfig().boards) if (board.interval !== 'off') this.forced.set(board.id, ++this.forceSeq);
+    this.mentionsForced = true;
     await this.tick().catch(() => undefined);
+    return { kind: 'done' };
+  }
+
+  /**
+   * `POST /api/jira/mentions/sweep`, the Mentions page's own "check now" (spec "Poller arming"). Like `sweepNow`, every decision is made before the first
+   * await. Order: mentions not armed (unconfigured, `unsupported`) → `not-armed`; a 429 window → `wait` with the STORED end, no call; a check running
+   * (tick-borne or another press) → join it; one ended under `SWEEP_FLOOR_MS` ago → `done`, no call; the boot not whole (no `cloudId`, or a 401 reset
+   * `me`, which the JQL is built from) → `done`, no call — the status says why, and the boot retry on the chain is what fixes it; else one check, outside
+   * the tick (header), then `wake()`. Never rejects: `checkMentions` turns a throw into the mentions `detail`.
+   */
+  async mentionsSweepNow(): Promise<SweepNowResult> {
+    const now = Date.now();
+    if (this.stopped || !this.mentionsArmed()) return { kind: 'not-armed' };
+    this.expireWindow(now);
+    if (this.inWindow(now)) return { kind: 'wait', retryAt: this.boot.retryAt! };
+    if (this.mentionsInFlight !== null) {
+      await this.mentionsInFlight;
+      return { kind: 'done' };
+    }
+    if (this.mentionsEndAt !== null && now - this.mentionsEndAt < SWEEP_FLOOR_MS) return { kind: 'done' };
+    const gate = this.gate();
+    if ('refused' in gate || !this.boot.answered()) return { kind: 'done' };
+    await this.checkMentions(gate.auth, true);
+    this.wake();
     return { kind: 'done' };
   }
 
@@ -349,7 +436,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
         calls: { sweep: 0, last429At: null },
         live: {},
         armed: false,
-        home: null
+        home: null,
+        mentions: null
       };
     }
     this.expireWindow(Date.now());
@@ -384,8 +472,118 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       // A sweep clears the timer on entry, so the `armed` getter reads false for its whole length — the poller's busiest moment, which the Connection card
       // and the chip would then call `idle`. A tick in flight is a chain that is alive, so status counts it; the getter stays timer-only, as `arm()` needs.
       armed: this.timer !== null || this.inFlight !== null,
-      home: homedir()
+      home: homedir(),
+      mentions: this.mentionsSummary()
     };
+  }
+
+  /**
+   * `GET /api/jira/mentions` — the cache with the dismissals applied (header), no call. Unconfigured answers what `GET /api/jira` says in that state, its
+   * reason included. `me` is the boot's display name (the `@` chip), `null` until `myself` answers; `retryAt` the open 429 window's end, else `null`.
+   */
+  mentionsPayload(): JiraMentionsPayload {
+    const env = jiraEnv();
+    if (!env.configured) return { configured: false, detail: env.detail };
+    const { issues, dismissed } = applyDismissals(this.mentions.issues, this.dismissedPredicate());
+    return {
+      configured: true,
+      polledAt: this.mentions.polledAt,
+      detail: this.mentions.detail,
+      truncated: this.mentions.truncated,
+      retryAt: this.windowEnd(),
+      window: JIRA_MENTIONS_WINDOW_DAYS,
+      me: this.boot.me?.name ?? null,
+      issues,
+      dismissed
+    };
+  }
+
+  /**
+   * `GET /api/jira/issue/:key/thread` — the mention modal's fresh read: the newest `JIRA_THREAD_MAX` comments, put back in time order, each judged as the
+   * check judges a thread (`judgeComments` over the same page, minus the dismissed ids), so `open` here and the list never disagree about one comment. A
+   * fresh read like `issueDetail`: the gate first, a failure through `routeFailed` (the route turns a 403/404 into its own 404), and its calls a route's.
+   * With `me` unknown there is no "mine" to judge: refused as the 401 that state is, or as the boot's own `connecting`.
+   */
+  async thread(key: string): Promise<JiraResult<JiraThreadPayload>> {
+    const gate = this.gate();
+    if ('refused' in gate) return gate.refused;
+    const me = this.boot.me;
+    if (me === null) return this.unauthorizedRefusal() ?? { ok: false, response: synthetic(0, this.boot.detail ?? 'connecting') };
+    const res = await this.client.comments(gate.auth, key, JIRA_THREAD_MAX);
+    if (!ok(res)) return this.routeFailed(res);
+    // The endpoint answers newest first (`orderBy=-created`, so the cap keeps the newest); the modal reads a conversation, oldest first.
+    const page = Array.isArray(res.data?.comments) ? res.data.comments : [];
+    const comments = rawComments(page).reverse();
+    const dismissed = this.dismissedPredicate();
+    const open = new Set(
+      judgeComments({ comments, me: me.accountId, site: gate.auth.site, key, now: Date.now(), windowDays: JIRA_MENTIONS_WINDOW_DAYS })
+        .map((m) => m.commentId)
+        .filter((id) => !dismissed(id))
+    );
+    // `truncated` is Jira's `total` against the page Jira SENT, not against `comments`: `rawComments` skips an entry with no string id or `created`, and a
+    // thread returned whole must not read as cut short because one of its entries was unreadable.
+    const total = typeof res.data?.total === 'number' ? res.data.total : page.length;
+    return {
+      ok: true,
+      value: {
+        key,
+        total,
+        truncated: total > page.length,
+        comments: comments.map((c) => ({
+          id: c.id,
+          author: authorOf(c),
+          created: c.created,
+          markdown: adfToMarkdown(c.body).markdown,
+          mine: c.author?.accountId === me.accountId,
+          mentionsMe: mentionsUser(c.body, me.accountId),
+          open: open.has(c.id)
+        }))
+      }
+    };
+  }
+
+  /**
+   * The cached candidate `commentId` on `key`, or `null` — what `POST /api/jira/mentions/dismiss` proves each id against, from memory, before it writes. A
+   * candidate, not an open mention: whether it is already dismissed is the store's question, asked by the route that holds the store.
+   */
+  mentionCandidate(key: string, commentId: string): JiraMention | null {
+    const issue = this.mentions.issues.find((i) => i.key === key);
+    return issue?.candidates.find((m) => m.commentId === commentId) ?? null;
+  }
+
+  /**
+   * The status payload's slice: `count` is the payload's `issues.length` (TICKETS waiting, the rail's unit), `null` until a check has succeeded. The whole
+   * slice is `null` while no check is owed (`!mentionsArmed()`: unconfigured, or an `unsupported` site): nothing will ever stamp `polledAt`, and a
+   * `polledAt: null` summary would keep the shell's status read on its 15 s floor and the popover on "not checked yet" for good.
+   */
+  private mentionsSummary(): JiraMentionsSummary | null {
+    if (!this.mentionsArmed()) return null;
+    const { polledAt, detail, truncated } = this.mentions;
+    const count = polledAt === null ? null : applyDismissals(this.mentions.issues, this.dismissedPredicate()).issues.length;
+    return { polledAt, count, detail, truncated, retryAt: this.windowEnd() };
+  }
+
+  /** One read of the store per payload: a Set, so filtering a hundred tickets is not a hundred scans of the dismissal list. */
+  private dismissedPredicate(): (commentId: string) => boolean {
+    const ids = new Set((this.store?.dismissed() ?? []).map((d) => d.commentId));
+    return (commentId) => ids.has(commentId);
+  }
+
+  /** The open 429 window's end as ISO, or `null` — expired where it is read, as `status()` does. */
+  private windowEnd(): string | null {
+    const now = Date.now();
+    this.expireWindow(now);
+    return this.inWindow(now) ? iso(this.boot.retryAt!) : null;
+  }
+
+  /** The mentions cache as the last check left it — candidates, NOT dismissal-filtered; `applyDismissals` derives the payload from it on read, in a copy. */
+  mentionsCache(): Readonly<MentionsCache> {
+    return this.mentions;
+  }
+
+  /** Mentions are owed whenever the site is configured and not `unsupported` (spec "Poller arming") — the same condition `owed()` arms the chain on. */
+  mentionsArmed(): boolean {
+    return jiraEnv().configured && this.boot.access !== 'unsupported';
   }
 
   /** A board's cached list: `null` for a board `jira.json` does not hold, an empty list with `polledAt: null` for one not swept yet. */
@@ -610,11 +808,12 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     if (this.timer === null && this.inFlight === null) this.schedule();
   }
 
-  /** The arming rule (header). `unsupported` is final (P5). */
-  private owed(config: JiraConfig): boolean {
-    if (this.boot.access === 'unsupported') return false;
-    if (!this.boot.answered()) return true;
-    return config.boards.some((b) => b.interval !== 'off' || this.coldOwed(b) || this.forced.has(b.id));
+  /**
+   * The arming rule (header): mentions are owed for as long as the site is configured (the caller's check), so only `unsupported` (P5, final) disarms. The
+   * board clauses this used to hold — a syncing board, a cold sweep owed, a forced board — are all subsumed: each still decides `due()`, not the chain.
+   */
+  private owed(): boolean {
+    return this.boot.access !== 'unsupported';
   }
 
   private coldOwed(board: JiraBoard): boolean {
@@ -635,8 +834,9 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
 
   /**
    * A 429 window that has run out is not a verdict any more. Expired where the state is READ — `status()`, the read gate, the sweep — not by a timer:
-   * a route can open the window while the chain is disarmed (no boards, or only `off` boards already swept — the ordinary phase-1 state), and a
-   * verdict that only a sweep could clear would then read `rate-limited` with a past instant for the life of the process.
+   * a route can open the window while the chain is disarmed (an `unsupported` site, or before the first tick — and, before mentions widened the
+   * arming, a site with no boards), and a verdict that only a sweep could clear would then read `rate-limited` with a past instant for the life of the
+   * process.
    */
   private expireWindow(now: number): void {
     if (this.boot.retryAt === null || now < this.boot.retryAt) return;
@@ -676,13 +876,15 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
 
     // The calls the routes made since the last tick are not this sweep's.
     this.client.takeCalls();
+    this.pressCalls = 0;
     try {
       await this.run(env, config, seen);
     } finally {
-      this.sweepCalls = this.client.takeCalls();
+      // Nor are a mentions press's made WHILE it ran (header): the client's counter cannot tell them apart, so the press counted its own.
+      this.sweepCalls = Math.max(0, this.client.takeCalls() - this.pressCalls);
     }
-    // Re-read after the awaits — see the header: an `arm()` that landed mid-sweep returned early and is honoured only here.
-    if (this.owed(readJiraConfig())) this.schedule();
+    // Judged after the awaits — see the header: a boot that turned out `unsupported` mid-sweep stops the chain here.
+    if (this.owed()) this.schedule();
   }
 
   private async run(creds: { site: string; email: string; token: string }, config: JiraConfig, seen: number): Promise<void> {
@@ -697,24 +899,118 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     }
 
     const auth: JiraAuth = { ...creds, cloudId: this.boot.cloudId! };
+    if (await this.sweepBoards(auth, config, seen)) {
+      // Every due board answered, so an earlier board-level `unreachable` is over — and only that verdict: a 429 or a 401 a ROUTE recorded while this sweep
+      // awaited is evidence this sweep does not have, and clearing it would read `ok` while the routes are refused (§8: only those two move the state).
+      if (this.boot.access === 'unreachable') {
+        this.boot.access = 'ok';
+        this.boot.detail = null;
+      }
+    }
+    // After the boards, whatever they answered (header): the step applies the window and boot gate itself, so a board 5xx no longer starves it.
+    //
+    // Riding the tick has a latency cost, accepted on purpose: the check holds `inFlight` for its whole run — one search plus, worst case, a hundred
+    // sequential thread reads (every kept ticket with more than the inline 20 comments). A `boardSaved` landing meanwhile waits behind it, can reach its
+    // `JIRA_SAVE_SWEEP_WAIT_MS` cap, and answers the save with the new board not yet swept; the sweep still follows the moment the check ends, so this is a
+    // slower first fill, never a lost one. The usual check is one call and a few reads, and the alternative — a second chain beside the tick — would split
+    // the one gate, the one 429/401 handling and the one CALLS figure this file keeps in one place.
+    if (this.mentionsDue(Date.now())) await this.checkMentions(auth);
+  }
+
+  /** The board loop. False when it ended early — a window or a 401 met between boards, or a whole-board failure — which leaves `access` as it stands. */
+  private async sweepBoards(auth: JiraAuth, config: JiraConfig, seen: number): Promise<boolean> {
     for (const board of config.boards) {
       // A route may have met a 429 while this sweep awaited: honour the window from the next board on.
-      if (this.inWindow(Date.now())) return;
+      if (this.inWindow(Date.now())) return false;
       // ...or a 401: `me` is gone, and no board is searched without it.
-      if (!this.boot.answered()) return;
+      if (!this.boot.answered()) return false;
       if (!this.due(board, Date.now())) continue;
       const force = this.forced.get(board.id);
-      if (!(await this.sweepBoard(board, auth))) return;
+      if (!(await this.sweepBoard(board, auth))) return false;
       // Spent only by a success on a file read after the save (header): a whole-board failure — a 429 window opening mid-board, a 401, a 5xx — replaced
       // nothing, so the board is still owed, and a save that landed after this sweep read the file is a newer force than the one it just answered.
       if (force !== undefined && force <= seen && this.forced.get(board.id) === force) this.forced.delete(board.id);
     }
-    // Every due board answered, so an earlier board-level `unreachable` is over — and only that verdict: a 429 or a 401 a ROUTE recorded while this sweep
-    // awaited is evidence this sweep does not have, and clearing it would read `ok` while the routes are refused (§8: only those two move the state).
-    if (this.boot.access === 'unreachable') {
-      this.boot.access = 'ok';
-      this.boot.detail = null;
+    return true;
+  }
+
+  // ── the mentions step ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Whether this tick owes a check: never inside a 429 window or with the boot unanswered (a 401 reset `me` — and the JQL is built from it); otherwise
+   * forced by the site sweep, never attempted, or `JIRA_MENTIONS_POLL_MS` since the last attempt began.
+   */
+  private mentionsDue(now: number): boolean {
+    if (this.inWindow(now) || !this.boot.answered()) return false;
+    if (this.mentionsForced || this.mentionsAttemptAt === null) return true;
+    return now - this.mentionsAttemptAt >= JIRA_MENTIONS_POLL_MS;
+  }
+
+  /**
+   * One mentions check, or the one already running — the in-flight join `tick()` gives the board sweep, kept separately because `mentionsSweepNow` runs it
+   * outside a tick. Starting OR joining one spends `mentionsForced`; starting one stamps the attempt (the cadence); ending one stamps `mentionsEndAt`
+   * (the floor). Never rejects: an unexpected throw is a failed check, recorded as its detail, and must not take the tick's successor with it. `byPress` is
+   * whoever STARTS the check: a tick that joins a press's check adds none of its calls to its figure, and a press that joins a tick's leaves them there.
+   */
+  private checkMentions(auth: JiraAuth, byPress = false): Promise<void> {
+    if (this.mentionsInFlight !== null) {
+      // The running check IS the answer to a force raised while it was out: leaving the flag set would send a second search on the next 15 s tick.
+      this.mentionsForced = false;
+      return this.mentionsInFlight;
     }
+    this.mentionsAttemptAt = Date.now();
+    this.mentionsForced = false;
+    const running = this.runMentions(auth, byPress)
+      .catch((err: unknown) => {
+        this.mentions = { ...this.mentions, detail: err instanceof Error ? err.message : 'mentions check failed' };
+      })
+      .finally(() => {
+        this.mentionsInFlight = null;
+        this.mentionsEndAt = Date.now();
+      });
+    this.mentionsInFlight = running;
+    return running;
+  }
+
+  /** `byPress`: started by `mentionsSweepNow`, so every call it sends is counted into `pressCalls` rather than left in a tick's figure (header). */
+  private async runMentions(auth: JiraAuth, byPress: boolean): Promise<void> {
+    const me = this.boot.me;
+    if (me === null) return;
+    // Read once for the whole check, not once per ticket: up to a hundred tickets ask it, and none of them needs a fresher copy than the check's start.
+    const config = readJiraConfig();
+    const result = await runMentionsCheck({
+      client: this.client,
+      auth,
+      me: me.accountId,
+      now: Date.now(),
+      boardsOf: (key) => this.boardNamesHolding(key, config),
+      refuse: () => {
+        if (this.inWindow(Date.now())) return synthetic(429, null);
+        // Answering null means the call goes out synchronously after this — the one point both counters move together.
+        if (byPress) this.pressCalls += 1;
+        return null;
+      }
+    });
+    if (result.ok) {
+      // Swapped whole, dismissals NOT applied — `applyDismissals` applies them on read, so a Dismiss that landed while this check was out survives the swap.
+      this.mentions = { polledAt: iso(Date.now()), detail: null, truncated: result.truncated, issues: result.issues };
+      return;
+    }
+    const res = result.response;
+    // A 401 and a 429 are about the token and the site: the board sweep's handling, so the boot resets or the one shared window opens (a synthesised 429
+    // from `refuse` opens nothing — `openWindow` knows it). The mentions rows and detail stay as they are: `access` and `retryAt` already say why.
+    if (res.status === 401 || res.status === 429) {
+      this.boardFailed(res);
+      return;
+    }
+    this.mentions = { ...this.mentions, detail: detailOf(res) };
+  }
+
+  /** The NAMES of the boards (in `jira.json` order) whose cache holds `key` — `boardsHolding`'s ids, named, for the mention row's board chips. */
+  private boardNamesHolding(key: string, config: JiraConfig): string[] {
+    return config.boards
+      .filter((b) => this.caches.get(b.id)?.issues.some((i) => i.key === key) ?? false)
+      .map((b) => b.name);
   }
 
   /** The boot calls still owed, in order, stopping at the first failure. True when the boot is whole afterwards. */

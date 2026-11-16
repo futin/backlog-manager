@@ -5,6 +5,7 @@ import { join, relative, sep } from 'node:path';
 import { dashboardsFile } from '../../server/src/agents/dashboards/dashboards-file.util';
 import { jiraConfigFile } from '../../server/src/jira/config.util';
 import { jiraLinksFile } from '../../server/src/jira/links.store';
+import { jiraMentionsFile } from '../../server/src/jira/mentions.store';
 import { controlHome } from '../../server/src/orchestrator/pause-control.util';
 import { watchdogFile } from '../../server/src/orchestrator/watchdog-config.util';
 import { reviewFile } from '../../server/src/settings/review-config.util';
@@ -29,6 +30,7 @@ const WRITERS: Record<string, string[]> = {
   'agents/dashboards/dashboards-file.util.ts': [dashboardsFile({})],
   'jira/config.util.ts': [jiraConfigFile({})],
   'jira/links.store.ts': [jiraLinksFile({})],
+  'jira/mentions.store.ts': [jiraMentionsFile({})],
   'orchestrator/pause-control.util.ts': [join(controlHome({}), 'some-project.json')],
   'orchestrator/watchdog-config.util.ts': [watchdogFile({})],
   'settings/review-config.util.ts': [reviewFile({})],

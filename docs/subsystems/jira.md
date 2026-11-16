@@ -6,7 +6,7 @@ registry entry, and nothing in `items/` knows it exists. This doc describes **ph
 client, the config reader, the poller and its caches, the issue mapping, the ADF converter, the ticket block and the read routes (six, then seven with phase
 5a's `/prompt`, nine with the repo/branch work's `/refs` and `/worktrees`, ten with the sessions page's `/sessions`). Phase 2 adds `jira.json`'s writers behind
 three guarded write routes (five since
-5a's skills, six with `/repo-defaults`) and the whole client section: a rail entry with three pages (Board, Sessions and Setup), the Detail dialog, the shell chip and
+5a's skills, six with `/repo-defaults`) and the whole client section: a rail entry with three pages (Board, Sessions and Setup; Jira mentions added a fourth, Mentions, between Sessions and Setup), the Detail dialog, the shell chip and
 a read-only Jira row on Settings › Shared (the Trackers card's then, the Sources card's since the source-sections change). Phase 3 adds the first two writes to
 Jira itself — assign the issue to me and transition it — behind two more guarded routes, each followed
 by a re-read of the issue that is spliced into the board caches, and the modal's two controls that call them. Phase 4 adds the `jira` skill and its CLI,
@@ -67,6 +67,10 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 | `links.store.ts`     | the link store's file I/O — `loadLinks`, `saveLinks`, `jiraLinksFile` (`~/.backlog-manager/settings/jira-links.json`, `BM_JIRA_LINKS_FILE`); no rule about what is kept |
 | `jira.controller.ts` | the ten read routes (six, phase 5's `GET /prompt`, the repo/branch work's `GET /refs` and `GET /worktrees`, and the sessions page's `GET /sessions`) |
 | `jira-write.controller.ts` | the ten POST routes — six config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work), the two sweeps that write nothing (`/sweep`, `/boards/sweep`) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
+| `mentions.controller.ts` | the mentions routes: `GET /mentions`, `GET /issue/:key/thread` and the three POSTs `/mentions/sweep`, `/mentions/dismiss`, `/mentions/restore` (→ [Mentions](#mentions-jira-mentions-phase-1-spec)) |
+| `mentions-check.util.ts` | the pure judge of one ticket's comments: is an open mention the user's own, newer than their latest comment, not dismissed |
+| `mentions.util.ts` | the mentions' shared shapes and helpers (the excerpt, the ADF walk's output, the summary) |
+| `mentions.store.ts` | the dismissals file's I/O (`~/.backlog-manager/settings/jira-mentions.json`); the server is its one writer, no skill reads it |
 | `jira.module.ts`     | `JiraModule` — the two controllers, the poller, the client (a factory value, the one place a suite swaps in a fake `fetch`) and since phase 5a `JiraLiveService`, all three exported for `AgentsModule` to import, never the reverse |
 
 `agents/` holds the other half of Run, in `jira-agents.controller.ts` (five POSTs: `dispatch-jira`, `jira-stop`, `jira-link`, `jira-unlink` and
@@ -108,7 +112,8 @@ unconfigured, then ask the poller — so a malformed request never reads as an e
 | `GET /api/jira/worktrees`         | `{ worktrees, unavailable }` — every working tree of every distinct mapped path, and each repo that could not be read with its reason; never an error for one repo |
 | `GET /api/jira/sessions?open=1`   | `JiraSessionsPayload` — every link, live and ended, with its derived `state`, the dashboard's `row` (`null` for an ended link or a live one the dashboard does not list) and `stateSince`, plus `reachable`, `rowsAt` and `saveError` (the link store's latest failed save, `null` once one lands; the List draws it as an amber line above the rows); memory only, and answered while unconfigured (no 503). `?open=1` marks a Jira page open, which quickens the reconciler |
 
-Every route but the first and `/sessions` answers 503 `Jira is not configured` while unconfigured. `GET /api/jira` fills `live` from the link store in the
+Every route but the first, `/sessions` and the mentions pair answers 503 `Jira is not configured` while unconfigured; `GET /mentions` answers 200 `{ configured: false,
+detail }` and `POST /mentions/sweep` answers 409 (the dismiss and restore writes and `GET /issue/:key/thread` stay 503, after their 400s). `GET /api/jira` fills `live` from the link store in the
 controller (the poller
 never sees it; an unconfigured server keeps `{}`; only the live `run` links are in it), and `GET /api/jira/issue/:key` fills `session` the same way. A failed
 Jira call is mapped
@@ -215,9 +220,10 @@ the poller disarms; the gateway `myself`, and once it has answered 200, one `mys
 anything else `null`, never asked again); and `GET field`, from which `pickSprintField` picks the sprint field. A failed boot call records `access`/`detail`
 and backs off 15 s, doubling to 5 min; a 429 opens the window instead. No board is searched until all four are in, and `me` shows on the payload only then.
 
-**Arming.** A `setTimeout` chain on `JIRA_POLL_MS` (15 s), `unref`'d, never overlapping: armed at bootstrap while the site is configured AND some board's
-interval is not `off`, OR some board is still owed its one cold sweep, OR the boot is unanswered — `unsupported` excepted. Judged again at the end of every
-sweep against `jira.json` re-read there, so a chain with nothing owed stops on the tick that finds it.
+**Arming.** A `setTimeout` chain on `JIRA_POLL_MS` (15 s), `unref`'d, never overlapping: armed at bootstrap while the site is configured, `unsupported`
+excepted, whatever the boards say — the mentions check (below) is owed every `JIRA_MENTIONS_POLL_MS` and needs no board, so a site with no boards, or every board
+`off`, keeps its chain. The boards' own states (a syncing one, one owed its cold sweep, a forced one) now decide only which board a tick sweeps. Judged again at
+the end of every sweep, so a boot that turns out `unsupported` stops the chain on the tick that finds it.
 
 **Due.** A board never swept successfully is due at once, whatever its interval — `off` included, which is how an `off` board gets one honest list per
 process. Otherwise it is due when `SYNC_INTERVALS[interval]` has passed since its `polledAt`; `off` is then never due.
@@ -254,6 +260,18 @@ place, `polledAt` unmoved — and the sweep that follows keeps the newer copy (a
 caches are the second cache in this server whose age is a rendered value; that widened rule's mechanism stays in `.claude/rules/tracker.md` beside the
 tracker cache's, which this doc points to rather than restates.
 
+## Mentions (Jira mentions phase 1, [spec](../superpowers/specs/2026-11-16-jira-mentions-design.md))
+
+The comments that @-mention the user and still wait on them, found by one JQL search (`comment ~ "<accountId>"` inside a 30-day window) whose inline comments
+are judged by `mentions-check.util.ts`: an open mention is not the user's own, was created after the user's latest comment on that ticket and has not been
+dismissed. The check rides the poller's tick, after the board loop, at once after boot and then `JIRA_MENTIONS_POLL_MS` after the last ATTEMPT, so its calls reach
+the CALLS meter and share the one 429 window; a failure keeps the last rows and `polledAt` and sets the mentions `detail`. `mentions.controller.ts` serves
+`GET /api/jira/mentions` (memory only, answering 200 `{ configured: false, detail }` while unconfigured), the guarded `POST /mentions/sweep` (409
+`Jira is not being polled` for an unconfigured or `unsupported` site, 429 with the stored `retryAt`), `POST /mentions/dismiss` and `/restore` (the dismissals live in `settings/jira-mentions.json`, `mentions.store.ts`, which
+the server alone writes) and `GET /issue/:key/thread`, the modal's fresh read. `GET /api/jira` carries a `mentions` summary `{ polledAt, count, detail,
+truncated, retryAt }` for the chip's popover row and the rail count. The client is `JiraMentionsView` (List and Cards behind a remembered switch), the
+`JiraMentionModal` (the ninth dialog) and `useJiraMentions`, whose age prints as `checked 1 min ago` through `checkedAge` in `lib/jira-mentions.ts`.
+
 ## `jira.json`'s reader and writers
 
 Read fresh on every use. Missing, or a parsed non-object: empty. Exists but cannot be read or parsed: empty with `unreadable` set, carried on the payload as
@@ -279,14 +297,15 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   The rail draws the row only while the status says `configured: true` (or while a stored `jira` section is held for the first answer), `App` falls a `jira`
   section on `configured: false` and on nothing else — to the first drawn source row, Files before GitHub, or Runs when there is none (`firstDrawn`,
   `lib/sources.ts`) — and Settings' `Opens on` offers `Jira` only while configured. `JiraView` (lazy, like every
-  section) picks the page and holds the open issue. The three pages, `JIRA_PAGES` in `lib/jira-page.ts`, are held by `hooks/useJiraPage.ts`, a `persistedStore`
+  section) picks the page and holds the open issue. The four pages (`board | sessions | mentions | setup`), `JIRA_PAGES` in `lib/jira-page.ts`, are held by `hooks/useJiraPage.ts`, a `persistedStore`
   (`hooks/persistedStore.ts`), and switched by the rail's tree or by `onOpenJiraPage` — the tree's own pair, built in `App` and handed down — never by an
   in-page control. The rule and its reasons are
-  [invariants.md](invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
+  [invariants.md](invariants.md#the-jira-sections-four-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 - **The provider and the hooks.** `JiraProvider` (`hooks/JiraContext.tsx`) holds the shell's ONE `useJira`, beside `TrackersProvider`, so the rail, the chip,
   both pages and the Sources card's Jira row read one answer on one clock. `useJira` (`hooks/useJira.ts`) is `useTrackers`' shape: one read on mount and focus,
-  a timer aimed at the soonest syncing board's `polledAt + interval + TRACKER_FETCH_SLACK_MS` with a `JIRA_STATUS_FLOOR_MS` (15 s) floor, no timer while
-  unconfigured or with no syncing board, only the newest read allowed to write, and the last payload kept through a failed read — it is the second
+  a timer aimed at the sooner of the soonest syncing board's `polledAt + interval + TRACKER_FETCH_SLACK_MS` and the mentions deadline (`mentions.polledAt +
+  JIRA_MENTIONS_POLL_MS + slack`) with a `JIRA_STATUS_FLOOR_MS` (15 s) floor, no timer while
+  unconfigured or with neither a syncing board nor a mentions summary, only the newest read allowed to write, and the last payload kept through a failed read — it is the second
   deliberate exception to the `useCoalescedFetch` rule
   ([invariants.md](invariants.md#a-client-poller-built-on-usecoalescedfetch-never-has-two-of-its-own-requests-in-flight)). `useJiraBoard(id, interval, nudge)`
   (`hooks/useJiraBoard.ts`) IS on `useCoalescedFetch`: it polls `boards/:id/issues` every `BOARD_TRACKER_POLL_MS` while the board syncs, once and then only on
@@ -581,7 +600,7 @@ label (`JIRA_BUILTIN_LABELS.review`, `Review the MR`) exists for the sessions li
 
 The look is DESIGN.md §8.9.1 (`Run ▾` and the strip), §8.9.2 (the modal's row), §8.9.3 (Skills) and §8.9.5 (the launch sheet). The rules are
 [invariants.md](invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake) (`Run ▾` is never hidden for the dashboard's sake) and the Escape
-section (eight dialogs). The browser still never talks to Jira or the dashboard: every request below is to this server.
+section (nine dialogs). The browser still never talks to Jira or the dashboard: every request below is to this server.
 
 - **`Run ▾`** (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the Detail dialog's agent column. It decides nothing:
   `runChipState(issue, status)` (`lib/jira.ts`) answers `no-repo` (a dashed chip that opens nothing, its title naming `Jira › Setup › Repositories`), `live`

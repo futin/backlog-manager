@@ -81,7 +81,12 @@ afterAll(() => {
 const post = (path: string, body: unknown) =>
   request(app.getHttpServer()).post(`/api/jira${path}`).set('content-type', 'application/json').send(JSON.stringify(body));
 const status = async (): Promise<JiraStatusPayload> => (await request(app.getHttpServer()).get('/api/jira').expect(200)).body;
-const searches = () => fake.calls.filter((c) => c.url.endsWith('/search/jql')).map((c) => (c.body as { jql: string }).jql);
+/** Board searches only: the mentions check (its own `comment ~` JQL) runs at once after boot, with no board saved (Jira › Mentions spec "Poller arming"). */
+const searches = () =>
+  fake.calls
+    .filter((c) => c.url.endsWith('/search/jql'))
+    .map((c) => (c.body as { jql: string }).jql)
+    .filter((jql) => !jql.startsWith('comment ~ '));
 
 describe('the guard, on all six config routes and the board sweep', () => {
   beforeAll(async () => {

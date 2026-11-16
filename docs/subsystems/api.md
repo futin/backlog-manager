@@ -219,14 +219,16 @@ re-reads the PR. Each POST carries `SameOriginPostGuard`, and the Host allowlist
 
 ### `jira/`
 
-The third outbound-calling module (Jira integration phase 1): a `fetch` client on Atlassian's API gateway, a poller armed only while the three `BM_JIRA_*`
-keys are set and a board is owed a sweep, the per-board issue caches it fills (the second cache in this server whose age is rendered, as `polledAt`), the
-`jira.json` reader, the ADF converter and the ticket block. Ten read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
-fresh (`?format=text` for the ticket block), the roots search, the project list, the JQL check and (phase 5a) `/prompt`, the composed Run prompt as `text/plain` — and
-ten guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
+The third outbound-calling module (Jira integration phase 1): a `fetch` client on Atlassian's API gateway, a poller armed while the three `BM_JIRA_*`
+keys are set and the site is not `unsupported` (mentions are owed with no board at all), the per-board issue caches it fills (the second cache in this server whose age is rendered, as `polledAt`; the Jira mentions cache is the fifth), the
+`jira.json` reader, the ADF converter and the ticket block. Twelve read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
+fresh (`?format=text` for the ticket block), the roots search, the project list, the JQL check, (phase 5a) `/prompt`, the composed Run prompt as `text/plain`,
+and (Jira mentions) `/mentions`, the cached list, and `/issue/:key/thread`, a fresh read of the comments behind one — and
+thirteen guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
 since the repo/branch work `/repo-defaults`), `/boards/sweep` (the chip's per-board `now`, which writes nothing and asks the poller for a save's sweep),
-`/sweep` (the popover head's site-wide `Sync now`, which writes nothing either and answers the status payload) and
-two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each followed by a re-read of the issue that is spliced into every board cache
+`/sweep` (the popover head's site-wide `Sync now`, which writes nothing either and answers the status payload), three for mentions (`/mentions/sweep`, which
+checks now behind the same 409/429 refusals as the board sweep, and `/mentions/dismiss` and `/mentions/restore`, which write `settings/jira-mentions.json`, the dismissals file)
+and two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each followed by a re-read of the issue that is spliced into every board cache
 holding it. Since 5a the module also owns `JiraLiveService`, the ticket–session link store (memory over `~/.backlog-manager/settings/jira-links.json`) behind the status
 payload's `live`, an issue's `session` and `GET /sessions`; the two POSTs that
 fill and end its links live in `agents/`, below, because they call the dashboard. The credentials are read per call and reach no payload. → [jira.md](jira.md),
