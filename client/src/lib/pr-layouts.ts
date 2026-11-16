@@ -172,6 +172,17 @@ export function needsYouCount(data: PullRequestsPayload | null): number {
   return levelCounts(rankPrs(splitReach(groupRepos(data.repos)).shown))['needs-you'];
 }
 
+/**
+ * How many PRs are open, for the PRs band's `N open in M repos` (`PrBandSub`) and the rail's GitHub › PRs count
+ * (`docs/superpowers/specs/2026-11-16-rail-pending-counts-design.md`): the sum of `total` over the repos the token can read (`splitReach(...).shown`). It is
+ * the one home of that sum, so the band and the pill cannot drift — neither may compute it inline. It sums `total`, not the listed rows, because a truncated
+ * repo lists fewer PRs than it has and the band has always said the larger, true number. `null` (nothing has answered, or the shell does not read PRs) is 0.
+ */
+export function openPrCount(data: PullRequestsPayload | null): number {
+  if (data === null) return 0;
+  return splitReach(groupRepos(data.repos)).shown.reduce((n, r) => n + r.total, 0);
+}
+
 export type PrLayout = 'inbox' | 'matrix' | 'cards';
 
 /** The persisted choice, under the board's `backlog-manager.` prefix like every other per-device setting (`usePersistedState`). */

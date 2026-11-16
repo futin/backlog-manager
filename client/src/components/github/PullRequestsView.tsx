@@ -12,7 +12,7 @@ import { useNow } from '../../hooks/useNow';
 import { useOrchestratorRunsContext } from '../../hooks/OrchestratorRunsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { usePullRequestsContext } from '../../hooks/PullRequestsContext';
-import { emptyRepoNote, parseLayout, PR_LAYOUT_KEY, PR_LAYOUT_OPTIONS, splitReach, type PrLayout } from '../../lib/pr-layouts';
+import { emptyRepoNote, openPrCount, parseLayout, PR_LAYOUT_KEY, PR_LAYOUT_OPTIONS, splitReach, type PrLayout } from '../../lib/pr-layouts';
 import type { PrRunContext } from '../../lib/pr-run';
 import { applyUpdateOutcome, findPr, groupRepos, mergeBlock, outcomeLine, updateTransition, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
 import type { PrWriteResult } from '../../../../shared/types';
@@ -193,7 +193,7 @@ export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: 
     [projects, items, runs, remote, remoteStarting]
   );
   const { shown, hidden } = useMemo(() => splitReach(data === null ? [] : groupRepos(data.repos)), [data]);
-  const open = shown.reduce((n, r) => n + r.total, 0);
+  const open = openPrCount(data);
 
   const [stored, setStored] = usePersistedState<PrLayout>(PR_LAYOUT_KEY, 'inbox');
   const layout = parseLayout(stored);

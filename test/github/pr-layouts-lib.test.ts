@@ -14,6 +14,7 @@ import {
   MATRIX_LABEL,
   matrixCells,
   newestPolledAt,
+  openPrCount,
   openRepoCount,
   parseLayout,
   PR_LAYOUT_OPTIONS,
@@ -546,5 +547,30 @@ describe('needsYouCount', () => {
 
   it('is 0 before anything has answered', () => {
     expect(needsYouCount(null)).toBe(0);
+  });
+});
+
+describe('openPrCount', () => {
+  // Distinct totals per repo (3, 2, 4, 7) so a reading that took one repo's total, or the listed rows instead of `total`, would not pass by coincidence.
+  const x = repo({ repo: 'a/x', total: 3, prs: [row({ number: 1 }), row({ number: 2 }), row({ number: 3 })] });
+  const y = repo({ repo: 'a/y', total: 2, prs: [row({ number: 4 }), row({ number: 5 })] });
+
+  it('is 0 before anything has answered', () => {
+    expect(openPrCount(null)).toBe(0);
+  });
+
+  it("sums every readable repo's total", () => {
+    expect(openPrCount({ token: true, repos: [x, y] })).toBe(5);
+  });
+
+  it('does not count a repo the token cannot read', () => {
+    const forbidden = repo({ repo: 'a/z', access: 'forbidden', detail: 'no', total: 4, prs: [row({ number: 9 })] });
+    expect(openPrCount({ token: true, repos: [x, y, forbidden] })).toBe(5);
+    expect(openPrCount({ token: true, repos: [forbidden] })).toBe(0);
+  });
+
+  it("counts a truncated repo's total, not its listed rows", () => {
+    const big = repo({ repo: 'a/big', total: 7, truncated: true, prs: [row({ number: 10 }), row({ number: 11 })] });
+    expect(openPrCount({ token: true, repos: [big] })).toBe(7);
   });
 });
