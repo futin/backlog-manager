@@ -195,7 +195,8 @@ describe('the check', () => {
 
   it('orders issues by their newest candidate, newest first, and drops an issue with none', async () => {
     mentionIssue('PAY-1', [comment(MARA, 300, ME)]);
-    mentionIssue('PAY-2', [comment(MARA, 100, ME), comment(IVO, 400, ME)]);
+    // Seeded oldest first like every thread here: PAY-2's older mention (400 min) first, then its newer one (100 min) — the one that ranks it.
+    mentionIssue('PAY-2', [comment(IVO, 400, ME), comment(MARA, 100, ME)]);
     mentionIssue('PAY-3', [comment(MARA, 50, ME), { ...comment(MARA, 40), author: { accountId: ME, displayName: 'Ada' } }]);
     await poller.tick();
     expect(poller.mentionsCache().issues.map((i) => i.key)).toEqual(['PAY-2', 'PAY-1']);
@@ -216,10 +217,10 @@ describe('the check', () => {
     for (const url of commentReads()) expect(url).toContain(`orderBy=-created&maxResults=${JIRA_THREAD_MAX}`);
   });
 
-  it('comment read 404 drops the issue, and the rest of the check stands with no detail', async () => {
+  it.each([403, 404])('comment read %i drops the issue, and the rest of the check stands with no detail', async (status) => {
     mentionIssue('PAY-131', [...filler(20, 100), comment(MARA, 10, ME)]);
     mentionIssue('SUP-208', [comment(MARA, 20, ME)]);
-    fake.failNext = ({ url }) => (url.includes('/issue/PAY-131/comment') ? { status: 404, body: { errorMessages: ['Issue does not exist'] } } : null);
+    fake.failNext = ({ url }) => (url.includes('/issue/PAY-131/comment') ? { status, body: { errorMessages: ['Issue does not exist'] } } : null);
     await poller.tick();
     const cache = poller.mentionsCache();
     expect(cache.issues.map((i) => i.key)).toEqual(['SUP-208']);

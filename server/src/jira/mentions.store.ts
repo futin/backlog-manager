@@ -20,7 +20,12 @@ import { JIRA_MENTIONS_WINDOW_DAYS, isJiraKey } from '../../../shared/types';
  *
  * **Prune on every save, never on load.** A dismissal exists to keep a comment out of the list, and the list only looks `JIRA_MENTIONS_WINDOW_DAYS` back, so
  * one whose COMMENT (`created`, not `dismissedAt`) is older than that can never matter again. Pruning at save keeps the file small with no timer, relative to
- * `Date.now()` at that save.
+ * `Date.now()` at that save — plus `PRUNE_GRACE_MS`, because "older than the window" is judged at two different instants. The cache's candidates were
+ * judged at CHECK time and the route proves a dismissal against them; this prune runs at SAVE time. A mention whose `created` crosses `now - 30d` between
+ * the two would pass the proof, be written, and be pruned by the very save that wrote it: the route answers 200 while the ticket stays in `issues` until the
+ * next successful check drops it as out of window — a Dismiss that looks ignored for up to a poll interval, longer while Jira is failing (a failed check
+ * keeps the old rows). A day's grace covers a full poll interval many times over and a day of failed checks besides, and costs at most a day's dismissals
+ * of extra file — nothing the list can show, since applying a dismissal to a comment no cached ticket carries is a no-op.
  *
  * **A write that throws changes nothing in memory**: the next list is built aside, written, and only then swapped in, so the route answering 5xx never leaves
  * the list claiming a dismissal the file does not hold. Validating ids and keys is the route's job; the store trusts its caller's shape.
@@ -28,6 +33,9 @@ import { JIRA_MENTIONS_WINDOW_DAYS, isJiraKey } from '../../../shared/types';
 
 /** The only schema version this code reads or writes. */
 export const JIRA_MENTIONS_VERSION = 1;
+
+/** How far past the window a dismissal is kept before the prune drops it (header: the window is judged at check time, the prune at save time). */
+export const PRUNE_GRACE_MS = 86_400_000;
 
 /** One dismissed mention comment. `created` is the comment's own instant (what the prune reads), `dismissedAt` when the person dismissed it. */
 export interface JiraDismissal {
@@ -121,7 +129,7 @@ export class JiraMentionsStore {
   }
 
   private save(next: JiraDismissal[]): void {
-    const cutoff = Date.now() - JIRA_MENTIONS_WINDOW_DAYS * 86_400_000;
+    const cutoff = Date.now() - JIRA_MENTIONS_WINDOW_DAYS * 86_400_000 - PRUNE_GRACE_MS;
     const kept = next.filter((d) => Date.parse(d.created) >= cutoff);
     const file = jiraMentionsFile();
     if (existsSync(file) && readFile(file).kind === 'bad') renameSync(file, `${file}.bad-${new Date().toISOString()}`);

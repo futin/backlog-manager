@@ -169,31 +169,47 @@ let answer: JiraMentionsConfigured;
 let unreadable: Set<string>;
 // A write the server refuses, by route: the status and the `{ error }` sentence it answers with, the payload untouched.
 let refuse: Partial<Record<'dismiss' | 'restore', { status: number; error: string }>>;
+// A case's own thread for a key, over `THREADS` — so the shared fixture is never mutated.
+let threadOverride: Record<string, JiraThreadPayload>;
+// Holds for the next writes, one per write in order: a write whose hold is set answers only once the case releases it (an answer still out).
+let holds: Promise<void>[];
+
+function hold(): { promise: Promise<void>; release: () => void } {
+  let release!: () => void;
+  const promise = new Promise<void>((r) => (release = r));
+  return { promise, release };
+}
 
 beforeEach(() => {
   localStorage.clear();
   answer = payload();
   unreadable = new Set();
   refuse = {};
+  threadOverride = {};
+  holds = [];
   fetchMock = jest.fn((url: string, init?: RequestInit) => {
     if (url === '/api/jira/mentions' || url === '/api/jira/mentions/sweep') return res(answer);
     if (url === '/api/jira/mentions/dismiss' || url === '/api/jira/mentions/restore') {
-      const refused = refuse[url.endsWith('/dismiss') ? 'dismiss' : 'restore'];
-      if (refused !== undefined) return res({ error: refused.error }, refused.status);
-      const { key } = JSON.parse(init?.body as string) as { key: string };
-      const all = [...answer.issues, ...answer.dismissed];
-      const issue = all.find((i) => i.key === key)!;
-      const rest = (list: JiraMentionIssue[]) => list.filter((i) => i.key !== key);
-      answer =
-        url.endsWith('/dismiss')
-          ? { ...answer, issues: rest(answer.issues), dismissed: [...rest(answer.dismissed), issue] }
-          : { ...answer, issues: [...rest(answer.issues), issue], dismissed: rest(answer.dismissed) };
-      return res(answer);
+      const write = (): Promise<Response> => {
+        const refused = refuse[url.endsWith('/dismiss') ? 'dismiss' : 'restore'];
+        if (refused !== undefined) return res({ error: refused.error }, refused.status);
+        const { key } = JSON.parse(init?.body as string) as { key: string };
+        const all = [...answer.issues, ...answer.dismissed];
+        const issue = all.find((i) => i.key === key)!;
+        const rest = (list: JiraMentionIssue[]) => list.filter((i) => i.key !== key);
+        answer =
+          url.endsWith('/dismiss')
+            ? { ...answer, issues: rest(answer.issues), dismissed: [...rest(answer.dismissed), issue] }
+            : { ...answer, issues: [...rest(answer.issues), issue], dismissed: rest(answer.dismissed) };
+        return res(answer);
+      };
+      const held = holds.shift();
+      return held === undefined ? write() : held.then(write);
     }
     const thread = /^\/api\/jira\/issue\/([^/]+)\/thread$/.exec(url);
     if (thread !== null) {
       const key = decodeURIComponent(thread[1]);
-      return unreadable.has(key) ? res({ error: `${key} is not readable` }, 404) : res(THREADS[key]);
+      return unreadable.has(key) ? res({ error: `${key} is not readable` }, 404) : res(threadOverride[key] ?? THREADS[key]);
     }
     const issue = /^\/api\/jira\/issue\/([^/]+)$/.exec(url);
     if (issue !== null) return res(DETAILS[decodeURIComponent(issue[1])]);
@@ -478,6 +494,140 @@ describe('the mention modal — opened from the Cards', () => {
     await settle();
     expect(posts('restore')).toEqual([{ key: 'OPS-9' }]);
     expect(within(d).getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+  });
+});
+
+describe('the mention modal — the header’s other promises', () => {
+  // Every fixture above focuses a comment AFTER my latest own one; here the focused mention sits inside the fold, so it must open by itself.
+  it('opens the fold by itself when the focused mention is inside it', async () => {
+    threadOverride['SUP-208'] = {
+      key: 'SUP-208',
+      total: 4,
+      truncated: false,
+      comments: [
+        comment('91', 'Mara Ilić', 96, 'Customer reports Lisbon branch bookings show one hour off.'),
+        comment('101', 'Ivo Kranjc', 3, '@Andreja does the BE store it?', { mentionsMe: true, open: true }),
+        comment('93', ME, 2, 'Looking at it.', { mine: true }),
+        comment('95', 'Ines Kovač', 1, '+1, the Porto branch may have the same problem.')
+      ]
+    };
+    const user = userEvent.setup();
+    await openList();
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    expect(focused()).toBe('101');
+    expect(dialog().querySelectorAll('[data-comment-id]')).toHaveLength(4);
+    expect(within(dialog()).queryByRole('button', { name: /earlier comment/ })).toBeNull();
+  });
+
+  it('says the mention is older than the loaded thread when a truncated thread does not hold it, and keeps the Jira link', async () => {
+    threadOverride['SUP-208'] = {
+      key: 'SUP-208',
+      total: 140,
+      truncated: true,
+      comments: [comment('95', 'Ines Kovač', 1, '+1, the Porto branch may have the same problem.'), comment('96', 'Petar Novak', 0.5, 'Same here.')]
+    };
+    const user = userEvent.setup();
+    await openList();
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    expect(focused()).toBeNull();
+    expect(within(dialog()).getByText('This mention is older than the 2 newest comments loaded here — open it in Jira.')).toHaveClass('jira-detail-none');
+    expect(within(dialog()).getByRole('link', { name: 'Reply in Jira' })).toHaveAttribute('href', 'https://acme.atlassian.net/browse/SUP-208?focusedCommentId=101');
+  });
+
+  it('says nothing of the kind on a whole thread that lacks the mention', async () => {
+    threadOverride['SUP-208'] = { key: 'SUP-208', total: 1, truncated: false, comments: [comment('95', 'Ines Kovač', 1, '+1')] };
+    const user = userEvent.setup();
+    await openList();
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    expect(within(dialog()).queryByText(/older than the/)).toBeNull();
+  });
+
+  it('a ticket gone from both lists under the open modal leaves only the link in the footer', async () => {
+    const user = userEvent.setup();
+    await openList();
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    answer = payload({ issues: [PAY], dismissed: [OPS] });
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await settle();
+    const d = dialog();
+    expect(crumbs()).toContain('SUP-208');
+    expect(within(d).getByRole('link', { name: 'Open in Jira' })).toHaveAttribute('href', 'https://acme.atlassian.net/browse/SUP-208?focusedCommentId=101');
+    expect(within(d).queryByRole('button', { name: 'Dismiss' })).toBeNull();
+    expect(within(d).queryByRole('button', { name: 'Restore' })).toBeNull();
+    expect(within(d).queryByText('You have not commented since this mention.')).toBeNull();
+  });
+
+  it('holds Dismiss, then Undo’s Restore, off while its write is out, so a double click cannot post twice', async () => {
+    const dismissHeld = hold();
+    const undoHeld = hold();
+    holds = [dismissHeld.promise, undoHeld.promise];
+    const user = userEvent.setup();
+    await openCards(user);
+    await user.click(within(card('SUP-208')).getByText(SUP.summary));
+    await settle();
+    const d = dialog();
+    await user.click(within(d).getByRole('button', { name: 'Dismiss' }));
+    expect(within(d).getByRole('button', { name: 'Dismiss' })).toBeDisabled();
+    await act(async () => dismissHeld.release());
+    await settle();
+    await settle();
+    await user.click(within(d).getByRole('button', { name: 'Undo' }));
+    // The footer answers the click at once (`dismissedHere` off, the page's answer still dismissed), so the write's control is `Restore` until it lands.
+    expect(within(d).getByRole('button', { name: 'Restore' })).toBeDisabled();
+    await act(async () => undoHeld.release());
+    await settle();
+    await settle();
+    expect(posts('dismiss')).toHaveLength(1);
+    expect(posts('restore')).toHaveLength(1);
+  });
+
+  // Dismiss on SUP-208, Next to PAY-131 before the post answers: SUP-208's refusal must not become PAY-131's alert, nor re-enable PAY-131's Dismiss
+  // while PAY-131's own write is out.
+  it('a write that settles after a step to another ticket touches nothing on the ticket now shown', async () => {
+    refuse.dismiss = { status: 400, error: '101 is not an open mention on SUP-208' };
+    const supHeld = hold();
+    const payHeld = hold();
+    holds = [supHeld.promise, payHeld.promise];
+    const user = userEvent.setup();
+    await openCards(user);
+    await user.click(within(card('SUP-208')).getByText(SUP.summary));
+    await settle();
+    const d = dialog();
+    await user.click(within(d).getByRole('button', { name: 'Dismiss' }));
+    await user.click(within(d).getByRole('button', { name: 'Next mention' }));
+    await settle();
+    expect(crumbs()).toContain('PAY-131');
+    await user.click(within(d).getByRole('button', { name: 'Dismiss' }));
+    expect(within(d).getByRole('button', { name: 'Dismiss' })).toBeDisabled();
+
+    await act(async () => supHeld.release());
+    await settle();
+    expect(within(d).queryByRole('alert')).toBeNull();
+    expect(within(d).getByRole('button', { name: 'Dismiss' })).toBeDisabled();
+
+    await act(async () => payHeld.release());
+    await settle();
+    expect(within(d).getByRole('alert')).toHaveTextContent('101 is not an open mention on SUP-208');
+    expect(within(d).getByRole('button', { name: 'Dismiss' })).toBeEnabled();
+  });
+
+  it('reads both routes again when the same ticket is opened a second time — nothing is cached past the modal', async () => {
+    const user = userEvent.setup();
+    await openList();
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'SUP-208' }));
+    await settle();
+    expect(gets('/api/jira/issue/SUP-208/thread')).toBe(2);
+    expect(gets('/api/jira/issue/SUP-208')).toBe(2);
   });
 });
 

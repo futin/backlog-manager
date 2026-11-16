@@ -1878,7 +1878,7 @@ button.rail-count { cursor: pointer }
 .jira-issues-row:hover .jira-issues-act .jira-run, .jira-issues-row:focus-within .jira-issues-act .jira-run { opacity: 1 }
 @media (hover: none) { .jira-issues-act .jira-run { opacity: 1 } }
 
-/* Jira › Mentions › List (§8.9.1, mock `Main.dc.html`) — the issue table above, re-sized for its own eight columns. The issue table keys its widths by
+/* Jira › Mentions › List (§8.9.7, mock `Main.dc.html`) — the issue table above, re-sized for its own eight columns. The issue table keys its widths by
    position from both ends (its Session-first order), so every column is set again here at one class more of specificity, or Key would inherit Session's 140
    and the actions cell Priority's 116. Comment takes what is left; Summary is a share so a wide screen widens both prose columns. */
 .jira-issues-table.jira-mentions-table thead th:nth-child(1) { width: 108px } /* Key: a twelve-character key at 13 px, as on the issue table. */
@@ -1899,7 +1899,7 @@ button.rail-count { cursor: pointer }
 .jira-mentions-acts { display: inline-flex; align-items: center; gap: 6px; opacity: 0; transition: opacity .12s }
 .jira-mentions-row:hover .jira-mentions-acts, .jira-mentions-row:focus-within .jira-mentions-acts, .jira-mentions-row[data-dismissed] .jira-mentions-acts { opacity: 1 }
 @media (hover: none) { .jira-mentions-acts { opacity: 1 } }
-/* Jira › Mentions › Cards (§8.9.1, mock `ListB.dc.html`): one card per ticket in two columns, one below 1000 px — a CSS step like `.board-columns`' own. */
+/* Jira › Mentions › Cards (§8.9.7, mock `ListB.dc.html`): one card per ticket in two columns, one below 1000 px — a CSS step like `.board-columns`' own. */
 .jira-mentions-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px }
 @media (max-width: 1000px) { .jira-mentions-cards { grid-template-columns: minmax(0, 1fr) } }
 /* font-size: the board `body` sets none, so without it a card's quote and foot read at the browser's 16 px — DESIGN's body text is 13 (ui-verify). */
@@ -1934,13 +1934,16 @@ button.rail-count { cursor: pointer }
 .jira-mentions-card { cursor: pointer }
 .jira-mentions-card-acts { cursor: auto }
 
-/* The mention modal (§8.9.1, mock `ModalA.dc.html`) — `Modal`'s split shape with `lead`, dressed in the Detail dialog's head, labels and panes. What follows
+/* The mention modal (§8.9.7, mock `ModalA.dc.html`) — `Modal`'s split shape with `lead`, dressed in the Detail dialog's head, labels and panes. What follows
    is only what the mock adds: the walk's position and arrows in the head, the thread card, the amber ask block, the footer and the board note. */
 .jira-mention-nav { margin-left: auto; display: inline-flex; align-items: center; gap: 8px }
 .jira-mention-pos { font-size: 12px; color: var(--ink2); white-space: nowrap }
 .jira-mention-thread { background: var(--strip); border-radius: 12px; padding: 4px 16px; min-width: 0 }
 .jira-mention-more { padding: 10px 0; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 500; color: var(--cyan); cursor: pointer; text-align: left }
 .jira-mention-more:hover { text-decoration: underline }
+/* The out-of-thread line (a truncated thread whose focused mention is older than every comment loaded). The mock never draws it, so it takes the fold row's
+   rhythm — the row it stands in for at the top of the card — rather than `.jira-detail-none`'s bare margin, which left it 4 px under the card's edge. */
+.jira-mention-thread > .jira-detail-none { padding: 10px 0 }
 .jira-mention-cm {
   display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 12px; padding: 14px 0; border-bottom: 1px solid var(--hairline);
   scroll-margin: 12px

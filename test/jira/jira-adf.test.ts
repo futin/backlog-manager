@@ -392,9 +392,14 @@ describe('adfToText', () => {
     expect(txt(para(text('a')), para(text('b')))).toBe('a b');
   });
 
-  it('writes an inlineCard as its url and drops media and unknown nodes', () => {
+  it('writes an inlineCard as its url, drops media, and adds nothing for an empty unknown node', () => {
     expect(txt(para({ type: 'inlineCard', attrs: { url: 'https://x.test/1' } }))).toBe('https://x.test/1');
     expect(txt(para(text('a')), { type: 'mediaSingle', content: [{ type: 'media', attrs: { id: 'm' } }] }, { type: 'wat' })).toBe('a');
+  });
+
+  it("walks an unknown node's children rather than dropping it: a node type Jira adds later keeps its words in the excerpt", () => {
+    expect(txt(para(text('a')), { type: 'wat', content: [para(text('kept'))] })).toBe('a kept');
+    expect(txt(para(text('a'), { type: 'wat', content: [text('-b')] }))).toBe('a -b');
   });
 
   it('collapses runs of whitespace and trims', () => {

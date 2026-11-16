@@ -418,9 +418,8 @@ describe('the Mentions row', () => {
     expect(within(row()).getByText('Jira answered 500')).toHaveClass('jira-setup-failure');
   });
 
-  it('posts the mentions sweep once, disables the icon while out, then re-reads the status', async () => {
+  it('posts the mentions sweep, disables the icon while out, then re-reads the status', async () => {
     await open(summary());
-    await user.click(icon());
     await user.click(icon());
     expect(mentionsPosts()).toHaveLength(1);
     expect(icon()).toBeDisabled();
@@ -430,13 +429,78 @@ describe('the Mentions row', () => {
     expect(reloadMock).toHaveBeenCalled();
   });
 
-  it('words a 429 as Jira asked to wait, and a 409 in red as the server said it', async () => {
+  // userEvent never fires a click on a disabled button, so a second `user.click` would pin the attribute and not the guard. Two native clicks inside ONE
+  // act land before React has re-rendered the icon disabled — the window the `mentionsBusy` ref exists for.
+  it('posts once for two clicks that land before the icon disables (the ref guard, not the attribute)', async () => {
+    await open(summary());
+    act(() => {
+      icon().click();
+      icon().click();
+    });
+    expect(mentionsPosts()).toHaveLength(1);
+  });
+
+  it('words a refused 429 press as Jira asked to wait, and holds the icon off until then with that tooltip', async () => {
     await open(summary());
     await user.click(icon());
     await act(async () => answer({ ok: false, status: 429, body: { message: 'rate limited', retryAt: new Date(NOW + 150_000).toISOString() } }));
     expect(within(row()).getByText('Jira asked to wait until 12:02')).toBeInTheDocument();
+    expect(icon()).toBeDisabled();
+    expect(icon()).toHaveAttribute('title', 'Jira asked to wait until 12:02');
+  });
+
+  it('words a refused 409 press in red as the server said it', async () => {
+    await open(summary());
     await user.click(icon());
     await act(async () => answer({ ok: false, status: 409, body: { message: 'Jira is not being polled' } }));
     expect(within(row()).getByText('Jira is not being polled')).toHaveClass('jira-setup-failure');
+    expect(icon()).toBeEnabled();
+  });
+
+  it('reads the wait the server stored, with no press, and holds the icon off with its end as the tooltip', async () => {
+    await open(summary({ retryAt: new Date(NOW + 150_000).toISOString() }));
+    expect(within(row()).getByText('Jira asked to wait until 12:02')).toHaveClass('jira-setup-failure');
+    expect(icon()).toBeDisabled();
+    expect(icon()).toHaveAttribute('title', 'Jira asked to wait until 12:02');
+  });
+
+  it('reads no wait once the stored one has passed', async () => {
+    await open(summary({ retryAt: ago(1_000) }));
+    expect(within(row()).queryByText(/Jira asked to wait/)).toBeNull();
+    expect(icon()).toBeEnabled();
+    expect(icon()).toHaveAttribute('title', 'Check mentions now');
+  });
+
+  it('puts the wait before the detail, and the detail before a refused press', async () => {
+    const { update } = renderChip(status({ mentions: summary({ retryAt: new Date(NOW + 150_000).toISOString(), detail: 'Jira answered 500' }) }));
+    await user.click(chip());
+    expect(within(row()).getByText('Jira asked to wait until 12:02')).toBeInTheDocument();
+    expect(within(row()).queryByText('Jira answered 500')).toBeNull();
+    update(status({ mentions: summary({ detail: 'Jira answered 500' }) }));
+    await user.click(icon());
+    await act(async () => answer({ ok: false, status: 409, body: { message: 'Jira is not being polled' } }));
+    expect(within(row()).getByText('Jira answered 500')).toHaveClass('jira-setup-failure');
+    expect(within(row()).queryByText('Jira is not being polled')).toBeNull();
+  });
+
+  it('holds the icon off under a blocking access, with the access sentence as its tooltip — the page chip does the same', async () => {
+    renderChip(status({ access: 'unauthorized', mentions: summary() }));
+    await user.click(chip());
+    expect(icon()).toBeDisabled();
+    expect(icon()).toHaveAttribute('title', accessPhrase('unauthorized'));
+  });
+
+  it('drops a refused press once a newer check has stamped the summary, and keeps it while the stamp has not moved', async () => {
+    const { update } = renderChip(status({ mentions: summary() }));
+    await user.click(chip());
+    await user.click(icon());
+    await act(async () => answer({ ok: false, status: 409, body: { message: 'Jira is not being polled' } }));
+    expect(within(row()).getByText('Jira is not being polled')).toBeInTheDocument();
+    // The status re-read the press asked for, same stamp: the refusal still describes the cache as it stands.
+    update(status({ mentions: summary() }));
+    expect(within(row()).getByText('Jira is not being polled')).toBeInTheDocument();
+    // A background check has landed since: a fresh age beside the old red would be a stale failure.
+    update(status({ mentions: summary({ polledAt: ago(10_000) }) }));
+    expect(row().querySelector('.jira-chip-board-line')?.textContent).toBe('checked 10 s ago · every 3m');
   });
 });

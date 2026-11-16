@@ -924,6 +924,11 @@ export function defaultModeFor(action: JiraAction, setting: '' | PermissionMode)
  * it), and the two phase 5 added: `skills` (Settings' Dispatch row maps it, and `resolveJiraAction` reads it) and `live` (`runChipState` indexes it) —
  * because a body missing one throws a `TypeError` inside a render, and React unmounts the page when it does. A wrong-shaped ROW degrades to a
  * row that says less instead.
+ *
+ * Since Jira mentions it checks the `mentions` summary too, field by field: the pill popover's Mentions row prints `count` and `detail` as React children
+ * (an object there throws), and `useJira`'s `nextDelay` and the row parse `polledAt` and `retryAt`. `null` (unconfigured, or the check not armed) passes, and
+ * so does an ABSENT slice — a status body from before mentions, which every reader treats as `null` — but a present one of the wrong shape refuses the
+ * answer.
  */
 export function isJiraStatusPayload(value: unknown): value is JiraStatusPayload {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -937,7 +942,22 @@ export function isJiraStatusPayload(value: unknown): value is JiraStatusPayload 
     Array.isArray(p.skills) &&
     isRecord(p.repos) &&
     isRecord(p.live) &&
-    isRecord(p.calls)
+    isRecord(p.calls) &&
+    (p.mentions === undefined || p.mentions === null || isMentionsSummary(p.mentions))
+  );
+}
+
+/** The status payload's `mentions` slice, every field a reader prints or parses (see `isJiraStatusPayload`). */
+function isMentionsSummary(v: unknown): boolean {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const m = v as Record<string, unknown>;
+  const stringOrNull = (x: unknown): boolean => x === null || typeof x === 'string';
+  return (
+    stringOrNull(m.polledAt) &&
+    (m.count === null || typeof m.count === 'number') &&
+    stringOrNull(m.detail) &&
+    stringOrNull(m.retryAt) &&
+    typeof m.truncated === 'boolean'
   );
 }
 

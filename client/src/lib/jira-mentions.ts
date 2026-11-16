@@ -36,12 +36,50 @@ export interface JiraMentionsFailure {
 /**
  * A 200 body is trusted only when it can be drawn: `configured` is the discriminator, and a configured body must carry the two arrays the page maps over.
  * A wrong shape is a failed read, for `isJiraStatusPayload`'s reason — a throw inside a render would unmount the page.
+ *
+ * The check goes down to the ROWS, unlike the board's list (`parseJiraBoardIssues` filters a bad row out): `mentionRows` flat-maps every ticket's `mentions`,
+ * the search lowercases the key, summary, author and excerpt, `mentionIssueType` the type, and the modal counts `boards` — each without a null-safe
+ * expression, so a ticket missing one would throw inside the render this guard exists to protect. A whole answer is refused rather than a row dropped
+ * because the server builds every row in one place; a malformed one means the body is not what this client was built against, and the page says so.
  */
 export function isJiraMentionsPayload(value: unknown): value is JiraMentionsPayload {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const p = value as Record<string, unknown>;
-  if (p.configured === false) return true;
-  return p.configured === true && Array.isArray(p.issues) && Array.isArray(p.dismissed);
+  if (!isRecord(value)) return false;
+  if (value.configured === false) return true;
+  return (
+    value.configured === true &&
+    Array.isArray(value.issues) &&
+    value.issues.every(isMentionIssue) &&
+    Array.isArray(value.dismissed) &&
+    value.dismissed.every(isMentionIssue)
+  );
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** What a List row, a card and the modal's head read of a ticket — see `isJiraMentionsPayload`. */
+function isMentionIssue(v: unknown): boolean {
+  return (
+    isRecord(v) &&
+    typeof v.key === 'string' &&
+    typeof v.summary === 'string' &&
+    typeof v.type === 'string' &&
+    isRecord(v.status) &&
+    Array.isArray(v.boards) &&
+    Array.isArray(v.mentions) &&
+    v.mentions.every(isMention)
+  );
+}
+
+function isMention(v: unknown): boolean {
+  return (
+    isRecord(v) &&
+    typeof v.commentId === 'string' &&
+    typeof v.created === 'string' &&
+    typeof v.excerpt === 'string' &&
+    typeof v.url === 'string' &&
+    isRecord(v.author) &&
+    typeof v.author.name === 'string'
+  );
 }
 
 /** The sentence and wait-end of a refusal body: `{ message }` (the sweep) first, then `{ error }`, then `fallback`. */
@@ -204,16 +242,24 @@ export function matchesMentionSearch(row: JiraMentionRow, search: string): boole
  * The excerpt cut around the user's own `@<me>`, so the cell can draw each one as a tinted chip IN PLACE (spec: "kept where the comment put it, not cut").
  * The server's excerpt words a mention as `@` + Jira's display text (`adfToText`), so a literal `@<me>` is the user's mention; anything else stays text.
  * Case-sensitive on purpose: Jira writes the display text it stored, and `@andreja` typed as plain text is not a mention. No `me` — nothing to mark.
+ *
+ * A match followed by a letter or digit is not one: with `me = "Ana"`, `@Anastasia` is someone else's name that happens to start with the user's. That is
+ * `chipMentions`' own `(?![\p{L}\p{N}])` boundary, so the List's excerpt and the modal's thread cannot disagree about which `@` is the user.
  */
 export function excerptParts(excerpt: string, me: string | null): { text: string; me: boolean }[] {
   if (me === null || me === '') return [{ text: excerpt, me: false }];
   const at = `@${me}`;
   const parts: { text: string; me: boolean }[] = [];
   let from = 0;
-  for (let i = excerpt.indexOf(at); i !== -1; i = excerpt.indexOf(at, from)) {
+  // `seek` runs past a rejected match one character at a time, but past an accepted one whole, so two chips never overlap.
+  for (let seek = 0, i = excerpt.indexOf(at); i !== -1; i = excerpt.indexOf(at, seek)) {
+    if (/^[\p{L}\p{N}]/u.test(excerpt.slice(i + at.length))) {
+      seek = i + 1;
+      continue;
+    }
     if (i > from) parts.push({ text: excerpt.slice(from, i), me: false });
     parts.push({ text: at, me: true });
-    from = i + at.length;
+    from = seek = i + at.length;
   }
   if (from < excerpt.length) parts.push({ text: excerpt.slice(from), me: false });
   return parts;
@@ -260,6 +306,30 @@ export function mentionsWait(retryAt: string | null, now: number, zone: string):
 }
 
 /**
+ * Whether a check-now press can run, for BOTH of its controls — the page's Sync now chip (`mentionsBand`) and the Jira pill popover's Mentions row icon —
+ * so the two cannot disagree about when a press is pointless. Off while a check is out, while a 429's wait is still ahead (the server's stored `retryAt`
+ * first, then a refused press's own, which is known before the next answer has stored it), and under a blocking access; the tooltip names the wait's end or
+ * the access sentence, else `Check mentions now`. `wait` and `blocking` come back too, because the band prints them.
+ */
+export function mentionsCheckGate(input: {
+  checking: boolean;
+  access: JiraAccess | undefined;
+  /** Wait ends in precedence order: the stored one, then a refusal's. */
+  retryAts: readonly (string | null)[];
+  now: number;
+  zone: string;
+}): { wait: string | null; blocking: string | null; disabled: boolean; title: string } {
+  const { checking, access, retryAts, now, zone } = input;
+  let wait: string | null = null;
+  for (const at of retryAts) {
+    wait = mentionsWait(at, now, zone);
+    if (wait !== null) break;
+  }
+  const blocking = access !== undefined && BLOCKING_ACCESS.has(access) ? accessPhrase(access) : null;
+  return { wait, blocking, disabled: checking || wait !== null || blocking !== null, title: wait ?? blocking ?? 'Check mentions now' };
+}
+
+/**
  * The band's whole reading, as the page draws it (spec "The page header says how many are waiting…"; `Sync.dc.html` draws each state):
  *
  * - `lead`, plain: `3 waiting · last 30 days · checked 1 min ago` (`checking…` in place of the age while a check is out), then the 429 sentence while a wait
@@ -291,13 +361,10 @@ export function mentionsBand(input: {
   view?: JiraMentionsView;
 }): MentionsBand {
   const { data, checking, access, error, now, zone, view = 'list' } = input;
-  const wait = mentionsWait(data.retryAt, now, zone) ?? mentionsWait(error?.retryAt ?? null, now, zone);
-  const blocking = access !== undefined && BLOCKING_ACCESS.has(access) ? accessPhrase(access) : null;
+  const { wait, blocking, disabled, title } = mentionsCheckGate({ checking, access, retryAts: [data.retryAt, error?.retryAt ?? null], now, zone });
   // A refused write (409 `Jira is not being polled`, a dismiss 400) or a failed read; a 429 is said by `wait` instead, and only while it is still ahead.
   const refused = error !== null && error.retryAt === null ? error.message : null;
   const fail = blocking ?? data.detail ?? refused;
-  const disabled = checking || wait !== null || blocking !== null;
-  const title = wait ?? blocking ?? 'Check mentions now';
   const tail = data.truncated ? `newest ${JIRA_MENTIONS_ISSUE_CAP} tickets checked` : null;
 
   if (data.polledAt === null) {

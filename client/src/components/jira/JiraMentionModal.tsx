@@ -18,7 +18,7 @@ import { Modal } from '../ui/Modal';
 export type MentionTicketState = 'open' | 'dismissed' | 'gone';
 
 /**
- * DESIGN.md §8.9.1 — the mention modal, thread first (Jira mentions phase 1, Task 10; spec "The mention modal"; mock `ModalA.dc.html` — `ModalB` and
+ * DESIGN.md §8.9.7 — the mention modal, thread first (Jira mentions phase 1, Task 10; spec "The mention modal"; mock `ModalA.dc.html` — `ModalB` and
  * `ModalDraft` were not picked, and the draft-a-reply half is phase 2, so nothing here drafts).
  *
  * **`Modal`'s split shape, thread on the left.** The head is the Detail dialog's (`.jira-detail-head`: type tile, key, type, project, the board badge, the
@@ -43,7 +43,7 @@ export type MentionTicketState = 'open' | 'dismissed' | 'gone';
  * Gone: only the link. Writes are the page's hook's — they never reject, a refusal lands in the band — and each resolves its outcome, because that band is
  * under the scrim: a refusal (`<id> is not an open mention on <KEY>` whenever the page's data is one poll stale) is drawn here as a `role="alert"` line
  * under the footer, the Detail dialog's write-error shape, and an optimistic `dismissedHere` is taken back, so the footer is the one the ticket still has.
- * `busy` keeps a double click from posting twice.
+ * `busy` keeps a double click from posting twice, and a write's outcome lands only while its own ticket is still the one shown.
  *
  * **Every link out is a server-built `url`** (the mention's focused-comment link, the detail's ticket link), opened by `Chip as="a"` in a new tab with no
  * referrer.
@@ -92,15 +92,25 @@ export function JiraMentionModal({
     setBusy(false);
     setRefused(null);
   }
+  // The key the dialog shows NOW and the newest write's number, both read by a write's settle — refs, because the settle closure was made on the render that
+  // sent it (`JiraDetail`'s `keyRef`). A write belongs to the ticket it was made on: Dismiss on A, Next to B before the post answers, and A's outcome must not
+  // run `setBusy(false)` on B (re-enabling B's Dismiss while B's own write is out, which is the double click `busy` exists to stop), nor draw A's refusal
+  // (`<id> is not an open mention on A`) as B's alert, nor put A's `before` back as B's `dismissedHere`. The number covers the walk back (A → B → A): a
+  // second write on A supersedes the first, so only the newest settle may clear `busy`.
+  const keyRef = useRef(issue.key);
+  keyRef.current = issue.key;
+  const writeSeq = useRef(0);
 
   // `here` is the `dismissedHere` the write means to leave behind; set before the post so the footer answers the click at once, and put back on a refusal.
   const write = (run: () => Promise<JiraMentionsWrite>, here: boolean): void => {
     const before = dismissedHere;
+    const key = issue.key;
+    const seq = ++writeSeq.current;
     setBusy(true);
     setRefused(null);
     setDismissedHere(here);
     void run().then((outcome) => {
-      if (!mounted.current) return;
+      if (!mounted.current || keyRef.current !== key || writeSeq.current !== seq) return;
       setBusy(false);
       if (!outcome.ok) {
         setRefused(outcome.message);
@@ -258,6 +268,11 @@ function TicketFacts({ detail, now }: { detail: JiraIssueDetail; now: number }) 
 /**
  * The thread column. The fold opens by itself when the focused mention sits inside it, so a step never lands on a comment the reader cannot see, and the
  * focused comment is scrolled to (`block: 'nearest'`, so a comment already in view does not jump).
+ *
+ * The route returns the newest `JIRA_THREAD_MAX` comments, so on a long thread the focused mention can be older than all of them (`truncated`, and its id is
+ * not among them): nothing can be highlighted or scrolled to, and the fold stays closed. Rather than leave the reader looking for it, a muted line at the top
+ * of the thread says so — the footer's Jira link (the mention's focused-comment `url`) is the way to it. Only on a truncated thread: a missing id on a whole
+ * thread means the comment was deleted since the last check, which the next check settles, and a line there would be a guess.
  */
 function Thread({ thread, focus, asking, me, now }: { thread: JiraThreadPayload; focus: string; asking: boolean; me: string | null; now: number }) {
   const [expanded, setExpanded] = useState(false);
@@ -277,6 +292,9 @@ function Thread({ thread, focus, asking, me, now }: { thread: JiraThreadPayload;
     <>
       <div className="jira-detail-lbl">{`Comments · ${thread.total}`}</div>
       <div className="jira-mention-thread">
+        {focusAt === -1 && thread.truncated && (
+          <p className="jira-detail-none">{`This mention is older than the ${comments.length} newest comment${comments.length === 1 ? '' : 's'} loaded here — open it in Jira.`}</p>
+        )}
         {!open && fold > 0 && (
           <button type="button" className="jira-mention-more" onClick={() => setExpanded(true)}>
             {`Show ${fold} earlier comment${fold === 1 ? '' : 's'}`}

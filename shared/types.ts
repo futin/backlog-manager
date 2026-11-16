@@ -1176,7 +1176,7 @@ export interface JiraStatusPayload {
    * know `$HOME`; the compose stack passes the host's `HOME` through, so the container's `homedir()` is the host's.
    */
   home: string | null;
-  /** The mentions cache's summary; `null` while unconfigured. */
+  /** The mentions cache's summary; `null` while no check is owed — unconfigured, or an `unsupported` site (`mentionsArmed()` false). */
   mentions: JiraMentionsSummary | null;
 }
 

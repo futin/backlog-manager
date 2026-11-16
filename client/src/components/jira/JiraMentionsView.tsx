@@ -28,7 +28,7 @@ import { JiraMentionModal, type MentionTicketState } from './JiraMentionModal';
 const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
 
 /**
- * DESIGN.md §8.9.1 — Jira › Mentions: the comments that @-mention the user and still wait on them (Jira mentions phase 1, Task 8; spec "The page", "Sync now,
+ * DESIGN.md §8.9.7 — Jira › Mentions: the comments that @-mention the user and still wait on them (Jira mentions phase 1, Task 8; spec "The page", "Sync now,
  * two ways"; mocks `Main.dc.html`, band states `Sync.dc.html`).
  *
  * **One read per page mount.** `useJiraMentions` is called here and nowhere under it: the List, and the Cards and the modal after it, take its values as props,

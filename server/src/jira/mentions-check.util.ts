@@ -12,8 +12,8 @@ import { MENTION_SEARCH_FIELDS, judgeComments, mentionsJql, type RawComment } fr
  */
 
 /**
- * A cached ticket: the row's fields, `candidates` every open mention BEFORE dismissals (Task 6 applies those on read), and `mentions` a COPY of that list —
- * a separate array, so a reader that filters `mentions` can never reach the candidates, and `candidates` is read-only in the type besides.
+ * A cached ticket: the row's fields, `candidates` every open mention BEFORE dismissals (`applyDismissals` applies those on read), and `mentions` a COPY of
+ * that list — a separate array, so a reader that filters `mentions` can never reach the candidates, and `candidates` is read-only in the type besides.
  */
 export type JiraMentionCacheIssue = JiraMentionIssue & { readonly candidates: readonly JiraMention[] };
 
@@ -122,11 +122,11 @@ export async function runMentionsCheck(input: MentionsCheckInput): Promise<Menti
 }
 
 /**
- * The dismissals applied on READ (Task 6; spec "Dismiss semantics"): the cache keeps every candidate, so a Dismiss or a Restore that lands while a check is
- * out is honoured the moment the payload is next built — there is no swap to survive. A ticket with any undismissed candidate is in `issues` carrying just
- * those; a ticket whose candidates are all dismissed is in `dismissed` carrying them. Each list is ordered by its own newest mention, newest first — for
- * `issues` that is the newest OPEN one, so a ticket whose newest mention was dismissed sorts by the next. Built from copies: the cache is read-only, and
- * the payload must never carry `candidates`, which is the cache's own field, not the wire shape.
+ * The dismissals applied on READ (spec "Routes and shapes", its Dismiss semantics): the cache keeps every candidate, so a Dismiss or a Restore that lands
+ * while a check is out is honoured the moment the payload is next built — there is no swap to survive. A ticket with any undismissed candidate is in
+ * `issues` carrying just those; a ticket whose candidates are all dismissed is in `dismissed` carrying them. Each list is ordered by its own newest mention,
+ * newest first — for `issues` that is the newest OPEN one, so a ticket whose newest mention was dismissed sorts by the next. Built from copies: the cache
+ * is read-only, and the payload must never carry `candidates`, which is the cache's own field, not the wire shape.
  */
 export function applyDismissals(
   cached: readonly JiraMentionCacheIssue[],

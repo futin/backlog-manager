@@ -7,7 +7,7 @@ import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 
 /**
- * DESIGN.md §8.9.1 — Jira › Mentions › List: one row per open mention, in the Board › List's table language (Jira mentions phase 1, Task 8; spec "The page";
+ * DESIGN.md §8.9.7 — Jira › Mentions › List: one row per open mention, in the Board › List's table language (Jira mentions phase 1, Task 8; spec "The page";
  * mock `Main.dc.html`).
  *
  * **The Board's table, not a second one.** The frame, the scroll box, the 44 px single-line rows, the hover fill and the cell marks are `JiraIssueList`'s

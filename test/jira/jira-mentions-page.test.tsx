@@ -21,11 +21,14 @@ const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 
-/** The next 14:32 UTC strictly after now — a wait end that is always in the future and always prints `14:32` in UTC. */
+/**
+ * The next 14:32 UTC at least a minute after now — a wait end that is always in the future and always prints `14:32` in UTC. The minute is margin: a 14:32
+ * only milliseconds ahead would already be past by the time `mentionsWait` reads it, and the case would go red for a suite run just before 14:32.
+ */
 function next1432(): string {
   const d = new Date();
   d.setUTCHours(14, 32, 0, 0);
-  if (d.getTime() <= Date.now()) d.setUTCDate(d.getUTCDate() + 1);
+  if (d.getTime() <= Date.now() + MIN) d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString();
 }
 
@@ -178,8 +181,8 @@ describe('Jira › Mentions — the List view', () => {
     await user.click(within(ops).getByRole('button', { name: 'Restore' }));
     await settle();
     expect(posts('restore')).toEqual([{ key: 'OPS-9' }]);
-    // The pick is a per-viewer convenience, remembered (spec "The page").
-    expect(localStorage.getItem('backlog-manager.jira-mentions-dismissed')).not.toBeNull();
+    // The pick is a per-viewer convenience, remembered (spec "The page") — the value the click chose, not merely some value.
+    expect(JSON.parse(localStorage.getItem('backlog-manager.jira-mentions-dismissed') ?? 'null')).toBe('shown');
   });
 
   it('Dismiss on a ticket posts every open mention id on it', async () => {
@@ -244,6 +247,39 @@ describe('Jira › Mentions — the List view', () => {
     expect(chip).toHaveAttribute('title', 'Jira asked to wait until 14:32');
   });
 
+  it('a search that matches no row says so, rather than the healthy-empty line', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await settle();
+    await user.type(screen.getByRole('searchbox', { name: 'Search mentions' }), 'no such text');
+    expect(bodyRows()).toHaveLength(0);
+    expect(screen.getByText('No mentions match')).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing waiting/)).toBeNull();
+  });
+
+  it('every read failing reads Mentions unavailable, never an empty list', async () => {
+    fetchMock.mockImplementation(() => res({ error: 'boom' }, 500));
+    const { unmount } = renderPage();
+    await settle();
+    expect(screen.getByText('Mentions unavailable')).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing waiting/)).toBeNull();
+    unmount();
+  });
+
+  it('a refused Dismiss lands in the band’s red beside the rows it left', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await settle();
+    fetchMock.mockImplementation((url: string) =>
+      url === '/api/jira/mentions/dismiss' ? res({ error: '101 is not an open mention on SUP-208' }, 400) : res(answer)
+    );
+    await user.click(within(bodyRows()[0]).getByRole('button', { name: 'Dismiss' }));
+    await settle();
+    const red = within(document.querySelector<HTMLElement>('.ui-band-sub')!).getByText('101 is not an open mention on SUP-208');
+    expect(red).toHaveClass('failing');
+    expect(rowKeys()).toEqual(['SUP-208', 'SUP-208', 'PAY-131']);
+  });
+
   it('Sync now checks mentions only; the List | Cards pick is remembered', async () => {
     const user = userEvent.setup();
     renderPage();
@@ -251,6 +287,9 @@ describe('Jira › Mentions — the List view', () => {
     await user.click(screen.getByRole('button', { name: 'Sync now' }));
     await settle();
     expect(posts('sweep')).toEqual([{}]);
+    // "Only": no other write went out beside it — the site-wide `/api/jira/sweep` is the pill's Sync now, not this page's (spec "Sync now, two ways").
+    const allPosts = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST').map(([u]) => u);
+    expect(allPosts).toEqual(['/api/jira/mentions/sweep']);
     await user.click(screen.getByRole('button', { name: 'Cards' }));
     expect(JSON.parse(localStorage.getItem('backlog-manager.jira-mentions-view') ?? 'null')).toBe('cards');
     expect(document.querySelector('tbody')).toBeNull();

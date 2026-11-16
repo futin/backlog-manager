@@ -720,8 +720,8 @@ describe('the shapes that are not a board', () => {
   });
 });
 
-// The section's pages are switched by the rail's tree alone (spec §6.1, `.claude/rules/board.md` "Settings is three pages…"): the real Board page, drawn
-// through the real `JiraView` inside a `main`, holds no control that restates that choice.
+// The section's pages are switched by the rail's tree alone (spec §6.1, `.claude/rules/board.md` "The Jira section's four pages are switched by the rail's
+// tree…"): the real Board page, drawn through the real `JiraView` inside a `main`, holds no control that restates that choice.
 it('draws no page switch inside main', async () => {
   render(
     <main>

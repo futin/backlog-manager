@@ -129,6 +129,41 @@ describe('useJiraMentions', () => {
     expect(jest.getTimerCount()).toBe(1);
   });
 
+  it('reads the floor for a cache that was never stamped', async () => {
+    fetchMock.mockImplementation(() => res(payload({ polledAt: null })));
+    render(tree());
+    await flush();
+    await advance(JIRA_STATUS_FLOOR_MS - 1);
+    expect(calls()).toBe(1);
+    await advance(1);
+    expect(calls()).toBe(2);
+  });
+
+  // The header's other half of "newest read wins": a POST's answer takes a sequence number, so a GET that was already out when the write was sent cannot
+  // land over the write's newer answer when it finally settles.
+  it('lets a write that settles first retire a read that was in flight before it', async () => {
+    render(tree());
+    await flush();
+    const stale = deferred();
+    fetchMock.mockImplementation((u: string, init?: RequestInit) =>
+      init === undefined ? stale.promise : u === '/api/jira/mentions/dismiss' ? res(payload({ me: 'dismissed' })) : res(payload())
+    );
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(calls()).toBe(2);
+    await act(async () => {
+      await last.dismiss('PAY-1', ['10']);
+    });
+    expect(screen.getByTestId('p')).toHaveTextContent('ok:dismissed');
+    await act(async () => {
+      stale.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload({ me: 'stale' })) } as Response);
+    });
+    await flush();
+    expect(screen.getByTestId('p')).toHaveTextContent('ok:dismissed');
+    expect(jest.getTimerCount()).toBe(1);
+  });
+
   it('keeps the last answer on a failed read, raises error and retries at the floor', async () => {
     render(tree());
     await flush();

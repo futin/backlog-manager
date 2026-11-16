@@ -1,8 +1,9 @@
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { JiraMentionsStore, jiraMentionsFile } from '../../server/src/jira/mentions.store';
+import { JIRA_MENTIONS_WINDOW_DAYS } from '../../shared/types';
+import { JiraMentionsStore, PRUNE_GRACE_MS, jiraMentionsFile } from '../../server/src/jira/mentions.store';
 import * as atomic from '../../server/src/atomic-write.util';
 
 const DAY = 86_400_000;
@@ -20,11 +21,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   jest.restoreAllMocks();
-  try {
-    chmodSync(dir, 0o755);
-  } catch {
-    /* gone */
-  }
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -84,13 +80,29 @@ describe('JiraMentionsStore', () => {
     expect(readdirSync(dir)).toEqual(['jira-mentions.json']);
   });
 
-  it('prunes a dismissal whose comment is older than the window on save', () => {
-    writeFileSync(file, JSON.stringify({ version: 1, dismissed: [entry('old', 'ABC-1', 31), entry('new', 'ABC-1', 29)] }));
+  it('prunes a dismissal whose comment is older than the window plus the grace on save', () => {
+    writeFileSync(file, JSON.stringify({ version: 1, dismissed: [entry('old', 'ABC-1', 32), entry('new', 'ABC-1', 29)] }));
     const s = new JiraMentionsStore();
     expect(s.dismissed()).toHaveLength(2); // a load does not prune
     s.dismiss([entry('x')]);
     expect(s.dismissed().map((d) => d.commentId).sort()).toEqual(['new', 'x']);
     expect(onDisk().dismissed.map((d) => d.commentId).sort()).toEqual(['new', 'x']);
+  });
+
+  it('keeps a dismissal whose comment just crossed the window: the route proved it against a check judged before the crossing', () => {
+    const now = Date.parse('2026-11-16T12:00:00Z');
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const window = JIRA_MENTIONS_WINDOW_DAYS * DAY;
+    const at = (ms: number) => ({ commentId: '', key: 'ABC-1', created: new Date(now - ms).toISOString(), dismissedAt: new Date(now).toISOString() });
+    const s = new JiraMentionsStore();
+    s.dismiss([
+      { ...at(window + 60_000), commentId: 'crossed' }, // a minute past the window: still in the check's candidates, the case the grace exists for
+      { ...at(window + PRUNE_GRACE_MS), commentId: 'edge' }, // exactly at the grace's end: kept
+      { ...at(window + PRUNE_GRACE_MS + 1), commentId: 'gone' } // one ms past it: pruned by the save that wrote it
+    ]);
+    expect(s.isDismissed('crossed')).toBe(true);
+    expect(s.dismissed().map((d) => d.commentId)).toEqual(['crossed', 'edge']);
+    expect(onDisk().dismissed.map((d) => d.commentId)).toEqual(['crossed', 'edge']);
   });
 
   it('restore drops every entry of a key and returns the count; none means 0 and no write', () => {

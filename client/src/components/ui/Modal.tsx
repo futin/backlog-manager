@@ -24,7 +24,7 @@ import { useNarrow } from '../../hooks/useNarrow';
  * closes does not offer. So `Modal` is composed by exactly three surfaces, the
  * backlog item (`board/ItemModal.tsx`), since Jira phase 2 the Jira
  * issue (`jira/JiraDetail.tsx`, §8.9.2), which is the item modal's twin
- * and has no run to show either, and since Jira mentions the mention modal (`jira/JiraMentionModal.tsx`, §8.9.1) — a ticket's comment thread, with no run
+ * and has no run to show either, and since Jira mentions the mention modal (`jira/JiraMentionModal.tsx`, §8.9.7) — a ticket's comment thread, with no run
  * either. A fourth composer is a design change, not a reuse.
  *
  * **It owns the scrim, the exit and the Escape key, and its composers own

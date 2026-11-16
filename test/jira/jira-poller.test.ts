@@ -213,6 +213,9 @@ describe('boot, no boards', () => {
   it('asks the five boot calls once, in order, then the mentions check, and is still armed for mentions', async () => {
     await poller.tick();
     expect(labels()).toEqual(BOOT);
+    // `labels()` leaves the mention calls out; the check is the one search after the boot, with the mentions JQL.
+    expect(fake.calls.filter(isMentionCall).map((c) => (c.body as { jql: string }).jql)).toEqual([MENTIONS_JQL]);
+    expect(fake.calls.findIndex(isMentionCall)).toBe(BOOT.length);
     expect(poller.status()).toMatchObject({
       access: 'ok',
       detail: null,

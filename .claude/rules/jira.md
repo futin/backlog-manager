@@ -41,7 +41,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   armed at bootstrap while all three keys are set and the site is not `unsupported` — whatever the boards say, because the mentions check is owed every
   `JIRA_MENTIONS_POLL_MS` and needs no board, so a site with no boards, or every board `off`, keeps its chain (`mentionsArmed()`; `owed()` is the same test on
   the boot's `access`). `unsupported` is final and disarms; unconfigured makes no call. Which board is DUE is still the board rules' question (a syncing
-  board, one owed its cold sweep, a forced one) and no longer the chain's. The rule is judged at the end of every sweep against `jira.json` read again there. `skills/jira/tools/jira.mjs` dials `http://127.0.0.1:${BM_API_PORT || 4322}` and nothing else — `jira.mjs
+  board, one owed its cold sweep, a forced one) and no longer the chain's. The rule is judged at the end of every sweep, after its awaits, on the boot's
+  `access` alone — `owed()` reads neither `jira.json` nor the env (the sweep checked the env at its start), so no board can change it. `skills/jira/tools/jira.mjs` dials `http://127.0.0.1:${BM_API_PORT || 4322}` and nothing else — `jira.mjs
   link|unlink <KEY>` POST `{ key, sessionId }` to `/api/agents/jira-link|jira-unlink`, the session id read from `CLAUDE_CODE_SESSION_ID` (unset is exit `1`,
   nothing sent) — reads no `BM_JIRA_*` and sends no `authorization` header; the source guard in `jira.test.mjs` (comment lines stripped) holds all three. Its
   one allowed `BM_JIRA_` name is `BM_JIRA_FETCH_RETRY_MS`, `worktree`'s pause before its one fetch retry (default 1 000 ms) — a test knob, carrying nothing of

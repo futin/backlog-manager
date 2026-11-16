@@ -6,7 +6,7 @@ import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 
 /**
- * DESIGN.md §8.9.1 — Jira › Mentions › Cards: one card per ticket (Jira mentions phase 1, Task 9; spec "The page", Cards; mock `ListB.dc.html`).
+ * DESIGN.md §8.9.7 — Jira › Mentions › Cards: one card per ticket (Jira mentions phase 1, Task 9; spec "The page", Cards; mock `ListB.dc.html`).
  *
  * **One card per TICKET, quoting the newest mention.** `mentionCards` groups the page's visible rows (the search only picks which tickets show); the quote is
  * the newest open comment by `created` ("Mara Ilić asked you · 2 h ago" over the excerpt, every `@<me>` the List's tinted chip), and `+N earlier mention(s)`

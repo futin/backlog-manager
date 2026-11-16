@@ -65,7 +65,10 @@ import { authorOf, judgeComments, mentionsUser } from './mentions.util';
  *
  * The payload and the status summary are DERIVED on read: the cache keeps every candidate, and `applyDismissals` filters a copy against the store each
  * time, so a Dismiss that lands while a check is out cannot be undone by that check's swap. The manual check (`mentionsSweepNow`) does NOT go through
- * `tick()` — boards are not swept, and its calls are a route's, discarded by the next tick's `takeCalls()` like any fresh read's. It shares exactly three
+ * `tick()` — boards are not swept, and its calls are a route's, never the CALLS meter's: between ticks the next tick's opening `takeCalls()` discards them
+ * like any fresh read's, and while a tick IS in flight (the client's counter is one number for the process) its `refuse` hook counts each call it sends
+ * into `pressCalls`, which that tick subtracts from its own figure — counted at the hook because the hook is asked synchronously right before the call,
+ * so no tick can open or close between the two. It shares exactly three
  * things with the tick-borne check: the in-flight join (`checkMentions`), the `SWEEP_FLOOR_MS` floor (measured from `mentionsEndAt`, whichever caller ran
  * the check), and the cadence (starting a check stamps the attempt, so a press puts the next background check 3 minutes after it). Its failures get the
  * check's own verdicts (`runMentions`: 401/429 to the site, anything else to the mentions `detail`); it then `wake()`s the chain, as `routeFailed` does, so
@@ -171,7 +174,7 @@ export interface MentionsCache {
   polledAt: string | null;
   detail: string | null;
   truncated: boolean;
-  /** Read-only to every reader: Task 6 filters a COPY on read, never these arrays in place (an in-place filter would eat the candidates). */
+  /** Read-only to every reader: `applyDismissals` filters a COPY on read, never these arrays in place (an in-place filter would eat the candidates). */
   readonly issues: readonly JiraMentionCacheIssue[];
 }
 
@@ -257,16 +260,21 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private forceSeq = 0;
   /** The calls the last sweep made, for the chip's CALLS meter (§6). */
   private sweepCalls = 0;
+  /**
+   * Calls a `mentionsSweepNow` check sent since the running tick's opening `takeCalls()` — the press's, not the tick's, so the tick subtracts them (header,
+   * "The mentions routes"). Reset at every tick's start; a press between ticks only grows it until the next start resets it with the counter it shadows.
+   */
+  private pressCalls = 0;
   /** When the last sweep finished, for `SWEEP_FLOOR_MS`. `null` until one has. */
   private lastSweepEndAt: number | null = null;
   private last429At: string | null = null;
   /** The mentions check's last good answer, plus why the latest check (if it failed) is not newer. Replaced whole on success (`checkMentions`). */
   private mentions: MentionsCache = { polledAt: null, detail: null, truncated: false, issues: [] };
-  /** The check running now, tick-borne or not: a second caller joins it rather than sending a second search (header; Task 6's manual check joins too). */
+  /** The check running now, tick-borne or not: a second caller joins it rather than sending a second search (header; `mentionsSweepNow` joins too). */
   private mentionsInFlight: Promise<void> | null = null;
   /** When the last check STARTED — the cadence runs from the attempt, not the success. `null` until one has: due at once after boot. */
   private mentionsAttemptAt: number | null = null;
-  /** When the last check ended, for a manual check's `SWEEP_FLOOR_MS` (Task 6). `null` until one has. */
+  /** When the last check ended, for `mentionsSweepNow`'s `SWEEP_FLOOR_MS` (spec "Sync now, two ways"). `null` until one has. */
   private mentionsEndAt: number | null = null;
   /** The site sweep asked for a check now (`sweepNow`). `mentionsDue` honours it; starting a check spends it, whatever the check then answers. */
   private mentionsForced = false;
@@ -397,7 +405,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     if (this.mentionsEndAt !== null && now - this.mentionsEndAt < SWEEP_FLOOR_MS) return { kind: 'done' };
     const gate = this.gate();
     if ('refused' in gate || !this.boot.answered()) return { kind: 'done' };
-    await this.checkMentions(gate.auth);
+    await this.checkMentions(gate.auth, true);
     this.wake();
     return { kind: 'done' };
   }
@@ -504,20 +512,23 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     const res = await this.client.comments(gate.auth, key, JIRA_THREAD_MAX);
     if (!ok(res)) return this.routeFailed(res);
     // The endpoint answers newest first (`orderBy=-created`, so the cap keeps the newest); the modal reads a conversation, oldest first.
-    const comments = rawComments(res.data?.comments).reverse();
+    const page = Array.isArray(res.data?.comments) ? res.data.comments : [];
+    const comments = rawComments(page).reverse();
     const dismissed = this.dismissedPredicate();
     const open = new Set(
       judgeComments({ comments, me: me.accountId, site: gate.auth.site, key, now: Date.now(), windowDays: JIRA_MENTIONS_WINDOW_DAYS })
         .map((m) => m.commentId)
         .filter((id) => !dismissed(id))
     );
-    const total = typeof res.data?.total === 'number' ? res.data.total : comments.length;
+    // `truncated` is Jira's `total` against the page Jira SENT, not against `comments`: `rawComments` skips an entry with no string id or `created`, and a
+    // thread returned whole must not read as cut short because one of its entries was unreadable.
+    const total = typeof res.data?.total === 'number' ? res.data.total : page.length;
     return {
       ok: true,
       value: {
         key,
         total,
-        truncated: total > comments.length,
+        truncated: total > page.length,
         comments: comments.map((c) => ({
           id: c.id,
           author: authorOf(c),
@@ -565,7 +576,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     return this.inWindow(now) ? iso(this.boot.retryAt!) : null;
   }
 
-  /** The mentions cache as the last check left it — candidates, NOT dismissal-filtered; Task 6 derives the payload from it on read, never in place. */
+  /** The mentions cache as the last check left it — candidates, NOT dismissal-filtered; `applyDismissals` derives the payload from it on read, in a copy. */
   mentionsCache(): Readonly<MentionsCache> {
     return this.mentions;
   }
@@ -865,10 +876,12 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
 
     // The calls the routes made since the last tick are not this sweep's.
     this.client.takeCalls();
+    this.pressCalls = 0;
     try {
       await this.run(env, config, seen);
     } finally {
-      this.sweepCalls = this.client.takeCalls();
+      // Nor are a mentions press's made WHILE it ran (header): the client's counter cannot tell them apart, so the press counted its own.
+      this.sweepCalls = Math.max(0, this.client.takeCalls() - this.pressCalls);
     }
     // Judged after the awaits — see the header: a boot that turned out `unsupported` mid-sweep stops the chain here.
     if (this.owed()) this.schedule();
@@ -895,6 +908,12 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       }
     }
     // After the boards, whatever they answered (header): the step applies the window and boot gate itself, so a board 5xx no longer starves it.
+    //
+    // Riding the tick has a latency cost, accepted on purpose: the check holds `inFlight` for its whole run — one search plus, worst case, a hundred
+    // sequential thread reads (every kept ticket with more than the inline 20 comments). A `boardSaved` landing meanwhile waits behind it, can reach its
+    // `JIRA_SAVE_SWEEP_WAIT_MS` cap, and answers the save with the new board not yet swept; the sweep still follows the moment the check ends, so this is a
+    // slower first fill, never a lost one. The usual check is one call and a few reads, and the alternative — a second chain beside the tick — would split
+    // the one gate, the one 429/401 handling and the one CALLS figure this file keeps in one place.
     if (this.mentionsDue(Date.now())) await this.checkMentions(auth);
   }
 
@@ -928,11 +947,12 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   }
 
   /**
-   * One mentions check, or the one already running — the in-flight join `tick()` gives the board sweep, kept separately because Task 6's manual check runs
-   * it outside a tick. Starting OR joining one spends `mentionsForced`; starting one stamps the attempt (the cadence); ending one stamps `mentionsEndAt`
-   * (the floor). Never rejects: an unexpected throw is a failed check, recorded as its detail, and must not take the tick's successor with it.
+   * One mentions check, or the one already running — the in-flight join `tick()` gives the board sweep, kept separately because `mentionsSweepNow` runs it
+   * outside a tick. Starting OR joining one spends `mentionsForced`; starting one stamps the attempt (the cadence); ending one stamps `mentionsEndAt`
+   * (the floor). Never rejects: an unexpected throw is a failed check, recorded as its detail, and must not take the tick's successor with it. `byPress` is
+   * whoever STARTS the check: a tick that joins a press's check adds none of its calls to its figure, and a press that joins a tick's leaves them there.
    */
-  private checkMentions(auth: JiraAuth): Promise<void> {
+  private checkMentions(auth: JiraAuth, byPress = false): Promise<void> {
     if (this.mentionsInFlight !== null) {
       // The running check IS the answer to a force raised while it was out: leaving the flag set would send a second search on the next 15 s tick.
       this.mentionsForced = false;
@@ -940,7 +960,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     }
     this.mentionsAttemptAt = Date.now();
     this.mentionsForced = false;
-    const running = this.runMentions(auth)
+    const running = this.runMentions(auth, byPress)
       .catch((err: unknown) => {
         this.mentions = { ...this.mentions, detail: err instanceof Error ? err.message : 'mentions check failed' };
       })
@@ -952,7 +972,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     return running;
   }
 
-  private async runMentions(auth: JiraAuth): Promise<void> {
+  /** `byPress`: started by `mentionsSweepNow`, so every call it sends is counted into `pressCalls` rather than left in a tick's figure (header). */
+  private async runMentions(auth: JiraAuth, byPress: boolean): Promise<void> {
     const me = this.boot.me;
     if (me === null) return;
     // Read once for the whole check, not once per ticket: up to a hundred tickets ask it, and none of them needs a fresher copy than the check's start.
@@ -963,10 +984,15 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       me: me.accountId,
       now: Date.now(),
       boardsOf: (key) => this.boardNamesHolding(key, config),
-      refuse: () => (this.inWindow(Date.now()) ? synthetic(429, null) : null)
+      refuse: () => {
+        if (this.inWindow(Date.now())) return synthetic(429, null);
+        // Answering null means the call goes out synchronously after this — the one point both counters move together.
+        if (byPress) this.pressCalls += 1;
+        return null;
+      }
     });
     if (result.ok) {
-      // Swapped whole, dismissals NOT applied — Task 6 applies them on read, so a Dismiss that landed while this check was out survives the swap.
+      // Swapped whole, dismissals NOT applied — `applyDismissals` applies them on read, so a Dismiss that landed while this check was out survives the swap.
       this.mentions = { polledAt: iso(Date.now()), detail: null, truncated: result.truncated, issues: result.issues };
       return;
     }

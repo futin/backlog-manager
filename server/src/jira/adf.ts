@@ -291,7 +291,9 @@ function textOf(node: AdfNode, depth: number): string {
       return ' ';
     default:
       // Inline children concatenate as written (`@Mara` + `, can you`, or a word split by a bold mark, must not gain a space); a BLOCK child is set off by
-      // spaces so a block boundary is a word boundary. The caller collapses the runs.
+      // spaces so a block boundary is a word boundary. The caller collapses the runs. This is also the branch an UNKNOWN node type lands in, and it walks
+      // that node's children rather than dropping them, on purpose: a node Jira adds later (a new panel or layout kind) usually wraps a person's words, and
+      // an excerpt missing them reads as a blank or half a sentence. Only `TEXT_DROPPED`, which has no words, is dropped by name.
       return childrenOf(node)
         .map((c) => (typeof c.type === 'string' && INLINE_TYPES.has(c.type) ? textOf(c, depth + 1) : ` ${textOf(c, depth + 1)} `))
         .join('');

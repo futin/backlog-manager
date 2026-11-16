@@ -342,10 +342,19 @@ describe('POST /api/jira/mentions/sweep', () => {
     expect(mentionSearches()).toBe(2);
   });
 
-  it('two concurrent presses make one search', async () => {
+  it('two concurrent presses make one search: the second joins the first while it is still out', async () => {
     await build();
+    const presses = jest.spyOn(poller, 'mentionsSweepNow');
     pastFloor();
-    await Promise.all([check().expect(200), check().expect(200)]);
+    // Parked until BOTH presses have reached the poller, so the second cannot be answered by the floor after the first ended: only the join answers it.
+    const release = fake.holdNextSearch();
+    const first = check().then((r) => r);
+    await until(() => mentionSearches() === 2);
+    const second = check().then((r) => r);
+    await until(() => presses.mock.calls.length === 2);
+    release();
+    expect((await first).status).toBe(200);
+    expect((await second).status).toBe(200);
     expect(mentionSearches()).toBe(2);
   });
 
@@ -411,6 +420,28 @@ describe('POST /api/jira/mentions/sweep', () => {
     await check().expect(200);
     expect(mentionSearches()).toBe(2);
     expect((await http().get('/api/jira').expect(200)).body.calls.sweep).toBe(sweep);
+  });
+
+  it("leaves the CALLS meter alone when the press lands while a tick's board sweep is out", async () => {
+    await build({ boards: [BOARD_ON] });
+    now += JIRA_POLL_MS + 61_000; // the 1m board is due; the mentions check is not (the boot's was under 180 s ago)
+    const before = fake.calls.length;
+    const release = fake.holdNextSearch();
+    const tick = poller.tick();
+    // The tick's first call is the board's search, parked: everything the press sends below lands while this tick is in flight.
+    await until(() => fake.calls.length > before);
+    const tickCallsBeforePress = fake.calls.length - before;
+    const pressStart = fake.calls.length;
+    pastFloor();
+    await check().expect(200);
+    const pressCalls = fake.calls.length - pressStart;
+    expect(pressCalls).toBeGreaterThan(0);
+    const afterPress = fake.calls.length;
+    release();
+    await tick;
+    const tickCalls = tickCallsBeforePress + (fake.calls.length - afterPress);
+    // The tick's figure is the tick's own calls, none of the press's — though the client's one counter saw both.
+    expect((await http().get('/api/jira').expect(200)).body.calls.sweep).toBe(tickCalls);
   });
 
   it('is refused by the guard from another origin, as dismiss and restore are', async () => {
@@ -489,6 +520,15 @@ describe('GET /api/jira/issue/:key/thread', () => {
     const res = await http().get('/api/jira/issue/SUP-400/thread').expect(200);
     expect(res.body).toMatchObject({ total: 101, truncated: true });
     expect(res.body.comments).toHaveLength(100);
+  });
+
+  it('is not truncated when Jira returned the whole thread but one entry was unreadable', async () => {
+    await build();
+    // An entry with no string id: `rawComments` skips it, so the modal shows 1 — but Jira sent all 2 it counts, which is not a cut thread.
+    fake.addComments('SUP-400', [{ ...comment(IVO, 45, false), id: undefined } as unknown as SeededComment]);
+    const res = await http().get('/api/jira/issue/SUP-400/thread').expect(200);
+    expect(res.body).toMatchObject({ total: 2, truncated: false });
+    expect(res.body.comments).toHaveLength(1);
   });
 
   it('a 404 or a 403 on the comment read is 404 "<KEY> is not readable"', async () => {

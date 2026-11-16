@@ -1,3 +1,4 @@
+import { JIRA_MENTIONS_EXCERPT_CHARS } from '../../shared/types';
 import { excerptOf, judgeComments, mentionsJql, mentionsUser, MENTION_SEARCH_FIELDS, type RawComment } from '../../server/src/jira/mentions.util';
 
 /* `now` is a pure-function input here, not a jsdom fixture, so absolute instants are the clearer fixture (the clock guard scopes to .tsx). */
@@ -94,5 +95,13 @@ describe('mentionsJql / excerptOf', () => {
   });
   it('does not cut a short one', () => {
     expect(excerptOf(doc(text('hello  world')))).toBe('hello world');
+  });
+  it('keeps text of exactly JIRA_MENTIONS_EXCERPT_CHARS whole, and cuts one character more', () => {
+    const exact = `${'a'.repeat(JIRA_MENTIONS_EXCERPT_CHARS - 2)} b`;
+    expect(exact).toHaveLength(JIRA_MENTIONS_EXCERPT_CHARS);
+    expect(excerptOf(doc(text(exact)))).toBe(exact);
+    const over = `${'a'.repeat(JIRA_MENTIONS_EXCERPT_CHARS - 1)} b`;
+    expect(over).toHaveLength(JIRA_MENTIONS_EXCERPT_CHARS + 1);
+    expect(excerptOf(doc(text(over)))).toBe(`${'a'.repeat(JIRA_MENTIONS_EXCERPT_CHARS - 1)}…`);
   });
 });

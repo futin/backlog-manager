@@ -113,7 +113,7 @@ own age and cadence, and its failure in red. Its count is tickets waiting, the r
 <sc-if value="{{chipEnabled}}" hint-placeholder-val="{{true}}"><button type="button" class="chip" onClick="{{syncMentions}}"><svg class="{{rowIcon}}" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-4M4 4v4h4M4 13a8 8 0 0 0 14.9 4M20 20v-4h-4"></path></svg>Sync now</button></sc-if><sc-if value="{{chipDisabled}}" hint-placeholder-val="{{false}}"><button type="button" class="chip" disabled title="{{chipTitle}}"><svg class="{{rowIcon}}" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-4M4 4v4h4M4 13a8 8 0 0 0 14.9 4M20 20v-4h-4"></path></svg>Sync now</button></sc-if>
 </div>
 </header>
-<p class="cap">The band's Sync now checks mentions only (<code>POST /api/jira/mentions/sweep</code>); boards are not swept. A press while a check is out joins it.
+<p class="cap">The band's Sync now checks mentions only (<code>POST /api/jira/mentions/sweep</code>); boards are not swept. While a check is out, or a wait is open, the chip is disabled (the wait's end is its tooltip), so there is nothing to join.
 In a 429 window the chip is disabled and its tooltip names the end. The sub-line keeps the Board's shape — count · window · age, then a failure in red and
 <i>newest 100 tickets checked</i> when truncated.</p>
 </section>
@@ -130,12 +130,12 @@ class Component extends DCLogic {
     const on = (k) => (st === k ? 'on' : '');
     const busy = st === 'busy';
     const lead = {
-      ok: '4 waiting · last 30 days · checked 1 min ago',
-      busy: '4 waiting · last 30 days · checking…',
+      ok: '3 tickets waiting · last 30 days · checked 1 min ago',
+      busy: '3 tickets waiting · last 30 days · checking…',
       first: 'checking for the first time…',
-      fail: '4 waiting · last 30 days · checked 7 min ago',
-      wait: '4 waiting · last 30 days · checked 2 min ago · Jira asked to wait until 14:32',
-      trunc: '6 waiting · last 30 days · checked 1 min ago · newest 100 tickets checked'
+      fail: '3 tickets waiting · last 30 days · checked 7 min ago',
+      wait: '3 tickets waiting · last 30 days · checked 2 min ago · Jira asked to wait until 14:32',
+      trunc: '5 tickets waiting · last 30 days · checked 1 min ago · newest 100 tickets checked'
     }[st];
     const pop = {
       ok: 'checked 1 min ago · every 3m',

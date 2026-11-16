@@ -12,7 +12,7 @@ import { useTimeZone } from '../hooks/TimeZoneContext';
 import { errorOf, postJson } from '../lib/http';
 import { accessPhrase, boardsByName, failurePhrase, initialsOf, polledPhrase } from '../lib/jira';
 import { TONE_WORD, fastestInterval, jiraDown, newestAge, serviceTone } from '../lib/service-status';
-import { checkedAge, mentionsWait, sweepJiraMentions } from '../lib/jira-mentions';
+import { checkedAge, mentionsCheckGate, sweepJiraMentions } from '../lib/jira-mentions';
 import { pollAge } from '../lib/tracker';
 import type { JiraPage } from '../lib/jira-page';
 import type { Section } from '../lib/sections';
@@ -88,9 +88,17 @@ export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSet
 
   // The Mentions row's press, held here for the boards' reason: closing the popover mid-check and opening it again must still spin. The refusal carries
   // `retryAt` so a 429 reads `Jira asked to wait until HH:MM` even before the next status answer has stored the wait.
+  //
+  // It also carries the summary's `polledAt` as the press saw it, and is drawn only while the status still says that: a refused press (409, a network
+  // failure) is about the cache as it stood then, and once a background check has stamped a newer `polledAt` the row reads `checked 10 s ago`, so a red
+  // `Jira is not being polled` beside it would be a stale failure next to a fresh age. Compared by value rather than as instants: the stamp is the
+  // server's clock and the press time would be this browser's, and skew between the two must not decide it. A failed check stamps too, and its own
+  // `detail` then says what went wrong, so nothing is lost by stepping aside.
   const [mentionsOut, setMentionsOut] = useState(false);
-  const [mentionsRefused, setMentionsRefused] = useState<{ message: string; retryAt: string | null } | null>(null);
+  const [mentionsRefused, setMentionsRefused] = useState<MentionsRefusal | null>(null);
   const mentionsBusy = useRef(false);
+  const polledAtNow = useRef<string | null>(null);
+  polledAtNow.current = data?.mentions?.polledAt ?? null;
   const sweepMentions = useCallback((): void => {
     if (mentionsBusy.current) return;
     mentionsBusy.current = true;
@@ -100,7 +108,7 @@ export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSet
       mentionsBusy.current = false;
       if (!mounted.current) return;
       setMentionsOut(false);
-      if (!answer.ok) setMentionsRefused({ message: answer.failure.message, retryAt: answer.failure.retryAt });
+      if (!answer.ok) setMentionsRefused({ message: answer.failure.message, retryAt: answer.failure.retryAt, polledAt: polledAtNow.current });
       reload();
     });
   }, [reload]);
@@ -112,6 +120,7 @@ export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSet
 
   const tone = serviceTone({ down: jiraDown(data.access), rows: data.boards, limited: data.access === 'rate-limited' }, now);
   const age = newestAge(data.boards, now);
+  const pressRefusal = mentionsRefused !== null && mentionsRefused.polledAt === (data.mentions?.polledAt ?? null) ? mentionsRefused : null;
 
   return (
     <div className="tracker-chip-root">
@@ -138,7 +147,7 @@ export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSet
           refused={refused}
           onSweep={sweep}
           mentionsOut={mentionsOut}
-          mentionsRefused={mentionsRefused}
+          mentionsRefused={pressRefusal}
           onSweepMentions={sweepMentions}
           onOpenSetup={
             onOpenSetup === undefined
@@ -153,6 +162,13 @@ export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSet
       )}
     </div>
   );
+}
+
+/** A refused Mentions press: the server's sentence, a 429's wait end, and the summary's `polledAt` when it was refused (see `sweepMentions`). */
+interface MentionsRefusal {
+  message: string;
+  retryAt: string | null;
+  polledAt: string | null;
 }
 
 /** A copy of `map` without `key` — the same map back when it holds no such key, so a `now` on a board that was never refused re-renders nothing. */
@@ -192,7 +208,7 @@ function JiraPopover({
   refused: ReadonlyMap<string, string>;
   onSweep: (id: string) => void;
   mentionsOut: boolean;
-  mentionsRefused: { message: string; retryAt: string | null } | null;
+  mentionsRefused: MentionsRefusal | null;
   onSweepMentions: () => void;
   onOpenSetup: (() => void) | undefined;
   onClose: () => void;
@@ -203,12 +219,14 @@ function JiraPopover({
   const every = fastestInterval(data.boards);
   const last429 = pollAge(data.calls.last429At, now);
   const { zone } = useTimeZone();
-  // The Mentions row reads the status payload's own summary (`null` while unconfigured, so no row) and never `useJiraMentions`, whose GET poller the
-  // app-wide chip must not arm. Red text, in the order a person can act on it: the wait still ahead, Jira's own detail, then a refused press.
-  const m = data.mentions;
+  // The Mentions row reads the status payload's own summary (`null` while unconfigured, so no row; absent from a body older than mentions, read the same)
+  // and never `useJiraMentions`, whose GET poller the app-wide chip must not arm. Red text, in the order a person can act on it: the wait still ahead, Jira's
+  // own detail, then a refused press. The icon is gated by `mentionsCheckGate`, the page's Sync now chip's own rule, so the two controls are off together —
+  // during an open 429 wait and under a blocking access — with the same tooltip; a press there would only be refused.
+  const m = data.mentions ?? null;
   const mentionsAge = m === null ? null : checkedAge(m.polledAt, now);
-  const mentionsFail =
-    m === null ? null : (mentionsWait(m.retryAt, now, zone) ?? mentionsWait(mentionsRefused?.retryAt ?? null, now, zone) ?? m.detail ?? (mentionsRefused !== null && mentionsRefused.retryAt === null ? mentionsRefused.message : null));
+  const gate = mentionsCheckGate({ checking: mentionsOut, access: data.access, retryAts: [m?.retryAt ?? null, mentionsRefused?.retryAt ?? null], now, zone });
+  const mentionsFail = m === null ? null : (gate.wait ?? m.detail ?? (mentionsRefused !== null && mentionsRefused.retryAt === null ? mentionsRefused.message : null));
 
   return (
     <Popover label="Jira" width={330} anchor={anchor} onClose={onClose}>
@@ -282,7 +300,7 @@ function JiraPopover({
               {m.truncated && ` · newest ${JIRA_MENTIONS_ISSUE_CAP} tickets checked`}
             </span>
           </span>
-          <button type="button" className="tracker-sync" aria-label="Check mentions now" title="Check mentions now" disabled={mentionsOut} onClick={onSweepMentions}>
+          <button type="button" className="tracker-sync" aria-label="Check mentions now" title={gate.title} disabled={gate.disabled} onClick={onSweepMentions}>
             <span className="jira-mentions-spin" data-on={mentionsOut ? '' : undefined}>
               <Glyph name="refresh" />
             </span>

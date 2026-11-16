@@ -67,6 +67,10 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 | `links.store.ts`     | the link store's file I/O — `loadLinks`, `saveLinks`, `jiraLinksFile` (`~/.backlog-manager/settings/jira-links.json`, `BM_JIRA_LINKS_FILE`); no rule about what is kept |
 | `jira.controller.ts` | the ten read routes (six, phase 5's `GET /prompt`, the repo/branch work's `GET /refs` and `GET /worktrees`, and the sessions page's `GET /sessions`) |
 | `jira-write.controller.ts` | the ten POST routes — six config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work), the two sweeps that write nothing (`/sweep`, `/boards/sweep`) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
+| `mentions.controller.ts` | the mentions routes: `GET /mentions`, `GET /issue/:key/thread` and the three POSTs `/mentions/sweep`, `/mentions/dismiss`, `/mentions/restore` (→ [Mentions](#mentions-jira-mentions-phase-1-spec)) |
+| `mentions-check.util.ts` | the pure judge of one ticket's comments: is an open mention the user's own, newer than their latest comment, not dismissed |
+| `mentions.util.ts` | the mentions' shared shapes and helpers (the excerpt, the ADF walk's output, the summary) |
+| `mentions.store.ts` | the dismissals file's I/O (`~/.backlog-manager/settings/jira-mentions.json`); the server is its one writer, no skill reads it |
 | `jira.module.ts`     | `JiraModule` — the two controllers, the poller, the client (a factory value, the one place a suite swaps in a fake `fetch`) and since phase 5a `JiraLiveService`, all three exported for `AgentsModule` to import, never the reverse |
 
 `agents/` holds the other half of Run, in `jira-agents.controller.ts` (five POSTs: `dispatch-jira`, `jira-stop`, `jira-link`, `jira-unlink` and

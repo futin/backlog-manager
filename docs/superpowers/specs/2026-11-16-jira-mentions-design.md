@@ -190,7 +190,7 @@ posting (rejected — the user then approves in two places, and a headless run h
 1. JQL `comment ~ <jqlString(me.accountId)> AND updated >= -<JIRA_MENTIONS_WINDOW_DAYS>d ORDER BY updated DESC`, fields `summary`, `status`, `issuetype`,
    `comment`, `updated`, paged by `nextPageToken` at 100, capped at `JIRA_MENTIONS_ISSUE_CAP` (100 issues; `truncated` on the payload when it bites, shown in
    the header).
-2. For an issue whose inline `comment.total` is larger than the comments returned, read the rest with `GET issue/{key}/comment` (paged) before judging it — an
+2. For an issue whose inline `comment.total` is larger than the comments returned, read the rest with `GET issue/{key}/comment` before judging it — an
    older unanswered mention or the user's own older reply could be in the part the search left out. One page, the newest 100 (`orderBy=-created`,
    `JIRA_THREAD_MAX`), is enough: a mention older than the user's latest own comment is answered whatever it is, and 100 comments inside a 30-day window
    is beyond any thread here. A 403 or 404 on that read (the ticket was deleted or hidden between search and read) drops that issue from this check's
@@ -237,7 +237,8 @@ posting (rejected — the user then approves in two places, and a headless run h
 
 Phase 1:
 
-- `GET /api/jira/mentions` → `JiraMentionsPayload` `{ polledAt, detail, truncated, window: days, issues: JiraMentionIssue[], dismissed: JiraMentionIssue[] }`,
+- `GET /api/jira/mentions` → `JiraMentionsPayload` `{ configured, polledAt, detail, retryAt, truncated, window: days, me, issues: JiraMentionIssue[], dismissed:
+  JiraMentionIssue[] }` (`me` is the reader's display name, which the `@chip` is drawn from; `retryAt` is the end of an open 429 window),
   served from the cache, no Jira call. `issues` ordered by their newest open mention, newest first. With Jira unconfigured it answers the same `unconfigured`
   shape `GET /api/jira` uses; before the first check, `polledAt: null` and the page says it is checking, never "Nothing waiting".
 - `JiraMentionIssue`: `key`, `summary`, `type` (name, for the swatch), `status` (name and category, as the board's issues carry it), `boards` (names, empty
@@ -264,7 +265,7 @@ Phase 1:
   a description.
 - The excerpt is a new plain-text walk in `adf.ts`, `adfToText` (not `adfToMarkdown`, which escapes text and writes placeholders): `text` nodes as written,
   a `mention` as its `attrs.text` with exactly one leading `@`, `emoji` as its `attrs.text`, `hardBreak` and block boundaries as one space, `inlineCard` as its
-  URL, media and anything unknown dropped; then whitespace collapsed and cut at `JIRA_MENTIONS_EXCERPT_CHARS` (280) on a word boundary with `…`.
+  URL and media dropped, an unknown node's own text kept; then whitespace collapsed and cut at `JIRA_MENTIONS_EXCERPT_CHARS` (280) on a word boundary with `…`.
 - The shapes go in `shared/types.ts` beside the other Jira shapes.
 
 Phase 2:
