@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -63,6 +63,7 @@ describe('JiraMentionsStore', () => {
   });
 
   it('treats an unreadable file as empty, then sets it aside at the first dismiss', () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     writeFileSync(file, '{not json');
     const s = new JiraMentionsStore();
     expect(s.dismissed()).toEqual([]);
