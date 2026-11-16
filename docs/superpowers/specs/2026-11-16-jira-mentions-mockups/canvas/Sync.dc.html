@@ -115,7 +115,7 @@ own age and cadence, and its failure in red. Its count is tickets waiting, the r
 </header>
 <p class="cap">The band's Sync now checks mentions only (<code>POST /api/jira/mentions/sweep</code>); boards are not swept. A press while a check is out joins it.
 In a 429 window the chip is disabled and its tooltip names the end. The sub-line keeps the Board's shape — count · window · age, then a failure in red and
-<i>first 100 tickets shown</i> when truncated.</p>
+<i>newest 100 tickets checked</i> when truncated.</p>
 </section>
 </div>
 </x-dc>
@@ -135,7 +135,7 @@ class Component extends DCLogic {
       first: 'checking for the first time…',
       fail: '4 waiting · last 30 days · checked 7 min ago',
       wait: '4 waiting · last 30 days · checked 2 min ago · Jira asked to wait until 14:32',
-      trunc: '142 waiting · last 30 days · checked 1 min ago · first 100 tickets shown'
+      trunc: '6 waiting · last 30 days · checked 1 min ago · newest 100 tickets checked'
     }[st];
     const pop = {
       ok: 'checked 1 min ago · every 3m',
@@ -143,7 +143,7 @@ class Component extends DCLogic {
       first: 'not checked yet · every 3m',
       fail: 'checked 7 min ago · every 3m',
       wait: 'checked 2 min ago · every 3m · wait until 14:32',
-      trunc: 'checked 1 min ago · every 3m · first 100 tickets shown'
+      trunc: 'checked 1 min ago · every 3m · newest 100 tickets checked'
     }[st];
     const set = (k) => () => this.setState({ st: k });
     return {
@@ -151,7 +151,7 @@ class Component extends DCLogic {
       toOk: set('ok'), toBusy: set('busy'), toFirst: set('first'), toFail: set('fail'), toWait: set('wait'), toTrunc: set('trunc'),
       subLead: lead,
       popLine: pop,
-      popCount: st === 'first' ? '—' : st === 'trunc' ? '100' : '3',
+      popCount: st === 'first' ? '—' : st === 'trunc' ? '5' : '3',
       popFail: st === 'fail',
       failText: 'Jira answered 503',
       rowIcon: busy || st === 'first' ? 'ic spin' : 'ic',

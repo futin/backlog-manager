@@ -59,14 +59,20 @@ Success: a question asked of the user on any ticket shows up on the page within 
 - Each row and card has an **Open in Jira** action that lands on the comment (`https://<site>/browse/<KEY>?focusedCommentId=<id>`); in Cards it reads
   "Reply in Jira".
 - A search box filters the loaded rows by key, summary, author and excerpt, client side.
-- Clicking a row's key or excerpt, or a card, opens **the mention modal** (below).
+- Clicking a row's key or excerpt, or a card, opens **the mention modal** (below) — a dismissed one too (Show dismissed on). Its footer then offers
+  **Restore** and **Open in Jira** in place of Dismiss (phase 2: no Draft a reply until restored); `Mention 1 of N` walks the rows the view shows, dismissed
+  ones only while Show dismissed is on; and the thread route's `open` is false for a dismissed comment (the check's judgement drops dismissed ids), so a
+  dismissed mention draws as an ordinary comment.
 - The page header says how many are waiting, the window and how old the answer is — List `4 waiting · last 30 days · checked 1 min ago`, Cards
-  `3 tickets waiting · …` — plus `first 100 tickets shown` when truncated (the cap counts tickets; the List's `N waiting` then counts the comments on those 100) and the failure
+  `3 tickets waiting · …` — plus `newest 100 tickets checked` when truncated (the cap is on tickets the search matched, answered ones included, so the waiting count can be far
+  below 100; the popover's `Mentions · N` and the rail still count waiting tickets) and the failure
   reason in red, the Board band's own shape (`Sync.dc.html` draws each state).
 - **Sync now, two ways** (`Sync.dc.html`):
   - The band carries a **Sync now** chip that checks mentions only (`POST /api/jira/mentions/sweep`, below) — boards are not swept. While a check is out
     (and before the first one lands) the chip's icon turns, the chip is disabled and the sub-line says `checking…` — as `Sync.dc.html` draws it; the
-    route's join rule below covers a press from another tab or the popover. In a 429 window the chip is disabled and its tooltip names the
+    route's join rule below covers a press from another tab or the popover. When no check can run — the status payload's `access` is `unauthorized`,
+    `forbidden` or `unsupported`, or `retryAt` is in the future — the sub-line never says `checking…`: it reads the Board band's own access sentence, or
+    `Jira asked to wait until 14:32`, with the last result (if any) kept below it and the chip disabled. In a 429 window the chip is disabled and its tooltip names the
     window's end (`Jira asked to wait until 14:32`), the way the pill's own Sync now reads.
   - The Jira status pill's popover (`JiraChip`, not the rail-total pill below) gains a **Mentions** row under the board rows — `Mentions · 3`, `checked 1 min ago · every 3m`, a failure in red — with
     the board rows' refresh icon (mentions only). The popover head's site-wide **Sync now** sweeps the boards AND checks mentions.
@@ -158,8 +164,11 @@ Success: a question asked of the user on any ticket shows up on the page within 
 - **The rail count depends on `feat/rail-pending-counts`** (spec `2026-11-16-rail-pending-counts-design.md`, unmerged on 2026-11-16), which makes a sub-page
   count "one entry in one map". This work adds the entry; it does not build a second badge mechanism. See Sequencing.
 - **Rule files that change with phase 1:** `board.md` (Jira section four pages; nine dialogs on the Escape stack), `jira.md` (poller arming), `tracker.md`
-  and CLAUDE.md/`invariants.md` (five rendered-age caches). Phase 2 adds `jira.md` (third write, fourth built-in) and `dispatch-watchdog.md` (`reply` repo
-  rule). Each edit lands in the same PR as the code it describes.
+  and CLAUDE.md/`invariants.md` (five rendered-age caches). Phase 1 also changes `board.md`'s client-poller bullet (a new `useJiraMentions` poller,
+  and `useJira`'s `nextDelay` no longer null while mentions are armed). Phase 2 adds `jira.md` (third write, fourth built-in, and its session bullet for the
+  `'reply'` link kind) and `dispatch-watchdog.md` (the `reply` repo rule, and its `parseJiraAction` sentence — "the three built-ins" and the quoted 400).
+  In code beside them: the 400 `action must be execute, context, review or { skill: <id> }` (`jira-agents.controller.ts`) gains `reply`, and
+  `JIRA_BUILTIN_LABELS`' key type (`shared/types.ts`) gains `'reply'`. Each edit lands in the same PR as the code it describes.
 - Wrap new prose at 160; comments explain why at the repo's density; tests sit where `.claude/rules/tests.md` says.
 
 ## Approaches
@@ -190,7 +199,9 @@ posting (rejected — the user then approves in two places, and a headless run h
    drop dismissed ids. Comments are judged by `created`, not `updated` — an edit that adds a mention after the user replied is missed, and a typo fix to an
    old mention does not resurface it. That trade is deliberate: edits are rare, and resurfacing answered threads breaks the anti-goal.
 4. Board membership is read from the board caches already in memory (the names of the boards whose cache holds the key) — no call.
-5. Swap the whole result into the cache with `polledAt = now`. A failure keeps the previous result and records the reason (see Failure handling); a 400 from
+5. Swap the whole result into the cache with `polledAt = now`, re-applying the dismissals and `answeredAt` as they stand AT SWAP TIME — a Dismiss,
+   Restore or posted reply that landed while the check was out must survive its swap, not be undone until the next check (test: dismiss during an
+   in-flight check; the swapped cache keeps the ticket dismissed). A failure keeps the previous result and records the reason (see Failure handling); a 400 from
    the JQL (it is built from the account id, so it should never happen) is recorded as a failure too, never as an empty list.
 
 `JIRA_MENTIONS_WINDOW_DAYS` is 30: long enough to cover a holiday, short enough that the list and the store stay small.
@@ -215,7 +226,8 @@ posting (rejected — the user then approves in two places, and a headless run h
 - The popover's site-wide Sync now (`POST /api/jira/sweep`) sweeps the boards owed a sweep and then checks mentions, in one press. It answers 409
   `not-armed` only when NEITHER is owed — no board syncs and mentions are not armed (Jira unconfigured or `unsupported`); a site with every board `off`
   still checks mentions and answers 200. Its payload stays `JiraStatusPayload`, and the status payload gains a `mentions` summary (`polledAt`, `count` —
-  TICKETS waiting, the rail's unit, `null` before the first check, drawn `—` — `detail`, `truncated`) so the popover row and the pill draw from the one read they already make.
+  TICKETS waiting, the rail's unit, `null` before the first check, drawn `—` — `detail`, `truncated`, `retryAt`: the open 429 window's end or `null`;
+  `JiraMentionsPayload` carries `retryAt` too) so the popover row and the pill draw from the one read they already make.
 - The per-board sweep (`POST /api/jira/boards/sweep`) stays a board sweep and never checks mentions.
 - The mentions-only "now" is its own route (below). It has the board sweep's floor: a press within `SWEEP_FLOOR_MS` (5 s) of the last mentions check's
   end answers the cached payload without a call. A press while a check is in flight joins it, as `sweepNow` joins an in-flight board sweep; a press
@@ -230,7 +242,8 @@ Phase 1:
   shape `GET /api/jira` uses; before the first check, `polledAt: null` and the page says it is checking, never "Nothing waiting".
 - `JiraMentionIssue`: `key`, `summary`, `type` (name, for the swatch), `status` (name and category, as the board's issues carry it), `boards` (names, empty
   for none), and `mentions: JiraMention[]` — every open mention on that issue, newest first. The List view draws one row per entry; Cards draws the first and
-  `+(length − 1) earlier`. Phase 2 adds `draft: { at, sessionId } | null` and `session` (the live `reply` link, if any).
+  `+(length − 1) earlier`. Phase 2 adds `draft: { text, at, sessionId } | null` — `text` is what fills the modal's editable box, so this payload is the draft's one read — and
+  `session` (the live `reply` link, if any).
 - `POST /api/jira/mentions/sweep` — same-origin guarded, no body. Runs a mentions check now (or joins the one in flight) and answers the fresh
   `JiraMentionsPayload`. 409 `Jira is not being polled` when mentions are not armed; 429 with `retryAt` inside the window. A 401 inside the check
   moves `access` (Failure handling) and a 5xx, 403/404 or transport failure sets the mentions `detail` only; either is a 200, as `/api/jira/sweep` treats its own. It resets the 3-minute
@@ -259,7 +272,12 @@ Phase 2:
 - **`'reply'` is a fourth built-in `JiraAction`**, labelled `JIRA_BUILTIN_LABELS.reply = 'Draft a reply'`. It is dispatched only from the mention modal —
   never a Run ▾ menu row, like `review` — through the existing `POST /api/agents/dispatch-jira`, with `mode: 'none'`, `assign: false`, `transitionId: null`.
   It does NOT take the one-run gate (`run`-only — a live `run` session on the ticket never blocks a reply draft), but it reserves the key the same
-  way for its own kind: one live `reply` link per key, a second answers 409 `a reply is already being drafted for <KEY>`. Its own gates, before the
+  way for its own kind: one live `reply` link per key, a second answers 409 `a reply is already being drafted for <KEY>`. **The link is a fourth
+  `JiraLinkHow`, `'reply'` (my call)**, not a `run` link told apart by its `action`: every reader that means "a Run" already filters on `how === 'run'`
+  (`live.service.ts` `liveRun`/`snapshot`, `JiraRunMenu`, `lib/jira.ts`'s run-live check, `ReviewRow`), so a reply link neither blocks Run nor appears in
+  the status payload's `live` map without touching them. `reserve`/`confirm` take the kind and keep a reply's pending reservation in its own map beside
+  `starting`, so a `starting` Run and a `starting` reply on one key coexist. The quiet rule and `JIRA_LIVE_CAP` count it like a `run` link; `links.store.ts`'s
+  `HOWS` and the Sessions page's how-label (`jira-sessions.ts`, `drafting a reply`) gain it. Its own gates, before the
   reservation: the key has an open mention in the cache (400 `<KEY> has no open mention`); and the repo is mapped to the key's
   project, OR — because most mentioned tickets live in projects nobody mapped — to ANY project in `jira.json` (my call; still proved against the file, still
   passed through the dashboard gate). A repo mapped to no project is refused 400 `<repo> is not mapped to any Jira project`. The modal picks the repo the
@@ -273,7 +291,8 @@ Phase 2:
   (session id from `CLAUDE_CODE_SESSION_ID`, as `link` does) to `POST /api/jira/mentions/draft`. Both keep jira.mjs's rules: the API only, no `BM_JIRA_*`, no
   authorization header, exit codes 2/3/5.
 - `POST /api/jira/mentions/draft` and `/draft/discard` are `SameOriginPostGuard`ed (the CLI's POST to `127.0.0.1` passes it) and validate `key` with
-  `isJiraKey` and `sessionId` as a UUID (400 otherwise). Draft accepts only from a session holding a LIVE `reply` link on that key (409 `no reply session for <KEY>` otherwise),
+  `isJiraKey` and `sessionId` with `isSessionId` (`jira-agents.controller.ts`, the link/unlink routes' shape check — not a UUID check, which would refuse
+  the ids the suites seed), answering the siblings' 400 `invalid session id`. Draft accepts only from a session holding a LIVE `reply` link on that key (409 `no reply session for <KEY>` otherwise),
   text non-empty and at most `JIRA_REPLY_MAX_CHARS` (8 000). It replaces the key's draft in the store. `POST /api/jira/mentions/draft/discard` `{ key }` drops
   it.
 - `POST /api/jira/mentions/reply` `{ key, text }` — the post. `SameOriginPostGuard` → validate (key, non-empty text ≤ `JIRA_REPLY_MAX_CHARS`) → configured
