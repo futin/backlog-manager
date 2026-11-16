@@ -42,7 +42,8 @@ there, and the reasoning behind the rules below in [docs/subsystems/invariants.m
   [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: Files, GitHub, Jira, Runs and Settings behind a side rail. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language. Not a `.claude/rules/` file.
-- `shared/` — `types.ts` (all shared shapes), `agent.ts` (the predicates both sides must agree on), `theme.css`, `jira-branch.ts`.
+- `shared/` — `types.ts` (all shared shapes), `agent.ts` (the predicates both sides must agree on), `theme.css`, `jira-branch.ts`, `jira-sessions.ts`,
+  `review.ts`.
 - `skills/` — the nine skills this repo publishes, one directory each, with their CLIs under `tools/`.
   → [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each: `backlog-reviewer.md`.
@@ -175,5 +176,5 @@ happened.
     - vite.config.ts
     - pnpm-workspace.yaml
   kind: index
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->

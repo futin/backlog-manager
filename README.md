@@ -15,6 +15,8 @@ the skills have touched, into one kanban-by-type board, and it can start that wo
   close it out as out of scope.
 - **Execute** a groomed bug or task — `/backlog-execute`: debug and fix, or build out the plan, then archive the item once verification proves it worked. With
   `--finish pr` it works in its own worktree and ends in a commit, a review, a push and a pull request.
+- **Review a change** — `/backlog-review`: this checkout's change against its base, committed, uncommitted and untracked alike, one reviewer per file group in
+  parallel; a second run reviews only what changed since the last one. It offers to fix what it finds and never commits.
 - **Drain the queue unattended** — `/backlog-orchestrate`: every ready bug and task, one at a time, each reviewed and verified, then merged into a base branch,
   left as a branch per item, or collected into one pull request per run.
 - **Schedule it** — `/backlog-tick`, which a scheduled dashboard job fires to do one unattended unit of work when the project is idle: an execute to a PR, or a
@@ -22,7 +24,8 @@ the skills have touched, into one kanban-by-type board, and it can start that wo
 - **Measure it** — `/backlog-retro` sweeps every orchestrator run on the machine into one report of what the pipeline cost, where the time went and how much of
   it was rework.
 - **Work Jira tickets** — `/jira` reads a ticket, moves it through its workflow, assigns it, and makes its git worktree in a mapped repo.
-- **See and steer everything from one board** — every project's items, open pull requests, live and finished runs, and Jira boards; start a groom, an execute or
+- **See and steer everything from one board** — every project's items, open pull requests, live and finished runs, and Jira boards with each ticket's GitLab
+  merge requests and CodeRabbit review; start a groom, an execute or
   an orchestrator run from a card, on this machine or another one; read it from your phone over Tailscale.
 
 ## How it works
@@ -52,7 +55,8 @@ The life of an item:
                        └──> /backlog-groom rejects it ──> out-of-scope/
 ```
 
-"Groomed" is derived from the file, never stored: a bug is groomed once its Cause and Fix are filled in, a task once its Plan is non-empty.
+"Groomed" is derived from the file, never stored: a bug is groomed once its Cause and Fix are filled in — a deferral such as `unknown`, `Not decided` or `TBD`
+does not count — and a task once its Plan is non-empty.
 
 The skills write items into whatever project they were run in. Every `init` or `new` call registers the project's absolute path in
 `~/.backlog-manager/registry.json`. This app reads that registry and renders every registered project's items in four fixed columns — refactoring, ideas, bugs,
@@ -69,10 +73,13 @@ tasks. Items that were decided against are not on the board at all: out-of-scope
 | `/backlog-orchestrate` | Drains the groomed queue, one worktree and one headless execute session per item; the only skill that merges     | `orchestrate.mjs`    |
 | `/backlog-tick`        | One unattended unit per scheduled tick, only when the project is idle; never merges                              | `tick.mjs`           |
 | `/backlog-retro`       | Sweeps every orchestrator run into a report and a pick-list of items, then records the sweep                     | `retro.mjs`          |
+| `/backlog-review`      | Reviews this checkout's change against its base in file groups, incrementally once reviewed; never commits       | `review.mjs`         |
 | `/jira`                | Reads and moves one Jira ticket through this machine's API, and makes its worktree on a Jira Run                 | `jira.mjs`           |
 
 The plugin also ships one agent, `backlog-manager:backlog-reviewer`: the read-only reviewer `/backlog-orchestrate` dispatches before every merge, and
-`/backlog-execute` before it pushes in `--finish pr` mode.
+`/backlog-execute` before it pushes in `--finish pr` mode. Those two, `/backlog-review` and a Jira Execute Run's review gate all go through one procedure
+(`skills/backlog-review/references/procedure.md`), which dispatches one reviewer per file group with the model and effort Settings › Shared › Reviewer picks,
+unless the launch overrides it.
 
 ### Orchestrator runs
 
@@ -94,11 +101,12 @@ pause, resume or stop the run afterwards.
 - **The app writes no item files.** Filing, grooming, executing and moving items all happen through the skills — at the CLI, inside Claude Code, or in a session
   the board itself spawned. What the board can do is start that work (a dispatch, or an orchestrator run — on this machine or on another machine's dashboard),
   pause, resume or stop a run, and save its own server-side settings under `~/.backlog-manager/settings/` (the run watchdog's, the tick breaker's, the remote
-  dashboards list, the Jira setup, the shared time zone); every item on screen is rendered from what is already on disk. A project connected to a tracker has no
+  dashboards list, the Jira setup and its session links, the shared time zone, the reviewer's model and effort); every item on screen is rendered from what is
+  already on disk. A project connected to a tracker has no
   item files at all: there the skills' writes reach GitHub through this app's API, which holds the credential — see [Architecture](#architecture).
 - **Its writes outside your disk are a short, closed list.** A tracker project's issues, through eleven guarded `/api/items/*` routes; an open pull request's
-  merge, auto-merge and update-branch, from GitHub › PRs; a Jira issue's assignee and status. Nothing else is written to GitHub or Jira, and the server never
-  writes git.
+  merge, auto-merge and update-branch, from GitHub › PRs; a Jira issue's assignee and status. Nothing else is written to GitHub or Jira, GitLab is only ever
+  read, and the server never writes git.
 
 ### Architecture
 
@@ -109,6 +117,7 @@ flowchart LR
     orch["backlog-orchestrate"]
     tick["backlog-tick"]
     retro["backlog-retro"]
+    review["backlog-review"]
     jira["jira"]
   end
 
@@ -117,6 +126,7 @@ flowchart LR
     runstate["orchestrator/<br/>run.json, runs/"]
     tickdir["tick/"]
     retrodir["retro/"]
+    reviewdir["reviews/"]
     settings["settings/"]
   end
 
@@ -125,6 +135,7 @@ flowchart LR
   spa["React SPA (client/)"]
   gh["GitHub"]
   jc["Jira Cloud"]
+  gl["GitLab"]
   dash["claude-agents-dashboard"]
 
   skills -- "backlog.mjs" --> registry
@@ -133,6 +144,7 @@ flowchart LR
   orch -- "orchestrate.mjs" --> runstate
   tick -- "tick.mjs" --> tickdir
   retro -- "retro.mjs (reads run state)" --> retrodir
+  review -- "review.mjs" --> reviewdir
   jira -- "jira.mjs" --> api
 
   spa <--> api
@@ -143,12 +155,13 @@ flowchart LR
   api --> settings
   api <--> gh
   api <--> jc
+  api -. "reads" .-> gl
   api -- "spawns sessions" --> dash
   dash --> session
 ```
 
-Solid arrows write, dotted arrows only read. The browser talks to the API alone — never to GitHub, Jira or the dashboard — and every token stays in the server
-process.
+Solid arrows write, dotted arrows only read. The browser talks to the API alone — never to GitHub, Jira, GitLab or the dashboard — and every token stays in the
+server process.
 
 A project connected to a tracker takes one detour through that picture and nothing else changes: its items are GitHub issues rather than files, so `backlog.mjs`
 routes every command through the API (which holds `BM_GITHUB_TOKEN` and does the writing) instead of touching `<project>/backlog/*.md`. The board, the skills
@@ -176,10 +189,10 @@ The repo is its own plugin marketplace:
 /plugin install backlog-manager@backlog-manager-marketplace
 ```
 
-That gives every project `/backlog`, `/backlog-capture`, `/backlog-groom`, `/backlog-execute`, `/backlog-orchestrate`, `/backlog-tick`, `/backlog-retro` and
-`/jira`, plus the read-only reviewer agent `backlog-manager:backlog-reviewer`. (An install carries `agents/` because a marketplace with no `sparsePaths` clones
-the whole repo; if your own declaration in `~/.claude/settings.json` pins that key, it has to list `agents` alongside `skills` or the reviewer is invisible in
-the install.)
+That gives every project `/backlog`, `/backlog-capture`, `/backlog-groom`, `/backlog-execute`, `/backlog-orchestrate`, `/backlog-tick`, `/backlog-retro`,
+`/backlog-review` and `/jira`, plus the read-only reviewer agent `backlog-manager:backlog-reviewer`. (An install carries `agents/` because a marketplace with
+no `sparsePaths` clones the whole repo; if your own declaration in `~/.claude/settings.json` pins that key, it has to list `agents` alongside `skills` or the
+reviewer is invisible in the install.)
 
 A skill edit in this repo reaches other sessions only after it is pushed and `pnpm run plugin:sync` reinstalls the plugin
 ([publishing](docs/workflows/publishing.md)).
@@ -284,6 +297,9 @@ Set all three of `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` (see [Confi
 repositories your Jira projects map to. The Jira section then appears in the rail: add boards and map repos on Jira › Setup, and a card's Run ▾ starts a session
 in the ticket's worktree or copies its prompt. The whole integration is in [the Jira doc](docs/subsystems/jira.md).
 
+If those repositories live on GitLab, set `BM_GITLAB_SITE` and a `read_api` `BM_GITLAB_TOKEN` too (see [Configuration](#gitlab)): the Jira views then show
+each ticket's merge requests, pipeline and CodeRabbit review, read-only ([the GitLab doc](docs/subsystems/gitlab.md)).
+
 ### 8. Optional: read it from your phone
 
 The web port is published on `127.0.0.1` only, and Tailscale is what puts it on the network: `pnpm run tailnet` registers a `tailscale serve` proxy from this
@@ -353,10 +369,14 @@ Five sections behind a side rail, each loaded on first visit. A source's section
   reason beside it. GitHub › Settings holds each repo's sync interval.
 - **Jira** — drawn only while the three `BM_JIRA_*` credentials are set. Board shows the synced Jira boards, with assign and transition; Setup holds the boards,
   the repositories each project maps to, and the skills a Run can start. A card's Run ▾ starts a session in the ticket's worktree, or copies its prompt.
+  Board's view switch draws the same tickets as a List, Sessions lists the agent sessions linked to tickets, and an Execute Run's **Review before
+  finishing** switch (on by default) reviews its commit against the ticket before it moves the ticket and pushes. With GitLab connected, a ticket's Detail
+  adds a Delivery pane — Pushed → MR open → Review → Pipeline → Merged — and a **Request review** or **Fix review** button that opens the launch sheet for a
+  session on the merge request's CodeRabbit review.
 - **Runs** — History (live and finished orchestrator runs, their cost, time and rework, with pause, resume and stop), Watchdog (the sweeper that resumes a
   crashed run) and Ticks (each project's tick record, its halt, and its Reset).
-- **Settings** — Local (this browser), Shared (this machine: time zone, tick caps, each source's token status) and Dashboards (the home dashboard's gates and
-  the other machines this board can launch on).
+- **Settings** — Local (this browser), Shared (this machine: time zone, tick caps, the reviewer's model and effort, each source's token status) and
+  Dashboards (the home dashboard's gates and the other machines this board can launch on).
 
 Two chips sit above the well while a source is connected: the GitHub poller's POLL and API meters, and Jira's. A version chip at the foot of the rail opens a
 **What's new** drawer with every release ([releases](docs/subsystems/releases.md)).
@@ -373,7 +393,7 @@ on it, and drop the image at `docs/board.png`._
 
 Everything lives in `.env`, and `.env.example` documents each key — except the rows marked "Not in `.env.example`" below (`BM_ORCH_HOME`,
 `BM_ORCH_CONTROL_HOME`, `BM_TRACKER_SYNC_FILE`, `BM_JIRA_FILE`, `BM_TICK_FILE`, `BM_TICK_HOME`, `BM_DASHBOARDS_FILE`, `BM_TIMEZONE_FILE`,
-`BM_JIRA_LINKS_FILE`, `BM_REVIEW_FILE`, `BM_REVIEW_HOME`,
+`BM_JIRA_LINKS_FILE`, `BM_REVIEW_FILE`, `BM_REVIEW_HOME`, `BM_GITLAB_REVIEW_BOT`,
 `BM_RETRO_HOME`, `BM_CLAUDE_PROJECTS` and `BM_AGENTS_TOKEN_<NAME>`), which are read straight from the process environment. The two that
 only `retro.mjs` reads, `BM_RETRO_HOME` and `BM_CLAUDE_PROJECTS`, come from the shell that runs it, not from `.env`. So does `BM_REVIEW_HOME`, which only
 `review.mjs` reads; `BM_REVIEW_FILE` moves the file only for the process it is set in, so the server and the skill's shell each need it. The tables leave
@@ -427,13 +447,14 @@ out, on purpose,
 | ----------------- | ------- | ------- |
 | `BM_GITLAB_SITE`  | empty   | The GitLab site, as a hostname only (`gitlab.example.com`). With `BM_GITLAB_TOKEN` it turns on the read-only GitLab connection; one without the other is not configured |
 | `BM_GITLAB_TOKEN` | empty   | A GitLab personal access token with `read_api`. Process-only — sent in one header to the site and nowhere else, never on a redirect, and never handed to a session |
+| `BM_GITLAB_REVIEW_BOT` | `coderabbitai` | The CodeRabbit bot's GitLab username, whose discussions the poller folds into each merge request's review state; set it when a self-hosted CodeRabbit runs under another account name. Blank reads as the default. Not in `.env.example` |
 
 ### State and settings files
 
 Paths the tools and the server keep their state in, or read another tool's state from. None of them is in `.env.example`; the defaults suit almost everyone.
 
 <details>
-<summary>Eleven path overrides</summary>
+<summary>The path overrides</summary>
 
 | Key                    | Default                                             | Purpose |
 | ---------------------- | --------------------------------------------------- | ------- |
@@ -496,22 +517,22 @@ Releases are nightly rollups: `.github/workflows/release.yml` runs at 04:17 UTC 
 
 ## Docs
 
-[`docs/overview.md`](docs/overview.md) is the map, and the one place that lists every doc. Six docs, one per seam plus the rationale:
+[`docs/overview.md`](docs/overview.md) is the map, and the one place that lists every doc. One doc per seam, plus the rationale:
 
 - [**The API**](docs/subsystems/api.md) — Nest, every route under `/api`. Reads the registry, each project's store and the orchestrator's run state; the only
   thing here that can spawn a session, and only when `BM_AGENTS` says so. Its tracker module also holds the GitHub › PRs cache (one GraphQL query per repo, kept
   60 s, fetched on demand) behind `GET /api/prs` and its three guarded writes.
 - [**The board**](docs/subsystems/board.md) — the React SPA: five lazy sections behind a side rail, with most of what you see derived in the browser from whole
   corpora.
-- [**The skills**](docs/subsystems/skills.md) — the nine published skills, their six CLIs, and the reviewer agent the orchestrator dispatches before a merge.
+- [**The skills**](docs/subsystems/skills.md) — the nine published skills, their CLIs, and the reviewer agent every review dispatches per file group.
 - [**Jira**](docs/subsystems/jira.md) — the Jira Cloud integration: a client, a board poller and its caches, ten read routes under `/api/jira`, six guarded
   config writes to `jira.json`, the two writes to Jira itself (`/issue/assign` and `/issue/transition`), the Run half in `agents/` (`POST
   /api/agents/dispatch-jira` and `/jira-stop`) with a persisted store of the sessions linked to each ticket, and the `jira` skill (`jira.mjs`) that reaches those routes from any
   session and, on a Run, makes the ticket's git worktree in a mapped repo.
 - [**GitLab**](docs/subsystems/gitlab.md) — the read-only GitLab connection: a poller over the merge requests of the GitLab projects Jira's mapped repos
-  name, `GET /api/gitlab`, and the MR chip, band line, List column and Detail pane that show each ticket's delivery.
+  name, `GET /api/gitlab`, and the MR chip, band line, List column and Detail pane that show each ticket's delivery and CodeRabbit review.
 - [**Releases**](docs/subsystems/releases.md) — the rail's version chip and its What's new drawer, read from this checkout's release tags.
-- [**Invariant rationale**](docs/subsystems/invariants.md) — the rules the other six are held to, and the failure each one encodes.
+- [**Invariant rationale**](docs/subsystems/invariants.md) — the rules the others are held to, and the failure each one encodes.
 
 Four workflow docs cover the procedures: [running the app](docs/workflows/development.md), [publishing a skill edit](docs/workflows/publishing.md),
 [CI](docs/workflows/ci.md) and [a second machine](docs/workflows/remote-machine.md).
@@ -521,13 +542,13 @@ Four workflow docs cover the procedures: [running the app](docs/workflows/develo
 | Path       | Contents                                                                                                                                                                                                                                 |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `skills/`  | The nine published skills — the plugin's skill root ([doc](docs/subsystems/skills.md))                                                                                                                                                   |
-| `agents/`  | The plugin's own agents; today just the orchestrator's reviewer ([doc](docs/subsystems/skills.md))                                                                                                                                       |
-| `server/`  | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader, the tracker poller, the tick breaker's routes, the release tags reader, the remote dashboards ([doc](docs/subsystems/api.md)), the Jira routes ([doc](docs/subsystems/jira.md))                               |
+| `agents/`  | The plugin's own agents; today just the reviewer every review dispatches ([doc](docs/subsystems/skills.md))                                                                                                                                       |
+| `server/`  | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader, the tracker poller, the tick breaker's routes, the release tags reader, the remote dashboards ([doc](docs/subsystems/api.md)), the Jira routes ([doc](docs/subsystems/jira.md)), the read-only GitLab poller ([doc](docs/subsystems/gitlab.md))                               |
 | `client/`  | React SPA — side rail, Files and GitHub boards and archives, GitHub › PRs, run chip, runs, Jira, settings, What's new ([doc](docs/subsystems/board.md))                                                                                       |
-| `shared/`  | Types, the derivations both sides must agree on (`agent.ts`), the Jira branch-name rule (`jira-branch.ts`), theme tokens                                                                                                                                                               |
+| `shared/`  | Types, the derivations both sides must agree on (`agent.ts`), the Jira branch-name rule (`jira-branch.ts`), the Jira session state (`jira-sessions.ts`), the CodeRabbit review state (`review.ts`), theme tokens                                                                                                                                                               |
 | `backlog/` | This repo's own backlog marker — its items are GitHub issues since the repo connected itself to a tracker                                                                                                                                |
 | `scripts/` | `sync-plugin.mjs` ([doc](docs/workflows/publishing.md)), `test-all.mjs` and `test-tmpdir.mjs`, the per-run temp root `test:skills` runs through ([doc](docs/workflows/development.md)), `tailnet.mjs`, the `tailscale serve` wrapper, and `ci-scope.mjs`, CI's one check command ([doc](docs/workflows/ci.md)) |
-| `test/`    | Jest suites, flat; many read the client or server tree and pin its shape ([doc](docs/workflows/development.md))                                                                                                                         |
+| `test/`    | Jest suites, one directory per feature; many read the client or server tree and pin its shape ([doc](docs/workflows/development.md))                                                                                                                         |
 | `docs/`    | The reference docs — start at [`overview.md`](docs/overview.md); `superpowers/` is the design spec and implementation plans, `audits/` the dated whole-repo audit reports                                                                |
 
 <!-- docs-sync:
@@ -546,5 +567,5 @@ Four workflow docs cover the procedures: [running the app](docs/workflows/develo
     - .env.example
     - pnpm-workspace.yaml
   kind: readme
-  verified: c28be64165cc6cf9d1faa0d8ce2a9f47aae69bd8
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->

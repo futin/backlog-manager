@@ -20,15 +20,18 @@ pnpm install
 cp .env.example .env
 ```
 
-Everything in [`.env.example`](../../.env.example) is commented out and documents its own default; the file matters for five things — moving the host-side
+Everything in [`.env.example`](../../.env.example) is commented out and documents its own default; the file matters for six things — moving the host-side
 ports, pointing the container at a project tree that isn't `~/Documents/custom-projects` (or, with `BM_JIRA_REPO_ROOT`, at a tree of Jira-mapped repos that
 isn't `~/Documents/timify-projects`), turning dispatch on, giving the tracker poller its
-`BM_GITHUB_TOKEN`, and giving the Jira poller its three credentials. `BM_AGENTS` is **off** by default, and compose passes it through as
+`BM_GITHUB_TOKEN`, giving the Jira poller its three credentials, and giving the GitLab connection its two.
+`BM_AGENTS` is **off** by default, and compose passes it through as
 `${BM_AGENTS:-off}` rather than setting a literal, so that documented default survives the documented quick start. `BM_GITHUB_TOKEN` is passed through the
 same way (`${BM_GITHUB_TOKEN:-}`), because a literal there would be a token committed to the repo; absent is a supported state, and the poller stays disarmed.
 `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are passed through the same way (`${BM_JIRA_SITE:-}` and so on), all three and not only the token — the
 email and the site would commit one machine's account — and until all three are set the server reads Jira as not configured and its poller stays disarmed
-([jira.md](../subsystems/jira.md)). `BM_API_PORT` also moves the skills: in a tracker project `backlog.mjs` dials `http://127.0.0.1:${BM_API_PORT:-4322}`, so
+([jira.md](../subsystems/jira.md)). `BM_GITLAB_SITE` and `BM_GITLAB_TOKEN` are passed through the same way, both or neither, and until both are set the board
+simply has no delivery marks; compose also passes `BM_GITLAB_REVIEW_BOT` through empty, which the server reads as its default `coderabbitai`.
+`BM_API_PORT` also moves the skills: in a tracker project `backlog.mjs` dials `http://127.0.0.1:${BM_API_PORT:-4322}`, so
 there is no second port setting for them.
 
 ### The whole stack
@@ -76,7 +79,8 @@ Reaching the board from another device is a separate, deliberate step: `pnpm run
 `~/.backlog-manager` and the project tree come in **read-only**, at their host paths, because the registry stores absolute host paths and they have to mean the
 same thing inside. One nested mount is read-write: `~/.backlog-manager/settings`, the only place the server itself writes — the watchdog config, the pause
 or stop request a live run reads back, and each tracker repo's sync interval (`tracker-sync.json`). The image also carries `git` and a system-config
-`safe.directory` — see Failure modes. The server's other settings files — `jira.json`, `tick.json`, `dashboards.json`, `timezone.json` and `review.json` —
+`safe.directory` — see Failure modes. The server's other settings files —
+`jira.json`, `jira-links.json`, `tick.json`, `dashboards.json`, `timezone.json` and `review.json` —
 live in that same directory, for the same reason. `review.json` is also read on the host, by `review.mjs`, so `BM_REVIEW_FILE` moves it only when it is set
 for both the server and the shell that runs the skill.
 
@@ -116,7 +120,9 @@ flag only ever affects the host.
 Suites run on jest's worker pool (one worker per core, less one), on a pinned timezone, with `BM_WATCHDOG=off` defaulted for every suite (`test/helpers/env.ts`,
 wired through `setupFiles`). That default is not tidiness: any suite that builds `AppModule` arms the watchdog's bootstrap scan, which reads the developer's
 real orchestrator state directory unless the suite overrode `BM_ORCH_HOME` — and with `BM_AGENTS` genuinely on in that shell, a crashed run sitting there would
-have `pnpm test` start a real agent session against the developer's own repo.
+have `pnpm test` start a real agent session against the developer's own repo. A `setupFilesAfterEnv` entry, `test/helpers/jira-links-env.ts`, likewise points
+`BM_JIRA_LINKS_FILE` at a fresh temp path before every test, because the Jira link store is persisted and a second case would otherwise load the first case's
+links; a suite that sets the variable in its own `beforeEach` still wins.
 
 Every fixture either runner creates lands in one per-run temp root, not in `/tmp` itself: jest's `globalSetup` points `TMPDIR` at a `bm-jest-<pid>-…`
 directory and `globalTeardown` removes it (`test/helpers/tmp-root.ts`), and `test:skills` goes through `scripts/test-tmpdir.mjs`, which does the same around
@@ -196,5 +202,5 @@ stack topology (`host.docker.internal`), not a policy default, so it is overrida
     - scripts/test-all.mjs
     - server/src/main.ts
   kind: workflow
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->

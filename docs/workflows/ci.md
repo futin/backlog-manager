@@ -71,8 +71,8 @@ docker run --rm --name ci-linux-bm --user root -v "$PWD":/src-ro:ro node:22 bash
 The local `node:22` image has no `git`, which the orchestrate and backlog suites spawn, so the command installs it; `/.dockerenv` is removed so the copy looks
 like the runner rather than a container. `.claude/worktrees` is excluded because a linked worktree's tree would be copied in whole, `.codegraph` because its
 daemon socket vanishes mid-copy. Debian's git is 2.39, older than the runner's: the one case that quotes git's own "already checked out" refusal accepts both
-the pre-2.42 and the current wording, so the container and the runner agree. Typecheck, build, jest (2,719 cases) and 945 of the node suite's 946 were green this
-way on 2026-10-15; the 946th is that git-wording case, re-run alone in the container after its fix.
+the pre-2.42 and the current wording, so the container and the runner agree. Typecheck, build, jest and all but one node case were green this
+way on 2026-10-15; the one left was that git-wording case, re-run alone in the container after its fix.
 
 ## The ruleset
 
@@ -147,5 +147,5 @@ A dispatch `sha` must be a commit on `main`; any other commit fails with `target
     - .github/pull_request_template.md
     - scripts/ci-scope.mjs
   kind: workflow
-  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->

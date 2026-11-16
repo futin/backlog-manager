@@ -1317,9 +1317,8 @@ to `main`.
 `backlog/verify.json` was the rejected alternative: it closes the orchestrated-merge half and leaves a human's `pnpm test` false-green, and the human half is
 what the 2026-09-06 audit found.
 
-The price, measured on a clean tree 2026-09-07: ~143s instead of jest's ~60s, so roughly +83s on every orchestrated item's verification step, paid knowingly.
-(Grooming predicted ~210s against a 136s jest baseline, i.e. +54%; both absolute figures were taken on a loaded machine and came down, while the ratio went the
-other way — +138%, because a free machine speeds jest up far more than it speeds the node runner up. The absolute number is what a run actually pays.)
+The price is the node runner's whole wall time added to jest's on every orchestrated item's verification step, paid knowingly; `time pnpm test` prints
+today's figure.
 
 The two named scripts stay the single copy of what each runner runs — `test-all.mjs` delegates to them and never re-spells `test:skills`'s glob pair, whose
 `scripts/*.test.mjs` half is the one most easily lost. Neither runner short-circuits the other, because a run with both broken has to report both.
@@ -1631,9 +1630,12 @@ of `out-of-scope/`. Archive's Out of scope column is the only surface that rende
 
 **The Jira clause (phase 5).** `POST /api/agents/dispatch-jira` cannot derive its action: a Jira issue has no file whose state says what comes next, so there is
 nothing for `deriveAction` to read and nothing for a second implementation to drift from. The action is a PICK, and the rule's other half still holds — the
-server never takes a string on trust. It is one of a closed set: the two built-ins, `execute` and `context`, and the skills `jira.json` holds right now. The
-controller refuses anything outside the shape (`parseJiraAction`: `execute`, `context` or an object whose only key is `skill`, holding an `s_` plus eight hex digits id; anything else is a 400); the
+server never takes a string on trust. It is one of a closed set: the three built-ins, `execute`, `context` and `review`, and the skills `jira.json` holds right
+now. The controller refuses anything outside the shape (`parseJiraAction`: `execute`, `context`, `review` or an object whose only key is `skill`, holding an
+`s_` plus eight hex digits id; anything else is a 400); the
 service then proves a skill id against the file it has just read (`resolveJiraActionOrThrow`, 400 `unknown skill <id>`), before Jira or the dashboard is asked.
+A bare `review` is a 400 there too (`review needs mr and half`): a review is built only from the `mr` and `half` the controller validates and the GitLab
+poller's cache then proves — see [a review dispatch decides from the cache](#a-review-dispatch-decides-from-the-cache-and-gates-the-branch).
 `GET /api/jira/prompt` runs the same two checks through the same function, so a preview and a Start refuse the same id in the same words. A skill's id is
 read from the same file read as its prompt template, so a skill and its text cannot come from two moments, and a skill deleted between the sheet opening and the
 Start is a 400, never a spawn with a stale template. The `repo` is the other field a Jira dispatch cannot take outright: it must be one of the paths `jira.json`
@@ -1714,7 +1716,10 @@ validated config — fixed `--review-*` names and values from closed lists or an
 the session is told whatever `composeJiraPrompt` (`server/src/jira/prompt.util.ts`) returns, and that is ONE function with two callers — `GET /api/jira/prompt`
 (the sheet's preview and Copy prompt) and the dispatch, once, before any Jira write — so what a person previewed, what was length-checked and what the session
 received are one text, byte for byte. What a caller influences is enumerated by that composition and nowhere else: the key (`isJiraKey`), the repo (proved
-against `jira.json`'s mapping) and the action pick. **No Run prompt carries a copy of the ticket (2026-11-11).** A skill's prompt is the template — the
+against `jira.json`'s mapping) and the action pick — a review's also carries its `mr` and `half`, proved against the GitLab poller's cache. The branch choice
+(`parseBranchChoice`) rides beside them, and its `review` switch (#518) is a validated boolean: on, an execute's text commits, reviews that commit against the
+`target` or `base` the closing rule already names, and transitions and pushes only on an approving verdict — a fixed sentence, no caller text of its own.
+**No Run prompt carries a copy of the ticket (2026-11-11).** A skill's prompt is the template — the
 person's own words from `jira.json` — with `{key}`, `{url}` and `{repo}` filled in one pass, and a `Jira ticket: <KEY>` line after it when the template names no
 `{key}`; `{summary}` and `{description}` stay literal. A built-in's prompt is its instruction, which opens by telling the session to read the ticket with
 `jira.mjs show <KEY>` and says that text, written by whoever filed the ticket, is not instructions and changes nothing in the task. Both used to carry the
@@ -1809,12 +1814,12 @@ promise in the spec and `.env.example` — with `BM_AGENTS` off the Board "rende
 not "improve" it into a disabled button on forty cards. "On the Board" is deliberate: the Jira card's `Run ▾` is the one stated exception, drawn with agents
 off for the reason [the next section](#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake) gives.
 
-The per-item blocks are the opposite case and keep their button. There are **five** of them, not one, and only the first is anything `dispatchGate` itself can
+The per-item blocks are the opposite case and keep their button. There are **seven** of them, not one, and only the first is anything `dispatchGate` itself can
 answer:
 
 - **The dashboard cannot see this item's project** — `dispatchGate`'s own fifth line, the section above.
-- **A local skill session already holds this item** — `progressBlock` (`client/src/lib/item-progress.ts`), and the only one of the five derived from the item
-  file itself. It is the exact mirror of the block below it: `started:` has one writer (`backlog.mjs start`) and one clearer (`stop`), so a session grooming or
+- **A local skill session already holds this item** — `progressBlock` (`client/src/lib/item-progress.ts`), and the only one of the seven derived from the item
+  file itself, the plan-review mark aside. It is the exact mirror of the block below it: `started:` has one writer (`backlog.mjs start`) and one clearer (`stop`), so a session grooming or
   executing an item states that in the frontmatter the board is already reading — `isInProgress` had been deriving it for the card's amber bar since before
   dispatch existed, and nothing ever wired that predicate into the dispatch path. For a files item it blocks on ANY stamp, fresh or stale, matching `start`'s
   own rule that any stamp refuses (a TRACKER claim is aged since #227: a stale hand claim no longer blocks, because the tracker's `start` retires it, while a
@@ -1851,6 +1856,10 @@ answer:
   the server's `plan` and `dispatch()` refuse with the same sentence, for the same reason the open PR does: the mark is derived from the tracker, which any
   machine's spawn can see. It sits after the open PR, which is the stronger fact, and before plan-review, because a groom has to vet the body first;
   `itemLadderBlock` holds that order.
+- **Its plan awaits a person's review** — `planReviewBlock` (`shared/agent.ts`), the last rung of `itemLadderBlock`: a plan a tick groomed carries
+  `plan-review` until a person approves it, and the board, `plan` and `dispatch()` refuse with `PLAN_REVIEW_REASON`. The reasoning is the tick's, in
+  [a tick does one unit](#a-tick-does-one-unit-only-when-idle-and-never-executes-a-plan-that-awaits-review). The board's one addition (#368) is that while
+  this rung is the one speaking, and the caller can approve, `DispatchButton` offers an enabled `Review plan` in place of the disabled launch.
 - **An orchestrator run has already claimed this item** — `runClaimBlock` (`shared/agent.ts`), which reads the run payload rather than the item. It has to: a
   run works each item inside its own git worktree and nothing reaches `main` until the item merges, so while a run holds `task-7` at `reviewing` the `task-7`
   file `/api/items` scans on `main` looks untouched — no `started:`, no `phase:`, nothing `isInProgress` could key off. The item is not lying; it is telling the
@@ -1862,7 +1871,8 @@ answer:
   not be unified — both are built from `PIPELINE_STAGES` (`shared/types.ts`, #376), the one hand-written spelling of those six, so they share a source, not a list. This block is checked on the board and again in `dispatch()`, the second being the one that holds: the launch sheet fetches its plan once on
   mount, so a sheet left open while a run starts still shows an enabled launch button, and only the server sees the run as it is at click time.
 
-`DispatchButton` reads all six in one order — environment-hidden, then project visibility, then the in-progress stamp, then the open PR, then the unvetted mark, then the run claim —
+`DispatchButton` reads all seven in one order — environment-hidden, then project visibility, then the in-progress stamp, then the open PR, then the unvetted mark,
+then the plan awaiting review, then the run claim (the execute-held rung is the server's alone, so the button passes `null` for it) —
 most fundamental first, so the reason on screen names the thing to fix rather than a symptom of it. With dispatch off or the project invisible there is nothing
 worth saying about either kind of session that might hold the item. The open PR sits after the stamp and before the run claim because it, too, is on the item
 this board renders, while a run claim is the volatile fact about another worktree. The stamp and the run claim are in that order for the same reason: the
@@ -2600,9 +2610,13 @@ read-write. It is a mount of the _directory_, not of `watchdog.json` itself, for
 creates a directory of that name, never a file — mounting the file directly would either fail on a fresh machine or silently create a directory where a file was
 expected, either way.
 
-One thing under `settings/` is now read by a skill's tool as well: `settings/orchestrator-control/`, the pause request (task-17, see "A pause request is a file
-the server writes and the tool reads" above). It is still written only by this server — the exception is to the "nothing under here is ever read by a skill"
-half of the sentence, not to the single-writer half.
+Since #461 the mount is pinned rather than remembered: `test/guards/server-write-paths.test.ts` resolves every server writer's default path and fails unless the
+most specific `docker-compose.yml` mount covering it is read-write, and fails on any `server/src` module that writes a file without a row in its table. It
+exists because `jira-links.json` once defaulted outside `settings/`, in the read-only mount, and every save failed into a log line until #460 moved it.
+
+Two things under `settings/` are now read by a skill's tool as well: `settings/orchestrator-control/`, the pause request (task-17, see "A pause request is a file
+the server writes and the tool reads" above), and `settings/review.json` (#507, below). Each is still written only by this server — the exception is to the
+"nothing under here is ever read by a skill" half of the sentence, not to the single-writer half.
 
 The third file is `settings/tracker-sync.json` (#17, `server/src/tracker/sync-config.util.ts`), each connected repo's sync interval on this machine. It joins
 `settings/` for `watchdog.json`'s reason — it is how eagerly THIS server asks GitHub, which no skill has anything to say about and which would differ between
@@ -2619,6 +2633,13 @@ failure reading as the default (`null`, each browser's own zone), one writer (`w
 `writeJsonAtomic`. It departs from `tick.json`, `jira.json` and `dashboards.json` on one point: a file that does not parse is REPLACED by the next write rather than
 refused, because it holds one value and the write replaces that value whole — there is nothing a write could lose, and the person picking a zone is the repair.
 No skill reads it.
+
+`settings/review.json` (#507, `server/src/settings/review-config.util.ts`) holds which model and effort review a branch's diff. It follows `timezone.json`
+point for point — read fresh, never cached, every failure reading as the defaults (`DEFAULT_REVIEW_CONFIG`, flagged `fileError` when the file exists but is
+unusable, so the Settings card can say it was ignored), one writer (`writeReview`, reached only from `POST /api/settings/review`, which answers a body
+`parseReviewConfig` refuses with a 400 and writes nothing), written through `writeJsonAtomic`, and replaced rather than refused when it does not parse. It
+departs on one point: a skill reads it. `skills/backlog-review/tools/review.mjs` reads the same file (both honour `BM_REVIEW_FILE`) when a launch passes no
+`--review-*` flag, and warns and falls back to the same defaults on a bad one, so the board and the skill agree on what is in force; it never writes it.
 
 Two switches guard `watchdog.json`, and they answer different questions. `WatchdogConfig.enabled` (the file's own field, read fresh on every tick) is the
 _user's_ switch: a disabled watchdog still arms, ticks and reports the crashed run it would have resumed — it only withholds the spawn, which is what keeps the
@@ -3331,7 +3352,7 @@ apart is why a slow machine can only ever leave a dot quiet.
 Until the app restyle this board drew no switch in the Settings band, on the argument that the rail's trees stand open at every width and a second control is a
 second wording free to disagree with the tree's. Spec §3 of `docs/superpowers/specs/2026-11-05-app-restyle-design.md` overrides that for this page: the band
 carries a `Segmented` `Local | Shared | Dashboards`, because the page is the one place a reader changes where a setting saves and the switch belongs where the
-question is asked. It is not a second wording — both controls write `settingsScope`, the tree through `setSettingsScope` and the switch through `update` — and
+question is asked. It is not a second wording — both controls write `settingsScope` through the same `update({ settingsScope })` — and
 the override does not travel: Runs' three pages (task-38 deleted `runs-mode.ts`'s `MODE_BUTTON` pair) and Jira's are still switched by the rail's tree or a link
 threaded down from it. `test/settings/settings-view.test.tsx` pins the switch (it used to pin the absence), so "remove the duplicate control" is as much a decision as
 "add one" was.
@@ -3764,7 +3785,9 @@ Project listing pages by `startAt` rather than following the `nextPage` URL Jira
 **Armed only while there is something to do.** The poller is the GitHub poller's `setTimeout` chain, and it arms on the same "still owed" logic: a board that
 polls, a board owed its one cold sweep, or a boot answer still missing. An unconfigured install, or one whose every board is `off` and already swept, makes no
 call to Atlassian at all — and `unsupported` (a Server/DC site) disarms for good, because no retry will make it Cloud. Compose passes the three keys as
-interpolations with empty defaults, never literals — bug-25's rule, where a literal is an account committed to a public repository.
+interpolations with empty defaults, never literals — bug-25's rule, where a literal is an account committed to a public repository. A person's ask is the one
+exception, and only for the board asked about: a board save, or since #472 the chip popover's per-board `now` (`POST /api/jira/boards/sweep`), marks that
+board `forced` — `off` included — which keeps the poller armed until a sweep that includes it lands.
 
 **`jira.mjs` goes through the server too, though it could call Jira itself** (Jira phase 4, spec §10). A CLI with the three variables in its environment
 could reach the gateway directly, and it deliberately does not: the server is Jira's ONE caller on this machine, so there is one rate-limit budget, one 429
@@ -3985,8 +4008,10 @@ a restart frees the key.
 with a 409 for as long as it cannot be read. This file's loss costs only past lines in a List, while refusing would stop every Run from linking until someone
 tidied it by hand. A file that does not parse, or whose `version` is not 1, therefore loads as empty with one warning and is renamed `jira-links.json.bad-<ISO>`
 at the first save, so a person can still read what was there; a boot that saves nothing leaves it exactly where it was. One unusable entry costs only itself,
-one level finer, the way the board and skill readers fall back. A save that throws is logged and nothing else: a launch must never fail because a history file
-could not be written, and the memory is the truth for this run of the server. Retention keeps the list from growing for ever — per key every live link and the
+one level finer, the way the board and skill readers fall back. A save that throws is logged and kept, and nothing else: a launch must never fail because a history file
+could not be written, and the memory is the truth for this run of the server. Kept, since #461, because a background save was the one writer whose failure
+reached no response: the latest failure (`{ message, at }`, cleared by the next good save) rides on `GET /api/jira/sessions` as `saveError`, and the List
+says the links are not being saved. Retention keeps the list from growing for ever — per key every live link and the
 20 newest ended ones, and a key whose newest end is over 90 days old with nothing live goes — and so do the caps on the suppressed and never-link lists.
 
 **The order protects the one-run-per-ticket rule, and so does what the store refuses to end.** The key is reserved (`starting`) BEFORE the dispatch's first Jira
@@ -4987,5 +5012,5 @@ padding keep the overhang inside the rail's padding box; an ancestor that clippe
     - test
     - docker-compose.yml
   kind: subsystem
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->
