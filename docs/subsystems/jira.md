@@ -108,7 +108,8 @@ unconfigured, then ask the poller — so a malformed request never reads as an e
 | `GET /api/jira/worktrees`         | `{ worktrees, unavailable }` — every working tree of every distinct mapped path, and each repo that could not be read with its reason; never an error for one repo |
 | `GET /api/jira/sessions?open=1`   | `JiraSessionsPayload` — every link, live and ended, with its derived `state`, the dashboard's `row` (`null` for an ended link or a live one the dashboard does not list) and `stateSince`, plus `reachable`, `rowsAt` and `saveError` (the link store's latest failed save, `null` once one lands; the List draws it as an amber line above the rows); memory only, and answered while unconfigured (no 503). `?open=1` marks a Jira page open, which quickens the reconciler |
 
-Every route but the first and `/sessions` answers 503 `Jira is not configured` while unconfigured. `GET /api/jira` fills `live` from the link store in the
+Every route but the first, `/sessions` and the mentions pair answers 503 `Jira is not configured` while unconfigured; `GET /mentions` answers 200 `{ configured: false,
+detail }` and `POST /mentions/sweep` answers 409 (the dismiss and restore writes and `GET /issue/:key/thread` stay 503, after their 400s). `GET /api/jira` fills `live` from the link store in the
 controller (the poller
 never sees it; an unconfigured server keeps `{}`; only the live `run` links are in it), and `GET /api/jira/issue/:key` fills `session` the same way. A failed
 Jira call is mapped
@@ -261,8 +262,8 @@ The comments that @-mention the user and still wait on them, found by one JQL se
 are judged by `mentions-check.util.ts`: an open mention is not the user's own, was created after the user's latest comment on that ticket and has not been
 dismissed. The check rides the poller's tick, after the board loop, at once after boot and then `JIRA_MENTIONS_POLL_MS` after the last ATTEMPT, so its calls reach
 the CALLS meter and share the one 429 window; a failure keeps the last rows and `polledAt` and sets the mentions `detail`. `mentions.controller.ts` serves
-`GET /api/jira/mentions` (memory only), the guarded `POST /mentions/sweep` (409 `Jira is not being polled` only for an `unsupported` site — an unconfigured one answers 503 first — and 429
-with the stored `retryAt`), `POST /mentions/dismiss` and `/restore` (the dismissals live in `settings/jira-mentions.json`, `mentions.store.ts`, which
+`GET /api/jira/mentions` (memory only, answering 200 `{ configured: false, detail }` while unconfigured), the guarded `POST /mentions/sweep` (409
+`Jira is not being polled` for an unconfigured or `unsupported` site, 429 with the stored `retryAt`), `POST /mentions/dismiss` and `/restore` (the dismissals live in `settings/jira-mentions.json`, `mentions.store.ts`, which
 the server alone writes) and `GET /issue/:key/thread`, the modal's fresh read. `GET /api/jira` carries a `mentions` summary `{ polledAt, count, detail,
 truncated, retryAt }` for the chip's popover row and the rail count. The client is `JiraMentionsView` (List and Cards behind a remembered switch), the
 `JiraMentionModal` (the ninth dialog) and `useJiraMentions`, whose age prints as `checked 1 min ago` through `checkedAge` in `lib/jira-mentions.ts`.
