@@ -349,7 +349,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
         calls: { sweep: 0, last429At: null },
         live: {},
         armed: false,
-        home: null
+        home: null,
+        mentions: null
       };
     }
     this.expireWindow(Date.now());
@@ -384,7 +385,9 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       // A sweep clears the timer on entry, so the `armed` getter reads false for its whole length — the poller's busiest moment, which the Connection card
       // and the chip would then call `idle`. A tick in flight is a chain that is alive, so status counts it; the getter stays timer-only, as `arm()` needs.
       armed: this.timer !== null || this.inFlight !== null,
-      home: homedir()
+      home: homedir(),
+      // Task 6 fills this from the mentions cache.
+      mentions: null
     };
   }
 

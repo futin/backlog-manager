@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 
-import { ADF_MEDIA_NAME_MAX, ADF_PLACEHOLDER_RE, adfToMarkdown, escapeMarkdown } from '../../server/src/jira/adf';
+import { ADF_MEDIA_NAME_MAX, ADF_PLACEHOLDER_RE, adfToMarkdown, adfToText, escapeMarkdown } from '../../server/src/jira/adf';
 
 /**
  * Jira integration, spec §8 (ADF → Markdown) and §14 P10 (the node inventory seen on real descriptions). One minimal fixture per node kind; every fixture is
@@ -363,5 +363,40 @@ describe('escapeMarkdown', () => {
 
   it('escapes the specials of text nodes in a document', () => {
     expect(md(para(text('snake_case_name and 2 * 3')))).toBe('snake\\_case\\_name and 2 \\* 3');
+  });
+});
+
+describe('adfToText', () => {
+  const txt = (...content: unknown[]) => adfToText(doc(...content));
+
+  it('writes text nodes as written, with no markdown escaping', () => {
+    expect(txt(para(text('Hi *there*')))).toBe('Hi *there*');
+  });
+
+  it('writes a mention with exactly one leading @', () => {
+    expect(txt(para({ type: 'mention', attrs: { id: 'a1', text: '@Mara Ilić' } }))).toBe('@Mara Ilić');
+    expect(txt(para({ type: 'mention', attrs: { id: 'a1', text: 'Mara Ilić' } }))).toBe('@Mara Ilić');
+  });
+
+  it('writes an emoji as its text', () => {
+    expect(txt(para({ type: 'emoji', attrs: { text: ':)' } }))).toBe(':)');
+  });
+
+  it('turns hardBreak and block boundaries into one space', () => {
+    expect(txt(para(text('a'), { type: 'hardBreak' }, text('b')))).toBe('a b');
+    expect(txt(para(text('a')), para(text('b')))).toBe('a b');
+  });
+
+  it('writes an inlineCard as its url and drops media and unknown nodes', () => {
+    expect(txt(para({ type: 'inlineCard', attrs: { url: 'https://x.test/1' } }))).toBe('https://x.test/1');
+    expect(txt(para(text('a')), { type: 'mediaSingle', content: [{ type: 'media', attrs: { id: 'm' } }] }, { type: 'wat' })).toBe('a');
+  });
+
+  it('collapses runs of whitespace and trims', () => {
+    expect(txt(para(text('  a   b\n\n c  ')))).toBe('a b c');
+  });
+
+  it.each([null, undefined, 'a string', 42, [], {}])('%j → empty string', (value) => {
+    expect(adfToText(value)).toBe('');
   });
 });

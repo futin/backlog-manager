@@ -46,6 +46,7 @@ function status(boards: JiraBoardStatus[], over: Partial<JiraStatusPayload> = {}
     live: {},
     armed: true,
     home: '/home/x',
+    mentions: null,
     ...over
   };
 }

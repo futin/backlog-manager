@@ -70,6 +70,7 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     live: {},
     armed: false,
     home: '/home/x',
+    mentions: null,
     ...over
   };
 }

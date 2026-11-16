@@ -754,6 +754,7 @@ describe('SettingsView', () => {
         live: {},
         armed: false,
         home: '/home/x',
+        mentions: null,
         ...over
       };
     }

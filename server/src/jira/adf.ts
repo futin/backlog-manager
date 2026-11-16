@@ -268,3 +268,41 @@ export function adfToMarkdown(doc: unknown): { markdown: string; placeholders: n
   const markdown = blocks([doc], ctx, 0).trim();
   return { markdown, placeholders: markdown === '' ? 0 : ctx.placeholders };
 }
+
+/** Nodes `adfToText` drops outright, children included: an attachment has no words, and a table cell's text out of its grid reads as noise. */
+const TEXT_DROPPED = new Set(['media', 'mediaSingle', 'mediaGroup', 'mediaInline']);
+
+function textOf(node: AdfNode, depth: number): string {
+  if (depth > MAX_DEPTH || typeof node.type !== 'string' || TEXT_DROPPED.has(node.type)) return '';
+  const attrs = attrsOf(node);
+  switch (node.type) {
+    case 'text':
+      return typeof node.text === 'string' ? node.text : '';
+    case 'mention': {
+      // Jira writes the display text with its `@` most of the time and without it sometimes; exactly one `@` either way, never `@@`.
+      const t = typeof attrs.text === 'string' ? attrs.text.replace(/^@+/, '') : '';
+      return t === '' ? '' : `@${t}`;
+    }
+    case 'emoji':
+      return typeof attrs.text === 'string' ? attrs.text : '';
+    case 'inlineCard':
+      return typeof attrs.url === 'string' ? attrs.url : '';
+    case 'hardBreak':
+      return ' ';
+    default:
+      // Any other node contributes its children, each set off by a space so a block boundary is a word boundary; the caller collapses the runs.
+      return childrenOf(node)
+        .map((c) => textOf(c, depth + 1))
+        .join(' ');
+  }
+}
+
+/**
+ * An ADF document → one line of plain text for a list row's excerpt. Unlike `adfToMarkdown` it neither escapes text nor writes placeholders: the row is
+ * drawn as text, so a person's `*` must stay a `*`. Whitespace is collapsed to single spaces and trimmed; NOT cut — the caller owns the length. Anything
+ * that is not an object yields `''`.
+ */
+export function adfToText(doc: unknown): string {
+  if (!isNode(doc)) return '';
+  return textOf(doc, 0).replace(/\s+/g, ' ').trim();
+}

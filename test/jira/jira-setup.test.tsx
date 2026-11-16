@@ -65,6 +65,7 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     live: {},
     armed: true,
     home: '/home/ada',
+    mentions: null,
     ...over
   };
 }
