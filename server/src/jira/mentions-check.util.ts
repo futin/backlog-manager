@@ -39,8 +39,11 @@ const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const ok = (res: JiraResponse<unknown>): boolean => res.status >= 200 && res.status < 300;
 
-/** Jira's comment objects, kept to what `judgeComments` reads; a comment with no string id or `created` is not one it can judge, so it is skipped. */
-function rawComments(list: unknown): RawComment[] {
+/**
+ * Jira's comment objects, kept to what `judgeComments` reads; a comment with no string id or `created` is not one it can judge, so it is skipped. Exported
+ * for the thread route, which must read a comment page exactly as the check does or its `open` would disagree with the list's.
+ */
+export function rawComments(list: unknown): RawComment[] {
   if (!Array.isArray(list)) return [];
   const out: RawComment[] = [];
   for (const c of list) {
@@ -116,4 +119,35 @@ export async function runMentionsCheck(input: MentionsCheckInput): Promise<Menti
   }
   issues.sort((a, b) => b.newest - a.newest);
   return { ok: true, issues: issues.map((i) => i.issue), truncated: res.data?.isLast === false };
+}
+
+/**
+ * The dismissals applied on READ (Task 6; spec "Dismiss semantics"): the cache keeps every candidate, so a Dismiss or a Restore that lands while a check is
+ * out is honoured the moment the payload is next built — there is no swap to survive. A ticket with any undismissed candidate is in `issues` carrying just
+ * those; a ticket whose candidates are all dismissed is in `dismissed` carrying them. Each list is ordered by its own newest mention, newest first — for
+ * `issues` that is the newest OPEN one, so a ticket whose newest mention was dismissed sorts by the next. Built from copies: the cache is read-only, and
+ * the payload must never carry `candidates`, which is the cache's own field, not the wire shape.
+ */
+export function applyDismissals(
+  cached: readonly JiraMentionCacheIssue[],
+  isDismissed: (commentId: string) => boolean
+): { issues: JiraMentionIssue[]; dismissed: JiraMentionIssue[] } {
+  const issues: JiraMentionIssue[] = [];
+  const dismissed: JiraMentionIssue[] = [];
+  for (const c of cached) {
+    const open = c.candidates.filter((m) => !isDismissed(m.commentId));
+    const row = (mentions: JiraMention[]): JiraMentionIssue => ({
+      key: c.key,
+      summary: c.summary,
+      type: c.type,
+      status: { ...c.status },
+      boards: [...c.boards],
+      mentions
+    });
+    if (open.length > 0) issues.push(row(open));
+    else if (c.candidates.length > 0) dismissed.push(row([...c.candidates]));
+  }
+  // Candidates are newest first (`judgeComments`), so each row's head is its newest mention.
+  const newestFirst = (a: JiraMentionIssue, b: JiraMentionIssue): number => Date.parse(b.mentions[0].created) - Date.parse(a.mentions[0].created);
+  return { issues: issues.sort(newestFirst), dismissed: dismissed.sort(newestFirst) };
 }

@@ -1,10 +1,12 @@
 import { homedir } from 'node:os';
 
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
 import {
   JIRA_MENTIONS_POLL_MS,
+  JIRA_MENTIONS_WINDOW_DAYS,
+  JIRA_THREAD_MAX,
   SYNC_INTERVALS,
   isJiraKey,
   type JiraAccess,
@@ -15,8 +17,12 @@ import {
   type JiraIssueDetail,
   type JiraIssueWriteResult,
   type JiraJqlCheckResult,
+  type JiraMention,
+  type JiraMentionsPayload,
+  type JiraMentionsSummary,
   type JiraProjectRef,
   type JiraStatusPayload,
+  type JiraThreadPayload,
   type JiraTransition
 } from '../../../shared/types';
 import { adfToMarkdown } from './adf';
@@ -26,7 +32,9 @@ import { JIRA_RATE_LIMIT_DEFAULT_MS, accessOf } from './errors.util';
 import { JiraBootState } from './identity';
 import { JiraClient, jqlString, type JiraAuth, type JiraResponse } from './jira.client';
 import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapContext } from './map-issue';
-import { runMentionsCheck, type JiraMentionCacheIssue } from './mentions-check.util';
+import { applyDismissals, rawComments, runMentionsCheck, type JiraMentionCacheIssue } from './mentions-check.util';
+import { JiraMentionsStore } from './mentions.store';
+import { authorOf, judgeComments, mentionsUser } from './mentions.util';
 
 /**
  * poller.service.ts — the Jira ticker, the per-board caches, and the handful of fresh reads the routes make (Jira phase 1; spec §3 `poller.service.ts` and
@@ -52,6 +60,16 @@ import { runMentionsCheck, type JiraMentionCacheIssue } from './mentions-check.u
  * (a 401 reset `me`, which the JQL needs) — the gate every call obeys. A 401 or 429 on its calls is the site's (`boardFailed`); any other failure is the
  * mentions cache's own `detail`, rows and `polledAt` kept, `access` untouched, because a mentions search failing says little about the boards and the next
  * board sweep is the better judge of the site. The calls and judgement are `mentions-check.util.ts`'s; the state and every verdict are here.
+ *
+ * ## The mentions routes (Jira › Mentions spec "Routes and shapes", "Sync now, two ways")
+ *
+ * The payload and the status summary are DERIVED on read: the cache keeps every candidate, and `applyDismissals` filters a copy against the store each
+ * time, so a Dismiss that lands while a check is out cannot be undone by that check's swap. The manual check (`mentionsSweepNow`) does NOT go through
+ * `tick()` — boards are not swept, and its calls are a route's, discarded by the next tick's `takeCalls()` like any fresh read's. It shares exactly three
+ * things with the tick-borne check: the in-flight join (`checkMentions`), the `SWEEP_FLOOR_MS` floor (measured from `mentionsEndAt`, whichever caller ran
+ * the check), and the cadence (starting a check stamps the attempt, so a press puts the next background check 3 minutes after it). Its failures get the
+ * check's own verdicts (`runMentions`: 401/429 to the site, anything else to the mentions `detail`); it then `wake()`s the chain, as `routeFailed` does, so
+ * a 401's boot retry has a link coming — the widened arming already keeps one for any site it accepts a press on, and the wake makes that explicit.
  *
  * ## Why `off` still gets one cold sweep
  *
@@ -256,7 +274,14 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   /** The verdict a 429 window covered, restored when the window ends with the boot still unanswered (header). `null` while no window is open. */
   private beforeWindow: { access: JiraAccess; detail: string | null } | null = null;
 
-  constructor(private readonly client: JiraClient) {}
+  /**
+   * The dismissals the payload and the summary are filtered against. Optional so a suite can build a poller on a bare client (`new JiraPollerService(client)`)
+   * — it then reads as no dismissals; the module always provides the one store, the same instance the mentions controller writes.
+   */
+  constructor(
+    private readonly client: JiraClient,
+    @Optional() @Inject(JiraMentionsStore) private readonly store: JiraMentionsStore | null = null
+  ) {}
 
   /** A tick is scheduled. Derived from the timer, for the reason the tracker poller gives: two sources of truth for "is a tick coming" drift apart. */
   get armed(): boolean {
@@ -353,6 +378,30 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     return { kind: 'done' };
   }
 
+  /**
+   * `POST /api/jira/mentions/sweep`, the Mentions page's own "check now" (spec "Poller arming"). Like `sweepNow`, every decision is made before the first
+   * await. Order: mentions not armed (unconfigured, `unsupported`) → `not-armed`; a 429 window → `wait` with the STORED end, no call; a check running
+   * (tick-borne or another press) → join it; one ended under `SWEEP_FLOOR_MS` ago → `done`, no call; the boot not whole (no `cloudId`, or a 401 reset
+   * `me`, which the JQL is built from) → `done`, no call — the status says why, and the boot retry on the chain is what fixes it; else one check, outside
+   * the tick (header), then `wake()`. Never rejects: `checkMentions` turns a throw into the mentions `detail`.
+   */
+  async mentionsSweepNow(): Promise<SweepNowResult> {
+    const now = Date.now();
+    if (this.stopped || !this.mentionsArmed()) return { kind: 'not-armed' };
+    this.expireWindow(now);
+    if (this.inWindow(now)) return { kind: 'wait', retryAt: this.boot.retryAt! };
+    if (this.mentionsInFlight !== null) {
+      await this.mentionsInFlight;
+      return { kind: 'done' };
+    }
+    if (this.mentionsEndAt !== null && now - this.mentionsEndAt < SWEEP_FLOOR_MS) return { kind: 'done' };
+    const gate = this.gate();
+    if ('refused' in gate || !this.boot.answered()) return { kind: 'done' };
+    await this.checkMentions(gate.auth);
+    this.wake();
+    return { kind: 'done' };
+  }
+
   /** A board was deleted: its cache goes now, not at the next sweep's hygiene pass — a board re-created under the same id must start cold. */
   boardDeleted(id: string): void {
     this.caches.delete(id);
@@ -416,9 +465,99 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       // and the chip would then call `idle`. A tick in flight is a chain that is alive, so status counts it; the getter stays timer-only, as `arm()` needs.
       armed: this.timer !== null || this.inFlight !== null,
       home: homedir(),
-      // Task 6 fills this from the mentions cache.
-      mentions: null
+      mentions: this.mentionsSummary()
     };
+  }
+
+  /**
+   * `GET /api/jira/mentions` — the cache with the dismissals applied (header), no call. Unconfigured answers what `GET /api/jira` says in that state, its
+   * reason included. `me` is the boot's display name (the `@` chip), `null` until `myself` answers; `retryAt` the open 429 window's end, else `null`.
+   */
+  mentionsPayload(): JiraMentionsPayload {
+    const env = jiraEnv();
+    if (!env.configured) return { configured: false, detail: env.detail };
+    const { issues, dismissed } = applyDismissals(this.mentions.issues, this.dismissedPredicate());
+    return {
+      configured: true,
+      polledAt: this.mentions.polledAt,
+      detail: this.mentions.detail,
+      truncated: this.mentions.truncated,
+      retryAt: this.windowEnd(),
+      window: JIRA_MENTIONS_WINDOW_DAYS,
+      me: this.boot.me?.name ?? null,
+      issues,
+      dismissed
+    };
+  }
+
+  /**
+   * `GET /api/jira/issue/:key/thread` — the mention modal's fresh read: the newest `JIRA_THREAD_MAX` comments, put back in time order, each judged as the
+   * check judges a thread (`judgeComments` over the same page, minus the dismissed ids), so `open` here and the list never disagree about one comment. A
+   * fresh read like `issueDetail`: the gate first, a failure through `routeFailed` (the route turns a 403/404 into its own 404), and its calls a route's.
+   * With `me` unknown there is no "mine" to judge: refused as the 401 that state is, or as the boot's own `connecting`.
+   */
+  async thread(key: string): Promise<JiraResult<JiraThreadPayload>> {
+    const gate = this.gate();
+    if ('refused' in gate) return gate.refused;
+    const me = this.boot.me;
+    if (me === null) return this.unauthorizedRefusal() ?? { ok: false, response: synthetic(0, this.boot.detail ?? 'connecting') };
+    const res = await this.client.comments(gate.auth, key, JIRA_THREAD_MAX);
+    if (!ok(res)) return this.routeFailed(res);
+    // The endpoint answers newest first (`orderBy=-created`, so the cap keeps the newest); the modal reads a conversation, oldest first.
+    const comments = rawComments(res.data?.comments).reverse();
+    const dismissed = this.dismissedPredicate();
+    const open = new Set(
+      judgeComments({ comments, me: me.accountId, site: gate.auth.site, key, now: Date.now(), windowDays: JIRA_MENTIONS_WINDOW_DAYS })
+        .map((m) => m.commentId)
+        .filter((id) => !dismissed(id))
+    );
+    const total = typeof res.data?.total === 'number' ? res.data.total : comments.length;
+    return {
+      ok: true,
+      value: {
+        key,
+        total,
+        truncated: total > comments.length,
+        comments: comments.map((c) => ({
+          id: c.id,
+          author: authorOf(c),
+          created: c.created,
+          markdown: adfToMarkdown(c.body).markdown,
+          mine: c.author?.accountId === me.accountId,
+          mentionsMe: mentionsUser(c.body, me.accountId),
+          open: open.has(c.id)
+        }))
+      }
+    };
+  }
+
+  /**
+   * The cached candidate `commentId` on `key`, or `null` — what `POST /api/jira/mentions/dismiss` proves each id against, from memory, before it writes. A
+   * candidate, not an open mention: whether it is already dismissed is the store's question, asked by the route that holds the store.
+   */
+  mentionCandidate(key: string, commentId: string): JiraMention | null {
+    const issue = this.mentions.issues.find((i) => i.key === key);
+    return issue?.candidates.find((m) => m.commentId === commentId) ?? null;
+  }
+
+  /** The status payload's slice: `count` is the payload's `issues.length` (TICKETS waiting, the rail's unit), `null` until a check has succeeded. */
+  private mentionsSummary(): JiraMentionsSummary {
+    const { polledAt, detail, truncated } = this.mentions;
+    const count = polledAt === null ? null : applyDismissals(this.mentions.issues, this.dismissedPredicate()).issues.length;
+    return { polledAt, count, detail, truncated, retryAt: this.windowEnd() };
+  }
+
+  /** One read of the store per payload: a Set, so filtering a hundred tickets is not a hundred scans of the dismissal list. */
+  private dismissedPredicate(): (commentId: string) => boolean {
+    const ids = new Set((this.store?.dismissed() ?? []).map((d) => d.commentId));
+    return (commentId) => ids.has(commentId);
+  }
+
+  /** The open 429 window's end as ISO, or `null` — expired where it is read, as `status()` does. */
+  private windowEnd(): string | null {
+    const now = Date.now();
+    this.expireWindow(now);
+    return this.inWindow(now) ? iso(this.boot.retryAt!) : null;
   }
 
   /** The mentions cache as the last check left it — candidates, NOT dismissal-filtered; Task 6 derives the payload from it on read, never in place. */

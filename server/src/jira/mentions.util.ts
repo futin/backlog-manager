@@ -43,7 +43,7 @@ export function excerptOf(body: unknown): string {
 }
 
 /** Jira's 48x48 avatar when present, else the largest by pixel width, else none. */
-function avatarOf(urls: Record<string, string> | undefined): string | undefined {
+export function avatarOf(urls: Record<string, string> | undefined): string | undefined {
   if (!urls) return undefined;
   if (urls['48x48']) return urls['48x48'];
   const sized = Object.entries(urls)
@@ -51,6 +51,12 @@ function avatarOf(urls: Record<string, string> | undefined): string | undefined 
     .filter(([n]) => Number.isFinite(n))
     .sort((a, b) => b[0] - a[0]);
   return sized[0]?.[1];
+}
+
+/** A comment's author as every mention shape carries it — the row's chip and the thread modal's — so the two never name one person differently. */
+export function authorOf(c: RawComment): { accountId: string; name: string; avatarUrl?: string } {
+  const avatarUrl = avatarOf(c.author?.avatarUrls);
+  return { accountId: c.author?.accountId ?? '', name: c.author?.displayName || 'Someone', ...(avatarUrl ? { avatarUrl } : {}) };
 }
 
 /**
@@ -78,12 +84,11 @@ export function judgeComments(input: {
     const at = Date.parse(c.created);
     if (Number.isNaN(at) || at <= answered || now - at > windowDays * DAY_MS) continue;
     if (c.author?.accountId === me || !mentionsUser(c.body, me)) continue;
-    const avatarUrl = avatarOf(c.author?.avatarUrls);
     out.push({
       at,
       mention: {
         commentId: c.id,
-        author: { accountId: c.author?.accountId ?? '', name: c.author?.displayName || 'Someone', ...(avatarUrl ? { avatarUrl } : {}) },
+        author: authorOf(c),
         created: c.created,
         excerpt: excerptOf(c.body),
         url: `https://${site}/browse/${key}?focusedCommentId=${c.id}`
