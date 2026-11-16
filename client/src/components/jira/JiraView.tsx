@@ -108,7 +108,7 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
       {page === 'sessions' ? (
         <JiraSessionsView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
       ) : page === 'mentions' ? (
-        <JiraMentionsView />
+        <JiraMentionsView onOpenJiraPage={onOpenJiraPage} />
       ) : (
         <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
       )}
