@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jira Mentions list, one card per ticket</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#f4f4f3}
+a{color:#2a5fae}a:hover{color:#1d4580}
+.b-card{background:#ffffff;border:1px solid #eaeae8;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.b-card:hover{border-color:#dcdcda;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.b-key{font-weight:600;color:#131313;text-decoration:none}
+.b-sum{color:#131313;text-decoration:none;font-weight:500;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.b-q{background:#f2f2f1;border-radius:10px;padding:10px 12px;text-decoration:none;color:#131313;display:flex;flex-direction:column;gap:4px}
+.b-q:hover{background:#ececeb}
+.b-meta{font-size:11px;font-weight:600;color:#8f6214}
+.b-at{background:#dce8f7;color:#2a5fae;border-radius:4px;padding:0 3px;font-weight:600}
+.b-chip{min-height:30px;padding:0 10px;border:1px solid #dcdcda;border-radius:9px;background:#ffffff;font:inherit;font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:6px;color:#131313;text-decoration:none;cursor:pointer;white-space:nowrap}
+.b-ic{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.b-pill{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:10px;background:#f2f2f1;font-size:11px;font-weight:500;color:#636363;white-space:nowrap}
+.b-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:1000px){.b-grid{grid-template-columns:minmax(0,1fr)}}
+</style>
+</helmet>
+<div style="width: 100%; min-height: 920px; display: flex; flex-wrap: wrap; background: #f4f4f3; font-family: 'Hanken Grotesk', -apple-system, sans-serif; color: #131313; font-size: 13px">
+<dc-import name="Rail" active="mentions" hint-size="220px,920px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 20px 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px">
+<header style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700">Mentions</h1>
+<div style="color: #636363; font-size: 12px">{{countLine}} · last 30 days · checked 1 min ago</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<div role="group" aria-label="View" style="display: flex; background: #ededec; border-radius: 7px; padding: 2px">
+<a href="Main.dc.html" style="padding: 5px 12px; border-radius: 5px; color: #525252; text-decoration: none">List</a>
+<a href="ListB.dc.html" aria-current="page" style="padding: 5px 12px; border-radius: 5px; background: #ffffff; font-weight: 600; color: #131313; text-decoration: none; box-shadow: 0 1px 2px rgba(0,0,0,.08)">Cards</a>
+</div>
+<label style="display: flex; align-items: center; gap: 6px; background: #ffffff; border: 1px solid #dcdcda; border-radius: 7px; padding: 5px 10px; color: #636363"><svg class="b-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4-4"></path></svg><input type="search" aria-label="Search mentions" placeholder="Search mentions" style="border: 0; outline: 0; font: inherit; width: 160px; background: transparent"></label>
+<button type="button" class="b-chip" aria-pressed="{{showDismissed}}" onClick="{{toggleDismissed}}">{{toggleLabel}}</button>
+</div>
+</header>
+<div class="b-grid">
+<sc-for list="{{cards}}" as="c" hint-placeholder-count="3">
+<article class="b-card" style="{{c.cardStyle}}">
+<div style="display: flex; gap: 8px; align-items: center; min-width: 0">
+<a class="b-key" href="ModalA.dc.html">{{c.key}}</a>
+<a class="b-sum" href="ModalA.dc.html">{{c.summary}}</a>
+<span class="b-pill">{{c.status}}</span>
+</div>
+<a class="b-q" href="ModalA.dc.html">
+<span class="b-meta">{{c.author}} asked you · {{c.when}}</span>
+<span style="line-height: 1.45"><span class="b-at">@Andreja</span> {{c.text}}</span>
+</a>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<span style="font-size: 12px; color: #636363">{{c.earlier}}</span>
+<span style="font-size: 12px; color: #8a8a8a">{{c.board}}</span>
+<span style="margin-left: auto; display: flex; gap: 6px">
+<sc-if value="{{c.open}}" hint-placeholder-val="{{true}}"><button type="button" class="b-chip" onClick="{{c.dismiss}}">Dismiss</button></sc-if>
+<sc-if value="{{c.isDismissed}}" hint-placeholder-val="{{false}}"><button type="button" class="b-chip" onClick="{{c.restore}}">Restore</button></sc-if>
+<a class="b-chip" href="#"><svg class="b-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg>Reply in Jira</a>
+</span>
+</div>
+</article>
+</sc-for>
+</div>
+<sc-if value="{{empty}}" hint-placeholder-val="{{false}}">
+<div style="padding: 48px 16px; text-align: center; color: #636363; background: #ffffff; border-radius: 12px">Nothing waiting on you in the last 30 days.</div>
+</sc-if>
+<p style="margin: 0; font-size: 12px; color: #8a8a8a">One card per ticket, showing its newest unanswered mention. Commenting on the ticket clears all of its mentions.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":920}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { dismissed: { 'OPS-388': true, 'WEB-61': true }, showDismissed: false };
+  }
+  renderVals() {
+    const all = [
+      { key: 'SUP-208', status: 'In Progress', summary: 'Booking widget shows wrong timezone for Lisbon branch', board: 'On none of your boards', author: 'Mara Ilić', text: 'can you confirm whether the BE stores the branch timezone or derives it from the company? Customer wants an answer by Friday.', when: '2 h ago', earlier: '' },
+      { key: 'PAY-131', status: 'Code Review', summary: 'Refund webhook retries flood the queue', board: 'On Payments Q4', author: 'Tomás Reyes', text: 'is the 3× retry from your change last sprint or from the gateway config? Seeing 40k jobs in the queue this morning.', when: 'yesterday', earlier: '+1 earlier mention' },
+      { key: 'WEB-77', status: 'To Do', summary: 'Rename the Resources tab in calendar settings', board: 'On none of your boards', author: 'Ines Kovač', text: 'does the API still accept the old resources key? Want to ship the copy change Monday.', when: '3 days ago', earlier: '' },
+      { key: 'OPS-388', status: 'Done', summary: 'Staging DB disk at 85%', board: 'On none of your boards', author: 'Lukas Brandt', text: 'FYI cleaning up old snapshots tonight, shout if any are yours.', when: '6 days ago', earlier: '' },
+      { key: 'WEB-61', status: 'In Progress', summary: 'Cookie banner overlaps the booking button', board: 'On none of your boards', author: 'Ines Kovač', text: 'thanks, all good now!', when: '9 days ago', earlier: '' }
+    ];
+    const d = this.state.dismissed;
+    const shown = this.state.showDismissed;
+    const cards = all.filter((c) => shown || !d[c.key]).map((c) => ({
+      ...c,
+      open: !d[c.key],
+      isDismissed: !!d[c.key],
+      cardStyle: d[c.key] ? 'opacity: .55' : '',
+      dismiss: () => this.setState({ dismissed: { ...d, [c.key]: true } }),
+      restore: () => { const n = { ...d }; delete n[c.key]; this.setState({ dismissed: n }); }
+    }));
+    const waiting = all.filter((c) => !d[c.key]).length;
+    const nDismissed = all.filter((c) => d[c.key]).length;
+    return {
+      cards,
+      empty: cards.length === 0,
+      countLine: waiting + ' tickets waiting',
+      showDismissed: shown ? 'true' : 'false',
+      toggleLabel: shown ? 'Hide dismissed' : 'Show dismissed · ' + nDismissed,
+      toggleDismissed: () => this.setState({ showDismissed: !shown })
+    };
+  }
+}
+</script>
+</body>
+</html>

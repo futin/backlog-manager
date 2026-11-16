@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mention modal, thread first</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#2a5fae}a:hover{color:#1d4580}
+.root{--board:#F4F4F3;--strip:#fff;--strip-hi:#F2F2F1;--hairline:#EAEAE8;--hairline2:#DCDCDA;--ink:#131313;--ink2:#636363;--ink3:#8A8A8A;--green:#5FA92C;--amber:#F5A15C;--mustard:#8f6214;--red:#C8412E;--note:#2a5fae;
+  font-family:"Hanken Grotesk",Helvetica,Arial,sans-serif;color:var(--ink);font-size:14px;line-height:1.45;background:rgba(19,19,19,.32);min-height:920px;padding:40px 48px;display:flex;justify-content:center;align-items:flex-start;box-sizing:border-box}
+.root *{box-sizing:border-box}
+.sheet{background:var(--board);border-radius:20px;width:100%;max-width:1240px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.18)}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:18px 24px;background:var(--strip);border-bottom:1px solid var(--hairline)}
+.crumbs{font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:6px}
+.top h1{flex-basis:100%;margin:0;font-size:22px;font-weight:600;letter-spacing:-.02em}
+.ty{width:14px;height:14px;border-radius:3px;display:inline-block;background:var(--red)}
+.x{margin-left:auto;display:flex;gap:8px;align-items:center}
+.chip{min-height:32px;padding:0 12px;border:1px solid var(--hairline2);border-radius:11px;background:var(--strip);font:inherit;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;text-decoration:none;color:var(--ink)}
+.chip.sm{min-height:28px;padding:0 10px;border-radius:9px;font-size:12px}
+.chip.pri{background:var(--ink);color:#fff;border-color:var(--ink)}
+.ic{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.body{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:20px;padding:20px 24px 24px}
+@media (max-width:1000px){.body{grid-template-columns:minmax(0,1fr)}}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.lbl{font-size:11px;font-weight:600;color:var(--ink3);display:flex;align-items:center;gap:8px}
+.thread{background:var(--strip);border-radius:12px;padding:4px 16px}
+.cm{display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px 12px;padding:14px 0;border-bottom:1px solid var(--hairline)}
+.cm:last-child{border-bottom:0}
+.av{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+.who{font-size:13px;font-weight:600;display:flex;gap:8px;align-items:baseline}
+.who span{font-weight:400;font-size:12px;color:var(--ink2)}
+.txt{grid-column:2;font-size:13.5px}
+.at{background:#dce8f7;color:var(--note);border-radius:4px;padding:0 3px;font-weight:600}
+.ask{margin:6px -10px;padding:10px 10px 12px;border-radius:12px;background:#fdf0e4}
+.ask-strip{grid-column:1 / -1;height:24px;margin:-10px -10px 6px;padding:0 12px;border-radius:12px 12px 0 0;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;background:var(--amber)}
+.more{background:none;border:0;font:inherit;font-size:12px;font-weight:500;color:var(--note);cursor:pointer;padding:10px 0;text-align:left}
+.pane{background:var(--strip);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:14px}
+.facts{display:grid;grid-template-columns:96px minmax(0,1fr);gap:9px 12px;font-size:13px;align-items:center;margin:0}
+.facts dt{color:var(--ink3);font-size:12px}
+.facts dd{margin:0;min-width:0}
+.pill{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:11px;background:#DCE8F7;font-size:12px;font-weight:500;color:var(--note)}
+.desc{font-size:13px;color:var(--ink2)}
+.note{font-size:12px;color:var(--ink2);background:var(--strip-hi);border-radius:10px;padding:10px 12px}
+.foot{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:12.5px;color:var(--ink2);padding:0 2px}
+.done{background:#eaf4dd;border-radius:10px;padding:10px 12px;font-size:13px;display:flex;align-items:center;gap:10px}
+</style>
+</helmet>
+<div class="root">
+<section class="sheet" role="dialog" aria-label="SUP-208 mention">
+<header class="top">
+<span class="crumbs"><i class="ty"></i><span style="font-weight: 600; color: #131313">SUP-208</span>· Bug · Support · on none of your boards</span>
+<span class="x">
+<span style="font-size: 12px; color: #636363">Mention 1 of 4</span>
+<a class="chip sm" href="#" aria-label="Previous mention"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg></a>
+<a class="chip sm" href="#" aria-label="Next mention"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></a>
+<a class="chip sm" href="Main.dc.html" aria-label="Close"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></a>
+</span>
+<h1>Booking widget shows wrong timezone for Lisbon branch</h1>
+</header>
+<div class="body">
+<div class="col">
+<div class="lbl">Comments · 6</div>
+<div class="thread">
+<sc-if value="{{collapsed}}" hint-placeholder-val="{{true}}"><button type="button" class="more" onClick="{{expand}}">Show 2 earlier comments</button></sc-if>
+<sc-if value="{{expanded}}" hint-placeholder-val="{{false}}">
+<div class="cm"><span class="av" style="background: #f5a15c">MI</span><div class="who">Mara Ilić <span>4 days ago</span></div><div class="txt">Customer reports Lisbon branch bookings show one hour off since the weekend. Screenshots attached.</div></div>
+<div class="cm"><span class="av" style="background: #e8e1f5">PN</span><div class="who">Petar Novak <span>3 days ago</span></div><div class="txt">Reproduced on staging: the widget shows UTC+1 for Lisbon after the DST switch.</div></div>
+</sc-if>
+<div class="cm"><span class="av" style="background: #cde8a8">AJ</span><div class="who">You <span>yesterday</span></div><div class="txt">Looking at it, my guess is the DST table we ship with the widget.</div></div>
+<div class="cm"><span class="av" style="background: #e8e1f5">PN</span><div class="who">Petar Novak <span>5 h ago</span></div><div class="txt">The frontend reads <code>branch.timezone</code> straight from /branches, so the widget is only echoing what it gets.</div></div>
+<div class="cm ask"><div class="ask-strip">Asks you · 2 h ago</div><span class="av" style="background: #f5a15c">MI</span><div class="who">Mara Ilić <span>2 h ago</span></div><div class="txt"><span class="at">@Andreja</span> can you confirm whether the BE stores the branch timezone or derives it from the company? Customer wants an answer by Friday.</div></div>
+<div class="cm"><span class="av" style="background: #dce8f7">IK</span><div class="who">Ines Kovač <span>1 h ago</span></div><div class="txt">+1, the Porto branch may have the same problem.</div></div>
+</div>
+<sc-if value="{{open}}" hint-placeholder-val="{{true}}">
+<div class="foot">
+<span>You have not commented since this mention.</span>
+<span style="margin-left: auto; display: flex; gap: 8px">
+<button type="button" class="chip" onClick="{{dismiss}}">Dismiss</button>
+<a class="chip" href="ModalDraft.dc.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"></path></svg>Draft a reply</a>
+<a class="chip pri" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg>Reply in Jira</a>
+</span>
+</div>
+</sc-if>
+<sc-if value="{{dismissed}}" hint-placeholder-val="{{false}}">
+<div class="done"><span>Dismissed. It comes back if someone mentions you on SUP-208 again.</span><button type="button" class="chip sm" style="margin-left: auto" onClick="{{undo}}">Undo</button></div>
+</sc-if>
+</div>
+<div class="col">
+<div class="lbl">Ticket</div>
+<div class="pane">
+<dl class="facts">
+<dt>Status</dt><dd><span class="pill">In Progress</span></dd>
+<dt>Assignee</dt><dd>Petar Novak</dd>
+<dt>Reporter</dt><dd>Mara Ilić</dd>
+<dt>Priority</dt><dd>High</dd>
+<dt>Parent</dt><dd>SUP-190 Branch settings issues</dd>
+<dt>Updated</dt><dd>1 h ago</dd>
+</dl>
+<div class="desc">Bookings made through the widget for the Lisbon branch show times one hour later than in the calendar. Started after the clocks changed on 26 Oct.</div>
+<a class="chip sm" href="#" style="align-self: flex-start"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg>Open ticket in Jira</a>
+</div>
+<div class="note">This ticket is on none of your boards, so the board cannot open it. Everything here comes from the mention check.</div>
+</div>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":920}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { expanded: false, dismissed: false };
+  }
+  renderVals() {
+    return {
+      collapsed: !this.state.expanded,
+      expanded: this.state.expanded,
+      expand: () => this.setState({ expanded: true }),
+      open: !this.state.dismissed,
+      dismissed: this.state.dismissed,
+      dismiss: () => this.setState({ dismissed: true }),
+      undo: () => this.setState({ dismissed: false })
+    };
+  }
+}
+</script>
+</body>
+</html>
