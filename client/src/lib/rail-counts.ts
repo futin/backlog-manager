@@ -27,8 +27,8 @@ export interface RailCount {
 }
 
 /** One section's entries, keyed by that section's own page key (`prs`, `runs`, `sessions`). Absent key = nothing pending on that page. */
-export type SectionCounts = Partial<Record<string, RailCount>>;
-export type RailCounts = Partial<Record<Section, SectionCounts>>;
+export type RailSectionCounts = Partial<Record<string, RailCount>>;
+export type RailCounts = Partial<Record<Section, RailSectionCounts>>;
 
 export interface RailCountsInput {
   /** The shell's one PRs answer (`PullRequestsContext`); `null` before it lands, while no GitHub project is registered, or with no token. */
@@ -72,7 +72,7 @@ export function railCounts(input: RailCountsInput): RailCounts {
  * only when exactly one entry is present: with two, a click on the sum could mean either page, so the pill stays plain and the click reaches the row.
  * `null` when nothing is pending.
  */
-export function sectionTotal(entries: SectionCounts | undefined, order: readonly string[]): RailCount | null {
+export function sectionTotal(entries: RailSectionCounts | undefined, order: readonly string[]): RailCount | null {
   if (!entries) return null;
   const present = order.map((k) => entries[k]).filter((e): e is RailCount => e !== undefined && e.n > 0);
   if (present.length === 0) return null;

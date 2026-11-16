@@ -1,4 +1,4 @@
-import { railCounts, sectionTotal, type RailCount, type SectionCounts } from '../../client/src/lib/rail-counts';
+import { railCounts, sectionTotal, type RailCount, type RailSectionCounts } from '../../client/src/lib/rail-counts';
 import { repo, row } from '../helpers/pr-fixtures';
 import type { PullRequestsPayload } from '../../shared/types';
 
@@ -68,7 +68,7 @@ describe('sectionTotal', () => {
   });
 
   it('sums, takes amber from any entry, and labels in tree order', () => {
-    const entries: SectionCounts = { a: entry(2, 'neutral', 'A', () => undefined), b: entry(3, 'warn', 'B', () => undefined) };
+    const entries: RailSectionCounts = { a: entry(2, 'neutral', 'A', () => undefined), b: entry(3, 'warn', 'B', () => undefined) };
     expect(sectionTotal(entries, ['b', 'a'])).toEqual({ n: 5, tone: 'warn', label: 'B; A' });
   });
 

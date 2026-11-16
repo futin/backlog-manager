@@ -17,7 +17,7 @@ import { useSettings } from '../hooks/useSettings';
 import { JIRA_PAGES, type JiraPage } from '../lib/jira-page';
 import { RUNS_MODES, type RunsMode } from '../lib/runs-mode';
 import { SECTIONS, type Section } from '../lib/sections';
-import { railCounts, sectionTotal, type RailCount, type SectionCounts } from '../lib/rail-counts';
+import { railCounts, sectionTotal, type RailCount, type RailSectionCounts } from '../lib/rail-counts';
 import { FILES_PAGES, GITHUB_PAGES, type FilesPage, type GithubPage } from '../lib/source-page';
 import { SETTINGS_SCOPES, type SettingsScope } from '../lib/settings';
 import type { PullRequestsPayload } from '../../../shared/types';
@@ -384,7 +384,7 @@ function RailTree<T extends string>({
   section: Section;
   current: Section;
   /** This section's pending counts by page (`lib/rail-counts.ts`); a page with an entry gets a pill at its row's right edge. */
-  counts?: SectionCounts;
+  counts?: RailSectionCounts;
   items: readonly T[];
   value: T;
   labelFor: (item: T) => string;
