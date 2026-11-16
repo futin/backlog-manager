@@ -1918,6 +1918,57 @@ button.rail-count { cursor: pointer }
 .jira-mentions-spin { display: inline-flex }
 .jira-mentions-spin[data-on] { animation: spin 1s linear infinite }
 @media (prefers-reduced-motion: reduce) { .jira-mentions-spin[data-on] { animation: none } }
+/* The List's key and excerpt and a card's summary open the mention modal: buttons, for the keyboard, worn as the text they replace — the cell keeps its
+   ellipsis, so the button is a block as wide as the cell and does the clipping itself. */
+.jira-mentions-open {
+  display: block; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap
+}
+.jira-mentions-open:hover { text-decoration: underline }
+/* A card's summary is that button too: `font: inherit` above would reset the summary's own size and weight, so they are said again at one class more. */
+.jira-mentions-open.jira-mentions-card-sum { width: auto; font-size: 14px; font-weight: 500; color: var(--ink) }
+.jira-mentions-card { cursor: pointer }
+.jira-mentions-card-acts { cursor: auto }
+
+/* The mention modal (§8.9.1, mock `ModalA.dc.html`) — `Modal`'s split shape with `lead`, dressed in the Detail dialog's head, labels and panes. What follows
+   is only what the mock adds: the walk's position and arrows in the head, the thread card, the amber ask block, the footer and the board note. */
+.jira-mention-nav { margin-left: auto; display: inline-flex; align-items: center; gap: 8px }
+.jira-mention-pos { font-size: 12px; color: var(--ink2); white-space: nowrap }
+.jira-mention-thread { background: var(--strip); border-radius: 12px; padding: 4px 16px; min-width: 0 }
+.jira-mention-more { padding: 10px 0; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 500; color: var(--cyan); cursor: pointer; text-align: left }
+.jira-mention-more:hover { text-decoration: underline }
+.jira-mention-cm {
+  display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 12px; padding: 14px 0; border-bottom: 1px solid var(--hairline);
+  scroll-margin: 12px
+}
+.jira-mention-cm:last-child { border-bottom: 0 }
+.jira-mention-cm > .jira-card-av { width: 28px; height: 28px }
+/* An open comment that asks the user: the mock's amber block. Its strip is the amber FILL with words on it — `--fill-live` under `--on-fill`, the one pair
+   whose job is ink on a fill (`--on-accent` on `--amber-solid` reads 3.5:1 in daylight, which the daylight-contrast guard refuses); the block itself is a
+   light tint of the amber mark, so the comment's own ink stays the board's. */
+.jira-mention-cm.ask { margin: 6px -10px; padding: 10px 10px 12px; border-radius: 12px; border-bottom: 0; background: color-mix(in srgb, var(--amber-solid) 12%, var(--strip)) }
+.jira-mention-ask-strip {
+  grid-column: 1 / -1; display: flex; align-items: center; height: 24px; margin: -10px -10px 6px; padding: 0 12px; border-radius: 12px 12px 0 0;
+  font-size: 12px; font-weight: 600; color: var(--on-fill); background: var(--fill-live)
+}
+.jira-mention-who { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink) }
+.jira-mention-when { font-size: 12px; font-weight: 400; color: var(--ink2) }
+.jira-mention-txt { grid-column: 2; min-width: 0; overflow-wrap: anywhere }
+.jira-mention-txt > :first-child { margin-top: 0 }
+.jira-mention-txt > :last-child { margin-bottom: 0 }
+.jira-mention-txt p, .jira-mention-txt li { font-size: 13.5px; line-height: 1.45; margin: 4px 0 }
+.jira-mention-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 2px; font-size: 12.5px; color: var(--ink2) }
+.jira-mention-foot-acts { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-left: auto }
+.jira-mention-done {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  font-size: 13px; color: var(--ink); background: color-mix(in srgb, var(--green-solid) 12%, var(--strip))
+}
+.jira-mention-done > button { margin-left: auto }
+.jira-mention-ticket { display: flex; flex-direction: column; gap: 14px; min-width: 0 }
+/* The description's first lines: four at 13 px, then cut — the whole of it is one click away (`Open ticket in Jira`). */
+.jira-mention-desc { max-height: calc(4 * 1.45em); overflow: hidden; font-size: 13px; line-height: 1.45; color: var(--ink2); overflow-wrap: anywhere }
+.jira-mention-desc > * { margin: 0 }
+.jira-mention-note { padding: 10px 12px; border-radius: 10px; font-size: 12px; color: var(--ink2); background: var(--strip-hi) }
 
 /* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
    what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px
@@ -4301,6 +4352,9 @@ button.rail-count { cursor: pointer }
 .ui-modal-split .ui-modal-close { top: 18px; right: 18px }
 .ui-modal-split .ui-modal-facts { border-right: none; padding: 20px 10px 24px 24px }
 .ui-modal-split .ui-modal-body { padding: 20px 24px 24px 10px }
+/* `lead` (Modal's header): the facts slot takes the wider column — the mention modal's thread, 1.6 : 1 as `ModalA.dc.html` draws it. Before the fold's rule, which
+   has the same specificity and so still collapses it to one column under 700 px. */
+.ui-modal-split.ui-modal-lead { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) }
 /* Folded, the split stacks head, agent and ticket — one scroll for the whole panel, since two stacked scrolling boxes on a phone trap the thumb. */
 .ui-modal-split.ui-modal-narrow { width: calc(100vw / var(--font-scale, 1)); grid-template-columns: minmax(0, 1fr); grid-template-rows: none; overflow-y: auto }
 .ui-modal-split.ui-modal-narrow .ui-modal-facts { max-height: none; overflow: visible; border-bottom: none; padding: 16px 16px 0 }
@@ -4387,7 +4441,8 @@ button.rail-count { cursor: pointer }
 }
 .chev-up { transform: rotate(180deg) }
 .chev-right { transform: rotate(-90deg) }
-@media (prefers-reduced-motion: reduce) { .chev-down { transition: none } .chev-up { transition: none } .chev-right { transition: none } }
+.chev-left { transform: rotate(90deg) }
+@media (prefers-reduced-motion: reduce) { .chev-down { transition: none } .chev-up { transition: none } .chev-right { transition: none } .chev-left { transition: none } }
 
 /* RunOn — the "Run on" machine-card group (spec "The picker's look"; §8.7 Overlays — the launch sheets it sits in, §7). One card-sized toggle per machine in an auto-fit grid, so two
    cards sit side by side on a sheet and stack on a phone with no breakpoint of this family's own. The card wears the chip's skin — `--strip`, a `--hairline2`

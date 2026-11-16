@@ -1,6 +1,6 @@
 import type { JiraMentionIssue } from '../../../../shared/types';
 import { initialsOf, statusTone, typeTone } from '../../lib/jira';
-import { askedAge, earlierText, excerptParts, mentionCards, mentionIssueType, type JiraMentionRow } from '../../lib/jira-mentions';
+import { askedAge, earlierText, excerptParts, mentionCards, mentionIssueType, type JiraMentionCard, type JiraMentionRow } from '../../lib/jira-mentions';
 import { Chip } from '../ui/Chip';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
@@ -17,7 +17,11 @@ import { JiraTypeIcon } from '../ui/JiraTypeIcon';
  * NEWEST mention, in a new tab with no referrer, worded `Reply in Jira` here and `Open in Jira` in the List.
  *
  * **Dismiss is the ticket's**, the same `onDismiss(issue)` the List calls, which posts every open id on it. A card whose ticket is dismissed (Show dismissed on)
- * is dimmed and offers `Restore` instead; its link stays. The click that opens the mention modal is Task 10's, so a card carries no handler beyond its buttons.
+ * is dimmed and offers `Restore` instead; its link stays.
+ *
+ * **The card's body opens the mention modal** (`onOpen`, Task 10) on the card's ticket and the mention it quotes; a click inside `.jira-mentions-card-acts`
+ * is the buttons' own and opens nothing. The summary is a `.jira-mentions-open` button with no handler of its own — its click (Enter or Space included)
+ * bubbles to the card's — so the keyboard has one stop per card that opens it.
  */
 export function JiraMentionCards({
   rows,
@@ -25,7 +29,8 @@ export function JiraMentionCards({
   me,
   now,
   onDismiss,
-  onRestore
+  onRestore,
+  onOpen
 }: {
   /** Every visible row — Show dismissed applied, the search NOT: a card quotes its ticket's newest mention whatever the filter matched. */
   rows: readonly JiraMentionRow[];
@@ -36,22 +41,33 @@ export function JiraMentionCards({
   now: number;
   onDismiss: (issue: JiraMentionIssue) => void;
   onRestore: (issue: JiraMentionIssue) => void;
+  onOpen: (card: JiraMentionCard) => void;
 }) {
   return (
     <div className="jira-mentions-cards" role="list" aria-label="Mentions">
-      {mentionCards(rows, search).map(({ issue, mention, earlier, dismissed }) => {
+      {mentionCards(rows, search).map((card) => {
+        const { issue, mention, earlier, dismissed } = card;
         const type = mentionIssueType(issue.type);
         const more = earlierText(earlier);
         return (
-          <article key={issue.key} className="jira-mentions-card" role="listitem" data-key={issue.key} data-dismissed={dismissed ? '' : undefined}>
+          <article
+            key={issue.key}
+            className="jira-mentions-card"
+            role="listitem"
+            data-key={issue.key}
+            data-dismissed={dismissed ? '' : undefined}
+            onClick={(e) => {
+              if (!(e.target instanceof Element) || e.target.closest('.jira-mentions-card-acts') === null) onOpen(card);
+            }}
+          >
             <div className="jira-mentions-card-head">
               <span className="jira-card-type" data-tone={typeTone(type)} title={issue.type} aria-hidden="true">
                 <JiraTypeIcon type={type} />
               </span>
               <span className="jira-card-key">{issue.key}</span>
-              <span className="jira-mentions-card-sum" title={issue.summary}>
+              <button type="button" className="jira-mentions-open jira-mentions-card-sum" title={issue.summary}>
                 {issue.summary}
-              </span>
+              </button>
               <span className="jira-card-status">
                 <span className="jira-status-dot" data-tone={statusTone(issue.status.category)} aria-hidden="true" />
                 {issue.status.name}

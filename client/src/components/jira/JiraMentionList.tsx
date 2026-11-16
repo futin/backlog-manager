@@ -25,14 +25,19 @@ import { JiraTypeIcon } from '../ui/JiraTypeIcon';
  *
  * **Actions fade in on hover or focus**, the Run cell's rule: `Dismiss` (every open mention on the TICKET — the user answers a thread, not a comment) or, on
  * a dismissed row, `Restore`, then `Open in Jira`, a link to the focused comment in a new tab with no referrer. A dismissed row (Show dismissed on) is dimmed,
- * its actions always shown, since Restore is the only thing to do with it. The row click that opens the mention modal is Task 10's.
+ * its actions always shown, since Restore is the only thing to do with it.
+ *
+ * **The key and the excerpt open the mention modal on THIS row's mention** (`onOpen`, Task 10): each is a `.jira-mentions-open` button worn as the text it
+ * replaces, so the keyboard reaches them and the cell keeps its ellipsis. Not the whole row — its Dismiss and Open in Jira sit in it, and a row-wide click
+ * target would make every miss of those a dialog.
  */
 export function JiraMentionList({
   rows,
   me,
   now,
   onDismiss,
-  onRestore
+  onRestore,
+  onOpen
 }: {
   rows: readonly JiraMentionRow[];
   /** The user's Jira display name, for the `@` chip; `null` draws the excerpt plain. */
@@ -40,6 +45,7 @@ export function JiraMentionList({
   now: number;
   onDismiss: (issue: JiraMentionIssue) => void;
   onRestore: (issue: JiraMentionIssue) => void;
+  onOpen: (row: JiraMentionRow) => void;
 }) {
   return (
     <div className="jira-issues-frame">
@@ -59,7 +65,7 @@ export function JiraMentionList({
           </thead>
           <tbody>
             {rows.map((row) => (
-              <MentionRow key={row.mention.commentId} row={row} me={me} now={now} onDismiss={onDismiss} onRestore={onRestore} />
+              <MentionRow key={row.mention.commentId} row={row} me={me} now={now} onDismiss={onDismiss} onRestore={onRestore} onOpen={onOpen} />
             ))}
           </tbody>
         </table>
@@ -73,19 +79,25 @@ function MentionRow({
   me,
   now,
   onDismiss,
-  onRestore
+  onRestore,
+  onOpen
 }: {
   row: JiraMentionRow;
   me: string | null;
   now: number;
   onDismiss: (issue: JiraMentionIssue) => void;
   onRestore: (issue: JiraMentionIssue) => void;
+  onOpen: (row: JiraMentionRow) => void;
 }) {
   const { issue, mention, dismissed } = row;
   const type = mentionIssueType(issue.type);
   return (
     <tr className="jira-issues-row jira-mentions-row" data-key={issue.key} data-dismissed={dismissed ? '' : undefined}>
-      <td className="jira-issues-key">{issue.key}</td>
+      <td className="jira-issues-key">
+        <button type="button" className="jira-mentions-open" onClick={() => onOpen(row)}>
+          {issue.key}
+        </button>
+      </td>
       <td title={issue.summary}>
         <span className="jira-issues-flex">
           <span className="jira-card-type" data-tone={typeTone(type)} title={issue.type} aria-hidden="true">
@@ -103,15 +115,17 @@ function MentionRow({
         </span>
       </td>
       <td className="jira-mentions-comment" data-col="comment" title={mention.excerpt}>
-        {excerptParts(mention.excerpt, me).map((p, i) =>
-          p.me ? (
-            <span key={i} className="jira-mentions-at">
-              {p.text}
-            </span>
-          ) : (
-            p.text
-          )
-        )}
+        <button type="button" className="jira-mentions-open" onClick={() => onOpen(row)}>
+          {excerptParts(mention.excerpt, me).map((p, i) =>
+            p.me ? (
+              <span key={i} className="jira-mentions-at">
+                {p.text}
+              </span>
+            ) : (
+              p.text
+            )
+          )}
+        </button>
       </td>
       <td>
         <span className="jira-issues-flex">

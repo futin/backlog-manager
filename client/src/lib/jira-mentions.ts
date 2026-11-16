@@ -5,13 +5,14 @@
  * `{ message }` body (a 429 adds `retryAt`, the end of the wait, which the page words as "Jira asked to wait until HH:MM"), the other routes answer `{ error }`.
  *
  * Since Task 8 it is also the one home of every derivation the Mentions page prints (board.md: "every derivation has one home in `lib/`"): the stored view
- * and Show-dismissed keys with their guards, the List's rows and search, the excerpt split around the user's own `@`, and the band's sub-line.
+ * and Show-dismissed keys with their guards, the List's rows and search, the excerpt split around the user's own `@`, and the band's sub-line. Since Task 10
+ * it holds the mention modal's too: the thread read, the walk over the view's order, the fold and the `@Name` chips.
  */
 import { errorOf, postJson } from './http';
 import { elapsedSince } from './item-age';
 import { accessPhrase } from './jira';
 import { formatZonedClock } from './time-zone';
-import { JIRA_MENTIONS_ISSUE_CAP, type JiraAccess, type JiraIssue, type JiraMention, type JiraMentionIssue, type JiraMentionsConfigured, type JiraMentionsPayload } from '../../../shared/types';
+import { JIRA_MENTIONS_ISSUE_CAP, type JiraAccess, type JiraIssue, type JiraMention, type JiraMentionIssue, type JiraMentionsConfigured, type JiraMentionsPayload, type JiraThreadComment, type JiraThreadPayload } from '../../../shared/types';
 
 export interface JiraMentionsFailure {
   message: string;
@@ -285,4 +286,85 @@ export function mentionsBand(input: {
   const parts = [waiting, `last ${data.window} days`, checking ? 'checking…' : age === null ? 'checked at an unknown time' : `checked ${age} ago`];
   if (wait !== null) parts.push(wait);
   return { lead: parts.join(' · '), fail, tail, disabled, title };
+}
+
+// ── The mention modal (Task 10) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A 200 thread is trusted only when the modal can draw it: the comments array it maps over and the `total` it prints. Anything else is a failed read, for
+ * `isJiraMentionsPayload`'s reason — a throw inside a render would unmount the page under the modal.
+ */
+export function isJiraThreadPayload(value: unknown): value is JiraThreadPayload {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const p = value as Record<string, unknown>;
+  return typeof p.key === 'string' && typeof p.total === 'number' && Array.isArray(p.comments);
+}
+
+/**
+ * `GET /api/jira/issue/:key/thread`, read fresh each time the modal lands on a ticket (spec: "the thread is the point and it must be current"). Rejects with
+ * an `Error` whose message is the server's own `{ error }` sentence — `SUP-208 is not readable` for a ticket Jira will not show this token — which the modal
+ * prints as it stands, so the reader learns why and not just that it failed.
+ */
+export async function fetchJiraThread(key: string): Promise<JiraThreadPayload> {
+  const res = await fetch(`/api/jira/issue/${encodeURIComponent(key)}/thread`);
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(errorOf(body, `HTTP ${res.status}`));
+  if (!isJiraThreadPayload(body)) throw new Error('malformed response');
+  return body;
+}
+
+/** One stop on the modal's prev/next walk: a List row or a Cards card, both of which carry the ticket and the mention they show. */
+export interface MentionStep {
+  issue: JiraMentionIssue;
+  mention: JiraMention;
+}
+
+/**
+ * Where `at` sits in the view's visible order, or `-1` when it has left it (answered, or dismissed with Show dismissed off). The List walks MENTIONS, so a
+ * row is found by its comment id; the Cards walk TICKETS, so a card is found by its key — a poll may have changed which mention a card quotes, and the card is
+ * still the one the reader opened.
+ */
+export function mentionStepIndex(order: readonly MentionStep[], at: MentionStep, byTicket: boolean): number {
+  return order.findIndex((s) => (byTicket ? s.issue.key === at.issue.key : s.issue.key === at.issue.key && s.mention.commentId === at.mention.commentId));
+}
+
+/**
+ * How many comments fold under `Show N earlier comments`: the ones before the user's own LATEST comment, which is where the conversation they owe an answer
+ * to starts (an open mention is by definition newer than it). `0` when the user never commented — nothing is history to them yet.
+ */
+export function threadFold(comments: readonly JiraThreadComment[]): number {
+  for (let i = comments.length - 1; i >= 0; i--) if (comments[i].mine) return i;
+  return 0;
+}
+
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+/**
+ * The thread's `@Name` mentions as tinted chips (spec "`@Name` mentions are tinted chips"; the List's `.jira-mentions-at`). A comment's markdown carries a
+ * mention as plain `@<display name>` (`adfToMarkdown`), so the boundaries of a multi-word name are not in the text; `names` — the user and every author in
+ * the thread — say which runs of text are mentions, longest first so `@Mara Ilić` beats `@Mara`.
+ *
+ * It works on the SANITISED html `renderMarkdown` produced, and only ever wraps text that is already there in a fixed `<span>`: it never inserts a byte a
+ * comment wrote, so it cannot reopen what the renderer closed. Tags pass through untouched, text inside `<code>`/`<pre>` is left alone (a handle in a code
+ * sample is not a mention), and a name followed by a letter or digit is not one either (`@Andrejas`). Names are matched as the renderer escapes them
+ * (`O'Brien` is `O&#39;Brien` in its output).
+ */
+export function chipMentions(html: string, names: readonly string[]): string {
+  const ats = [...new Set(names.filter((n) => n.trim() !== ''))]
+    .map((n) => `@${n}`.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]))
+    .sort((a, b) => b.length - a.length);
+  if (ats.length === 0) return html;
+  const re = new RegExp(`(?:${ats.map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\p{L}\\p{N}])`, 'gu');
+  let inCode = 0;
+  return html
+    .split(/(<[^>]*>)/)
+    .map((part) => {
+      if (part.startsWith('<')) {
+        if (/^<(code|pre)\b/i.test(part)) inCode += 1;
+        else if (/^<\/(code|pre)>/i.test(part)) inCode = Math.max(0, inCode - 1);
+        return part;
+      }
+      return inCode > 0 ? part : part.replace(re, (m) => `<span class="jira-mentions-at">${m}</span>`);
+    })
+    .join('');
 }

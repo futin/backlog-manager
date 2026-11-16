@@ -1,11 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraMentions } from '../../hooks/useJiraMentions';
 import { useJiraMentionsDismissed, useJiraMentionsView } from '../../hooks/useJiraMentionsView';
 import { useNow } from '../../hooks/useNow';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
-import { JIRA_MENTIONS_VIEWS, matchesMentionSearch, mentionRows, mentionsBand, type JiraMentionsView as ViewMode } from '../../lib/jira-mentions';
+import {
+  JIRA_MENTIONS_VIEWS,
+  matchesMentionSearch,
+  mentionCards,
+  mentionRows,
+  mentionsBand,
+  mentionStepIndex,
+  type JiraMentionsView as ViewMode,
+  type MentionStep
+} from '../../lib/jira-mentions';
 import type { JiraPage } from '../../lib/jira-page';
 import type { JiraMentionIssue } from '../../../../shared/types';
 import { Band } from '../ui/Band';
@@ -14,6 +23,7 @@ import { Glyph } from '../ui/Glyphs';
 import { Segmented } from '../ui/Segmented';
 import { JiraMentionCards } from './JiraMentionCards';
 import { JiraMentionList } from './JiraMentionList';
+import { JiraMentionModal, type MentionTicketState } from './JiraMentionModal';
 
 const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
 
@@ -39,6 +49,14 @@ const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
  *
  * Dismiss and Restore are the hook's, which never reject — a refusal lands in `error` and the band says it in red — and replace the payload on success, so
  * the row leaves (or comes back) from the answer itself, not from a guess made here.
+ *
+ * **The mention modal is held here** (Task 10), because its prev/next walks the order THIS page draws: the List's rows (one per mention, the search
+ * applied) or the Cards' cards (one per ticket, `mentionCards` over the same search), Show dismissed applied to both. `opened` is the stop the reader is on —
+ * a ticket and a mention — and its place in the order is recomputed on every render (`mentionStepIndex`: by comment id in the List, by key in the Cards), so
+ * a poll that reorders or recounts the page moves `Mention i of N` and never the dialog. A stop that LEFT the order (answered, dismissed with Show dismissed
+ * off, filtered out) stays on screen with no position; its neighbours are then the ones around the last place it held (`lastAt`), so Previous is the row
+ * that was before it and Next the one that took its place. The ticket's state for the footer is read from the same answer: in `issues`, in `dismissed`, or
+ * in neither.
  */
 export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
   const { data, loading, error, checking, sweep, dismiss, restore } = useJiraMentions();
@@ -49,11 +67,16 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   const [view, setView] = useJiraMentionsView();
   const [showDismissed, setShowDismissed] = useJiraMentionsDismissed();
   const [search, setSearch] = useState('');
+  const [opened, setOpened] = useState<MentionStep | null>(null);
+  // The last index `opened` held in the order — written during render, on the render that found it, and read only on one that did not (see the header).
+  const lastAt = useRef(0);
 
   const configured = data !== null && data.configured ? data : null;
   // Cards quote a ticket's newest mention whatever the search matched, so they take `visible` (no search) and filter by ticket themselves.
   const visible = useMemo(() => (configured === null ? [] : mentionRows(configured, showDismissed)), [configured, showDismissed]);
   const rows = useMemo(() => visible.filter((r) => matchesMentionSearch(r, search)), [visible, search]);
+  const byTicket = view === 'cards';
+  const order: readonly MentionStep[] = useMemo(() => (byTicket ? mentionCards(visible, search) : rows), [byTicket, visible, search, rows]);
 
   if (data === null || !data.configured) {
     return (
@@ -77,6 +100,20 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   const nDismissed = data.dismissed.length;
   const ids = (issue: JiraMentionIssue): string[] => issue.mentions.map((m) => m.commentId);
   const healthyEmpty = data.polledAt !== null && data.detail === null && data.issues.length === 0;
+
+  const at = opened === null ? -1 : mentionStepIndex(order, opened, byTicket);
+  if (at !== -1) lastAt.current = at;
+  const prev = opened === null ? undefined : at !== -1 ? order[at - 1] : order[lastAt.current - 1];
+  const next = opened === null ? undefined : at !== -1 ? order[at + 1] : order[lastAt.current];
+  // The stop as the page draws it now (a card's quoted mention may have moved under a poll), else as it was opened.
+  const shown = opened === null ? null : at !== -1 ? order[at] : opened;
+  const liveIssue = (key: string): { issue: JiraMentionIssue; state: MentionTicketState } | null => {
+    const open = data.issues.find((i) => i.key === key);
+    if (open !== undefined) return { issue: open, state: 'open' };
+    const gone = data.dismissed.find((i) => i.key === key);
+    return gone === undefined ? null : { issue: gone, state: 'dismissed' };
+  };
+  const live = shown === null ? null : liveIssue(shown.issue.key);
 
   return (
     <div className="board" data-testid="jira-mentions-page">
@@ -130,6 +167,7 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
             now={now}
             onDismiss={(issue) => void dismiss(issue.key, ids(issue))}
             onRestore={(issue) => void restore(issue.key)}
+            onOpen={setOpened}
           />
         ) : (
           <JiraMentionList
@@ -138,6 +176,7 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
             now={now}
             onDismiss={(issue) => void dismiss(issue.key, ids(issue))}
             onRestore={(issue) => void restore(issue.key)}
+            onOpen={setOpened}
           />
         )
       ) : search.trim() !== '' && (data.issues.length > 0 || (showDismissed && nDismissed > 0)) ? (
@@ -145,6 +184,23 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
       ) : healthyEmpty ? (
         <div className="board-empty">{`Nothing waiting on you in the last ${data.window} days.`}</div>
       ) : null}
+
+      {shown !== null && (
+        <JiraMentionModal
+          issue={live?.issue ?? shown.issue}
+          mention={shown.mention}
+          state={live?.state ?? 'gone'}
+          me={data.me}
+          now={now}
+          position={at === -1 ? null : { at: at + 1, of: order.length }}
+          onPrev={prev === undefined ? null : () => setOpened(prev)}
+          onNext={next === undefined ? null : () => setOpened(next)}
+          // Dismiss is the ticket's, as on the page: every mention the latest answer holds for it.
+          onDismiss={() => dismiss(shown.issue.key, ids(live?.issue ?? shown.issue))}
+          onRestore={() => restore(shown.issue.key)}
+          onClose={() => setOpened(null)}
+        />
+      )}
     </div>
   );
 }

@@ -2225,10 +2225,11 @@ the one settings key a hand-edited localStorage value could turn into script exe
 ## Escape has one owner, and the topmost dialog is the only one that closes
 
 Escape has one owner, and the topmost dialog is the only one that closes. `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-listener, installed on the first entry and removed with the last; all eight dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet`,
+listener, installed on the first entry and removed with the last; all nine dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet`,
 `OrchestrateSheet`, since Jira phase 2 the Jira Detail dialog (`jira/JiraDetail.tsx`) and the Jira board sheet (`jira/JiraBoardSheet.tsx`), since the
 release chip the What's new drawer (`ReleasesDrawer.tsx`), since Jira phase 5 the Jira launch sheet (`jira/JiraLaunchSheet.tsx`), and since the Dashboards
-card stopped editing in place its add/edit sheet (`settings/DashboardSheet.tsx`) — are on it
+card stopped editing in place its add/edit sheet (`settings/DashboardSheet.tsx`), and since Jira mentions the mention modal (`jira/JiraMentionModal.tsx`) —
+are on it
 and none binds its own listener. There were four until task-37: `RunDrawer` left the Board with the rest of the run's detail, which
 is the Runs page's own sheet — inline, beside the list, never a dialog — so it is off the stack rather than migrated onto it, and `useDialogEscape` itself is
 untouched. They used to bind four, unguarded, and two of them are mounted together by design — Board and Archive both keep the item modal open behind the launch
@@ -2266,8 +2267,13 @@ row, where a seven-field form inside the list of machines read as more of the li
 composer. It opens over nothing but the Settings page, so it ranks above no other dialog in practice, and the suite gains no case for it: it runs through
 the shell code the existing cases already cover. The page's row-level `Remove` stays an inline `Confirm`.
 
+The mention modal makes it nine, and through `Modal` this time: `JiraMentionModal` composes it, its third composer after `ItemModal` and `JiraDetail`, so
+it joined the stack without a line of the hook changing. It is the Detail dialog's reasoning a second time — a ticket's comment thread and its facts, with
+no run's Pause or Resume to give a standing place to — so the rule that kept the run's detail out of a modal does not reach it either. It opens from the
+Mentions page and over nothing else, and the suite gains no case for it: it runs through the shell code the item modal's cases already cover.
+
 One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens — and, since #225, the item modal's claim release — drawn inline in
-the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to its two composers and nothing else floating but `Popover`'s
+the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to its three composers and nothing else floating but `Popover`'s
 panels, which hang under their control without a scrim. The Jira board sheet's `Delete board` asks through it too, drawn inside the sheet, as do — since Jira phase 5 — the Skills card's `×` (`JiraSkillsGroup`, in its row) and
 the Detail dialog's session card `Stop` (in place of the button). It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
@@ -2281,7 +2287,7 @@ and in the same shape: it MOUNTS only while open, calling `useDialogEscape` once
 it back when it closes. What it does not take from the stack is click-outside — the stack owns a key, not the pointer, so `Popover` binds its own `pointerdown`
 on `document` while it is open, ignoring a press on its panel and on the control that opened it (that control's click is what toggles it). The dashboard's
 `useDismiss` bundles the two into one hook with its own `keydown` listener, which is exactly the second Escape owner this section forbids, and is why it was not
-copied. Still eight dialogs counted.
+copied. Still nine dialogs counted.
 
 Ranking is by **mount order**, a contract and not an accident: the entry's position is fixed for the dialog's mounted lifetime (registration effect keyed on
 `[]`, `onClose` read through a ref rewritten every render), because every call site passes an inline arrow and an effect keyed on `[onClose]` would re-push the

@@ -36,7 +36,10 @@ import { useEffect, useRef } from 'react';
  * Eight since the Dashboards card's add/edit sheet: `DashboardSheet` (`components/settings/DashboardSheet.tsx`) composes `ui/FormSheet`, its fifth composer,
  * and joined by construction with nothing here changed.
  *
- * One entry is not a dialog at all, and it is not one of the eight: bug-53's
+ * Nine since Jira mentions: `JiraMentionModal` (`components/jira/JiraMentionModal.tsx`) composes `ui/Modal`, its third composer after the item modal and
+ * `JiraDetail`, and joined by construction with nothing here changed. It is hosted by the Mentions page and opens over nothing but that page.
+ *
+ * One entry is not a dialog at all, and it is not one of the nine: bug-53's
  * `ui/Confirm.tsx`, the inline confirmation the run's Stop opens (as do the claim release, the Jira board sheet's `Delete board`, the Skills card's `×` and the
  * Jira modal's `Stop session`). It paints no
  * scrim and floats over nothing, but it calls this hook while it is drawn,
