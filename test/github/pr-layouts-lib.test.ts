@@ -28,53 +28,13 @@ import {
   transientFailures
 } from '../../client/src/lib/pr-layouts';
 import { groupRepos, mergeBlock, prChips, updateBlock, type PrOutcome } from '../../client/src/lib/prs';
-import type { PrRepoView, PullRequestRow } from '../../shared/types';
+import { repo, row } from '../helpers/pr-fixtures';
+import type { PullRequestRow } from '../../shared/types';
 
 /**
  * The PRs layouts' triage derivations (`docs/superpowers/specs/2026-10-29-prs-layouts-design.md`: Level of a PR, Rank, Layout key). Fixtures set every field
  * and discriminate (distinct repos, numbers, timestamps), so a reading that crossed a field or a row would not pass by coincidence.
  */
-
-function row(over: Partial<PullRequestRow> = {}): PullRequestRow {
-  return {
-    number: 17,
-    title: 'Teach the board to merge',
-    url: 'https://github.com/futin/x/pull/17',
-    author: 'ada',
-    draft: false,
-    head: 'feature/merge-it',
-    headSha: 'a'.repeat(40),
-    base: 'main',
-    crossRepository: false,
-    maintainerCanModify: true,
-    updatedAt: '2026-10-29T10:00:00Z',
-    mergeable: 'mergeable',
-    mergeState: 'clean',
-    review: null,
-    checks: 'none',
-    checkCounts: null,
-    autoMerge: null,
-    canUpdateBranch: false,
-    ...over
-  };
-}
-
-function repo(over: Partial<PrRepoView> = {}): PrRepoView {
-  return {
-    repo: 'futin/x',
-    polledAt: '2026-10-29T10:10:00Z',
-    access: 'ok',
-    detail: null,
-    syncOff: null,
-    methods: ['squash', 'merge'],
-    autoMergeAllowed: true,
-    prs: [],
-    total: 0,
-    truncated: false,
-    checksDetail: null,
-    ...over
-  };
-}
 
 describe('reach', () => {
   it('isNoAccess is true for forbidden and not-found only', () => {
