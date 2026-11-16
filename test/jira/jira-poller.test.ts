@@ -175,6 +175,7 @@ describe('unconfigured', () => {
       skills: [],
       calls: { sweep: 0, last429At: null },
       live: {},
+      mentions: null,
       armed: false,
       home: null
     });
