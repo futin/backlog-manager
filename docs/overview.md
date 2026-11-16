@@ -91,7 +91,7 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   then the remote dashboards and the remote boards named in `~/.backlog-manager/settings/dashboards.json`, still this one module, and with no such file nothing
   about a launch changes ([setup](workflows/remote-machine.md)).
 - **`tracker/`** — the second of four outbound-calling modules: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set,
-  the in-memory issue cache the `github` adapter answers from (one of the four caches in this server whose age is rendered, as `polledAt`), the PRs page's
+  the in-memory issue cache the `github` adapter answers from (one of the five caches in this server whose age is rendered, as `polledAt`), the PRs page's
   per-repo pull-request cache (the third: read on demand with a 60 s TTL, no timer), the eleven-label bootstrap, the claim protocol's pure half (`claim.ts`
   — what a claim IS, and why the lowest live comment id wins), and a read-only `trackers` route for Settings. The token is read per call from the
   environment and reaches no payload.
@@ -205,7 +205,7 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   the rail bar below 700 px — and two item readings: the card's `untyped`/assignee/link-out/`queued` badge, and the item modal's age beside the cached body —
   all derived in `lib/tracker.ts`, plus GitHub › Settings' `Sync` card, whose one control is each repo's sync interval, and the read-only `Sources` card on
   Shared Settings (token, reach, connect commands, the Jira row). Jira is drawn only
-  while `GET /api/jira` says configured: a second shell chip beside the tracker's, and three pages under its rail entry — Board, Sessions and Setup,
+  while `GET /api/jira` says configured: a second shell chip beside the tracker's, and four pages under its rail entry — Board, Sessions, Mentions and Setup,
   switched by the tree alone — all derived in `lib/jira.ts`. → [docs/subsystems/board.md](subsystems/board.md)
 - [`.claude/DESIGN.md`](../.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
   cite its subsection in a header comment. Not a `.claude/rules/` file — those hold the mechanism tier for a path scope, every bullet anchored into

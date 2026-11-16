@@ -54,20 +54,20 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   first on Shared) — `.set-cols` survives only on GitHub › Settings and Jira › Setup. One `RailTree` renders every tree — Files, GitHub, Jira, Runs and Settings, five call sites; `SECTIONS`/`Section`
   live in `client/src/lib/sections.ts` because the rail reading `useSettings` closed a cycle with `lib/settings.ts`. Why:
   [invariants.md](docs/subsystems/invariants.md#settings-is-three-pages-the-page-is-the-scope)
-- **The Jira section's three pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
+- **The Jira section's four pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
   `GET /api/jira` says configured.** `jira` sits in `SECTIONS` (`lib/sections.ts`) between `github` and `runs` UNCONDITIONALLY — `resolveLegacySection`
   (`lib/source-page.ts`) runs in a `useState` initializer, before the status exists — and the conditional half is the shell's alone. `SideRail`'s `drawn` skips
   the row unless the shell's one `useJira` (`JiraProvider`) says `configured: true`, or the status is unknown (`data` null) while `jira` is the section on
   screen. `App`'s hold-and-fall effect moves a `jira` section on `configured === false` and on nothing else — through `change` to `firstDrawn`
   (`lib/sources.ts`) of the projects answer, or, unwritten, to the provisional `FALLBACK_SECTION` while that answer is unknown, for the settle to correct;
   unknown holds,
-  drawn in `JiraView`'s `loading…` or `Jira unavailable` shape. The page is `JIRA_PAGES` (`board | sessions | setup`), `JIRA_PAGE_KEY` and `isJiraPage` in
+  drawn in `JiraView`'s `loading…` or `Jira unavailable` shape. The page is `JIRA_PAGES` (`board | sessions | mentions | setup`), `JIRA_PAGE_KEY` and `isJiraPage` in
   `lib/jira-page.ts`, held by `hooks/useJiraPage.ts` — a `persistedStore` (`hooks/persistedStore.ts`, the one home of the client's persisted module
   store), because the rail's `RailTree` and the in-page links are two mounted writers. The Board and Sessions pages share one board pick and load (`hooks/usePickedJiraBoard.ts`, `JiraBoardPicker`). The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board or Sessions page) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
   `change('jira')` and handed down through `JiraView`; the Sources card's `Jira › Setup ↗` link is the same pair, threaded `App` → `SettingsView` → `SharedPage`
   → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a page switch of its own (its `Sync now` and per-board icons sweep, they do not navigate). Settings' `Opens on` offers `Jira` only while
   configured (`landingOptions`), keeping a stored `jira` pin's option; a `landing: 'jira'` takes the same fall. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-jira-sections-three-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
+  [invariants.md](docs/subsystems/invariants.md#the-jira-sections-four-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
 - **A source row (Files, GitHub) is drawn only while a registered project has that source, and its pages are switched by the rail's tree or a link threaded down
   from it.** `files` and `github` sit in `SECTIONS` UNCONDITIONALLY and whether a row draws is the projects answer's: `ProjectsProvider`
   (`hooks/ProjectsContext.tsx`) is the shell's one read of `GET /api/projects`, through `useRefreshing` with no `armed` (mount + focus), keeping the last answer
@@ -164,7 +164,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   (`runStageTotals`) excludes `pending` too; `MACHINE_STAGES` is the closed list of what counts. Why:
   [invariants.md](docs/subsystems/invariants.md#queue-wait-is-not-work)
 - **A client poller built on `useCoalescedFetch` never has two of its own requests in flight: its timer is armed by an answer, and a trigger that lands
-  mid-flight folds into one follow-up (`useTrackers` and `useJira` are the deliberate exceptions, #231).** `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure
+  mid-flight folds into one follow-up (`useTrackers`, `useJira` and `useJiraMentions` are the deliberate exceptions, #231).** `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure
   of React) is the one home of poll scheduling and `hooks/useCoalescedFetch.ts` is its React shell; `hooks/useRefreshing.ts` (#285) is the layer every board
   poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useTicks`, `useOrchestratorArchive`, `TimeZoneProvider` (#241) and
   `ProjectsProvider` (no `armed`: none of the three polls) and `useJiraSessions` (15 s, one instance in `JiraSessionsContext`, mounted by the shell around the rail and the section, `enabled` only while Jira is configured) and `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) and `usePullRequests` (60 s, mounted ONCE by the shell's `PullRequestsProvider` while a GitHub project is registered — same constant `armed`; GitHub › PRs and Settings' Access card read its context. The server's PR cache has no timer, so that one mount is the only thing that ever reads PRs, and the rail counts open PRs on every page — spec §4.9a)
@@ -180,8 +180,11 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   sets with `useMountedRef`. `useTrackers` is the deliberate exception, and the rule is scoped to the hooks built on this for it: its timer chases the server's
   own poll clock, and a focus refetch, the timer's read and `saveInterval`'s refetch CAN overlap — it guards writes by sequence number (only the newest read may
   write) instead of preventing the overlap (#231). `useJira` (`hooks/useJira.ts`) is the second exception, the same shape on the same counter: its timer is
-  aimed at the soonest board's next sweep (`polledAt + interval + TRACKER_FETCH_SLACK_MS`, floored at `JIRA_STATUS_FLOOR_MS`), no timer while unconfigured or
-  with no syncing board, and focus, timer and a Setup save's `reload` may overlap. `useJiraBoard` IS built on `useCoalescedFetch`. Why:
+  aimed at the soonest of the next board sweep (`polledAt + interval + TRACKER_FETCH_SLACK_MS`, floored at `JIRA_STATUS_FLOOR_MS`) and the mentions deadline
+  (`mentions.polledAt + JIRA_MENTIONS_POLL_MS + slack`, same floor), no timer while unconfigured (`nextDelay` is null only then, or when no board syncs AND the status carries no mentions summary), and focus, timer and a Setup save's `reload` may overlap.
+  `useJiraMentions` (`hooks/useJiraMentions.ts`, called once, by the Mentions page) is the third, the same shape on the same counter, aimed at the mentions
+  cache's own clock: ONE timer at `polledAt + JIRA_MENTIONS_POLL_MS + TRACKER_FETCH_SLACK_MS` floored at `JIRA_STATUS_FLOOR_MS`, none while unconfigured, focus
+  refetching at once, and a POST's answer taking a sequence number so an older GET cannot land over it. `useJiraBoard` IS built on `useCoalescedFetch`. Why:
   [invariants.md](docs/subsystems/invariants.md#a-client-poller-built-on-usecoalescedfetch-never-has-two-of-its-own-requests-in-flight)
 - **`linkBase` becomes an href**, so `clampSettings` routes it through `clampOrigin` — URL-parsed, `http(s)` only. The one settings key a hand-edited
   localStorage value could turn into script execution.

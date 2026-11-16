@@ -29,7 +29,7 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   one check after the 409, a 400 `<path> is not mapped` unless SOME project maps the path. Why:
   [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
 - **The Jira token never leaves the server: the browser and `jira.mjs` both go through the server's own routes (`/api/jira`, and
-  `/api/agents/jira-link|jira-unlink` for `link` and `unlink`), and the poller is armed only while a board syncs.**
+  `/api/agents/jira-link|jira-unlink` for `link` and `unlink`), and the poller is armed while the site is configured and not `unsupported`.**
   `jiraEnv()` (`env.util.ts`) reads `BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN` (spelled once, in `JIRA_ENV`) per call, trimmed, never cached; whitespace
   is absent, the site is lower-cased and must pass `isJiraHostname`, and `detail` names the first problem — emptiness first, in site/email/token order, then the
   hostname shape. Every call is `JiraClient.request`'s: the gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3` (`GATEWAY_HOST`, not configurable),
@@ -38,14 +38,15 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `authorization: Basic …` is built there and nowhere else, and every `message` is Jira's sentence or the transport error's, never the request.
   `JiraStatusPayload` carries `site`, `me.name`, `me.accountId` and `tokenKind` — never the email or the token. Compose passes all three as
   `'${BM_JIRA_<NAME>:-}'`, pinned through `JIRA_ENV` by `test/guards/compose-env.test.ts`. `JiraPollerService` is a `setTimeout` chain on `JIRA_POLL_MS`, `unref`'d,
-  armed at bootstrap while the site is configured AND some board's interval is not `off`, OR some board is still owed its one cold sweep, OR the boot
-  (`cloudId`, `serverInfo`, `me`, the sprint field) is unanswered — except `unsupported`, which is final and disarms. The rule is judged at the end of every
-  sweep against `jira.json` read again there. `skills/jira/tools/jira.mjs` dials `http://127.0.0.1:${BM_API_PORT || 4322}` and nothing else — `jira.mjs
+  armed at bootstrap while all three keys are set and the site is not `unsupported` — whatever the boards say, because the mentions check is owed every
+  `JIRA_MENTIONS_POLL_MS` and needs no board, so a site with no boards, or every board `off`, keeps its chain (`mentionsArmed()`; `owed()` is the same test on
+  the boot's `access`). `unsupported` is final and disarms; unconfigured makes no call. Which board is DUE is still the board rules' question (a syncing
+  board, one owed its cold sweep, a forced one) and no longer the chain's. The rule is judged at the end of every sweep against `jira.json` read again there. `skills/jira/tools/jira.mjs` dials `http://127.0.0.1:${BM_API_PORT || 4322}` and nothing else — `jira.mjs
   link|unlink <KEY>` POST `{ key, sessionId }` to `/api/agents/jira-link|jira-unlink`, the session id read from `CLAUDE_CODE_SESSION_ID` (unset is exit `1`,
   nothing sent) — reads no `BM_JIRA_*` and sends no `authorization` header; the source guard in `jira.test.mjs` (comment lines stripped) holds all three. Its
   one allowed `BM_JIRA_` name is `BM_JIRA_FETCH_RETRY_MS`, `worktree`'s pause before its one fetch retry (default 1 000 ms) — a test knob, carrying nothing of
   Jira's — and its second is `BM_JIRA_FETCH_TIMEOUT_MS`, the bound on each `worktree` fetch (default 60 s), a test knob too. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-jira-token-never-leaves-the-server-and-the-poller-is-armed-only-while-a-board-syncs)
+  [invariants.md](docs/subsystems/invariants.md#the-jira-token-never-leaves-the-server-and-the-poller-is-armed-while-the-site-is-configured)
 - **Jira's Done column is a window, not a store: a done issue whose resolution — or, lacking one, whose last update — is older than 14 days is dropped at map
   time.** `JIRA_DONE_WINDOW_DAYS` lives in `map-issue.ts` and nowhere else; `mapJiraIssue` applies it to the `done` category alone, from `resolutiondate`, else
   `updated`, and keeps an issue exactly 14 days old. It runs as each issue is mapped, so a dropped issue counts against no cap — per query, per root walk or the

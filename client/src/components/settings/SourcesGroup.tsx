@@ -96,8 +96,10 @@ export function SourcesGroup({
           ? { tone: 'grey', word: 'checking…' }
           : { tone: gitlabTone(gitlabStatus, now), word: CARD_WORD[gitlabTone(gitlabStatus, now)] };
 
-  // Read again: all three sweeps, then every context re-reads. A sweep's 409 means nothing is armed to sweep (Jira or GitLab unconfigured or idle, no github repo), which is not an
-  // error on a card whose job is to say what the machine has; anything else is a sentence under the foot. A ref guards the double click `reading` cannot.
+  // Read again: all three sweeps, then every context re-reads. A sweep's 409 means nothing is armed to sweep — Jira unconfigured or `unsupported` (a
+  // configured Jira always keeps a chain now, for its mentions, even with every board `off`, so "idle" is no longer a 409), GitLab unconfigured or idle, or no
+  // github repo — which is not an error on a card whose job is to say what the machine has; anything else is a sentence under the foot. A ref guards the
+  // double click `reading` cannot.
   const readAgain = async (): Promise<void> => {
     if (inFlight.current) return;
     inFlight.current = true;

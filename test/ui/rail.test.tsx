@@ -666,7 +666,7 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(view.result.current[0]).toBe('list');
   });
 
-  it('draws Board, Sessions, Setup in the open Jira tree; Sessions carries the count as its own button, and the row itself still just sets the page', async () => {
+  it('draws Board, Sessions, Mentions, Setup in the open Jira tree; Sessions carries the count as its own button, and the row itself still just sets the page', async () => {
     const onChange = jest.fn();
     const page = renderHook(() => useJiraPage());
     const filters = renderHook(() => useJiraListFilters());

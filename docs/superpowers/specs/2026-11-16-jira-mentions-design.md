@@ -1,6 +1,6 @@
 # Jira › Mentions — design
 
-Status: full design (project), two phases, one spec. Date: 2026-11-16. Branch `feat/jira-mentions`. Mocks: the Design-canvas artifact "Jira Mentions"
+Status: full design (project), two phases, one spec; phase 1 built (2026-11-16). Date: 2026-11-16. Branch `feat/jira-mentions`. Mocks: the Design-canvas artifact "Jira Mentions"
 (https://claude.ai/artifact/2uoCrFpdE3hYmCn3TpHGnP, private), copied into [`2026-11-16-jira-mentions-mockups/canvas/`](2026-11-16-jira-mentions-mockups/canvas/).
 
 | Mock (in `canvas/`) | What it fixes | Phase |

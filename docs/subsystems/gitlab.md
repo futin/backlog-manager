@@ -8,7 +8,7 @@ nothing to GitLab and nothing to disk, and it adds no setting of its own: what i
 `server/src/gitlab/` is the fourth outbound-calling module, after `agents/`, `tracker/` and `jira/`, and the only one that talks to GitLab. The rules it
 answers to are in [`.claude/rules/gitlab.md`](../../.claude/rules/gitlab.md); the reasoning is in
 [invariants](invariants.md#the-gitlab-token-never-leaves-the-server-never-follows-a-redirect-and-the-poller-is-armed-only-while-a-mapped-repo-is-on-the-site)
-and, for the cache, in [the four caches](invariants.md#the-tracker-jira-pull-request-and-gitlab-caches-are-the-four-caches-in-this-server-whose-age-is-a-rendered-value).
+and, for the cache, in [the five caches](invariants.md#the-tracker-jira-pull-request-gitlab-and-jira-mentions-caches-are-the-five-caches-in-this-server-whose-age-is-a-rendered-value).
 
 ## Configuration
 

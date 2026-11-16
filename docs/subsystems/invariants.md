@@ -3406,14 +3406,14 @@ Jira › Setup holds `jira.json`'s writes: the control governs one source, and i
 keeps the read-only report of every source this machine reaches, the `Sources` card, alone in its left column, against Watchdog, Tick and Time zone in its
 right; its two links (`GitHub › Settings ↗`, `Jira › Setup ↗`) are the shell's pairs threaded down, and each is drawn only while the section it opens is drawn.
 
-## The Jira section's three pages are switched by the rail's tree, and the section is drawn only when configured
+## The Jira section's four pages are switched by the rail's tree, and the section is drawn only when configured
 
-The Jira section's three pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
+The Jira section's four pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
 `GET /api/jira` says configured. The two halves are separate rules that happen to meet in one rail row, and each has a precedent or a failure behind it.
 
 ### The tree rule is Runs' and Settings', applied a third time
 
-Board, Sessions and Setup are three pages under one rail entry, which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared, Dashboards) already have, and the rule those
+Board, Sessions, Mentions and Setup are four pages under one rail entry, which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared, Dashboards) already have, and the rule those
 two settled is that the tree is the switch at every width: the rail's trees stand open below 700 px, so a segmented control on the page would be a second
 wording of the same choice, free to drift from the tree's and reached in the same number of taps. Task-38 deleted Runs' in-page pair for that reason and task-42
 never gave Settings one; a Jira page switch would have been the first thing a later reader removed, so it was never drawn.
@@ -3611,7 +3611,7 @@ slowing a live run's sync costs latency, and that is the user's call. The route 
 the starting entries, and hosting it in `TrackerModule` would be a module cycle. Remote runs are the read-side twin: an `off` repo derives none, because a
 frozen comment cache would otherwise show another machine's run as live for as long as sync stays off.
 
-## The tracker, Jira, pull-request and GitLab caches are the four caches in this server whose age is a rendered value
+## The tracker, Jira, pull-request, GitLab and Jira-mentions caches are the five caches in this server whose age is a rendered value
 
 `TrackerPollerService` holds every connected repo's issues in memory, per repo, lost on restart and rebuilt by the first sync (task-45, spec §5.1). Every other
 read in this server is per request and uncached — the registry, each project's source marker, the run files, `uncommitted` — and those rules are untouched: this
@@ -3646,6 +3646,14 @@ pipeline, for the Jira poller's reason: a list that empties on a blip makes ever
 the work disappearing, while a `polledAt` that stops moving is the honest way to say "this is old". It exists for the tracker's reason too — a per-request
 read would be a GitLab request per ticket per render — and it is bounded the same way: a sweep spends at most `GITLAB_PAGES_PER_PROJECT` list pages per
 project and one detail read per open MR, so its request count grows with open MRs, not with history.
+
+**The Jira mentions cache is the fifth** (`JiraPollerService`, [spec](../superpowers/specs/2026-11-16-jira-mentions-design.md)). It is one result for the
+site — the comments that @-mention the user and still wait on them, the tickets they sit on, the dismissals applied — in memory and lost on restart, and it is
+allowed for the others' reason: a per-request read would be a Jira call per page render and per rail poll, and the rail counts mentions on every page. It is
+kept honest their way: `polledAt` rides on `GET /api/jira/mentions` and the page prints it as `checked 1 min ago`, and it moves only on a successful check. A
+failed check keeps the last rows and their `polledAt` and records its own `detail`, because "Nothing waiting" over a list that merely failed to load is a
+claim the cache cannot make. It shares the board poller's chain, boot state, 429 window and call counter instead of owning a second timer, so its calls reach
+the CALLS meter and one rate-limit budget covers every Jira call the server makes. The thread a mention opens is a fresh read, never this cache.
 
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
 board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip
@@ -3774,7 +3782,7 @@ because an unreadable file cannot say what is mapped. Its reader's fallback goes
 a pattern that fails `patternProblem` — the same checks the route applies — costs only itself, so a hand-edited bad pattern leaves that path's good base
 working.
 
-## The Jira token never leaves the server, and the poller is armed only while a board syncs
+## The Jira token never leaves the server, and the poller is armed while the site is configured
 
 The GitHub token's rule (above), stated again for a second credential rather than assumed to cover it: this app now holds secrets for two services, and a rule
 written about `BM_GITHUB_TOKEN` is not the one a reader of `server/src/jira/` will look for. `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are read by
@@ -3788,9 +3796,11 @@ address a scoped token can reach (spec §14 P14) — so nothing in a request nam
 credential at all, and the `myself` probe that tells a classic token from a scoped one is sent once, after the gateway has already accepted the credential.
 Project listing pages by `startAt` rather than following the `nextPage` URL Jira returns, so Basic auth is never sent to an address a response body chose.
 
-**Armed only while there is something to do.** The poller is the GitHub poller's `setTimeout` chain, and it arms on the same "still owed" logic: a board that
-polls, a board owed its one cold sweep, or a boot answer still missing. An unconfigured install, or one whose every board is `off` and already swept, makes no
-call to Atlassian at all — and `unsupported` (a Server/DC site) disarms for good, because no retry will make it Cloud. Compose passes the three keys as
+**Armed only while there is something to do — and the mentions check is always something to do.** The poller is the GitHub poller's `setTimeout` chain, and it
+arms on the same "still owed" logic, but since Jira mentions the thing owed is the site's, not a board's: the check for comments that mention the user is
+due every few minutes for as long as the site is configured, and it needs no board. So a configured install keeps its chain even with no boards, or with every
+board `off` and already swept, and the boards' own states (one that polls, one owed its cold sweep, a forced one) now decide only which board a tick sweeps. An
+unconfigured install makes no call to Atlassian at all — and `unsupported` (a Server/DC site) disarms for good, because no retry will make it Cloud. Compose passes the three keys as
 interpolations with empty defaults, never literals — bug-25's rule, where a literal is an account committed to a public repository. A person's ask is the one
 exception, and only for the board asked about: a board save, or since #472 the chip popover's per-board `now` (`POST /api/jira/boards/sweep`), marks that
 board `forced` — `off` included — which keeps the poller armed until a sweep that includes it lands.
