@@ -32,8 +32,12 @@ https://claude.ai/artifact/2uoCrFpdE3hYmCn3TpHGnP).
 - Constants, exact: `JIRA_MENTIONS_POLL_MS = 180_000`, `JIRA_MENTIONS_WINDOW_DAYS = 30`, `JIRA_MENTIONS_ISSUE_CAP = 100`, `JIRA_THREAD_MAX = 100`,
   `JIRA_MENTIONS_EXCERPT_CHARS = 280`, dismiss batch 1–50 ids. The mention sweep reuses `SWEEP_FLOOR_MS` (5 000) from `poller.service.ts`.
 - Store: `~/.backlog-manager/settings/jira-mentions.json`, override `BM_JIRA_MENTIONS_FILE`, `version: 1`, written with `writeJsonAtomic`.
-- Error bodies in the jira module use `{ message }` (as `jira-write.controller.ts` does). Exact sentences: `Jira is not being polled` (409),
-  `<id> is not an open mention on <KEY>` (400), `could not save — nothing changed` (500), `<KEY> is not readable` (404), `rate limited` + `retryAt` (429).
+- Error bodies follow `jira-write.controller.ts`: the mentions sweep's 409 `Jira is not being polled` and 429 `rate limited` + `retryAt` use `{ message }`
+  exactly as the site sweep does (:111-112); every other sentence uses `{ error }` (:79, :133), which is the only key the client's `errorOf`
+  (`client/src/lib/http.ts:17`) shows — `<id> is not an open mention on <KEY>` (400), `could not save — nothing changed` (500), `<KEY> is not readable`
+  (404). Route tests assert the whole body.
+- jsdom fixtures (Tasks 7-11) take `created`/`polledAt`/`retryAt` from `test/helpers/dates.ts` or a faked clock, never a literal date —
+  `test/guards/fixture-clock.test.ts` fails literal ones, and `checked 1 min ago`, `2 h ago` and `14:32` need a controlled clock.
 - Copy, exact: `N waiting · last 30 days · checked <age>` (List), `N tickets waiting · …` / `1 ticket waiting · …` (Cards), suffix
   ` · newest 100 tickets checked`, `checking…`, `Nothing waiting on you in the last 30 days.`, `Show dismissed · N`, `Restore`, `Dismiss`,
   `Open in Jira` (List) / `Reply in Jira` (Cards), `You have not commented since this mention.`,
@@ -101,12 +105,14 @@ https://claude.ai/artifact/2uoCrFpdE3hYmCn3TpHGnP).
 - `MENTION_SEARCH_FIELDS = ['summary','status','issuetype','comment','updated']`.
 - `mentionsUser(body: unknown, accountId: string): boolean` — true when the ADF holds a `mention` node whose `attrs.id === accountId`, at any depth.
 - `RawComment { id: string; author?: { accountId?: string; displayName?: string; avatarUrls?: Record<string,string> }; created: string; body: unknown }`.
-- `judgeComments(comments: RawComment[], me: string, now: number, windowDays: number, answeredAfter?: string | null): JiraMention[]` — every
-  CANDIDATE mention (open before dismissals), newest first; `url` built by the caller-supplied site (add a `site: string` parameter).
+- `judgeComments(input: { comments: RawComment[]; me: string; site: string; key: string; now: number; windowDays: number; answeredAfter?: string | null }):
+  JiraMention[]` — every CANDIDATE mention (open before dismissals), newest first; `url` = `https://<site>/browse/<KEY>?focusedCommentId=<id>` (spec "The
+  page"); `site` is the configured host as the existing browse links use it.
 - `excerptOf(body: unknown): string` — `adfToText`, cut at 280 on a word boundary with `…` (no cut when ≤ 280).
 
 - [ ] **Step 1: Failing tests** (fixtures: me `acc-me`, Mara `acc-m`, Ivo `acc-i`; `now` fixed at `2026-11-16T12:00:00Z`; every comment a distinct id and time):
-  - "mention found": Mara at 10:00 mentions me, no own comment → one mention, `commentId` hers, `author.name 'Mara Ilić'`.
+  - "mention found": Mara at 10:00 mentions me, no own comment → one mention, `commentId` hers, `author.name 'Mara Ilić'`, `url`
+    `https://acme.atlassian.net/browse/SUP-208?focusedCommentId=<her id>` (site `acme.atlassian.net`, key `SUP-208`).
   - "answered by a later own comment": Mara 10:00 mentions me, mine 10:04 → `[]`.
   - "only mentions after my latest own comment": Mara 08:00, mine 09:00, Ivo 11:00 → only Ivo's; my earlier 07:00 comment does not count as latest.
   - "self-mention ignored": my own comment mentioning `acc-me` → `[]`, and it still counts as my latest comment.
@@ -124,7 +130,10 @@ https://claude.ai/artifact/2uoCrFpdE3hYmCn3TpHGnP).
 **Files:**
 - Create: `server/src/jira/mentions.store.ts`
 - Modify: `docker-compose.yml` (the comment listing what the server writes under `settings/`, ~173-184: add `jira-mentions.json`)
-- Test: `test/jira/jira-mentions-store.test.ts` (use a temp file via `BM_JIRA_MENTIONS_FILE`, `test/helpers/jira-links-env.ts`'s pattern)
+- Modify: `test/helpers/jira-links-env.ts` (registered in `jest.config.ts:25`) — its `beforeEach` also points `BM_JIRA_MENTIONS_FILE` at a per-case temp
+  path, so the poller and route suites of Tasks 5-6, which build the real store, never write the developer's `~/.backlog-manager/settings/`
+- Modify: `test/guards/server-write-paths.test.ts` — `WRITERS` (:28) gains `'jira/mentions.store.ts': [jiraMentionsFile({})]`; run it in Step 4
+- Test: `test/jira/jira-mentions-store.test.ts` (use a temp file via `BM_JIRA_MENTIONS_FILE`)
 
 **Interfaces — Produces:** `jiraMentionsFile(env = process.env): string`; `class JiraMentionsStore` (Nest provider) with
 `dismissed(): readonly JiraDismissal[]`, `dismiss(entries: JiraDismissal[]): void`, `restore(key: string): number` (how many dropped),
@@ -170,7 +179,8 @@ Behaviour:
   `sweepCalls`. A board's 5xx/whole-board failure no longer `return`s past it: the mentions step still runs unless a 429 window is open or the boot is not
   answered (401).
 - **Check:** one search page (`maxResults` 100, `JIRA_MENTIONS_ISSUE_CAP`), `truncated` when `isLast` is false. Per issue whose inline `total` > returned
-  count: `comments(auth, key, JIRA_THREAD_MAX)`; 403/404 drops that issue; any other failure fails the whole check. Boards from `boardsHolding(key)`.
+  count: `comments(auth, key, JIRA_THREAD_MAX)`; 403/404 drops that issue; any other failure fails the whole check. `boards` holds the NAMES of the boards
+  whose cache holds the key (`boardsHolding` answers ids, poller.service.ts:399 — map them to names, or add a names sibling).
   Issues ordered by newest candidate, newest first; issues with no candidate dropped.
 - **Failure:** 401 → `boardFailed`'s 401 path (boot reset, `unauthorized`); 429 → `openWindow`; 403/404 on the search, 5xx, transport, 400 → mentions
   `detail` (the response's detail sentence), rows and `polledAt` kept, site `access` untouched.
@@ -181,7 +191,10 @@ Behaviour:
   - "arming with every board off": two `off` boards, swept once → still armed; a mentions search runs again after 180 000 ms, not before (advance 179 999 →
     no new search).
   - "mention found end to end": FakeJira issue `SUP-208` with Mara's mention → cache has one issue, one candidate, `boards: []`.
-  - ">20 comments fetch": issue with 23 comments, my reply at #5, Mara's mention at #2 (outside the inline 20) → one `comments` call; result `[]` (answered).
+  - "board names": `PAY-131` held by board `Payments Q4` (id distinct from the name), `SUP-208` on none → `boards` `['Payments Q4']` and `[]`.
+  - ">20 comments fetch": two 23-comment issues, each with Mara's mention at #2 (oldest three are outside the inline 20). `SUP-208` has my reply only at
+    #3 (also outside) → `[]`; `PAY-131` has no own comment → one open mention. Two `comments` calls. A build that ignored the fetched page would open
+    `SUP-208` and miss `PAY-131`.
   - "comment read 404 drops the issue": two issues, one 404s → cache holds the other, no `detail`.
   - "5xx keeps rows": good check, then search 503 → `issues` unchanged, `polledAt` unchanged, `detail` set, status `access` still `ok`.
   - "401 moves access": search 401 → status `access: 'unauthorized'`.
@@ -215,7 +228,9 @@ Behaviour:
   `adfToMarkdown`; `open` = the Task 2 judgement minus dismissed ids; 403/404 → 404 `<KEY> is not readable`; other failures through the existing
   `routeFailed` mapping. Its calls are a route's (discarded by the next `takeCalls()`).
 - The site sweep `POST /api/jira/sweep`: `sweepNow()`'s `not-armed` follows the widened arming — a site with every board `off` answers 200 and checks
-  mentions in that press.
+  mentions in that press. Mechanism: beside forcing every non-`off` board (poller.service.ts:321), `sweepNow()` marks mentions due (a `mentionsForced` flag
+  the mentions step's due test honours and clears), under the same in-flight join and `SWEEP_FLOOR_MS` floor. `mentionsSweepNow()` sets the same flag but
+  forces no board. Rewrite `test/jira/jira-sweep-route.test.ts:90-96` ("409 when only off boards remain") to the new rule.
 
 - [ ] **Step 1: Failing tests:**
   - "dismiss during an in-flight check survives the swap": hold the FakeJira search open, dismiss Mara's mention, release → payload `dismissed` holds
@@ -228,7 +243,8 @@ Behaviour:
   - restore with nothing dismissed → 200, payload unchanged.
   - sweep: unconfigured → 409 `Jira is not being polled`; inside a 429 window → 429 with `retryAt`; two presses within 5 s → one search; a press resets the
     cadence (the next background search is 180 000 ms after it).
-  - "site sweep with all boards off": `POST /api/jira/sweep` → 200 and one mentions search.
+  - "site sweep with all boards off": boot, let the boot's own mentions check finish (searches = 1), move past the floor, `POST /api/jira/sweep` → 200 and
+    mentions searches = 2, board searches unchanged.
   - summary: before the first check `count: null`; after one with two waiting tickets and one dismissed `count: 2`; cross-origin POST → 403.
   - thread: time order, `mine` on my comment, `open` true only on Mara's undismissed mention after my latest comment; 404 → 404 `SUP-208 is not readable`.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS, plus `test/jira/jira-routes.test.ts` (status shape).
@@ -317,10 +333,13 @@ Dismiss `Dismissed. It comes back if someone mentions you on <KEY> again.` + `Un
 Ticket facts (status, assignee, reporter, priority, parent, updated, description's first lines, `Open ticket in Jira`) and, for no board, the note
 `This ticket is on none of your boards, so the board cannot open it.`
 
-- [ ] **Step 1: Failing tests:** opening `SUP-208` fetches both routes once; header shows `on none of your boards` and `Mention 1 of 3`; next → `PAY-131`
-  (no badge, no note); two earlier comments fold under `Show 2 earlier comments`; the open comment carries `Asks you`; Dismiss posts, footer swaps, Undo
+- [ ] **Step 1: Failing tests** (Task 8's fixture with times: `SUP-208` Ivo 3 h ago and Mara 5 h ago, `PAY-131` 4 h ago — so the payload orders
+  `SUP-208`, `PAY-131`; List rows run ticket by ticket in payload order, each ticket's mentions newest first): in List, opening `SUP-208`'s first row
+  fetches both routes once; header shows `on none of your boards` and `Mention 1 of 3`; next → `Mention 2 of 3`, still `SUP-208` (Mara's comment
+  focused, no refetch); next → `Mention 3 of 3`, `PAY-131` (no badge, no note). In Cards, `SUP-208` opens as `Mention 1 of 2`; next → `PAY-131`; two earlier comments fold under `Show 2 earlier comments`; the open comment carries `Asks you`; Dismiss posts, footer swaps, Undo
   restores; thread 404 → `SUP-208 is not readable` in the modal; Escape closes it (the Escape stack); a dismissed `OPS-9` opens with `Restore`.
-- [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS, plus the `Modal` composer guard if one exists (`grep -l "Modal" test/ui test/guards`).
+- [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS, plus `test/guards/dialog-count-docs.test.ts` and every `grep -l "Modal" test/ui test/guards` hit — a
+  new `Modal` composer turns the count guard red until Task 13 updates its docs, so do Task 13's dialog-count edits in this task.
 - [ ] **Step 5:** Commit `feat(client): the mention modal, thread first`.
 
 ### Task 11: Popover Mentions row and band Sync now — mock `Sync.dc.html`
@@ -335,14 +354,13 @@ mentions in that press). Hidden while `mentions` is null (unconfigured).
   mentions sweep once and is disabled while out; a 429 answer shows `Jira asked to wait until 14:32`.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS. **Step 5:** Commit `feat(client): Mentions row in the Jira pill's popover`.
 
-### Task 12: Rail entry — mock `Rail.dc.html` — **waits for `feat/rail-pending-counts` (PR #528) to merge into `main`**
+### Task 12: Rail entry — mock `Rail.dc.html`
 
 **Files:** Modify `client/src/lib/rail-counts.ts` (`RailCountsInput` gains `jiraMentions: number`, `openJiraMentions?: () => void`; `out.jira.mentions`),
 `client/src/components/SideRail.tsx` (feed it from `useJiraContext().data?.mentions?.count ?? 0`; `openJiraMentions` sets the Jira page to `mentions` and
 the section to `jira`); Test `test/ui/rail-counts-lib.test.ts`, `test/ui/rail.test.tsx`.
 
-Before starting: `git fetch origin && git merge origin/main` into the branch; if #528 is not in `main`, park this task (`autopilot park` under autopilot)
-and go on to Task 13. Never build a stopgap badge.
+PR #528 (`rail-counts.ts`, `railCounts()` at `SideRail.tsx:201`) is already merged into this branch (merge of `origin/main`, b3dd6a58).
 
 - [ ] **Step 1: Failing tests:** `railCounts({ …, jiraMentions: 1 })` → `jira.mentions` `{ n: 1, tone: 'warn', label: '1 ticket mentions you' }`; 3 →
   `3 tickets mention you`; 0 → no entry. `sectionTotal` with only mentions → `onOpen` opens Mentions; with sessions and mentions both non-zero → no
@@ -354,11 +372,13 @@ and go on to Task 13. Never build a stopgap badge.
 **Files:** `CLAUDE.md` (the caches invariant: "four caches" → five, naming mentions); `docs/subsystems/invariants.md` (that section, ~3608 — its heading
 is an anchor that `CLAUDE.md`, `.claude/rules/tracker.md` and `docs/subsystems/gitlab.md` link, so a renamed heading updates all three links);
 `.claude/rules/tracker.md` (its cache mechanism count); `.claude/rules/board.md` ("The Jira section's three pages" → four; eight dialogs on the Escape
-stack → nine and the `Modal` composer list; the client-poller bullet gains `useJiraMentions` and `useJira`'s widened `nextDelay`); `.claude/rules/jira.md`
+stack → nine and the `Modal` composer list — together with the other places that pin the count: `test/guards/dialog-count-docs.test.ts` (:50-52, :63,
+:93), `docs/subsystems/invariants.md`'s Escape entry (~2228) and `client/src/hooks/useDialogEscape.ts`'s header (~36), all landed in Task 10; the
+client-poller bullet gains `useJiraMentions` and `useJira`'s widened `nextDelay`); `.claude/rules/jira.md`
 ("armed only while a board syncs" headline and mechanism → armed while configured and not `unsupported`); `docs/subsystems/` Jira/board/api docs where they
 list Jira routes or pages; `docs/superpowers/specs/2026-11-16-jira-mentions-design.md` status line ("phase 1 built").
 
-- [ ] **Step 1:** `grep -rn "four caches\|three pages\|eight dialogs\|armed only while a board" CLAUDE.md docs .claude/rules` — every hit is in this list or
+- [ ] **Step 1:** `grep -rn "four caches\|three pages\|eight dialogs\|armed only while a board\|[Ee]ight dialogs\|[Ee]ight since" CLAUDE.md docs .claude/rules client/src test` — every hit is in this list or
   is fixed. **Step 2:** Edit each (one sentence per rule; keep each rule file's mechanism-only shape and its `Why:` link). **Step 3:** run
   `pnpm exec jest test/guards` (rule-file guards). **Step 4:** Commit `docs: rules and docs for Jira mentions phase 1`.
 
