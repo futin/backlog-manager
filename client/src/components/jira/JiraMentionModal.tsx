@@ -2,6 +2,7 @@ import { type RefObject, useEffect, useRef, useState } from 'react';
 
 import type { JiraIssueDetail, JiraMention, JiraMentionIssue, JiraThreadComment, JiraThreadPayload } from '../../../../shared/types';
 import { useFetched } from '../../hooks/useFetched';
+import type { JiraMentionsWrite } from '../../hooks/useJiraMentions';
 import { useMountedRef } from '../../hooks/useMountedRef';
 import { fetchJiraDetail, initialsOf, statusTone, typeTone } from '../../lib/jira';
 import { askedAge, chipMentions, fetchJiraThread, mentionIssueType, threadFold } from '../../lib/jira-mentions';
@@ -39,8 +40,10 @@ export type MentionTicketState = 'open' | 'dismissed' | 'gone';
  * **The footer is the ticket's state, read from the page's answer** (`state`), never guessed here. Open: `You have not commented since this mention.`,
  * `Dismiss` (every open mention on the ticket, the user answers a thread) and `Reply in Jira` (the ink chip, the focused-comment `url`). Dismissed FROM this
  * dialog: the green `Dismissed. It comes back …` line with `Undo`, which restores. Opened already dismissed (Show dismissed on): `Restore` and `Open in Jira`.
- * Gone: only the link. Writes are the page's hook's — they never reject, a refusal lands in the band — so this holds only `busy`, to keep a double click from
- * posting twice.
+ * Gone: only the link. Writes are the page's hook's — they never reject, a refusal lands in the band — and each resolves its outcome, because that band is
+ * under the scrim: a refusal (`<id> is not an open mention on <KEY>` whenever the page's data is one poll stale) is drawn here as a `role="alert"` line
+ * under the footer, the Detail dialog's write-error shape, and an optimistic `dismissedHere` is taken back, so the footer is the one the ticket still has.
+ * `busy` keeps a double click from posting twice.
  *
  * **Every link out is a server-built `url`** (the mention's focused-comment link, the detail's ticket link), opened by `Chip as="a"` in a new tab with no
  * referrer.
@@ -69,8 +72,8 @@ export function JiraMentionModal({
   position: { at: number; of: number } | null;
   onPrev: (() => void) | null;
   onNext: (() => void) | null;
-  onDismiss: () => Promise<void>;
-  onRestore: () => Promise<void>;
+  onDismiss: () => Promise<JiraMentionsWrite>;
+  onRestore: () => Promise<JiraMentionsWrite>;
   onClose: () => void;
 }) {
   const mounted = useMountedRef();
@@ -81,17 +84,28 @@ export function JiraMentionModal({
   const [shownKey, setShownKey] = useState(issue.key);
   const [dismissedHere, setDismissedHere] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The last write's refusal, the server's own sentence; cleared by the next write and by a step to another ticket.
+  const [refused, setRefused] = useState<string | null>(null);
   if (shownKey !== issue.key) {
     setShownKey(issue.key);
     setDismissedHere(false);
     setBusy(false);
+    setRefused(null);
   }
 
-  const write = (run: () => Promise<void>, after?: () => void): void => {
+  // `here` is the `dismissedHere` the write means to leave behind; set before the post so the footer answers the click at once, and put back on a refusal.
+  const write = (run: () => Promise<JiraMentionsWrite>, here: boolean): void => {
+    const before = dismissedHere;
     setBusy(true);
-    after?.();
-    void run().then(() => {
-      if (mounted.current) setBusy(false);
+    setRefused(null);
+    setDismissedHere(here);
+    void run().then((outcome) => {
+      if (!mounted.current) return;
+      setBusy(false);
+      if (!outcome.ok) {
+        setRefused(outcome.message);
+        setDismissedHere(before);
+      }
     });
   };
 
@@ -140,7 +154,7 @@ export function JiraMentionModal({
         <div className="jira-mention-foot">
           <span>You have not commented since this mention.</span>
           <span className="jira-mention-foot-acts">
-            <Chip disabled={busy} onClick={() => write(onDismiss, () => setDismissedHere(true))}>
+            <Chip disabled={busy} onClick={() => write(onDismiss, true)}>
               Dismiss
             </Chip>
             <Chip variant="ink" as="a" href={mention.url} icon={<Glyph name="external" />}>
@@ -151,7 +165,7 @@ export function JiraMentionModal({
       ) : state === 'dismissed' && dismissedHere ? (
         <div className="jira-mention-done">
           <span>{`Dismissed. It comes back if someone mentions you on ${issue.key} again.`}</span>
-          <Chip size={28} disabled={busy} onClick={() => write(onRestore, () => setDismissedHere(false))}>
+          <Chip size={28} disabled={busy} onClick={() => write(onRestore, false)}>
             Undo
           </Chip>
         </div>
@@ -159,7 +173,7 @@ export function JiraMentionModal({
         <div className="jira-mention-foot">
           <span className="jira-mention-foot-acts">
             {state === 'dismissed' && (
-              <Chip disabled={busy} onClick={() => write(onRestore)}>
+              <Chip disabled={busy} onClick={() => write(onRestore, false)}>
                 Restore
               </Chip>
             )}
@@ -168,6 +182,11 @@ export function JiraMentionModal({
             </Chip>
           </span>
         </div>
+      )}
+      {refused !== null && (
+        <p className="jira-modal-error" role="alert">
+          {refused}
+        </p>
       )}
     </div>
   );

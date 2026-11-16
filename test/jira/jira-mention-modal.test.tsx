@@ -167,14 +167,19 @@ const res = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400,
 let fetchMock: jest.Mock;
 let answer: JiraMentionsConfigured;
 let unreadable: Set<string>;
+// A write the server refuses, by route: the status and the `{ error }` sentence it answers with, the payload untouched.
+let refuse: Partial<Record<'dismiss' | 'restore', { status: number; error: string }>>;
 
 beforeEach(() => {
   localStorage.clear();
   answer = payload();
   unreadable = new Set();
+  refuse = {};
   fetchMock = jest.fn((url: string, init?: RequestInit) => {
     if (url === '/api/jira/mentions' || url === '/api/jira/mentions/sweep') return res(answer);
     if (url === '/api/jira/mentions/dismiss' || url === '/api/jira/mentions/restore') {
+      const refused = refuse[url.endsWith('/dismiss') ? 'dismiss' : 'restore'];
+      if (refused !== undefined) return res({ error: refused.error }, refused.status);
       const { key } = JSON.parse(init?.body as string) as { key: string };
       const all = [...answer.issues, ...answer.dismissed];
       const issue = all.find((i) => i.key === key)!;
@@ -394,6 +399,46 @@ describe('the mention modal — opened from the Cards', () => {
     expect(posts('restore')).toEqual([{ key: 'SUP-208' }]);
     expect(within(d).getByText('You have not commented since this mention.')).toBeInTheDocument();
     expect(within(d).getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
+  });
+
+  // The likeliest refusal: the page's data is one poll stale, and a mention it still lists was answered meanwhile.
+  it('a refused Dismiss says why inside the modal, and the footer stays open with Dismiss to press again', async () => {
+    refuse.dismiss = { status: 400, error: '101 is not an open mention on SUP-208' };
+    const user = userEvent.setup();
+    await openCards(user);
+    await user.click(within(card('SUP-208')).getByText(SUP.summary));
+    await settle();
+    const d = dialog();
+    await user.click(within(d).getByRole('button', { name: 'Dismiss' }));
+    await settle();
+    expect(within(d).getByRole('alert')).toHaveTextContent('101 is not an open mention on SUP-208');
+    expect(within(d).getByText('You have not commented since this mention.')).toBeInTheDocument();
+    expect(within(d).getByRole('button', { name: 'Dismiss' })).toBeEnabled();
+    expect(within(d).queryByText(/^Dismissed\./)).toBeNull();
+
+    // A retry that lands clears the line.
+    delete refuse.dismiss;
+    await user.click(within(d).getByRole('button', { name: 'Dismiss' }));
+    await settle();
+    expect(within(d).queryByRole('alert')).toBeNull();
+    expect(within(d).getByText('Dismissed. It comes back if someone mentions you on SUP-208 again.')).toBeInTheDocument();
+  });
+
+  it('a refused Undo says why, and the footer stays dismissed with Undo to press again', async () => {
+    const user = userEvent.setup();
+    await openCards(user);
+    await user.click(within(card('SUP-208')).getByText(SUP.summary));
+    await settle();
+    const d = dialog();
+    await user.click(within(d).getByRole('button', { name: 'Dismiss' }));
+    await settle();
+    refuse.restore = { status: 500, error: 'could not save — nothing changed' };
+    await user.click(within(d).getByRole('button', { name: 'Undo' }));
+    await settle();
+    expect(within(d).getByRole('alert')).toHaveTextContent('could not save — nothing changed');
+    expect(within(d).getByText('Dismissed. It comes back if someone mentions you on SUP-208 again.')).toBeInTheDocument();
+    expect(within(d).getByRole('button', { name: 'Undo' })).toBeEnabled();
+    expect(within(d).queryByText('You have not commented since this mention.')).toBeNull();
   });
 
   it('a thread the server cannot read says so inside the modal, which stays open', async () => {

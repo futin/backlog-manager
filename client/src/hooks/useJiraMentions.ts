@@ -20,7 +20,13 @@ import { useWindowFocus } from './useWindowFocus';
  * `error` is a `JiraMentionsFailure | null`, shared by reads and writes: `message`, and `retryAt` for a 429 sweep (the page's "Jira asked to wait until"
  * copy). `checking` is true while this hook's own sweep is out, or while the cache has never been stamped (`polledAt` null) and nothing blocks the check —
  * Jira reachable per the shell's status `access` (read through `useJiraContext`) and no `retryAt`; the page then says "checking", never "Nothing waiting".
+ *
+ * `dismiss` and `restore` also RESOLVE their own outcome (`JiraMentionsWrite`) — still never rejecting, and still raising `error` for the band — because
+ * the mention modal sits over that band under a scrim, and a refusal it cannot see is a click that did nothing. `error` alone would not do: it is shared
+ * with the poll, so the modal could not tell its own write's refusal from a read's.
  */
+export type JiraMentionsWrite = { ok: true } | { ok: false; message: string };
+
 export interface JiraMentionsState {
   data: JiraMentionsPayload | null;
   loading: boolean;
@@ -28,8 +34,8 @@ export interface JiraMentionsState {
   reload: () => void;
   sweep: () => Promise<void>;
   checking: boolean;
-  dismiss: (key: string, ids: string[]) => Promise<void>;
-  restore: (key: string) => Promise<void>;
+  dismiss: (key: string, ids: string[]) => Promise<JiraMentionsWrite>;
+  restore: (key: string) => Promise<JiraMentionsWrite>;
 }
 
 function nextDelay(data: JiraMentionsPayload, now: number): number | null {
@@ -89,18 +95,20 @@ export function useJiraMentions(): JiraMentionsState {
 
   // A write's answer replaces `data` and re-arms the timer from its stamp. Taking a sequence number here retires any read still in flight.
   const write = useCallback(
-    async (path: 'sweep' | 'dismiss' | 'restore', body: object): Promise<void> => {
+    async (path: 'sweep' | 'dismiss' | 'restore', body: object): Promise<JiraMentionsWrite> => {
       try {
         const data = await postJiraMentions(path, body);
-        if (!mounted.current) return;
+        if (!mounted.current) return { ok: true };
         latest.current += 1;
         setState({ data, loading: false, error: null });
         clear();
         const ms = nextDelay(data, Date.now());
         if (ms !== null) timer.current = setTimeout(reload, ms);
+        return { ok: true };
       } catch (e) {
-        if (!mounted.current) return;
-        setState((prev) => ({ ...prev, error: asMentionsFailure(e) }));
+        const failure = asMentionsFailure(e);
+        if (mounted.current) setState((prev) => ({ ...prev, error: failure }));
+        return { ok: false, message: failure.message };
       }
     },
     [clear, reload]

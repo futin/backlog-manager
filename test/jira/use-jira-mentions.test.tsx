@@ -223,4 +223,28 @@ describe('useJiraMentions', () => {
     });
     expect(last.error?.message).toBe('could not save — nothing changed');
   });
+
+  it('dismiss and restore resolve their own outcome — ok, or the refusal sentence — so a caller over the band can say it; they never reject', async () => {
+    render(tree());
+    await flush();
+    fetchMock.mockImplementation(() => res(payload({ me: 'dismissed' })));
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await last.dismiss('PAY-1', ['10']);
+    });
+    expect(outcome).toEqual({ ok: true });
+    fetchMock.mockImplementation(() => res({ error: '10 is not an open mention on PAY-1' }, 400));
+    await act(async () => {
+      outcome = await last.dismiss('PAY-1', ['10']);
+    });
+    expect(outcome).toEqual({ ok: false, message: '10 is not an open mention on PAY-1' });
+    // The band's half is unchanged: the refusal is still the hook's `error`, and the last good answer stays.
+    expect(last.error?.message).toBe('10 is not an open mention on PAY-1');
+    expect(screen.getByTestId('p')).toHaveTextContent('ok:dismissed');
+    fetchMock.mockImplementation(() => res({ error: 'could not save — nothing changed' }, 500));
+    await act(async () => {
+      outcome = await last.restore('PAY-1');
+    });
+    expect(outcome).toEqual({ ok: false, message: 'could not save — nothing changed' });
+  });
 });
