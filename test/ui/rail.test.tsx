@@ -707,6 +707,38 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(sub()).toBeNull();
   });
 
+  it('draws Mentions’ count as its own button from the status payload’s mentions summary; a click opens Mentions and the Jira section', async () => {
+    const onChange = jest.fn();
+    const page = renderHook(() => useJiraPage());
+    act(() => page.result.current[1]('board'));
+    const withMentions = (count: number | null | undefined) => {
+      const data = { configured: true, mentions: count === undefined ? null : { polledAt: null, count, detail: null, truncated: false, retryAt: null } };
+      return (
+        <SettingsProvider>
+          <ProjectsContext.Provider value={{ data: null, drawn: BOTH, reload: () => {} }}>
+            <JiraContext.Provider value={{ ...configured, data: data as unknown as JiraStatusPayload }}>
+              <JiraSessionsContext.Provider value={{ data: payload([]), reload: () => Promise.resolve() }}>
+                <SideRail section="jira" onChange={onChange} provisional={false} />
+              </JiraSessionsContext.Provider>
+            </JiraContext.Provider>
+          </ProjectsContext.Provider>
+        </SettingsProvider>
+      );
+    };
+    const { rerender } = render(withMentions(2));
+    const group = screen.getByRole('group', { name: 'Jira pages' });
+    const pill = within(group).getByRole('button', { name: '2 tickets mention you' });
+    expect(pill).toHaveTextContent('2');
+    await userEvent.click(pill);
+    expect(page.result.current[0]).toBe('mentions');
+    expect(onChange).toHaveBeenLastCalledWith('jira');
+    // A null count (not checked yet) and a null summary (unconfigured) both draw nothing.
+    rerender(withMentions(null));
+    expect(within(screen.getByRole('group', { name: 'Jira pages' })).queryByRole('button', { name: /mention/ })).toBeNull();
+    rerender(withMentions(undefined));
+    expect(within(screen.getByRole('group', { name: 'Jira pages' })).queryByRole('button', { name: /mention/ })).toBeNull();
+  });
+
   it('on a phone, the open menu draws one Sessions pill button, in the Jira tree, that lands on Sessions and closes the menu', async () => {
     await withNarrow(async () => {
       const onChange = jest.fn();

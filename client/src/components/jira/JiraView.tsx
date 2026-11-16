@@ -20,7 +20,7 @@ import { JiraSetupView } from './JiraSetupView';
  * JiraView — the Jira section (Jira phase 2, spec §6.1; DESIGN.md §8.9, and §8.0 for the tree that switches its pages). Lazy in `App`, like every section,
  * so a machine that never configures Jira never fetches this chunk.
  *
- * It decides one thing: which of the section's three pages (Board, Sessions, Setup) is drawn, read from `useJiraPage` — the module store the rail's tree writes. It
+ * It decides one thing: which of the section's four pages (Board, Sessions, Mentions, Setup) is drawn, read from `useJiraPage` — the module store the rail's tree writes. It
  * draws NO control that switches them, at any width (the Runs/Settings rule, CLAUDE.md "Settings is three pages…"): the tree is the switch, and the in-page
  * links that also land on a page (`Open board` and Sessions' `Open Setup`, the empty board's chip to Setup) are `onOpenJiraPage`, the rail's own navigation threaded
  * down from `App`, handed to the pages as given.

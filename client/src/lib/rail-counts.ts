@@ -22,7 +22,7 @@ export interface RailCount {
   tone: RailTone;
   /** The full accessible name, in words — the pill draws only `n`, so this is what a screen reader hears and a hover shows. */
   label: string;
-  /** Present only for a count whose pill is a real button (today Jira › Sessions); without it the pill lets a click through to its row. */
+  /** Present only for a count whose pill is a real button (Jira › Sessions and Mentions); without it the pill lets a click through to its row. */
   onOpen?: () => void;
 }
 
@@ -39,6 +39,10 @@ export interface RailCountsInput {
   jiraNeedsYou: number;
   /** What the Jira Sessions pill's click does; supplied by `SideRail`, which owns the stores it writes. */
   openJiraNeedsYou?: () => void;
+  /** Tickets holding a mention that still waits on the reader (`status.mentions.count`, null before the first check read as 0). Not sessions: a ticket counts once. */
+  jiraMentions: number;
+  /** What the Jira Mentions pill's click does; supplied by `SideRail`, for the reason `openJiraNeedsYou` is. */
+  openJiraMentions?: () => void;
 }
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
@@ -62,6 +66,12 @@ export function railCounts(input: RailCountsInput): RailCounts {
     const sessions: RailCount = { n, tone: 'warn', label: n === 1 ? '1 session needs you' : `${n} sessions need you` };
     if (input.openJiraNeedsYou) sessions.onOpen = input.openJiraNeedsYou;
     out.jira = { sessions };
+  }
+  if (input.jiraMentions > 0) {
+    const n = input.jiraMentions;
+    const mentions: RailCount = { n, tone: 'warn', label: n === 1 ? '1 ticket mentions you' : `${n} tickets mention you` };
+    if (input.openJiraMentions) mentions.onOpen = input.openJiraMentions;
+    out.jira = { ...out.jira, mentions };
   }
   return out;
 }
