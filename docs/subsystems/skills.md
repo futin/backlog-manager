@@ -114,6 +114,11 @@ and no skill can. `jira.test.mjs` pins the same Table A and B rows as `test/jira
 comment naming its original ([`backlog-tick`](#backlog-tick)).
 `retro.mjs` has no discriminator at all — it needs no git root, because its subject is every project at once — and `backlog.mjs` has neither path helper,
 because the run-state directory is none of its business. Each copy is pinned by its own tool's suite.
+One helper crosses every border but one: `isMain`, the run-as-main guard, which compares `process.argv[1]` and `import.meta.url` through `realpathSync` so a
+script started through a symlinked path still runs `main()` instead of exiting `0` having done nothing (#453). `backlog.mjs`'s copy carries the reasoning;
+`orchestrate.mjs`, `api-call.mjs`, `retro.mjs`, `jira.mjs` and `review.mjs` — and `scripts/sync-plugin.mjs`, `ci-scope.mjs`, `tailnet.mjs` and
+`test-tmpdir.mjs` — each carry a twin naming it, all pinned by `scripts/run-as-main.test.mjs` rather than by their own suites. `tick.mjs` has none: it calls
+`main` unguarded.
 
 #### `backlog.mjs`'s two modes (task-46, spec §6.5)
 
@@ -162,7 +167,7 @@ comment per file; `retro.mjs`'s is the long-form copy the others point at, and `
 rule is untouched by the `await`: it is `process.exit()` that truncates a pipe, and what the rule actually requires is that nothing hold the event loop open
 when `main` returns. Each awaits every `fetch` to completion and sends `connection: close`, so no pooled socket outlives the call — `tick.mjs`'s request
 timeout is an `AbortSignal.timeout`, an unref'd timer, and every child it runs is `spawnSync`; the source guard accepts the awaited form for those four files
-and still requires the synchronous one of `orchestrate.mjs` and `retro.mjs`, which hold no asynchronous work at all. `backlog.test.mjs`'s
+and still requires the synchronous one of `orchestrate.mjs`, `retro.mjs` and `review.mjs`, which hold no asynchronous work at all. `backlog.test.mjs`'s
 `CLI_SOURCES` is where the list of files lives, never a count in prose.
 
 #### `orchestrate.mjs`'s two modes (task-47, spec §7)
@@ -350,5 +355,5 @@ skill's own `SKILL.md` is the authority on how that skill behaves; this doc is t
     - skills
     - agents
   kind: subsystem
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->

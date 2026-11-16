@@ -60,16 +60,17 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 | `block.ts`           | `renderTicketBlock` — one issue as plain text: the facts, the description, the subtasks (capped at `JIRA_BLOCK_CHILDREN_CAP`, 30); read by `?format=text` and `jira.mjs show` — no Run prompt carries it since 2026-11-11 |
 | `poller.service.ts`  | `JiraPollerService` — the ticker, the boot sequence, the per-board caches, every fresh read the routes make, and since phase 3 `assignToMe`, `transitionIssue`, the splice and the sweep's newest-wins rule |
 | `unwrap.util.ts`     | `unwrapJira` — a poller outcome as its value or its §8 error, shared by both controllers so a failure means the same on every route (phase 3); `jiraWriteOrThrow` (phase 5a) — an issue write's outcome with its two own refusals, hoisted out of the write controller so the two write routes and `dispatch-jira` answer a failure in the same words |
-| `prompt.util.ts`     | `composeJiraPrompt` — what a Run session is told, the ticket framed as data (phase 5a); `resolveJiraActionOrThrow`; `JIRA_PROMPT_MAX`; since the repo/branch work `workspaceBlock` and the Open MR closing rule |
+| `prompt.util.ts`     | `composeJiraPrompt` — what a Run session is told, the ticket framed as data (phase 5a); `resolveJiraActionOrThrow`; `JIRA_PROMPT_MAX`; since the repo/branch work `workspaceBlock` and the Open MR closing rule; since the CodeRabbit review work the review action's text and its two shape checks, `parseReviewMr` and `parseReviewHalf`; since the review gate the execute text's review-before-finishing order |
 | `refs.util.ts`       | the repo/branch work's one reader of git: `readRepoRefs` (`JiraRepoRefs`), `readWorktrees`, `checkRepo` (the unavailable reasons) — every call a read through `runGit` |
 | `branch-choice.util.ts` | `parseBranchChoice` (the branch choice's shape, 400s) and `resolveWorkspace` (the choice against the refs, 409s), shared by `/prompt` and `dispatch-jira` |
 | `live.service.ts`    | `JiraLiveService` — the ticket–session link store, in memory over a file (phase 5a's map, persisted since the Jira sessions work, → [the link store](#the-link-store)); not `JiraService`, the spec's name for it |
 | `links.store.ts`     | the link store's file I/O — `loadLinks`, `saveLinks`, `jiraLinksFile` (`~/.backlog-manager/settings/jira-links.json`, `BM_JIRA_LINKS_FILE`); no rule about what is kept |
 | `jira.controller.ts` | the ten read routes (six, phase 5's `GET /prompt`, the repo/branch work's `GET /refs` and `GET /worktrees`, and the sessions page's `GET /sessions`) |
-| `jira-write.controller.ts` | the eight write routes — six config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
+| `jira-write.controller.ts` | the ten POST routes — six config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work), the two sweeps that write nothing (`/sweep`, `/boards/sweep`) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
 | `jira.module.ts`     | `JiraModule` — the two controllers, the poller, the client (a factory value, the one place a suite swaps in a fake `fetch`) and since phase 5a `JiraLiveService`, all three exported for `AgentsModule` to import, never the reverse |
 
-`agents/` holds the other half of Run, in `jira-agents.controller.ts` (the two POSTs), `jira-dispatch.service.ts` (`JiraDispatchService`: dispatch and stop),
+`agents/` holds the other half of Run, in `jira-agents.controller.ts` (five POSTs: `dispatch-jira`, `jira-stop`, `jira-link`, `jira-unlink` and
+`jira-open-desktop`), `jira-dispatch.service.ts` (`JiraDispatchService`: dispatch, stop, link, unlink and the desktop hand-over),
 `jira-live.service.ts` (`JiraLiveReconciler`) and `session-stop.util.ts` (the dashboard stop call, hoisted out of the item abort) — see
 [Run](#run-phase-5a). The edge runs agents → jira and never back.
 
@@ -81,7 +82,9 @@ category, priority, assignee, reporter, parent, a subtask count, labels, sprint,
 `failures`), `JiraTransition`, `JiraIssueDetail` (an issue plus the Markdown description, children, transitions and the ids of the boards holding it) and
 `JiraStatusPayload`; phase 3 adds `JiraIssueWriteResult`, `{ ok: true, reread: boolean }`, the answer of both issue writes. Phase 5a gives two existing
 fields their data — `JiraStatusPayload.live`, `Record<key, JiraLiveSession>` (`name`, `startedAt`, `repo`, `starting`), and `JiraIssueDetail.session`, the
-key's `JiraLiveSession` or `null` — and adds `JiraAction` (`'execute' | 'context' | { skill: <s_ id> }`), `JiraDispatchRequest` and `JiraDispatchResult`. Phase 2 widened the payload by two fields: `armed`, the poller's `armed` getter — the Connection card's `every 15 s` / `idle`
+key's `JiraLiveSession` or `null` — and adds `JiraAction` (`'execute' | 'context' | { skill: <s_ id> }`, and `'review'` since the CodeRabbit review work,
+with `ReviewHalf`), `JiraDispatchRequest` and `JiraDispatchResult`.
+Phase 2 widened the payload by two fields: `armed`, the poller's `armed` getter — the Connection card's `every 15 s` / `idle`
 has no other source — and `home`, `os.homedir()` read per call, `null` while unconfigured, because the Repositories card shows a path under `$HOME` as `~`
 and the browser has no other way to know `$HOME` (compose passes the host's `HOME` through, so the container's `homedir()` is the host's). `JiraAccess` is `ok |
 unconfigured | unsupported | unauthorized | forbidden | rate-limited | unreachable`; `JiraTokenKind` is `classic | scoped`. `isJiraKey`
@@ -100,7 +103,7 @@ unconfigured, then ask the poller — so a malformed request never reads as an e
 | `GET /api/jira/search?q=`         | ≤ 20 issues for the roots picker; `q` required (400), trimmed, blank → `[]` with no call, over 100 characters → 400            |
 | `GET /api/jira/projects`          | every project the credentials see, `{ key, name }[]` sorted by key, paged by `startAt`                                          |
 | `GET /api/jira/jql/check?jql=`    | `{ ok: true, count }` or `{ ok: false, message }` (Jira rejected it — still a 200); `jql` required, over 2 000 characters → 400  |
-| `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&review&target&mrProject&mrIid&half` | `text/plain`: `composeJiraPrompt`'s answer (`mrProject`, `mrIid` and `half` only for `action=review`, the iid a string here). Refusals in order: 400 `invalid issue key`, 400 `action must be execute, context, review or skill:<id>`, 400 `repo is required`, the branch choice's 400s (`parseBranchChoice`, [below](#branch-and-worktree-the-repobranch-work)), 503, 409 (`jira.json` unreadable), 400 `unknown skill <id>`, the issue read (§8), 400 `<repo> is not mapped to <PROJECT>` (`repos[detail.project.key]`, repo normalised like a stored path), the refs' 409s (`resolveWorkspace`), 400 `prompt too long` |
+| `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&review&target&mrProject&mrIid&half` | `text/plain`: `composeJiraPrompt`'s answer (`mrProject`, `mrIid` and `half` only for `action=review`, the iid a string here). Refusals in order: 400 `invalid issue key`, 400 `action must be execute, context, review or skill:<id>`, 400 `repo is required`, for `action=review` 400 `mr must be { project, iid }` and 400 `half must be request or fix`, the branch choice's 400s (`parseBranchChoice`, [below](#branch-and-worktree-the-repobranch-work)), 503, 409 (`jira.json` unreadable), 400 `unknown skill <id>`, the issue read (§8), 400 `<repo> is not mapped to <PROJECT>` (`repos[detail.project.key]`, repo normalised like a stored path), the refs' 409s (`resolveWorkspace`), 400 `prompt too long` |
 | `GET /api/jira/refs?repo&key`     | `JiraRepoRefs` for one mapped repo, as of its last fetch. 400 `repo is required`, 400 `invalid issue key` (`key` is optional), 503, 409, 400 `<repo> is not mapped`; an unreadable repo is a 200 with `available: false` and its reason |
 | `GET /api/jira/worktrees`         | `{ worktrees, unavailable }` — every working tree of every distinct mapped path, and each repo that could not be read with its reason; never an error for one repo |
 | `GET /api/jira/sessions?open=1`   | `JiraSessionsPayload` — every link, live and ended, with its derived `state`, the dashboard's `row` (`null` for an ended link or a live one the dashboard does not list) and `stateSince`, plus `reachable`, `rowsAt` and `saveError` (the link store's latest failed save, `null` once one lands; the List draws it as an amber line above the rows); memory only, and answered while unconfigured (no 503). `?open=1` marks a Jira page open, which quickens the reconciler |
@@ -442,7 +445,8 @@ fixed text; with `review` off the prompt is byte for byte what it was.
 
 `GET /api/jira/prompt?key=&action=&repo=` answers `text/plain`. Its refusals, in order: 400 `invalid issue key`; 400 `action must be execute, context, review or
 skill:<id>`; 400 `repo is required`; 503 not configured; 409 for an unreadable `jira.json`; 400 `unknown skill <id>`; the issue read through §8's mapping; 400
-`<repo> is not mapped to <PROJECT>`; the refs' 409s; 400 `prompt too long`. The branch choice's 400s come right after `repo is required`. The repo is normalised
+`<repo> is not mapped to <PROJECT>`; the refs' 409s; 400 `prompt too long`. The branch choice's 400s come right after `repo is required` — after a review's
+`mr` and `half` 400s, which only shape the query and ask GitLab nothing (the dispatch is what checks the MR against the cache). The repo is normalised
 as `parseReposWrite` stored it (`~` expanded, one trailing slash dropped).
 **The mapping check differs between the two routes by design:** `dispatch-jira` checks the repo against the KEY'S PREFIX, before any Jira read — a project key
 holds no `-`, so the prefix is the project — while `/prompt` checks the read detail's `project.key`, which it has anyway. They agree for every issue except one
@@ -465,7 +469,9 @@ The methods, by what reads them. **The Run's** — `reserve` (the synchronous on
 pair it upgrades that entry to `run`), `release` (a `starting` entry only) — and the
 reads that serve them, `get`, `snapshot` (the status payload's `live`), `confirmed` and `hasConfirmed`, all of which see `run` links alone. **The reconciler's
 and the page's** — `links`, `liveLinks` and `hasLive` (every `how`), `end(key, sessionId, reason)`, `reattach`, `markQuiet` and `clearQuiet`, and the dashboard
-cache `setRows`, `rowsAt`, `rowFor`, `markUnreachable`, `reachable`, `notePageRead`, `pageOpen` and `onPageOpened`, which is memory only and never in the file. `addLink`,
+cache `setRows`, `rowsAt`, `rowFor`, `activeRows` (the `working` and `question` rows, the review dispatch's branch gate's read), `markUnreachable`, `reachable`,
+`notePageRead`, `pageOpen` and `onPageOpened`, which is memory only and never in the file. `reposChanged`, which `POST /api/jira/repos` calls after a save,
+tells every `onReposChanged` listener — the reconciler and, since the GitLab connection, the GitLab poller, each re-arming. `addLink`,
 `unlink`, `isSuppressed`, `unsuppress`, `markNeverLink` and `isNeverLink` are for branch-detected and hand-made links: the reconciler's detection pass makes the first, and no route makes the second yet. There is no
 `clear`: a session ends, it is not deleted. Live links are capped at `JIRA_LIVE_CAP` (100, a `starting` one counted): one more ends the oldest live link as
 `expired`, never a `starting` one; a live link older than `JIRA_LIVE_TTL_MS` (8 h, counted from the later of `startedAt` and `reattachedAt`) ends `expired`
@@ -474,14 +480,17 @@ poller never does.
 
 ### `POST /api/agents/dispatch-jira`
 
-`{ key, repo, action, assign, transitionId, mode, branch?, base?, openMr?, review?, target?, permissionMode?, model?, effort?, remoteControl?, surface? }` →
+`{ key, repo, action, assign, transitionId, mode, branch?, base?, openMr?, review?, target?, permissionMode?, model?, effort?, remoteControl?, surface?,
+prompt?, mr?, half? }` →
 `JiraDispatchResult` (`sessionId`, `assigned`, `transitioned` — the transition's NAME or `null` — and `session`). The controller (`JiraAgentsController`, behind
 `SameOriginPostGuard`, answering 200) checks the body's shape
 field by field; `JiraDispatchService.dispatch` then does, in this order: configured → `jira.json` readable → the skill exists → the repo mapped to the key's
 project → the dashboard gate (`projectDispatchGate`) → a `desktop` surface while that same read lacks `desktopAvailable` (409) → `live.reserve` → `no identity` if an assign is asked and the poller has no `me` → a FRESH issue read →
-the transition is among the ones that read offers → the first composition fits → assign (skipped when the ticket is already mine) → transition → re-read and
-re-compose, only if something was written → spawn in the repo under the session name `jira <KEY>`, carrying `surface` as it came → `confirm` and arm the
-reconciler. The dashboard runs a `desktop` launch's first turn headless and then hands it to the app (`claude://resume`), answering an id like any other,
+the transition is among the ones that read offers → the composition fits → assign (skipped when the ticket is already mine) → transition → spawn in the
+repo under the session name `jira <KEY>`, carrying `surface` as it came → `confirm` and arm the reconciler. The prompt is composed once, before any write,
+and nothing re-reads or re-composes after one. A body carrying the launch sheet's edited `prompt` (non-empty after trimming and within `JIRA_PROMPT_MAX`,
+else a 400 from the controller before any write) skips the composition and is spawned as written; every other field still drives the link, the writes and
+the workspace. The dashboard runs a `desktop` launch's first turn headless and then hands it to the app (`claude://resume`), answering an id like any other,
 so it confirms and reconciles the same way — the reconciler drops it once that turn ends. A dashboard from before the hand-over answers `{ surface:
 'desktop' }` with no id: the key is released and the answer is `{ surface: 'desktop', assigned, transitioned, session: null }`. Everything that can be
 refused is refused before the first write; any failure after the reservation releases it. The branch choice is parsed by the controller (`parseBranchChoice`, a
@@ -490,7 +499,7 @@ nothing and written nothing.
 
 | status | `error` |
 | ------ | ------- |
-| 400 | `invalid issue key`; `action must be execute, context, review or { skill: <id> }`; `mr must be { project, iid }`; `half must be request or fix`; `review needs mr and half`; `repo is required`; `surface must be dashboard or desktop`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `review must be true or false`, `review is only for execute with a branch`, `target is only for openMr with continue`, a name failing Table A) |
+| 400 | `invalid issue key`; `action must be execute, context, review or { skill: <id> }`; `mr must be { project, iid }`; `half must be request or fix`; `review needs mr and half`; `repo is required`; `surface must be dashboard or desktop`; `prompt must be a non-empty string`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `review must be true or false`, `review is only for execute with a branch`, `target is only for openMr with continue`, a name failing Table A) |
 | 503 | `Jira is not configured`; `no identity` |
 | 409 | `settings/jira.json <reason> — fix or delete it by hand`; `the desktop app is not available on this machine's dashboard — launch on Dashboard instead`; `<branch> exists — switch to Continue`; `<branch> is checked out in the mapped checkout <repo>`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment`; for a review, `a session is live on <branch>`, `no review state for !<iid> yet`, `nothing to review on !<iid>`, `!<iid> has too many threads to read`, `the review on !<iid> moved on — reopen the sheet` |
 | 400 | `unknown skill <id>`; `<repo> is not mapped to <PROJECT>`; `transition not offered`; `prompt too long`; for a review, `!<iid> is not an open merge request of <KEY>`, `<repo> is not a review candidate for !<iid>`, `a review continues <branch>` |
@@ -498,7 +507,7 @@ nothing and written nothing.
 | as §8 | the issue read, the assign and the transition, through `unwrapJira` / `jiraWriteOrThrow` — `retryAt` verbatim; an assign or transition failure is prefixed `assign: ` / `transition: ` |
 
 A failure after a write landed keeps its status and says the write stands: `— the assign stands` after a failed transition, `— the Jira writes stand` after a
-failed re-read, re-composition or spawn. The write is not undone, and the sentence says so rather than inviting a retry as though it were.
+failed spawn. The write is not undone, and the sentence says so rather than inviting a retry as though it were.
 
 ### The review action
 
@@ -541,6 +550,16 @@ link leaves the suppression standing. A pair already in the store, live or ended
 **Unlink** → `{ ok: true }`. Removes a `branch` or `manual` link and remembers the pair, so the next detection tick does not re-add it (C9). A `run` link is a 409
 `<KEY> was started by Run ▾ — stop it from the board instead`; a pair not in the store is a 404 `<KEY> is not linked to session <id8>`. It calls nothing, so it works
 with dispatch off.
+
+### `POST /api/agents/jira-open-desktop`
+
+`{ sessionId }` → `{ ok: true }`, in `JiraDispatchService.openDesktop`: Open in Desktop for a session running on the dashboard surface. It takes no key —
+the hand-over is about the session, not a ticket — and is `SameOriginPostGuard`ed, 400 `invalid session id` (`isSessionId`) and 409 when dispatch is off
+(`stop`'s sentence). It posts the dashboard's own guarded hand-over, `POST /api/spawn` with `{ resume: <id>, surface: 'desktop' }`, and re-implements none of
+the dashboard's guard: its status and `{ error }` come back unchanged (501 `desktop app unavailable`, 400 `unknown session`, 409 `session is still running`,
+`already resuming` or `session is open in the desktop app`, 429, 500 `open failed`), not reworded as `desktopSpawnError` rewords a launch. An unreachable
+dashboard is a 502 naming the cause, and so is a 200 that does not say `surface: 'desktop'` — a dashboard from before the hand-over. Jira is never called and
+the link store is not touched.
 
 ### The reconciler
 
@@ -677,9 +696,9 @@ The repo/branch work adds `jira-branch` (Tables A–E of `shared/jira-branch.ts`
 (`/refs`, `/worktrees`, the prompt's branch parameters), `jira-prompt` (the workspace block, the placeholders, Open MR), `agents-dispatch-jira`, `compose-env`
 (the second mount, `BM_REPO_ROOTS`), `jira-lib`, `jira-launch` (the Branch section), `jira-setup` (the row defaults and the path's worktrees), `jira-board`
 (the chip) and `jira-detail` (the Worktrees list). `skills/jira/tools/jira.test.mjs` (node) covers `worktree` over real temp repos and its own Tables A and B.
-The CodeRabbit review work adds `review-state`, `review-copy` and `gitlab-review-fold`, and widens `agents-dispatch-jira` (the review dispatch, the branch
-gate), `agents-jira-live`, `jira-prompt`, `jira-routes`, `jira-launch` (the review sheet), `jira-delivery-pane`, `jira-delivery-surfaces`, `jira-board`,
-`jira-lib` and `delivery-lib`.
+The CodeRabbit review work adds `review-state`, `review-copy` and `gitlab-review-fold` (all three in `test/gitlab/`), and widens `agents-dispatch-jira`
+(the review dispatch, the branch gate), `agents-jira-live`, `jira-prompt`, `jira-routes`, `jira-launch` (the review sheet), `jira-delivery-pane`,
+`jira-delivery-surfaces`, `jira-board`, `jira-lib` and `delivery-lib`.
 `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a per-request failure hook; `test/helpers/env.ts` blanks
 the three keys so no suite inherits a developer's credentials. `test/guards/compose-env.test.ts` pins the compose passthrough.
 The Jira sessions work adds `jira-sessions-state` (`sessionState` and `needsYou`) and widens `jira-live` (the store, its file, retention, the one-run gate),
@@ -697,5 +716,5 @@ another's links.
   sources:
     - server/src/jira
   kind: subsystem
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->

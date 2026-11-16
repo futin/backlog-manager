@@ -5,8 +5,9 @@ them (the files on disk, or a polled GitHub repo), reading the orchestrator's ru
 boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), polling the merge requests of the GitLab projects those boards' mapped repos name
 (`gitlab/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), deriving the tick breaker's board from the tick home (`tick/`), and — behind a switch that is off
 by default — asking another local process to start a Claude Code session, which since multi-dashboard may be a process on another machine. It writes no item
-file and no run file; the only bytes it owns are eight files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
-`tracker-sync.json`, since Jira phase 2 `jira.json`, for the tick breaker `tick.json`, for the machine list `dashboards.json` and, for the board's one
+file and no run file; the only bytes it owns are nine files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
+`tracker-sync.json`, since Jira phase 2 `jira.json`, since the Jira sessions work its link store `jira-links.json`, for the tick breaker `tick.json`, for
+the machine list `dashboards.json` and, for the board's one
 time zone, `timezone.json`, and for the reviewer, `review.json` (both `settings/`). Its writes to
 Jira itself (phase 3's issue assign and transition) are calls, not files.
 
@@ -140,7 +141,11 @@ listing is eventually consistent, so a `since` equal to the mark lost brickwrigh
 drops pull requests, and sleeps a rate-limited repo until its reset. A repo's first successful sync in a process logs one line,
 `tracker <repo>: cold sync <status> — <n> issues cached, <pages> page(s)`, and no later sync logs anything (#332). Since bug-55 a tick also makes one conditional per-issue comments read for every issue the
 cache holds an UNRELEASED claim on — none at all when nothing is held — and lets that list be the truth for that issue, because the repo-wide `since` read can
-never report a deletion and a loser deleted by another machine's server otherwise stayed cached as a phantom claim. Every absorbed issue — polled or taken off a write — also records the sha256 of its body under its
+never report a deletion and a loser deleted by another machine's server otherwise stayed cached as a phantom claim. Since #411 a tick also makes one
+`GET /pulls/<n>` for each merged PR that could lift an `in-review` label and whose base this process does not know yet (`learnReviewBases`) — a base, once
+learned, is never asked again, so a quiet repo spends nothing there; a limit stops the asking for that tick, and any other failure is that one PR's alone, which
+leaves the repo's `access` as it read and the next sync asks again (#441).
+Every absorbed issue — polled or taken off a write — also records the sha256 of its body under its
 `updated_at` (32 stamps per issue, a stamp seen with two bodies poisoned), which is what lets `body` forgive a stamp a poll has moved past (bug #234). The eleven labels in `labels.ts` are created on a repo's first successful sync if any is
 missing — the module's one write to GitHub. `map-issue.ts` is the pure issue → `BacklogItem` mapping (spec §5.3). `GET /api/trackers` is read-only and carries
 the platform's `hasToken`/`login`, its rate limit, and one row per registered project — **never the token**, which is read per call from the environment and
@@ -166,6 +171,14 @@ While a repo is `off`, every write path refuses with 409 `{ error: <the sentence
 `GithubSource` writes (through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check), `dispatch`, `orchestrate` and
 `resume` in `AgentsService`, and `ItemsAbortService.abort` as its first check after the files refusal — before its dashboard stop, not only before its release. `plan()` names the same sentence as its `blocked`, so the launch sheet never offers what dispatch refuses. `backlog.mjs` prints
 the `error` verbatim and exits `1` through its generic non-2xx path — not `5`: the stack is up, the setting is the refusal.
+
+`POST /api/github/sweep` (`tracker.controller.ts`, guarded like the agents POSTs) is the GitHub popover head's `Sync now`, every repo or one with `{ repo }`. It
+writes nothing: it asks `TrackerPollerService.sweepNow` for one sweep of `sweepTargets` — the named repo or every connected one, less any `off` or asleep —
+regardless of their intervals, joins a sweep already in flight, and answers `done` with no call inside `SWEEP_FLOOR_MS` (5 s) of the last one; then
+`PullRequestsService.refreshNow` re-reads those repos' PR lists, each only past `PR_TTL_MS`, and the route answers the `GET /api/trackers` payload. 400 for a
+`repo` that fails `isRepo`, 409 `{ message: 'GitHub is not being polled' }` with nothing armed, 404 for a repo no registered GitHub project is connected to,
+429 `{ message: 'rate limited', retryAt }` for a named repo still asleep (the later of its two sleeps); a 401, a 5xx or a transport failure inside the sweep is
+the poller's to record and is a 200 here.
 
 **The PRs page** ([spec](../superpowers/specs/2026-10-29-source-sections-design.md), Goal 2). `pulls.query.ts` holds the GraphQL — one list query per repo
 (open PRs and the repo's merge settings), the single-PR query, the two auto-merge mutations — sent through `GithubClient.graphql`, whose answers are recorded
@@ -210,8 +223,9 @@ The third outbound-calling module (Jira integration phase 1): a `fetch` client o
 keys are set and a board is owed a sweep, the per-board issue caches it fills (the second cache in this server whose age is rendered, as `polledAt`), the
 `jira.json` reader, the ADF converter and the ticket block. Ten read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
 fresh (`?format=text` for the ticket block), the roots search, the project list, the JQL check and (phase 5a) `/prompt`, the composed Run prompt as `text/plain` — and
-nine guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
-since the repo/branch work `/repo-defaults`), `/boards/sweep` (the chip's per-board `now`, which writes nothing and asks the poller for a save's sweep) and
+ten guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
+since the repo/branch work `/repo-defaults`), `/boards/sweep` (the chip's per-board `now`, which writes nothing and asks the poller for a save's sweep),
+`/sweep` (the popover head's site-wide `Sync now`, which writes nothing either and answers the status payload) and
 two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each followed by a re-read of the issue that is spliced into every board cache
 holding it. Since 5a the module also owns `JiraLiveService`, the ticket–session link store (memory over `~/.backlog-manager/settings/jira-links.json`) behind the status
 payload's `live`, an issue's `session` and `GET /sessions`; the two POSTs that
@@ -252,11 +266,15 @@ and a repo Jira › Setup maps has its `origin` on the site, and the in-memory M
 
 - `GET /api/gitlab` — `GitlabPayload` (`{ status, jiraProjects, mrs }`) from memory: the Sources row's state, identity and problems, each Jira key's mapped
   GitLab projects, and every cached MR with the ticket keys it carries. Never a token, never a remote's userinfo.
+  Since the CodeRabbit review work each open MR also carries `review` (`GitlabReview`, `null` when not read): the poller reads up to `GITLAB_REVIEW_PAGES`
+  (3) pages of the MR's `/discussions` when a read is due and folds the threads of one bot account — `BM_GITLAB_REVIEW_BOT`, read per call, else
+  `coderabbitai`.
 - `POST /api/gitlab/sweep` — guarded; `arm()` then a sweep, waited for up to `GITLAB_SWEEP_WAIT_MS`: 200 `{ ok: true }`, 409 when there is nothing to poll,
   429 with `retryAt` inside a rate-limit window.
 
-A repos save reaches it through `JiraLiveService.onReposChanged`, so `gitlab/` imports `JiraModule` and never the Jira poller. → [gitlab.md](gitlab.md),
-the full doc.
+A repos save reaches it through `JiraLiveService.onReposChanged`, so `gitlab/` imports `JiraModule` and never the Jira poller. `AgentsModule` imports
+`GitlabModule` for the review dispatch below, which reads the cache (`findMr`, `reposFor`) and makes no GitLab call; the edge runs agents → gitlab and never
+back. → [gitlab.md](gitlab.md), the full doc.
 
 ### `registry/`
 
@@ -315,7 +333,10 @@ the machine is `home`.
   by `composeJiraPrompt` — unless the body carries the launch sheet's edited `prompt` (a non-empty string of at most 4 000, else a 400 before any write), which
   is spawned as written. A failure after a Jira write says the write stands. Since the repo/branch work the body also carries the branch choice (`mode`,
   `branch`, `base`, `openMr`, `review`, `target`, above), checked before anything is reserved or written. An optional `surface` (`dashboard` | `desktop`) is item
-  dispatch's, for any action: forwarded to the spawn as it came, `desktop` a 409 unless home's dashboard says `desktopAvailable`. → [jira.md](jira.md#run-phase-5a)
+  dispatch's, for any action: forwarded to the spawn as it came, `desktop` a 409 unless home's dashboard says `desktopAvailable`. Since the CodeRabbit review
+  work `action` may also be `review`, with `mr` (`{ project, iid }`) and `half` (`request` | `fix`), each a 400 when malformed; the service checks them
+  against the GitLab poller's cache before anything is reserved, and its prompt names the cached MR. → [jira.md](jira.md#run-phase-5a),
+  [the review action](jira.md#the-review-action)
 - `POST /api/agents/jira-stop` `{ key, sessionId }` — stops ONE live session of the key through the dashboard (`session-stop.util.ts`, shared with the item
   abort) and ends its link as `stopped`; a ticket can hold several, so a bare key is a 400, and an id that is not a live link of the key a 409. Never calls
   Jira. `JiraLiveReconciler` ends links whose session the dashboard has stopped reporting as working for two minutes. →
@@ -326,6 +347,9 @@ the machine is `home`.
   capped list is not a refusal — then a `manual` link and `{ ok: true, linked: 'added' | 'exists' }`; an explicit link lifts an earlier unlink's suppression.
   Unlink removes a `branch`/`manual` link and suppresses the pair so detection never re-adds it; a `run` link is a 409, an unknown pair a 404; it makes no
   dashboard call. →  [jira.md](jira.md#post-apiagentsjira-link-and-jira-unlink)
+- `POST /api/agents/jira-open-desktop` `{ sessionId }` — Open in Desktop for a dashboard-surface session: the dashboard's own guarded hand-over
+  (`POST /api/spawn` with `{ resume, surface: 'desktop' }`), its status and `{ error }` passed through unchanged; 400 `invalid session id`, 409 when dispatch is
+  off, 502 for an unreachable dashboard or a 200 that does not say `surface: 'desktop'`. No key, and Jira is never called.
 - `GET /api/agents/watchdog`, `POST /api/agents/watchdog/config` — the run watchdog's live state, read out of this process's own memory and the settings file it
   owns, plus the four server-side knobs behind it.
 - `GET /api/agents/merge-check` — a local, read-only look at whether a project's main tree is in a state that can receive a merge.
@@ -379,7 +403,8 @@ the run `stop` stay home-only: they act on a run file, and a remote run has none
 Every new outbound read — the offers' dashboard and board reads, usage, and a remote's status — is held to 5 s. Home keeps its 4 s health and 15 s management
 reads, and every spawn and stop keeps 10 s.
 
-`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop` and `jira-link` answer 409 with the same sentence; `jira-unlink` calls nothing and is not gated). `status` exists to report that gate, so it answers either
+`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop`, `jira-link` and
+`jira-open-desktop` answer 409 with the same sentence; `jira-unlink` calls nothing and is not gated). `status` exists to report that gate, so it answers either
 way, and `pause`, `watchdog`, `watchdog/config` and `merge-check` never call the dashboard at all: two read this process's own state, one writes its own
 settings file, one looks at local git. `pause` being independent of the switch is deliberate rather than incidental — a pause is a fact on this machine's own
 disk about a run that is already going, so gating it would mean a run started while dispatch was on could never be stopped after somebody turned it off.
@@ -534,7 +559,7 @@ rebinding, which satisfies that guard with two matching lies. Global rather than
   `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN`, and never by the browser. Two calls go to the site itself (`https://<BM_JIRA_SITE>`): the unauthenticated `tenant_info`
   that yields the `cloudId`, and the one `myself` probe that tells a classic token from a scoped one.
 - **`<BM_GITLAB_SITE>`** — reached only from `gitlab/`, at `https://<site>/api/v4`, with `PRIVATE-TOKEN` read per call from `BM_GITLAB_TOKEN`, redirects
-  refused, three `GET` endpoints and nothing else, and never by the browser. A mapped repo's `origin` host is compared with the site, never dialled.
+  refused, four `GET` endpoints and nothing else, and never by the browser. A mapped repo's `origin` host is compared with the site, never dialled.
 - **The tick home** — `~/.backlog-manager/tick/`, read fresh per request by `tick/` and never written by this server; its only writer is `tick.mjs`. The one
   file this server writes for the breaker is `~/.backlog-manager/settings/tick.json`, beside the watchdog config.
 - **The client** — same-origin `fetch` against these routes, plus the built bundle when `static.ts` finds one.
@@ -549,5 +574,5 @@ origin guard, the derive-never-accept rule for dispatch, and the watchdog's armi
   sources:
     - server/src
   kind: subsystem
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->

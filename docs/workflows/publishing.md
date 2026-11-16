@@ -41,7 +41,8 @@ The script's own last lines are the verification: `installed v<version> @ <sha>`
 
 To confirm a specific skill or agent actually landed, look in the install path the script printed; that directory is what a session loads, and it is the only
 place worth checking. `node --test scripts/sync-plugin.test.mjs` covers the pure halves — the refusal ladder, the digests, the sparse-path hint — and runs as
-part of `pnpm test` (`test:skills`'s glob includes `scripts/*.test.mjs`, which is exactly why that half of the glob must not be lost).
+part of `pnpm test` (`test:skills`'s glob includes `scripts/*.test.mjs`, which is exactly why that half of the glob must not be lost). It also runs the prune
+against a temp versions directory and pins its three survivors: the version just installed, one marked `.in_use`, and any entry that is not a directory.
 
 ## Failure modes
 
@@ -85,5 +86,5 @@ one.
     - scripts/sync-plugin.test.mjs
     - .claude-plugin
   kind: workflow
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->

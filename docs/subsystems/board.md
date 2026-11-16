@@ -59,7 +59,7 @@ called by `OrchestratorRunsProvider` (`hooks/OrchestratorRunsContext.tsx`, mount
 payload (Board, Archive, GitHub › PRs, Runs) take it through `useOrchestratorRunsContext()`. The provider's `working` is `undefined` until the first answer
 (`answered`), so the cursor is solid then and on a crashed run, and a view switch — Settings included — loses nothing. Its `liveCount` (`liveRunCount`) is the Live sheet's row count.
 
-Every section has a sub-nav tree under its row: Files (Board, Archive), GitHub (Board, PRs, Archive, Settings), Jira (Board, Setup), Runs (History, Watchdog, Ticks)
+Every section has a sub-nav tree under its row: Files (Board, Archive), GitHub (Board, PRs, Archive, Settings), Jira (Board, Sessions, Setup), Runs (History, Watchdog, Ticks)
 and Settings (Local, Shared, Dashboards). All five are drawn by one component, `RailTree`, because the markup carries three details that must not drift — the
 `rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone menu on a pick. What each call site supplies is only what
 legitimately differs: the item list, which of them is current, and what a pick writes. In every case the tree is the **only** control that switches between the
@@ -82,6 +82,12 @@ who its mounted readers are.
 The rail's last element is the version chip, `v0.2.0` or `v0.2.0+3`, with a cyan dot while a release has landed since this browser last opened the
 What's new drawer behind it; the shell owns the read, the dot and the drawer, and renders the drawer outside the rail. All of it is
 [releases.md](releases.md).
+The chip shares the rail's foot card (`.rail-foot`) with `API connected` or `API unreachable`, read in `AppShell` from the shell's one `useTrackers`
+answer — an error is `down`, an answer `ok`, nothing until either — with no poller of its own.
+
+GitHub and Runs carry counts beside their rows too (restyle spec §4.9a), handed down from `App` as `counts`, so the rail reads nothing for them: GitHub's is
+`needsYouCount` (`lib/pr-layouts.ts`) over the shell's one pull-requests answer, the PRs that need the reader, as an amber `Pill`; Runs' is the provider's
+`liveCount`, as a neutral one. Zero draws no pill.
 
 The Jira row carries a Needs-you count badge (Jira sessions spec §7.4, C4): `useJiraNeedsYou` (`client/src/hooks/useJiraNeedsYou.ts`) reads the shell's one
 sessions answer — `JiraSessionsProvider` (`hooks/JiraSessionsContext.tsx`), hoisted out of `JiraView` into `App`'s shell around the rail AND the section, with
@@ -174,7 +180,8 @@ filter track (`FilterBar`: a `Filters` popover holding the Project picks, the St
 keys and an `Ascending`/`Descending` switch, each key arriving in its natural direction) and the Orchestrate chip, then four fixed columns
 (refactors/ideas/bugs/tasks). Out-of-scope has no Board column at all; it belongs to Archive. A click on a card opens the **item modal** — `ItemModal`
 composing `Modal`: a facts column (project dot and name, id, section, the created / updated / last-commit stamps, `groomed`, tags, the `in progress since`
-reading while a session holds the item, the elapsed and token counters when present, the file path, the dispatch control) beside the item's rendered Markdown
+reading while a session holds the item, the elapsed and token counters when present, the file path — or, for a tracker item (`BacklogItem.url` set, #497),
+an `issue` fact linking its `gh:<owner>/<repo>#<n>` path to the issue's page — the dispatch control) beside the item's rendered Markdown
 body, folding above it under 700 px. The body goes through `renderMarkdown` (`client/src/lib/markdown.ts`), the sanitising `marked` configuration hoisted
 out of `ItemModal` in Jira phase 2 so the Jira issue modal renders a ticket's description through the same function: raw HTML never renders as markup — a comment span renders as nothing, text around it in the same token renders as Markdown (a span holds no second opener, so a `-->` closes only the nearest `<!--` before it and any other `<!--` stays as literal text, #419), and any other tag as escaped literal text, so `Promise<void>` survives in prose, and text marked lexes inside an inline `<script>`/`<pre>` is escaped too (#350) — a link may name only
 `http`, `https` or `mailto` (or no scheme), and an image may name no scheme at all, so the board makes no outbound fetch on a viewer's behalf.
@@ -472,8 +479,9 @@ from the saved setting (`useReviewPick`) and sends a `review` override only when
 `review: null`, which the server refuses. The Runs detail sheet's facts show who reviewed a run as one line, `Reviewer: …` (`reviewerLabel`, `shared/agent.ts`),
 from the config the run recorded at `init`; a run recorded before the setting existed, or a value that fails `parseReviewConfig`, reads `Reviewer: default`.
 
-The watchdog card is one of five places Settings writes to the server — GitHub › Settings' sync picker, since #17, the `Backlog tick` card's threshold and two
-caps, the `Time zone` card's zone (#241), and the Dashboards page's four `POST /api/dashboards/*` writes — four knobs that live in `settings/watchdog.json`
+The watchdog card is one of six places Settings writes to the server — GitHub › Settings' sync picker, since #17, the `Backlog tick` card's threshold and two
+caps, the `Time zone` card's zone (#241), the `Reviewer` card's config (#507), and the Dashboards page's four `POST /api/dashboards/*` writes —
+four knobs that live in `settings/watchdog.json`
 beside the registry rather than in this browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the rail's tree calls. Because it
 writes, it can be refused, like the sync picker: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it
 was refused for, while every knob keeps showing the value the server actually holds. That is a separate hook field (`saveError`) from the failed-GET `error`
@@ -531,8 +539,10 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   its header, inside a sideways-scrolling box whose dot and PR columns stay sticky; a problem cell and a header count are pills (red for `bad` and Checks,
   amber otherwise; a healthy cell is plain text). The Checks cell and the checks chip are sized by `checkTally` (`lib/prs.ts`) — `2 of 7 failing`, `3 of 7
   running`, `7 passing`, and `2 of 7 checks failing` on a chip — from `PullRequestRow.checkCounts`, and say the bare word when there are no counts or the
-  counts do not back the word (a `pending` rollup with nothing running); its row toggles one expansion, a panel that is the `Ledger`'s next sibling inside the sheet (`aria-controls`; a `Popover`
-  portals nothing and the scroll box's and Ledger's overflow would clip the Merge menu), holding the key strip with a blocked Merge's reason in words, then the foot.
+  counts do not back the word (a `pending` rollup with nothing running); its row toggles one expansion, the table row right under that PR (`MatrixExpand`,
+  `.prs-matrix-expand`, one cell across every column, `aria-controls`), holding the key strip with a blocked Merge's reason in words, then the foot. Inside
+  it the Merge menu is drawn in flow (`position: static`) so the scroll box cannot clip it, and the cell's content is pinned to the box's visible width
+  (`.prs-matrix-pinned`), as a collapsed row's outcome is.
   **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`), its head a dark 28 px repo `GlyphTile`, the short repo name (`repoShortName`), the
   `N open` pill and `polled <age>` at the trailing edge, the cards flowing two-up in `.prs-cards-grid` (one column under ~1100 px of pane), its rows the same `PrRow` Inbox draws
   (without the repo name; Cards' text takes a 240 px basis so the keys stay at the right of a two-up card, Inbox keeps 320); a repo read cleanly with none is counted in the
@@ -673,7 +683,8 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   and window focus, never a poll — the value changes on a person's pick), and `useTimeZone()`: `{ zone, stored, browser, save, saveError }`, `zone` being
   `stored ?? browser`. A component mounted without the provider reads the browser's zone, which is what the jsdom suites rely on.
 - `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns`,
-  `useWatchdog`, `useTicks`, `useOrchestratorArchive`, `useJiraSessions` and `useMachines` (all through `useRefreshing`, below), and of `useJiraBoard` directly:
+  `useWatchdog`, `useTicks`, `useOrchestratorArchive`, `useJiraSessions`, `useMachines`, `usePullRequests` and `useGitlab` (all through `useRefreshing`, below),
+  and of `useJiraBoard` directly:
   one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
   rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
 - `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those pollers go through, `useMachines`
@@ -681,7 +692,8 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `hooks/useFetched.ts` (#285) — the keyed one-shot read: `idle | pending | ok | failed`, a key change reads `pending` on the render that carries it, and a
   superseded or post-unmount answer sets nothing. `useProjectSources`, the item modal's body, `LaunchSheet`'s plan and branch list, `useOrchestrateDraft`'s
   merge-check, uncommitted flag and branch list, `RunDetail`'s archived run, `JiraDetail`'s detail and worktrees, `JiraLaunchSheet`'s prompt preview and
-  detail, `JiraBranchSection`'s and `JiraReposGroup`'s branch refs, and the Jira board's and Repositories card's worktree lists all read through it.
+  detail, `JiraBranchSection`'s and `JiraReposGroup`'s branch refs, the Jira board's and Repositories card's worktree lists, and `useReviewSetting`'s one GET
+  all read through it.
 - `hooks/useAgents.ts` — status poll on mount and window focus, plus the one re-ask a click against a project-visibility block provokes.
 - `hooks/useAction.ts` — the one home of a click-fired mutation's in-flight guard, `busy`, `error` and message mapping (#286, bug-19's layer 1): `RunControls`,
   `LaunchSheet`, `useOrchestrateDraft`, `ClaimRelease` and, since Jira phases 3 and 5, `JiraDetail`'s writes and `JiraLaunchSheet`'s Start keep only their own
@@ -753,5 +765,5 @@ with the failure each one encodes. Not restated here.
     - client/src
     - shared/types.ts
   kind: subsystem
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->

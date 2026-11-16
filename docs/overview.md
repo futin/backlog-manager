@@ -28,7 +28,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [workflows/ci.md](workflows/ci.md)                   | the PR gate: `ci / checks`, `ci / pr-title`, `ci / skills` from release-kit, and the `main-pr-only` ruleset             |
 | [workflows/remote-machine.md](workflows/remote-machine.md) | adding a second machine to the launch picker: its name, its tailnet reach, its allowlist and token, this board's `.env` |
 
-`.claude/rules/` sits beside that table rather than in it: eleven path-scoped files that a session loads automatically when it reads a file under their `paths:`
+`.claude/rules/` sits beside that table rather than in it: the path-scoped files that a session loads automatically when it reads a file under their `paths:`
 glob, each the one home of the rules scoped to its paths, mechanism included — CLAUDE.md keeps only the cross-cutting rules' headlines and a table of which file
 covers which paths, `subsystems/invariants.md` the reasoning. They are guarded by `test/guards/claude-rules.test.ts` rather than by `/docs-sync`, because what can rot
 in them is mechanical: a dead anchor, a glob that matches nothing, a CLAUDE.md headline with no byte-equal copy in a rule file, a rule homed in two files, a
@@ -145,7 +145,7 @@ unit of work per scheduled tick and is read-only against items, the run state an
 `/api/jira` — save `worktree`, which is git only and makes a ticket's worktree in a mapped repo; `review.mjs`, the review home's only writer
 (`~/.backlog-manager/reviews/`), which scopes a change into reviewer groups and
 merges their reports), and one agent under `agents/` that the orchestrator dispatches, one per file group, to review an item's branch before it merges (and
-execute, before a `pr`-mode push; and `/backlog-review`, on any checkout).
+execute, before a `pr`-mode push; a Jira Execute Run, before its transition; and `/backlog-review`, on any checkout).
 `backlog-orchestrate` is the only skill that merges into a base — it works one item per worktree and merges each into the run's base branch (`main` unless the
 run
 was given `--base`), or leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only — merges them onto a run branch of its own and
@@ -205,26 +205,33 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   the rail bar below 700 px — and two item readings: the card's `untyped`/assignee/link-out/`queued` badge, and the item modal's age beside the cached body —
   all derived in `lib/tracker.ts`, plus GitHub › Settings' `Sync` card, whose one control is each repo's sync interval, and the read-only `Sources` card on
   Shared Settings (token, reach, connect commands, the Jira row). Jira is drawn only
-  while `GET /api/jira` says configured: a second shell chip beside the tracker's, and two pages under its rail entry — Board and Setup, switched by the tree
-  alone — all derived in `lib/jira.ts`. → [docs/subsystems/board.md](subsystems/board.md)
+  while `GET /api/jira` says configured: a second shell chip beside the tracker's, and three pages under its rail entry — Board, Sessions and Setup,
+  switched by the tree alone — all derived in `lib/jira.ts`. → [docs/subsystems/board.md](subsystems/board.md)
 - [`.claude/DESIGN.md`](../.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
   cite its subsection in a header comment. Not a `.claude/rules/` file — those hold the mechanism tier for a path scope, every bullet anchored into
   `invariants.md`.
-- `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`, `dispatchGate` and the run/watchdog predicates both sides must agree on), `theme.css`
-  (five theme palettes), `jira-branch.ts` (a Jira Run's branch-naming rules, which server and launch sheet both import; `jira.mjs` keeps its one hand copy).
+- `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`, `dispatchGate`, the item-block ladder `itemLadderBlock`,
+  `DEFAULT_REVIEW_CONFIG` and the run/watchdog predicates both sides must agree on), `theme.css`
+  (five theme palettes), `jira-branch.ts` (a Jira Run's branch-naming rules, which server and launch sheet both import; `jira.mjs` keeps its one hand copy),
+  `jira-sessions.ts` (a linked Jira session's state, derived — never stored — so server and client cannot disagree on a row) and `review.ts` (a GitLab MR's
+  CodeRabbit review state, derived from the cached facts against the clock).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`, `skills/backlog-execute/`, `skills/backlog-orchestrate/`, `skills/backlog-retro/`,
-  `skills/backlog-tick/`, `skills/jira/` — the skills this repo publishes. `skills/backlog/tools/backlog.mjs` is the registry's only writer;
+  `skills/backlog-tick/`, `skills/backlog-review/`, `skills/jira/` — the skills this repo publishes.
+  `skills/backlog/tools/backlog.mjs` is the registry's only writer;
   `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run file's only writer. `skills/backlog-retro/tools/retro.mjs` reads the run-state directory, the
   registry and — by recorded lease id — each run's driver transcript, and owns `~/.backlog-manager/retro/`
   ([spec](superpowers/specs/2026-09-06-backlog-retro-design.md)). `skills/backlog-tick/tools/tick.mjs` decides one unattended unit of work per scheduled
   tick (read-only against items, the run state and git) and owns `~/.backlog-manager/tick/`
   ([spec](superpowers/specs/2026-10-22-backlog-tick-design.md)). `skills/jira/tools/jira.mjs` reads and moves one Jira ticket
-  through `/api/jira` and writes no file of its own; its one exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo.
+  through `/api/jira` and writes no file of its own (`link` and `unlink`, which tie this session to a ticket on the board, go through `/api/agents`); its one
+  exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo. `skills/backlog-review/tools/review.mjs` resolves the
+  reviewer config from `settings/review.json`, scopes a change into reviewer groups and merges their reports, and owns `~/.backlog-manager/reviews/`.
   **Start orchestrator runs from the board, not by typing the trigger into a terminal.** →
   [docs/subsystems/skills.md](subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
-  `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge, and `backlog-execute` before a `pr`-mode push.
-- `.claude/rules/` — eleven path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
+  `backlog-reviewer.md`, dispatched one per file group by `skills/backlog-review/references/procedure.md` — which `backlog-orchestrate` follows before every
+  merge, `backlog-execute` before a `pr`-mode push, a Jira Execute Run before its transition, and `/backlog-review` on any checkout.
+- `.claude/rules/` — the path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
   mechanism text for the rules scoped to its paths; CLAUDE.md keeps the cross-cutting rules' headlines, `docs/subsystems/invariants.md` the reasoning. Guarded
   by `test/guards/claude-rules.test.ts`: bullets only, each anchored at most once, one home per linked rule, CLAUDE.md's headlines byte-equal with their rule-file
   copies.
@@ -233,7 +240,8 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   (`pnpm test`, → [docs/workflows/development.md](workflows/development.md)), `test-tmpdir.mjs` (the per-run temp root `test:skills` runs `node --test`
   inside, same doc), `tailnet.mjs` (`pnpm run tailnet` — the `tailscale serve` wrapper) and `ci-scope.mjs` (CI's one check command — what a PR's diff can
   break, → [docs/workflows/ci.md](workflows/ci.md#scoped-checks)).
-- `docs/` — the reference docs; `docs/superpowers/` holds the design spec and implementation plans this repo was built from.
+- `docs/` — the reference docs; `docs/superpowers/` holds the design specs code comments cite, decision logs and in-flight plans — a merged plan and every
+  review report leave it ([README](superpowers/README.md)).
 
 <!-- docs-sync:
   sources:
@@ -247,5 +255,5 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
     - agents
     - docs/.docs-sync.yml
   kind: overview
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->

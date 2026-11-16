@@ -44,7 +44,9 @@ HEAD or a tag next moves. Concurrent requests under one key share one read. The 
 
 `v0.3.0`, or `v0.3.0+2` when HEAD is two commits past the tag (ui-kit's `chipLabel`). No chip at all when `current` is null — which is what a checkout without
 the baseline tag shows. It is the rail's last element, sunk to its foot, and the last row of the phone menu, where tapping it closes the menu as every rail
-entry does. There the chip's `narrow` prop gives the pill a 44 px hit area, which overhangs it by 8 px above and below; `.rail-foot`'s margins and the rail's
+entry does. It shares that foot card (`.rail-foot`) with the `API connected` / `API unreachable` row, which `AppShell` reads from the shell's `useTrackers`
+answer — no poller of its own — and the card is drawn while either has something to show.
+In the phone menu the chip's `narrow` prop gives the pill a 44 px hit area, which overhangs it by 8 px above and below; `.rail-foot`'s margins and the rail's
 padding keep that overhang inside the rail, whose `overflow-x: hidden` clips the y-axis too.
 
 **The dot.** A cyan dot sits in the chip while the newest release (the baseline counts) is above the version stored under `localStorage`
@@ -90,5 +92,5 @@ bumped by hand, separately, for the plugin. The GitHub Release pages are written
     - client/src/App.tsx
     - client/src/styles.css
   kind: subsystem
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 4e55c09a3603270431e31ebc9d75600c61e5de07
 -->
