@@ -12,10 +12,11 @@ import { useTimeZone } from '../hooks/TimeZoneContext';
 import { errorOf, postJson } from '../lib/http';
 import { accessPhrase, boardsByName, failurePhrase, initialsOf, polledPhrase } from '../lib/jira';
 import { TONE_WORD, fastestInterval, jiraDown, newestAge, serviceTone } from '../lib/service-status';
+import { checkedAge, mentionsWait, sweepJiraMentions } from '../lib/jira-mentions';
 import { pollAge } from '../lib/tracker';
 import type { JiraPage } from '../lib/jira-page';
 import type { Section } from '../lib/sections';
-import type { JiraBoardStatus, JiraStatusPayload } from '../../../shared/types';
+import { JIRA_MENTIONS_POLL_MS, type JiraBoardStatus, type JiraStatusPayload } from '../../../shared/types';
 
 /**
  * The Jira status pill (Shell mock, top right; spec §4.9) — `TrackerChip`'s sibling: a 28 px `StatusPill` (dot, `Jira`, the newest board's poll age) in a
@@ -85,6 +86,25 @@ export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSet
     [reload]
   );
 
+  // The Mentions row's press, held here for the boards' reason: closing the popover mid-check and opening it again must still spin. The refusal carries
+  // `retryAt` so a 429 reads `Jira asked to wait until HH:MM` even before the next status answer has stored the wait.
+  const [mentionsOut, setMentionsOut] = useState(false);
+  const [mentionsRefused, setMentionsRefused] = useState<{ message: string; retryAt: string | null } | null>(null);
+  const mentionsBusy = useRef(false);
+  const sweepMentions = useCallback((): void => {
+    if (mentionsBusy.current) return;
+    mentionsBusy.current = true;
+    setMentionsOut(true);
+    setMentionsRefused(null);
+    void sweepJiraMentions().then((answer) => {
+      mentionsBusy.current = false;
+      if (!mounted.current) return;
+      setMentionsOut(false);
+      if (!answer.ok) setMentionsRefused({ message: answer.failure.message, retryAt: answer.failure.retryAt });
+      reload();
+    });
+  }, [reload]);
+
   // The chip outlives every section; the popover has no reason to.
   useEffect(() => setOpen(false), [section]);
 
@@ -117,6 +137,9 @@ export function JiraChip({ section, onOpenSetup }: { section: Section; onOpenSet
           sweeping={sweeping}
           refused={refused}
           onSweep={sweep}
+          mentionsOut={mentionsOut}
+          mentionsRefused={mentionsRefused}
+          onSweepMentions={sweepMentions}
           onOpenSetup={
             onOpenSetup === undefined
               ? undefined
@@ -154,6 +177,9 @@ function JiraPopover({
   sweeping,
   refused,
   onSweep,
+  mentionsOut,
+  mentionsRefused,
+  onSweepMentions,
   onOpenSetup,
   onClose
 }: {
@@ -165,6 +191,9 @@ function JiraPopover({
   sweeping: ReadonlySet<string>;
   refused: ReadonlyMap<string, string>;
   onSweep: (id: string) => void;
+  mentionsOut: boolean;
+  mentionsRefused: { message: string; retryAt: string | null } | null;
+  onSweepMentions: () => void;
   onOpenSetup: (() => void) | undefined;
   onClose: () => void;
 }) {
@@ -173,6 +202,13 @@ function JiraPopover({
   const last = newestAge(data.boards, now);
   const every = fastestInterval(data.boards);
   const last429 = pollAge(data.calls.last429At, now);
+  const { zone } = useTimeZone();
+  // The Mentions row reads the status payload's own summary (`null` while unconfigured, so no row) and never `useJiraMentions`, whose GET poller the
+  // app-wide chip must not arm. Red text, in the order a person can act on it: the wait still ahead, Jira's own detail, then a refused press.
+  const m = data.mentions;
+  const mentionsAge = m === null ? null : checkedAge(m.polledAt, now);
+  const mentionsFail =
+    m === null ? null : (mentionsWait(m.retryAt, now, zone) ?? mentionsWait(mentionsRefused?.retryAt ?? null, now, zone) ?? m.detail ?? (mentionsRefused !== null && mentionsRefused.retryAt === null ? mentionsRefused.message : null));
 
   return (
     <Popover label="Jira" width={330} anchor={anchor} onClose={onClose}>
@@ -230,6 +266,27 @@ function JiraPopover({
           </div>
         );
       })}
+      {m !== null && (
+        <div className="tracker-row jira-chip-board jira-chip-mentions" data-testid="jira-chip-mentions">
+          <span className="tracker-row-text">
+            <span className="tracker-row-name">Mentions · {m.count === null ? '—' : m.count}</span>
+            <span className="jira-chip-board-line">
+              {mentionsOut ? 'checking…' : mentionsAge === null ? 'not checked yet' : `checked ${mentionsAge} ago`} · every {JIRA_MENTIONS_POLL_MS / 60_000}m
+              {mentionsFail !== null && (
+                <>
+                  {' · '}
+                  <span className="jira-setup-failure">{mentionsFail}</span>
+                </>
+              )}
+            </span>
+          </span>
+          <button type="button" className="tracker-sync" aria-label="Check mentions now" title="Check mentions now" disabled={mentionsOut} onClick={onSweepMentions}>
+            <span className="jira-mentions-spin" data-on={mentionsOut ? '' : undefined}>
+              <Glyph name="refresh" />
+            </span>
+          </button>
+        </div>
+      )}
       {onOpenSetup !== undefined && (
         <button type="button" className="tracker-link" onClick={onOpenSetup}>
           Jira setup

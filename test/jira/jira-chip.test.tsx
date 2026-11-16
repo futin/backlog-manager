@@ -370,3 +370,64 @@ describe('the Jira chip’s homes', () => {
     expect(count()).toBe(0);
   });
 });
+
+describe('the Mentions row', () => {
+  const summary = (over: Partial<NonNullable<JiraStatusPayload['mentions']>> = {}): NonNullable<JiraStatusPayload['mentions']> => ({
+    polledAt: ago(60_000),
+    count: 3,
+    detail: null,
+    truncated: false,
+    retryAt: null,
+    ...over
+  });
+  const row = () => screen.getByTestId('jira-chip-mentions');
+  const icon = () => screen.getByRole('button', { name: 'Check mentions now' });
+  const open = async (m: JiraStatusPayload['mentions']) => {
+    renderChip(status({ mentions: m }));
+    await user.click(chip());
+  };
+  const mentionsPosts = () => fetchMock.mock.calls.filter(([url]) => url === '/api/jira/mentions/sweep');
+
+  it('is absent while mentions is null', async () => {
+    await open(null);
+    expect(screen.queryByTestId('jira-chip-mentions')).toBeNull();
+  });
+
+  it('reads the count and the age under the boards', async () => {
+    await open(summary());
+    expect(row().querySelector('.tracker-row-name')?.textContent).toBe('Mentions · 3');
+    expect(row().querySelector('.jira-chip-board-line')?.textContent).toBe('checked 1 min ago · every 3m');
+  });
+
+  it('shows a dash for a count that is not known yet', async () => {
+    await open(summary({ count: null, polledAt: null }));
+    expect(row().querySelector('.tracker-row-name')?.textContent).toBe('Mentions · —');
+  });
+
+  it('draws the cache detail in red', async () => {
+    await open(summary({ detail: 'Jira answered 500' }));
+    expect(within(row()).getByText('Jira answered 500')).toHaveClass('jira-setup-failure');
+  });
+
+  it('posts the mentions sweep once, disables the icon while out, then re-reads the status', async () => {
+    await open(summary());
+    await user.click(icon());
+    await user.click(icon());
+    expect(mentionsPosts()).toHaveLength(1);
+    expect(icon()).toBeDisabled();
+    expect(within(row()).getByText(/checking…/)).toBeInTheDocument();
+    await act(async () => answer({ ok: true, status: 200, body: { configured: true, polledAt: ago(0), detail: null, truncated: false, retryAt: null, window: 30, me: null, issues: [], dismissed: [] } }));
+    expect(icon()).toBeEnabled();
+    expect(reloadMock).toHaveBeenCalled();
+  });
+
+  it('words a 429 as Jira asked to wait, and a 409 in red as the server said it', async () => {
+    await open(summary());
+    await user.click(icon());
+    await act(async () => answer({ ok: false, status: 429, body: { message: 'rate limited', retryAt: new Date(NOW + 150_000).toISOString() } }));
+    expect(within(row()).getByText(/^Jira asked to wait until \d\d:\d\d$/)).toBeInTheDocument();
+    await user.click(icon());
+    await act(async () => answer({ ok: false, status: 409, body: { message: 'Jira is not being polled' } }));
+    expect(within(row()).getByText('Jira is not being polled')).toHaveClass('jira-setup-failure');
+  });
+});

@@ -62,6 +62,20 @@ export const asMentionsFailure = (e: unknown): JiraMentionsFailure =>
     ? (e as JiraMentionsFailure)
     : { message: 'Jira unavailable', retryAt: null, status: 0 };
 
+/**
+ * `POST /api/jira/mentions/sweep` for a caller that has no `useJiraMentions` — the Jira pill's popover. That hook arms its own GET poller and the chip is
+ * mounted app-wide, so the chip posts the press itself and re-reads the shell's status for the row's age. Never rejects: a refusal (409 `Jira is not being
+ * polled`, 429 with the wait's end, a network failure) resolves as the `JiraMentionsFailure` the row words.
+ */
+export async function sweepJiraMentions(): Promise<{ ok: true } | { ok: false; failure: JiraMentionsFailure }> {
+  try {
+    await postJiraMentions('sweep', {});
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, failure: asMentionsFailure(e) };
+  }
+}
+
 // ── The page's stored picks (Task 8) ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
