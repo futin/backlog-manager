@@ -124,7 +124,9 @@ Behaviour:
   allTickets: true })`, `onChange('jira')`, close menu).
 - Top row: one render path for every section — `sectionTotal(map[id], <that section's page list>)`; with `onOpen` a `<button className="rail-count">`,
   otherwise a `<span className="rail-count" role="img">`; `aria-label` is the total's `label`; the pill is `<Pill tone={tone}>{n}</Pill>`. The three
-  per-section blocks go.
+  per-section blocks go. **While that section's tree is drawn** (`treeOpen(id)`), the top-row pill is instead a plain `<span className="rail-count"
+  aria-hidden="true">` — visible, no name, no button — so no count is announced twice and Jira never has two same-named buttons (spec, "No pill is
+  announced twice").
 - `RailTree` takes `counts?: SectionCounts`; each item becomes a `.rail-group` wrapper holding the sub-row button and, when the item has an entry, the same
   pill markup as the top row. Extract that pill markup into one small local component used by both, so the two cannot drift.
 - Update the comments that describe the old counts (Props doc, the JSX comment above the count blocks) to the new rule.
@@ -142,6 +144,9 @@ Behaviour:
     draw.
   - A sub-row pill is a `.rail-count` inside a `.rail-group` (pins the click pass-through rule from the existing CSS test).
   - Zero everywhere → no `.rail-count` in the document.
+  - With Runs open (`liveRuns: 2`), exactly one element is named `2 live runs` (the History sub pill), and the Runs top-row `.rail-count` has
+    `aria-hidden="true"` with text `2`; with Files open, the Runs top-row pill is the named one.
+  - With Jira open and 1 session needing you, exactly one button is named `1 session needs you` (the Sessions sub pill).
 - [ ] **Step 2: Run** `pnpm exec jest test/ui/rail.test.tsx` — expect the new cases to FAIL.
 - [ ] **Step 3: Implement** per Behaviour above, and `App`'s new `counts` prop.
 - [ ] **Step 4: Run** `pnpm exec jest test/ui/rail.test.tsx test/ui/rail-counts-lib.test.ts test/github/use-pull-requests.test.tsx
@@ -157,11 +162,16 @@ Behaviour:
 - Modify: `.claude/rules/board.md` the poller bullet's "the rail counts PRs that need you on every page" (~170)
 - Modify: `docs/superpowers/specs/2026-11-05-jira-sessions-page-design.md` C4 (~103): append one line that this spec supersedes "the Sessions tree entry
   carries no count"
+- Modify: `docs/subsystems/board.md` (~88-90, the rail counts paragraph) and `docs/subsystems/invariants.md` (~3617, "the rail counts PRs that need you on
+  every page")
+- Modify comments: `client/src/hooks/PullRequestsContext.tsx:30`, `client/src/hooks/usePullRequests.ts:17`, `client/src/lib/pr-layouts.ts:166`,
+  `client/src/lib/run-pulse.ts:30` — wherever they say the rail counts needs-you PRs or the Runs badge, name the new count
 
 - [ ] **Step 1:** Rewrite **The counts** to: per-page pills on sub-rows from `lib/rail-counts.ts`, the top row's sum, the tone rule in words, the copy table's
   forms, Jira's (and any `onOpen` entry's) pill as a real button while the rest are `role="img"` spans that let the click through, zero draws nothing,
   Jira keeps its last count while unreachable. Keep the placement sentences (`.rail-group`, 10 px in, centred). Name the new spec.
-- [ ] **Step 2:** board.md: "the rail counts PRs that need you on every page" → "the rail counts open PRs on every page". C4 supersede line.
+- [ ] **Step 2:** `.claude/rules/board.md` and `docs/subsystems/invariants.md`: "the rail counts PRs that need you on every page" → "the rail counts open
+  PRs on every page". `docs/subsystems/board.md`'s counts paragraph to match DESIGN.md. The four comments. C4 supersede line.
 - [ ] **Step 3: Run** `grep -rn "PRs need you\|PRs that need you" .claude client/src docs/subsystems` — expect no hit that describes the rail (the PR
   page's own Needs-you level may stay). Run `pnpm exec jest test/guards` — expect PASS (some guards read DESIGN.md).
 - [ ] **Step 4: Commit** `docs: rail pending counts in DESIGN.md and board rules`.

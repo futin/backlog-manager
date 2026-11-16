@@ -66,7 +66,16 @@ mechanism to scale: tomorrow more sub-pages will want a pending number of their 
 - PRs pill tone carries needs-you: amber when any PR needs the reader, so the old signal is not lost when the number widens to all open PRs.
 - An entry may carry an optional `onOpen`. With it, the pill is a real `<button>` beside the row's (as Jira's top-row count is today); without it, a plain
   `role="img"` span that lets the click through to the row. Jira › Sessions has one — the existing handler: Sessions page, `Needs you` chip, `All tickets`
-  on — and the Jira top-row pill keeps the same click. GitHub and Runs pills, top and sub, stay plain.
+  on — and the Jira top-row pill keeps the same click. GitHub and Runs pills, top and sub, stay plain. `onOpen` is an INPUT to the lib function, never
+  built there: `SideRail` passes its handler (`setJiraPage`, `setJiraListFilters`, `onChange('jira')`, and closing the phone menu), so the function stays
+  pure. Top-row click rule, for any section: the top-row pill is a button exactly when its section has one non-zero entry and that entry has `onOpen`, and
+  it runs that `onOpen`; otherwise it is a plain span.
+- **No pill is announced twice.** While a section's tree is drawn (its section open at desktop width, or always below 700 px), the top-row pill is drawn
+  as a plain span with `aria-hidden="true"` — still visible, the click passing through to the row — and only the sub-row pills carry names and buttons.
+  While the tree is not drawn, the top-row pill carries the name (and the button, by the rule above). So Jira never shows two same-named buttons.
+- **Sub-row markup:** `.rail-sublink` is itself the `<button>`, so it cannot hold the Jira pill's button. Each tree item, inside `RailTree`'s one render
+  path, becomes a positioned wrapper (`.rail-group`, the class the top row uses) holding the sub-row button and its pill as siblings; the pill reuses
+  `.rail-count`, so `.rail-count:not(button) { pointer-events: none }` already lets a plain pill's click through. The sub-row button gets `width: 100%`.
 - Sub-row pills hang at the sub-row's right edge, same `Pill` component and size as the top row.
 - Tone rule in words: **amber** when the count includes something waiting on the reader, **grey** when it is only a quantity. A top row is amber when any
   of its entries is.
@@ -90,11 +99,17 @@ A top row's name is its non-zero entries' labels joined by `; ` in tree order �
 - `.claude/rules/board.md`'s poller bullet ("the rail counts PRs that need you on every page"): now "the rail counts open PRs on every page".
 - `docs/superpowers/specs/2026-11-05-jira-sessions-page-design.md` C4 ("the Sessions tree entry carries no count") is superseded by this spec; the badge on
   the Jira row stays, as C4 wanted, now as the sum.
-- `test/ui/rail.test.tsx`'s case pinning no count on Sessions flips to pin the new pill.
+- `docs/subsystems/board.md` (~88-90, the rail counts paragraph) and `docs/subsystems/invariants.md` (~3617, the PR cache's "the rail counts PRs that need
+  you on every page", the Why target of the board.md rules bullet): same rewrite.
+- Comments naming the old count: `client/src/hooks/PullRequestsContext.tsx:30`, `client/src/hooks/usePullRequests.ts:17`, `client/src/lib/pr-layouts.ts:166`,
+  `client/src/lib/run-pulse.ts:30`.
+- `test/ui/rail.test.tsx`: the case pinning no count on Sessions flips to pin the new pill; the `counts` prop cases (~722-750, `3 PRs need you`) are
+  rewritten to the new prop and copy; and the Jira badge cases using a single-match `getByRole('button', { name })` (~579, 594, 651, 664) must stay
+  unambiguous — with the Jira tree closed they match the top-row button only, by the no-double-announcement rule above.
 - A section whose sum is zero draws no top-row pill even when a sub-page is open.
 - Below 700 px (trees always open) both the top-row sum and sub-row counts draw, as at desktop width.
 
 ## Left to the builder
 
 - Where the map type and the summing helper live (a `lib/` module, testable without rendering).
-- CSS for `.rail-sublink` holding a trailing pill, inside DESIGN.md §8.0's measurements.
+- Exact CSS for the sub-row pill's inset inside DESIGN.md §8.0's measurements (markup is decided above).
