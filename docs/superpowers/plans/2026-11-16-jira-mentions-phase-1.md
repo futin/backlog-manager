@@ -203,7 +203,11 @@ Behaviour:
   - "calls counted": a tick with one board page and a mentions search with one comment read → status `calls.sweep` 3.
   - "truncated": search answers `isLast: false` → `truncated: true`.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS, plus `pnpm exec jest test/jira/jira-poller.test.ts test/jira/jira-sweep-route.test.ts`
-  (arming changed — update any test that asserted "not armed without a syncing board" to the new rule, naming the spec section in the test).
+  (arming changed — update any test that asserted "not armed without a syncing board" to the new rule, naming the spec section in the test). This task
+  also lands the site sweep's half: beside forcing every non-`off` board (poller.service.ts:321), `sweepNow()` sets a `mentionsForced` flag that the
+  mentions step's due test honours and clears, under the same in-flight join and floor. Rewrite `test/jira/jira-sweep-route.test.ts:90-96` ("409 when
+  only off boards remain") to the new rule here, and make that suite's `onSearches` (:58) exclude the mentions JQL so its `onSearches() - cold` counts
+  (:106, :115) stay board-only.
 - [ ] **Step 5:** Commit `feat(jira): check mentions on the poller's chain`.
 
 ### Task 6: Payload, summary, manual check, dismiss/restore, thread — the routes
@@ -228,9 +232,9 @@ Behaviour:
   `adfToMarkdown`; `open` = the Task 2 judgement minus dismissed ids; 403/404 → 404 `<KEY> is not readable`; other failures through the existing
   `routeFailed` mapping. Its calls are a route's (discarded by the next `takeCalls()`).
 - The site sweep `POST /api/jira/sweep`: `sweepNow()`'s `not-armed` follows the widened arming — a site with every board `off` answers 200 and checks
-  mentions in that press. Mechanism: beside forcing every non-`off` board (poller.service.ts:321), `sweepNow()` marks mentions due (a `mentionsForced` flag
-  the mentions step's due test honours and clears), under the same in-flight join and `SWEEP_FLOOR_MS` floor. `mentionsSweepNow()` sets the same flag but
-  forces no board. Rewrite `test/jira/jira-sweep-route.test.ts:90-96` ("409 when only off boards remain") to the new rule.
+  mentions in that press, through Task 5's `mentionsForced` flag. `mentionsSweepNow()` does NOT go through `tick()`: it calls the mentions check directly,
+  outside the tick (spec "Sync now, two ways": boards are not swept; spec "It rides the Jira poller": a manual check's calls are a route's), sharing only
+  the mentions check's own in-flight join, the `SWEEP_FLOOR_MS` floor and the cadence reset.
 
 - [ ] **Step 1: Failing tests:**
   - "dismiss during an in-flight check survives the swap": hold the FakeJira search open, dismiss Mara's mention, release → payload `dismissed` holds
@@ -242,7 +246,8 @@ Behaviour:
     throws, and a following GET still shows the ticket in `issues`.
   - restore with nothing dismissed → 200, payload unchanged.
   - sweep: unconfigured → 409 `Jira is not being polled`; inside a 429 window → 429 with `retryAt`; two presses within 5 s → one search; a press resets the
-    cadence (the next background search is 180 000 ms after it).
+    cadence (the next background search is 180 000 ms after it); a board due at the moment of a mentions-only press is not searched by it; status
+    `calls.sweep` is unchanged by the press.
   - "site sweep with all boards off": boot, let the boot's own mentions check finish (searches = 1), move past the floor, `POST /api/jira/sweep` → 200 and
     mentions searches = 2, board searches unchanged.
   - summary: before the first check `count: null`; after one with two waiting tickets and one dismissed `count: 2`; cross-origin POST → 403.
@@ -338,8 +343,8 @@ Ticket facts (status, assignee, reporter, priority, parent, updated, description
   fetches both routes once; header shows `on none of your boards` and `Mention 1 of 3`; next → `Mention 2 of 3`, still `SUP-208` (Mara's comment
   focused, no refetch); next → `Mention 3 of 3`, `PAY-131` (no badge, no note). In Cards, `SUP-208` opens as `Mention 1 of 2`; next → `PAY-131`; two earlier comments fold under `Show 2 earlier comments`; the open comment carries `Asks you`; Dismiss posts, footer swaps, Undo
   restores; thread 404 → `SUP-208 is not readable` in the modal; Escape closes it (the Escape stack); a dismissed `OPS-9` opens with `Restore`.
-- [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS, plus `test/guards/dialog-count-docs.test.ts` and every `grep -l "Modal" test/ui test/guards` hit — a
-  new `Modal` composer turns the count guard red until Task 13 updates its docs, so do Task 13's dialog-count edits in this task.
+- [ ] **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS, plus `test/guards/dialog-count-docs.test.ts` and every `grep -l "Modal" test/ui test/guards` hit. Update
+  board.md, invariants.md's Escape entry, `useDialogEscape.ts`'s header and `dialog-count-docs.test.ts` (eight → nine) together in this task, then run it.
 - [ ] **Step 5:** Commit `feat(client): the mention modal, thread first`.
 
 ### Task 11: Popover Mentions row and band Sync now — mock `Sync.dc.html`
