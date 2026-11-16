@@ -5,7 +5,7 @@ Status: full design (project), two phases, one spec. Date: 2026-11-16. Branch `f
 
 | Mock (in `canvas/`) | What it fixes | Phase |
 | ------------------- | ------------- | ----- |
-| `Main.dc.html` | List view: one row per mentioning comment, the View switch, Show dismissed | 1 |
+| `Main.dc.html` | List view: the Board › List table, one row per mentioning comment; the Board's View switch; Show dismissed | 1 |
 | `ListB.dc.html` | Cards view: one card per ticket, newest mention quoted, `+N earlier mention` | 1 |
 | `ModalA.dc.html` | The mention modal, thread first (**picked**) | 1 |
 | `Rail.dc.html` | Jira › Mentions in the rail with its amber count | 1 |
@@ -41,9 +41,13 @@ Success: a question asked of the user on any ticket shows up on the page within 
 - A fourth Jira page, **Mentions**, between Sessions and Setup (`JIRA_PAGES` order: board, sessions, mentions, setup).
 - An **open mention** is a comment that (a) @-mentions the user's account id, (b) was not written by the user, (c) was created after the user's own latest
   comment on that same issue, (d) was created inside the lookback window, and (e) has not been dismissed.
-- **Two views behind a List | Cards switch**, the Board page's segmented control and its remembered pick (`Main.dc.html`, `ListB.dc.html`):
-  - **List** — one row per open mention: ticket key, status pill, summary, which boards it is on ("On Payments Q4" / "On none of your boards"), who asked
-    (avatar and name), a two-line excerpt of the comment, how long ago, and the row's actions. Two mentions on one ticket are two rows.
+- **Two views behind a List | Cards switch** — the Board page's own switch, reused: `Segmented track` as `JiraViewSwitch` draws it, with a remembered pick
+  the way `useJiraView` remembers the Board's (`Main.dc.html`, `ListB.dc.html`):
+  - **List** — the Board › List issue table, reused (`JiraIssueList`'s `.jira-issues-*` frame, scroll box, 44 px single-line rows, row hover and the
+    Run-style action cell that fades in on hover). One row per open mention, columns: Key, Summary (type icon + title), Asked by (avatar disc + name),
+    Comment (the excerpt on one ellipsised line, `@you` chip first, full text in the cell's title), Status (dot + name), Boards ("Payments Q4" / muted
+    "none"), When, and the actions. Two mentions on one ticket are two rows. The excerpt is one line because a Board row is one line; the modal shows the
+    whole comment.
   - **Cards** — one card per ticket: key, summary, status, the NEWEST open mention quoted ("Mara Ilić asked you · 2 h ago" over the excerpt), `+N earlier
     mention(s)`, the boards line, and the actions. Two columns, one below 1000 px.
 - **Dismiss is per ticket in both views.** The user answers a thread, not a comment, so Dismiss hides every currently open mention on that ticket, and a
@@ -236,8 +240,11 @@ Phase 2:
 
 ## The page
 
-- Built in `client/src/components/jira/`, drawn with `.claude/DESIGN.md`'s list language. The Sessions page's row (`JiraSessionCard`) is the nearest model for
-  the List row, and the Board's card for the Cards view; the builder starts there, not from a new component.
+- Built in `client/src/components/jira/`, from the Board page's own parts, not new ones: the header is `Band` (`ui-band`, title + sub, the switch, a
+  `.board-band-search` input and the Show dismissed chip on the right); the switch is `Segmented track` as in `JiraViewSwitch`; the List is the
+  `JiraIssueList` table — share its classes, and lift its frame/row shell into a shared piece if reusing it as-is would bend `JiraIssueList`'s props; the
+  Cards view starts from the Board's card. Where the mention row needs a cell the issue table lacks (Asked by, Comment), it is a new column in the same
+  table language, not a second table.
 - Every view-drawing plan task cites its mock file from the table at the top.
 - Empty, healthy: "Nothing waiting on you in the last 30 days." Empty because Jira is not set up: the same pointer to Setup the other pages use.
 - Polled by the client on the same cadence the Jira status payload is (no faster than the server can change it).
