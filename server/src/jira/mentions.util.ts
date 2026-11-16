@@ -12,9 +12,14 @@ export const MENTION_SEARCH_FIELDS = ['summary', 'status', 'issuetype', 'comment
 
 const DAY_MS = 86_400_000;
 
-/** The JQL that finds issues whose comments may mention `accountId`. `jqlString` is the only way this server interpolates into a query. */
+/**
+ * The JQL that finds issues whose comments may mention `accountId`. `jqlString` is the only way this server interpolates into a query; `Done` is Jira's own
+ * status-category name, a constant, not a value. A ticket in the done category is left out at the search: its conversation is over, and "answered" only
+ * means "I commented after the mention", so the thank-you that follows my answer on a closed ticket read as an open mention — six of nine on the first live
+ * list were on done tickets. Filtering in the JQL, not after it, also keeps those tickets out of the search's one page and spares their comment reads.
+ */
 export function mentionsJql(accountId: string, days: number): string {
-  return `comment ~ ${jqlString(accountId)} AND updated >= -${days}d ORDER BY updated DESC`;
+  return `comment ~ ${jqlString(accountId)} AND updated >= -${days}d AND statusCategory != Done ORDER BY updated DESC`;
 }
 
 export interface RawComment {
