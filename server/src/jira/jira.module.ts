@@ -4,6 +4,7 @@ import { JiraClient } from './jira.client';
 import { JiraController } from './jira.controller';
 import { JiraWriteController } from './jira-write.controller';
 import { JiraLiveService } from './live.service';
+import { JiraMentionsStore } from './mentions.store';
 import { JiraPollerService } from './poller.service';
 
 /**
@@ -34,7 +35,7 @@ import { JiraPollerService } from './poller.service';
  */
 @Module({
   controllers: [JiraController, JiraWriteController],
-  providers: [JiraPollerService, JiraLiveService, { provide: JiraClient, useFactory: () => new JiraClient() }],
-  exports: [JiraPollerService, JiraClient, JiraLiveService]
+  providers: [JiraPollerService, JiraLiveService, JiraMentionsStore, { provide: JiraClient, useFactory: () => new JiraClient() }],
+  exports: [JiraPollerService, JiraClient, JiraLiveService, JiraMentionsStore]
 })
 export class JiraModule {}
