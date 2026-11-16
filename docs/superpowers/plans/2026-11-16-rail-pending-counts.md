@@ -85,10 +85,15 @@ budget is soft.
   - `railCounts(input: RailCountsInput): RailCounts` — entries only for non-zero counts; a section with none is absent.
   - `sectionTotal(entries: SectionCounts | undefined, order: readonly string[]): RailCount | null` — `null` when no non-zero entry; `n` the sum; `tone`
     `warn` if any entry is; `label` the entries' labels in `order` joined by `; `; `onOpen` the entry's own when exactly one entry is present, else absent.
+    An entry whose key is not in `order` is ignored (neither summed nor labelled), so the top row never counts a page the tree does not draw.
 
-- [ ] **Step 1: Write the failing tests** (`describe('railCounts')`, `describe('sectionTotal')`):
+- [ ] **Step 1: Write the failing tests** (`describe('railCounts')`, `describe('sectionTotal')`). PR fixtures: `row()`/`repo()` are file-local in
+  `test/github/pr-layouts-lib.test.ts:37,61`; move them to `test/helpers/pr-fixtures.ts` (export, import from both suites) rather than copy.
   - All inputs zero / `prs: null` → `{}`.
-  - PRs with 5 open, 0 need you → `github.prs` = `{ n: 5, tone: 'neutral', label: '5 open PRs' }`; 1 open → `'1 open PR'`.
+  - PRs with 5 open, 0 need you → `github.prs` = `{ n: 5, tone: 'neutral', label: '5 open PRs' }`, built from a repo whose `total` is 5 but lists only 2
+    PRs (so the label's `N` is visibly `total`); 1 open → `'1 open PR'`.
+  - All three inputs set at once (PRs 4 open/0 need you, `liveRuns: 2`, `jiraNeedsYou: 1`, `openJiraNeedsYou: fn`) → three sections, each its own number;
+    `github.prs` and `runs.runs` carry no `onOpen`.
   - PRs with 5 open, 1 needs you → tone `warn`, label `'5 open PRs, 1 needs you'`; 2 need you → `'5 open PRs, 2 need you'`; 1 open 1 needs you →
     `'1 open PR, 1 needs you'`.
   - `liveRuns: 1` → `runs.runs` = `{ n: 1, tone: 'neutral', label: '1 live run' }`; `2` → `'2 live runs'`.
@@ -98,6 +103,8 @@ budget is soft.
   - Two entries `a` (2, neutral, `'A'`) and `b` (3, warn, `'B'`), order `['b', 'a']` → `{ n: 5, tone: 'warn', label: 'B; A' }` with no `onOpen`, even
     when both carry one.
   - One entry carrying `onOpen` → total carries that same function.
+  - Two `neutral` entries → total tone `neutral`.
+  - An entry keyed `x` not in `order` → ignored: `sectionTotal({ x: …3 }, ['a'])` is `null`.
 - [ ] **Step 2: Run** `pnpm exec jest test/ui/rail-counts-lib.test.ts` — expect FAIL (module missing).
 - [ ] **Step 3: Implement** the module, header comment citing `.claude/DESIGN.md` §8.0 and the spec, saying why it is pure (testable without a rail) and why
   `onOpen` is an input rather than built here (the handler writes stores the rail owns).
@@ -107,7 +114,7 @@ budget is soft.
 ### Task 3: draw the counts in `SideRail` and `RailTree`, wire `App`
 
 **Files:**
-- Modify: `client/src/components/SideRail.tsx` (`Props.counts` at ~95, the Jira/GitHub/Runs count blocks at ~221-245, `RailTree` at ~360-410 and its five
+- Modify: `client/src/components/SideRail.tsx` (`Props.counts` at ~82, the Jira/GitHub/Runs count blocks at ~221-245, `RailTree` at ~360-410 and its five
   call sites)
 - Modify: `client/src/App.tsx:364` (`counts={...}`), and drop the `needsYouCount` import at :24 if unused
 - Modify: `client/src/styles.css` (`.rail-sublink` ~222 needs `width: 100%` once wrapped; nothing else new — reuse `.rail-group` and `.rail-count`)
@@ -132,8 +139,9 @@ Behaviour:
 - Update the comments that describe the old counts (Props doc, the JSX comment above the count blocks) to the new rule.
 
 - [ ] **Step 1: Rewrite/add the failing tests** in `test/ui/rail.test.tsx` (build PRs payloads with the same fixture shape `pr-layouts-lib.test.ts` uses):
-  - GitHub top row with 3 open PRs, none needing you → a `neutral` pill `3`, named `3 open PRs`; with 1 needing you → `warn`, named `3 open PRs, 1 needs
-    you`; `prs: null` → no pill.
+  - GitHub top row with 3 open PRs, none needing you → a `neutral` pill `3`, `getByRole('img', { name: '3 open PRs' })`; with 1 needing you → `warn`,
+    `getByRole('img', { name: '3 open PRs, 1 needs you' })`; `prs: null` → no pill.
+  - PRs (3 open) and `liveRuns: 2` both set, Files open → GitHub's top row holds `3`, Runs' holds `2` (per-section scoping).
   - GitHub open on `prs` page: the `GitHub pages` group's `PRs` row's wrapper holds a pill `3` with the same name; `Board`, `Archive`, `Settings` hold
     none.
   - Runs with `liveRuns: 2` → top-row neutral pill named `2 live runs`; open Runs tree → `History` row holds the same; `Watchdog`/`Ticks` none.
@@ -147,7 +155,12 @@ Behaviour:
   - With Runs open (`liveRuns: 2`), exactly one element is named `2 live runs` (the History sub pill), and the Runs top-row `.rail-count` has
     `aria-hidden="true"` with text `2`; with Files open, the Runs top-row pill is the named one.
   - With Jira open and 1 session needing you, exactly one button is named `1 session needs you` (the Sessions sub pill).
-- [ ] **Step 2: Run** `pnpm exec jest test/ui/rail.test.tsx` — expect the new cases to FAIL.
+  - Jira open, 2 sessions needing you → Sessions sub pill reads `2`, named `2 sessions need you`; rerender with the payload `reachable: false` → still `2`,
+    same name; then a reachable answer with none needing you → no Sessions pill (Review Focus 3).
+  - Narrow (the `matchMedia` stub), 1 session needing you, menu open → exactly one button named `1 session needs you`, inside the `Jira pages` group;
+    clicking it sets page `sessions`, chip `needs-you`, `allTickets: true`, calls `onChange('jira')`, and leaves `Menu` at `aria-expanded="false"` (Review
+    Focus 4).
+- [ ] **Step 2: Run** `pnpm exec jest test/ui/rail.test.tsx` — expect the new cases to FAIL (the zero-everywhere case is a regression guard and may pass).
 - [ ] **Step 3: Implement** per Behaviour above, and `App`'s new `counts` prop.
 - [ ] **Step 4: Run** `pnpm exec jest test/ui/rail.test.tsx test/ui/rail-counts-lib.test.ts test/github/use-pull-requests.test.tsx
   test/orchestrator/orchestrator-hook.test.tsx test/ui/nav.test.tsx test/ui/shell-strip.test.tsx` and `pnpm run typecheck` — expect PASS. Before that,
@@ -162,7 +175,7 @@ Behaviour:
 - Modify: `.claude/rules/board.md` the poller bullet's "the rail counts PRs that need you on every page" (~170)
 - Modify: `docs/superpowers/specs/2026-11-05-jira-sessions-page-design.md` C4 (~103): append one line that this spec supersedes "the Sessions tree entry
   carries no count"
-- Modify: `docs/subsystems/board.md` (~88-90, the rail counts paragraph) and `docs/subsystems/invariants.md` (~3617, "the rail counts PRs that need you on
+- Modify: `docs/subsystems/board.md` (~88-91, the rail counts paragraph and the next one, "The Jira row carries a Needs-you count badge") and `docs/subsystems/invariants.md` (~3617, "the rail counts PRs that need you on
   every page")
 - Modify comments: `client/src/hooks/PullRequestsContext.tsx:30`, `client/src/hooks/usePullRequests.ts:17`, `client/src/lib/pr-layouts.ts:166`,
   `client/src/lib/run-pulse.ts:30` — wherever they say the rail counts needs-you PRs or the Runs badge, name the new count
@@ -178,6 +191,21 @@ Behaviour:
 
 ### Task 5: `/ui-verify`
 
-- [ ] Invoke `/ui-verify` on the branch: no mock files exist (the user picked from text sketches in chat, spec "Decided with the user"); verify against the
-  spec's sketch — GitHub `[5]` on the top row and on PRs, Runs `[2]` on the top row and History — with fixture or live data, at desktop and 375 px, in light
-  theme. Check the sub-row pill sits inside the 28 px row without growing it, and a 3-digit count does not overlap the label. Fix defects on the branch.
+- [ ] Invoke `/ui-verify` on the branch: no mock files exist (the user picked from text sketches in chat, spec "Decided with the user"). Reference
+  layout, the sketch the user picked:
+
+  ```
+  ▣ GitHub        [5]
+     Board
+     PRs           [5]
+     Archive
+     Settings
+  ▣ Runs          [2]
+     History       [2]
+     Watchdog
+     Ticks
+  ```
+
+  Verify with fixture or live data, at desktop and 375 px, in light theme: the sub-row pill sits inside the 28 px row without growing it; a 3-digit count
+  does not overlap the label; GitHub's pill is grey with no PR needing you and amber with one; Jira › Sessions' pill is amber and a working button. Fix
+  defects on the branch.
