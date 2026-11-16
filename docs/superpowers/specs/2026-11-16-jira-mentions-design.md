@@ -9,6 +9,7 @@ Status: full design (project), two phases, one spec. Date: 2026-11-16. Branch `f
 | `ListB.dc.html` | Cards view: one card per ticket, newest mention quoted, `+N earlier mention` | 1 |
 | `ModalA.dc.html` | The mention modal, thread first (**picked**) | 1 |
 | `Rail.dc.html` | Jira › Mentions in the rail with its amber count | 1 |
+| `Sync.dc.html` | The Jira pill popover's Mentions row; the band's Sync now chip; the band sub-line's states (checking, first check, failing, 429, truncated) | 1 |
 | `ModalDraft.dc.html` | The modal's draft states: drafting, draft ready, posted | 2 |
 | `ModalB.dc.html` | Not picked — today's ticket modal plus a Comments pane. Kept for the record; build nothing from it. | — |
 
@@ -58,7 +59,13 @@ Success: a question asked of the user on any ticket shows up on the page within 
 - A search box filters the loaded rows by key, summary, author and excerpt, client side.
 - Clicking a row's key or excerpt, or a card, opens **the mention modal** (below).
 - The page header says how many are waiting, the window and how old the answer is — List `4 waiting · last 30 days · checked 1 min ago`, Cards
-  `3 tickets waiting · …` — plus `truncated` and the failure reason when present. No Refresh: the server owns the cadence.
+  `3 tickets waiting · …` — plus `first 100 shown` when truncated and the failure reason in red, the Board band's own shape (`Sync.dc.html` draws each state).
+- **Sync now, two ways** (`Sync.dc.html`):
+  - The band carries a **Sync now** chip that checks mentions only (`POST /api/jira/mentions/sweep`, below) — boards are not swept. While a check is out
+    the chip's icon turns and the sub-line says `checking…`; a press then joins that check. In a 429 window the chip is disabled and its tooltip names the
+    window's end (`Jira asked to wait until 14:32`), the way the pill's own Sync now reads.
+  - The Jira top-row pill's popover gains a **Mentions** row under the board rows — `Mentions · 3`, `checked 1 min ago · every 3m`, a failure in red — with
+    the board rows' refresh icon (mentions only). The popover head's site-wide **Sync now** sweeps the boards AND checks mentions.
 - The rail shows the waiting count on **Jira › Mentions** (`Rail.dc.html`), amber, through the pending-counts map that `feat/rail-pending-counts` introduces
   (see Constraints). The count is **tickets** waiting, the Cards number — the rail asks "how many threads owe an answer", not "how many comments".
 - The server checks in the background, on its own slower cadence, while Jira is configured — the user notices without opening the page.
@@ -184,8 +191,13 @@ posting (rejected — the user then approves in two places, and a headless run h
 ### Poller arming (my call)
 
 - `armed` keeps meaning "the chain is alive", so it reads true while only mentions keep the chain going.
-- `sweepNow` (the chip's per-board and all-boards "now") is a BOARD sweep: it keeps answering 409 `not-armed` when no board is owed one, even if mentions
-  keep the chain alive. There is no "check mentions now" control.
+- The popover's site-wide Sync now (`POST /api/jira/sweep`) sweeps the boards owed a sweep and then checks mentions, in one press. It answers 409
+  `not-armed` only when NEITHER is owed — no board syncs and mentions are not armed (Jira unconfigured or `unsupported`); a site with every board `off`
+  still checks mentions and answers 200. Its payload stays `JiraStatusPayload`, and the status payload gains a `mentions` summary (`polledAt`, `count`,
+  `detail`, `truncated`) so the popover row and the pill draw from the one read they already make.
+- The per-board sweep (`POST /api/jira/boards/sweep`) stays a board sweep and never checks mentions.
+- The mentions-only "now" is its own route (below). A press while a check is in flight joins it, as `sweepNow` joins an in-flight board sweep; a press
+  inside the 429 window is refused, never queued.
 
 ## Routes and shapes
 
@@ -197,6 +209,10 @@ Phase 1:
 - `JiraMentionIssue`: `key`, `summary`, `type` (name, for the swatch), `status` (name and category, as the board's issues carry it), `boards` (names, empty
   for none), and `mentions: JiraMention[]` — every open mention on that issue, newest first. The List view draws one row per entry; Cards draws the first and
   `+(length − 1) earlier`. Phase 2 adds `draft: { at, sessionId } | null` and `session` (the live `reply` link, if any).
+- `POST /api/jira/mentions/sweep` — same-origin guarded, no body. Runs a mentions check now (or joins the one in flight) and answers the fresh
+  `JiraMentionsPayload`. 409 `Jira is not being polled` when mentions are not armed; 429 with `retryAt` inside the window. A 401, 5xx or transport
+  failure inside the check is the poller's to record (`access`, `detail`) and is a 200, as `/api/jira/sweep` treats its own. It resets the 3-minute
+  cadence, so the next background check is due 3 minutes after this one.
 - `JiraMention`: `commentId`, `author: { accountId, name, avatarUrl? }`, `created`, `excerpt`, `url` (the focused-comment link).
 - **Dismiss semantics (my call):** a dismissal is per comment id, made per ticket. `dismissed` lists the tickets whose open mentions are ALL dismissed; a
   ticket with a dismissed mention and a newer undismissed one appears only in `issues`, carrying the undismissed one. `POST /api/jira/mentions/dismiss`
