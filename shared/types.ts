@@ -1180,7 +1180,10 @@ export interface JiraStatusPayload {
   mentions: JiraMentionsSummary | null;
 }
 
-/** Jira › Mentions cadence and bounds (spec "Routes and shapes"). The poller, the store and the client's refetch clock all read these, so none restates a number. */
+/**
+ * Jira › Mentions cadence and bounds (spec "Routes and shapes"). The poller, the store and the client's refetch clock all read these, so none restates a
+ * number.
+ */
 export const JIRA_MENTIONS_POLL_MS = 180_000;
 /** How far back the mentions search looks, in days: long enough to cover a holiday, short enough that the list and the store stay small. */
 export const JIRA_MENTIONS_WINDOW_DAYS = 30;
@@ -1241,7 +1244,9 @@ export interface JiraMentionsConfigured {
 }
 export type JiraMentionsPayload = JiraMentionsConfigured | JiraMentionsUnconfigured;
 
-/** The status payload's slice of the mentions cache, so the chip popover and the rail count draw from the read they already make. `count` is waiting tickets. */
+/**
+ * The status payload's slice of the mentions cache, so the chip popover and the rail count draw from the read they already make. `count` is waiting tickets.
+ */
 export interface JiraMentionsSummary {
   polledAt: string | null;
   count: number | null;

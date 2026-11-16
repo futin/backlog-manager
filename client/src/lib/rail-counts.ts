@@ -39,7 +39,10 @@ export interface RailCountsInput {
   jiraNeedsYou: number;
   /** What the Jira Sessions pill's click does; supplied by `SideRail`, which owns the stores it writes. */
   openJiraNeedsYou?: () => void;
-  /** Tickets holding a mention that still waits on the reader (`status.mentions.count`, null before the first check read as 0). Not sessions: a ticket counts once. */
+  /**
+   * Tickets holding a mention that still waits on the reader (`status.mentions.count`, null before the first check read as 0). Not sessions: a ticket counts
+   * once.
+   */
   jiraMentions: number;
   /** What the Jira Mentions pill's click does; supplied by `SideRail`, for the reason `openJiraNeedsYou` is. */
   openJiraMentions?: () => void;

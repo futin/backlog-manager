@@ -3648,8 +3648,8 @@ read would be a GitLab request per ticket per render — and it is bounded the s
 project and one detail read per open MR, so its request count grows with open MRs, not with history.
 
 **The Jira mentions cache is the fifth** (`JiraPollerService`, [spec](../superpowers/specs/2026-11-16-jira-mentions-design.md)). It is one result for the
-site — the comments that @-mention the user and still wait on them, the tickets they sit on, the dismissals applied — in memory and lost on restart, and it is
-allowed for the others' reason: a per-request read would be a Jira call per page render and per rail poll, and the rail counts mentions on every page. It is
+site — the comments that @-mention the user and still wait on them, the tickets they sit on, dismissed ones included — in memory and lost on restart (the dismissals live in a file and are applied when the cache is READ,
+`applyDismissals`, never baked into it), and it is allowed for the others' reason: a per-request read would be a Jira call per page render and per rail poll, and the rail counts mentions on every page. It is
 kept honest their way: `polledAt` rides on `GET /api/jira/mentions` and the page prints it as `checked 1 min ago`, and it moves only on a successful check. A
 failed check keeps the last rows and their `polledAt` and records its own `detail`, because "Nothing waiting" over a list that merely failed to load is a
 claim the cache cannot make. It shares the board poller's chain, boot state, 429 window and call counter instead of owning a second timer, so its calls reach

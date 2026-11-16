@@ -2,7 +2,8 @@
  * jira-mentions.ts — the fetch/post helpers and shape guard behind `hooks/useJiraMentions.ts` (Jira mentions phase 1, Task 7).
  *
  * No React. One `JiraMentionsFailure` shape for every refusal so the page reads one thing: the sweep's two refusals (409, 429) keep the board sweep's
- * `{ message }` body (a 429 adds `retryAt`, the end of the wait, which the page words as "Jira asked to wait until HH:MM"), the other routes answer `{ error }`.
+ * `{ message }` body (a 429 adds `retryAt`, the end of the wait, which the page words as "Jira asked to wait until HH:MM"), the other routes answer `{ error
+ * }`.
  *
  * Since Task 8 it is also the one home of every derivation the Mentions page prints (board.md: "every derivation has one home in `lib/`"): the stored view
  * and Show-dismissed keys with their guards, the List's rows and search, the excerpt split around the user's own `@`, and the band's sub-line. Since Task 10
@@ -12,7 +13,17 @@ import { errorOf, postJson } from './http';
 import { elapsedSince } from './item-age';
 import { accessPhrase } from './jira';
 import { formatZonedClock } from './time-zone';
-import { JIRA_MENTIONS_ISSUE_CAP, type JiraAccess, type JiraIssue, type JiraMention, type JiraMentionIssue, type JiraMentionsConfigured, type JiraMentionsPayload, type JiraThreadComment, type JiraThreadPayload } from '../../../shared/types';
+import {
+  JIRA_MENTIONS_ISSUE_CAP,
+  type JiraAccess,
+  type JiraIssue,
+  type JiraMention,
+  type JiraMentionIssue,
+  type JiraMentionsConfigured,
+  type JiraMentionsPayload,
+  type JiraThreadComment,
+  type JiraThreadPayload
+} from '../../../shared/types';
 
 export interface JiraMentionsFailure {
   message: string;
@@ -137,9 +148,9 @@ export interface JiraMentionCard {
 }
 
 /**
- * Rows (Show dismissed applied, search not) grouped into one card per ticket, in the rows' own order (waiting tickets first, then the dismissed ones). The quoted
- * mention is the newest by `created`, not the first row, so the card does not lean on the server's ordering (an unparseable stamp sorts oldest). `search` keeps a
- * ticket when ANY of its rows matches; a card whose only matching comment is an older one still quotes the newer mention.
+ * Rows (Show dismissed applied, search not) grouped into one card per ticket, in the rows' own order (waiting tickets first, then the dismissed ones). The
+ * quoted mention is the newest by `created`, not the first row, so the card does not lean on the server's ordering (an unparseable stamp sorts oldest).
+ * `search` keeps a ticket when ANY of its rows matches; a card whose only matching comment is an older one still quotes the newer mention.
  */
 export function mentionCards(rows: readonly JiraMentionRow[], search = ''): JiraMentionCard[] {
   const byKey = new Map<string, JiraMentionRow[]>();
@@ -180,7 +191,9 @@ export function waitingCount(data: JiraMentionsConfigured): number {
   return data.issues.reduce((n, i) => n + i.mentions.length, 0);
 }
 
-/** The search box: key, summary, author and excerpt, case-insensitive, on the loaded rows only (spec "A search box filters the loaded rows"). Blank keeps all. */
+/**
+ * The search box: key, summary, author and excerpt, case-insensitive, on the loaded rows only (spec "A search box filters the loaded rows"). Blank keeps all.
+ */
 export function matchesMentionSearch(row: JiraMentionRow, search: string): boolean {
   const q = search.trim().toLowerCase();
   if (q === '') return true;

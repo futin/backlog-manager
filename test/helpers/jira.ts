@@ -124,7 +124,9 @@ export class FakeJira {
   comments = new Map<string, SeededComment[]>();
   private searchGate: Promise<void> | null = null;
 
-  /** Appends comments to an issue, oldest first. Search carries the newest 20 inline when it asks for `comment`; the comment endpoint serves them newest first. */
+  /**
+   * Appends comments to an issue, oldest first. Search carries the newest 20 inline when it asks for `comment`; the comment endpoint serves them newest first.
+   */
   addComments(key: string, list: SeededComment[]): void {
     this.comments.set(key, [...(this.comments.get(key) ?? []), ...list]);
   }

@@ -3,8 +3,8 @@
  * text triangles (▸ ▾ ▴) there because a glyph a few pixels tall was hard to see and its size depended on whichever font the platform fell back to.
  *
  * One 10×10 stroked path, `M2 4l3 3 3-3`; `up`, `right` and `left` are rotations of it (`.chev-up`, `.chev-right`, `.chev-left` — the last since the mention
- * modal's Previous arrow), never a second drawing, so the four directions can not drift apart. Colour is `currentColor`, so the wrapper — the chip's `--ink3` caret, the dispatch word's tone — decides it and the mark takes no
- * accent of its own (§6: icons never take accent colour).
+ * modal's Previous arrow), never a second drawing, so the four directions can not drift apart. Colour is `currentColor`, so the wrapper — the chip's `--ink3`
+ * caret, the dispatch word's tone — decides it and the mark takes no accent of its own (§6: icons never take accent colour).
  *
  * Drawn at 11 px where the dashboard's is 9: the board's caret has been 11 px since §8.0 wrote it down, and guard 3's 11 px floor is the same number.
  * `aria-hidden` always — the mark is a cue beside a control that already carries its own name, and a "chevron" announcement would be noise.

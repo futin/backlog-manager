@@ -205,7 +205,10 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   const treeOpen = (id: Section): boolean => narrow || section === id;
 
   // Every pending count the rail draws, by section and page (`lib/rail-counts.ts`): each sub-row carries its page's own number and the top row the sum.
-  const pending = railCounts({ prs: counts?.prs ?? null, liveRuns: counts?.liveRuns ?? 0, jiraNeedsYou,
+  const pending = railCounts({
+    prs: counts?.prs ?? null,
+    liveRuns: counts?.liveRuns ?? 0,
+    jiraNeedsYou,
     openJiraNeedsYou,
     jiraMentions: jira?.mentions?.count ?? 0,
     openJiraMentions
