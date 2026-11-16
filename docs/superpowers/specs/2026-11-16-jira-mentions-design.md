@@ -187,7 +187,8 @@ posting (rejected — the user then approves in two places, and a headless run h
 
 ## How a check works
 
-1. JQL `comment ~ <jqlString(me.accountId)> AND updated >= -<JIRA_MENTIONS_WINDOW_DAYS>d ORDER BY updated DESC`, fields `summary`, `status`, `issuetype`,
+1. JQL `comment ~ <jqlString(me.accountId)> AND updated >= -<JIRA_MENTIONS_WINDOW_DAYS>d AND statusCategory != Done ORDER BY updated DESC` (the done
+   category left out after phase 1 shipped: a thank-you after my answer on a closed ticket read as open — 27 tickets live, 9 without them), fields `summary`, `status`, `issuetype`,
    `comment`, `updated`, paged by `nextPageToken` at 100, capped at `JIRA_MENTIONS_ISSUE_CAP` (100 issues; `truncated` on the payload when it bites, shown in
    the header).
 2. For an issue whose inline `comment.total` is larger than the comments returned, read the rest with `GET issue/{key}/comment` before judging it — an

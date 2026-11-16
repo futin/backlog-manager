@@ -82,7 +82,7 @@ describe('mentionsUser', () => {
 
 describe('mentionsJql / excerptOf', () => {
   it('quotes the account id through jqlString', () => {
-    expect(mentionsJql('acc-"x', 30)).toBe('comment ~ "acc-\\"x" AND updated >= -30d ORDER BY updated DESC');
+    expect(mentionsJql('acc-"x', 30)).toBe('comment ~ "acc-\\"x" AND updated >= -30d AND statusCategory != Done ORDER BY updated DESC');
     expect(MENTION_SEARCH_FIELDS).toEqual(['summary', 'status', 'issuetype', 'comment', 'updated']);
   });
   it('cuts a long excerpt on a word boundary with an ellipsis', () => {

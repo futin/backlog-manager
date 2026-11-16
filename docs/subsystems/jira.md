@@ -262,8 +262,8 @@ tracker cache's, which this doc points to rather than restates.
 
 ## Mentions (Jira mentions phase 1, [spec](../superpowers/specs/2026-11-16-jira-mentions-design.md))
 
-The comments that @-mention the user and still wait on them, found by one JQL search (`comment ~ "<accountId>"` inside a 30-day window) whose inline comments
-are judged by `mentions-check.util.ts`: an open mention is not the user's own, was created after the user's latest comment on that ticket and has not been
+The comments that @-mention the user and still wait on them, found by one JQL search (`comment ~ "<accountId>"` inside a 30-day window, tickets in the done
+status category left out) whose inline comments are judged by `mentions-check.util.ts`: an open mention is not the user's own, was created after the user's latest comment on that ticket and has not been
 dismissed. The check rides the poller's tick, after the board loop, at once after boot and then `JIRA_MENTIONS_POLL_MS` after the last ATTEMPT, so its calls reach
 the CALLS meter and share the one 429 window; a failure keeps the last rows and `polledAt` and sets the mentions `detail`. `mentions.controller.ts` serves
 `GET /api/jira/mentions` (memory only, answering 200 `{ configured: false, detail }` while unconfigured), the guarded `POST /mentions/sweep` (409
