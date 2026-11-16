@@ -99,6 +99,8 @@ A top row's name is its non-zero entries' labels joined by `; ` in tree order �
 - `.claude/rules/board.md`'s poller bullet ("the rail counts PRs that need you on every page"): now "the rail counts open PRs on every page".
 - `docs/superpowers/specs/2026-11-05-jira-sessions-page-design.md` C4 ("the Sessions tree entry carries no count") is superseded by this spec; the badge on
   the Jira row stays, as C4 wanted, now as the sum.
+- `docs/superpowers/specs/2026-11-05-app-restyle-design.md` §4.9a's GitHub bullet ("the Inbox's `Needs you` number, amber") and §4's Counts bullet
+  ("GitHub (PRs that need you)"): superseded by this spec; §4.9a's always-on read is unchanged.
 - `docs/subsystems/board.md` (~88-90, the rail counts paragraph) and `docs/subsystems/invariants.md` (~3617, the PR cache's "the rail counts PRs that need
   you on every page", the Why target of the board.md rules bullet): same rewrite.
 - Comments naming the old count: `client/src/hooks/PullRequestsContext.tsx:30`, `client/src/hooks/usePullRequests.ts:17`, `client/src/lib/pr-layouts.ts:166`,
