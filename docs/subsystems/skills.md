@@ -120,8 +120,9 @@ and a byte ratchet on the model-invocable total (4,911 B before #557, 2,398 B af
   last complete review of the branch, skips lockfiles and generated files, partitions the rest into groups with a reviewer model and effort each, and writes
   the manifest to `--out`; `--previous` keeps an earlier round's groups for a fix loop. `merge` reads the group reports, proves every reviewed file appears
   under some report's `## Coverage`, resolves each finding's `anchor:` quote against `to`, de-duplicates by line, computes the verdict (`approve`, `fix`, or
-  `incomplete` when a file went unreviewed), writes the merged report, and records the branch's review state under `~/.backlog-manager/reviews/`
-  (`$BM_REVIEW_HOME`), the one directory it owns. `config` prints the resolved reviewer config. It writes no git and no repo file.
+  `incomplete` when a file went unreviewed), counts Minor findings per kind (`bug`, `test`, `docs`, `trivial` — none of them ever changes the verdict),
+  writes the merged report, and records the branch's review state under `~/.backlog-manager/reviews/` (`$BM_REVIEW_HOME`), the one directory it owns —
+  open Minors included, so the next incremental review carries them forward instead of dropping them. `config` prints the resolved reviewer config. It writes no git and no repo file.
 
 No skill's tools may import another skill's: one skill's `tools/` directory is not on another's path once installed, so a helper two of them need exists
 twice, on purpose. No helper is shared by all of them, and the two pairs are different pairs — `backlog.mjs` and `orchestrate.mjs` each carry the

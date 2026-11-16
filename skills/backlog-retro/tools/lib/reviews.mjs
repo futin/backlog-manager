@@ -47,10 +47,12 @@ function section(text, name) {
   return EMPTY_SECTION.test(body) ? '' : body;
 }
 
-// A top-level `## Minor` entry the reviewer tagged as demoted drift: `- `, an optional `<path>:<line> — ` location, then the literal `drift:`. Case-sensitive
-// on purpose — the tag is a token the reviewer's contract spells one way, and a `Drift:` is prose that happens to start with the word, not the tag. The
-// location is one whitespace-free token because the reviewer's grammar makes it `<path>:<line>`, so a later `drift:` deep in an untagged finding never matches.
-const DRIFT_ENTRY = /^- ((?:\S+ — )?drift:.*)$/;
+// A top-level `## Minor` entry the reviewer tagged as demoted drift: `- `, an optional `<path>:<line> — ` location, an optional `[<kind>] ` tag, then the
+// literal `drift:`. Case-sensitive on purpose — the tag is a token the reviewer's contract spells one way, and a `Drift:` is prose that happens to start with
+// the word, not the tag. The location is one whitespace-free token because the reviewer's grammar makes it `<path>:<line>`, so a later `drift:` deep in an
+// untagged finding never matches. The kind tag (#531) is optional so a report written before every Minor carried one still counts; since #531 the reviewer
+// writes it ahead of `drift: `, and the merged report renders every Minor with one, so without it no drift would be counted at all.
+const DRIFT_ENTRY = /^- ((?:\S+ — )?(?:\[[a-z]+\] )?drift:.*)$/;
 
 // The tagged entries' first lines, `- ` stripped. Only left-margin entries count: an indented line is the previous entry's continuation (the reviewer's
 // entry grammar), and an empty or `None.` section is `''` from section() already, so it yields `[]` like a missing heading does.

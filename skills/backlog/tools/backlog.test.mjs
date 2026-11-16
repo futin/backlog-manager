@@ -3314,6 +3314,15 @@ test('backlog-reviewer reports coverage, anchors and earlier findings', () => {
     ['never read a tree other than the one given', 'the tree rule that replaced "never review the main tree"'],
     ['any file', 'a group may raise a finding about any file'],
     ['full severity', 'a finding outside the group keeps its full severity'],
+    ['[<kind>] <text>', 'a Minor entry carries its kind tag (#531)'],
+    ['`bug`', 'the bug Minor kind'],
+    ['`test`', 'the test Minor kind'],
+    ['`docs`', 'the docs Minor kind'],
+    ['`trivial`', 'the trivial Minor kind'],
+    ['counted as `bug`', 'an untagged Minor counts as bug'],
+    ['with the reproducing input or state named in the finding, is Important — never Minor', 'a reachable bug is Important, never Minor'],
+    ['an earlier Minor marked `open` does not change the verdict', 'an earlier Minor left open never makes fix'],
+    ['an earlier Critical or Important finding you mark `open`, means `verdict: fix`', 'only an open earlier Critical/Important makes fix'],
   ]
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `backlog-reviewer.md lost the rule: ${rule} (${needle})`)
@@ -3338,6 +3347,12 @@ test('the review procedure dispatches every group in one message and retries cov
     ['backlog-finding-checker', 'each new finding is checked by its own agent'],
     ['--checks', 'the second merge takes the check files'],
     ['## 4b', 'the check step sits between the retry and the re-review without renumbering §5'],
+    ['Minor [<kind>]: <text>', 'an earlier Minor is dispatched with its kind and no anchor'],
+    ['"minorByKind"', 'merge stdout counts Minors per kind'],
+    ['"minorCarried"', 'merge stdout counts the Minors carried from earlier rounds'],
+    ['"minorUntouched"', 'merge stdout counts the carried Minors no reviewer re-read'],
+    ['"minorResolved"', 'merge stdout counts the earlier Minors resolved'],
+    ['kinds a person chose to fix', 'the caller reads only the chosen kinds of ## Minor'],
   ]
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `procedure.md lost the rule: ${rule} (${needle})`)
@@ -3373,9 +3388,13 @@ test('backlog-finding-checker confirms or refutes one finding and writes nothing
 test('backlog-review offers to fix and commits nothing', () => {
   const text = flat(REVIEW_SKILL_MD)
   const RULES = [
-    ['Fix Critical and Important (Recommended)', 'the recommended fix option'],
-    ['Fix all, including Minor', 'the fix-everything option'],
-    ["Don't fix", 'the decline option'],
+    ['`Fix Critical and Important`', 'the Critical/Important fix option'],
+    ['`Fix Critical/Important + Minor bug, test, docs`', 'the middle tier: Minor bug, test and docs'],
+    ['`Fix all, including trivial Minor`', 'the fix-everything option'],
+    ["`Don't fix`", 'the decline option'],
+    ['Exactly one fix option carries ` (Recommended)`', 'one option is Recommended (#531)'],
+    ["state the reason in that option's description", 'the Recommended pick is judgment with a stated reason'],
+    ['so not re-reviewed; none dropped', 'the result says carried Minors were not re-reviewed, not dropped'],
     ['commits nothing', 'a fix is left uncommitted for the user'],
     ['at most two', 'the fix rounds are capped'],
     ['autopilot decide', 'an autopilot-gated offer takes the Recommended option and logs it'],
