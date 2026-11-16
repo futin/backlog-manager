@@ -9,7 +9,7 @@ Status: full design (project), two phases, one spec. Date: 2026-11-16. Branch `f
 | `ListB.dc.html` | Cards view: one card per ticket, newest mention quoted, `+N earlier mention` | 1 |
 | `ModalA.dc.html` | The mention modal, thread first (**picked**) | 1 |
 | `Rail.dc.html` | Jira › Mentions in the rail with its amber count | 1 |
-| `Sync.dc.html` | The Jira pill popover's Mentions row; the band's Sync now chip; the band sub-line's states (checking, first check, failing, 429, truncated) | 1 |
+| `Sync.dc.html` | The Jira status pill popover's (`JiraChip`) Mentions row; the band's Sync now chip; the band sub-line's states (checking, first check, failing, 429, truncated) | 1 |
 | `ModalDraft.dc.html` | The modal's draft states: drafting, draft ready, posted | 2 |
 | `ModalB.dc.html` | Not picked — today's ticket modal plus a Comments pane. Kept for the record; build nothing from it. | — |
 
@@ -64,7 +64,7 @@ Success: a question asked of the user on any ticket shows up on the page within 
   - The band carries a **Sync now** chip that checks mentions only (`POST /api/jira/mentions/sweep`, below) — boards are not swept. While a check is out
     the chip's icon turns and the sub-line says `checking…`; a press then joins that check. In a 429 window the chip is disabled and its tooltip names the
     window's end (`Jira asked to wait until 14:32`), the way the pill's own Sync now reads.
-  - The Jira top-row pill's popover gains a **Mentions** row under the board rows — `Mentions · 3`, `checked 1 min ago · every 3m`, a failure in red — with
+  - The Jira status pill's popover (`JiraChip`, not the rail-total pill below) gains a **Mentions** row under the board rows — `Mentions · 3`, `checked 1 min ago · every 3m`, a failure in red — with
     the board rows' refresh icon (mentions only). The popover head's site-wide **Sync now** sweeps the boards AND checks mentions.
 - The rail shows the waiting count on **Jira › Mentions** (`Rail.dc.html`), amber, through the pending-counts map that `feat/rail-pending-counts` introduces
   (see Constraints). The count is **tickets** waiting, the Cards number — the rail asks "how many threads owe an answer", not "how many comments".
