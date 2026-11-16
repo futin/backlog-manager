@@ -782,7 +782,10 @@ commit(s) since the last review` or `CodeRabbit · the last review didn't land` 
 No row
 for `reviewing`, `clean`, `unknown` or an unread review, none for an `Also:` MR, none for a lead that is not open. The button is hidden where it can never work
 and
-disabled, titled with the session's name, while the live-session gate holds ([board.md](rules/board.md)); it opens the Run launch sheet in review mode (§8.9.5).
+disabled while the live-session gate holds ([board.md](rules/board.md)) — then it wears the dashed skin (`.ui-split-dashed`, the look `Run ▾`
+without a repo and a blocked Merge wear), is titled with the gate's sentence, and a reason line (`.jira-dlv-review-why`) sits under the row: a 7 px green
+live dot, the session's name at 500 `--ink`, then `is live on this ticket` / `is live on <branch>` and `— <label> waits until it ends or you stop it.` at 12
+`--ink2`, wrapping rather than ellipsising. It opens the Run launch sheet in review mode (§8.9.5).
 
 **The track** (`DeliveryTrack`, `components/ui/`; `.jira-dlv-*`). Five equal columns — `Pushed`, `MR open`, `Review`, `Pipeline`, then `Merged` or `Closed` —
 the

@@ -401,13 +401,33 @@ describe('the CodeRabbit row', () => {
 
   describe('the live-session gate', () => {
     const open = (): GitlabMr => mr({ review: review() });
+    const why = (): HTMLElement | null => document.querySelector('.jira-dlv-review-why');
     const blocked = (title: string) => {
       const btn = screen.getByRole('button', { name: 'Fix review' });
       expect(btn).toBeDisabled();
       expect(btn).toHaveAttribute('title', title);
       // A disabled button takes no hover, so the wrapper carries the same sentence for the pointer.
       expect(btn.parentElement).toHaveAttribute('title', title);
+      // An ink button drew :disabled exactly like an enabled one, so the blocked one wears the board's dashed skin — the look Run ▾ and Merge use.
+      expect(btn.parentElement).toHaveClass('ui-split-dashed');
+      // The reason is on screen, not only in a tooltip: the line under the row says who holds it and what to do, and the button points at it.
+      expect(why()?.textContent).toBe(`${title} — Fix review waits until it ends or you stop it.`);
+      expect(btn).toHaveAttribute('aria-describedby', why()?.id);
     };
+
+    it('names the session in bold on the reason line', () => {
+      drawRow([open()], { onReview: jest.fn(), links: [link({ name: 'TIMIFY-123 execute' })] });
+      expect(why()?.querySelector('strong')?.textContent).toBe('TIMIFY-123 execute');
+    });
+
+    it('says the request half’s own label on the line', () => {
+      drawRow([mr({ review: NONE })], {
+        onReview: jest.fn(),
+        links: [link({ name: 'TIMIFY-123 execute' })]
+      });
+      expect(screen.getByRole('button', { name: 'Request review' })).toBeDisabled();
+      expect(why()?.textContent).toBe('TIMIFY-123 execute is live on this ticket — Request review waits until it ends or you stop it.');
+    });
 
     it('a live `run` link on the key disables it, naming the session', () => {
       drawRow([open()], { onReview: jest.fn(), links: [link({ name: 'TIMIFY-123 execute' })] });
@@ -444,7 +464,12 @@ describe('the CodeRabbit row', () => {
           link({ how: 'branch', branch: 'x' })
         ]
       });
-      expect(screen.getByRole('button', { name: 'Fix review' })).toBeEnabled();
+      const btn = screen.getByRole('button', { name: 'Fix review' });
+      expect(btn).toBeEnabled();
+      // Unblocked, the button is the ink pill again and there is no reason line to point at.
+      expect(btn.parentElement).not.toHaveClass('ui-split-dashed');
+      expect(btn).not.toHaveAttribute('aria-describedby');
+      expect(why()).toBeNull();
     });
   });
 });
