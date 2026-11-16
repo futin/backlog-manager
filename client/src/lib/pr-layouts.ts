@@ -163,7 +163,8 @@ export function levelCounts(ranked: readonly RankedPr[]): Record<PrLevel, number
 }
 
 /**
- * The Inbox's `Needs you` number, which tones the rail's GitHub › PRs count amber (spec §4.9a): the exact pipeline `PullRequestsView` feeds the Inbox — `groupRepos`, then only the
+ * The Inbox's `Needs you` number, which tones the rail's GitHub › PRs count amber (spec §4.9a): the exact pipeline `PullRequestsView` feeds the Inbox —
+ * `groupRepos`, then only the
  * repos the token can read (`splitReach(...).shown`), then `rankPrs` and `levelCounts` — so the rail and the tile can never disagree. A repo the token cannot
  * read contributes nothing, as on the page. `null` (nothing has answered, or the shell does not read PRs) is 0.
  */

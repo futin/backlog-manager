@@ -92,12 +92,14 @@ context's empty default. Each lands as a `Pill` on the sub-row of the page that 
 `needsYouCount` is above zero and grey otherwise), Runs › History (the live runs, grey), Jira › Sessions (amber) — and the section's top row draws
 `sectionTotal`, their sum, as an `aria-hidden` span while its tree is drawn so no count is announced twice. Zero draws no pill.
 
-The Jira › Sessions row carries the Needs-you count, summed onto the Jira row (Jira sessions spec §7.4, C4): `useJiraNeedsYou` (`client/src/hooks/useJiraNeedsYou.ts`) reads the shell's one
+The Jira › Sessions row carries the Needs-you count, summed onto the Jira row (Jira sessions spec §7.4, C4): `useJiraNeedsYou`
+(`client/src/hooks/useJiraNeedsYou.ts`) reads the shell's one
 sessions answer — `JiraSessionsProvider` (`hooks/JiraSessionsContext.tsx`), hoisted out of `JiraView` into `App`'s shell around the rail AND the section, with
 `enabled` = Jira configured (no poll and no badge otherwise) and `open` = Jira is the current section, so with the section closed the request carries no
 `open=1` — and counts `needsYouCount` (`lib/jira-list.ts`): plan, permission, reply and answer across EVERY linked ticket, not the picked board's, each
 session once, by `sessionId`, even when it is linked to two tickets. Zero draws no element. While the dashboard is unreachable (`reachable: false`, every live link reads Lost contact) or a read fails, the
-hook keeps the last count it was sure of. The count is a `button.rail-count` beside the Sessions sub-row's button, inside that item's `.rail-group` (and on the Jira row's, while the tree is closed) — every row has one, holding the button and its count but never
+hook keeps the last count it was sure of. The count is a `button.rail-count` beside the Sessions sub-row's button, inside that item's `.rail-group` (and on
+the Jira row's, while the tree is closed) — every row has one, holding the button and its count but never
 the open tree (a button in a button is invalid, and
 the row must still just open Jira); its click sets the Jira page to `sessions` and the filters to `{ chip: 'needs-you', allTickets: true }`
 through the two module stores, then `change('jira')`, so the Sessions page it lands on shows every session it counted; it never touches the Board page's view.
