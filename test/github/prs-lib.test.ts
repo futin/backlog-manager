@@ -151,7 +151,7 @@ describe('the write blocks', () => {
   it('mergeBlock: first match wins, in order', () => {
     expect(mergeBlock(pr({ draft: true, mergeable: 'conflicting', checks: 'failure' }), repo({ syncOff: SYNC_OFF, methods: [] }))).toBe('sync off');
     expect(mergeBlock(pr({ draft: true, mergeable: 'conflicting', checks: 'failure' }), repo({ methods: [] }))).toBe('draft');
-    expect(mergeBlock(pr({ mergeable: 'conflicting', checks: 'failure' }), repo({ methods: [] }))).toBe('not mergeable');
+    expect(mergeBlock(pr({ mergeable: 'conflicting', checks: 'failure' }), repo({ methods: [] }))).toBe('conflicts');
     expect(mergeBlock(pr({ checks: 'failure' }), repo({ methods: [] }))).toBe('checks failing');
     expect(mergeBlock(pr(), repo({ methods: [] }))).toBe('no merge method allowed');
     expect(mergeBlock(pr({ mergeable: 'unknown', checks: 'pending' }), repo())).toBeNull();
@@ -170,10 +170,26 @@ describe('the write blocks', () => {
     expect(updateBlock(pr({ crossRepository: true, maintainerCanModify: true }), repo(), false)).toBeNull();
   });
 
-  it('updateBlock: a PR that cannot be updated reads up to date only when it is not behind its base', () => {
-    expect(updateBlock(pr({ mergeState: 'behind', canUpdateBranch: false }), repo(), false)).toBe('no permission to update');
-    expect(updateBlock(pr({ mergeState: 'clean', canUpdateBranch: false }), repo(), false)).toBe('already up to date');
+  it('updateBlock: a PR GitHub says is behind is updatable whatever canUpdateBranch says; any other state that cannot be updated reads up to date', () => {
+    // claude-agents-dashboard#493: `viewerCanUpdateBranch` was false on a BEHIND PR the token could update (ruleset, `allow_update_branch` off). The write
+    // decides, and a token that really may not gets the server's 502 `the token lacks permission for this`.
+    expect(updateBlock(pr({ mergeState: 'behind', canUpdateBranch: false }), repo(), false)).toBeNull();
     expect(updateBlock(pr({ mergeState: 'behind', canUpdateBranch: true }), repo(), false)).toBeNull();
+    expect(updateBlock(pr({ mergeState: 'clean', canUpdateBranch: false }), repo(), false)).toBe('already up to date');
+    expect(updateBlock(pr({ mergeState: 'blocked', canUpdateBranch: false }), repo(), false)).toBe('already up to date');
+  });
+
+  it('updateBlock: a conflicting PR reads conflicts — never already up to date — after sync off and updating…, before the fork rule', () => {
+    // GitHub reports a conflicting PR `DIRTY` with `viewerCanUpdateBranch` false, which the old ladder read as up to date.
+    const dirty = pr({ number: 37, headSha: '4'.repeat(40), mergeable: 'conflicting', mergeState: 'dirty', canUpdateBranch: false });
+    expect(updateBlock(dirty, repo(), false)).toBe('conflicts');
+    expect(updateBlock({ ...dirty, mergeState: 'behind', canUpdateBranch: true }, repo(), false)).toBe('conflicts');
+    expect(updateBlock({ ...dirty, crossRepository: true, maintainerCanModify: false }, repo(), false)).toBe('conflicts');
+    expect(updateBlock(dirty, repo({ syncOff: SYNC_OFF }), false)).toBe('sync off');
+    expect(updateBlock(dirty, repo(), true)).toBe('updating…');
+    // Merge and auto-merge say the same word for the same fact.
+    expect(mergeBlock(dirty, repo())).toBe('conflicts');
+    expect(autoMergeBlock(dirty, repo())).toBe('conflicts');
   });
 
   it('updateBlock: while an update is in flight the reason is updating…, whatever canUpdateBranch says (GitHub flips it false once the update lands)', () => {
@@ -184,7 +200,7 @@ describe('the write blocks', () => {
     expect(updateBlock(refused, repo(), true)).toBe('updating…');
     // The same two rows with no update in flight keep their own answers, so `updating` is the only thing that moved.
     expect(updateBlock(updatable, repo(), false)).toBeNull();
-    expect(updateBlock(refused, repo(), false)).toBe('no permission to update');
+    expect(updateBlock(refused, repo(), false)).toBeNull();
   });
 
   it('updateBlock: not behind, not updatable, not updating reads already up to date; up to date but updatable reads null', () => {
@@ -210,13 +226,13 @@ describe('the write blocks', () => {
     expect(autoMergeBlock(pr(), repo({ syncOff: SYNC_OFF, autoMergeAllowed: false }))).toBe('sync off');
   });
 
-  it('autoMergeBlock, unarmed: the same order as mergeBlock — sync off, draft, not mergeable, checks failing — then the repo setting', () => {
+  it('autoMergeBlock, unarmed: the same order as mergeBlock — sync off, draft, conflicts, checks failing — then the repo setting', () => {
     // One fixture that is at once draft, conflicting and failing, on a repo with the setting off and under sync off; peel one condition per line.
     const everything = pr({ number: 41, headSha: '4'.repeat(40), draft: true, mergeable: 'conflicting', checks: 'failure' });
     const off = repo({ repo: 'futin/auto-a', syncOff: SYNC_OFF, autoMergeAllowed: false });
     expect(autoMergeBlock(everything, off)).toBe('sync off');
     expect(autoMergeBlock(everything, { ...off, syncOff: null })).toBe('draft');
-    expect(autoMergeBlock({ ...everything, draft: false }, { ...off, syncOff: null })).toBe('not mergeable');
+    expect(autoMergeBlock({ ...everything, draft: false }, { ...off, syncOff: null })).toBe('conflicts');
     expect(autoMergeBlock({ ...everything, draft: false, mergeable: 'mergeable' }, { ...off, syncOff: null })).toBe('checks failing');
     expect(autoMergeBlock({ ...everything, draft: false, mergeable: 'mergeable', checks: 'none' }, { ...off, syncOff: null })).toBe(
       'auto-merge not enabled on the repo'
@@ -246,10 +262,10 @@ describe('PR_KEYS', () => {
 });
 
 describe('REPO_REASONS', () => {
-  it('holds exactly the six reasons that belong to the repo, and none of the row’s own facts', () => {
-    const six = ['sync off', 'no merge method allowed', 'auto-merge not enabled on the repo', 'fork does not allow edits'];
-    expect([...REPO_REASONS].sort()).toEqual([...six, 'no permission to update', 'updating…'].sort());
-    for (const fact of ['draft', 'not mergeable', 'checks failing', 'already up to date']) expect(REPO_REASONS.has(fact)).toBe(false);
+  it('holds exactly the five reasons that belong to the repo, and none of the row’s own facts', () => {
+    const repoReasons = ['sync off', 'no merge method allowed', 'auto-merge not enabled on the repo', 'fork does not allow edits'];
+    expect([...REPO_REASONS].sort()).toEqual([...repoReasons, 'updating…'].sort());
+    for (const fact of ['draft', 'conflicts', 'checks failing', 'already up to date']) expect(REPO_REASONS.has(fact)).toBe(false);
   });
 });
 
@@ -286,11 +302,11 @@ describe('whyLine', () => {
     expect(whyLine(fork, repo({ repo: 'futin/why-e' }), false, undefined)).toEqual(['fork does not allow edits']);
   });
 
-  it('a behind PR this token may not update says no permission to update; a clean one that cannot be updated says nothing', () => {
+  it('a behind PR GitHub calls not updatable says nothing — its Update stays open — and neither does a clean one that cannot be updated', () => {
     const own = repo({ repo: 'futin/why-f' });
     const behind = pr({ number: 56, headSha: 'b2'.repeat(20), mergeState: 'behind', canUpdateBranch: false });
     const clean = pr({ number: 57, headSha: 'c3'.repeat(20), mergeState: 'clean', canUpdateBranch: false });
-    expect(whyLine(behind, own, false, undefined)).toEqual(['no permission to update']);
+    expect(whyLine(behind, own, false, undefined)).toEqual([]);
     expect(whyLine(clean, own, false, undefined)).toEqual([]);
   });
 
