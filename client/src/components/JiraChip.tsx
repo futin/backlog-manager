@@ -16,7 +16,7 @@ import { checkedAge, mentionsWait, sweepJiraMentions } from '../lib/jira-mention
 import { pollAge } from '../lib/tracker';
 import type { JiraPage } from '../lib/jira-page';
 import type { Section } from '../lib/sections';
-import { JIRA_MENTIONS_POLL_MS, type JiraBoardStatus, type JiraStatusPayload } from '../../../shared/types';
+import { JIRA_MENTIONS_ISSUE_CAP, JIRA_MENTIONS_POLL_MS, type JiraBoardStatus, type JiraStatusPayload } from '../../../shared/types';
 
 /**
  * The Jira status pill (Shell mock, top right; spec §4.9) — `TrackerChip`'s sibling: a 28 px `StatusPill` (dot, `Jira`, the newest board's poll age) in a
@@ -278,6 +278,8 @@ function JiraPopover({
                   <span className="jira-setup-failure">{mentionsFail}</span>
                 </>
               )}
+              {/* The band's own tail (mentionsBand): the cap is on tickets the search matched, so `Mentions · 3` can sit beside a full 100. */}
+              {m.truncated && ` · newest ${JIRA_MENTIONS_ISSUE_CAP} tickets checked`}
             </span>
           </span>
           <button type="button" className="tracker-sync" aria-label="Check mentions now" title="Check mentions now" disabled={mentionsOut} onClick={onSweepMentions}>

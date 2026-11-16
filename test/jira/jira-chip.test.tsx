@@ -403,6 +403,11 @@ describe('the Mentions row', () => {
     expect(row().querySelector('.jira-chip-board-line')?.textContent).toBe('checked 1 min ago · every 3m');
   });
 
+  it('appends the cap tail when the search was truncated, as the page band does', async () => {
+    await open(summary({ truncated: true }));
+    expect(row().querySelector('.jira-chip-board-line')?.textContent).toBe('checked 1 min ago · every 3m · newest 100 tickets checked');
+  });
+
   it('shows a dash for a count that is not known yet', async () => {
     await open(summary({ count: null, polledAt: null }));
     expect(row().querySelector('.tracker-row-name')?.textContent).toBe('Mentions · —');

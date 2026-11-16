@@ -1902,7 +1902,8 @@ button.rail-count { cursor: pointer }
 /* Jira › Mentions › Cards (§8.9.1, mock `ListB.dc.html`): one card per ticket in two columns, one below 1000 px — a CSS step like `.board-columns`' own. */
 .jira-mentions-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px }
 @media (max-width: 1000px) { .jira-mentions-cards { grid-template-columns: minmax(0, 1fr) } }
-.jira-mentions-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
+/* font-size: the board `body` sets none, so without it a card's quote and foot read at the browser's 16 px — DESIGN's body text is 13 (ui-verify). */
+.jira-mentions-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip); font-size: 13px }
 .jira-mentions-card:hover { background: var(--card-hover) }
 .jira-mentions-card[data-dismissed] > :not(.jira-mentions-card-foot), .jira-mentions-card[data-dismissed] .jira-mentions-card-more, .jira-mentions-card[data-dismissed] .jira-mentions-card-boards { opacity: .55 }
 .jira-mentions-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px }
@@ -1957,9 +1958,11 @@ button.rail-count { cursor: pointer }
 .jira-mention-who { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink) }
 .jira-mention-when { font-size: 12px; font-weight: 400; color: var(--ink2) }
 .jira-mention-txt { grid-column: 2; min-width: 0; overflow-wrap: anywhere }
-.jira-mention-txt > :first-child { margin-top: 0 }
-.jira-mention-txt > :last-child { margin-bottom: 0 }
-.jira-mention-txt p, .jira-mention-txt li { font-size: 13.5px; line-height: 1.45; margin: 4px 0 }
+.item-body.jira-mention-txt > :first-child { margin-top: 0 }
+.item-body.jira-mention-txt > :last-child { margin-bottom: 0 }
+/* `.item-body.` raises this over `.item-body p, .item-body li` (15 px / 1.6, later in this file), which the comment body also carries for its markdown —
+   at equal specificity the later rule won and the thread read at the ticket pane's size, not the mock's 13.5 (ui-verify). */
+.item-body.jira-mention-txt p, .item-body.jira-mention-txt li { font-size: 13.5px; line-height: 1.45; margin: 4px 0 }
 .jira-mention-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 2px; font-size: 12.5px; color: var(--ink2) }
 .jira-mention-foot-acts { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-left: auto }
 .jira-mention-done {
