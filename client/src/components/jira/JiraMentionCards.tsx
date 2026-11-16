@@ -8,7 +8,7 @@ import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 /**
  * DESIGN.md §8.9.1 — Jira › Mentions › Cards: one card per ticket (Jira mentions phase 1, Task 9; spec "The page", Cards; mock `ListB.dc.html`).
  *
- * **One card per TICKET, quoting the newest mention.** `mentionCards` groups the rows the page filtered; the quote is the newest open comment ("Mara Ilić asked
+ * **One card per TICKET, quoting the newest mention.** `mentionCards` groups the page's visible rows (the search only picks which tickets show); the quote is the newest open comment by `created` ("Mara Ilić asked
  * you · 2 h ago" over the excerpt, every `@<me>` the List's tinted chip), and `+N earlier mention(s)` says what else the thread holds. The card wears the board
  * card's marks — the type tile, the status dot, the initials disc — and the page's own `.jira-mentions-card` classes for the frame and the two-column grid, which
  * falls to one column below 1000 px by a CSS media rule, the way `.board-columns` steps down (no `useNarrow`: the Board's columns do not use it either).
@@ -21,12 +21,16 @@ import { JiraTypeIcon } from '../ui/JiraTypeIcon';
  */
 export function JiraMentionCards({
   rows,
+  search,
   me,
   now,
   onDismiss,
   onRestore
 }: {
+  /** Every visible row — Show dismissed applied, the search NOT: a card quotes its ticket's newest mention whatever the filter matched. */
   rows: readonly JiraMentionRow[];
+  /** The page's search box; it only decides which tickets get a card. */
+  search: string;
   /** The user's Jira display name, for the `@` chip; `null` draws the excerpt plain. */
   me: string | null;
   now: number;
@@ -35,7 +39,7 @@ export function JiraMentionCards({
 }) {
   return (
     <div className="jira-mentions-cards" role="list" aria-label="Mentions">
-      {mentionCards(rows).map(({ issue, mention, earlier, dismissed }) => {
+      {mentionCards(rows, search).map(({ issue, mention, earlier, dismissed }) => {
         const type = mentionIssueType(issue.type);
         const more = earlierText(earlier);
         return (

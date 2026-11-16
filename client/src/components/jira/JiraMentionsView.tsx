@@ -51,10 +51,9 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   const [search, setSearch] = useState('');
 
   const configured = data !== null && data.configured ? data : null;
-  const rows = useMemo(
-    () => (configured === null ? [] : mentionRows(configured, showDismissed).filter((r) => matchesMentionSearch(r, search))),
-    [configured, showDismissed, search]
-  );
+  // Cards quote a ticket's newest mention whatever the search matched, so they take `visible` (no search) and filter by ticket themselves.
+  const visible = useMemo(() => (configured === null ? [] : mentionRows(configured, showDismissed)), [configured, showDismissed]);
+  const rows = useMemo(() => visible.filter((r) => matchesMentionSearch(r, search)), [visible, search]);
 
   if (data === null || !data.configured) {
     return (
@@ -125,7 +124,8 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
       {rows.length > 0 ? (
         view === 'cards' ? (
           <JiraMentionCards
-            rows={rows}
+            rows={visible}
+            search={search}
             me={data.me}
             now={now}
             onDismiss={(issue) => void dismiss(issue.key, ids(issue))}

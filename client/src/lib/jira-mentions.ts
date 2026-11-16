@@ -111,9 +111,8 @@ export function mentionRows(data: JiraMentionsConfigured, showDismissed: boolean
 }
 
 /**
- * One Cards-view card: a ticket and the mention it quotes. The server orders a ticket's mentions newest first, so the first row a ticket has in `rows` is the one
- * quoted; a search that matches only an older comment quotes that one instead, and `earlier` still counts every OTHER open mention on the ticket (the card says
- * how much more the thread holds, not how much the filter kept).
+ * One Cards-view card: a ticket and the mention it quotes. The quote, `earlier` and the Reply link are the TICKET's — computed over all its visible rows, the
+ * search NOT applied — so a filter never changes what a card says: it only decides which tickets show.
  */
 export interface JiraMentionCard {
   issue: JiraMentionIssue;
@@ -122,16 +121,34 @@ export interface JiraMentionCard {
   dismissed: boolean;
 }
 
-/** Rows grouped into one card per ticket, in the rows' own order (waiting tickets first, then the dismissed ones). */
-export function mentionCards(rows: readonly JiraMentionRow[]): JiraMentionCard[] {
-  const seen = new Set<string>();
+/**
+ * Rows (Show dismissed applied, search not) grouped into one card per ticket, in the rows' own order (waiting tickets first, then the dismissed ones). The quoted
+ * mention is the newest by `created`, not the first row, so the card does not lean on the server's ordering (an unparseable stamp sorts oldest). `search` keeps a
+ * ticket when ANY of its rows matches; a card whose only matching comment is an older one still quotes the newer mention.
+ */
+export function mentionCards(rows: readonly JiraMentionRow[], search = ''): JiraMentionCard[] {
+  const byKey = new Map<string, JiraMentionRow[]>();
+  for (const row of rows) {
+    const group = byKey.get(row.issue.key);
+    if (group === undefined) byKey.set(row.issue.key, [row]);
+    else group.push(row);
+  }
+  const time = (r: JiraMentionRow): number => {
+    const t = Date.parse(r.mention.created);
+    return Number.isNaN(t) ? -Infinity : t;
+  };
   const cards: JiraMentionCard[] = [];
-  for (const { issue, mention, dismissed } of rows) {
-    if (seen.has(issue.key)) continue;
-    seen.add(issue.key);
-    cards.push({ issue, mention, earlier: Math.max(0, issue.mentions.length - 1), dismissed });
+  for (const group of byKey.values()) {
+    if (!group.some((r) => matchesMentionSearch(r, search))) continue;
+    const newest = group.reduce((best, r) => (time(r) > time(best) ? r : best));
+    cards.push({ issue: newest.issue, mention: newest.mention, earlier: group.length - 1, dismissed: newest.dismissed });
   }
   return cards;
+}
+
+/** `+1 earlier mention` / `+2 earlier mentions`; `null` when the ticket has only the one. */
+export function earlierText(earlier: number): string | null {
+  return earlier <= 0 ? null : `+${earlier} earlier mention${earlier === 1 ? '' : 's'}`;
 }
 
 /** The quote's age, spelled the way the mock does (`2 h ago`, `6 d ago`, `just now`) from the List's compact `2h`; `null` for an unparseable stamp. */
@@ -141,11 +158,6 @@ export function askedAge(created: string, now: number): string | null {
   if (short === 'now') return 'just now';
   const m = /^(\d+)([mhd])$/.exec(short);
   return m === null ? short : `${m[1]} ${m[2]} ago`;
-}
-
-/** `+1 earlier mention` / `+2 earlier mentions`; `null` when the ticket has only the one. */
-export function earlierText(earlier: number): string | null {
-  return earlier <= 0 ? null : `+${earlier} earlier mention${earlier === 1 ? '' : 's'}`;
 }
 
 /** How many mentions wait — the List's count, one per row (the Cards' count is tickets, and the rail's). Dismissed tickets are not waiting. */

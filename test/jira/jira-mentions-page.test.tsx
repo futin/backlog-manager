@@ -312,6 +312,23 @@ describe('Jira › Mentions — the Cards view', () => {
     expect(posts('restore')).toEqual([{ key: 'OPS-9' }]);
   });
 
+  it('quotes the newest mention by `created`, whatever order the payload lists them in', async () => {
+    answer = payload({ issues: [{ ...SUP, mentions: [...SUP.mentions].reverse() }, PAY] });
+    await openCards();
+    expect(within(card('SUP-208')).getByText('Mara Ilić asked you · 2 h ago')).toBeInTheDocument();
+    expect(within(card('SUP-208')).getByText('+1 earlier mention')).toBeInTheDocument();
+    expect(within(card('SUP-208')).getByRole('link', { name: 'Reply in Jira' })).toHaveAttribute('href', 'https://acme.atlassian.net/browse/SUP-208?focusedCommentId=101');
+  });
+
+  it('a search that matches only the older comment still shows the ticket, quoting the newer mention', async () => {
+    const user = await openCards();
+    await user.type(screen.getByRole('searchbox', { name: 'Search mentions' }), 'derived');
+    expect(cards().map((c) => c.getAttribute('data-key'))).toEqual(['SUP-208']);
+    expect(within(card('SUP-208')).getByText('Mara Ilić asked you · 2 h ago')).toBeInTheDocument();
+    expect(within(card('SUP-208')).getByText('+1 earlier mention')).toBeInTheDocument();
+    expect(within(card('SUP-208')).getByRole('link', { name: 'Reply in Jira' })).toHaveAttribute('href', expect.stringContaining('focusedCommentId=101'));
+  });
+
   it('the Cards pick survives a remount', async () => {
     await openCards();
     document.body.innerHTML = '';

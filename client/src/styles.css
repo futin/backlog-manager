@@ -1902,12 +1902,12 @@ button.rail-count { cursor: pointer }
 /* Jira › Mentions › Cards (§8.9.1, mock `ListB.dc.html`): one card per ticket in two columns, one below 1000 px — a CSS step like `.board-columns`' own. */
 .jira-mentions-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px }
 @media (max-width: 1000px) { .jira-mentions-cards { grid-template-columns: minmax(0, 1fr) } }
-.jira-mentions-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--steel) }
+.jira-mentions-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--strip) }
 .jira-mentions-card:hover { background: var(--card-hover) }
 .jira-mentions-card[data-dismissed] > :not(.jira-mentions-card-foot), .jira-mentions-card[data-dismissed] .jira-mentions-card-more, .jira-mentions-card[data-dismissed] .jira-mentions-card-boards { opacity: .55 }
 .jira-mentions-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px }
 .jira-mentions-card-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; color: var(--ink) }
-.jira-mentions-quote { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--strip) }
+.jira-mentions-quote { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--strip-hi) }
 .jira-mentions-quote-meta { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--amber-ink) }
 .jira-mentions-quote-text { line-height: 1.45; color: var(--ink); overflow-wrap: anywhere }
 .jira-mentions-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px }
