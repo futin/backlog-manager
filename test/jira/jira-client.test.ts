@@ -653,3 +653,70 @@ describe('FakeJira', () => {
     expect(limited.headers.get('x-ratelimit-remaining')).not.toBeNull();
   });
 });
+
+describe('comments, and FakeJira comment support (Jira mentions, task 4)', () => {
+  const mk = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: String(i + 1), created: `2026-11-01T00:${String(i).padStart(2, '0')}:00.000+0000`, body: { type: 'doc' } }));
+
+  it('GETs issue/{key}/comment newest first with the key encoded and bumps takeCalls by one', async () => {
+    const { fake, client } = build();
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
+    await client.comments(auth, 'PAY-1', 100);
+    expect(fake.calls[0].method).toBe('GET');
+    expect(fake.calls[0].url).toBe(`${GATEWAY}/issue/PAY-1/comment?orderBy=-created&maxResults=100`);
+    expect(client.takeCalls()).toBe(1);
+    await client.comments(auth, 'A/B', 5);
+    expect(fake.calls[1].url).toBe(`${GATEWAY}/issue/A%2FB/comment?orderBy=-created&maxResults=5`);
+  });
+
+  it('the endpoint answers newest first, honours maxResults, and carries total', async () => {
+    const { fake, client } = build();
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
+    fake.addComments('PAY-1', mk(23));
+    const out = await client.comments(auth, 'PAY-1', 3);
+    expect(out.status).toBe(200);
+    expect(out.data?.total).toBe(23);
+    expect((out.data?.comments as { id: string }[]).map((c) => c.id)).toEqual(['23', '22', '21']);
+  });
+
+  it('an issue with no comments answers an empty list, an unknown one 404', async () => {
+    const { fake, client } = build();
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
+    expect((await client.comments(auth, 'PAY-1', 10)).data).toMatchObject({ comments: [], total: 0 });
+    expect((await client.comments(auth, 'NOPE-1', 10)).status).toBe(404);
+  });
+
+  it('a search that asks for `comment` gets the newest 20 inline in ascending order with total and startAt; one that does not is unchanged', async () => {
+    const { fake, client } = build();
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
+    fake.addComments('PAY-1', [...mk(22), { id: '23', created: '2026-11-02T00:00:00.000+0000', body: null, updated: 'u' }]);
+    const jql = 'key = "PAY-1"';
+    const withC = await client.search(auth, { jql, fields: ['summary', 'comment'], maxResults: 10 });
+    const c = (withC.data!.issues[0] as { fields: { comment: { comments: { id: string; updated?: string }[]; total: number; startAt: number; maxResults: number } } })
+      .fields.comment;
+    expect(c.total).toBe(23);
+    expect(c.startAt).toBe(3);
+    expect(c.maxResults).toBe(20);
+    expect(c.comments).toHaveLength(20);
+    expect(c.comments[0].id).toBe('4');
+    expect(c.comments[19]).toMatchObject({ id: '23', updated: 'u' });
+    const without = await client.search(auth, { jql, fields: ['summary'], maxResults: 10 });
+    expect((without.data!.issues[0] as { fields: object }).fields).not.toHaveProperty('comment');
+  });
+
+  it('holdNextSearch parks the next search until released, and only that one', async () => {
+    const { fake, client } = build();
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
+    const release = fake.holdNextSearch();
+    let done = false;
+    const p = client.search(auth, { jql: 'key = "PAY-1"', fields: ['summary'], maxResults: 10 }).then((r) => {
+      done = true;
+      return r;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(done).toBe(false);
+    release();
+    expect((await p).status).toBe(200);
+    expect((await client.search(auth, { jql: 'key = "PAY-1"', fields: ['summary'], maxResults: 10 })).status).toBe(200);
+  });
+});
