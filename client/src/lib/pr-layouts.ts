@@ -163,13 +163,25 @@ export function levelCounts(ranked: readonly RankedPr[]): Record<PrLevel, number
 }
 
 /**
- * The Inbox's `Needs you` number, for the rail's GitHub count (spec §4.9a): the exact pipeline `PullRequestsView` feeds the Inbox — `groupRepos`, then only the
+ * The Inbox's `Needs you` number, which tones the rail's GitHub › PRs count amber (spec §4.9a): the exact pipeline `PullRequestsView` feeds the Inbox —
+ * `groupRepos`, then only the
  * repos the token can read (`splitReach(...).shown`), then `rankPrs` and `levelCounts` — so the rail and the tile can never disagree. A repo the token cannot
  * read contributes nothing, as on the page. `null` (nothing has answered, or the shell does not read PRs) is 0.
  */
 export function needsYouCount(data: PullRequestsPayload | null): number {
   if (data === null) return 0;
   return levelCounts(rankPrs(splitReach(groupRepos(data.repos)).shown))['needs-you'];
+}
+
+/**
+ * How many PRs are open, for the PRs band's `N open in M repos` (`PrBandSub`) and the rail's GitHub › PRs count
+ * (`docs/superpowers/specs/2026-11-16-rail-pending-counts-design.md`): the sum of `total` over the repos the token can read (`splitReach(...).shown`). It is
+ * the one home of that sum, so the band and the pill cannot drift — neither may compute it inline. It sums `total`, not the listed rows, because a truncated
+ * repo lists fewer PRs than it has and the band has always said the larger, true number. `null` (nothing has answered, or the shell does not read PRs) is 0.
+ */
+export function openPrCount(data: PullRequestsPayload | null): number {
+  if (data === null) return 0;
+  return splitReach(groupRepos(data.repos)).shown.reduce((n, r) => n + r.total, 0);
 }
 
 export type PrLayout = 'inbox' | 'matrix' | 'cards';

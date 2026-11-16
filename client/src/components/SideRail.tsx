@@ -17,8 +17,10 @@ import { useSettings } from '../hooks/useSettings';
 import { JIRA_PAGES, type JiraPage } from '../lib/jira-page';
 import { RUNS_MODES, type RunsMode } from '../lib/runs-mode';
 import { SECTIONS, type Section } from '../lib/sections';
+import { railCounts, sectionTotal, type RailCount, type RailSectionCounts } from '../lib/rail-counts';
 import { FILES_PAGES, GITHUB_PAGES, type FilesPage, type GithubPage } from '../lib/source-page';
 import { SETTINGS_SCOPES, type SettingsScope } from '../lib/settings';
+import type { PullRequestsPayload } from '../../../shared/types';
 
 /**
  * Each section's label in the rail. The LIST and its order live in
@@ -76,10 +78,12 @@ interface Props {
    */
   provisional: boolean;
   /**
-   * The rail's always-on counts (restyle spec §4.9a): GitHub's PRs that need the reader (amber, a thing waiting on a person) and Runs' live runs (grey). `App`
-   * reads both from the shell's providers — no poller here. Zero or absent draws no pill. Jira's count is the rail's own read (`useJiraNeedsYou`).
+   * The inputs to the rail's pending counts (`docs/superpowers/specs/2026-11-16-rail-pending-counts-design.md`): the shell's one PRs answer, for GitHub ›
+   * PRs, and its live-run count, for Runs › History. `App` reads both from the shell's providers — no poller here. Absent reads as nothing pending. Jira ›
+   * Sessions' count is the rail's own read (`useJiraNeedsYou`), because `JiraSessionsProvider` is mounted inside `AppShell`'s return and a read in `App`
+   * would sit above it. Which page carries which number, its tone and its name are `lib/rail-counts.ts`'s.
    */
-  counts?: { github?: number; runs?: number };
+  counts?: { prs?: PullRequestsPayload | null; liveRuns?: number };
   /** Whether the client's existing reads are answering, for the footer card: `null` while unknown draws nothing. No poller of its own. */
   api?: 'ok' | 'down' | null;
 }
@@ -130,11 +134,18 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   // The Jira section's page — `useRunsMode`'s module store and its reason: this tree and the Board page's own `Set up` chip (threaded down from `App` as
   // `onOpenJiraPage`) are two mounted writers of one value, and a `usePersistedState` per caller would leave the other looking at a stale page.
   const [jiraPage, setJiraPage] = useJiraPage();
-  // The Jira row's Needs-you badge (spec §7.4, C4): the shell's one sessions answer, never a read of its own. It counts every linked ticket, so its click opens
-  // the Sessions page — the Board's deck shows the picked board only — with the chip and All tickets set, in the same handler that moves the page and the
-  // section. The stores are module-level for this reason (`useJiraPage`, `useJiraListFilters`): this is a writer that is not the page. It leaves the Board
-  // page's view alone: the badge no longer opens the List.
-  const needsYouCount = useJiraNeedsYou();
+  // Jira › Sessions' pending count (rail pending-counts spec; it supersedes the jira-sessions spec's C4, which kept the count off the Sessions entry): the
+  // shell's one sessions answer, never a read of its own. It counts every linked ticket, so its click opens the Sessions page — the Board's deck shows the
+  // picked board only — with the chip and All tickets set, in the same handler that moves the page and the section. The stores are module-level for this
+  // reason (`useJiraPage`, `useJiraListFilters`): this is a writer that is not the page. It leaves the Board page's view alone. The handler is passed INTO
+  // `railCounts` rather than built there, which keeps that function pure; the Sessions pill and, while the tree is closed, the Jira top row both run it.
+  const jiraNeedsYou = useJiraNeedsYou();
+  const openJiraNeedsYou = (): void => {
+    setJiraPage('sessions');
+    setJiraListFilters({ chip: 'needs-you', allTickets: true });
+    onChange('jira');
+    setMenuOpen(false);
+  };
   /*
     The Jira row (Jira phase 2, spec §6.1) is drawn while `GET /api/jira` says `configured: true`, and in ONE other case: the status is still unknown (`data`
     null — not answered yet, or every read so far failed) and Jira is the section on screen. That is the shell's hold (`App`): a stored `jira` is kept until an
@@ -186,6 +197,17 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   // than behind an accordion (§8.0).
   const treeOpen = (id: Section): boolean => narrow || section === id;
 
+  // Every pending count the rail draws, by section and page (`lib/rail-counts.ts`): each sub-row carries its page's own number and the top row the sum.
+  const pending = railCounts({ prs: counts?.prs ?? null, liveRuns: counts?.liveRuns ?? 0, jiraNeedsYou, openJiraNeedsYou });
+  // Each section's page list, in tree order — what `sectionTotal` sums and labels by, so the top row never counts a page its tree does not draw.
+  const pagesOf: Partial<Record<Section, readonly string[]>> = {
+    files: FILES_PAGES,
+    github: GITHUB_PAGES,
+    jira: JIRA_PAGES,
+    runs: RUNS_MODES,
+    settings: SETTINGS_SCOPES
+  };
+
   return (
     <nav className="rail" aria-label="Sections" data-hidden={hidden ? 'true' : undefined}>
       {narrow ? (
@@ -218,40 +240,16 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
                 <GlyphTile glyph={RAIL_GLYPH[id]} tone={section === id ? 'ink' : 'neutral'} />
                 <span className="rail-label">{RAIL_LABEL[id]}</span>
               </button>
-              {/* A sibling of the row's button, never inside it: a button in a button is invalid, and the row keeps meaning "open Jira" while the count means
-                  "open what needs me". Hung over the row's right edge by `.rail-group`. Zero draws no element at all (§7.4). GitHub and Runs counts are plain
-                  pills: the row itself is the control. */}
-              {id === 'jira' && needsYouCount > 0 && (
-                <button
-                  type="button"
-                  className="rail-count"
-                  aria-label={`${needsYouCount} ${needsYouCount === 1 ? 'session needs' : 'sessions need'} you`}
-                  onClick={() => {
-                    setJiraPage('sessions');
-                    setJiraListFilters({ chip: 'needs-you', allTickets: true });
-                    onChange('jira');
-                    setMenuOpen(false);
-                  }}
-                >
-                  <Pill tone="warn">{needsYouCount}</Pill>
-                </button>
-              )}
-              {id === 'github' && (counts?.github ?? 0) > 0 && (
-                <span className="rail-count" role="img" aria-label={`${counts?.github} ${counts?.github === 1 ? 'PR needs' : 'PRs need'} you`}>
-                  <Pill tone="warn">{counts?.github}</Pill>
-                </span>
-              )}
-              {id === 'runs' && (counts?.runs ?? 0) > 0 && (
-                <span className="rail-count" role="img" aria-label={`${counts?.runs} live ${counts?.runs === 1 ? 'run' : 'runs'}`}>
-                  <Pill tone="neutral">{counts?.runs}</Pill>
-                </span>
-              )}
+              {/* The section's pending sum, hung over the row's right edge by `.rail-group`; zero draws no element. While the section's tree is drawn the
+                  sub-row pills carry the names and the click, so this one goes silent (still visible) and no count is announced twice. */}
+              <RailPill count={sectionTotal(pending[id], pagesOf[id] ?? [])} silent={treeOpen(id)} />
             </div>
             {id === 'files' && treeOpen('files') && (
               <RailTree
                 label="Files pages"
                 section="files"
                 current={section}
+                counts={pending.files}
                 items={FILES_PAGES}
                 value={filesPage}
                 labelFor={(p) => RAIL_SOURCE_LABEL[p]}
@@ -265,6 +263,7 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
                 label="GitHub pages"
                 section="github"
                 current={section}
+                counts={pending.github}
                 items={GITHUB_PAGES}
                 value={githubPage}
                 labelFor={(p) => RAIL_SOURCE_LABEL[p]}
@@ -278,6 +277,7 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
                 label="Runs views"
                 section="runs"
                 current={section}
+                counts={pending.runs}
                 items={RUNS_MODES}
                 value={runsMode}
                 labelFor={(m) => RAIL_SUB_LABEL[m]}
@@ -291,6 +291,7 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
                 label="Jira pages"
                 section="jira"
                 current={section}
+                counts={pending.jira}
                 items={JIRA_PAGES}
                 value={jiraPage}
                 labelFor={(p) => RAIL_JIRA_LABEL[p]}
@@ -304,6 +305,7 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
                 label="Settings pages"
                 section="settings"
                 current={section}
+                counts={pending.settings}
                 items={SETTINGS_SCOPES}
                 value={settings.settingsScope}
                 labelFor={(v) => RAIL_SCOPE_LABEL[v]}
@@ -375,11 +377,14 @@ function RailTree<T extends string>({
   labelFor,
   onPick,
   onChange,
-  closeMenu
+  closeMenu,
+  counts
 }: {
   label: string;
   section: Section;
   current: Section;
+  /** This section's pending counts by page (`lib/rail-counts.ts`); a page with an entry gets a pill at its row's right edge. */
+  counts?: RailSectionCounts;
   items: readonly T[];
   value: T;
   labelFor: (item: T) => string;
@@ -391,26 +396,66 @@ function RailTree<T extends string>({
     <div className="rail-sub" role="group" aria-label={label}>
       {items.map((item) => {
         const on = value === item && current === section;
+        // Each entry is wrapped in `.rail-group`, the top row's positioning parent, so its pill can be a sibling of the row's button — the Jira Sessions
+        // pill is a button itself, and a button in a button is invalid.
         return (
-          <button
-            key={item}
-            type="button"
-            className={on ? 'rail-sublink on' : 'rail-sublink'}
-            aria-current={on ? 'true' : undefined}
-            onClick={() => {
-              onPick(item);
-              // A tree entry is a destination as well as a choice: picked from
-              // another section it has to bring the reader along, or it would
-              // persist a view nobody can see.
-              onChange(section);
-              closeMenu();
-            }}
-          >
-            {labelFor(item)}
-          </button>
+          <div key={item} className="rail-group">
+            <button
+              type="button"
+              className={on ? 'rail-sublink on' : 'rail-sublink'}
+              aria-current={on ? 'true' : undefined}
+              onClick={() => {
+                onPick(item);
+                // A tree entry is a destination as well as a choice: picked from
+                // another section it has to bring the reader along, or it would
+                // persist a view nobody can see.
+                onChange(section);
+                closeMenu();
+              }}
+            >
+              {labelFor(item)}
+            </button>
+            <RailPill count={counts?.[item] ?? null} silent={false} />
+          </div>
         );
       })}
     </div>
+  );
+}
+
+/**
+ * One pending-count pill (§8.0 "The counts"), for a top row and a sub-row alike — one component so the two cannot drift. Hung over its row's right edge by
+ * the `.rail-group` around it. Three shapes:
+ *
+ * - with `onOpen`, a real `<button>` (today Jira › Sessions: open what needs me), a sibling of the row's own button;
+ * - without, a `role="img"` span named by the count's label, which `.rail-count:not(button)` lets a click through to the row beneath;
+ * - `silent`, a plain span hidden from assistive tech — the top row's sum while its tree is drawn, where the sub-row pills already carry the names and the
+ *   click, so a screen reader never hears one count twice and Jira never has two same-named buttons.
+ *
+ * `null` draws nothing: zero is no element at all, never an empty pill.
+ */
+function RailPill({ count, silent }: { count: RailCount | null; silent: boolean }) {
+  if (count === null) return null;
+  const pill = <Pill tone={count.tone}>{count.n}</Pill>;
+  if (silent) {
+    return (
+      <span className="rail-count" aria-hidden="true">
+        {pill}
+      </span>
+    );
+  }
+  const { onOpen } = count;
+  if (onOpen) {
+    return (
+      <button type="button" className="rail-count" aria-label={count.label} onClick={onOpen}>
+        {pill}
+      </button>
+    );
+  }
+  return (
+    <span className="rail-count" role="img" aria-label={count.label}>
+      {pill}
+    </span>
   );
 }
 
