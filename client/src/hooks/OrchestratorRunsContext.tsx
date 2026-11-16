@@ -13,7 +13,7 @@ type RunsState = ReturnType<typeof useOrchestratorRuns>;
  * an empty first answer, so only `answered` can tell "nobody knows" from "nothing is working". Settings, which used to report nothing, now reads the same
  * answer as every other page.
  *
- * `liveCount` is the number of rows in the Runs page's Live sheet (`liveRunCount`), for the rail's Runs badge.
+ * `liveCount` is the number of rows in the Runs page's Live sheet (`liveRunCount`), for the rail's Runs › History count.
  */
 export interface RunsContextValue extends RunsState {
   working: boolean | undefined;

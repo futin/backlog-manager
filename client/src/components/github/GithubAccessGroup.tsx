@@ -21,7 +21,7 @@ import { splitReach } from '../../lib/pr-layouts';
  * client.
  *
  * **It reads `usePullRequestsContext`**, the shell's one PR read (spec §4.9a), so the request, the server's 60 s cache and the payload are the PRs page's own.
- * The shell reads while a GitHub project is registered, because the rail counts PRs that need you on every page; mounting Settings adds no read of its own.
+ * The shell reads while a GitHub project is registered, because the rail counts open PRs on every page; mounting Settings adds no read of its own.
  *
  * **No age on the rows.** `PrRepoView` carries `polledAt` (the last SUCCESSFUL read) and no attempt time, so a `checked … ago` would be a guess; the row is
  * the repo and its `detail`, in the `--red` text class (`.set-error`) a refusal already uses on this page. The fix note names the token's setting and the

@@ -28,7 +28,7 @@ const WARNING_CLOCK_MS = 15_000;
  * with merge, auto-merge and update branch — grouped by repo in Cards, ranked across repos in Inbox and Matrix.
  *
  * **Reads.** `usePullRequestsContext` is the shell's one read of `GET /api/prs` (spec §4.9a; `PullRequestsProvider`), shared with GitHub › Settings' `Access` card
- * — the shell reads while a GitHub project is registered, because the rail counts PRs that need you on every page. The run-in-progress warning (`prRunWarning`) is derived from
+ * — the shell reads while a GitHub project is registered, because the rail counts open PRs on every page. The run-in-progress warning (`prRunWarning`) is derived from
  * what the Board already polls: `useBoard`'s items and projects and the shell's one runs poll (`useOrchestratorRunsContext`): runs, remote runs and remote
  * launches — no request of its own.
  *
