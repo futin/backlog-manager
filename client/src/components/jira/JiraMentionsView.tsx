@@ -12,6 +12,7 @@ import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
 import { Glyph } from '../ui/Glyphs';
 import { Segmented } from '../ui/Segmented';
+import { JiraMentionCards } from './JiraMentionCards';
 import { JiraMentionList } from './JiraMentionList';
 
 const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
@@ -73,7 +74,7 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
     );
   }
 
-  const band = mentionsBand({ data, checking, access, error, now, zone });
+  const band = mentionsBand({ data, checking, access, error, now, zone, view });
   const nDismissed = data.dismissed.length;
   const ids = (issue: JiraMentionIssue): string[] => issue.mentions.map((m) => m.commentId);
   const healthyEmpty = data.polledAt !== null && data.detail === null && data.issues.length === 0;
@@ -121,19 +122,24 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
         </Chip>
       </Band>
 
-      {view === 'cards' ? (
-        // Task 9 draws the Cards view (`ListB.dc.html`); until then the pick is honoured and remembered, and the page says what it will be.
-        <div className="board-empty" data-testid="jira-mentions-cards">
-          Cards view
-        </div>
-      ) : rows.length > 0 ? (
-        <JiraMentionList
-          rows={rows}
-          me={data.me}
-          now={now}
-          onDismiss={(issue) => void dismiss(issue.key, ids(issue))}
-          onRestore={(issue) => void restore(issue.key)}
-        />
+      {rows.length > 0 ? (
+        view === 'cards' ? (
+          <JiraMentionCards
+            rows={rows}
+            me={data.me}
+            now={now}
+            onDismiss={(issue) => void dismiss(issue.key, ids(issue))}
+            onRestore={(issue) => void restore(issue.key)}
+          />
+        ) : (
+          <JiraMentionList
+            rows={rows}
+            me={data.me}
+            now={now}
+            onDismiss={(issue) => void dismiss(issue.key, ids(issue))}
+            onRestore={(issue) => void restore(issue.key)}
+          />
+        )
       ) : search.trim() !== '' && (data.issues.length > 0 || (showDismissed && nDismissed > 0)) ? (
         <div className="board-empty">No mentions match</div>
       ) : healthyEmpty ? (

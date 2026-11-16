@@ -256,3 +256,67 @@ describe('Jira › Mentions — the List view', () => {
     expect(document.querySelector('tbody')).toBeNull();
   });
 });
+
+describe('Jira › Mentions — the Cards view', () => {
+  const cards = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>('.jira-mentions-card'));
+  const card = (key: string): HTMLElement => cards().find((c) => c.getAttribute('data-key') === key) as HTMLElement;
+
+  async function openCards() {
+    const user = userEvent.setup();
+    renderPage();
+    await settle();
+    await user.click(screen.getByRole('button', { name: 'Cards' }));
+    return user;
+  }
+
+  it('draws one card per ticket, the newest mention quoted with +1 earlier mention, and the sub-line counts tickets', async () => {
+    await openCards();
+    expect(cards().map((c) => c.getAttribute('data-key'))).toEqual(['SUP-208', 'PAY-131']);
+    expect(document.querySelector('tbody')).toBeNull();
+    const sup = within(card('SUP-208'));
+    expect(sup.getByText('Mara Ilić asked you · 2 h ago')).toBeInTheDocument();
+    expect(card('SUP-208').querySelector('.jira-mentions-at')?.textContent).toBe('@Andreja');
+    expect(card('SUP-208').textContent).not.toContain('is the branch zone stored or derived?');
+    expect(sup.getByText('+1 earlier mention')).toBeInTheDocument();
+    expect(within(card('PAY-131')).queryByText(/earlier/)).toBeNull();
+    expect(sup.getByText('on none of your boards')).toBeInTheDocument();
+    expect(within(card('PAY-131')).getByText('on Payments Q4')).toBeInTheDocument();
+    expect(sub()).toBe('2 tickets waiting · last 30 days · checked 1 min ago');
+  });
+
+  it('pluralises earlier mentions and says 1 ticket waiting for one ticket', async () => {
+    answer = payload({ issues: [{ ...SUP, mentions: [...SUP.mentions, mention('103', 'Ines Kovač', 'third', 9 * HOUR, 'SUP-208')] }], dismissed: [] });
+    await openCards();
+    expect(within(card('SUP-208')).getByText('+2 earlier mentions')).toBeInTheDocument();
+    expect(sub()).toBe('1 ticket waiting · last 30 days · checked 1 min ago');
+  });
+
+  it('Reply in Jira links the newest comment in a new tab; Dismiss posts every id on the ticket', async () => {
+    const user = await openCards();
+    const link = within(card('SUP-208')).getByRole('link', { name: 'Reply in Jira' });
+    expect(link).toHaveAttribute('href', 'https://acme.atlassian.net/browse/SUP-208?focusedCommentId=101');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer');
+    await user.click(within(card('SUP-208')).getByRole('button', { name: 'Dismiss' }));
+    await settle();
+    expect(posts('dismiss')).toEqual([{ key: 'SUP-208', commentIds: ['101', '102'] }]);
+  });
+
+  it('a dismissed ticket is a dimmed card with Restore under Show dismissed', async () => {
+    const user = await openCards();
+    await user.click(screen.getByRole('button', { name: 'Show dismissed · 1' }));
+    expect(cards().map((c) => c.getAttribute('data-key'))).toEqual(['SUP-208', 'PAY-131', 'OPS-9']);
+    expect(card('OPS-9')).toHaveAttribute('data-dismissed');
+    await user.click(within(card('OPS-9')).getByRole('button', { name: 'Restore' }));
+    await settle();
+    expect(posts('restore')).toEqual([{ key: 'OPS-9' }]);
+  });
+
+  it('the Cards pick survives a remount', async () => {
+    await openCards();
+    document.body.innerHTML = '';
+    renderPage();
+    await settle();
+    expect(cards()).toHaveLength(2);
+  });
+});

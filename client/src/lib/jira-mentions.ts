@@ -8,6 +8,7 @@
  * and Show-dismissed keys with their guards, the List's rows and search, the excerpt split around the user's own `@`, and the band's sub-line.
  */
 import { errorOf, postJson } from './http';
+import { elapsedSince } from './item-age';
 import { accessPhrase } from './jira';
 import { formatZonedClock } from './time-zone';
 import { JIRA_MENTIONS_ISSUE_CAP, type JiraAccess, type JiraIssue, type JiraMention, type JiraMentionIssue, type JiraMentionsConfigured, type JiraMentionsPayload } from '../../../shared/types';
@@ -109,6 +110,44 @@ export function mentionRows(data: JiraMentionsConfigured, showDismissed: boolean
   return [...rowsOf(data.issues, false), ...(showDismissed ? rowsOf(data.dismissed, true) : [])];
 }
 
+/**
+ * One Cards-view card: a ticket and the mention it quotes. The server orders a ticket's mentions newest first, so the first row a ticket has in `rows` is the one
+ * quoted; a search that matches only an older comment quotes that one instead, and `earlier` still counts every OTHER open mention on the ticket (the card says
+ * how much more the thread holds, not how much the filter kept).
+ */
+export interface JiraMentionCard {
+  issue: JiraMentionIssue;
+  mention: JiraMention;
+  earlier: number;
+  dismissed: boolean;
+}
+
+/** Rows grouped into one card per ticket, in the rows' own order (waiting tickets first, then the dismissed ones). */
+export function mentionCards(rows: readonly JiraMentionRow[]): JiraMentionCard[] {
+  const seen = new Set<string>();
+  const cards: JiraMentionCard[] = [];
+  for (const { issue, mention, dismissed } of rows) {
+    if (seen.has(issue.key)) continue;
+    seen.add(issue.key);
+    cards.push({ issue, mention, earlier: Math.max(0, issue.mentions.length - 1), dismissed });
+  }
+  return cards;
+}
+
+/** The quote's age, spelled the way the mock does (`2 h ago`, `6 d ago`, `just now`) from the List's compact `2h`; `null` for an unparseable stamp. */
+export function askedAge(created: string, now: number): string | null {
+  const short = elapsedSince(created, now);
+  if (short === null) return null;
+  if (short === 'now') return 'just now';
+  const m = /^(\d+)([mhd])$/.exec(short);
+  return m === null ? short : `${m[1]} ${m[2]} ago`;
+}
+
+/** `+1 earlier mention` / `+2 earlier mentions`; `null` when the ticket has only the one. */
+export function earlierText(earlier: number): string | null {
+  return earlier <= 0 ? null : `+${earlier} earlier mention${earlier === 1 ? '' : 's'}`;
+}
+
 /** How many mentions wait — the List's count, one per row (the Cards' count is tickets, and the rail's). Dismissed tickets are not waiting. */
 export function waitingCount(data: JiraMentionsConfigured): number {
   return data.issues.reduce((n, i) => n + i.mentions.length, 0);
@@ -208,8 +247,10 @@ export function mentionsBand(input: {
   error: JiraMentionsFailure | null;
   now: number;
   zone: string;
+  /** The page's view: Cards counts tickets, the List counts mentions. Defaults to the List. */
+  view?: JiraMentionsView;
 }): MentionsBand {
-  const { data, checking, access, error, now, zone } = input;
+  const { data, checking, access, error, now, zone, view = 'list' } = input;
   const wait = mentionsWait(data.retryAt, now, zone) ?? mentionsWait(error?.retryAt ?? null, now, zone);
   const blocking = access !== undefined && BLOCKING_ACCESS.has(access) ? accessPhrase(access) : null;
   // A refused write (409 `Jira is not being polled`, a dismiss 400) or a failed read; a 429 is said by `wait` instead, and only while it is still ahead.
@@ -228,7 +269,8 @@ export function mentionsBand(input: {
   }
 
   const age = checkedAge(data.polledAt, now);
-  const parts = [`${waitingCount(data)} waiting`, `last ${data.window} days`, checking ? 'checking…' : age === null ? 'checked at an unknown time' : `checked ${age} ago`];
+  const waiting = view === 'cards' ? `${data.issues.length} ticket${data.issues.length === 1 ? '' : 's'} waiting` : `${waitingCount(data)} waiting`;
+  const parts = [waiting, `last ${data.window} days`, checking ? 'checking…' : age === null ? 'checked at an unknown time' : `checked ${age} ago`];
   if (wait !== null) parts.push(wait);
   return { lead: parts.join(' · '), fail, tail, disabled, title };
 }
