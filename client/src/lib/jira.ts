@@ -3,6 +3,7 @@ import type { Settings } from './settings';
 import { errorOf } from './http';
 import { elapsedSince, formatCreated } from './item-age';
 import { countdownReading, pollAge, pollProgress, type PollReading } from './tracker';
+import { runBlockPhrase, runYields } from '../../../shared/jira-sessions';
 import { DEFAULT_NAME_PATTERN, branchCarriesKey, branchNameProblem, renderBranchPattern, shellQuote, slugOf } from '../../../shared/jira-branch';
 import { JIRA_PROMPT_MAX, SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
 import type {
@@ -844,15 +845,20 @@ export function displayPath(path: string, home: string | null): string {
  * title names Setup › Repositories) however the rest reads, so a `live` session on a project whose mapping was removed afterwards draws the dashed chip too —
  * the live STRIP beside it, which reads `status.live` alone, still carries the session and its Stop. Otherwise `ready`.
  *
- * **What `live` reads (Jira sessions, §7.3 / §5's one-run gate; ruling 95).** `live` is the UNION of two sources: a live `run` link on the key in the sessions
- * payload, OR any entry in `status.live` for it, `starting` or confirmed. Neither source is a fallback for the other, because each is ahead of the other in a
- * window the chip must not offer a Start in. The status' `live` map holds every live `run` link plus every `starting` reservation (and never a `branch`/`manual`
- * link — the server's `JiraLiveService.snapshot()`), so a `starting` reservation, which the sessions payload cannot carry, and a Run the server has just
- * CONFIRMED, which the sessions poll has not seen yet (it runs on its own 15 s clock), both read `live` the moment the status says so; the payload covers the
- * other direction, a `run` link the status has not been re-read for. Reading only one would re-offer `Start` for up to a poll after a Start landed, and the
- * server's one-run gate answers that second Start with a 409. What stays `ready` is exactly what neither source holds: a live `branch` or `manual` link
- * (a session somebody started in a terminal, found by its branch) does NOT disable Run, and neither does an ended link. With no sessions payload (not
- * loaded yet, or a page mounted without the provider) the status alone answers, so a first paint can never offer a Start the server would refuse.
+ * **What `live` reads (Jira sessions §7.3; ruling 95; narrowed by the quiet-only Run gate, spec 2026-11-17-jira-quiet-run-gate-design.md, Design → Client).**
+ * `live` means "the server would refuse a Run here", and it reads the same two sources ruling 95 unions — the sessions payload and `status.live` — because
+ * each is ahead of the other in a window the chip must not offer a Start in. What changed is that a live `run` link no longer holds the key by being live:
+ * the server lets a Run start beside live Runs that ALL yield (`runYields`, `shared/jira-sessions.ts` — quiet, and seen in the dashboard's latest good read),
+ * so the chip does too. `live` is then any of:
+ * - a `starting` reservation in `status.live` — the sessions payload cannot carry one, and the server refuses a second Start beside it;
+ * - a confirmed `status.live` entry whose session the payload holds no live `run` link for — a Run the server has just confirmed and the 15 s sessions poll
+ *   has not seen, which nobody can yet call quiet;
+ * - a live `run` link on the key in the payload that does not yield — working, waiting on a person, not quiet yet, or unseen by the dashboard;
+ * - no payload at all (not loaded yet, or a page mounted without the provider) and any `status.live` entry — so a first paint can never offer a Start the
+ *   server would refuse.
+ * What stays `ready` is a live `branch` or `manual` link (a session somebody started in a terminal, found by its branch), an ended link, and live Runs that
+ * all yield. Reading a payload link's own `row` against the payload's own `reachable` is what keeps this the server's answer: the payload is the reconciler's
+ * latest read, the same rows `reserve` reads.
  *
  * "Mapped" is the status' own `repos`: at least ONE path for the issue's project. An empty list (a hand-edited `jira.json` the server kept) is unmapped, which
  * `unmappedProjects` above does not say — it asks only whether the key is present, because the Repositories card's warning is about a key nobody has
@@ -865,9 +871,36 @@ export function runChipState(
 ): 'no-repo' | 'live' | 'ready' {
   const paths: unknown = status.repos[issue.project.key];
   if (!Array.isArray(paths) || paths.length === 0) return 'no-repo';
-  if (status.live[issue.key] !== undefined) return 'live';
-  const runLive = sessions !== null && sessions.links.some((l) => l.key === issue.key && l.how === 'run' && l.endedAt === null);
-  return runLive ? 'live' : 'ready';
+  return runHold(issue.key, status, sessions) === null ? 'ready' : 'live';
+}
+
+/**
+ * The disabled chip's `title` for a `live` state — `a Run on <KEY> is <why>`, ending in the words the server's 409 (`<KEY> has a Run <why>`) ends with — or
+ * `null` when the chip is not `live`. First match wins, in `runChipState`'s order: a reservation is `starting`; a confirmed entry the payload has no live link
+ * for, or no payload at all, is `not quiet yet` (nothing current says otherwise); else the phrase of the NEWEST live `run` link on the key that does not
+ * yield, which is the one the server's `runBlock` names too.
+ */
+export function runBlockTitle(
+  issue: JiraIssue,
+  status: Pick<JiraStatusPayload, 'repos' | 'live'>,
+  sessions: JiraSessionsPayload | null
+): string | null {
+  if (runChipState(issue, status, sessions) !== 'live') return null;
+  return `a Run on ${issue.key} is ${runHold(issue.key, status, sessions)}`;
+}
+
+/** Why a Run on `key` would be refused, in `runBlockTitle`'s words, or `null` when nothing holds it. The one body behind both exports above. */
+function runHold(key: string, status: Pick<JiraStatusPayload, 'live'>, sessions: JiraSessionsPayload | null): string | null {
+  const entry = status.live[key];
+  if (entry?.starting === true) return 'starting';
+  if (sessions === null) return entry === undefined ? null : 'not quiet yet';
+  const runs = sessions.links.filter((l) => l.key === key && l.how === 'run' && l.endedAt === null);
+  if (entry !== undefined && !runs.some((l) => l.sessionId === entry.sessionId)) return 'not quiet yet';
+  const newestFirst = [...runs].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+  for (const l of newestFirst) {
+    if (!runYields(l, l.row, sessions.reachable)) return runBlockPhrase(l, l.row, sessions.reachable) ?? 'not quiet yet';
+  }
+  return null;
 }
 
 /** The last segment of an absolute path, trailing slashes ignored: `/Users/ada/pay` → `pay`. The strip names a session's repo this short way (spec §6.2). */

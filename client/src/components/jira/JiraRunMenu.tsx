@@ -5,7 +5,7 @@ import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { useParentRead } from '../../hooks/useParentRead';
 import { useNow } from '../../hooks/useNow';
 import { useSettings } from '../../hooks/useSettings';
-import { jiraSettingOf, resolveJiraAction, runChipState, skillCommand } from '../../lib/jira';
+import { jiraSettingOf, resolveJiraAction, runBlockTitle, runChipState, skillCommand } from '../../lib/jira';
 import { pollAge } from '../../lib/tracker';
 import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
 import type { JiraAction, JiraIssue, JiraSessionsPayload, JiraStatusPayload } from '../../../../shared/types';
@@ -23,12 +23,15 @@ import { SplitChip } from '../ui/SplitChip';
  * setting goes through `resolveJiraAction` — the helper Settings' own select uses, so a deleted skill's id reads as `execute` here exactly as it does there.
  *
  * **It decides nothing itself.** `runChipState` (`lib/jira.ts`) is the one answer, read from the shell's status through `useJiraContext()` and the sessions
- * payload through `useJiraSessionsContext()` (the one-run gate is a live `run` link, not any live session — that function's header says what each source adds):
+ * payload through `useJiraSessionsContext()` (the Run gate is a live `run` link that is not quiet, never any live session — that function's header says what
+ * each source adds):
  * - `no-repo` — the primitive's `dashed` look and both halves disabled, titled `no repository mapped for <PROJECT> — Jira › Setup › Repositories`: there is
  *   nowhere to run, and the title says where to fix that.
- * - `live` — both halves disabled, titled `a session is running on <KEY>`, the left half reading `Running · <age>` behind a steady green dot. The age is the
- *   status entry's `startedAt` when there is one, else the newest open `run` link's — the same two sources `runChipState` unions. The strip beside it carries
- *   the session and Detail's Stop.
+ * - `live` — both halves disabled, titled by `runBlockTitle` (`a Run on <KEY> is still working`, `… waiting on you`, `… not quiet yet`, `… not seen by the
+ *   dashboard`, `… starting` — the server's 409 ends in the same words), the left half reading `Running · <age>` behind a steady green dot. The age is the
+ *   status entry's `startedAt` when there is one, else the newest open `run` link's — the same two sources `runChipState` reads. The strip beside it carries
+ *   the session and Detail's Stop. A quiet Run on the key the dashboard still sees no longer makes it `live` (spec 2026-11-17-jira-quiet-run-gate-design.md):
+ *   the chip reads `Run` and the next Run starts beside it.
  * - `ready` — the menu: `Built in` (the two built-ins), then `Skills on this machine · N` (omitted at zero), then a footer saying every choice opens the launch
  *   sheet first. A pick calls `onPick(target, action)`, closes the menu and hands focus to the chevron; the sheet itself belongs to the page (`JiraView`), because it
  *   has to mount ABOVE an open modal. The preferred row stays where it is and is only marked — a menu that reorders itself moves under the pointer.
@@ -99,7 +102,7 @@ export function JiraRunMenu({
     state === 'no-repo'
       ? `no repository mapped for ${issue.project.key} — Jira › Setup › Repositories`
       : state === 'live'
-        ? `a session is running on ${issue.key}`
+        ? (runBlockTitle(issue, data, sessions) ?? undefined)
         : undefined;
   const defaultAction = resolveJiraAction(settings.jiraDefaultAction, data.skills);
   const pick = (target: JiraIssue, action: JiraAction): void => {
@@ -154,9 +157,15 @@ export function JiraRunMenu({
   );
 }
 
-/** `no-repo` / `live`'s title for an issue — the chip's own words, reused for a parent's rows so the two read alike. */
-function blockTitle(state: 'no-repo' | 'live', issue: JiraIssue): string {
-  return state === 'no-repo' ? `no repository mapped for ${issue.project.key} — Jira › Setup › Repositories` : `a session is running on ${issue.key}`;
+/** `no-repo` / `live`'s title for an issue — the chip's own words, reused for a parent's rows so the two read alike (a parent's `live` names its own Run). */
+function blockTitle(
+  state: 'no-repo' | 'live',
+  issue: JiraIssue,
+  status: Pick<JiraStatusPayload, 'repos' | 'live'>,
+  sessions: JiraSessionsPayload | null
+): string {
+  if (state === 'no-repo') return `no repository mapped for ${issue.project.key} — Jira › Setup › Repositories`;
+  return runBlockTitle(issue, status, sessions) ?? `a Run on ${issue.key} is not quiet yet`;
 }
 
 /**
@@ -189,7 +198,7 @@ function RunPanel({
     if (read.state === 'ready') {
       target = read.issue;
       const gate = runChipState(read.issue, status, sessions);
-      if (gate !== 'ready') blocked = blockTitle(gate, read.issue);
+      if (gate !== 'ready') blocked = blockTitle(gate, read.issue, status, sessions);
     } else {
       target = null;
       blocked = read.state === 'failed' ? read.error : `loading ${parentKey}…`;

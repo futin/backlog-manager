@@ -69,6 +69,7 @@ import {
   jiraWritesStand,
   resolveJiraAction,
   runChipState,
+  runBlockTitle,
   pickBoard,
   soonestBoard,
   sortForBoard,
@@ -1196,6 +1197,68 @@ describe('runChipState', () => {
     it('still answers no-repo first, and reads the old live entry while the payload is null', () => {
       expect(runChipState(issue(), payload({ repos: {} }), sessions(link()))).toBe('no-repo');
       expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': session } }), null)).toBe('live');
+    });
+  });
+
+  // The quiet-only Run gate (spec 2026-11-17-jira-quiet-run-gate-design.md, Design → Client): a live Run on the key holds the chip only while it does not
+  // yield — quiet AND seen in the dashboard's latest good read. The title names why, in the words the server's 409 ends with.
+  describe('the quiet gate', () => {
+    const at = (min: number): string => new Date(Date.UTC(2026, 9, 19, 10, min)).toISOString();
+    const link = (over: Partial<JiraSessionsPayload['links'][number]> = {}): JiraSessionsPayload['links'][number] =>
+      ({
+        key: 'PAY-1', sessionId: 's1', how: 'run', action: 'context', name: 'jira PAY-1', repo: '/home/ada/pay', branch: null, surface: 'dashboard', model: null,
+        effort: null, snapshot: { summary: 'x', type: 'Story', parentKey: null }, startedAt: at(0), endedAt: null, endReason: null,
+        quietSince: at(3), reattachedAt: null, state: 'quiet', row: { status: 'idle' }, stateSince: at(3), ...over
+      }) as JiraSessionsPayload['links'][number];
+    const working = { quietSince: null, state: 'working', row: { status: 'working' } } as Partial<JiraSessionsPayload['links'][number]>;
+    const asking = { quietSince: null, state: 'answer', row: { status: 'question' } } as Partial<JiraSessionsPayload['links'][number]>;
+    const sessions = (links: JiraSessionsPayload['links'], reachable = true): JiraSessionsPayload => ({ links, reachable, rowsAt: at(4) });
+    const live = (sessionId: string, starting = false) => ({ 'PAY-1': { ...session, sessionId, starting } });
+    const both = (st: ReturnType<typeof payload>, ss: JiraSessionsPayload | null) => [runChipState(issue(), st, ss), runBlockTitle(issue(), st, ss)];
+
+    it('a quiet Run the dashboard sees leaves the chip ready, with no title', () => {
+      expect(both(payload({ repos: mapped, live: live('s1') }), sessions([link()]))).toEqual(['ready', null]);
+    });
+
+    it('a working Run holds it: still working', () => {
+      expect(both(payload({ repos: mapped, live: live('s1') }), sessions([link(working)]))).toEqual(['live', 'a Run on PAY-1 is still working']);
+    });
+
+    it('an unreachable dashboard holds a quiet Run: not seen by the dashboard', () => {
+      expect(both(payload({ repos: mapped, live: live('s1') }), sessions([link()], false))).toEqual(['live', 'a Run on PAY-1 is not seen by the dashboard']);
+    });
+
+    it('a confirmed status entry the payload has no live link for holds it: not quiet yet', () => {
+      expect(both(payload({ repos: mapped, live: live('s2') }), sessions([link()]))).toEqual(['live', 'a Run on PAY-1 is not quiet yet']);
+    });
+
+    it('a starting reservation holds it: starting', () => {
+      expect(both(payload({ repos: mapped, live: live('s2', true) }), sessions([link()]))).toEqual(['live', 'a Run on PAY-1 is starting']);
+    });
+
+    it('with no sessions payload a confirmed entry holds it: not quiet yet', () => {
+      expect(both(payload({ repos: mapped, live: live('s1') }), null)).toEqual(['live', 'a Run on PAY-1 is not quiet yet']);
+    });
+
+    it('two live Runs: the newest that does not yield names the reason, and one non-yielding Run is enough', () => {
+      const st = payload({ repos: mapped, live: live('b') });
+      expect(both(st, sessions([link({ sessionId: 'a' }), link({ sessionId: 'b', startedAt: at(5), ...working })]))).toEqual([
+        'live',
+        'a Run on PAY-1 is still working'
+      ]);
+      expect(both(st, sessions([link({ sessionId: 'a', ...working }), link({ sessionId: 'b', startedAt: at(5) })]))).toEqual([
+        'live',
+        'a Run on PAY-1 is still working'
+      ]);
+      expect(both(st, sessions([link({ sessionId: 'a', ...working }), link({ sessionId: 'b', startedAt: at(5), ...asking })]))).toEqual([
+        'live',
+        'a Run on PAY-1 is waiting on you'
+      ]);
+    });
+
+    it('a working branch link never holds it, and an unmapped project is still no-repo', () => {
+      expect(both(payload({ repos: mapped }), sessions([link({ how: 'branch', ...working })]))).toEqual(['ready', null]);
+      expect(both(payload({ repos: {}, live: live('s1') }), sessions([link(working)]))).toEqual(['no-repo', null]);
     });
   });
 });

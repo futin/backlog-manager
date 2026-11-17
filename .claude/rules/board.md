@@ -123,7 +123,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   [invariants.md](docs/subsystems/invariants.md#environment-level-blocks-hide-the-dispatch-control-per-item-ones-disable-it)
 - **Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides.** `JiraRunMenu`
   (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the Detail dialog's agent column, and it reads `runChipState` (`lib/jira.ts`)
-  alone: `no-repo` draws a dashed chip that opens nothing, a live key a disabled one, anything else a `Popover` — and with agents off it still draws and still
+  alone: `no-repo` draws a dashed chip that opens nothing, a `live` key (a `starting` reservation, or a live `run` link on it that does not yield — `runYields`, `shared/jira-sessions.ts`) a disabled one titled by `runBlockTitle`, anything else a `Popover` — and with agents off it still draws and still
   opens, because the launch sheet's `Copy prompt` needs no dashboard. `JiraLaunchSheet` asks `projectDispatchGate` and draws `Start` only on a `disabled` or
   `enabled` answer, never on `hidden`, and draws none before the agents status has landed; `Copy prompt` waits on the preview and a clipboard and on nothing
   else. Do not hide `Run ▾` on `BM_AGENTS` off to match the Board's buttons. Why:
@@ -131,7 +131,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
 - **The CodeRabbit button is the MR's, not Run ▾'s: `JiraRunMenu` never offers `review`, and the Detail row opens the launch sheet already set.** `ReviewRow`
   (`components/jira/ReviewRow.tsx`) draws under Detail's delivery track for the LEAD MR only (`Also:` MRs get none), and only where `reviewRowText` has a
   sentence — absent for `reviewing`, `clean`, `unknown` and an unread review. Its button is HIDDEN, not disabled, where it can never work (no candidate repo,
-  agents off or not yet answered, no `onReview`) and DISABLED while `reviewGate` holds (a live `run` link or `status.live` entry on the key, or a live link
+  agents off or not yet answered, no `onReview`) and DISABLED while `reviewGate` holds (a live `run` link, quiet or not, or `status.live` entry on the key — strict, as a review's dispatch is, or a live link
   or `working`/`question` row on the MR's source branch in a candidate) — in the dashed skin, titled with `reviewGateText`, and pointing (`aria-describedby`)
   at a reason line under the row, since a disabled ink split draws like an enabled one; dispatch's 409s stay the authority for what the client cannot see. The click calls `DeliveryPane`'s `onReview`, threaded through `JiraDetail` to `JiraView`'s launch state, and dispatches nothing itself. The sheet
   in review mode (`review` prop) shows ONE pressed tile (`Fix review` / `Request review`), offers only the MR's candidate repos (`GitlabProjectView.repos`, not

@@ -224,7 +224,7 @@ describe('Run on — the parent segment', () => {
     await land(0, json(detail('P-1')));
     for (const r of rowsOf(menu)) {
       expect(r).toBeDisabled();
-      expect(r).toHaveAttribute('title', 'a session is running on P-1');
+      expect(r).toHaveAttribute('title', 'a Run on P-1 is not seen by the dashboard');
     }
     await userEvent.click(segment(menu, 'S-1'));
     for (const r of rowsOf(menu)) expect(r).toBeEnabled();

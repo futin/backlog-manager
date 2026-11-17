@@ -641,8 +641,8 @@ describe('JiraDetail — Run ▾ (Jira phase 5)', () => {
     await screen.findByText('not');
     expect(modalRun()).toBeDisabled();
     expect(modalMore()).toBeDisabled();
-    expect(modalRun()).toHaveAttribute('title', 'a session is running on PAY-131');
-    expect(modalMore()).toHaveAttribute('title', 'a session is running on PAY-131');
+    expect(modalRun()).toHaveAttribute('title', 'a Run on PAY-131 is not quiet yet');
+    expect(modalMore()).toHaveAttribute('title', 'a Run on PAY-131 is not quiet yet');
     expect(modalRun()).toHaveTextContent('Running · 3h');
     view.unmount();
 
@@ -884,7 +884,7 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     const run = mount({ sessions: payload(link()) });
     await screen.findByText('not');
     expect(modalRun()).toBeDisabled();
-    expect(modalRun()).toHaveAttribute('title', 'a session is running on PAY-131');
+    expect(modalRun()).toHaveAttribute('title', 'a Run on PAY-131 is not seen by the dashboard');
     run.unmount();
 
     // An ENDED run link does not hold the gate, and a reservation does even though no link exists for it yet.
@@ -932,7 +932,24 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     const live = document.querySelector('.jira-detail-agent-band') as HTMLElement;
     expect(live.querySelector('.jira-sess')).not.toBeNull();
     expect(within(live).queryByText('No session on this ticket')).toBeNull();
-    expect(within(live).getByText('Next session takes over once this one ends.')).toBeInTheDocument();
+    expect(within(live).getByText('Next Run can start once this one is quiet.')).toBeInTheDocument();
+  });
+
+  // The quiet-only Run gate (spec 2026-11-17-jira-quiet-run-gate-design.md): a live Run that is quiet and seen by the dashboard no longer holds Run ▾, and
+  // the band line says which of the two the ticket is in; with no live Run on the key there is nothing to wait for, so no line.
+  it('opens Run ▾ beside a quiet Run and says so, and draws no band line with only a branch link live', async () => {
+    const quiet = mount({ sessions: payload(link({ quietSince: hoursAgo(1), state: 'quiet', row: row({ status: 'idle' }) })) });
+    await screen.findByText('not');
+    expect(modalRun()).toBeEnabled();
+    expect(modalRun()).not.toHaveAttribute('title');
+    const band = document.querySelector('.jira-detail-agent-band') as HTMLElement;
+    expect(band.querySelector('.jira-detail-next')?.textContent).toBe('Quiet — a new Run can start now.');
+    quiet.unmount();
+
+    mount({ sessions: payload(link({ how: 'branch', action: null, branch: 'PAY-131-x', row: row({ status: 'working' }), state: 'working' })) });
+    await screen.findByText('not');
+    expect(modalRun()).toBeEnabled();
+    expect(document.querySelector('.jira-detail-next')).toBeNull();
   });
 
   it('draws the priority as a toned pill, each label as a chip, and every fact label behind an aria-hidden glyph', async () => {

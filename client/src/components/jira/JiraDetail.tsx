@@ -19,6 +19,7 @@ import {
   progressLine,
   repoBasename,
   resolveJiraAction,
+  runChipState,
   stopJira,
   ticketWorktrees,
   statusTone,
@@ -73,8 +74,11 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * hold several, and the server ends only the one it is told.
  *
  * **`Run ▾`** (`JiraRunMenu`, the card's own chip) → `onRun(issue, action)`; the launch sheet is hosted by `JiraView`, ABOVE this dialog, so Escape closes the
- * sheet alone and the dialog under it on the next press. It sits in the Agent band at the column's top (restyle §4.4) — on the empty state's row, or on the label row with `Next session takes over once this one ends.` beside it — and `runChipState`
- * disables it only while a `run` link is live (the one-run gate, §5) or a reservation is `starting`; a live `branch` or `manual` link does not. It is never hidden.
+ * sheet alone and the dialog under it on the next press. It sits in the Agent band at the column's top (restyle §4.4) — on the empty state's row, or on the
+ * label row — and `runChipState` disables it only while a live `run` link on the key is not quiet, or a reservation is `starting` (the quiet-only Run gate,
+ * spec 2026-11-17-jira-quiet-run-gate-design.md); a live `branch` or `manual` link does not. It is never hidden. Beside it the label row says which side of
+ * that gate the ticket is on, following `runChipState`: `Next Run can start once this one is quiet.` while it is `live`, `Quiet — a new Run can start now.`
+ * while it is `ready` with a live Run on the key, and nothing otherwise — a live branch link alone has no Run to wait on.
  *
  * **The write controls** (Jira phase 3; spec §6.3, §8; DESIGN.md §8.9.2) sit beside the fact each one changes, as the mock draws them — `Move to…` after the
  * status pill, `Assign to me` after the assignee:
@@ -351,6 +355,10 @@ export function JiraDetail({
   const lastRun = ended.length > 0 ? pollAge(ended[0].endedAt, now) : null;
   const bandSub = `default: ${defaultLabel}${lastRun === null ? '' : ` · last run ${lastRun}`}`;
   const runControl = <JiraRunMenu issue={issue} home="modal" onPick={onRun} />;
+  // The band's gate line (header): the chip's own state, so the line and the disabled chip can never disagree.
+  const gate = data === null ? null : runChipState(issue, data, sessions);
+  const runLive = liveLinks.some((l) => l.how === 'run');
+  const nextLine = gate === 'live' ? 'Next Run can start once this one is quiet.' : gate === 'ready' && runLive ? 'Quiet — a new Run can start now.' : null;
 
   // The agent column — `Modal`'s facts slot. Cards newest first; the reservation, being newest of all, leads.
   const agent = (
@@ -364,7 +372,7 @@ export function JiraDetail({
                 Agent
                 <span>{`${liveCount} live · ${ended.length} ended`}</span>
               </div>
-              <span className="jira-detail-next">Next session takes over once this one ends.</span>
+              {nextLine !== null && <span className="jira-detail-next">{nextLine}</span>}
               {runControl}
             </div>
             {parentLineEl}
