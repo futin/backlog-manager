@@ -34,10 +34,11 @@ import type { PrAutoMergeRequest, PrRepoView, PrResolveState, PrWriteResult, Pul
  *
  * **The chevron opens `Merge menu`, the tenth `Popover` composer**: `Merge` (asks first, then merges), `Enable auto-merge` / `Disable auto-merge`,
  * `Update branch` and — where a resolve session could ever start — `Resolve conflicts`, each a plain button with a tile. Up to four rows, and the fourth
- * follows `.claude/rules/board.md`'s hidden-versus-disabled split: an environment-level block (`gate` `null` while the agents status is unknown, or `hidden`
- * — agents off, or no registered project maps this repo) leaves the row out entirely, while every per-PR reason (`resolveBlock`: sync off, the project's
- * visibility, a fork, mergeability pending, no conflicts, a session already resolving, a push GitHub has not seen, a run's warning) keeps it, disabled and
- * saying why. The row starts nothing itself: `onResolve` is the page's, which holds the PR in flight and re-reads.
+ * follows `.claude/rules/board.md`'s hidden-versus-disabled split: an environment-level block (`gate` `null` while the agents status is unknown, or `hidden` —
+ * dispatch off, the dashboard unreachable, no `CLAUDE_BIN`, remote answers off, or no registered project mapping this repo) leaves the row out entirely, while
+ * every per-PR reason (`resolveBlock`: sync off, the project's visibility, a fork, mergeability pending, no conflicts, a session already resolving, a push
+ * GitHub has not seen, a run's warning) keeps it, disabled and saying why. The row starts nothing itself: `onResolve` is the page's, which holds the PR in
+ * flight and re-reads.
  *
  * A blocked row is `aria-disabled` and its sub-line IS the reason, pointed at by `aria-describedby`, so the
  * menu says the same thing the half does without a tooltip. The row `primaryKey` names carries an `aria-hidden` tick. Focus lands on the first enabled row when

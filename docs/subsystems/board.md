@@ -577,9 +577,10 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   row still reading `merged`. It does not go through `useSweep`, so the GitHub pill's spinner does not turn for it.
   **Resolve conflicts** ([spec](../superpowers/specs/2026-11-17-pr-conflict-resolve-design.md), "The board") is the Merge menu's fourth row, `merge <base> in
   with a headless session` under a `robot` tile. The page reads `useAgents()` and hands every layout `gateFor` (`resolveGateFor`, `lib/pr-resolve.ts`): a
-  `null` gate (status not landed) or a `hidden` one (agents off, or no registered project maps the repo) leaves the row out — the environment-level half of
-  the hidden-versus-disabled rule — and a `disabled` or `enabled` one draws it. Its per-PR reasons are `resolveBlock`'s, in the route's own refusal order
-  (sync off, the project's visibility, `fork — cannot push`, `mergeability pending`, `no conflicts`, `resolving…`, `resolved — waiting for GitHub`, then
+  `null` gate (status not landed) or a `hidden` one (an environment-level block: dispatch off, the dashboard unreachable, no `CLAUDE_BIN`, remote answers off,
+  or no registered project mapping the repo) leaves the row out — the environment-level half of the hidden-versus-disabled rule — and a `disabled` or `enabled`
+  one draws it. Its per-PR reasons are `resolveBlock`'s, in the route's own refusal order (sync off, the project's visibility, `fork — cannot push`,
+  `mergeability pending`, `no conflicts`, `resolving…`, `resolved — waiting for GitHub`, then
   `prRunWarning`'s text, which `PrRow` and Matrix's `MatrixExpand` each pass in); a stopped outcome is no block. A click calls the page's `resolve`, which
   mirrors `write`: the key joins `inFlight`, the old outcome clears, `dispatchPrResolve` posts, a refusal's sentence lands as an error outcome, a success
   records none, and the page re-reads before the key leaves. The resolve states are indexed once by `<repo>#<number>` (`resolveIndex`). `PrResolveLine`
@@ -766,9 +767,10 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   `PullRequestsView` (GitHub › PRs) and the three layouts it switches between — `PrInbox`, `PrMatrix`, `PrCards` — over the shared `PrActions` (merge,
   auto-merge, update, resolve conflicts, open), `PrResolveLine` (the resolve status line under the strip),
   `PrFoot` (the merge Confirm, then `PrOutcomeLine`) and `PrRepoNotes`; `components/settings/SourcesGroup.tsx` is the Shared report.
-- `lib/prs.ts`, `lib/pr-run.ts`, `lib/pr-resolve.ts`, `lib/prs-api.ts` and `hooks/usePullRequests.ts` — the PRs page's
-  derivations (chips, the three blocks, the default method,
-  `UpdateMark`, `whyLine`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read (mounted once, by the shell); `lib/pr-layouts.ts` is the layout key, its
+- `lib/prs.ts`, `lib/pr-run.ts`, `lib/pr-resolve.ts`, `lib/prs-api.ts` and `hooks/usePullRequests.ts` — the PRs page's derivations (chips, the three write
+  blocks, the default method, `UpdateMark`, `whyLine`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its resolve helpers (`resolveBlock`,
+  `resolveGateFor`, `shownOutcome`, `resolveIndex`), its six fetchers and its one 60 s read (mounted once, by the shell);
+  `lib/pr-layouts.ts` is the layout key, its
   options (`PR_LAYOUT_OPTIONS`) and stored choice, `splitReach` (which hides the repos the token cannot read), `cardRepos` and `emptyRepoNote`, and every Inbox
   and Matrix derivation: a PR's level, severity, verdict and rank, `primaryKey`, the Matrix cells, tones and column counts.
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one

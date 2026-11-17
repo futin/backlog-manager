@@ -23,6 +23,9 @@ import type { PrResolveState, PullRequestRow } from '../../../../shared/types';
  * Which outcome still shows is `shownOutcome`'s call, never re-derived here (`.claude/rules/board.md`: every derivation has one home in `lib/`). The status
  * chips are `Chip`s because the look is the board's chip and has one home; the non-link ones are `as="label"`, the only non-button shape `Chip` offers that
  * is not a link, so a status never reads as a control.
+ *
+ * Every shape carries `role="status"`, as `PrOutcomeLine` does: a Resolve click that stood records no outcome line by design, so this line appearing is the
+ * click's only answer, and a screen reader has to hear it. The region mounts only when there is something to say, so a quiet PR carries no empty one.
  */
 export function PrResolveLine({ pr, state }: { pr: PullRequestRow; state: PrResolveState | undefined }) {
   const { settings } = useSettings();
@@ -31,7 +34,7 @@ export function PrResolveLine({ pr, state }: { pr: PullRequestRow; state: PrReso
   if (state.live !== null) {
     const id = state.live.sessionId;
     return (
-      <div data-testid="pr-resolve">
+      <div data-testid="pr-resolve" role="status">
         {id === null ? (
           <Chip as="label" size={28}>
             resolving…
@@ -49,7 +52,7 @@ export function PrResolveLine({ pr, state }: { pr: PullRequestRow; state: PrReso
   if (outcome === null || outcome.outcome === 'up-to-date') return null;
   if (outcome.outcome === 'pushed') {
     return (
-      <div data-testid="pr-resolve">
+      <div data-testid="pr-resolve" role="status">
         <Chip as="label" size={28}>
           resolved — waiting for GitHub
         </Chip>
@@ -57,7 +60,7 @@ export function PrResolveLine({ pr, state }: { pr: PullRequestRow; state: PrReso
     );
   }
   return (
-    <p className="prs-why" data-testid="pr-resolve">
+    <p className="prs-why" data-testid="pr-resolve" role="status">
       {`resolve stopped: ${outcome.reason}`}
       {outcome.sessionId !== null && (
         <>
