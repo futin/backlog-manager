@@ -26,7 +26,7 @@ import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
 import { Select } from '../ui/Select';
-import { OpenChip } from './JiraSessionCard';
+import { OpenChip } from './SessionOpen';
 
 /** Where the opened ticket stands in the page's latest answer: still waiting, dismissed, or gone from both (answered, or aged out of the window). */
 export type MentionTicketState = 'open' | 'dismissed' | 'gone';
