@@ -85,7 +85,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   string`, `text too long` past `JIRA_REPLY_MAX_CHARS`) → configured (503) → `JiraPollerService.postReply`, whose own refusals are 409s — `no open mention` (the
   key is not an open, undismissed ticket in the mentions cache) and `posting` (single-flight per key: a `replying` set checked and set synchronously, cleared in
   `finally`) — then `gate()` and `unauthorizedRefusal()` with no Jira call, then `POST issue/{key}/comment` with `replyDoc`'s ADF: one mention node whose
-  account is the newest undismissed mention's author read FROM THE CACHE, never from the request, then the text's paragraphs. A failure maps through
+  account is the newest undismissed mention's author read FROM THE CACHE, never from the request (no node when that author's account id is `''`), then the
+  text's paragraphs. A failure maps through
   `unwrapJira`, and the post's own 401/403 gains ` — the token needs write:comment:jira`; a definite 4xx frees the key as it is. A status 0 or ≥ 500 on the
   POST is `unconfirmed` instead: the key goes into `uncertain` with the attempt's start and the route answers 502 `replyUnconfirmed(key)` (`Jira did not
   confirm the reply to <KEY> — it may have posted; …`), the draft kept. The next `postReply` on that key, after the same checks and gates, reads `GET

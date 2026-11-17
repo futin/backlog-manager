@@ -454,6 +454,20 @@ describe('replyDoc', () => {
     expect(first(replyDoc({ accountId: 'acc-m', name: '@Mara Ilić' }, 'x'))).toEqual(mention);
   });
 
+  it("leaves the mention node out for an author with no account id (authorOf's '' for an author-less comment), and the leading space with it", () => {
+    const anon = { accountId: '', name: 'Someone' };
+    expect(replyDoc(anon, 'Hi\nthere\n\nSecond')).toEqual({
+      version: 1,
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'Hi' }, { type: 'hardBreak' }, { type: 'text', text: 'there' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Second' }] }
+      ]
+    });
+    expect(JSON.stringify(replyDoc(anon, 'x'))).not.toContain('mention');
+    expect(replyDoc(anon, '  ').content).toEqual([{ type: 'paragraph', content: [] }]);
+  });
+
   it('round-trips through the read side as the person would see it', () => {
     expect(adfToMarkdown(replyDoc(MARA, 'Hi there\nline two\n\nSecond')).markdown).toBe('@Mara Ilić Hi there\nline two\n\nSecond');
   });

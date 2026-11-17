@@ -335,25 +335,30 @@ export type AdfDoc = { version: 1; type: 'doc'; content: AdfBlock[] };
  * trimmed, so neither end carries a stray break. No Markdown is interpreted — a `*` is a `*`, as it is in the box the person typed into. The mention's
  * display text is `@` + the name with any `@` it already carries stripped, so it is never `@@`. Text that trims to nothing yields the mention alone; the
  * route refuses blank text before it gets here.
+ *
+ * An empty `accountId` gets no mention node at all: `authorOf` answers `''` for a comment Jira sent without an author (an app, a deleted account), and the
+ * check does not filter those out, so the newest open mention can carry one. A mention node with `id: ''` is not a mention of anyone — Jira would most
+ * likely refuse the whole comment over it — so the reply is posted as plain paragraphs instead, with no leading space where the mention would have been.
  */
 export function replyDoc(to: { accountId: string; name: string }, text: string): AdfDoc {
-  const mention: AdfInline = { type: 'mention', attrs: { id: to.accountId, text: `@${to.name.replace(/^@+/, '')}` } };
+  const mention: AdfInline | null = to.accountId === '' ? null : { type: 'mention', attrs: { id: to.accountId, text: `@${to.name.replace(/^@+/, '')}` } };
+  const lead: AdfInline[] = mention === null ? [] : [mention];
   const paragraphs = text
     .replace(/\r\n?/g, '\n')
     .trim()
     .split(/\n[^\S\n]*\n\s*/)
     .map((p) => p.trim())
     .filter((p) => p !== '');
-  if (paragraphs.length === 0) return { version: 1, type: 'doc', content: [{ type: 'paragraph', content: [mention] }] };
+  if (paragraphs.length === 0) return { version: 1, type: 'doc', content: [{ type: 'paragraph', content: lead }] };
   const content: AdfBlock[] = paragraphs.map((p, i) => {
     const inline: AdfInline[] = [];
     p.split('\n').forEach((line, j) => {
       if (j > 0) inline.push({ type: 'hardBreak' });
       // The mention is followed by a space, carried on the first line's text so the paragraph holds no text node that is only a space.
-      const t = i === 0 && j === 0 ? ` ${line}` : line;
+      const t = i === 0 && j === 0 && mention !== null ? ` ${line}` : line;
       if (t !== '') inline.push({ type: 'text', text: t });
     });
-    return { type: 'paragraph', content: i === 0 ? [mention, ...inline] : inline };
+    return { type: 'paragraph', content: i === 0 ? [...lead, ...inline] : inline };
   });
   return { version: 1, type: 'doc', content };
 }
