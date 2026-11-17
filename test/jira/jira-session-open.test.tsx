@@ -4,6 +4,8 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { useRef, useState } from 'react';
 
 import { SessionOpen } from '../../client/src/components/jira/SessionOpen';
@@ -201,5 +203,52 @@ describe('SessionOpen', () => {
       expect(screen.getByRole('button', { name: 'Stop session' })).toBeDisabled();
       expect(screen.getByRole('article', { name: 'Session s1' })).toHaveFocus();
     });
+  });
+});
+
+/*
+  #478: the split and the plain path draw ONE confirmation (`StopConfirm`), and `SessionOpen.tsx` no longer imports back from `JiraSessionCard.tsx` — `OpenChip`
+  moved here, so the dependency runs one way.
+*/
+describe('SessionOpen cleanup (#478)', () => {
+  const STOP_SENTENCE = 'Stop this session? It ends mid-work; its edits stay where it left them.';
+  const confirmFacts = (): { text: string; buttons: string[] } => {
+    const box = screen.getByTestId('jira-stop-confirm');
+    return { text: box.textContent ?? '', buttons: within(box).getAllByRole('button').map((b) => b.textContent ?? '') };
+  };
+
+  it('both Stop paths draw the same confirmation', async () => {
+    const split = mount({ onStop: jest.fn() });
+    await userEvent.click(more());
+    await userEvent.click(within(menu()).getByRole('button', { name: 'Stop session' }));
+    const fromSplit = confirmFacts();
+    split.unmount();
+
+    const original = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: true, media: q, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
+    try {
+      mount({ buttons: { primary: { label: 'Open in Desktop', target: 'desktop' }, secondary: null }, onStop: jest.fn() });
+      expect(document.querySelector('.ui-split')).toBeNull();
+      await userEvent.click(screen.getByRole('button', { name: 'Stop session' }));
+      const fromPlain = confirmFacts();
+      expect(fromPlain).toEqual(fromSplit);
+    } finally {
+      window.matchMedia = original;
+    }
+    expect(fromSplit.text).toContain(STOP_SENTENCE);
+    expect(fromSplit.buttons).toEqual(expect.arrayContaining(['Stop session', 'Keep running']));
+  });
+
+  it('has no import cycle: SessionOpen.tsx imports nothing from JiraSessionCard, and OpenChip is defined there alone', () => {
+    const dir = join(__dirname, '../../client/src/components/jira');
+    const read = (name: string): string => readFileSync(join(dir, name), 'utf8');
+    const sessionOpen = read('SessionOpen.tsx');
+    expect(sessionOpen).not.toMatch(/from '\.\/JiraSessionCard'/);
+    expect(sessionOpen).toMatch(/export function OpenChip\(/);
+    expect(read('JiraSessionCard.tsx')).not.toMatch(/function OpenChip\(/);
+    expect(read('JiraCard.tsx')).toMatch(/import \{ OpenChip \} from '\.\/SessionOpen'/);
+    // One Confirm in the file, inside StopConfirm: the two copies cannot drift apart again.
+    expect(sessionOpen.match(/<Confirm\b/g)).toHaveLength(1);
+    expect(sessionOpen.match(/jira-stop-confirm/g)).toHaveLength(1);
   });
 });

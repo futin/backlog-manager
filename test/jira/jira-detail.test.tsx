@@ -808,6 +808,22 @@ describe('JiraDetail — the agent column (Jira sessions, spec §7.3)', () => {
     await waitFor(() => expect(reloadSessions).toHaveBeenCalledTimes(1));
   });
 
+  it('asks the agents status once for several live cards, not once per card (#478)', async () => {
+    mount({
+      status: { live: SESSION() },
+      sessions: payload(
+        link({ sessionId: 'with-stop', startedAt: hoursAgo(1), stateSince: hoursAgo(1), row: row({ id: 'with-stop' }) }),
+        link({ sessionId: 'no-stop', startedAt: hoursAgo(2), stateSince: hoursAgo(2), row: row({ id: 'no-stop', stopState: undefined }) }),
+        link({ sessionId: 'no-row', startedAt: hoursAgo(3), stateSince: hoursAgo(3), row: null })
+      )
+    });
+    await screen.findByText('not');
+    await waitFor(() => expect(cards()).toHaveLength(3));
+    // The first card's chevron is there once the agents answer has landed (its Stop row needs agents on), so every read the cards would make has been made.
+    await waitFor(() => expect(moreChip(cards()[0])).not.toBeNull());
+    expect(agentsReads()).toBe(1);
+  });
+
   it('draws a `Starting…` card from the shell\'s reservation, which the sessions payload never carries', async () => {
     mount({ status: { live: SESSION({ starting: true }) }, sessions: payload() });
     await screen.findByText('not');

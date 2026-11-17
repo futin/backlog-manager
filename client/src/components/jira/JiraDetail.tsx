@@ -48,7 +48,7 @@ import { Popover } from '../ui/Popover';
 import { SpreadBar } from '../ui/SpreadBar';
 import { DeliveryPane } from './DeliveryPane';
 import { JiraRunMenu } from './JiraRunMenu';
-import { JiraHistoryLine, JiraSessionCard, JiraStartingCard } from './JiraSessionCard';
+import { JiraHistoryLine, JiraSessionCards, JiraStartingCard } from './JiraSessionCard';
 import { WorktreeRow } from './JiraWorktreeRow';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
 
@@ -369,16 +369,15 @@ export function JiraDetail({
             </div>
             {parentLineEl}
             {starting !== null && <JiraStartingCard session={starting} now={now} />}
-            {liveLinks.map((link) => (
-              <JiraSessionCard
-                key={link.sessionId ?? link.startedAt}
-                link={link}
+            {liveLinks.length > 0 && (
+              <JiraSessionCards
+                links={liveLinks}
                 now={now}
                 busy={busy}
                 onUnlink={(sessionId) => sessionWrite((key) => unlinkJira(key, sessionId))}
                 onStop={(sessionId) => sessionWrite((key) => stopJira(key, sessionId))}
               />
-            ))}
+            )}
           </>
         ) : (
           <>
