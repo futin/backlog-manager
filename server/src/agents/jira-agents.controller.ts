@@ -2,7 +2,7 @@ import { Body, Controller, HttpCode, HttpException, Post, UseGuards } from '@nes
 
 import { isJiraKey, parseJiraAction } from '../../../shared/types';
 import type { JiraDispatchRequest, JiraDispatchResult } from '../../../shared/types';
-import { parseBranchChoice } from '../jira/branch-choice.util';
+import { REPLY_SHAPE_ERROR, parseBranchChoice, replyChoiceIsNarrow } from '../jira/branch-choice.util';
 import { JIRA_TRANSITION_ID_MAX_CHARS } from '../jira/config.util';
 import { JIRA_PROMPT_MAX, parseReviewHalf, parseReviewMr } from '../jira/prompt.util';
 import { JiraDispatchService } from './jira-dispatch.service';
@@ -51,7 +51,21 @@ export class JiraAgentsController {
     const key = body.key;
     if (!isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
     const action = parseJiraAction(body.action);
-    if (action === null) throw new HttpException({ error: 'action must be execute, context, review or { skill: <id> }' }, 400);
+    if (action === null) throw new HttpException({ error: 'action must be execute, context, review, reply or { skill: <id> }' }, 400);
+    // Ruling R2: a reply is narrow on the wire — mode none and no branch fields, no assign, no transition, no edited prompt, a dashboard launch. The mention
+    // modal is its one caller and sends exactly that; anything wider is a hand-made request, and each extra field contradicts what a reply is: a worktree or a
+    // Jira write for a session that only drafts words, an edited prompt that could carry the thread's text into the instruction, or a desktop hand-over that
+    // answers no session id — leaving no link for the draft route to prove the session by. One sentence for all of it, checked right after the action and
+    // before every other field, so a reply wrong in two ways says the same thing.
+    if (action === 'reply') {
+      const narrow =
+        replyChoiceIsNarrow(body) &&
+        body.assign === false &&
+        body.transitionId === null &&
+        body.prompt === undefined &&
+        (body.surface === undefined || body.surface === 'dashboard');
+      if (!narrow) throw new HttpException({ error: REPLY_SHAPE_ERROR }, 400);
+    }
     // A review names the MR its button was drawn for and the half its sheet previewed (spec §6); both are shape here and checked against the GitLab cache by
     // the service. `mr` before `half`, both before the branch choice: the brief's one order. The iid must arrive as a JSON number — `parseReviewMr` also takes
     // a digit string because `GET /api/jira/prompt` reads it from a query, but a body has no reason to quote it, so a quoted one is a malformed body. Any other

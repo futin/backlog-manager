@@ -4278,6 +4278,27 @@ Two reviews on one branch would answer the same findings twice and commit over e
 the branch of any `how`, and any live dashboard row on it. The links and the rows can be 15 to 60 s old; the spec accepts that, because the cost of a second
 session slipping through that window is a redundant comment, and a gate that read GitLab or the dashboard per click would put a request on a button.
 
+## A reply-draft session reads only, and only a person's click posts
+
+Jira mentions ([spec](../superpowers/specs/2026-11-16-jira-mentions-design.md)). A reply is a comment under the person's name on a ticket other people
+read, so the one thing that must not happen is a session posting it. The session therefore never holds a way to: its prompt orders `jira.mjs draft`, which
+hands the text to this server and stops, and `jira.mjs` has no verb that comments. What reaches Jira is the person's own click on the board, after they have
+read the draft — the same rule as the board's other Jira writes, where a person's action and not a session's judgement is the write. A session that
+investigated the wrong thing costs a discarded draft; one that could post would cost a public comment nobody can unsay.
+
+No ticket or thread text enters the prompt, for the reason the other built-ins dropped theirs (2026-11-11), sharpened. The thread is exactly the text a
+stranger controls — the comment that @-mentioned the person is someone else's words — so it is the likeliest place for an instruction aimed at the session.
+The prompt names the key and orders `jira.mjs show` and `jira.mjs thread`, read as data, not instructions; the session meets that text as tool output, where
+it is evidence to answer rather than a brief to follow. It also keeps the prompt deterministic, so the preview the modal shows is the spawn byte for byte. The
+repository is investigated read only, without a branch or a worktree, because a reply answers a question and changes nothing — and the wire shape (mode
+`none`, no assign, no transition, no edited prompt) is refused otherwise, so no request can widen it into a Run.
+
+The repo may be mapped to ANY project, unlike every other dispatch's, because a mention arrives from wherever a colleague works: most tickets a person is
+@-mentioned on live in projects they never mapped, and the code that answers the question is still one of their own repositories. Any-project still means
+proved against `jira.json` and asked of the dashboard gate — a repo mapped nowhere is a 400 — so the wider rule admits no path the person did not configure.
+A reply also needs an open mention on the key: with none there is nothing to answer, and a dispatch that does not check would let any key through the
+narrow door. The draft reserves in its own map, so it never blocks, or is blocked by, a Run on the same ticket.
+
 ## The CodeRabbit button belongs to the MR, never to Run
 
 A review acts on one merge request's threads, and `Run ▾` is a ticket's menu: it has no MR to name, and a row in it would either guess the lead MR or add a pick

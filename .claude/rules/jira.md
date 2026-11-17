@@ -161,4 +161,17 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `JiraLiveService.activeRows()` — `working` / `question` dashboard rows on that branch. Those rows come from the reconciler's list, 15–60 s old by design; the
   spec accepts that window, and a refusal is 409 `a session is live on <branch>`. `JIRA_BUILTIN_LABELS.review` (`Review the MR`) is a label for links and the
   List, never a menu row. Why: [invariants.md](docs/subsystems/invariants.md#a-review-dispatch-decides-from-the-cache-and-gates-the-branch)
+- **`reply` is the fourth built-in action: a read-only session that drafts an answer to a mention, dispatched only from the mention modal.** `parseJiraAction`
+  / `parseJiraActionParam` accept `'reply'` and `resolveJiraActionOrThrow` maps it to `{ kind: 'reply' }`. Its wire shape is narrow (R2): `replyChoiceIsNarrow`
+  (`branch-choice.util.ts`: mode `none`, no branch, base or target, `openMr`/`review` absent or false) plus `assign: false`, `transitionId: null`, no `prompt`
+  and `surface` absent or `dashboard`, else 400 `REPLY_SHAPE_ERROR` (`a reply takes mode none, no assign, no transition and no edited prompt`) from the
+  controller before any read; the preview applies the branch half. Dispatch then runs two gates of its own, both before the dashboard gate: an OPEN mention —
+  the key among `JiraPollerService.mentionsPayload().issues`, from memory (not configured, not cached, or every mention dismissed is 400 `<KEY> has no open
+  mention`) — and the any-project repo rule, `anyProjectRepoOrThrow` (`prompt.util.ts`, shared with `GET /api/jira/prompt`; 400 `<repo> is not mapped to any
+  Jira project`). It reserves in its own map, `reserve(key, repo, 'reply')`, so a Run on the key does not block it and a second reply is 409 `a reply is already
+  being drafted for <KEY>`; every release and the `confirm` name the kind, and the answer's `startedAt` is `replySession`'s. `replyText` orders `jira.mjs show`
+  and `jira.mjs thread` read as data, not instructions, the repo investigated read only (no edits, commits or branches), the reply written without a leading
+  @-mention and handed over with `jira.mjs draft <KEY>` on stdin — never posted, never a Jira call; it carries no ticket or thread text, so the preview equals
+  the spawn. The preview has no mention gate. `JIRA_BUILTIN_LABELS.reply` (`Draft a reply`) is a label for links and the List, never a menu row. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-reply-draft-session-reads-only-and-only-a-persons-click-posts)
 - **`jira.mjs` writes no file of its own**; its one exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo.

@@ -490,7 +490,7 @@ describe('GET /api/jira/prompt', () => {
     async (_label, action) => {
       const params: Record<string, string> = { key: 'PAY-131' };
       if (action !== undefined) params.action = action;
-      expect((await get(q(params)).expect(400)).body).toEqual({ error: 'action must be execute, context, review or skill:<id>' });
+      expect((await get(q(params)).expect(400)).body).toEqual({ error: 'action must be execute, context, review, reply or skill:<id>' });
     }
   );
 

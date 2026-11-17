@@ -18,12 +18,12 @@ import type {
   ReviewHalf
 } from '../../../shared/types';
 import { renderTicketBlock } from './block';
-import { parseBranchChoice, resolveWorkspace } from './branch-choice.util';
+import { REPLY_SHAPE_ERROR, parseBranchChoice, replyChoiceIsNarrow, resolveWorkspace } from './branch-choice.util';
 import { JIRA_JQL_MAX_CHARS, isJiraId, normaliseRepoPath, readJiraConfig } from './config.util';
 import { jiraEnv, repoRoots } from './env.util';
 import { JiraLiveService } from './live.service';
 import { JIRA_SEARCH_MAX_CHARS, JiraPollerService } from './poller.service';
-import { composeJiraPrompt, parseReviewHalf, parseReviewMr, resolveJiraActionOrThrow } from './prompt.util';
+import { anyProjectRepoOrThrow, composeJiraPrompt, parseReviewHalf, parseReviewMr, resolveJiraActionOrThrow } from './prompt.util';
 import type { JiraComposeAction } from './prompt.util';
 import { readRepoRefs, readWorktrees } from './refs.util';
 import { unwrapJira } from './unwrap.util';
@@ -173,7 +173,9 @@ export class JiraController {
    * issue key`), `action` (400), `repo` present (400 `repo is required`), the branch choice's shape (400, `parseBranchChoice` — the same sentences
    * `dispatch-jira` answers; `mode` is required, so a caller that sends none is refused rather than guessed at), configured (503 — after the three parameters,
    * as everywhere in this file), `jira.json` readable (409 — a skill or a mapping read out of a file we cannot read would be a guess), the skill exists (400
-   * `unknown skill <id>`, before Jira is asked), the issue read (`unwrapJira`'s §8 mapping), the repo mapped for the ISSUE'S project (400), the choice against
+   * `unknown skill <id>`, before Jira is asked), the issue read (`unwrapJira`'s §8 mapping), the repo mapped for the ISSUE'S project (400) — for `reply`,
+   * mapped to ANY project (400 `<repo> is not mapped to any Jira project`, `anyProjectRepoOrThrow`), whose branch fields R2 narrowed to mode `none` before
+   * the branch choice was parsed — the choice against
    * the repo's refs (409, `resolveWorkspace` — a new branch that exists, a continued one the mapped checkout holds), the cap (400 `prompt too long`). The refs
    * are read only for a mode that names a branch, after the mapping check, so a repo that is not this project's is never handed to git; the repo's stored base
    * is looked up as `/refs` looks it up.
@@ -202,7 +204,7 @@ export class JiraController {
   ): Promise<string> {
     if (typeof key !== 'string' || !isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
     const action = parseJiraActionParam(actionParam);
-    if (action === null) throw new HttpException({ error: 'action must be execute, context, review or skill:<id>' }, 400);
+    if (action === null) throw new HttpException({ error: 'action must be execute, context, review, reply or skill:<id>' }, 400);
     if (typeof repo !== 'string' || repo.trim() === '') throw new HttpException({ error: 'repo is required' }, 400);
     // A review names its MR and half in the query; the preview only SHAPES them (no GitLab call), the dispatch route is what resolves the MR.
     let review: { mr: { project: string; iid: number }; half: ReviewHalf } | null = null;
@@ -212,6 +214,11 @@ export class JiraController {
       const parsedHalf = parseReviewHalf(half);
       if (parsedHalf === null) throw new HttpException({ error: 'half must be request or fix' }, 400);
       review = { mr, half: parsedHalf };
+    }
+    // A reply's branch fields are R2's (the dispatch refuses the rest of its wider shape): mode none and nothing else, in R2's sentence, so the preview never
+    // shows a workspace block that no reply dispatch would spawn.
+    if (action === 'reply' && !replyChoiceIsNarrow({ mode, branch, base, openMr, review: reviewFlag, target })) {
+      throw new HttpException({ error: REPLY_SHAPE_ERROR }, 400);
     }
     const choice = parseBranchChoice({ mode, branch, base, openMr, review: reviewFlag, target }, key, action);
     if (!choice.ok) throw new HttpException({ error: choice.error }, 400);
@@ -223,9 +230,15 @@ export class JiraController {
     const composeAction: JiraComposeAction =
       review !== null ? { kind: 'review', half: review.half, mr: review.mr } : resolveJiraActionOrThrow(action, config.skills);
     const detail = unwrapJira(await this.poller.issueDetail(key));
-    const normalised = normaliseRepoPath(repo, homedir());
-    if (normalised === null || !(config.repos[detail.project.key] ?? []).includes(normalised)) {
-      throw new HttpException({ error: `${repo} is not mapped to ${detail.project.key}` }, 400);
+    // A reply's repo may be mapped to ANY project (most mentioned tickets live in unmapped ones) — the dispatch's rule through the same helper. No open-mention
+    // gate here: the preview only reads, and the dispatch is what refuses a key with nothing to answer.
+    let normalised: string | null;
+    if (action === 'reply') normalised = anyProjectRepoOrThrow(repo, config.repos, homedir());
+    else {
+      normalised = normaliseRepoPath(repo, homedir());
+      if (normalised === null || !(config.repos[detail.project.key] ?? []).includes(normalised)) {
+        throw new HttpException({ error: `${repo} is not mapped to ${detail.project.key}` }, 400);
+      }
     }
     let workspace: JiraWorkspace | null = null;
     if (choice.value.mode !== 'none') {
