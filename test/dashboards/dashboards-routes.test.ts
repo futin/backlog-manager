@@ -332,13 +332,66 @@ describe('the dashboards settings routes', () => {
       expect(after.note).toBe('keep me');
     });
 
-    it('a delete removes only the kept row, and the duplicate it shadowed is live on the next read', async () => {
+    const view = async (): Promise<DashboardsView> => (await request(app!.getHttpServer()).get('/api/dashboards').expect(200)).body as DashboardsView;
+
+    // #420 reverses #349's delete: a name is one machine case-insensitively, so a delete removes every raw row of that name — the shadowed duplicate
+    // included — and nothing the next read could promote under the same identity is left behind. `jira.json`'s deleteBoard has the same contract.
+    it('a delete removes the machine: the kept row and the duplicate it shadowed both go, every other row and key stays', async () => {
       writeFixture(fixture);
       await createApp();
       await post('/entries/delete', { name: 'alpha' }).expect(200);
-      expect(disk().dashboards).toEqual([invalid, dupe]);
-      const view = (await request(app!.getHttpServer()).get('/api/dashboards').expect(200)).body as DashboardsView;
-      expect(view.dashboards.map((d) => d.name)).toEqual(['ALPHA']);
+      const after = disk();
+      expect(after.dashboards).toEqual([invalid]);
+      expect(after.order).toEqual(['home']);
+      expect(after.note).toBe('keep me');
+      expect(after.home).toEqual({ flavour: 'kept' });
+      expect((await view()).dashboards).toEqual([]);
+    });
+
+    it('a delete naming the drawn row in another case is a 404, and the file is byte-identical', async () => {
+      writeFixture(fixture);
+      await createApp();
+      const before = readFileSync(file, 'utf8');
+      const res = await post('/entries/delete', { name: 'ALPHA' }).expect(404);
+      expect(res.body.error).toBe('no dashboard named "ALPHA"');
+      expect(readFileSync(file, 'utf8')).toBe(before);
+    });
+
+    it('a delete removes a half-broken row of the same name on either side of the kept row', async () => {
+      const box = { ...pro, name: 'Box', host: 'box-host' };
+      const beta = { ...pro, name: 'beta', host: 'beta-host' };
+      writeFixture({ dashboards: [{ name: 'box', url: 'not a url' }, box, { name: 'BOX', url: 'not a url' }, beta] });
+      await createApp();
+      await post('/entries/delete', { name: 'Box' }).expect(200);
+      expect(disk().dashboards).toEqual([beta]);
+    });
+
+    it('a delete leaves every row the name match must not touch, in order', async () => {
+      const box = { ...pro, name: 'Box', host: 'box-host' };
+      const rest = [3, null, { name: 7 }, { name: 'Bad', url: 'not a url' }];
+      writeFixture({ dashboards: [box, ...rest] });
+      await createApp();
+      await post('/entries/delete', { name: 'Box' }).expect(200);
+      expect(disk().dashboards).toEqual(rest);
+    });
+
+    it('a delete removes a duplicate of that name past the cap too', async () => {
+      const eight = Array.from({ length: 8 }, (_, i) => ({ ...pro, name: `M${i + 1}`, host: `m${i + 1}` }));
+      writeFixture({ dashboards: [...eight, { ...pro, name: 'm1', host: 'm1-dupe' }] });
+      await createApp();
+      await post('/entries/delete', { name: 'M1' }).expect(200);
+      expect(disk().dashboards).toEqual(eight.slice(1));
+      expect((await view()).dashboards.map((d) => d.name)).toEqual(['M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8']);
+    });
+
+    // A ninth row of ANOTHER name is another machine nobody asked to delete: it stays, and the freed slot draws it. That is the cap working, not a revival.
+    it('a delete keeps a row of another name past the cap, and the view promotes it', async () => {
+      const nine = Array.from({ length: 9 }, (_, i) => ({ ...pro, name: `M${i + 1}`, host: `m${i + 1}` }));
+      writeFixture({ dashboards: nine });
+      await createApp();
+      await post('/entries/delete', { name: 'M1' }).expect(200);
+      expect(disk().dashboards).toEqual(nine.slice(1));
+      expect((await view()).dashboards.map((d) => d.name)).toEqual(['M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9']);
     });
 
     it('a threshold save keeps all nine valid rows on disk while the view still shows eight', async () => {

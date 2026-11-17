@@ -2142,7 +2142,9 @@ invalid entry, a case-insensitive duplicate (the first wins) and anything past t
 launched to is a card the person can see and fix, where a thrown error would blank the whole list. That repair is a VIEW, never written back (#349): every
 POST edits the raw file it read and keeps every row and key it did not change — a dropped row, a shadowed duplicate, a ninth entry, a key this version does
 not know — because the old write-the-view shape erased a person's hand-edited row the first time they saved an unrelated setting. `jira.json`'s writer
-keeps the same contract.
+keeps the same contract. The one exception is a delete, which removes every row of that machine's name, in any case and whether or not it validates (#420):
+a name is one machine case-insensitively, so deleting only the kept row let the next read promote the duplicate it had shadowed into the freed slot, and the
+delete looked like it did nothing. A row of another name — past the cap included — is another machine and stays, the way `jira.json`'s `deleteBoard` works.
 
 **Tokens are env-only, and no response carries one.** A remote's token is `BM_AGENTS_TOKEN_<NAME uppercased>`, home's is `BM_AGENTS_TOKEN`, and neither is in
 the file, the view or any error: `DashboardsView` carries `tokenSet` (a boolean) and `tokenVar` (the variable's NAME, so the card can say which one to set), and

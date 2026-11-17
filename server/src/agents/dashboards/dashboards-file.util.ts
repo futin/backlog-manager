@@ -28,7 +28,8 @@ import type { DashboardEntry, DashboardsFile, HomeEntry, SuggestStrategy } from 
  * The repair is a VIEW, never written back (#349). The reader hands back the raw parsed object beside the normalised one, and every write edits the raw object —
  * exactly the keys and the one row it changes — and keeps everything else, rows the view dropped and unknown top-level keys included. That is `jira.json`'s
  * writer contract (`jira/config.util.ts`'s header); before it, moving the threshold slider wrote the normalised list back and a hand-written row the reader
- * had dropped was gone from disk for good.
+ * had dropped was gone from disk for good. The one exception is a delete, which removes every raw row of that machine's name in any case — a duplicate the
+ * view shadowed and a half-broken row included — because a name is one machine, and a row left behind under it would be promoted by the next read (#420).
  */
 
 export const DEFAULT_STRATEGY: SuggestStrategy = 'prefer';
@@ -184,7 +185,7 @@ function clampThreshold(v: unknown): number {
  * FIRST entry per lowercased name wins and a later one is dropped (names are machine ids and, uppercased, token env vars, so `Pro` and `pro` would share a
  * token and be indistinguishable on the wire), and only the first MAX_REMOTES valid entries are kept. Both run before `order` is normalised, so it sees
  * only the ids that survived. The routes refuse both as a 400 on a POST; this is the reader's repair for a file a person edited by hand, and it is never
- * written back — the dropped rows stay on disk (see the header).
+ * written back — the dropped rows stay on disk until a delete of their name removes them with the kept row (see the header).
  */
 export function keptRows(rows: unknown): { entry: DashboardEntry; at: number }[] {
   const kept: { entry: DashboardEntry; at: number }[] = [];
