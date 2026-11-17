@@ -162,7 +162,8 @@ The ladder, in order. Every refusal's text is shown on the PR row's outcome line
    (the PR writes' own sentence, `pulls.service.ts`).
 3. Sync off → 409 with `syncOffBlock`'s sentence unchanged: `sync is off for <repo> — turn it on in GitHub › Settings`.
 4. `projectDispatchGate` for the project path: any `hidden` verdict (agents off, dashboard unreachable, no Claude binary, remote answers off —
-   `shared/agent.ts`) or its one `disabled` verdict (the project not visible to the dashboard) → 409 with the gate's own reason text.
+   `shared/agent.ts`) or its one `disabled` verdict (the project not visible to the dashboard) → 409 with the gate's own reason text, except dispatch on
+   with the dashboard unreachable, which is 502 as `dispatch-jira` answers.
 5. Fresh one-PR read, through `PullRequestsService` (a new public method over its existing private single-PR read, so the token, the pools' sleeps and the
    cache splice stay that service's): no token → 503 with its `NO_TOKEN` text; a sleeping `graphql` pool → 429 with the sleep's own detail; a failed read →
    502 `could not read <repo>#<n> from GitHub`; not found, merged or closed → 409 `<repo>#<n> is not open`; cross-repository → 409

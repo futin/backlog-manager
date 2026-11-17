@@ -105,14 +105,16 @@ export class PrResolveService {
   /**
    * Rung 7 — the PR's leftover lock, read and never written. None: the plain trigger. A lock the tool would still honour is the 409; a dead owner's lock is
    * reclaimed by naming its session in the trigger, so the new session clears the leftover trees at once instead of waiting out the 3 hours. A lock whose
-   * liveness cannot be established — the dashboard throws, or the id is not one a prompt may carry — is the 409 too, never a reclaim.
+   * liveness cannot be established — the dashboard throws — is the 409 too, never a reclaim; an id a prompt may not carry is the null-id rule.
    */
   private async triggerFor(repo: string, number: number, cfg: AgentsConfig, running: string): Promise<string> {
     const lock = readLock(join(prResolveHome(), 'locks', `${fileKey(repo, number)}.lock`));
     if (lock === null) return resolveTrigger(repo, number, null);
     const age = Date.now() - lock.at;
-    if (lock.sessionId === null) return age < NULL_LOCK_TTL_MS ? refuse(running, 409) : resolveTrigger(repo, number, null);
-    if (age < JIRA_LIVE_GRACE_MS || !RECLAIMABLE_ID.test(lock.sessionId)) return refuse(running, 409);
+    // An id a prompt may not carry is treated as no id at all: nothing can be reclaimed by name, so the lock is honoured for the same 3 hours the tool honours
+    // it and then ignored, rather than refusing forever on a file only the tool's own TTL would ever clear.
+    if (lock.sessionId === null || !RECLAIMABLE_ID.test(lock.sessionId)) return age < NULL_LOCK_TTL_MS ? refuse(running, 409) : resolveTrigger(repo, number, null);
+    if (age < JIRA_LIVE_GRACE_MS) return refuse(running, 409);
     let row: Awaited<ReturnType<typeof dashboardSessionRow>>;
     try {
       row = await dashboardSessionRow(cfg, lock.sessionId);

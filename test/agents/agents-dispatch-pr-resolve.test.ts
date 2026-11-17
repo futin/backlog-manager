@@ -5,6 +5,7 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
+import { AgentsService } from '../../server/src/agents/agents.service';
 import { PrResolveService } from '../../server/src/agents/pr-resolve.service';
 import { JIRA_LIVE_GRACE_MS } from '../../server/src/agents/jira-live.service';
 import { fileKey, parseFileKey } from '../../server/src/agents/pr-resolve.util';
@@ -13,7 +14,7 @@ import { REGISTRY_FILE } from '../../server/src/registry/registry.service';
 import { PullRequestsService } from '../../server/src/tracker/pulls.service';
 import { writeSyncInterval } from '../../server/src/tracker/sync-config.util';
 import { GITHUB_TOKEN_ENV } from '../../server/src/tracker/token.util';
-import { DEFAULT_MODEL } from '../../shared/agent';
+import { clampMode, DEFAULT_MODEL, projectDispatchGate } from '../../shared/agent';
 import type { PrResolveOutcome, PullRequestRow } from '../../shared/types';
 import { listenLoopback } from '../helpers/app';
 import { makeProject, makeRegistry } from '../helpers/store';
@@ -193,23 +194,42 @@ describe('the ladder', () => {
     expect(res.body.error).toBe(`sync is off for ${REPO} — turn it on in GitHub › Settings`);
   });
 
-  it('409s agents off with the gate text, and 502s an unreachable dashboard', async () => {
-    readOne(conflicting());
+  /** The gate's own sentence for the project, computed the way the route does — never a hand copy of the text. */
+  const gateReason = async (): Promise<string> => {
+    const gate = projectDispatchGate(await app.get(AgentsService).status(), paths[0]);
+    if (gate.control === 'enabled') throw new Error('the gate is open');
+    return gate.reason;
+  };
+
+  it('409s agents off with the gate text, and 502s an unreachable dashboard, both before the PR is read', async () => {
+    const read = readOne(conflicting());
     process.env.BM_AGENTS = 'off';
     const off = await post({ repo: REPO, number: 7 }).expect(409);
-    expect(off.body.error).toEqual(expect.stringContaining('BM_AGENTS'));
+    expect(off.body.error).toBe(await gateReason());
     process.env.BM_AGENTS = 'on';
     dash.healthDown = true;
     const down = await post({ repo: REPO, number: 7 }).expect(502);
-    expect(down.body.error).toEqual(expect.stringContaining('dashboard'));
+    expect(down.body.error).toBe(await gateReason());
+    expect(read).not.toHaveBeenCalled();
     expect(spawned()).toBe(0);
   });
 
-  it('409s a project the dashboard does not list', async () => {
-    readOne(conflicting());
+  it('409s sync off ahead of the gate: with BM_AGENTS off too, the sync-off sentence wins', async () => {
+    const read = readOne(conflicting());
+    writeSyncInterval(REPO, 'off');
+    process.env.BM_AGENTS = 'off';
+    const res = await post({ repo: REPO, number: 7 }).expect(409);
+    expect(res.body.error).toBe(`sync is off for ${REPO} — turn it on in GitHub › Settings`);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('409s a project the dashboard does not list, before the PR is read', async () => {
+    const read = readOne(conflicting());
     dash.paths = ['/somewhere/else'];
     const res = await post({ repo: REPO, number: 7 }).expect(409);
     expect(res.body.error).toBe(`the dashboard does not list ${paths[0]} — most likely no Claude session there inside its LOOKBACK_HOURS`);
+    expect(res.body.error).toBe(await gateReason());
+    expect(read).not.toHaveBeenCalled();
   });
 
   it('passes the one-PR read refusals through: 503, 429, 502', async () => {
@@ -256,6 +276,8 @@ describe('the spawn', () => {
     expect(spawns[0].model).toBe(DEFAULT_MODEL);
     expect('effort' in spawns[0]).toBe(false);
     expect(spawns[0].remoteControl).toBe(false);
+    // Asks for `auto`, clamped to the dashboard's cap the way every other spawn is — the cap is the status's, not a literal of this route.
+    expect(spawns[0].permissionMode).toBe(clampMode('auto', (await app.get(AgentsService).status()).spawnMaxPermission));
     expect(spawns[0].project).toBe('-dir-0');
     expect(spawns[0].name).toBe('pr-resolve acme/web#7');
   });
@@ -314,10 +336,12 @@ describe('the spawn', () => {
       readOne(conflicting());
       dash.spawnStatus = 500;
       const failed = await post({ repo: REPO, number: 7 });
-      expect(failed.status).not.toBe(201);
+      expect(failed.status).toBe(502);
+      expect(failed.body).toEqual({ error: 'boom' });
       expect(failed.body.error).not.toBe(`a resolve of ${REPO}#7 is already running`);
       dash.spawnStatus = 200;
       await post({ repo: REPO, number: 7 }).expect(201);
+      expect(spawned()).toBe(2);
     });
 
     it('drops the reservation of an entry whose session is gone, past the grace, before the next click', async () => {
@@ -374,11 +398,33 @@ describe('the spawn', () => {
       expect(spawns[0].prompt).toBe('/backlog-manager:pr-resolve acme/web#7');
     });
 
-    it('a session id that is not a plain token never reaches the prompt', async () => {
+    it('a session id that is not a plain token never reaches the prompt: the null-id rule, a 409 under 3 hours', async () => {
       writeLock(REPO, 7, 'x\n/other-skill', Date.now() - 10 * 60_000);
       await post({ repo: REPO, number: 7 }).expect(409);
       expect(spawned()).toBe(0);
+      expect(urls.some((u) => u.includes('/api/sessions/'))).toBe(false);
     });
+
+    it('and past 3 hours the plain trigger, with no reclaim and nothing of the id in the prompt', async () => {
+      writeLock(REPO, 7, 'x\n/other-skill', Date.now() - 4 * 60 * 60_000);
+      await post({ repo: REPO, number: 7 }).expect(201);
+      expect(spawns[0].prompt).toBe('/backlog-manager:pr-resolve acme/web#7');
+    });
+  });
+});
+
+describe('an unreadable registry', () => {
+  it('is the 503 naming registry.json, before anything else', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const broken = join(mkdtempSync(join(tmpdir(), 'bm-brokenreg-')), 'registry.json');
+    writeFileSync(broken, '{"projects": [');
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(REGISTRY_FILE).useValue(broken).compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+    await listenLoopback(app);
+    const res = await post({ repo: REPO, number: 7 }).expect(503);
+    expect(res.body.error).toContain('registry.json');
+    expect(spawned()).toBe(0);
   });
 });
 
