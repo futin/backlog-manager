@@ -121,7 +121,7 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   original probe).
 - [ ] **Step 4:** Commit the result line: `git commit -m "docs(jira): record the comment-scope probe"`.
 
-**Probe result:** _(filled by Task 1)_
+**Probe result:** 400 — comment write in scope (2026-11-17, TIMIFY-28740, `Comment body can not be empty!`)
 
 ---
 
