@@ -766,7 +766,7 @@ async function thread(args) {
   if (!ok(res)) throw failure(res)
   if (res.body === null || typeof res.body !== 'object' || !Array.isArray(res.body.comments)) throw unreadable(res)
   const { comments, total, truncated } = res.body
-  const blocks = comments.map((c) => `${c.author.name} — ${c.created}\n${c.markdown}`)
+  const blocks = comments.map((c) => `${c.author?.name ?? 'Someone'} — ${c.created}\n${c.markdown}`)
   if (truncated === true && Number.isFinite(total) && total > comments.length) blocks.unshift(`(${total - comments.length} earlier not shown)`)
   console.log(blocks.join('\n\n'))
   return 0

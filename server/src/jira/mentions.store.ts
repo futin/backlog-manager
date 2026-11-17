@@ -9,7 +9,8 @@ import type { JiraMentionDraft } from '../../../shared/types';
 import { isSessionId } from './session-id.util';
 
 /**
- * The mentions store (Jira › Mentions, spec Constraints "The mentions store is the server's own file"): which mention comments a person dismissed. The
+ * The mentions store (Jira › Mentions, spec Constraints "The mentions store is the server's own file"): which mention comments a person dismissed, and the
+ * reply drafts held for them. The
  * server is its one writer, through `writeJsonAtomic`, and the shape, the load-once and the set-aside rule are `links.store.ts`'s, for the same reasons —
  * this is machine-written state whose loss costs a few re-appearing mentions, so a file that cannot be read is set aside rather than refusing every dismiss.
  *
@@ -140,7 +141,7 @@ export class JiraMentionsStore {
   constructor() {
     const file = jiraMentionsFile();
     const read = readFile(file);
-    if (read.kind === 'bad') console.warn(`${file}: ${read.why} — starting with no dismissals; the file is set aside at the first save`);
+    if (read.kind === 'bad') console.warn(`${file}: ${read.why} — starting with no dismissals or drafts; the file is set aside at the first save`);
     this.list = read.kind === 'ok' ? read.dismissed : [];
     this.drafts = read.kind === 'ok' ? read.drafts : [];
   }

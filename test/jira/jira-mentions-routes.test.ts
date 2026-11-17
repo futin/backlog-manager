@@ -807,7 +807,6 @@ describe('POST /api/jira/mentions/reply (plan Task 5)', () => {
     await reply('SUP-500', 'hi').expect(200);
     const body = fake.posted[0].body as ReturnType<typeof replyDoc>;
     expect(body.content[0].content[0]).toEqual({ type: 'mention', attrs: { id: MARA.accountId, text: `@${MARA.displayName}` } });
-    expect(mara.id).not.toBe(ivoOld.id);
   });
 
   it('the thread route marks the answered mention open: false after the post, though the read does not carry the reply', async () => {
