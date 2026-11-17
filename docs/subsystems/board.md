@@ -210,7 +210,9 @@ Finish the person had already touched away. Below the editable body a read-only 
 every control; `finish` is sent on every execute launch (and a home groom's), `base`, `autoMerge` and `fix` only under PR, and `fix` only as `autoMerge &&
 fix`. A capture sheet keeps its closing rule inside the editable text. An execute's or a groom's sheet on home also draws an **Open in** Dashboard |
 Desktop pill `Segmented` when the plan carries `launchSurface` (home's dashboard said `desktopAvailable`), preselected from it — the dashboard's own Shared
-default, never this board's Settings and never the last launch — and sends its pick as `surface`; a sheet that drew no control sends no key. A remote pick
+default, never this board's Settings and never the last launch (the Jira launch sheet is the one exception: it seeds Open in, the repository and the branch
+from the ticket's last linked session, resolved against live state — [jira.md](jira.md)) — and sends its pick as `surface`; a sheet that drew no control
+sends no key. A remote pick
 hides it, and it waits for `useRunOn`'s `loading` the way a groom's Finish does. Under Desktop, permission mode, model, effort and remote control are
 disabled, not hidden, beside a line saying the app uses its own, and the launch button reads `open in desktop`; the answer carries no session id, so the
 sheet says `Opened in the desktop app` instead of linking to a session. The toolbar Orchestrate control opens

@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
 import { errorMessage, useAction } from '../../hooks/useAction';
 import { useAgents } from '../../hooks/useAgents';
 import { useFetched } from '../../hooks/useFetched';
+import { useNow } from '../../hooks/useNow';
 import { useSettings } from '../../hooks/useSettings';
 import { EFFORT_OPTIONS, LAUNCH_SURFACE_OPTIONS, MODEL_OPTIONS, modelEffortFlags, sessionUrl } from '../../lib/agents';
 import {
@@ -15,12 +17,15 @@ import {
   fetchJiraDetail,
   fetchJiraPrompt,
   jiraWritesStand,
+  lastJiraLink,
   launchFootLine,
+  preferredBranchApplies,
+  prefilledLine,
   transitionOptions
 } from '../../lib/jira';
 import { clampMode, modesUpTo, projectDispatchGate } from '../../../../shared/agent';
 import { JIRA_BUILTIN_LABELS, JIRA_PROMPT_MAX, jiraActionParam } from '../../../../shared/types';
-import type { JiraAction, JiraDispatchResult, JiraIssue, LaunchSurface, PermissionMode, ReviewHalf } from '../../../../shared/types';
+import type { JiraAction, JiraDispatchResult, JiraIssue, JiraLink, LaunchSurface, PermissionMode, ReviewHalf } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 import { GlyphTile } from '../ui/GlyphTile';
@@ -78,10 +83,20 @@ export const PREVIEW_SETTLE_MS = 350;
  * transition, then the session — so a write that landed stands if the spawn then fails, and the refusal says so (`jiraWritesStand`).
  *
  * **Open in: Dashboard | Desktop** is the board `LaunchSheet`'s control (the §8.2/§8.6 pill `Segmented`), drawn only while home's dashboard says
- * `desktopAvailable`, for any action, and preselected from its `launchSurfaceDefault` — seeded once, the first render the status is known, never from this
- * board's Settings or the last launch. Without it no `surface` is sent. The dashboard runs a desktop launch's first turn headless and then hands it to the
- * app, so permissions, model and effort still apply to that turn; only remote control does not (the dashboard forces it off), so its Switch is disabled
- * and reads Off. The session still has an id and a live entry, so the started state links to it like any other.
+ * `desktopAvailable`, for any action, and preselected from the ticket's last linked session's `surface` when it names one, else from the dashboard's
+ * `launchSurfaceDefault` — seeded once, the first render the status is known, never from this board's Settings. Without it no `surface` is sent. The
+ * dashboard runs a desktop launch's first turn headless and then hands it to the app, so permissions, model and effort still apply to that turn; only remote
+ * control does not (the dashboard forces it off), so its Switch is disabled and reads Off. The session still has an id and a live entry, so the started state
+ * links to it like any other.
+ *
+ * **A ticket that already had a session opens from that session's setup** (#503): Open in, the repository and the branch (Continue on its branch), each
+ * resolved on its own against live state — the repository only when the project still maps it, Open in only while the control is drawn, the branch only
+ * when the chosen repository is that session's and its refs still list the branch (`preferredBranchApplies`). The link is the server's Jira link store, read
+ * through the shell's `useJiraSessionsContext()` — no storage of this sheet's own, so a phone opens the same sheet a laptop does — and it is frozen the first
+ * render that payload is known, so a later sessions poll can never move a field under the reader. Model, effort, permissions and the execute finish are NOT
+ * taken from it: those stay "never the last launch" (`docs/subsystems/invariants.md` says why per-ticket reuse is not that hazard). A review sheet takes
+ * nothing from it — the MR fixes its repository and branch and its own rule seeds Desktop. One `.sheet-note` says the sheet was prefilled, only when a field
+ * was actually taken.
  */
 export function JiraLaunchSheet({
   issue,
@@ -115,11 +130,21 @@ export function JiraLaunchSheet({
   const reviewWire = review === undefined ? undefined : { half: review.half, mr: { project: review.mr.project, iid: review.mr.iid } };
 
   const [action, setAction] = useState<JiraAction>(initialAction);
+  // The ticket's last session (#503), frozen the first render the sessions payload is known: `undefined` until then, `null` for a ticket with none and for
+  // every review sheet. Read through `link` below, which computes it in the very render the payload lands, so the Open in seed in that same render already
+  // sees it. Frozen because every field it seeds is the reader's from then on, and a poll that brought a newer session must not move them.
+  const { data: sessions } = useJiraSessionsContext();
+  const [frozenLink, setFrozenLink] = useState<JiraLink | null | undefined>(undefined);
+  const link = frozenLink !== undefined ? frozenLink : sessions !== null && review === undefined ? lastJiraLink(sessions.links, issue.key) : null;
+  if (frozenLink === undefined && sessions !== null) setFrozenLink(link);
+  // The last session's repository, only while the ticket's project still maps it: a worktree path or a mapping since removed seeds nothing.
+  const linkRepo = link !== null && paths.includes(link.repo) ? link.repo : null;
   // '' is "not chosen": several mapped paths wait for a pick, and the preview waits with them rather than guessing a repository. A single path is
   // derived, not seeded — the mapping can arrive after mount (the status is the shell's, and may still be loading when the sheet opens), and a one-shot
-  // `useState` seed would leave a statically shown path unselected with no control to fix it.
+  // `useState` seed would leave a statically shown path unselected with no control to fix it. The last session's repository is derived the same way and
+  // for the same reason, ahead of the single path; a pick always wins over both.
   const [pickedRepo, setRepo] = useState('');
-  const repo = pickedRepo === '' && paths.length === 1 ? paths[0] : pickedRepo;
+  const repo = pickedRepo !== '' ? pickedRepo : (linkRepo ?? (paths.length === 1 ? paths[0] : ''));
   const [pickedMode, setPickedMode] = useState<PermissionMode | null>(null);
   const [model, setModel] = useState(settings.dispatchDefaultModel);
   const [effort, setEffort] = useState(settings.dispatchDefaultEffort);
@@ -129,10 +154,15 @@ export function JiraLaunchSheet({
   // Seeded in render, not an effect, for the board sheet's reason: an effect would paint one frame of Dashboard on a sheet whose default is Desktop. `null`
   // until the status first lands — the shell's `useAgents` may still be loading when the sheet opens.
   const [pickedSurface, setSurface] = useState<LaunchSurface | null>(null);
+  const [surfaceFromLink, setSurfaceFromLink] = useState(false);
   // A review launch seeds Desktop whenever it is offered, whatever `launchSurfaceDefault` says (spec §5.2/§6): a review session is one a person watches and
-  // answers, so the Settings default for ordinary launches does not apply to it. Without Desktop available it seeds as any other sheet does.
+  // answers, so the Settings default for ordinary launches does not apply to it. Without Desktop available it seeds as any other sheet does. Any other
+  // sheet takes the last session's surface first (#503) — only while the control is drawn, since without it nothing is sent — and a `null` one (a detected
+  // session whose surface is unknown) falls through to the dashboard's default.
   if (pickedSurface === null && agents !== null) {
-    setSurface(review !== undefined && agents.desktopAvailable === true ? 'desktop' : (agents.launchSurfaceDefault ?? 'dashboard'));
+    const linked = agents.desktopAvailable === true && link !== null ? link.surface : null;
+    setSurface(review !== undefined && agents.desktopAvailable === true ? 'desktop' : (linked ?? agents.launchSurfaceDefault ?? 'dashboard'));
+    setSurfaceFromLink(linked !== null);
   }
   const offersDesktop = agents?.desktopAvailable === true;
   const desktop = offersDesktop && pickedSurface === 'desktop';
@@ -141,8 +171,16 @@ export function JiraLaunchSheet({
   const [started, setStarted] = useState<JiraDispatchResult | null>(null);
 
   const actionKey = jiraActionParam(action);
-  const branch = useBranchState(action, repo, issue.key, issue.summary, data?.repoDefaults?.[repo], review?.mr.sourceBranch ?? null);
+  // The last session's branch is a preference only in that session's own repository: switching away re-seeds from the new repository's refs without it.
+  const preferred = link !== null && link.repo === repo ? link.branch : null;
+  const branch = useBranchState(action, repo, issue.key, issue.summary, data?.repoDefaults?.[repo], review?.mr.sourceBranch ?? null, preferred);
   const branchSent = branch.ready && branch.refusal === null;
+  // The hint is drawn only when a field was actually taken from the link: a repository among several (a single mapped path is the same either way), an Open
+  // in that is drawn, or a branch the refs still list. `now` ticks a minute at a time only while there is a link to age.
+  const prefilled =
+    link !== null &&
+    ((linkRepo !== null && paths.length > 1) || (surfaceFromLink && offersDesktop) || (branch.ready && preferredBranchApplies(action, branch.known, preferred)));
+  const now = useNow(link !== null);
   const choiceKey = JSON.stringify(branch.choice);
   // The choice the preview may be asked about — the live one once it has stood still (I1). Typing (a field or a switch inside the same mode) waits
   // `PREVIEW_SETTLE_MS`; the rest goes through at once, set during render like `useBranchState`'s re-seed so no frame asks about the old one: the first
@@ -386,6 +424,7 @@ export function JiraLaunchSheet({
         )
       ) : (
         <>
+          {prefilled && link !== null && <div className="sheet-note">{prefilledLine(link.startedAt, now)}</div>}
           {/* A group of buttons, not a select: three picture tiles, so what Claude will do is seen before it is chosen. `aria-pressed` rather than a radiogroup,
               for Segmented's reason — each press applies at once. The name is the title; the sub-line is the description. */}
           <div className="sheet-field">

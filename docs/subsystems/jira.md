@@ -615,7 +615,13 @@ section (nine dialogs). The browser still never talks to Jira or the dashboard: 
   for every action, else `plan` for `context` and `acceptEdits` for the rest), clamped to the host's ceiling —
   and model and effort seed from Settings. While the agents status says `desktopAvailable`, an `Open in` Dashboard | Desktop pill (the board LaunchSheet's
   control) sits under the action, for any action, seeded once from `launchSurfaceDefault`, and Start sends its pick as `surface`; under Desktop only remote
-  control is disabled (and sent Off) — permissions, model and effort still drive the headless first turn. Start stays HOME-ONLY under multi-dashboard: the sheet draws no machine picker and `dispatch-jira` takes no
+  control is disabled (and sent Off) — permissions, model and effort still drive the headless first turn. **A ticket that already had a session opens from
+  that session's setup** (#503): the newest link for the key by `startedAt` (`lastJiraLink`, any `how`, live or ended), read through the shell's
+  `useJiraSessionsContext()` and frozen the first render that payload is known, seeds Open in (its `surface`, while the control is drawn; a `null` one falls
+  through to `launchSurfaceDefault`), the repository (only a path the project still maps) and the branch (Continue on it, only in that session's own
+  repository and only while its refs list it and it is not the mapped checkout's — `preferredBranchApplies`), each resolved on its own, and one
+  `.sheet-note` reads `Prefilled from the last session · <age>` when any of them was taken. Model, effort, permissions and the execute finish still never
+  come from it, and a review sheet takes nothing from it. Start stays HOME-ONLY under multi-dashboard: the sheet draws no machine picker and `dispatch-jira` takes no
   `machine`, because the mapped repository is a path in this machine's `jira.json` and means nothing on another. A landed Start calls `onStarted`, which reloads
   the shell's status (the strip) and the sessions payload and nudges the board. The server
   applies `Assign to me` and `Move to` BEFORE the spawn, so a Start refused after a write landed ends its sentence `— the assign stands` or `— the Jira writes

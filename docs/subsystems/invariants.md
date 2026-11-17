@@ -2206,6 +2206,14 @@ The execute sheet's Finish picker follows the same rule: `executeDefaultFinish` 
 is the one place the rule goes further — there is no stored base at all, because a branch name remembered from last week is a ref that may no longer exist, so
 the select opens on the literal `main` and is sent only under PR.
 
+The Jira launch sheet seeds Open in, the repository and the branch from the ticket's last linked session (#503), and that is not the sticky pick this section
+rejects. The values are this ticket's own — what the previous session on the same ticket ran with — not a global pick from last week carried onto unrelated
+work. Each is re-validated against live state before it is used: the repository only while the project still maps it, Open in only while the dashboard says
+`desktopAvailable`, the branch only while the chosen repository's refs still list it, so a ref that has gone costs nothing but the fallback to today's
+defaults. And none of them spends: a sticky `max` costs money on every launch it rides, while a repository, a surface or a branch decides only where the work
+happens. Model, effort, permissions and the execute finish are the controls that spend or widen, and they still never come from the last launch, on this
+sheet as on every other.
+
 A groom's sheet is seeded the same way by `groomDefaultFinish` (same default, same `pickOne` clamp), and the two PR toggles beside the picker by
 `prAutoMergeDefault` and `prFixDefault` (booleans, default `false`, clamped by `pickBool`, so a stored string reads as the default). Fix only has meaning once
 auto-merge is on, so Settings disables its row while `prAutoMergeDefault` is off — but the stored `prFixDefault` is left alone, and the sheet sends `fix` only
