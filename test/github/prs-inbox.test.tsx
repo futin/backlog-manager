@@ -111,6 +111,10 @@ function props(repos: PrRepoView[], over: Partial<PrLayoutProps> = {}): PrLayout
     inFlight: new Set(),
     confirming: null,
     setConfirming: jest.fn(),
+    // The Resolve conflicts inputs: no state, the agents status unread (no row), and a resolve that never runs — the page's suite covers those.
+    resolves: new Map(),
+    gateFor: () => null,
+    resolve: jest.fn(() => Promise.resolve()),
     ...over
   };
 }

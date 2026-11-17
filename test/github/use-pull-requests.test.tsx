@@ -10,7 +10,7 @@ import { PullRequestsProvider, usePullRequestsContext } from '../../client/src/h
 import { TrackersContext } from '../../client/src/hooks/TrackersContext';
 import { needsYouCount } from '../../client/src/lib/pr-layouts';
 import { fetchPullRequests, mergePr, updateBranch } from '../../client/src/lib/prs-api';
-import type { PullRequestsPayload } from '../../shared/types';
+import type { PrResolveState, PullRequestsPayload } from '../../shared/types';
 
 /**
  * `usePullRequests` and `prs-api` (GitHub › PRs, task 6): one read on mount, one a minute later and none sooner, none after unmount, two refreshes during one
@@ -46,6 +46,27 @@ function res(status: number, body: unknown): Response {
 
 const realFetch = global.fetch;
 
+/**
+ * Each tick reads `GET /api/prs` AND `GET /api/agents/pr-resolve` (spec 2026-11-17-pr-conflict-resolve-design.md). The cases below that pin the PR read's
+ * own cadence hand their stub to `routed`, which answers the resolves read on its own (`resolveCalls`, `answerResolves`) so `fn`'s count and its
+ * `mockImplementationOnce` sequence stay the PR read's alone.
+ */
+let resolveCalls: number;
+let answerResolves: () => Promise<Response>;
+const routed = (fn: jest.Mock): typeof fetch =>
+  ((...args: Parameters<typeof fetch>) => {
+    if (String(args[0]) === '/api/agents/pr-resolve') {
+      resolveCalls += 1;
+      return answerResolves();
+    }
+    return fn(...args) as Promise<Response>;
+  }) as typeof fetch;
+
+beforeEach(() => {
+  resolveCalls = 0;
+  answerResolves = () => Promise.resolve(res(200, { resolves: [] }));
+});
+
 async function flush(): Promise<void> {
   await act(async () => {
     await jest.advanceTimersByTimeAsync(0);
@@ -70,7 +91,7 @@ describe('usePullRequests', () => {
 
   it('reads once on mount, again at 60 s and not at 59 s', async () => {
     const fn = jest.fn(() => Promise.resolve(res(200, payload('futin/x'))));
-    global.fetch = fn as unknown as typeof fetch;
+    global.fetch = routed(fn);
     const { result } = renderHook(() => usePullRequests());
 
     expect(PRS_POLL_MS).toBe(60_000);
@@ -88,7 +109,7 @@ describe('usePullRequests', () => {
 
   it('stops reading when the page unmounts', async () => {
     const fn = jest.fn(() => Promise.resolve(res(200, payload('futin/x'))));
-    global.fetch = fn as unknown as typeof fetch;
+    global.fetch = routed(fn);
     const { unmount } = renderHook(() => usePullRequests());
     await flush();
     expect(fn).toHaveBeenCalledTimes(1);
@@ -105,7 +126,7 @@ describe('usePullRequests', () => {
       .mockImplementationOnce(() => Promise.resolve(res(200, payload('futin/x'))))
       .mockImplementationOnce(() => new Promise<Response>((resolve) => (release = resolve)))
       .mockImplementation(() => Promise.resolve(res(200, payload('futin/y'))));
-    global.fetch = fn as unknown as typeof fetch;
+    global.fetch = routed(fn);
     const { result } = renderHook(() => usePullRequests());
     await flush();
     expect(fn).toHaveBeenCalledTimes(1);
@@ -130,7 +151,7 @@ describe('usePullRequests', () => {
       .fn()
       .mockImplementationOnce(() => Promise.resolve(res(200, payload('futin/x'))))
       .mockImplementation(() => Promise.resolve(res(500, { error: 'GitHub is having a day' })));
-    global.fetch = fn as unknown as typeof fetch;
+    global.fetch = routed(fn);
     const { result } = renderHook(() => usePullRequests());
     await flush();
     expect(result.current.error).toBeNull();
@@ -145,7 +166,7 @@ describe('usePullRequests', () => {
       .fn()
       .mockImplementationOnce(() => Promise.resolve(res(500, null)))
       .mockImplementation(() => Promise.resolve(res(200, payload('futin/y'))));
-    global.fetch = fn as unknown as typeof fetch;
+    global.fetch = routed(fn);
     const { result } = renderHook(() => usePullRequests());
     await flush();
     expect(result.current.data).toBeNull();
@@ -162,7 +183,7 @@ describe('usePullRequests', () => {
       .fn()
       .mockImplementationOnce(() => Promise.resolve(res(200, payload('futin/mounted'))))
       .mockImplementation(() => Promise.resolve(res(200, payload('futin/refreshed'))));
-    global.fetch = fn as unknown as typeof fetch;
+    global.fetch = routed(fn);
     const { result } = renderHook(() => usePullRequests());
     await flush();
     expect(result.current.data).toEqual(payload('futin/mounted'));
@@ -183,7 +204,7 @@ describe('usePullRequests', () => {
       .fn()
       .mockImplementationOnce(() => Promise.resolve(res(200, payload('futin/mounted'))))
       .mockImplementation(() => Promise.reject(new Error('stub: the refresh could not connect')));
-    global.fetch = fn as unknown as typeof fetch;
+    global.fetch = routed(fn);
     const { result } = renderHook(() => usePullRequests());
     await flush();
     expect(result.current.data).toEqual(payload('futin/mounted'));
@@ -198,6 +219,42 @@ describe('usePullRequests', () => {
     expect(result.current.error).toBe('stub: the refresh could not connect');
     expect(result.current.data).toEqual(payload('futin/mounted'));
   });
+
+  it('one tick issues one /api/prs and one /api/agents/pr-resolve, and returns the resolves beside the rows', async () => {
+    const live: PrResolveState = { repo: 'futin/x', number: 5, live: { sessionId: 's1' }, outcome: null };
+    const fn = jest.fn((input: RequestInfo | URL) =>
+      Promise.resolve(String(input) === '/api/agents/pr-resolve' ? res(200, { resolves: [live] }) : res(200, payload('futin/x')))
+    );
+    global.fetch = fn as unknown as typeof fetch;
+    const { result } = renderHook(() => usePullRequests());
+    expect(result.current.resolves).toEqual([]);
+    await flush();
+    expect(fn.mock.calls.map((c) => String(c[0]))).toEqual(['/api/prs', '/api/agents/pr-resolve']);
+    expect(result.current.resolves).toEqual([live]);
+    await advance(PRS_POLL_MS);
+    expect(fn.mock.calls.map((c) => String(c[0]))).toEqual(['/api/prs', '/api/agents/pr-resolve', '/api/prs', '/api/agents/pr-resolve']);
+  });
+
+  it('a 500 on the resolves read keeps the previous resolves and leaves error null; refresh still resolves the PR payload', async () => {
+    const live: PrResolveState = { repo: 'futin/x', number: 5, live: { sessionId: 's1' }, outcome: null };
+    let resolvesFail = false;
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      if (String(input) !== '/api/agents/pr-resolve') return Promise.resolve(res(200, payload('futin/x')));
+      return Promise.resolve(resolvesFail ? res(500, { error: 'boom' }) : res(200, { resolves: [live] }));
+    }) as unknown as typeof fetch;
+    const { result } = renderHook(() => usePullRequests());
+    await flush();
+    expect(result.current.resolves).toEqual([live]);
+
+    resolvesFail = true;
+    let resolved: PullRequestsPayload | null | undefined;
+    await act(async () => {
+      resolved = await result.current.refresh();
+    });
+    expect(resolved).toEqual(payload('futin/x'));
+    expect(result.current.resolves).toEqual([live]);
+    expect(result.current.error).toBeNull();
+  });
 });
 
 describe('prs-api', () => {
@@ -208,7 +265,7 @@ describe('prs-api', () => {
   it('rejects a refused merge with the server sentence, verbatim', async () => {
     const sentence = 'head moved: expected a1b2c3 but the PR is at d4e5f6 — reload the page';
     const fn = jest.fn(() => Promise.resolve(res(409, { error: sentence })));
-    global.fetch = fn as unknown as typeof fetch;
+    global.fetch = routed(fn);
 
     await expect(mergePr({ repo: 'futin/x', number: 17, method: 'squash', headSha: 'a'.repeat(40) })).rejects.toThrow(new Error(sentence));
     const [url, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
@@ -281,11 +338,12 @@ describe('PullRequestsProvider', () => {
 
   it('asks nothing, on mount or after 60 s, while no GitHub project is registered', async () => {
     const fn = jest.fn(() => Promise.resolve(res(200, payload('futin/x'))));
-    global.fetch = fn as unknown as typeof fetch;
+    global.fetch = routed(fn);
     const { result } = renderHook(() => usePullRequestsContext(), { wrapper: wrap(['files']) });
     await flush();
     await advance(PRS_POLL_MS * 2);
     expect(fn).not.toHaveBeenCalled();
+    expect(resolveCalls).toBe(0);
     expect(result.current.enabled).toBe(false);
     expect(result.current.data).toBeNull();
     expect(result.current.error).toBeNull();
@@ -294,7 +352,7 @@ describe('PullRequestsProvider', () => {
 
   it('with a GitHub project, two readers make ONE request per 60 s', async () => {
     const fn = jest.fn(() => Promise.resolve(res(200, payload('futin/x'))));
-    global.fetch = fn as unknown as typeof fetch;
+    global.fetch = routed(fn);
     function Reader({ id }: { id: string }) {
       const { data } = usePullRequestsContext();
       return <p>{`${id}:${data === null ? 'none' : data.repos.length}`}</p>;
@@ -316,7 +374,7 @@ describe('PullRequestsProvider', () => {
   });
 
   it('a registered project with no token is enabled and counts nothing', async () => {
-    global.fetch = jest.fn(() => Promise.resolve(res(200, { token: false, repos: [] }))) as unknown as typeof fetch;
+    global.fetch = routed(jest.fn(() => Promise.resolve(res(200, { token: false, repos: [] }))));
     const { result } = renderHook(() => usePullRequestsContext(), { wrapper: wrap(['github']) });
     await flush();
     expect(result.current.enabled).toBe(true);

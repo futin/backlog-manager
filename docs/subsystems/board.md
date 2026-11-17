@@ -532,7 +532,10 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   spec](../superpowers/specs/2026-10-30-prs-page-fixes-design.md); DESIGN.md §8.11). `PullRequestsView` lists every open pull request of the registered GitHub
   repos — forks and other authors included — drawn as Inbox, Matrix or Cards (below). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
   last answer, plus mount and focus), mounted once by the shell's `PullRequestsProvider` and read here and by GitHub › Settings' Access card through
-  `usePullRequestsContext`: the server's PR cache has no timer, so with no GitHub project registered there are no PR reads at all. A repo the token cannot read (`forbidden` or `not-found`, `splitReach` in `lib/pr-layouts.ts`) is handed to no layout and left out of
+  `usePullRequestsContext`: the server's PR cache has no timer, so with no GitHub project registered there are no PR reads at all. The same tick also reads
+  `GET /api/agents/pr-resolve` (`fetchPrResolves`) into the context's `resolves`; only the PR read decides `error` and what `refresh` resolves, and a failed
+  resolves read keeps the last answer.
+  A repo the token cannot read (`forbidden` or `not-found`, `splitReach` in `lib/pr-layouts.ts`) is handed to no layout and left out of
   the band's `N open in M repos · polled <age>`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card
   (`GithubAccessGroup`, the hook's second mount) lists each with GitHub's `detail` and the token fix; a repo the token reads whose checks it may not
   (`checksDetail`, a `FORBIDDEN` on `statusCheckRollup` alone) is drawn like any other with every PR's `checks` `unknown` and listed on that card under
@@ -553,7 +556,7 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   **Cards** is a sheet per repo with an open PR or a departed outcome (`cardRepos`), its head a dark 28 px repo `GlyphTile`, the short repo name (`repoShortName`), the
   `N open` pill and `polled <age>` at the trailing edge, the cards flowing two-up in `.prs-cards-grid` (one column under ~1100 px of pane), its rows the same `PrRow` Inbox draws
   (without the repo name; Cards' text takes a 240 px basis so the keys stay at the right of a two-up card, Inbox keeps 320); a repo read cleanly with none is counted in the
-  toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — the split Merge (main half from `mergeMain`: `Merge`, `Auto-merge` or `Auto-merge on`; its chevron opens `Merge menu`: Merge, Enable/Disable auto-merge, Update branch, the row `primaryKey` names ticked) and an icon link `Open #n on GitHub` — with its why-line (`whyLine`: the repo's and the token's reasons only), and the same foot, `PrFoot` — the merge `Confirm`,
+  toolbar instead (`emptyRepoNote`, `N repos with no open PRs`). All three draw the same key strip, `PrActions` — the split Merge (main half from `mergeMain`: `Merge`, `Auto-merge` or `Auto-merge on`; its chevron opens `Merge menu`: Merge, Enable/Disable auto-merge, Update branch, Resolve conflicts, the row `primaryKey` names ticked) and an icon link `Open #n on GitHub` — with its why-line (`whyLine`: the repo's and the token's reasons only) and, under it, the resolve line (`PrResolveLine`), and the same foot, `PrFoot` — the merge `Confirm`,
   the method `Select` inside it, then `PrOutcomeLine`. A blocked main half (dashed, reading `Blocked`) or menu row is `aria-disabled` with its reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync
   off` on each for a sync-off repo) as its `title` (the half) and its `aria-describedby` (both; a row's sub-line is the reason); the split is `disabled` outright only while its PR's write runs, because the page
   owns an in-flight set keyed `<repo>#<number>` (`prKey` / `parsePrKey`, `lib/prs.ts`). The page holds ONE `confirming` key, so a second `Merge` moves the Confirm, and a write leaving, a layout
@@ -572,6 +575,17 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   page's own re-read, and on `ok` the shell's trackers `reload()`, so the merge's closed issues and the repo's other PRs (behind, `Update branch`) are current
   without a press of Sync — the named sweep makes the PR cache re-read that repo inside its TTL. No other outcome posts one; a refused sweep is silent, the
   row still reading `merged`. It does not go through `useSweep`, so the GitHub pill's spinner does not turn for it.
+  **Resolve conflicts** ([spec](../superpowers/specs/2026-11-17-pr-conflict-resolve-design.md), "The board") is the Merge menu's fourth row, `merge <base> in
+  with a headless session` under a `robot` tile. The page reads `useAgents()` and hands every layout `gateFor` (`resolveGateFor`, `lib/pr-resolve.ts`): a
+  `null` gate (status not landed) or a `hidden` one (agents off, or no registered project maps the repo) leaves the row out — the environment-level half of
+  the hidden-versus-disabled rule — and a `disabled` or `enabled` one draws it. Its per-PR reasons are `resolveBlock`'s, in the route's own refusal order
+  (sync off, the project's visibility, `fork — cannot push`, `mergeability pending`, `no conflicts`, `resolving…`, `resolved — waiting for GitHub`, then
+  `prRunWarning`'s text, which `PrRow` and Matrix's `MatrixExpand` each pass in); a stopped outcome is no block. A click calls the page's `resolve`, which
+  mirrors `write`: the key joins `inFlight`, the old outcome clears, `dispatchPrResolve` posts, a refusal's sentence lands as an error outcome, a success
+  records none, and the page re-reads before the key leaves. The resolve states are indexed once by `<repo>#<number>` (`resolveIndex`). `PrResolveLine`
+  draws, from `shownOutcome`: a live session as a `resolving…` chip (a link to the session through Settings' `linkBase` once the spawn has answered with an
+  id), a `pushed` outcome as a `resolved — waiting for GitHub` chip, a `stopped` one as `resolve stopped: <reason>` with a `session ↗` link when the session
+  is known, and nothing for `up-to-date`, an outcome about another head, or no state.
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live
@@ -750,8 +764,10 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   and `useFilesPage`/`useGithubPage` with their setters, `persistedStore`s (`hooks/persistedStore.ts`) like `useJiraPage`.
 - `components/github/` — `GithubSettingsView` (GitHub › Settings), `GithubSyncGroup`, its `Sync` card, and `GithubAccessGroup`, its `Access` card;
   `PullRequestsView` (GitHub › PRs) and the three layouts it switches between — `PrInbox`, `PrMatrix`, `PrCards` — over the shared `PrActions` (merge,
-  auto-merge, update, open), `PrFoot` (the merge Confirm, then `PrOutcomeLine`) and `PrRepoNotes`; `components/settings/SourcesGroup.tsx` is the Shared report.
-- `lib/prs.ts`, `lib/pr-run.ts`, `lib/prs-api.ts` and `hooks/usePullRequests.ts` — the PRs page's derivations (chips, the three blocks, the default method,
+  auto-merge, update, resolve conflicts, open), `PrResolveLine` (the resolve status line under the strip),
+  `PrFoot` (the merge Confirm, then `PrOutcomeLine`) and `PrRepoNotes`; `components/settings/SourcesGroup.tsx` is the Shared report.
+- `lib/prs.ts`, `lib/pr-run.ts`, `lib/pr-resolve.ts`, `lib/prs-api.ts` and `hooks/usePullRequests.ts` — the PRs page's
+  derivations (chips, the three blocks, the default method,
   `UpdateMark`, `whyLine`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read (mounted once, by the shell); `lib/pr-layouts.ts` is the layout key, its
   options (`PR_LAYOUT_OPTIONS`) and stored choice, `splitReach` (which hides the repos the token cannot read), `cardRepos` and `emptyRepoNote`, and every Inbox
   and Matrix derivation: a PR's level, severity, verdict and rank, `primaryKey`, the Matrix cells, tones and column counts.

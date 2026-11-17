@@ -1,14 +1,17 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
+import { PrResolveLine } from './PrResolveLine';
 import { Chip } from '../ui/Chip';
 import { Glyph, type GlyphName } from '../ui/Glyphs';
 import { GlyphTile, type GlyphTileTone } from '../ui/GlyphTile';
 import { Popover } from '../ui/Popover';
 import { SplitChip } from '../ui/SplitChip';
 import { primaryKey } from '../../lib/pr-layouts';
+import { resolveBlock } from '../../lib/pr-resolve';
 import { autoMergeBlock, defaultMethod, mergeBlock, mergeMain, prKey, updateBlock, whyLine, type PrOutcome } from '../../lib/prs';
 import { setAutoMerge, updateBranch } from '../../lib/prs-api';
-import type { PrAutoMergeRequest, PrRepoView, PrWriteResult, PullRequestRow } from '../../../../shared/types';
+import type { DispatchGate } from '../../../../shared/agent';
+import type { PrAutoMergeRequest, PrRepoView, PrResolveState, PrWriteResult, PullRequestRow } from '../../../../shared/types';
 
 /**
  * The one key strip every GitHub › PRs layout draws beside a pull request (.claude/DESIGN.md §8.11, "Actions and their reasons"; spec §4.8): a split Merge and
@@ -29,10 +32,19 @@ import type { PrAutoMergeRequest, PrRepoView, PrWriteResult, PullRequestRow } fr
  * them. An armed PR on a sync-off repo is the one half whose NAME and look disagree on purpose: it is still `Auto-merge on #n`, because that is what it is,
  * and `Blocked`, because `sync off` stops a disarm like every write (parked: whether the page should let a person disarm from a repo it will not write to).
  *
- * **The chevron opens `Merge menu`, the tenth `Popover` composer**: `Merge` (asks first, then merges), `Enable auto-merge` / `Disable auto-merge` and
- * `Update branch`, each a plain button with a tile. A blocked row is `aria-disabled` and its sub-line IS the reason, pointed at by `aria-describedby`, so the
+ * **The chevron opens `Merge menu`, the tenth `Popover` composer**: `Merge` (asks first, then merges), `Enable auto-merge` / `Disable auto-merge`,
+ * `Update branch` and — where a resolve session could ever start — `Resolve conflicts`, each a plain button with a tile. Up to four rows, and the fourth
+ * follows `.claude/rules/board.md`'s hidden-versus-disabled split: an environment-level block (`gate` `null` while the agents status is unknown, or `hidden`
+ * — agents off, or no registered project maps this repo) leaves the row out entirely, while every per-PR reason (`resolveBlock`: sync off, the project's
+ * visibility, a fork, mergeability pending, no conflicts, a session already resolving, a push GitHub has not seen, a run's warning) keeps it, disabled and
+ * saying why. The row starts nothing itself: `onResolve` is the page's, which holds the PR in flight and re-reads.
+ *
+ * A blocked row is `aria-disabled` and its sub-line IS the reason, pointed at by `aria-describedby`, so the
  * menu says the same thing the half does without a tooltip. The row `primaryKey` names carries an `aria-hidden` tick. Focus lands on the first enabled row when
  * the menu opens; Escape (the Popover's) and a pick both hand it back to the chevron.
+ *
+ * **The resolve line** (`PrResolveLine`) sits under the why-line, a sibling of it rather than a part: it reports what the last resolve session did, which no
+ * other row or cell says, and it draws in every layout because every layout draws this strip.
  *
  * **The why-line** under the strip is `whyLine`'s: only the reasons a row does not already state elsewhere — the repo's and the token's (`sync off` once, not
  * three times), never the PR's own facts, which its chips, cells and verdict already say. `omitUpdatingReason` drops `updating…` from it for a layout that
@@ -56,6 +68,10 @@ export function PrActions({
   busy,
   onMerge,
   onWrite,
+  warning,
+  gate,
+  resolveState,
+  onResolve,
   omitUpdatingReason = false,
   blockedText = false
 }: {
@@ -71,6 +87,14 @@ export function PrActions({
   onMerge: () => void;
   /** Runs one write for this PR and resolves once its outcome is recorded and the page has re-read. Never rejects. */
   onWrite: (call: () => Promise<PrWriteResult>) => Promise<void>;
+  /** `prRunWarning`'s text for this PR, or `null`: the last of `resolveBlock`'s reasons, passed in because it needs the run context the strip does not hold. */
+  warning: string | null;
+  /** The repo's resolve dispatch gate (`resolveGateFor`): `null` or `hidden` draws no Resolve conflicts row; `disabled` and `enabled` draw it. */
+  gate: DispatchGate | null;
+  /** This PR's resolve state, for the row's reason and the resolve line; `undefined` when no session ever touched it. */
+  resolveState: PrResolveState | undefined;
+  /** `Resolve conflicts` was picked: the page starts the session. */
+  onResolve: () => void;
   /** Leave `updating…` off the why-line, for a layout that already prints it beside the row (Matrix's Base cell). */
   omitUpdatingReason?: boolean;
   /** A blocked main half reads its reason instead of `Blocked`, for a layout that has the room. */
@@ -150,6 +174,20 @@ export function PrActions({
       primary: primary === 'update'
     }
   ];
+  // Hidden, not disabled, on an environment-level block (see the header): a row that could never work is not drawn as one that might.
+  if (gate !== null && gate.control !== 'hidden') {
+    rows.push({
+      id: 'resolve',
+      // `robot`: the one row that hands the PR to a session rather than asking GitHub, drawn as the board draws an agent.
+      glyph: 'robot',
+      tone: 'neutral',
+      label: 'Resolve conflicts',
+      sub: `merge ${base} in with a headless session`,
+      block: resolveBlock(pr, repo, gate, resolveState, warning),
+      act: onResolve,
+      primary: false
+    });
+  }
 
   const mainId = `${ids}-main`;
   const word = half.mode === 'merge' ? 'Merge' : half.mode === 'arm' ? 'Auto-merge' : 'Auto-merge on';
@@ -235,6 +273,7 @@ export function PrActions({
         </span>
       )}
       {reasons.length > 0 && <p className="prs-why">{reasons.join(' · ')}</p>}
+      <PrResolveLine pr={pr} state={resolveState} />
     </div>
   );
 }

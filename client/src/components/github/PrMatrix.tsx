@@ -92,6 +92,9 @@ function MatrixExpand({ r, props, id }: { r: RankedPr; props: PrLayoutProps; id:
   const updating = props.marks[key] !== undefined;
   const outcome = props.outcomes[key]?.kind === 'updating' ? undefined : props.outcomes[key];
   const write = (call: () => Promise<PrWriteResult>) => props.write(key, repo.repo, pr.headSha, call);
+  // The Resolve conflicts row's last reason. The collapsed row computes the same warning for its own cell; the expansion asks again rather than threading it
+  // down, because it is one pure call on props both already hold.
+  const warning = prRunWarning(pr, repo.repo, props.ctx, props.now);
   return (
     <tr className="prs-matrix-expand" id={id} data-testid={`pr-expand-${key}`}>
       <td colSpan={COLUMN_COUNT}>
@@ -104,6 +107,10 @@ function MatrixExpand({ r, props, id }: { r: RankedPr; props: PrLayoutProps; id:
             busy={props.inFlight.has(key)}
             onMerge={() => props.setConfirming(key)}
             onWrite={write}
+            warning={warning}
+            gate={props.gateFor(repo.repo)}
+            resolveState={props.resolves.get(key)}
+            onResolve={() => void props.resolve(key, repo.repo, pr.number)}
             omitUpdatingReason
             blockedText
           />

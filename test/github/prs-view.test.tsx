@@ -9,7 +9,8 @@ import '@testing-library/jest-dom';
 import PullRequestsView from '../../client/src/components/github/PullRequestsView';
 import { PR_LAYOUT_KEY } from '../../client/src/lib/pr-layouts';
 import { UPDATING_MS } from '../../client/src/lib/prs';
-import type { OrchestratorRun, PrRepoView, PullRequestRow, PullRequestsPayload, RunQueueItem } from '../../shared/types';
+import { RUN_HELD_STAGES } from '../../shared/agent';
+import type { AgentsStatus, OrchestratorRun, PrRepoView, PrResolveState, PullRequestRow, PullRequestsPayload, RunQueueItem } from '../../shared/types';
 import { PullRequestsProvider } from '../../client/src/hooks/PullRequestsContext';
 import { TrackersContext } from '../../client/src/hooks/TrackersContext';
 import { OrchestratorRunsProvider } from '../../client/src/hooks/OrchestratorRunsContext';
@@ -144,9 +145,21 @@ let reloadTrackers: jest.Mock;
 /** Every request in the order it left: a case that needs the sweep BEFORE the page's re-read reads it here. */
 let order: string[];
 
+/** `GET /api/agents/pr-resolve`'s states (the page's second read beside `/api/prs`). */
+let resolveStates: PrResolveState[];
+/** `GET /api/agents/status` — every project visible and dispatch on, so the Resolve conflicts row is drawn unless a case says otherwise. */
+let agentsStatus: AgentsStatus;
+
 /** A fresh copy per answer, as a real `json()` gives: a case that edits `payload` between reads must not edit the answer the page already holds. */
 const respond = (status: number, body: unknown) =>
   Promise.resolve({ ok: status < 300, status, json: () => Promise.resolve(JSON.parse(JSON.stringify(body)) as unknown) } as Response);
+
+/** The two agents reads the page makes beside `/api/prs`, answered the same way by every stub in this file (a hung one would hold the PR read with it). */
+function agentsRead(url: string): Promise<Response> | null {
+  if (url === '/api/agents/pr-resolve') return respond(200, { resolves: resolveStates });
+  if (url === '/api/agents/status') return respond(200, agentsStatus);
+  return null;
+}
 
 /** The layout is a stored per-device choice (`PR_LAYOUT_KEY`); a case that asserts one layout's anatomy pins it before it renders. */
 const storeLayout = (layout: 'inbox' | 'matrix' | 'cards'): void => localStorage.setItem(PR_LAYOUT_KEY, JSON.stringify(layout));
@@ -169,9 +182,13 @@ beforeEach(() => {
   answerSweep = () => ({ status: 200, body: { platforms: [], projects: [] } });
   reloadTrackers = jest.fn();
   order = [];
+  resolveStates = [];
+  agentsStatus = { enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto', projectPaths: ['/p/x', '/p/y'] };
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     order.push(url);
+    const agents = agentsRead(url);
+    if (agents !== null) return agents;
     if (url === '/api/prs' && init?.method !== 'POST') {
       reads += 1;
       return respond(200, payload);
@@ -457,6 +474,8 @@ describe('PullRequestsView — merge', () => {
     let release: (v: Response) => void = () => {};
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/prs' && init?.method !== 'POST') return respond(200, payload);
+      const agents = agentsRead(String(input));
+      if (agents !== null) return agents;
       posts.push({ url: String(input), body: JSON.parse(String(init?.body)) as unknown });
       return new Promise<Response>((r) => {
         release = r;
@@ -493,6 +512,8 @@ describe('PullRequestsView — merge', () => {
     let release: (v: Response) => void = () => {};
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/prs' && init?.method !== 'POST') return respond(200, payload);
+      const agents = agentsRead(String(input));
+      if (agents !== null) return agents;
       return new Promise<Response>((r) => {
         release = r;
       });
@@ -597,6 +618,8 @@ describe('PullRequestsView — blocked actions', () => {
     let release: (v: Response) => void = () => {};
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/prs' && init?.method !== 'POST') return respond(200, payload);
+      const agents = agentsRead(String(input));
+      if (agents !== null) return agents;
       return new Promise<Response>((r) => {
         release = r;
       });
@@ -636,7 +659,8 @@ describe('PullRequestsView — a merge syncs its repo (#505)', () => {
     expect(sweeps).toEqual([{ repo: 'futin/y' }]);
     expect(reloadTrackers).toHaveBeenCalledTimes(1);
     expect(reads).toBe(before + 1);
-    expect(order).toEqual(['/api/prs/merge', '/api/github/sweep', '/api/prs']);
+    // The re-read is the hook's whole tick: `/api/prs` and, beside it, the resolve states (spec 2026-11-17-pr-conflict-resolve-design.md).
+    expect(order).toEqual(['/api/prs/merge', '/api/github/sweep', '/api/prs', '/api/agents/pr-resolve']);
   });
 
   it('an update-branch answered update-requested posts no sweep', async () => {
@@ -1266,6 +1290,8 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
     let release: (v: Response) => void = () => {};
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/prs' && init?.method !== 'POST') return respond(200, payload);
+      const agents = agentsRead(String(input));
+      if (agents !== null) return agents;
       return new Promise<Response>((r) => {
         release = r;
       });
@@ -1334,4 +1360,141 @@ describe('PullRequestsView — the page owns marks, outcomes and writes', () => 
       expect(moreOf(strip)).toBeEnabled();
     });
   });
+});
+
+/* ---------------------------------------------------------------------------------------------------------------------------------------------------------
+   Resolve conflicts (spec `2026-11-17-pr-conflict-resolve-design.md`, "The board"): the page reads the agents status for the gate, threads the run warning to
+   the row in every layout, runs the dispatch through the same in-flight set as a write, and draws a refusal on the outcome line.
+   ------------------------------------------------------------------------------------------------------------------------------------------------------- */
+
+describe('PullRequestsView — Resolve conflicts', () => {
+  const PR3 = pr({
+    number: 3,
+    title: 'Untangle the queue',
+    author: 'di',
+    head: 'backlog/3',
+    headSha: '3'.repeat(40),
+    base: 'main',
+    url: 'https://github.com/futin/y/pull/3',
+    mergeable: 'conflicting',
+    mergeState: 'dirty',
+    updatedAt: ago(30_000)
+  });
+  const KEY = 'futin/y#3';
+  const DISPATCH = '/api/agents/dispatch-pr-resolve';
+  const dispatches = () => posts.filter((p) => p.url === DISPATCH);
+  /** A live run on `/p/y` whose queue holds item 3 at a held stage — the warning `prRunWarning` reads for head `backlog/3`. */
+  const holdRun = (): void => {
+    mockRuns.runs = [
+      {
+        runId: 'r1',
+        project: '/p/y',
+        status: 'running',
+        base: 'main',
+        queue: [{ id: '3', title: 'item 3', stage: RUN_HELD_STAGES[0] } as RunQueueItem],
+        updatedAt: ago(5_000)
+      } as OrchestratorRun
+    ];
+  };
+
+  beforeEach(() => {
+    payload.repos[1] = { ...payload.repos[1], prs: [PR3, PR12], total: 2 };
+  });
+
+  it("Inbox: a run holding the PR's item is the Resolve row's reason", async () => {
+    storeLayout('inbox');
+    holdRun();
+    await mount();
+    const resolve = menuRow(strip(KEY), 'Resolve conflicts');
+    expect(resolve).toHaveAttribute('aria-disabled', 'true');
+    expect(resolve).toHaveAccessibleDescription('run in progress on this machine');
+    fireEvent.click(resolve);
+    expect(dispatches()).toEqual([]);
+  });
+
+  it("Matrix (expanded row): a run holding the PR's item is the Resolve row's reason", async () => {
+    storeLayout('matrix');
+    holdRun();
+    const { user } = await mount();
+    await user.click(screen.getByTestId(`pr-mrow-${KEY}`));
+    const resolve = menuRow(screen.getByTestId(`pr-expand-${KEY}`), 'Resolve conflicts');
+    expect(resolve).toHaveAttribute('aria-disabled', 'true');
+    expect(resolve).toHaveAccessibleDescription('run in progress on this machine');
+  });
+
+  it('draws no Resolve row while dispatch is off (a hidden gate)', async () => {
+    storeLayout('cards');
+    agentsStatus = { ...agentsStatus, enabled: false };
+    await mount();
+    expect(() => menuRow(strip(KEY), 'Resolve conflicts')).toThrow();
+    expect(within(strip(KEY)).getByRole('dialog', { name: 'Merge menu' })).not.toHaveTextContent('Resolve conflicts');
+  });
+
+  it('holds the PR in flight before the POST answers: the chevron is disabled, opens nothing, and one POST left (Review Focus 3)', async () => {
+    storeLayout('cards');
+    const ok = global.fetch;
+    let release: (v: Response) => void = () => {};
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === DISPATCH) {
+        posts.push({ url: DISPATCH, body: JSON.parse(String(init?.body)) as unknown });
+        return new Promise<Response>((r) => {
+          release = r;
+        });
+      }
+      return (ok as jest.Mock)(input, init) as Promise<Response>;
+    }) as unknown as typeof fetch;
+    await mount();
+    // Opened outside the async `act`: `menuRow`'s own sync `act` nested inside one would not commit the menu before it queries it.
+    const resolveRow = menuRow(strip(KEY), 'Resolve conflicts');
+    await act(async () => {
+      fireEvent.click(resolveRow);
+      await drain();
+    });
+    expect(chevron(KEY)).toBeDisabled();
+    fireEvent.click(chevron(KEY));
+    expect(within(strip(KEY)).queryByRole('dialog', { name: 'Merge menu' })).toBeNull();
+    expect(dispatches()).toEqual([{ url: DISPATCH, body: { repo: 'futin/y', number: 3 } }]);
+    expect(chevron('futin/y#12')).toBeEnabled();
+
+    resolveStates = [{ repo: 'futin/y', number: 3, live: { sessionId: 's1' }, outcome: null }];
+    await act(async () => {
+      release({ ok: true, status: 202, json: () => Promise.resolve({ sessionId: 's1' }) } as Response);
+      await drain();
+    });
+    await flush();
+    expect(chevron(KEY)).toBeEnabled();
+    // A dispatch that stood records no outcome line; the re-read's live state says it instead, and is now the row's reason.
+    expect(within(row(KEY)).queryByTestId('pr-outcome')).toBeNull();
+    expect(within(row(KEY)).getByTestId('pr-resolve')).toHaveTextContent('resolving…');
+    expect(menuRow(strip(KEY), 'Resolve conflicts')).toHaveAccessibleDescription('resolving…');
+  });
+
+  it("draws a refused POST's sentence verbatim on the outcome line, in the error kind, and re-reads", async () => {
+    storeLayout('cards');
+    const REFUSED = 'a resolve of futin/y#3 is already running — wait for it to finish';
+    answerPost = (url) => (url === DISPATCH ? { status: 409, body: { error: REFUSED } } : { status: 200, body: {} });
+    await mount();
+    const before = reads;
+    await clickAndSettle(menuRow(strip(KEY), 'Resolve conflicts'));
+    expect(dispatches()).toHaveLength(1);
+    const line = within(row(KEY)).getByTestId('pr-outcome');
+    expect(line).toHaveTextContent(REFUSED);
+    expect(line).toHaveClass('prs-outcome-error');
+    expect(reads).toBe(before + 1);
+    expect(chevron(KEY)).toBeEnabled();
+  });
+
+  it.each(['cards', 'inbox', 'matrix'] as const)(
+    'a resolve state for a PR no repo lists renders nothing and throws nothing in %s (Review Focus 4)',
+    async (layout) => {
+      storeLayout(layout);
+      resolveStates = [
+        { repo: 'futin/y', number: 99, live: { sessionId: 's1' }, outcome: null },
+        { repo: 'futin/gone', number: 1, live: null, outcome: { outcome: 'stopped', reason: 'x', fromSha: 'a', headSha: 'a', sessionId: null } }
+      ];
+      await mount();
+      expect(screen.queryByTestId('pr-resolve')).toBeNull();
+      expect(screen.queryByText(/resolve stopped/)).toBeNull();
+    }
+  );
 });

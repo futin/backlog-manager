@@ -139,6 +139,10 @@ export function PrRow({
         busy={props.inFlight.has(key)}
         onMerge={() => props.setConfirming(key)}
         onWrite={write}
+        warning={warning}
+        gate={props.gateFor(repo.repo)}
+        resolveState={props.resolves.get(key)}
+        onResolve={() => void props.resolve(key, repo.repo, pr.number)}
       />
     </li>
   );
