@@ -1552,7 +1552,7 @@ describe('JiraView — the review button opens the launch sheet', () => {
     }
   };
   const GITLAB = {
-    status: { state: 'connected', site: 'gitlab.example.test', malformedSite: false, user: { username: 'ada', name: 'Ada' }, httpStatus: null, reason: null, armed: true, retryAt: null, mappedRepos: 1, foundHosts: [], problems: [] },
+    status: { state: 'connected', site: 'gitlab.example.test', malformedSite: false, user: { username: 'ada', name: 'Ada' }, httpStatus: null, reason: null, armed: true, retryAt: null, mappedRepos: 1, foundHosts: [], problems: [], interval: '1m' },
     jiraProjects: { PAY: [{ path: 'dev/pay', repo: 'pay', polledAt: iso(2), capped: false, failed: false, repos: ['/Users/ada/pay'] }] },
     mrs: [LEAD]
   } as unknown as GitlabPayload;

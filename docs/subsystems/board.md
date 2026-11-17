@@ -163,7 +163,7 @@ until the Jira card needed the same band for a live session, and the component o
 Delivery pane (full) and the List's Delivery cell (`compact`) — and its `.jira-dlv-*` classes are the Jira stylesheet's, outside the ui primitives block.
 Everything else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`,
 `RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`, `StageBars`, `WatchdogMonitor` (runs); `JiraView`, `JiraBoardView`, `JiraSessionsView`, `JiraIssueList`, `JiraCard`,
-`JiraDetail`, `JiraSetupView`, `JiraBoardSheet`, `JiraReposGroup`, `JiraConnectionGroup`, `JiraSkillsGroup`, `JiraWorktreeRow`, `JiraRunMenu`,
+`JiraDetail`, `JiraSetupView`, `JiraBoardSheet`, `JiraReposGroup`, `GitlabSyncGroup`, `JiraConnectionGroup`, `JiraSkillsGroup`, `JiraWorktreeRow`, `JiraRunMenu`,
 `JiraLaunchSheet`, `JiraBranchSection`, `MrChip`, `GitlabBandLine`, `DeliveryPane` (jira). `JiraChip` sits at the top level of `components/` beside
 `TrackerChip`, because the shell draws it. `FilterBar` sits at the top level of `components/`, like `lib/view-keys.ts`, because more than one lazy chunk
 reads it (Board, Archive and the Jira board); `RunControls` sits there too, though only the Runs chunk reads it (`RunDetail`, `WatchdogMonitor`), and
@@ -459,6 +459,13 @@ GitHub, so it is the machine's, in `settings/tracker-sync.json`. `useTrackers().
 the server's value, never the one clicked; a refusal (turning a repo off under a live or paused run) keeps the old value selected and puts the server's sentence
 in the row's hint until the next pick for that repo or a read in which its interval has moved — not any read, which would wipe it within a second. Two checkouts
 of one repo are one key, so both rows move.
+
+Jira › Setup carries the GitLab twin (#527): a `GitLab` card (`GitlabSyncGroup`) under Repositories, one `Sync interval` row with the same pill over the same
+`SYNC_INTERVALS` keys. One row, not one per repo, because the GitLab poller reads every mapped project in one sweep, so the cadence is the machine's, in
+`settings/gitlab-sync.json`. It reads `useGitlabContext()` and draws nothing until there is a true value to show — no answer yet, GitLab unconfigured, or a
+status with no `interval` (an older API). A pick posts `POST /api/gitlab/sync` through `postJson`, holds the pill disabled until the post and the context's
+`refresh()` both settle, and shows the server's value, never the click; a refusal's sentence (`errorOf`) or `could not save — <message>` replaces the
+`<site> · every mapped repo, one sweep` hint until the next pick.
 
 The `Backlog tick` card (`TickGroup`) sits under the watchdog in the same column, because both are machine-wide controls — a value written to a file on the host
 — where the left column is the host report. It is three `Select`s of 1–10: the number of failed ticks in a row that halt a project (`haltAfter`, default 3), and

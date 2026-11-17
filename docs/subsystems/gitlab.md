@@ -43,9 +43,20 @@ with, so the two can never disagree. An MR that names none of its project's keys
 
 ## The poller
 
-A `setTimeout` chain every `GITLAB_POLL_MS` (2 min), the tracker poller's shape, with an immediate sweep on `arm()`. `arm()` runs at bootstrap, on every
-repos save (`JiraLiveService.onReposChanged`, never awaited by the save) and from the sweep route; a sweep that maps zero projects on the site disarms, and
-an `arm()` that lands mid-sweep re-arms after it. One sweep is in flight at a time and every caller joins it; `armed` is a timer or a flight.
+A `setTimeout` chain, the tracker poller's shape, with an immediate sweep on `arm()`. `arm()` runs at bootstrap, on every repos save
+(`JiraLiveService.onReposChanged`, never awaited by the save) and from the sweep route; a sweep that maps zero projects on the site disarms, and an `arm()`
+that lands mid-sweep re-arms after it. One sweep is in flight at a time and every caller joins it; `armed` is a timer, a flight or `parked`.
+
+**The cadence is a setting** (#527): `settings/gitlab-sync.json`, `{ "interval": "15s" | "1m" | "5m" | "off" }` — `SYNC_INTERVALS`, the same four tokens
+GitHub's sync and a Jira board use — picked on Jira › Setup's `GitLab` card and `DEFAULT_GITLAB_INTERVAL` (`1m`) when the file is missing, unreadable or holds
+anything else. One value per machine, not per repo, because one sweep reads every mapped project. `schedule()` reads it fresh (`readGitlabInterval`,
+`sync-config.util.ts`) every time it sets the next timer, so a hand edit takes effect at the next sweep; an open 429 window still pushes the timer past
+`retryAt`. `off` sets no timer and marks the poller `parked`: still armed, so `Sync now` and a repos save still sweep (the cold-boot sweep still runs
+too, since `arm()` sweeps before it schedules), and the status keeps reading `connected` — only the automatic sweeps stop. `POST /api/gitlab/sync`
+`{ interval }` is the file's one writer (`writeGitlabInterval`, through `writeJsonAtomic`, a file that exists but does not parse refused with a 409 and left
+byte-identical); after a write it calls `reschedule()`, which drops a pending timer (or the parked mark) and schedules again from the new value, so a change
+takes effect now, not after the old interval runs out. It does nothing while a sweep is in flight (that sweep's `finally` schedules from the new value) or
+while the poller is disarmed. The status carries the effective value as `interval`, in every state.
 
 **Per project, per sweep**: the opened MRs, then merged and closed MRs updated within `GITLAB_FINISHED_DAYS` (30), each `order_by=updated_at&sort=desc`, at
 `GITLAB_PER_PAGE` (100) rows a page and at most `GITLAB_PAGES_PER_PROJECT` (5) pages — a spent budget after a full page sets `capped`, and the order means it

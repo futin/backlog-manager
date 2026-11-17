@@ -1,6 +1,6 @@
 import { GitlabClient, type RawMr } from '../../server/src/gitlab/gitlab.client';
 import { GitlabPollerService } from '../../server/src/gitlab/poller.service';
-import { GITLAB_POLL_MS, GITLAB_SWEEP_WAIT_MS, type GitlabPayload } from '../../shared/types';
+import { GITLAB_SWEEP_WAIT_MS, SYNC_INTERVALS, type GitlabPayload, type SyncInterval } from '../../shared/types';
 import { FakeGitlab, rawDiscussion, rawMr, rawNote } from '../helpers/gitlab';
 
 const SITE = 'www.gitlab.timify.io';
@@ -10,6 +10,8 @@ const REMOTE_PAT = 'glpat-abc';
 const MS = 'development/backend/microservice';
 const PROXY = 'development/dev-api-graphql-proxy';
 const T0 = Date.parse('2026-11-12T10:00:00.000Z');
+/** The default interval's period (`DEFAULT_GITLAB_INTERVAL`, `1m`): what the harness's interval reads unless a case sets another. */
+const POLL_MS = SYNC_INTERVALS['1m'];
 
 const ORIGINS: Record<string, string> = {
   '/repos/microservice': `git@${SITE}:${MS}.git`,
@@ -32,6 +34,8 @@ interface Harness {
   listeners: (() => void)[];
   setRepos(r: Record<string, string[]>): void;
   setEnv(e: NodeJS.ProcessEnv): void;
+  /** The value behind the poller's `interval` dep — read at every use, so setting it is a write to `gitlab-sync.json` as the poller sees it. */
+  setInterval(i: SyncInterval): void;
   userCalls(): number;
   paths(): string[];
 }
@@ -39,13 +43,14 @@ interface Harness {
 const made: GitlabPollerService[] = [];
 
 function setup(
-  opts: { repos?: Record<string, string[]>; env?: NodeJS.ProcessEnv; client?: GitlabClient; fake?: FakeGitlab } = {}
+  opts: { repos?: Record<string, string[]>; env?: NodeJS.ProcessEnv; client?: GitlabClient; fake?: FakeGitlab; interval?: SyncInterval } = {}
 ): Harness {
   const fake = opts.fake ?? new FakeGitlab();
   const clock = { now: T0 };
   const listeners: (() => void)[] = [];
   let repos = opts.repos ?? { TIMIFY: ['/repos/microservice'] };
   let env: NodeJS.ProcessEnv = opts.env ?? { BM_GITLAB_SITE: SITE, BM_GITLAB_TOKEN: TOKEN };
+  let interval: SyncInterval = opts.interval ?? '1m';
   const svc = new GitlabPollerService(
     opts.client ?? new GitlabClient(fake.fetch),
     { onReposChanged: (l: () => void) => void listeners.push(l) },
@@ -53,7 +58,8 @@ function setup(
       repos: () => repos,
       readOrigin: async (p) => ORIGINS[p] ?? null,
       env: () => env,
-      now: () => clock.now
+      now: () => clock.now,
+      interval: () => interval
     }
   );
   made.push(svc);
@@ -64,6 +70,7 @@ function setup(
     listeners,
     setRepos: (r) => (repos = r),
     setEnv: (e) => (env = e),
+    setInterval: (i) => (interval = i),
     userCalls: () => fake.calls.filter((c) => new URL(c.url).pathname === '/api/v4/user').length,
     paths: () => fake.calls.map((c) => new URL(c.url).pathname)
   };
@@ -212,12 +219,12 @@ describe('GitlabPollerService — what a sweep reads', () => {
     ]);
     h.fake.script.set(detailPath(MS, 412), { status: 500 });
     h.fake.script.set(detailPath(MS, 413), { status: 500 });
-    h.clock.now = T0 + GITLAB_POLL_MS;
+    h.clock.now = T0 + POLL_MS;
     await h.svc.tick();
     let p = h.svc.payload();
     expect(p.mrs.find((m) => m.iid === 412)?.pipeline).toBe('success');
     expect(p.mrs.find((m) => m.iid === 413)?.pipeline).toBe('none');
-    expect(p.jiraProjects.TIMIFY[0]).toMatchObject({ failed: false, polledAt: new Date(T0 + GITLAB_POLL_MS).toISOString() });
+    expect(p.jiraProjects.TIMIFY[0]).toMatchObject({ failed: false, polledAt: new Date(T0 + POLL_MS).toISOString() });
     expect(p.status).toMatchObject({ state: 'unreachable', httpStatus: 500 });
 
     h.fake.script.set(detailPath(MS, 412), { status: 404 });
@@ -277,7 +284,7 @@ describe('GitlabPollerService — what a sweep reads', () => {
     const polledAt = new Date(T0).toISOString();
 
     h.fake.script.set(listPath(MS), { throws: new TypeError('fetch failed') });
-    h.clock.now = T0 + GITLAB_POLL_MS;
+    h.clock.now = T0 + POLL_MS;
     await h.svc.tick();
     let p = h.svc.payload();
     expect(p.mrs.map((m) => m.iid)).toEqual([412]);
@@ -294,11 +301,11 @@ describe('GitlabPollerService — what a sweep reads', () => {
     expect(h.fake.calls.every((c) => new URL(c.url).host === SITE)).toBe(true);
 
     h.fake.script.delete(listPath(MS));
-    h.clock.now = T0 + 3 * GITLAB_POLL_MS;
+    h.clock.now = T0 + 3 * POLL_MS;
     await h.svc.tick();
     p = h.svc.payload();
     expect(p.status).toMatchObject({ state: 'connected', reason: null });
-    expect(p.jiraProjects.TIMIFY[0]).toMatchObject({ failed: false, polledAt: new Date(T0 + 3 * GITLAB_POLL_MS).toISOString() });
+    expect(p.jiraProjects.TIMIFY[0]).toMatchObject({ failed: false, polledAt: new Date(T0 + 3 * POLL_MS).toISOString() });
   });
 });
 
@@ -761,5 +768,170 @@ describe('GitlabPollerService — repos per Jira project, findMr and reposFor', 
     expect(h.svc.findMr(GRP, 1)).toBeNull();
     h.svc.reposFor('PAY', GRP);
     expect(h.fake.calls).toHaveLength(calls);
+  });
+});
+
+/**
+ * #527 — the sweep's cadence is this machine's `gitlab-sync.json` interval, read at every `schedule()`. Fake timers read a pending timer's delay (Date and
+ * the event-loop turns a Response body needs stay real, as in the sweep-wait case above); the poller's own clock is the harness's. A sweep is counted by the
+ * one request every sweep makes first: the opened list's page 1.
+ */
+describe('GitlabPollerService — the sweep interval', () => {
+  const sweeps = (h: Harness): number =>
+    h.fake.calls
+      .map((c) => new URL(c.url))
+      .filter((u) => u.pathname === listPath(MS) && u.searchParams.get('state') === 'opened' && u.searchParams.get('page') === '1').length;
+
+  async function advance(ms: number): Promise<void> {
+    await jest.advanceTimersByTimeAsync(ms);
+    await settle();
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ['Date', 'setImmediate', 'nextTick', 'queueMicrotask'] });
+  });
+
+  it('5m: after the first sweep the next one runs at +300 000 ms, not at +299 999', async () => {
+    const h = setup({ interval: '5m' });
+    await boot(h);
+    expect(sweeps(h)).toBe(1);
+    await advance(299_999);
+    expect(sweeps(h)).toBe(1);
+    await advance(1);
+    expect(sweeps(h)).toBe(2);
+  });
+
+  it('15s: the next sweep runs at +15 000 ms', async () => {
+    const h = setup({ interval: '15s' });
+    await boot(h);
+    await advance(14_999);
+    expect(sweeps(h)).toBe(1);
+    await advance(1);
+    expect(sweeps(h)).toBe(2);
+  });
+
+  it('off: one bootstrap sweep, then no timer — yet armed, and the status says off', async () => {
+    const h = setup({ interval: 'off' });
+    const p = await boot(h);
+    await settle();
+    expect(sweeps(h)).toBe(1);
+    expect(jest.getTimerCount()).toBe(0);
+    expect(h.svc.armed).toBe(true);
+    expect(p.status.interval).toBe('off');
+    expect(p.status.armed).toBe(true);
+  });
+
+  it('off, armed: sweepNow() sweeps once more and the poller stays parked', async () => {
+    const h = setup({ interval: 'off' });
+    await boot(h);
+    expect(await h.svc.sweepNow()).toEqual({ kind: 'done' });
+    expect(sweeps(h)).toBe(2);
+    expect(h.svc.armed).toBe(true);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('off, armed: a repos save runs exactly one more sweep, then parks again', async () => {
+    const h = setup({ interval: 'off' });
+    await boot(h);
+    for (const l of h.listeners) l();
+    await settle();
+    expect(sweeps(h)).toBe(2);
+    expect(jest.getTimerCount()).toBe(0);
+    expect(h.svc.armed).toBe(true);
+    await advance(600_000);
+    expect(sweeps(h)).toBe(2);
+  });
+
+  it('off: a sweep that maps zero projects disarms, and sweepNow() then answers not-armed', async () => {
+    const h = setup({ interval: 'off' });
+    await boot(h);
+    h.setRepos({ TIMIFY: ['/repos/gh'] });
+    for (const l of h.listeners) l();
+    await settle();
+    expect(h.svc.armed).toBe(false);
+    expect(await h.svc.sweepNow()).toEqual({ kind: 'not-armed' });
+  });
+
+  it('reschedule() from a pending 5m timer to 15s: the sweep runs 15 s after the call', async () => {
+    const h = setup({ interval: '5m' });
+    await boot(h);
+    await advance(100_000);
+    h.setInterval('15s');
+    h.svc.reschedule();
+    await advance(14_999);
+    expect(sweeps(h)).toBe(1);
+    await advance(1);
+    expect(sweeps(h)).toBe(2);
+  });
+
+  it('reschedule() from a pending 1m timer to off: the timer is cancelled, the poller parked, no sweep in ten minutes', async () => {
+    const h = setup({ interval: '1m' });
+    await boot(h);
+    h.setInterval('off');
+    h.svc.reschedule();
+    expect(jest.getTimerCount()).toBe(0);
+    expect(h.svc.armed).toBe(true);
+    await advance(600_000);
+    expect(sweeps(h)).toBe(1);
+  });
+
+  it('reschedule() while parked, to 1m: a sweep a minute later, not at once', async () => {
+    const h = setup({ interval: 'off' });
+    await boot(h);
+    h.setInterval('1m');
+    h.svc.reschedule();
+    await settle();
+    expect(sweeps(h)).toBe(1);
+    await advance(59_999);
+    expect(sweeps(h)).toBe(1);
+    await advance(1);
+    expect(sweeps(h)).toBe(2);
+  });
+
+  it('reschedule() on an unarmed (unconfigured) poller: no timer and no request', async () => {
+    const h = setup({ env: {} });
+    h.svc.onApplicationBootstrap();
+    h.svc.reschedule();
+    await settle();
+    expect(jest.getTimerCount()).toBe(0);
+    expect(h.fake.calls).toHaveLength(0);
+  });
+
+  it('inside a 429 window ending 90 s ahead, a 15s interval waits the window out', async () => {
+    const h = setup({ interval: '15s' });
+    h.fake.script.set(listPath(MS), { status: 429, headers: { 'retry-after': '90' } });
+    await boot(h);
+    h.fake.script.delete(listPath(MS));
+    // The poller reads the harness's clock, not the faked timers, so it is moved in step: a sweep that fired inside the window would ask nothing.
+    h.clock.now = T0 + 15_000;
+    await advance(15_000);
+    expect(sweeps(h)).toBe(1);
+    h.clock.now = T0 + 89_999;
+    await advance(74_999);
+    expect(sweeps(h)).toBe(1);
+    h.clock.now = T0 + 90_000;
+    await advance(1);
+    expect(sweeps(h)).toBe(2);
+  });
+
+  it('unconfigured: the status carries the interval too — the default, or the harness value', () => {
+    expect(setup({ env: {} }).svc.payload().status.interval).toBe('1m');
+    expect(setup({ env: {}, interval: '5m' }).svc.payload().status.interval).toBe('5m');
+  });
+
+  it('off: a repos save that lands mid-sweep gets exactly one more sweep after it, then parks', async () => {
+    const h = setup({ interval: 'off' });
+    await boot(h);
+    h.fake.script.set(listPath(MS), { delay: 50 });
+    const pending = h.svc.sweepNow();
+    await settle();
+    expect(sweeps(h)).toBe(2);
+    for (const l of h.listeners) l();
+    // The delay answers every list read of a sweep (opened, merged, closed), so each sweep takes several 50 ms steps; parked, nothing else is pending.
+    for (let i = 0; i < 20; i++) await advance(50);
+    expect(await pending).toEqual({ kind: 'done' });
+    expect(sweeps(h)).toBe(3);
+    expect(jest.getTimerCount()).toBe(0);
+    expect(h.svc.armed).toBe(true);
   });
 });

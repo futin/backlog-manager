@@ -7,8 +7,9 @@ import type { GitlabPayload } from '../../../shared/types';
 
 /**
  * How long after one `GET /api/gitlab` settles the next is asked (#277: from the answer, not the wall clock). The route reads the server's in-memory MR cache
- * and costs GitLab nothing — the server's own sweep runs on its `GITLAB_POLL_MS` (2 min) — so this period only decides how soon a finished sweep shows. 30 s
- * keeps the Sources row and the MR badges within a half minute of it without a request that would outpace the cache it reads.
+ * and costs GitLab nothing — the server's own sweep runs on the interval set in Jira › Setup › GitLab (`gitlab-sync.json`, `1m` by default) — so this
+ * period only decides how soon a finished sweep shows. 30 s keeps the Sources row and the MR badges within a half minute of it without a request that would
+ * outpace the cache it reads.
  */
 export const GITLAB_CLIENT_POLL_MS = 30_000;
 

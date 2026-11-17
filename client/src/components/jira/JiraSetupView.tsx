@@ -14,15 +14,16 @@ import { JiraBoardSheet, type JiraProjectList } from './JiraBoardSheet';
 import { JiraConnectionGroup } from './JiraConnectionGroup';
 import { JiraReposGroup } from './JiraReposGroup';
 import { JiraSkillsGroup } from './JiraSkillsGroup';
+import { GitlabSyncGroup } from './GitlabSyncGroup';
 
 /**
  * Jira › Setup (Jira phase 2, spec §6.4; `Setup.html`, `BoardsTen.html`; DESIGN.md §8.9.3, and §8.6 for the card language it borrows whole).
  *
- * Settings' shape on purpose: a band (`Setup`, the `this machine` pill — everything on this page is written to `~/.backlog-manager/settings/jira.json` on
- * the host, so it is Settings › Shared's scope word), then cards composed from `SettingsGroup` / `SettingsRow` in Settings' own two hand-balanced columns
+ * Settings' shape on purpose: a band (`Setup`, the `this machine` pill — everything on this page is written to `~/.backlog-manager/settings/` on the host:
+ * `jira.json`, and since #527 the GitLab card's `gitlab-sync.json` — so it is Settings › Shared's scope word), then cards composed from `SettingsGroup` / `SettingsRow` in Settings' own two hand-balanced columns
  * (`.set-cols` / `.set-col`, folding to one at Settings' 1100 px — which also covers the plan's "stacking below 700 px"; a third breakpoint for the same
  * card language would let the two pages fold at different widths for no reason). Hand-balanced for §8.6's reason: a masonry reflow would move a card to
- * the other side as its neighbour grew a row. The left column is Boards, then Repositories; the right is Connection and, since phase 5,
+ * the other side as its neighbour grew a row. The left column is Boards, then Repositories, then GitLab (#527 — its sweep interval, beside the repos the sweep reads); the right is Connection and, since phase 5,
  * Skills — the mock's split, which keeps the two cards a person edits on one side and the report on the other.
  *
  * **The Boards card** (this task): a `New board` chip in the head; one row per board in `boardsForSetup`'s order (by name, `off` boards last), each its name
@@ -59,7 +60,10 @@ export function JiraSetupView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage
 
   return (
     <div className="set jira-setup">
-      <Band title="Setup" sub="the boards this machine follows, and where each Jira project's code lives · ~/.backlog-manager/settings/jira.json">
+      <Band
+        title="Setup"
+        sub="the boards this machine follows, and where each Jira project's code lives · ~/.backlog-manager/settings/jira.json, gitlab-sync.json"
+      >
         <Pill tone="neutral">this machine</Pill>
       </Band>
       <JiraConnectionGroup />
@@ -73,6 +77,7 @@ export function JiraSetupView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage
             onOpen={openBoard}
           />
           <JiraReposGroup projects={projects} />
+          <GitlabSyncGroup />
         </div>
         <div className="set-col">
           <JiraSkillsGroup />
