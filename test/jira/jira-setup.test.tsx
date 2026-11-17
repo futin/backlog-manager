@@ -119,6 +119,11 @@ let reposAnswer: (body: { project: string; paths: string[] }) => Promise<Respons
    answers — so a case can watch the card follow its own save. A case that wants a refusal replaces them. */
 let skillsAnswer: (body: { id?: string; name: string; prompt: string }) => Promise<Response>;
 let skillsDeleteAnswer: (body: { id: string }) => Promise<Response>;
+/* `POST /api/jira/skills/order`. The default does what the server does — puts the stored skills in the order `ids` names — so a case can watch the card
+   follow its own move. A case that wants a refusal replaces it. */
+let skillsOrderAnswer: (body: { ids: string[] }) => Promise<Response>;
+/* `GET /api/jira` normally answers `statusAnswer`; a case that needs to hold or fail ONE reload sets this, and the router clears it as it answers. */
+let nextStatusRead: (() => Promise<Response>) | null;
 /* `POST /api/jira/repo-defaults`. The default does what the server does — stores the path's two values in the status the next `GET /api/jira` answers (a
    `null` drops its key) — so a case can watch the row follow its own save. A case that wants a refusal replaces it. */
 let defaultsAnswer: (body: { path: string; base: string | null; namePattern: string | null }) => Promise<Response>;
@@ -156,6 +161,13 @@ beforeEach(() => {
     statusAnswer = { ...statusAnswer, skills: statusAnswer.skills.filter((k) => k.id !== body.id) };
     return answer({ ok: true });
   };
+  skillsOrderAnswer = (body) => {
+    const stored = statusAnswer.skills;
+    const ordered = body.ids.flatMap((id) => stored.filter((k) => k.id === id));
+    statusAnswer = { ...statusAnswer, skills: [...ordered, ...stored.filter((k) => !body.ids.includes(k.id))] };
+    return answer({ ok: true });
+  };
+  nextStatusRead = null;
   defaultsAnswer = (body) => {
     const repoDefaults = { ...statusAnswer.repoDefaults };
     const entry = { ...(body.base !== null && { base: body.base }), ...(body.namePattern !== null && { namePattern: body.namePattern }) };
@@ -181,7 +193,11 @@ beforeEach(() => {
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     sent.push({ url, init });
-    if (url === '/api/jira') return answer(statusAnswer);
+    if (url === '/api/jira') {
+      const held = nextStatusRead;
+      nextStatusRead = null;
+      return held !== null ? held() : answer(statusAnswer);
+    }
     if (url === '/api/jira/projects') {
       return answer([
         { key: 'OPS', name: 'Platform' },
@@ -198,6 +214,7 @@ beforeEach(() => {
     if (url.startsWith('/api/jira/refs?')) return refsAnswer(new URLSearchParams(url.split('?')[1]).get('repo') ?? '');
     if (url === '/api/jira/skills') return skillsAnswer(JSON.parse(String(init?.body)));
     if (url === '/api/jira/skills/delete') return skillsDeleteAnswer(JSON.parse(String(init?.body)));
+    if (url === '/api/jira/skills/order') return skillsOrderAnswer(JSON.parse(String(init?.body)));
     const issuesOf = /^\/api\/jira\/boards\/([^/]+)\/issues$/.exec(url);
     if (issuesOf !== null) return boardIssuesAnswer(decodeURIComponent(issuesOf[1]));
     if (url.startsWith('/api/jira/boards/')) return answer({ issues: [], polledAt: null });
@@ -1157,6 +1174,7 @@ describe('accessPhrase', () => {
 
 const GROOM: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' };
 const SUMMARISE: JiraSkill = { id: 's_0123abce', name: 'Summarise changes', prompt: '/summarise-jira-ticket-changes {key}' };
+const REVIEW: JiraSkill = { id: 's_0123abcf', name: 'Review MR', prompt: '/review {key}' };
 
 const skillsCard = (): HTMLElement => screen.getByRole('heading', { name: 'Skills' }).closest('section') as HTMLElement;
 const skillNames = (): string[] => Array.from(skillsCard().querySelectorAll('.jira-setup-skill .jira-run-label')).map((n) => n.textContent ?? '');
@@ -1335,5 +1353,128 @@ describe('the Skills card', () => {
     skillsAnswer = () => Promise.reject(new Error('down'));
     await userEvent.click(addSkillChip());
     expect(await within(skillsCard()).findByText('the skill was not saved — the server did not answer')).toBeInTheDocument();
+  });
+
+  describe('↑/↓ order (2026-11-17 skill-order spec)', () => {
+    const moveButton = (label: string): HTMLElement => within(skillsCard()).getByRole('button', { name: label });
+    const moveButtons = (): HTMLElement[] => within(skillsCard()).queryAllByRole('button', { name: /^Move / });
+    const orderPosts = (): { ids: string[] }[] => posts('/api/jira/skills/order').map((p) => JSON.parse(String(p.init?.body)));
+    const STALE = 'the skill list changed since this page loaded — reload and try again; nothing was written';
+
+    it('disables ↑ on the first skill and ↓ on the last, enables the rest, and gives the built-ins no arrows', async () => {
+      statusAnswer = status({ skills: [GROOM, SUMMARISE, REVIEW] });
+      await renderSetup();
+      expect(moveButton('Move Groom ticket up')).toBeDisabled();
+      expect(moveButton('Move Groom ticket down')).toBeEnabled();
+      expect(moveButton('Move Summarise changes up')).toBeEnabled();
+      expect(moveButton('Move Summarise changes down')).toBeEnabled();
+      expect(moveButton('Move Review MR up')).toBeEnabled();
+      expect(moveButton('Move Review MR down')).toBeDisabled();
+      for (const name of ['Work it end to end', 'Open with the ticket loaded']) {
+        expect(within(labelIn(name)).queryAllByRole('button', { name: /^Move / })).toHaveLength(0);
+      }
+      // The arrows sit before the default slot, so `Make default` and × keep their places.
+      const order = Array.from(labelIn('Groom ticket').querySelectorAll('button')).map((b) => b.getAttribute('aria-label'));
+      expect(order).toEqual(['Move Groom ticket up', 'Move Groom ticket down', 'Make Groom ticket the default action', 'Remove Groom ticket']);
+    });
+
+    it('↓ on the first skill POSTs the whole order with the two swapped, reloads, and draws what the server stored', async () => {
+      statusAnswer = status({ skills: [GROOM, SUMMARISE, REVIEW] });
+      await renderSetup();
+      const before = statusReads();
+      await userEvent.click(moveButton('Move Groom ticket down'));
+
+      await waitFor(() => expect(orderPosts()).toEqual([{ ids: ['s_0123abce', 's_0123abcd', 's_0123abcf'] }]));
+      expect(posts('/api/jira/skills/order')[0].init?.headers).toEqual({ 'content-type': 'application/json' });
+      await waitFor(() => expect(statusReads()).toBeGreaterThan(before));
+      await waitFor(() => expect(skillNames().slice(2)).toEqual(['Summarise changes', 'Groom ticket', 'Review MR']));
+    });
+
+    it('↑ on the last skill swaps it with the one above', async () => {
+      statusAnswer = status({ skills: [GROOM, SUMMARISE, REVIEW] });
+      await renderSetup();
+      await userEvent.click(moveButton('Move Review MR up'));
+      await waitFor(() => expect(orderPosts()).toEqual([{ ids: ['s_0123abcd', 's_0123abcf', 's_0123abce'] }]));
+      await waitFor(() => expect(skillNames().slice(2)).toEqual(['Groom ticket', 'Review MR', 'Summarise changes']));
+    });
+
+    it('after a landed move keeps every arrow disabled until the reload answers, so no move acts on the old list', async () => {
+      statusAnswer = status({ skills: [GROOM, SUMMARISE, REVIEW] });
+      await renderSetup();
+      let release: () => void = () => {};
+      nextStatusRead = () =>
+        new Promise<Response>((resolve) => {
+          release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(statusAnswer) } as Response);
+        });
+      await userEvent.click(moveButton('Move Groom ticket down'));
+      await waitFor(() => expect(orderPosts()).toHaveLength(1));
+      // `busy` has cleared (the add row is live again), yet the list drawn is still the pre-move one: every arrow waits.
+      await waitFor(() => expect(skillName()).toBeEnabled());
+      expect(skillNames().slice(2)).toEqual(['Groom ticket', 'Summarise changes', 'Review MR']);
+      for (const b of moveButtons()) expect(b).toBeDisabled();
+
+      await act(async () => release());
+      await waitFor(() => expect(skillNames().slice(2)).toEqual(['Summarise changes', 'Groom ticket', 'Review MR']));
+      expect(moveButton('Move Summarise changes down')).toBeEnabled();
+      expect(moveButton('Move Groom ticket up')).toBeEnabled();
+    });
+
+    it('a failed reload after a landed move re-enables the arrows (error turns true) rather than locking them', async () => {
+      statusAnswer = status({ skills: [GROOM, SUMMARISE, REVIEW] });
+      await renderSetup();
+      nextStatusRead = () => answer({ error: 'boom' }, 500);
+      await userEvent.click(moveButton('Move Groom ticket down'));
+      await waitFor(() => expect(orderPosts()).toHaveLength(1));
+      await waitFor(() => expect(moveButton('Move Summarise changes down')).toBeEnabled());
+      // The drawn list is still the pre-move one: the failed read changed nothing.
+      expect(skillNames().slice(2)).toEqual(['Groom ticket', 'Summarise changes', 'Review MR']);
+    });
+
+    it('a refused move shows the server’s sentence and leaves the drawn order alone', async () => {
+      statusAnswer = status({ skills: [GROOM, SUMMARISE, REVIEW] });
+      skillsOrderAnswer = () => answer({ error: STALE }, 409);
+      await renderSetup();
+      const before = statusReads();
+      await userEvent.click(moveButton('Move Groom ticket down'));
+      expect(await within(skillsCard()).findByText(STALE)).toHaveClass('set-error');
+      expect(skillNames().slice(2)).toEqual(['Groom ticket', 'Summarise changes', 'Review MR']);
+      expect(statusReads()).toBe(before);
+      expect(moveButton('Move Groom ticket down')).toBeEnabled();
+    });
+
+    it('a move the server never answers says the order was not saved', async () => {
+      statusAnswer = status({ skills: [GROOM, SUMMARISE] });
+      skillsOrderAnswer = () => Promise.reject(new Error('down'));
+      await renderSetup();
+      await userEvent.click(moveButton('Move Groom ticket down'));
+      expect(await within(skillsCard()).findByText('the order was not saved — the server did not answer')).toBeInTheDocument();
+    });
+
+    it('a refusal without a sentence falls back to the status line', async () => {
+      statusAnswer = status({ skills: [GROOM, SUMMARISE] });
+      skillsOrderAnswer = () => answer(null, 502);
+      await renderSetup();
+      await userEvent.click(moveButton('Move Groom ticket down'));
+      expect(await within(skillsCard()).findByText('the order was not saved (HTTP 502)')).toBeInTheDocument();
+    });
+
+    it('a hand-duplicated id is sent once, and its repeated row draws the same arrows as its first', async () => {
+      statusAnswer = status({ skills: [GROOM, SUMMARISE, { ...GROOM, name: 'Groom again' }, REVIEW] });
+      await renderSetup();
+      expect(moveButton('Move Groom again up')).toBeDisabled();
+      expect(moveButton('Move Groom again down')).toBeEnabled();
+      await userEvent.click(moveButton('Move Groom ticket down'));
+      await waitFor(() => expect(orderPosts()).toEqual([{ ids: ['s_0123abce', 's_0123abcd', 's_0123abcf'] }]));
+    });
+
+    it('a row whose remove Confirm is open has its arrows disabled; the other rows keep theirs', async () => {
+      statusAnswer = status({ skills: [GROOM, SUMMARISE, REVIEW] });
+      await renderSetup();
+      await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Remove Summarise changes' }));
+      expect(moveButton('Move Summarise changes up')).toBeDisabled();
+      expect(moveButton('Move Summarise changes down')).toBeDisabled();
+      expect(moveButton('Move Groom ticket down')).toBeEnabled();
+      expect(moveButton('Move Review MR up')).toBeEnabled();
+    });
   });
 });

@@ -2065,6 +2065,7 @@ button.rail-count { cursor: pointer }
 .jira-setup-skill .jira-run-text { flex: 1 1 auto }
 .jira-setup-skill .jira-run-label { font-size: 13px; font-weight: 500; color: var(--ink) }
 .jira-setup-default { flex: none; font-size: 11px; color: var(--ink3) }
+.jira-setup-move { flex: none; display: flex; gap: 4px } /* The ↑/↓ pair keeps its 28 px chips whole and close: the row's 10 px gap would split them. */
 .jira-setup-skill .jira-setup-x { margin-left: 0 }
 /* The connection banner (spec §4.4): one wrapping row — the 40 px initials disc, who is connected, three figures, the status pill — with the server's `detail`
    on a red line under it when the pill is not Healthy. Page-local classes only (guard 7); one face, 11 px floor. */
