@@ -98,7 +98,7 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
   other tool suites use):
   - `parseTarget`: `acme/web#12` → `{ owner:'acme', name:'web', repo:'acme/web', number:12 }`; `acme/web.js#3` accepted; `acme/web`, `acme/web#0`,
     `acme/web#-1`, `acme/web#1x`, `acme_x/web#1`, ``, `acme/web#12 ` → `null`.
-  - `fileKey('acme/my__lib', 12)` → `acme__my__lib__12`, and the server's `parseFileKey` (Task 4) splits it back; `parseTarget('acme/my__lib#12')` accepted.
+  - `fileKey('acme/my__lib', 12)` → `acme__my__lib__12`; `parseTarget('acme/my__lib#12')` accepted (the split back is Task 4's `parseFileKey`, tested there).
   - `paths` with cwd `/r`, home `/h`, `acme/web#12` → tree `/r/.worktrees/pr-resolve-12`, baseTree `/r/.worktrees/pr-resolve-12-base`, lock
     `/h/locks/acme__web__12.lock`, outcome `/h/acme__web__12.json`.
   - `takeLock` fresh → `{ taken:true, recovered:false }` and the file holds `{ sessionId:'s1', at }`; a second `takeLock` with `s2` → `{ taken:false }`.
@@ -244,7 +244,9 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
     201 and one 409 — run once with no outcome file and once with an outcome file `{ sessionId: null, … }` for `acme/web#7` already on disk (a terminal
     run's), still exactly one spawn.
   - Keying: with `acme/web#7` live, POSTs for `acme/web#8` and for `acme/api#7` (a second registered repo) both answer 201.
-  - Spawn held open past the grace (fake dashboard spawn never answers; clock past `JIRA_LIVE_GRACE_MS`): GET lists `acme/web#7` with `live: { sessionId:
+  - Clock for every past-grace case: stub `Date.now` only (`jest.spyOn(Date, 'now')`), never fake timers — fake timers would also fire the spawn's own
+    timeout and drop the reservation the case asserts is kept. The service reads `Date.now()` in `dispatch` and `list`.
+  - Spawn held open past the grace (fake dashboard spawn never answers; `Date.now` moved past `JIRA_LIVE_GRACE_MS`): GET lists `acme/web#7` with `live: { sessionId:
     null }`, and a second POST → 409 already running.
   - Spawn fails (dashboard 500) → the error returns, and an immediate retry is NOT refused as already running.
   - Leftover lock `{ sessionId:'old', at: now-10min }`, dashboard row for `old` with `processLive: true` → 409; with no row → 201 and the prompt ends
@@ -314,7 +316,8 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
 - Modify: `client/src/components/github/PullRequestsView.tsx` — `useAgents()` for the status; builds `gateFor` with `resolveGateFor(status, repo,
   projects)`; `resolve` mirrors `write`'s in-flight and outcome handling (adds the key to `inFlight`, clears the old outcome, POSTs `dispatchPrResolve`,
   on rejection records `{ kind: 'error', text: <server sentence> }`, on success records nothing, then `await refresh()`, then drops the key).
-- Modify: `client/src/components/github/PrActions.tsx` — new props `warning: string | null` (the row's `prRunWarning`, which `PrRow` and `PrMatrix` already compute — passed down, not recomputed), `gate: DispatchGate | null`, `resolveState: PrResolveState | undefined`,
+- Modify: `client/src/components/github/PrActions.tsx` — new props `warning: string | null` (the row's `prRunWarning`: `PrRow` passes its existing `warning` (`PrRow.tsx:47`); `MatrixExpand` has none in scope, so `PrMatrix` computes it once per
+  PR and hands it to both `MatrixRow` and `MatrixExpand`, or `MatrixExpand` calls `prRunWarning(pr, repo.repo, props.ctx, props.now)` itself), `gate: DispatchGate | null`, `resolveState: PrResolveState | undefined`,
   `onResolve: () => void`; the fourth row `{ id: 'resolve', glyph: <builder's pick>, tone: 'neutral', label: 'Resolve conflicts', sub: \`merge ${base} in
   with a headless session\`, block: resolveBlock(…, warning), act: onResolve, primary: false }`, appended only when `gate !==
   null && gate.control !== 'hidden'`; header comment updated (the menu's rows, the resolve row's hidden/disabled split per `.claude/rules/board.md`).
@@ -332,13 +335,14 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
   - `PrActions` with `gate: null` → no `Resolve conflicts` row in the opened menu (Review Focus 2); `hidden` gate → none; `enabled` gate, conflicting PR,
     nothing else → row enabled, sub reads `merge main in with a headless session` (base `main`).
   - Each reason drawn as the row's sub with `aria-disabled="true"`, and a click sends no POST: `sync off`, a `disabled` gate's text, `fork — cannot push`,
-    `mergeability pending`, `no conflicts`, `resolving…`, `resolved — waiting for GitHub`, a pipeline-held PR's `prRunWarning` text verbatim (head
-    `backlog/3`, `ctx` with a project mapped to the repo and a `running` run on that project holding item 3 → `run in progress on this machine`;
-    `pr-run.ts`'s `ITEM_HEAD` is `^(?:backlog|execute)/(\d+)$`).
+    `mergeability pending`, `no conflicts`, `resolving…`, `resolved — waiting for GitHub`, and a `warning: 'run in progress on this machine'` prop drawn verbatim.
+  - Threading, page-level in `prs-view.test.tsx`, once in Inbox and once in Matrix (expanded row): a PR on head `backlog/3`, the page's `ctx` with a
+    project mapped to the repo and a `running` run on that project whose `queue` has an entry `id: '3'` at a `RUN_HELD_STAGES` stage → the Resolve row's
+    sub reads `run in progress on this machine` (`pr-run.ts:19,45-46`).
   - Enabled row click → `onResolve` called once.
   - Review Focus 3, in `PullRequestsView` (`prs-view.test.tsx`): the POST to `/api/agents/dispatch-pr-resolve` held on an unresolved promise, Resolve
-    clicked, the menu reopened and Resolve clicked again → exactly ONE POST was sent (pins that `resolve` puts the key into `inFlight` before the POST
-    answers, not only that a busy strip is disabled).
+    clicked → the strip's chevron is disabled, a click on it opens no menu, and exactly ONE POST was sent (pins that `resolve` puts the key into
+    `inFlight` before the POST answers).
   - `PrResolveLine`: live with id → `resolving…` with an href ending `?session=s1`; live with `null` → `resolving…` and no link; pushed at `fromSha` →
     `resolved — waiting for GitHub`; pushed at `headSha` while `mergeable` → nothing; stopped → `resolve stopped: tests failed` and a `session ↗` link;
     stopped with `sessionId: null` → no link; stopped for another head → nothing.
