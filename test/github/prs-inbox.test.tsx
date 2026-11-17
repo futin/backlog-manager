@@ -76,9 +76,9 @@ function repo(name: string, prs: PullRequestRow[], over: Partial<PrRepoView> = {
  */
 function Harness(p: Omit<PrLayoutProps, 'confirming' | 'setConfirming'>) {
   const [confirming, setConfirming] = useState<string | null>(null);
-  const write: PrLayoutProps['write'] = (key, sha, call) => {
+  const write: PrLayoutProps['write'] = (key, repo, sha, call) => {
     if (confirming === key) setConfirming(null);
-    return p.write(key, sha, call);
+    return p.write(key, repo, sha, call);
   };
   return (
     <>
@@ -307,12 +307,12 @@ describe('PrInbox — items', () => {
     expect(within(row()).getByTestId('pr-merge-confirm')).toBeInTheDocument();
   });
 
-  it('hands the page its write keyed by <repo>#<number> and the PR head', async () => {
+  it('hands the page its write keyed by <repo>#<number>, with the repo and the PR head', async () => {
     const user = userEvent.setup();
     const write = jest.fn(() => Promise.resolve());
     render(<PrInbox {...props([repo('a/x', [behind])], { write })} />);
     await user.click(menuRow(keysOf(screen.getByTestId('pr-row-a/x#2')), 'Update branch'));
-    expect(write).toHaveBeenCalledWith('a/x#2', SHA, expect.any(Function));
+    expect(write).toHaveBeenCalledWith('a/x#2', 'a/x', SHA, expect.any(Function));
   });
 
   it('draws an outcome line under a loud and under a quiet row', () => {

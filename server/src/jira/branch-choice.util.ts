@@ -42,6 +42,21 @@ function nameProblem(field: string, value: unknown, notAString: string): string 
   return problem === null ? null : `${field} ${problem}`;
 }
 
+/** Ruling R2's one sentence, for every way a `reply` request is wider than the mention modal sends it — the dispatch's fields and the preview's alike. */
+export const REPLY_SHAPE_ERROR = 'a reply takes mode none, no assign, no transition and no edited prompt';
+
+/**
+ * The branch-choice half of ruling R2: a `reply` is mode `none` with no branch, base or target, and `openMr`/`review` absent or off (`false`, or `'false'` on
+ * the query — the same spellings `parseBranchChoice` reads as off). A reply session drafts words and changes nothing, so a worktree would be one it must not
+ * use, and a preview that printed a workspace block would show a prompt no dispatch spawns. Checked BEFORE `parseBranchChoice` by both routes, so a reply
+ * that names a branch is refused in R2's words rather than in whichever branch rule the wider shape happens to trip first. The dispatch adds the half the
+ * preview has no field for (assign, transition, edited prompt, surface).
+ */
+export function replyChoiceIsNarrow(raw: JiraBranchChoiceRaw): boolean {
+  const off = (value: unknown): boolean => absent(value) || value === false || value === 'false';
+  return raw.mode === 'none' && absent(raw.branch) && absent(raw.base) && absent(raw.target) && off(raw.openMr) && off(raw.review);
+}
+
 /**
  * `raw` validated for `key` and `action`, the refusals in the order the spec lists them and the first hit winning — so a request wrong in two ways always
  * says the same sentence. `execute` is the one action that needs a branch: `none` is the "work in the mapped checkout" mode, and an execute with no worktree

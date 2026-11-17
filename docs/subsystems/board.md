@@ -568,7 +568,10 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   and judges that answer — a read the server answers from GitHub, because the update made the repo due at that same moment — and a same head or a failed read
   just drops the mark. `updateBlock` reads `conflicts` for a conflicting PR and never refuses a behind one on GitHub's `viewerCanUpdateBranch` alone, which answered false on a
   behind PR the token could update (claude-agents-dashboard#493): the write decides, and a real refusal comes back as the server's permission 502. Its runs come from the shell's one poll
-  (`useOrchestratorRunsContext`).
+  (`useOrchestratorRunsContext`). A Merge answered `merged` or `already-merged` then syncs that PR's repo (#505): one `postSweep('github', <repo>)` before the
+  page's own re-read, and on `ok` the shell's trackers `reload()`, so the merge's closed issues and the repo's other PRs (behind, `Update branch`) are current
+  without a press of Sync — the named sweep makes the PR cache re-read that repo inside its TTL. No other outcome posts one; a refused sweep is silent, the
+  row still reading `merged`. It does not go through `useSweep`, so the GitHub pill's spinner does not turn for it.
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live

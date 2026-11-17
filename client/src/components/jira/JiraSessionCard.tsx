@@ -5,19 +5,16 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
 import { useAction } from '../../hooks/useAction';
 import { useAgents } from '../../hooks/useAgents';
 import { useNarrow } from '../../hooks/useNarrow';
-import { useSettings } from '../../hooks/useSettings';
 import { elapsedSince } from '../../lib/item-age';
 import { openDesktopJira, repoBasename } from '../../lib/jira';
 import {
   linkedHow,
   openButtons,
-  openTarget,
   runLabel,
   sessionDuration,
   shortSessionId,
   stripTitle,
   surfaceWord,
-  type OpenButton,
   type SessionLink
 } from '../../lib/jira-sessions';
 import { formatZonedClock } from '../../lib/time-zone';
@@ -27,7 +24,7 @@ import type { JiraLiveSession } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { LiveStrip } from '../ui/LiveStrip';
 import { Meter } from '../ui/Meter';
-import { SessionOpen } from './SessionOpen';
+import { OpenChip, SessionOpen } from './SessionOpen';
 
 /**
  * JiraSessionCard — one live Jira session as Detail draws it (Jira sessions spec §7.3, §7.5), and the history line under the cards. Exported on its own
@@ -54,7 +51,9 @@ import { SessionOpen } from './SessionOpen';
  * - **Stop** — only when the dashboard's row carries `stopState`, which is the dashboard's own rule for a session it can signal. A Desktop- or CLI-owned
  *   session, or a `processLive` one with no handle, gets none: Stop would end the link as `stopped` while the process kept running, and C5 would re-attach
  *   it at the next reconcile. `stopping` draws the chip disabled — the signal is already on its way. And, as before the sessions page, only while the
- *   dashboard has agents enabled (this card reads `useAgents()`; `Stop session` is a row of `SessionOpen`'s menu and its `Confirm` is `SessionOpen`'s), so a Stop the dashboard would refuse is not drawn.
+ *   dashboard has agents enabled (the card is handed `agentsOn` by `JiraSessionCards`, which asks `useAgents()` once per list and is mounted only while
+ *   there is a live link; `Stop session` is a row of `SessionOpen`'s menu and its `Confirm` is `SessionOpen`'s), so a Stop the dashboard would refuse is
+ *   not drawn.
  */
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -66,53 +65,13 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** One Dashboard or Desktop button, drawn from `openButtons`' answer and `desktopButton`'s verdict (see the header). */
-export function OpenChip({
-  button,
-  sessionId,
-  row,
-  launch,
-  primary,
-  onHandover
-}: {
-  button: OpenButton;
-  sessionId: string;
-  row: SessionLink['row'];
-  /** The link's own launch surface: `desktopButton` reads it to know Run ▾ started a `local` row in the app (`appOwned`). */
-  launch: SessionLink['surface'];
-  primary: boolean;
-  onHandover: (sessionId: string) => void;
-}) {
-  const { settings } = useSettings();
-  const phone = useNarrow();
-  const variant = primary ? 'ink' : 'outline';
-  const plan = openTarget(button, sessionId, row, launch, phone, settings.linkBase);
-  if (plan === null) return null;
-  if (plan.kind === 'href')
-    return (
-      <Chip as="a" size={28} variant={variant} href={plan.href}>
-        {button.label}
-      </Chip>
-    );
-  if (plan.kind === 'disabled')
-    return (
-      <Chip size={28} variant={variant} disabled title={plan.title ?? undefined}>
-        {button.label}
-      </Chip>
-    );
-  return (
-    <Chip size={28} variant={variant} onClick={() => onHandover(sessionId)}>
-      {button.label}
-    </Chip>
-  );
-}
-
 export function JiraSessionCard({
   link,
   now,
   busy,
   onUnlink,
-  onStop
+  onStop,
+  agentsOn
 }: {
   link: SessionLink;
   /** The page's one minute clock (`useNow`), so every age on the card ticks together. */
@@ -121,12 +80,13 @@ export function JiraSessionCard({
   busy: boolean;
   onUnlink: (sessionId: string) => void;
   onStop: (sessionId: string) => void;
+  /** The dashboard has agents enabled — `JiraSessionCards`' one `useAgents()` answer, so N cards are one request, not N (#478). */
+  agentsOn: boolean;
 }) {
   const { data } = useJiraContext();
   const { zone } = useTimeZone();
   const phone = useNarrow();
   const handover = useAction();
-  const agents = useAgents();
   // The card takes the focus after an accepted Stop, when the control that held it is disabled (`SessionOpen`'s header, #475); `tabIndex={-1}` makes it
   // focusable from script without adding a tab stop.
   const cardRef = useRef<HTMLElement>(null);
@@ -143,8 +103,6 @@ export function JiraSessionCard({
     : [formatZonedClock(started, zone), elapsedSince(link.startedAt, now)].filter((p) => p !== null).join(' · ');
   const pct = row?.contextPct;
   const stoppable = row?.stopState !== undefined;
-  // `StopSession` read this itself; the menu's row is offered only while the dashboard has agents on, so a Stop it would refuse is not drawn.
-  const agentsOn = agents.status !== null && agents.status.enabled;
   const stopping = row?.stopState === 'stopping';
 
   return (
@@ -193,6 +151,38 @@ export function JiraSessionCard({
         )}
       </div>
     </article>
+  );
+}
+
+/**
+ * Detail's live session cards, one `JiraSessionCard` per link, asking the dashboard's agents status ONCE for the lot (#478). Each card used to call
+ * `useAgents()` itself, so a ticket with N live sessions mounted N of them and sent N `GET /api/agents/status` on open and on every window focus. The call
+ * cannot move up into `JiraDetail`: a hook runs on every render, and Detail must not ask at all for a ticket with no confirmed session or only a starting one
+ * (`test/jira/jira-detail.test.tsx` pins both). So it lives in this list, which Detail mounts only while it has a live link. A fragment, so the DOM is the
+ * cards' alone, as it was.
+ */
+export function JiraSessionCards({
+  links,
+  now,
+  busy,
+  onUnlink,
+  onStop
+}: {
+  links: SessionLink[];
+  now: number;
+  busy: boolean;
+  onUnlink: (sessionId: string) => void;
+  onStop: (sessionId: string) => void;
+}) {
+  const agents = useAgents();
+  // The menu's Stop row is offered only while the dashboard has agents on, so a Stop it would refuse is not drawn.
+  const agentsOn = agents.status !== null && agents.status.enabled;
+  return (
+    <>
+      {links.map((link) => (
+        <JiraSessionCard key={link.sessionId ?? link.startedAt} link={link} now={now} busy={busy} onUnlink={onUnlink} onStop={onStop} agentsOn={agentsOn} />
+      ))}
+    </>
   );
 }
 

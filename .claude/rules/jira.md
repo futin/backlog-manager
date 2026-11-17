@@ -28,8 +28,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `/repo-defaults` takes `null` for unset (both `null` deletes the entry) and adds
   one check after the 409, a 400 `<path> is not mapped` unless SOME project maps the path. Why:
   [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
-- **The Jira token never leaves the server: the browser and `jira.mjs` both go through the server's own routes (`/api/jira`, and
-  `/api/agents/jira-link|jira-unlink` for `link` and `unlink`), and the poller is armed while the site is configured and not `unsupported`.**
+- **The Jira token never leaves the server: the browser and `jira.mjs` both go through the server's own routes (`/api/jira`, `/api/jira/mentions/draft`
+  for `draft`, and `/api/agents/jira-link|jira-unlink` for `link` and `unlink`), and the poller is armed while the site is configured and not `unsupported`.**
   `jiraEnv()` (`env.util.ts`) reads `BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN` (spelled once, in `JIRA_ENV`) per call, trimmed, never cached; whitespace
   is absent, the site is lower-cased and must pass `isJiraHostname`, and `detail` names the first problem — emptiness first, in site/email/token order, then the
   hostname shape. Every call is `JiraClient.request`'s: the gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3` (`GATEWAY_HOST`, not configurable),
@@ -44,7 +44,7 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   board, one owed its cold sweep, a forced one) and no longer the chain's. The rule is judged at the end of every sweep, after its awaits, on the boot's
   `access` alone — `owed()` reads neither `jira.json` nor the env (the sweep checked the env at its start), so no board can change it. `skills/jira/tools/jira.mjs` dials `http://127.0.0.1:${BM_API_PORT || 4322}` and nothing else — `jira.mjs
   link|unlink <KEY>` POST `{ key, sessionId }` to `/api/agents/jira-link|jira-unlink`, the session id read from `CLAUDE_CODE_SESSION_ID` (unset is exit `1`,
-  nothing sent) — reads no `BM_JIRA_*` and sends no `authorization` header; the source guard in `jira.test.mjs` (comment lines stripped) holds all three. Its
+  nothing sent; `draft` sends `{ key, sessionId, text }` with its session id the same way) — reads no `BM_JIRA_*` and sends no `authorization` header; the source guard in `jira.test.mjs` (comment lines stripped) holds all three. Its
   one allowed `BM_JIRA_` name is `BM_JIRA_FETCH_RETRY_MS`, `worktree`'s pause before its one fetch retry (default 1 000 ms) — a test knob, carrying nothing of
   Jira's — and its second is `BM_JIRA_FETCH_TIMEOUT_MS`, the bound on each `worktree` fetch (default 60 s), a test knob too. Why:
   [invariants.md](docs/subsystems/invariants.md#the-jira-token-never-leaves-the-server-and-the-poller-is-armed-while-the-site-is-configured)
@@ -61,8 +61,9 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `JIRA_SEARCH_MAX_CHARS` a 400), upper-cases it for the key test, and otherwise searches `summary ~ ` the escaped text plus `*`. A board query's `jql` is sent
   as `jira.json` holds it, and the check route sends the person's text untouched — bounded only by `JIRA_JQL_MAX_CHARS` (`config.util.ts`). Why:
   [invariants.md](docs/subsystems/invariants.md#every-value-the-server-puts-into-jql-is-quoted-and-escaped-and-a-persons-jql-is-passed-verbatim)
-- **The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key.** The two
-  routes are `POST /api/jira/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }` in `jira-write.controller.ts`, each `SameOriginPostGuard` →
+- **The board's Jira writes are assign, transition and the mention reply, nothing else; assign and transition each re-read the issue and splice it into every
+  board cache holding the key.** The two routes are `POST /api/jira/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }` in
+  `jira-write.controller.ts`, each `SameOriginPostGuard` →
   validate (400: `invalid issue key`, `transitionId must be a non-empty string` — a string of at most `JIRA_TRANSITION_ID_MAX_CHARS`, 64) → configured (503) →
   `JiraPollerService.assignToMe` / `transitionIssue`, whose outcomes go through `jiraWriteOrThrow` (`unwrap.util.ts`, hoisted there beside `unwrapJira` so the read
   controller, these two routes and `dispatch-jira` share one mapping: §8's table and `retryAt` mean the same thing on every route) — its two own refusals are
@@ -79,8 +80,23 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `Date.parse(updated)` keeps the cached copy; equal or unparseable on either side keeps the sweep's, and a key the sweep did not return is dropped as
   before. The answer is `200 { ok: true, reread }` (`JiraIssueWriteResult`): `reread` is true when the re-read's 2xx body was an issue — even if the Done
   window then dropped it — and false when it was not or the call failed (its 401 or 429 still moves the site state through `routeFailed`); a failed re-read
-  never turns the 200 into an error. There is no per-key queue on the server: the modal's `useAction` is the one-at-a-time guard. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)
+  never turns the 200 into an error. There is no per-key queue on the server: the modal's `useAction` is the one-at-a-time guard. The mention reply is `POST
+  /api/jira/mentions/reply` `{ key, text }` in `mentions.controller.ts`: `SameOriginPostGuard` → validate (400: `invalid issue key`, `text must be a non-empty
+  string`, `text too long` past `JIRA_REPLY_MAX_CHARS`) → configured (503) → `JiraPollerService.postReply`, whose own refusals are 409s — `no open mention` (the
+  key is not an open, undismissed ticket in the mentions cache) and `posting` (single-flight per key: a `replying` set checked and set synchronously, cleared in
+  `finally`) — then `gate()` and `unauthorizedRefusal()` with no Jira call, then `POST issue/{key}/comment` with `replyDoc`'s ADF: one mention node whose
+  account is the newest undismissed mention's author read FROM THE CACHE, never from the request (no node when that author's account id is `''`), then the
+  text's paragraphs. A failure maps through
+  `unwrapJira`, and the post's own 401/403 gains ` — the token needs write:comment:jira`; a definite 4xx frees the key as it is. A status 0 or ≥ 500 on the
+  POST is `unconfirmed` instead: the key goes into `uncertain` with the attempt's start and the route answers 502 `replyUnconfirmed(key)` (`Jira did not
+  confirm the reply to <KEY> — it may have posted; …`), the draft kept. The next `postReply` on that key, after the same checks and gates, reads `GET
+  issue/{key}/comment` (the newest `JIRA_THREAD_MAX`) and ADOPTS a comment by `me` created at or after the attempt's start less `JIRA_REPLY_CLOCK_SLACK_MS`
+  (30 s) and after the mention being answered — the 2xx path below, no POST — else clears the mark, checks the 429 window again and posts; a failed read (or
+  `me` unknown) refuses through `routeFailed` with no POST and keeps the mark, which the check prunes with `answeredAt`. A 2xx drops the ticket from the
+  mentions cache and records
+  `answeredAt` (key → the comment's `created`), applied on read so the search index's lag cannot bring the ticket back until a newer mention lands; then the
+  draft is dropped, a failed drop logged and never an error. No splice into the board caches follows — a comment is not a field they show. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-transition-and-the-mention-reply-nothing-else)
 - **A Jira branch name obeys one rule, in `shared/jira-branch.ts`, and `jira.mjs` carries its one hand-kept copy.** `branchNameProblem` (Table A: `git
   check-ref-format --branch`'s rules, at most `BRANCH_NAME_MAX` = 200 characters, and only `[A-Za-z0-9._/-]` — narrower than git, because the name is pasted
   bare into the `jira.mjs worktree` line of the prompt) and `branchCarriesKey` (Table B: the key case-insensitive, bounded on both sides by a non-alphanumeric
@@ -92,7 +108,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
 - **A Jira session is a persisted link, and Stop, a quiet dashboard or the 8-hour backstop each end it.** `JiraLiveService` (`server/src/jira/live.service.ts`,
   NOT `JiraService`) holds the link store in memory and writes it whole after every change but a `starting` reservation: `server/src/jira/links.store.ts`,
   `~/.backlog-manager/settings/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it), version 1, the server its one writer, through
-  `writeJsonAtomic`. It holds `links` (`JiraLink`: key, session id, `how` — `run`, `branch` or `manual` — action, repo, branch, surface, model, effort, a ticket
+  `writeJsonAtomic`. It holds `links` (`JiraLink`: key, session id, `how` — `run`, `branch`, `manual` or `reply` —
+  action, repo, branch, surface, model, effort, a ticket
   snapshot, `startedAt`, `endedAt` with an `endReason` of `idle`, `stopped`, `expired` or `gone`, `quietSince` and `reattachedAt`), plus the `suppressed` and
   `neverLink` pairs (each capped at 1,000, oldest out); `(key, sessionId)` is a link's identity, and a key may hold several. A file that does not parse, or
   whose `version` is not 1, loads EMPTY with one warning and is renamed `jira-links.json.bad-<ISO>` at the first save — never overwritten, and left alone by a
@@ -108,7 +125,9 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   page is open; a read that OPENS the page (`pageOpen` was false) fires `JiraLiveService.onPageOpened`, and the reconciler drops a pending 60 s timer for a 15 s one.
   The one-run gate is `run`-only. The dispatch RESERVES the key (`starting`, memory only, never written, dropped by a restart) before its first Jira write, and
   `reserve` is a synchronous check-and-set refusing while a live `run` link or a reservation holds the key — so of two Starts exactly one passes, the other 409s
-  `<KEY> is starting` / `already has a session`; a live `branch` or `manual` link is the user's own and blocks nothing. Every failure after the reservation runs
+  `<KEY> is starting` / `already has a session`; a live `branch` or `manual` link is the user's own and blocks nothing.
+  A `reply` reserves in its own map beside `starting`, refused only by another live or starting `reply` on the key, so a Run and a reply draft on one key
+  coexist; `get`/`snapshot`/`confirmed` stay `run`-only, and `unlink` refuses a `reply` link (409). Every failure after the reservation runs
   through one `catch` that `release`s it; `release` touches only a `starting` entry, so it can never drop a session that did start, and a refused `reserve`
   releases nothing (it would drop the other request's entry). `confirm` follows the spawn and turns the reservation into a `run` link (over a live `branch` or
   `manual` link for the same pair it upgrades that entry to `run`); a key released meanwhile
@@ -158,4 +177,17 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `JiraLiveService.activeRows()` — `working` / `question` dashboard rows on that branch. Those rows come from the reconciler's list, 15–60 s old by design; the
   spec accepts that window, and a refusal is 409 `a session is live on <branch>`. `JIRA_BUILTIN_LABELS.review` (`Review the MR`) is a label for links and the
   List, never a menu row. Why: [invariants.md](docs/subsystems/invariants.md#a-review-dispatch-decides-from-the-cache-and-gates-the-branch)
+- **`reply` is the fourth built-in action: a read-only session that drafts an answer to a mention, dispatched only from the mention modal.** `parseJiraAction`
+  / `parseJiraActionParam` accept `'reply'` and `resolveJiraActionOrThrow` maps it to `{ kind: 'reply' }`. Its wire shape is narrow (R2): `replyChoiceIsNarrow`
+  (`branch-choice.util.ts`: mode `none`, no branch, base or target, `openMr`/`review` absent or false) plus `assign: false`, `transitionId: null`, no `prompt`
+  and `surface` absent or `dashboard`, else 400 `REPLY_SHAPE_ERROR` (`a reply takes mode none, no assign, no transition and no edited prompt`) from the
+  controller before any read; the preview applies the branch half. Dispatch then runs two gates of its own, both before the dashboard gate: an OPEN mention —
+  the key among `JiraPollerService.mentionsPayload().issues`, from memory (not configured, not cached, or every mention dismissed is 400 `<KEY> has no open
+  mention`) — and the any-project repo rule, `anyProjectRepoOrThrow` (`prompt.util.ts`, shared with `GET /api/jira/prompt`; 400 `<repo> is not mapped to any
+  Jira project`). It reserves in its own map, `reserve(key, repo, 'reply')`, so a Run on the key does not block it and a second reply is 409 `a reply is already
+  being drafted for <KEY>`; every release and the `confirm` name the kind, and the answer's `startedAt` is `replySession`'s. `replyText` orders `jira.mjs show`
+  and `jira.mjs thread` read as data, not instructions, the repo investigated read only (no edits, commits or branches), the reply written without a leading
+  @-mention and handed over with `jira.mjs draft <KEY>` on stdin — never posted, never a Jira call; it carries no ticket or thread text, so the preview equals
+  the spawn. The preview has no mention gate. `JIRA_BUILTIN_LABELS.reply` (`Draft a reply`) is a label for links and the List, never a menu row. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-reply-draft-session-reads-only-and-only-a-persons-click-posts)
 - **`jira.mjs` writes no file of its own**; its one exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo.

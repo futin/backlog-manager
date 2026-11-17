@@ -191,7 +191,10 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   status carries no mentions summary), and focus, timer and a Setup save's `reload` may overlap.
   `useJiraMentions` (`hooks/useJiraMentions.ts`, called once, by the Mentions page) is the third, the same shape on the same counter, aimed at the mentions
   cache's own clock: ONE timer at `polledAt + JIRA_MENTIONS_POLL_MS + TRACKER_FETCH_SLACK_MS` floored at `JIRA_STATUS_FLOOR_MS`, none while unconfigured, focus
-  refetching at once, and a POST's answer taking a sequence number so an older GET cannot land over it. `useJiraBoard` IS built on `useCoalescedFetch`. Why:
+  refetching at once, and a POST's answer taking a sequence number so an older GET cannot land over it. While any ticket in `issues` or `dismissed` carries
+  a reply-draft `session` (phase 2), `nextDelay` caps that same timer at `JIRA_REPLY_REREAD_MS` (15 s) — the 15 s re-read is the one timer shortened, never a
+  second one, and it is the same sequence-numbered `reload`, so a POST's answer still wins over an older GET; once no `session` is left it is the cache clock
+  again. `useJiraBoard` IS built on `useCoalescedFetch`. Why:
   [invariants.md](docs/subsystems/invariants.md#a-client-poller-built-on-usecoalescedfetch-never-has-two-of-its-own-requests-in-flight)
 - **`linkBase` becomes an href**, so `clampSettings` routes it through `clampOrigin` — URL-parsed, `http(s)` only. The one settings key a hand-edited
   localStorage value could turn into script execution.

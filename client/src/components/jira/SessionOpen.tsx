@@ -8,7 +8,6 @@ import { Chip } from '../ui/Chip';
 import { Confirm } from '../ui/Confirm';
 import { Popover } from '../ui/Popover';
 import { SplitChip } from '../ui/SplitChip';
-import { OpenChip } from './JiraSessionCard';
 
 /**
  * SessionOpen — a session's Open control (spec §4.5; `JiraLaunch.dc.html`'s deck card): one split pill whose main half is the primary Open and whose chevron
@@ -92,11 +91,7 @@ export function SessionOpen({
 
   if (asking)
     return (
-      <Confirm
-        label="confirm stop"
-        testId="jira-stop-confirm"
-        acceptLabel="Stop session"
-        dismissLabel="Keep running"
+      <StopConfirm
         onDismiss={() => {
           refocus.current = 'chevron';
           setAsking(false);
@@ -106,9 +101,7 @@ export function SessionOpen({
           setAsking(false);
           onStop?.(sessionId);
         }}
-      >
-        Stop this session? It ends mid-work; its edits stay where it left them.
-      </Confirm>
+      />
     );
 
   const close = (): void => setOpen(false);
@@ -213,20 +206,14 @@ function PlainActions({
   }, [asking, cardRef]);
   if (asking)
     return (
-      <Confirm
-        label="confirm stop"
-        testId="jira-stop-confirm"
-        acceptLabel="Stop session"
-        dismissLabel="Keep running"
+      <StopConfirm
         onDismiss={() => setAsking(false)}
         onAccept={() => {
           refocus.current = true;
           setAsking(false);
           onStop?.(sessionId);
         }}
-      >
-        Stop this session? It ends mid-work; its edits stay where it left them.
-      </Confirm>
+      />
     );
   return (
     <>
@@ -241,5 +228,62 @@ function PlainActions({
         </Chip>
       )}
     </>
+  );
+}
+
+/**
+ * The one Stop question, drawn by both `SessionOpen`'s split and `PlainActions` (#478). The two used to carry their own copy of this `Confirm` — label, test
+ * id, both button names and the sentence — and those copies must change together; they had already drifted once, so the words live here and nowhere else.
+ * It decides nothing about focus: where the focus goes once the question closes is each caller's (`refocus` above, #475), passed in through the two handlers.
+ */
+function StopConfirm({ onDismiss, onAccept }: { onDismiss: () => void; onAccept: () => void }) {
+  return (
+    <Confirm label="confirm stop" testId="jira-stop-confirm" acceptLabel="Stop session" dismissLabel="Keep running" onDismiss={onDismiss} onAccept={onAccept}>
+      Stop this session? It ends mid-work; its edits stay where it left them.
+    </Confirm>
+  );
+}
+
+/**
+ * One Dashboard or Desktop button, drawn from `openButtons`' answer and `desktopButton`'s verdict (`JiraSessionCard`'s header). It lives here, beside
+ * `SessionOpen`, because both draw an Open from `openTarget` — and so `JiraSessionCard.tsx` imports this file and never the other way round (#478).
+ */
+export function OpenChip({
+  button,
+  sessionId,
+  row,
+  launch,
+  primary,
+  onHandover
+}: {
+  button: OpenButton;
+  sessionId: string;
+  row: SessionLink['row'];
+  /** The link's own launch surface: `desktopButton` reads it to know Run ▾ started a `local` row in the app (`appOwned`). */
+  launch: SessionLink['surface'];
+  primary: boolean;
+  onHandover: (sessionId: string) => void;
+}) {
+  const { settings } = useSettings();
+  const phone = useNarrow();
+  const variant = primary ? 'ink' : 'outline';
+  const plan = openTarget(button, sessionId, row, launch, phone, settings.linkBase);
+  if (plan === null) return null;
+  if (plan.kind === 'href')
+    return (
+      <Chip as="a" size={28} variant={variant} href={plan.href}>
+        {button.label}
+      </Chip>
+    );
+  if (plan.kind === 'disabled')
+    return (
+      <Chip size={28} variant={variant} disabled title={plan.title ?? undefined}>
+        {button.label}
+      </Chip>
+    );
+  return (
+    <Chip size={28} variant={variant} onClick={() => onHandover(sessionId)}>
+      {button.label}
+    </Chip>
   );
 }

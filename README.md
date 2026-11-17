@@ -105,8 +105,8 @@ pause, resume or stop the run afterwards.
   already on disk. A project connected to a tracker has no
   item files at all: there the skills' writes reach GitHub through this app's API, which holds the credential — see [Architecture](#architecture).
 - **Its writes outside your disk are a short, closed list.** A tracker project's issues, through eleven guarded `/api/items/*` routes; an open pull request's
-  merge, auto-merge and update-branch, from GitHub › PRs; a Jira issue's assignee and status. Nothing else is written to GitHub or Jira, GitLab is only ever
-  read, and the server never writes git.
+  merge, auto-merge and update-branch, from GitHub › PRs; a Jira issue's assignee and status; and a reply comment on a ticket that mentions you, posted only by
+  your click on Post reply, never by a session. Nothing else is written to GitHub or Jira, GitLab is only ever read, and the server never writes git.
 
 ### Architecture
 
@@ -526,7 +526,8 @@ Releases are nightly rollups: `.github/workflows/release.yml` runs at 04:17 UTC 
   corpora.
 - [**The skills**](docs/subsystems/skills.md) — the nine published skills, their CLIs, and the reviewer agent every review dispatches per file group.
 - [**Jira**](docs/subsystems/jira.md) — the Jira Cloud integration: a client, a board poller and its caches, twelve read routes under `/api/jira`, six guarded
-  config writes to `jira.json`, the two writes to Jira itself (`/issue/assign` and `/issue/transition`), the Run half in `agents/` (`POST
+  config writes to `jira.json`, the three writes to Jira itself (`/issue/assign`, `/issue/transition` and the mention reply's `/mentions/reply`), the Run
+  half in `agents/` (`POST
   /api/agents/dispatch-jira` and `/jira-stop`) with a persisted store of the sessions linked to each ticket, and the `jira` skill (`jira.mjs`) that reaches those routes from any
   session and, on a Run, makes the ticket's git worktree in a mapped repo.
 - [**GitLab**](docs/subsystems/gitlab.md) — the read-only GitLab connection: a poller over the merge requests of the GitLab projects Jira's mapped repos

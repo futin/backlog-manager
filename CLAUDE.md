@@ -91,8 +91,8 @@ happened.
   Why: [invariants.md](docs/subsystems/invariants.md#a-board-started-run-is-visible-before-its-run-file-exists)
 - **Item files are read-only to the server and client**; every write goes through the skills, and dispatch writes none — the spawned session runs them.
   **A TRACKER project's items are what this server writes** (task-46), only through the eleven routes below — never a file, on any path — **plus a Jira
-  issue's assignee and status, through `/api/jira/issue/assign` and `/issue/transition`, and an open PR's merge, auto-merge and update-branch, through
-  `/api/prs/*`.**
+  issue's assignee and status, through `/api/jira/issue/assign` and `/issue/transition`, a reply comment, through `/api/jira/mentions/reply`, and an open
+  PR's merge, auto-merge and update-branch, through `/api/prs/*`.**
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)
 - **An outsider's tracker issue is executable only while its body matches a pin a groom of ours wrote.**

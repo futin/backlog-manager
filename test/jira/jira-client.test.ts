@@ -1,6 +1,7 @@
 import { JIRA_TIMEOUT_MS, JiraClient, gatewayBase, jqlString, siteBase } from '../../server/src/jira/jira.client';
 import type { JiraAuth, JiraResponse } from '../../server/src/jira/jira.client';
 import { JIRA_RATE_LIMIT_DEFAULT_MS, accessOf, jiraHttpError } from '../../server/src/jira/errors.util';
+import { replyDoc } from '../../server/src/jira/adf';
 import { FakeJira, makeRawIssue } from '../helpers/jira';
 
 /**
@@ -130,6 +131,24 @@ describe('what each method puts on the wire', () => {
     expect(fake.calls[0].url).toBe(`${GATEWAY}/issue/PAY-1/transitions`);
     expect(fake.calls[0].headers).toMatchObject({ authorization: BASIC, 'content-type': 'application/json' });
     expect(fake.calls[0].body).toEqual({ transition: { id: '31' } });
+  });
+
+  it('addComment POSTs { body: <doc> } to the comment path through request, and the 201 carries the new id and created', async () => {
+    const { fake, client } = build();
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
+    const doc = replyDoc({ accountId: 'acc-m', name: 'Mara Ilić' }, 'Hi');
+    const out = await client.addComment(auth, 'PAY-1', doc);
+    expect(out.status).toBe(201);
+    expect(out.data).toMatchObject({ id: fake.posted[0].id, created: fake.posted[0].created });
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].method).toBe('POST');
+    expect(fake.calls[0].url).toBe(`${GATEWAY}/issue/PAY-1/comment`);
+    // The one auth path: the same Basic header every other call carries, built in `request` and nowhere else.
+    expect(fake.calls[0].headers).toMatchObject({ authorization: BASIC, 'content-type': 'application/json' });
+    expect(fake.calls[0].body).toEqual({ body: doc });
+    expect(client.takeCalls()).toBe(1);
+    await client.addComment(auth, 'A/B 1', doc);
+    expect(fake.calls[1].url).toBe(`${GATEWAY}/issue/A%2FB%201/comment`);
   });
 
   it('a 400 on either write reads Jira\'s own sentence as message', async () => {

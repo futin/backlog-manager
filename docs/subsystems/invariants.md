@@ -1630,8 +1630,8 @@ of `out-of-scope/`. Archive's Out of scope column is the only surface that rende
 
 **The Jira clause (phase 5).** `POST /api/agents/dispatch-jira` cannot derive its action: a Jira issue has no file whose state says what comes next, so there is
 nothing for `deriveAction` to read and nothing for a second implementation to drift from. The action is a PICK, and the rule's other half still holds — the
-server never takes a string on trust. It is one of a closed set: the three built-ins, `execute`, `context` and `review`, and the skills `jira.json` holds right
-now. The controller refuses anything outside the shape (`parseJiraAction`: `execute`, `context`, `review` or an object whose only key is `skill`, holding an
+server never takes a string on trust. It is one of a closed set: the four built-ins, `execute`, `context`, `review` and `reply`, and the skills `jira.json` holds right
+now. The controller refuses anything outside the shape (`parseJiraAction`: `execute`, `context`, `review`, `reply` or an object whose only key is `skill`, holding an
 `s_` plus eight hex digits id; anything else is a 400); the
 service then proves a skill id against the file it has just read (`resolveJiraActionOrThrow`, 400 `unknown skill <id>`), before Jira or the dashboard is asked.
 A bare `review` is a 400 there too (`review needs mr and half`): a review is built only from the `mr` and `half` the controller validates and the GitLab
@@ -3911,13 +3911,28 @@ repo (the reason `backlog.mjs` restates `resolveSource`), so `jira.mjs` re-imple
 behind. The tool's copy is not redundant with the server's check: the person can paste the prompt into a terminal and edit the line, and the tool is the
 last thing between that line and `git worktree add`.
 
-## The board's Jira writes are assign and transition, nothing else
+## The board's Jira writes are assign, transition and the mention reply, nothing else
 
 Until phase 3 this server wrote to Jira nowhere: every call was a read and the only file it changed was `jira.json`. Phase 3 ([plan](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-10-19-jira-phase-3-writes.md),
 spec §8, §13) adds the first two calls that change anything on Atlassian's side — **assign the issue to me** and **transition it** — and this rule is what keeps
 the list at two. A third (comment, edit a field, create, unassign, assign someone else) is a new rule and a new section here, never another route that "fits
 the pattern": a credential that can write to a person's tracker is the sharpest thing this server holds, and the size of what it may do with it should be a
 fact a reader can check by counting routes (`POST /api/jira/issue/assign` and `/issue/transition`, in `jira-write.controller.ts`).
+
+**The third write is the mention reply, and only a person's click sends it (Jira mentions phase 2).** That rule did its job: the comment is a new write, so it came
+with its own section ([a reply-draft session reads only, and only a person's click posts](#a-reply-draft-session-reads-only-and-only-a-persons-click-posts)) and its
+own route, `POST /api/jira/mentions/reply` in `mentions.controller.ts`, rather than riding an assign-shaped route. The count a reader checks is now three, and the
+comment is the first write that adds text under the person's name, which is why it differs from the other two in kind: it is not idempotent (two posts are two
+comments, so the poller holds it single-flight per key), and nothing a session can reach sends it — the session's prompt says never post, `jira.mjs` has no post
+verb, and the route takes `{ key, text }` from the person's edited draft, never a session id.
+
+**A reply Jira did not confirm is read for before it is sent again.** Not idempotent also means a failure is not always a failure: a transport error or the
+10 s deadline does not cancel a write Jira had already begun, and a gateway 5xx often follows one that completed. Answered as a plain failure — draft kept, key
+free, Post reply enabled under the same text — the obvious next click was a second comment @-mentioning the colleague twice under the person's name, and the
+next mentions check, which would have seen the first one, arrives a poll interval too late. So the poller marks such a key `uncertain` with the attempt's
+start, the route says the reply may have posted, and the next post on that key first reads the thread's newest comments (the comment endpoint, which carries
+a write the search index has not caught up with) and adopts a comment of mine created since the attempt as the posted one, instead of sending a second. Only
+an absent comment lets it post; a read that fails posts nothing. A definite 4xx is a refusal Jira made, so it stays an ordinary failure with nothing to look for.
 
 **`{ accountId: null }` is never sent.** Jira reads a null assignee as UNASSIGN, so an assign sent while the identity was unknown would not fail — it would
 succeed at the opposite of what was asked. The poller therefore refuses an assign with no call when `me` is null (`503 no identity`, which heals on the next
@@ -3960,13 +3975,15 @@ are not — each sends one field's new value and Jira orders them — so two bro
 caches on whichever answer is newest. The one-at-a-time guard is the modal's, through the `useAction` hook, which also stops a double click; it is a courtesy
 to the person, not a lock the server relies on.
 
-**`dispatch-jira` is a second caller of the two writes, never a third write.** Phase 5's Start may assign the issue to me and move it before it spawns, and it
+**`dispatch-jira` is a second caller of assign and transition, never a new write.** Phase 5's Start may assign the issue to me and move it before it spawns, and it
 does so through `JiraPollerService.assignToMe` and `transitionIssue` — the same two methods, the same refusals and the same mapping (`jiraWriteOrThrow`, hoisted
-to `unwrap.util.ts` so the three callers cannot word a failure differently) — so counting the poller's write methods still gives two. What the dispatch adds
+to `unwrap.util.ts` so the three callers cannot word a failure differently) — so the dispatch adds none to the poller's write methods, which are assign,
+transition and the mention reply's `postReply`, and it calls only the first two. What the dispatch adds
 is order and bookkeeping, not capability: everything it can refuse is refused before the first write (the transition is checked against a fresh read of what
 the workflow offers, `no identity` before an assign is attempted, the first composition's length), an assign the ticket already carries is skipped rather
 than sent, and a failure after a landed write says so in its own sentence (`— the assign stands`, `— the Jira writes stand`) because the write is not
-undone and a retry must not be invited as though it were. Unassign, assigning anyone else, a comment and a field edit remain a new rule apiece.
+undone and a retry must not be invited as though it were. Unassign, assigning anyone else, any comment but the person's own mention reply and a field edit
+remain a new rule apiece.
 
 ## The board's pull-request writes are merge, auto-merge and update-branch, nothing else, and each re-reads the PR
 
@@ -4004,7 +4021,7 @@ GitHub call makes an outbound request.
 **Each re-reads the PR.** After every outcome but a limit, the write reads the single PR again and splices it into the PR cache — its row while open, its
 removal once merged or closed — rather than patching the cached row to what the person expected: a merge queue, a required check or GitHub's own
 `mergeable` recomputation can make the PR something other than what was asked for. The answer carries that row as `pr` and `reread`; a failed re-read is
-`reread: false` and never an error, because the write has already happened ([the Jira rule](#the-boards-jira-writes-are-assign-and-transition-nothing-else)).
+`reread: false` and never an error, because the write has already happened ([the Jira rule](#the-boards-jira-writes-are-assign-transition-and-the-mention-reply-nothing-else)).
 A merge's `200` splices the PR out even when its re-read fails — GitHub's answer already said it is merged.
 
 **Why the second merge is `already-merged`.** Two clicks on Merge, two tabs, or a merge raced from github.com: the second request is serialised behind the
@@ -4285,6 +4302,33 @@ Two reviews on one branch would answer the same findings twice and commit over e
 `<main checkout>\0<branch>`, taken synchronously with `live.reserve`, released on a failed spawn and on a desktop launch that answered no id), any live link on
 the branch of any `how`, and any live dashboard row on it. The links and the rows can be 15 to 60 s old; the spec accepts that, because the cost of a second
 session slipping through that window is a redundant comment, and a gate that read GitLab or the dashboard per click would put a request on a button.
+
+## A reply-draft session reads only, and only a person's click posts
+
+Jira mentions ([spec](../superpowers/specs/2026-11-16-jira-mentions-design.md)). A reply is a comment under the person's name on a ticket other people
+read, so the one thing that must not happen is a session posting it. The session therefore never holds a way to: its prompt orders `jira.mjs draft`, which
+hands the text to this server and stops, and `jira.mjs` has no verb that comments. What reaches Jira is the person's own click on the board, after they have
+read the draft — the same rule as the board's other Jira writes, where a person's action and not a session's judgement is the write. A session that
+investigated the wrong thing costs a discarded draft; one that could post would cost a public comment nobody can unsay.
+
+No ticket or thread text enters the prompt, for the reason the other built-ins dropped theirs (2026-11-11), sharpened. The thread is exactly the text a
+stranger controls — the comment that @-mentioned the person is someone else's words — so it is the likeliest place for an instruction aimed at the session.
+The prompt names the key and orders `jira.mjs show` and `jira.mjs thread`, read as data, not instructions; the session meets that text as tool output, where
+it is evidence to answer rather than a brief to follow. It also keeps the prompt deterministic, so the preview the modal shows is the spawn byte for byte. The
+repository is investigated read only, without a branch or a worktree, because a reply answers a question and changes nothing — and the wire shape (mode
+`none`, no assign, no transition, no edited prompt) is refused otherwise, so no request can widen it into a Run.
+
+The repo may be mapped to ANY project, unlike every other dispatch's, because a mention arrives from wherever a colleague works: most tickets a person is
+@-mentioned on live in projects they never mapped, and the code that answers the question is still one of their own repositories. Any-project still means
+proved against `jira.json` and asked of the dashboard gate — a repo mapped nowhere is a 400 — so the wider rule admits no path the person did not configure.
+A reply also needs an open mention on the key: with none there is nothing to answer, and a dispatch that does not check would let any key through the
+narrow door. The draft reserves in its own map, so it never blocks, or is blocked by, a Run on the same ticket.
+
+**The link kind is `reply`, and a draft is proved by it.** `JiraLinkHow` gains `'reply'` beside `run`, `branch` and `manual`, because the draft route must know that
+the caller is the live reply session of THAT key: `POST /mentions/draft` accepts text only for a live `reply` link whose key and session id both match, so a
+Run's session, a manual link or a hand-made request cannot plant a draft under a ticket. Unlinking one is refused (the person stops it from the mention, where the
+draft's own controls live), and a reply link never shows through the Run readers (`get`, `snapshot`, `confirmed`, `hasConfirmed`), so it neither takes nor frees a Run's reservation. A draft is
+text a stranger's thread may have shaped, which is why it is only ever shown for editing: it reaches Jira after a person has read it, through `/mentions/reply`.
 
 ## The CodeRabbit button belongs to the MR, never to Run
 

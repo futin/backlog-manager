@@ -29,7 +29,8 @@ import {
  * pull requests except the client shell's one reader (`PullRequestsProvider`, armed only while a GitHub project is registered; spec §4.9a — the rail counts
  * open PRs on every page), so a sweep would spend GraphQL budget on a list nobody is drawing and break "the poller is armed only while something
  * is connected" in spirit — a tab closed an hour ago would still be polling. So this service has NO `setTimeout`, no interval and no sweep: a read happens
- * only inside `list()` (a `GET /api/prs`) or, from task 4, inside a write's re-read. The shell reader's 60 s poll is the only cadence, and it
+ * only inside `list()` (a `GET /api/prs`), inside a write's re-read (task 4), or inside `refreshNow` (a `POST /api/github/sweep` — a person's press, or
+ * the PRs page's sync after its own merge). The shell reader's 60 s poll is the only cadence, and it
  * stops when no GitHub project is registered or the tab closes.
  *
  * ## Why a cache at all
@@ -49,7 +50,8 @@ import {
  * of either outcome. Without it a repo answering 502 would be re-queried on every `GET` — two tabs, two queries a minute each — which is exactly the cost the
  * TTL exists to cap; a failing repo is retried once a minute like a healthy one.
  *
- * One thing makes an entry due BEFORE its TTL: an accepted update-branch sets `dueAt` to `PR_UPDATING_MS` after the write. GitHub merges the base in
+ * Two things make an entry due BEFORE its TTL. A sweep that names its repo makes it due at once, unless a read has started since the press (`refreshNow`'s
+ * `pressedAt`, #505). And an accepted update-branch sets `dueAt` to `PR_UPDATING_MS` after the write. GitHub merges the base in
  * asynchronously, the write's own re-read usually still shows the old head, and the page's row says `updating…` for exactly that long and then re-reads
  * once (`shared/types.ts`, the one home of the number). Served from a 60 s TTL, that re-read would bring back the old head with the row's actions enabled on
  * it — and a `Merge` clicked then sends a stale SHA into a self-caused 409. `dueAt` only ever makes a read happen sooner; the in-flight join still holds,
@@ -192,13 +194,32 @@ export class PullRequestsService {
   }
 
   /**
-   * The GitHub sweep's second half: re-read these repos' PR lists, each once and only past `PR_TTL_MS`, through `refresh` — so a repo already being read is
-   * joined, not read twice, and a repo asleep in the GraphQL pool is skipped. No token is nothing to do. Never rejects: a failed read is the entry's own
-   * `access`, as for `list()`.
+   * The GitHub sweep's second half: re-read these repos' PR lists, each once, through `refresh` — so a repo already being read is joined, not read twice, and
+   * a repo asleep in the GraphQL pool is skipped. No token is nothing to do. Never rejects: a failed read is the entry's own `access`, as for `list()`.
+   *
+   * Without `pressedAt`, a repo is re-read only past `PR_TTL_MS`. With it, each repo whose last read STARTED before that moment is made due through `dueBy`,
+   * the same mechanism an update-branch uses, so it is read inside its TTL too (#505). The route passes it only for a press that NAMES a repo — a repo row's
+   * sync icon, or the PRs page's sync after its own merge — because the PRs page polls every 60 s, so a sweep right after a merge almost always met a fresh
+   * entry and left the other PRs' behind / up-to-date state as it was. An unnamed `Sync now` keeps the TTL rule: forcing it would make one press cost a
+   * GraphQL query per registered repo.
+   *
+   * Why "started before the press" and not simply "due now": two presses arriving together join one poller sweep, and the first one's PR read can land
+   * before the second press gets here. Due-now would read again for the second; a read that started at or after the second press already shows everything
+   * that press could ask about, so it answers it. A read still in flight has not stamped its attempt yet, so it never counts as answering — it is joined,
+   * never doubled, and because it began before the due time it leaves that time standing and the next `GET /api/prs` reads once more (its rows may predate
+   * the merge the press was about). `dueBy` never moves a due time later.
    */
-  async refreshNow(repos: string[], now: number = Date.now()): Promise<void> {
+  async refreshNow(repos: string[], now: number = Date.now(), opts: { pressedAt?: number } = {}): Promise<void> {
     const token = githubToken();
     if (token === null) return;
+    const pressedAt = opts.pressedAt;
+    if (pressedAt !== undefined) {
+      for (const repo of repos) {
+        const entry = this.entries.get(repo);
+        const last = Math.max(entry?.polledAt ?? -Infinity, entry?.attemptedAt ?? -Infinity);
+        if (last < pressedAt) this.dueBy(repo, pressedAt);
+      }
+    }
     await Promise.all(repos.map((repo) => this.refresh(repo, now, token).catch(() => undefined)));
   }
 

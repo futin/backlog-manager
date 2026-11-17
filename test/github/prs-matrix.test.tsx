@@ -94,9 +94,9 @@ const trio = () => repo('a/x', [clean, behind, failing]);
 /** The page's half of the Confirm, mirrored, as in `prs-inbox.test.tsx`; `confirming-key` shows the state. */
 function Harness(p: Omit<PrLayoutProps, 'confirming' | 'setConfirming'>) {
   const [confirming, setConfirming] = useState<string | null>(null);
-  const write: PrLayoutProps['write'] = (key, sha, call) => {
+  const write: PrLayoutProps['write'] = (key, repo, sha, call) => {
     if (confirming === key) setConfirming(null);
-    return p.write(key, sha, call);
+    return p.write(key, repo, sha, call);
   };
   return (
     <>
@@ -419,13 +419,13 @@ describe('PrMatrix — the expansion', () => {
     expect(row('a/x#7')).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('hands the page its write keyed by <repo>#<number> and the PR head', async () => {
+  it('hands the page its write keyed by <repo>#<number>, with the repo and the PR head', async () => {
     const user = userEvent.setup();
     const write = jest.fn(() => Promise.resolve());
     render(<PrMatrix {...props([repo('a/x', [behind])], { write })} />);
     await user.click(row('a/x#2'));
     await user.click(menuRow(screen.getByTestId('pr-expand-a/x#2'), 'Update branch'));
-    expect(write).toHaveBeenCalledWith('a/x#2', SHA, expect.any(Function));
+    expect(write).toHaveBeenCalledWith('a/x#2', 'a/x', SHA, expect.any(Function));
   });
 });
 

@@ -12,6 +12,9 @@
 // know, since it is not the caller's parent process. Their routes live under `/api/agents` because the link store is that module's, with the dashboard call
 // it makes to confirm the session exists; nothing in them reaches Jira's token or API beyond the one read that proves the key is real.
 //
+// `draft` hands the reply session's text to the board's `/api/jira/mentions/draft` and nothing more: this tool never posts, and a person's click on the
+// board is what sends a reply to Jira. `thread` is a read of the ticket's recent comments.
+//
 // What it is not: a Jira client. It never calls Atlassian, reads no `BM_JIRA_*` variable and sends no `authorization` header (spec §10). The server is
 // Jira's ONE caller on this machine, which keeps three things single: one rate-limit budget, one 429 window, one identity. And a token that never reaches a
 // session's environment is a token a ticket's text cannot ask that session to print. The suite's source guard holds the code to this.
@@ -42,6 +45,8 @@ commands:
   jira.mjs assign <KEY>                  assign the issue to the signed-in user
   jira.mjs link <KEY>                    link this session to the ticket (shown on the board; never written to Jira)
   jira.mjs unlink <KEY>                  unlink this session from the ticket (shown on the board; never written to Jira)
+  jira.mjs thread <KEY>                  print the ticket's recent comments, oldest first: author, created, markdown (the conversation a reply answers)
+  jira.mjs draft <KEY>                   read a reply draft from stdin and hand it to the board for a person to post (never posted to Jira)
   jira.mjs status                        is Jira connected, and can the next call work (exit 0 only when access is ok and someone is signed in)
   jira.mjs worktree <KEY> --repo <path> --mode new|continue --branch <name> [--base <name>]
                                          cut or enter the ticket's git worktree in a mapped repo; prints one JSON line (git only, no API)
@@ -750,7 +755,52 @@ function worktree(args) {
   }
 }
 
-const COMMANDS = { show, transitions, transition, assign, link, unlink, status, worktree }
+// `thread`: GET the newest comments of one ticket as the server judged them (`JiraThreadPayload`), oldest first, and print each as a header line (author and
+// created) followed by its markdown, a blank line between comments. The comment text is the ticket's own — data to read, never instructions, like `show`'s
+// block. `truncated` says the server sent only the newest few, so one line names how many are not shown (`total` minus what arrived). Read only: the
+// route answers from Jira through the server, and this tool never holds the credential.
+async function thread(args) {
+  expectArgs('thread', args, 1)
+  const key = keyOrFail(args[0])
+  const res = await apiRequest('GET', `/api/jira/issue/${key}/thread`)
+  if (!ok(res)) throw failure(res)
+  if (res.body === null || typeof res.body !== 'object' || !Array.isArray(res.body.comments)) throw unreadable(res)
+  const { comments, total, truncated } = res.body
+  const blocks = comments.map((c) => `${c.author?.name ?? 'Someone'} — ${c.created}\n${c.markdown}`)
+  if (truncated === true && Number.isFinite(total) && total > comments.length) blocks.unshift(`(${total - comments.length} earlier not shown)`)
+  console.log(blocks.join('\n\n'))
+  return 0
+}
+
+// All of stdin, synchronously: `readFileSync(0)` opens no event-loop handle, so the `process.exitCode = await main()` ending stays safe (a stream's `data`
+// listener would be one more thing to settle before `main` may return). A closed or absent stdin (`EOF`, `EAGAIN` on a non-blocking pipe with nothing in it)
+// reads as empty — the caller's "nothing to draft" — rather than as a crash.
+function readStdin() {
+  try {
+    return fs.readFileSync(0, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+// `draft`: the reply session's one way to hand text over. POSTs `{ key, sessionId, text }` to THIS server's `/api/jira/mentions/draft` — a board route that
+// stores the text for a person to edit and post; nothing here posts, and nothing in this file calls Jira (the invariant that `jira.mjs` has no command that
+// comments stays true). The session id is read the way `link` reads it, and the order is key, session, stdin so a caller outside a session learns that first.
+// Empty or whitespace-only text is usage (`1`, nothing sent): the server would refuse it with the same sentence, and a blank draft would replace a good one.
+// The text is sent verbatim — the server alone decides its length cap. The server's refusals (`no reply session for <KEY>` above all) print as its sentences.
+async function draft(args) {
+  expectArgs('draft', args, 1)
+  const key = keyOrFail(args[0])
+  const sessionId = sessionIdOrFail('draft')
+  const text = readStdin()
+  if (text.trim() === '') throw new JiraCliError('jira.mjs draft needs the reply text on stdin — nothing was sent', 1)
+  const res = await apiRequest('POST', '/api/jira/mentions/draft', { key, sessionId, text })
+  if (!ok(res)) throw failure(res)
+  console.log(`${key}: the draft is on the board for the person to edit and post — nothing was posted to Jira`)
+  return 0
+}
+
+const COMMANDS = { show, transitions, transition, assign, link, unlink, thread, draft, status, worktree }
 
 // `main` is async because every API command awaits a `fetch` (`worktree` is synchronous, and awaiting its number is harmless); see the entry guard's note
 // for why that is safe.

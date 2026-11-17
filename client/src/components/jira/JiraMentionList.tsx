@@ -5,6 +5,7 @@ import { excerptParts, mentionIssueType, type JiraMentionRow } from '../../lib/j
 import { Chip } from '../ui/Chip';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
+import { Pill } from '../ui/Pill';
 
 /**
  * DESIGN.md §8.9.7 — Jira › Mentions › List: one row per open mention, in the Board › List's table language (Jira mentions phase 1, Task 8; spec "The page";
@@ -104,6 +105,14 @@ function MentionRow({
             <JiraTypeIcon type={type} />
           </span>
           <span className="jira-issues-cut">{issue.summary}</span>
+          {/* Phase 2: a drafted reply waits on the reader — the warn tone, "waiting on a person". Every row of the ticket carries it: the draft is the
+              ticket's. The `.jira-mentions-marker` wrapper holds it at its own width: as a bare flex child of the row it shrank to 25 px ("Draft read")
+              beside a long summary, because `.ui-pill` carries no `flex: none` and guard 7 forbids page CSS naming it (ui-verify). */}
+          {issue.draft !== null && (
+            <span className="jira-mentions-marker">
+              <Pill tone="warn">Draft ready</Pill>
+            </span>
+          )}
         </span>
       </td>
       <td>

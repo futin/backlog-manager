@@ -84,7 +84,7 @@ export function PrRow({
     )
   });
   if (age !== null) metaItems.push({ key: 'age', node: <span>{age}</span> });
-  const write = (call: () => Promise<PrWriteResult>) => props.write(key, pr.headSha, call);
+  const write = (call: () => Promise<PrWriteResult>) => props.write(key, repo.repo, pr.headSha, call);
   return (
     <li className="prs-row" data-testid={`pr-row-${key}`}>
       <GlyphTile glyph={checksGlyph(pr.checks)} tone={checksTone(pr.checks)} size={tileSize} />

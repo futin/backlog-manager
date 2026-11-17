@@ -123,6 +123,13 @@ export class FakeJira {
   /** Comments per issue key, in Jira's ascending time order (seed oldest first). */
   comments = new Map<string, SeededComment[]>();
   private searchGate: Promise<void> | null = null;
+  /**
+   * Every comment POSTed (`POST issue/{key}/comment`, the mention reply), in arrival order. Deliberately NOT appended to `comments`: the fake plays a Jira
+   * whose search index has not caught up with the write — the lag the poller's `answeredAt` exists for — so a case proves the poller hides the answered
+   * mention itself rather than seeing the reply come back through a read. A case that wants the reply in the thread adds it with `addComments`.
+   */
+  readonly posted: { key: string; id: string; created: string; body: unknown }[] = [];
+  private commentGate: Promise<void> | null = null;
 
   /**
    * Appends comments to an issue, oldest first. Search carries the newest 20 inline when it asks for `comment`; the comment endpoint serves them newest first.
@@ -194,6 +201,18 @@ export class FakeJira {
     return this.json(status, { errorMessages: [message], errors: {} });
   }
 
+  /**
+   * Parks the NEXT comment POST (and only that one) after it is recorded in `calls` and before it is answered, so a case can race a second post against a
+   * first that is still out; the returned function releases it.
+   */
+  holdNextComment(): () => void {
+    let release!: () => void;
+    this.commentGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return release;
+  }
+
   fetch: typeof fetch = (async (url: string, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? 'GET';
     const headers: Record<string, string> = {};
@@ -219,6 +238,11 @@ export class FakeJira {
       if (method === 'POST' && gw[2] === '/search/jql' && this.searchGate !== null) {
         const gate = this.searchGate;
         this.searchGate = null;
+        await gate;
+      }
+      if (method === 'POST' && /^\/issue\/[^/]+\/comment$/.test(gw[2] ?? '') && this.commentGate !== null) {
+        const gate = this.commentGate;
+        this.commentGate = null;
         await gate;
       }
       return this.gateway(method, gw[2] ?? '', new URLSearchParams(gw[3] ?? ''), body);
@@ -295,6 +319,16 @@ export class FakeJira {
       const max = Number(query.get('maxResults') ?? 50);
       const ordered = query.get('orderBy') === '-created' ? [...all].reverse() : all;
       return this.json(200, { comments: ordered.slice(0, max), total: all.length, startAt: 0, maxResults: max });
+    }
+
+    // The mention reply (Task 5): 201 with the new comment's id and `created`, stamped from `Date.now()` so a case's frozen clock decides it. Recorded in
+    // `posted`, never in `comments` (see `posted`).
+    if (method === 'POST' && commentPath) {
+      const key = decodeURIComponent(commentPath[1]);
+      if (!this.issues.has(key)) return this.refuse(404, 'Issue does not exist or you do not have permission to see it.');
+      const posted = { key, id: String(90_000 + this.posted.length + 1), created: new Date(Date.now()).toISOString(), body: (body as { body?: unknown }).body };
+      this.posted.push(posted);
+      return this.json(201, { id: posted.id, created: posted.created, body: posted.body });
     }
 
     const issuePath = /^\/issue\/([^/]+)(\/transitions)?$/.exec(path);
