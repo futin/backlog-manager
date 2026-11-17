@@ -2,8 +2,9 @@
 
 The read-only GitLab connection ([spec](../superpowers/specs/2026-11-12-gitlab-connection-design.md), mocks under
 [`2026-11-12-gitlab-connection-mockups/`](../superpowers/specs/2026-11-12-gitlab-connection-mockups/)): the board shows, per Jira ticket, the merge requests
-that carry its key and where each one stands — open, its pipeline, merged or closed. It is not a source and not a third tracker. It owns no file, writes
-nothing to GitLab and nothing to disk, and it adds no setting of its own: what it polls is derived from the repos Jira › Setup › Repositories already maps.
+that carry its key and where each one stands — open, its pipeline, merged or closed. It is not a source and not a third tracker. It writes nothing to
+GitLab, and its one file on disk is its one setting, `settings/gitlab-sync.json` — how often the poller sweeps (#527, below); what it polls is still derived
+from the repos Jira › Setup › Repositories already maps.
 
 `server/src/gitlab/` is the fourth outbound-calling module, after `agents/`, `tracker/` and `jira/`, and the only one that talks to GitLab. The rules it
 answers to are in [`.claude/rules/gitlab.md`](../../.claude/rules/gitlab.md); the reasoning is in

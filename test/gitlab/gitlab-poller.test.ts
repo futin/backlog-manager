@@ -902,14 +902,14 @@ describe('GitlabPollerService — the sweep interval', () => {
     h.fake.script.set(listPath(MS), { status: 429, headers: { 'retry-after': '90' } });
     await boot(h);
     h.fake.script.delete(listPath(MS));
-    // The poller reads the harness's clock, not the faked timers, so it is moved in step: a sweep that fired inside the window would ask nothing.
-    h.clock.now = T0 + 15_000;
+    // The poller reads the harness's clock, not the faked timers. The clock is moved past the window FIRST, so a timer armed at the bare 15 s would fire
+    // into an expired window and ask GitLab (sweeps 2 at +15 s) — while a sweep fired inside the window asks nothing, which is why keeping the clock in
+    // step with the timers could not tell the two apart. Only the 90 s timer `max(ms, retryAt - now)` arms leaves the count at 1 until +90 s.
+    h.clock.now = T0 + 90_000;
     await advance(15_000);
     expect(sweeps(h)).toBe(1);
-    h.clock.now = T0 + 89_999;
     await advance(74_999);
     expect(sweeps(h)).toBe(1);
-    h.clock.now = T0 + 90_000;
     await advance(1);
     expect(sweeps(h)).toBe(2);
   });
