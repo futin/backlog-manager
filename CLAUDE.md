@@ -1,7 +1,7 @@
 # backlog-manager
 
-Claude Code plugin repo: nine skills under `skills/` (eight backlog skills and `jira`) plus a local NestJS + React app that shows every registered project's
-backlog on one kanban-by-type board. No database: the registry file and each project's `backlog/` directory are the data.
+Claude Code plugin repo: ten skills under `skills/` (eight backlog skills, `jira` and `pr-resolve`) plus a local NestJS + React app that shows every registered
+project's backlog on one kanban-by-type board. No database: the registry file and each project's `backlog/` directory are the data.
 
 ## Commands
 
@@ -44,7 +44,7 @@ there, and the reasoning behind the rules below in [docs/subsystems/invariants.m
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language. Not a `.claude/rules/` file.
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (the predicates both sides must agree on), `theme.css`, `jira-branch.ts`, `jira-sessions.ts`,
   `review.ts`.
-- `skills/` — the nine skills this repo publishes, one directory each, with their CLIs under `tools/`.
+- `skills/` — the ten skills this repo publishes, one directory each, with their CLIs under `tools/`.
   → [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each: `backlog-reviewer.md`.
 - `.claude/rules/` — the path-scoped mechanism files, listed in the next section.

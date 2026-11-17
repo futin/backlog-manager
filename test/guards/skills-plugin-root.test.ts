@@ -35,15 +35,24 @@ describe('skills/ spell the plugin root the way Claude Code substitutes it', () 
     expect(offenders).toEqual([]);
   });
 
-  // Non-vacuity: the guard above passes trivially on a skill that stopped naming the plugin root at all, which would be its own bug — every one of the nine
-  // skills calls a tool that lives under the install, and there is no other way for a skill body to reach it.
-  it.each(['backlog', 'backlog-capture', 'backlog-groom', 'backlog-execute', 'backlog-orchestrate', 'backlog-retro', 'backlog-tick', 'backlog-review', 'jira'])(
-    '%s/SKILL.md calls its tools through ${CLAUDE_PLUGIN_ROOT}',
-    (skill) => {
-      const body = readFileSync(join(SKILLS_ROOT, skill, 'SKILL.md'), 'utf8');
-      expect(body).toMatch(/node "\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/[a-z-]+\/tools\/[a-z]+\.mjs"/);
-    },
-  );
+  // Non-vacuity: the guard above passes trivially on a skill that stopped naming the plugin root at all, which would be its own bug — every one of the ten
+  // skills calls a tool that lives under the install, and there is no other way for a skill body to reach it. The tool name takes a dash because
+  // pr-resolve's tool is `pr-resolve.mjs`; the braced root and the `skills/<name>/tools/` shape are what the pattern pins.
+  it.each([
+    'backlog',
+    'backlog-capture',
+    'backlog-groom',
+    'backlog-execute',
+    'backlog-orchestrate',
+    'backlog-retro',
+    'backlog-tick',
+    'backlog-review',
+    'jira',
+    'pr-resolve',
+  ])('%s/SKILL.md calls its tools through ${CLAUDE_PLUGIN_ROOT}', (skill) => {
+    const body = readFileSync(join(SKILLS_ROOT, skill, 'SKILL.md'), 'utf8');
+    expect(body).toMatch(/node "\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/[a-z-]+\/tools\/[a-z-]+\.mjs"/);
+  });
 
   // The verify launcher hands the root to its child through `env`, inside single quotes the outer shell must not expand (SKILL.md §8). Once the root is
   // substituted into the text, the assignment is a literal path — which is exactly what it must still read as.

@@ -26,6 +26,14 @@ paths: ["skills/**", "agents/**", "server/src/tick/tick.service.ts", "server/src
   one of them is a TWIN whose comment names the original, and a prune of one skill never breaks another. It writes no git either — every git call is a read.
   The server reads this directory too (`GET /api/ticks`, the board's Runs › Ticks page) and writes none of it: a Reset is a stamp in `settings/tick.json`, never a
   file here. Why: [invariants.md](docs/subsystems/invariants.md#backlog-managertick-has-exactly-one-writer-and-the-tick-never-writes-run-state)
+- **`~/.backlog-manager/pr-resolve/` has exactly one writer, `pr-resolve.mjs`; the server only reads it.** The home holds one outcome file per PR,
+  `<owner>__<repo>__<N>.json` — `{ sessionId, outcome, reason, fromSha, headSha, at }`, written by `outcome` as a temp file in the same directory plus a
+  `rename` — and one lock per PR under `locks/`, `<owner>__<repo>__<N>.lock` — `{ sessionId, at }`, taken by `lock take` with an exclusive create (`'wx'`) and
+  removed by `lock release` only when it records the caller's own session. `$BM_PR_RESOLVE_HOME` overrides the home, read per call, for the reason
+  `$BM_TICK_HOME` exists. A stale lock (older than 3 hours, or one whose session `--reclaim` names exactly) is claimed by `claimStale`, a TWIN of
+  `tick-state.mjs`'s `claimStaleLock` whose comment names it. The tool imports nothing from another skill's `tools/`, from `server/` or from `shared/`; the
+  `pr-resolve` skill writes the home only through it. The server reads the outcome files and the locks to answer the board and to derive a dispatch, and writes
+  none of either. Why: [invariants.md](docs/subsystems/invariants.md#backlog-managerpr-resolve-has-exactly-one-writer-and-the-server-only-reads-it)
 - **A tick does at most one unit of work, only when the project is idle, and never executes a plan that still carries `plan-review`.** `tick.mjs decide` prints
   ONE verdict — `execute`, `groom`, `recover`, `busy` or `idle` — and writes the lock only for the first two; the skill carries that verdict out in its own
   session and ends with `record`, which releases it. Busy is any of: a `running` or `paused` orchestrator run, a board-started run with no run file yet (read

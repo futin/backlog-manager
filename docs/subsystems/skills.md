@@ -1,15 +1,15 @@
 # The skills
 
-Nine skills under `skills/` — eight backlog skills and `jira` — one agent under `agents/`, and six CLIs beneath the skills — two of which do all the writing
-to items, the registry and the run file, a third that only reads them, `tick.mjs`, which owns the one directory a scheduled tick keeps its lock and its failure
-record in, and `jira.mjs`, which writes no file of its own and reaches Jira only through the local
-API, its one git command (`worktree`) aside, and `review.mjs`, which scopes a change into reviewer groups and merges their reports — plus one
-single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47). This is the plugin's skill root
-— never duplicated under `.claude/skills/`, which would load the same skills twice and drift.
+Ten skills under `skills/` — eight backlog skills, `jira` and `pr-resolve` — one agent under `agents/`, and seven CLIs beneath the skills — two of which do all
+the writing to items, the registry and the run file, a third that only reads them, `tick.mjs`, which owns the one directory a scheduled tick keeps its lock and
+its failure record in, and `jira.mjs`, which writes no file of its own and reaches Jira only through the local API, its one git command (`worktree`) aside,
+`review.mjs`, which scopes a change into reviewer groups and merges their reports, and `pr-resolve.mjs`, which owns the one directory a PR resolve keeps its
+locks and outcome files in — plus one single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47). This is the plugin's skill root — never
+duplicated under `.claude/skills/`, which would load the same skills twice and drift.
 
 ## Mechanism
 
-### The nine
+### The ten
 
 | skill                 | what it does                                                                                                                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -21,6 +21,7 @@ single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47
 | `backlog-retro`       | sweeps every orchestrator run on the machine into a report of what the pipeline cost, where the time went and how much was rework, proposes backlog items from what it finds, and records the sweep for the next one to be measured against |
 | `backlog-tick`        | one unattended unit of work per scheduled tick, started by a dashboard job: only when the project is idle, it executes a ready bug or task to a PR, or grooms an ungroomed bug or a refactor into a plan marked `plan-review` |
 | `backlog-review`      | reviews the change in a checkout against its base — committed, uncommitted and untracked work alike — with one `backlog-reviewer` per file group in parallel, proves every changed file covered, pins every finding to a quoted line, offers to fix and never commits; its `references/procedure.md` is also the review the orchestrator and `pr`-mode execute follow |
+| `pr-resolve`          | resolves a conflicting GitHub PR unattended, started by the board's Resolve conflicts: merges the base into the PR's head in a detached worktree, resolves only the mechanical conflicts, proves the merge with the project's checks and pushes it, never forced — or pushes nothing and says why on the PR when any conflict is a judgment call |
 | `jira`                | reads one Jira ticket and moves it — prints it, lists and applies its transitions, assigns it to me, checks the connection — all through `/api/jira`; links or unlinks the calling session through `/api/agents/jira-link`/`jira-unlink`; on a Jira Run, makes the ticket's git worktree in a mapped repo (git only)           |
 
 `backlog-orchestrate` is the largest of the eight and the only one that merges. Told to drain a queue, it works every ready bug and task one at a time —
@@ -74,6 +75,9 @@ that tree and branch as a groom already taken. `skills/backlog-groom/references/
 - `skills/backlog-tick/tools/tick.mjs` — `backlog-tick`'s own CLI, and the tick home's only writer (through `tick-state.mjs`, the one file that writes). Four
   subcommands: `decide` (reads the project and prints ONE JSON verdict — `execute`, `groom`, `recover`, `busy` or `idle` — taking the lock only for the first
   two), `record <id> ok|failed --kind groom|execute`, `status` and `forget <id>`. See [`backlog-tick`](#backlog-tick) below.
+- `skills/pr-resolve/tools/pr-resolve.mjs` — `pr-resolve`'s own CLI, and the pr-resolve home's only writer. `parse <owner/repo#N> [--reclaim <id>]` prints
+  the target's worktree, lock and outcome paths; `lock take|release` holds one resolve per PR (exit `3` refused); `outcome` writes the record the board reads.
+  See [`pr-resolve`](#pr-resolve) below.
 - `skills/backlog-orchestrate/tools/api-call.mjs` — one HTTP request and nothing else, run by `orchestrate.mjs` with `spawnSync` (task-47). It exists so the
   parent can stay synchronous: `fetch` is asynchronous and `orchestrate.mjs`'s entry guard rests on nothing holding the event loop open, so the asynchrony is
   exiled into a child that is reaped before the parent's call returns. Its exit codes are private (`0`/`3`/`5`) and `apiCall` maps them onto the tool's own
@@ -283,6 +287,27 @@ one, and the only marker it ever clears is the groom `started:` its own stale lo
 ([invariants.md](invariants.md#the-only-started-marker-a-tick-clears-is-the-one-a-killed-tick-left)); the ownership rule is
 [invariants.md](invariants.md#backlog-managertick-has-exactly-one-writer-and-the-tick-never-writes-run-state).
 
+### `pr-resolve`
+
+Spec: [2026-11-17-pr-conflict-resolve-design.md](../superpowers/specs/2026-11-17-pr-conflict-resolve-design.md). The board's Resolve conflicts on a
+conflicting PR spawns `/backlog-manager:pr-resolve <owner>/<repo>#<N>` headless, in the repo's main checkout, on the default model and effort; a terminal can
+run the same trigger. The session never asks. It reads the PR with `gh pr view` (open, `CONFLICTING`, not from a fork), takes the PR's lock, cuts a
+**detached** worktree at `origin/<head>` (`.worktrees/pr-resolve-<N>`, with `node_modules` symlinked and the excludes `backlog-execute`'s `pr` mode sets),
+runs `git merge --no-ff --no-commit origin/<base>`, and classifies every conflicted hunk as mechanical or judgment — the worked examples are
+`skills/pr-resolve/references/classify.md`. One judgment hunk aborts the whole resolve with nothing pushed. A mechanical resolution is proved with the project's
+own checks; a check that fails is re-run on the base in a second detached tree (`.worktrees/pr-resolve-<N>-base`), and only a failure the merge added stops
+it. The merge is committed with paths staged one by one, never `-A`, and pushed `git push origin HEAD:<head>`, never forced. Every exit after the lock removes
+the trees this session made, releases the lock, writes the outcome file, posts one `gh pr comment` and ends on one of three lines — `pr-resolve: pushed`,
+`pr-resolve: up to date — nothing pushed`, `pr-resolve: stopped — <one-line reason>`.
+
+**State lives in `~/.backlog-manager/pr-resolve/`** (`$BM_PR_RESOLVE_HOME`): one outcome file per PR, `<owner>__<repo>__<N>.json`
+(`{ sessionId, outcome, reason, fromSha, headSha, at }`), and one lock per PR under `locks/`. The lock is an exclusive create; a lock older than 3 hours, or
+one whose session the board's `--reclaim` names, is claimed by a TWIN of `backlog-tick`'s `claimStaleLock`, and the claimer removes the trees the dead resolve
+left. The server reads both and writes neither
+([invariants.md](invariants.md#backlog-managerpr-resolve-has-exactly-one-writer-and-the-server-only-reads-it)). The skill is the third, beside execute's and
+groom's `pr` modes, that writes git outside an orchestrator run — into a PR's own head, never into a base
+([invariants.md](invariants.md#backlog-orchestrate-is-the-only-skill-that-merges-into-a-base-execute-and-groom-commit-and-push-only-in-pr-mode-and-may-arm-github-auto-merge)).
+
 ### `references/`
 
 `skills/backlog-orchestrate/references/` holds the parts its `SKILL.md` deliberately does **not** carry inline, because a run re-reads its whole body on
@@ -301,6 +326,9 @@ whole `--finish pr` flow, read in full once the trigger chose `pr`; `skills/back
 session dispatched under a `[backlog-tick]` marker, read when a stop happens; and `skills/backlog-groom/references/backlog-tick.md` is read in full, before
 `show`, by a groom carrying that marker — the two verdicts a tick may groom, the `## Assumptions (unattended)` heading and the `plan-review` mark's spelling per
 source.
+
+`skills/pr-resolve/references/classify.md` is `pr-resolve`'s one reference: the worked examples of a mechanical and a judgment conflict, read in full at the
+step that classifies them, every time — the line between the two classes is that skill's main content.
 
 `skills/jira/references/review.md` is the `jira` skill's one reference: how a Jira Execute Run with `review` on reviews its own commit before the ticket moves or
 anything is pushed — read only when the prompt sends the session there.
@@ -331,6 +359,8 @@ any earlier finding it was handed `resolved` or `open` — the report grammar `r
   directory, the registry and the project's items to say `busy`, and writes none of them. The server reads it, per request and never writes it — `GET
   /api/ticks` and the board's Runs › Ticks page ([api.md](api.md#tick--the-tick-breakers-board)); the one file the server writes for the breaker is
   `settings/tick.json`, which `decide` and `status` read.
+- **The pr-resolve home** — `pr-resolve.mjs` writes `~/.backlog-manager/pr-resolve/` (`$BM_PR_RESOLVE_HOME`) and nothing else does: the outcome files and
+  the per-PR locks. The server reads both, per request, and writes neither.
 - **The plugin install** — a run resolves its own skill files through the plugin-root path its skill text was loaded with,
   a copy of the pushed `HEAD`. Getting an edit there is
   [workflows/publishing.md](../workflows/publishing.md).

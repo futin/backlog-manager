@@ -3348,6 +3348,37 @@ test('backlog-review says when there is nothing to review', () => {
   )
 })
 
+// --- pr-resolve: the three final lines, the push it never forces, the staging it never widens ------------------------------------------------------
+//
+// A headless pr-resolve session ends on one of three literal lines, and the outcome file the board reads repeats the same outcome — so the line is a
+// vocabulary the board, the session and a person reading a terminal run all share (spec: docs/superpowers/specs/2026-11-17-pr-conflict-resolve-design.md,
+// "The skill"). Its two git rules are the feature's anti-goals: a rewritten PR branch, or a merge commit that swept up an untracked file, is a failure even
+// when everything passes. Nothing else reads SKILL.md, so a trim that drops one of them is green everywhere but here. Read, never imported.
+const PR_RESOLVE_SKILL_MD = fileURLToPath(new URL('../../pr-resolve/SKILL.md', import.meta.url))
+
+test('pr-resolve ends on one of three exact final lines, and a lock stop says who holds it', () => {
+  const text = flat(PR_RESOLVE_SKILL_MD)
+  for (const line of ['pr-resolve: pushed', 'pr-resolve: up to date — nothing pushed', 'pr-resolve: stopped — <one-line reason>']) {
+    assert.ok(text.includes(line), `pr-resolve/SKILL.md lost the final line \`${line}\``)
+  }
+  assert.ok(text.includes('another resolve of #<N> is running'), 'pr-resolve/SKILL.md lost the lock-stop reason')
+})
+
+test('pr-resolve pushes the head never forced and stages by path, never -A', () => {
+  const text = flat(PR_RESOLVE_SKILL_MD)
+  const RULES = [
+    ['git push origin HEAD:<head>', 'the push names the PR head and nothing else'],
+    ['never forced', 'the push is never forced'],
+    ['never `-A`', 'staging is by path, so no untracked file rides into the merge commit'],
+    ['git merge --no-ff --no-commit origin/<base>', 'the merge leaves the commit to the commit step'],
+    ['One judgment hunk aborts the whole resolve', 'a judgment call is never guessed at'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(text.includes(needle), `pr-resolve/SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+  assert.ok(!/git push[^`]*--force/.test(text), 'pr-resolve/SKILL.md spells a forced push')
+})
+
 // --- backlog-groom's closing "on disk only" line -----------------------------
 //
 // The seam: `backlog-orchestrate`'s gate reads each candidate at the ref its
