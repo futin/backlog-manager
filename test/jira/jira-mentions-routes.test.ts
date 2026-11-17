@@ -5,10 +5,11 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { JIRA_MENTIONS_DISMISS_MAX, JIRA_MENTIONS_POLL_MS, JIRA_MENTIONS_WINDOW_DAYS, type JiraMentionsConfigured } from '../../shared/types';
+import { JIRA_MENTIONS_DISMISS_MAX, JIRA_REPLY_MAX_CHARS, JIRA_MENTIONS_POLL_MS, JIRA_MENTIONS_WINDOW_DAYS, type JiraMentionsConfigured } from '../../shared/types';
 import * as atomic from '../../server/src/atomic-write.util';
 import { AppModule } from '../../server/src/app.module';
 import { JiraClient } from '../../server/src/jira/jira.client';
+import { JiraLiveService } from '../../server/src/jira/live.service';
 import { mentionsJql } from '../../server/src/jira/mentions.util';
 import { JIRA_POLL_MS, JiraPollerService, SWEEP_FLOOR_MS } from '../../server/src/jira/poller.service';
 import { REGISTRY_FILE } from '../../server/src/registry/registry.service';
@@ -550,5 +551,116 @@ describe('GET /api/jira/issue/:key/thread', () => {
   it('is 503 while unconfigured', async () => {
     await build({ on: false });
     expect((await http().get('/api/jira/issue/SUP-208/thread').expect(503)).body).toEqual({ error: 'Jira is not configured' });
+  });
+});
+
+describe('POST /api/jira/mentions/draft and /draft/discard (plan Task 4)', () => {
+  const META = { action: 'reply', name: 'jira SUP-208', branch: null, surface: 'dashboard', model: null, effort: null, snapshot: { summary: 'S', type: 'Task', parentKey: null } } as const;
+  const draft = (payload: Record<string, unknown>) => post('/api/jira/mentions/draft', payload);
+  const discard = (key: string) => post('/api/jira/mentions/draft/discard', { key });
+  /** A live reply link on `key` for `sessionId`, made the way the dispatch makes one. */
+  const replyLink = (key = 'SUP-208', sessionId = 'rep-1'): JiraLiveService => {
+    const live = app.get(JiraLiveService);
+    live.reserve(key, '/repo', 'reply');
+    live.confirm(key, sessionId, META, 'reply');
+    return live;
+  };
+  const ok = { key: 'SUP-208', sessionId: 'rep-1', text: 'Thanks, fixed in the next release.' };
+
+  it('refuses another origin with 403, and the CLI shape (no origin header, loopback) passes', async () => {
+    await build();
+    replyLink();
+    await draft(ok).set('origin', 'http://evil.test').expect(403);
+    await discard('SUP-208').set('origin', 'http://evil.test').expect(403);
+    await draft(ok).expect(200);
+  });
+
+  it('validates in order: key, session id, text, then length', async () => {
+    await build();
+    expect((await draft({ ...ok, key: 'sup-208' }).expect(400)).body).toEqual({ error: 'invalid issue key' });
+    expect((await draft({ ...ok, sessionId: 'x y' }).expect(400)).body).toEqual({ error: 'invalid session id' });
+    expect((await draft({ ...ok, text: '   ' }).expect(400)).body).toEqual({ error: 'text must be a non-empty string' });
+    expect((await draft({ ...ok, text: 7 }).expect(400)).body).toEqual({ error: 'text must be a non-empty string' });
+    expect((await draft({ ...ok, text: 'a'.repeat(JIRA_REPLY_MAX_CHARS + 1) }).expect(400)).body).toEqual({ error: 'text too long' });
+  });
+
+  it('is 503 while unconfigured', async () => {
+    await build({ on: false });
+    expect((await draft(ok).expect(503)).body).toEqual({ error: 'Jira is not configured' });
+  });
+
+  it('is 409 with no live reply link for the (key, session): none, a run link, an ended reply, another session\'s', async () => {
+    await build();
+    const want = { error: 'no reply session for SUP-208' };
+    expect((await draft(ok).expect(409)).body).toEqual(want);
+    const live = app.get(JiraLiveService);
+    live.reserve('SUP-208', '/repo');
+    live.confirm('SUP-208', 'rep-1', { ...META, action: 'execute' });
+    expect((await draft(ok).expect(409)).body).toEqual(want);
+    live.reserve('SUP-208', '/repo', 'reply');
+    live.confirm('SUP-208', 'rep-2', META, 'reply');
+    expect((await draft(ok).expect(409)).body).toEqual(want);
+    live.end('SUP-208', 'rep-2', 'stopped');
+    expect((await draft({ ...ok, sessionId: 'rep-2' }).expect(409)).body).toEqual(want);
+    expect((await mentions()).issues.every((i) => i.draft === null)).toBe(true);
+  });
+
+  it('stores the draft from a live reply link, shows it on the payload, and a second draft replaces it; exactly 8 000 characters is accepted', async () => {
+    await build();
+    replyLink();
+    const res = await draft(ok).expect(200);
+    const row = res.body.issues.find((i: { key: string }) => i.key === 'SUP-208');
+    expect(row.draft).toEqual({ text: ok.text, sessionId: 'rep-1', at: new Date(T0).toISOString() });
+    expect((await mentions()).issues.find((i) => i.key === 'SUP-208')?.draft).toEqual(row.draft);
+    expect((await mentions()).issues.find((i) => i.key === 'SUP-300')?.draft).toBeNull();
+    const long = 'b'.repeat(JIRA_REPLY_MAX_CHARS);
+    await draft({ ...ok, text: long }).expect(200);
+    expect((await mentions()).issues.find((i) => i.key === 'SUP-208')?.draft?.text).toBe(long);
+  });
+
+  it('carries session: null with no reply link, sessionId null while starting, the id once confirmed', async () => {
+    await build();
+    const sess = async () => (await mentions()).issues.find((i) => i.key === 'SUP-208')?.session;
+    expect(await sess()).toBeNull();
+    const live = app.get(JiraLiveService);
+    live.reserve('SUP-208', '/repo', 'reply');
+    expect(await sess()).toMatchObject({ sessionId: null, repo: '/repo' });
+    live.confirm('SUP-208', 'rep-1', META, 'reply');
+    expect(await sess()).toMatchObject({ sessionId: 'rep-1', repo: '/repo' });
+  });
+
+  it('a dismissed ticket carries its draft and session in dismissed[]', async () => {
+    await build();
+    replyLink();
+    await draft(ok).expect(200);
+    const res = await dismiss('SUP-208', [c4.id]).expect(200);
+    expect(keysOf(res.body.dismissed)).toEqual(['SUP-208']);
+    expect(res.body.dismissed[0].draft).toMatchObject({ text: ok.text });
+    expect(res.body.dismissed[0].session).toMatchObject({ sessionId: 'rep-1' });
+  });
+
+  it('discard drops the draft and answers draft: null; a key with no draft is 200 and writes nothing', async () => {
+    await build();
+    replyLink();
+    await draft(ok).expect(200);
+    const res = await discard('SUP-208').expect(200);
+    expect(res.body.issues.find((i: { key: string }) => i.key === 'SUP-208').draft).toBeNull();
+    const spy = jest.spyOn(atomic, 'writeJsonAtomic');
+    await discard('SUP-208').expect(200);
+    await discard('SUP-300').expect(200);
+    expect(spy).not.toHaveBeenCalled();
+    expect((await discard('nope').expect(400)).body).toEqual({ error: 'invalid issue key' });
+  });
+
+  it('a failed save is 500 "could not save — nothing changed" and the payload is unchanged', async () => {
+    await build();
+    replyLink();
+    const before = await mentions();
+    jest.spyOn(atomic, 'writeJsonAtomic').mockImplementation(() => {
+      throw new Error('disk full');
+    });
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect((await draft(ok).expect(500)).body).toEqual({ error: 'could not save — nothing changed' });
+    expect(await mentions()).toEqual(before);
   });
 });

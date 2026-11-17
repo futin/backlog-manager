@@ -1,11 +1,13 @@
 import { Body, Controller, Get, HttpCode, HttpException, Param, Post, UseGuards } from '@nestjs/common';
 
-import { JIRA_MENTIONS_DISMISS_MAX, isJiraKey } from '../../../shared/types';
-import type { JiraMentionsPayload, JiraThreadPayload } from '../../../shared/types';
+import { JIRA_MENTIONS_DISMISS_MAX, JIRA_REPLY_MAX_CHARS, isJiraKey } from '../../../shared/types';
+import type { JiraMentionIssue, JiraMentionsPayload, JiraThreadPayload } from '../../../shared/types';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import { jiraEnv } from './env.util';
+import { JiraLiveService } from './live.service';
 import { JiraMentionsStore, type JiraDismissal } from './mentions.store';
 import { JiraPollerService } from './poller.service';
+import { isSessionId } from './session-id.util';
 import { unwrapJira } from './unwrap.util';
 
 /** A Jira comment id as the REST API spells it: a decimal string. Twenty digits is far past any id Jira mints and short enough to keep a body small. */
@@ -27,19 +29,29 @@ const COMMENT_ID = /^\d{1,20}$/;
  * the store's retention clock, can come from). The write is all-or-nothing: the store throws with its memory unchanged, and the route answers 500 `could not
  * save — nothing changed`, the sentence the page shows. Restore of a key with nothing dismissed writes nothing and answers the payload as it was.
  *
+ * **Drafts (plan Task 4, rulings R5/R6).** `POST mentions/draft` `{ key, sessionId, text }` is the one door a reply session's text comes in by (`jira.mjs draft`
+ * posts here — this server's own route, never a Jira call): guard → validate (400: key, `invalid session id`, `text must be a non-empty string`, `text too long`)
+ * → configured (503) → the `(key, sessionId)` pair must be a LIVE `reply` link in `JiraLiveService` (409 `no reply session for <KEY>` — a run link, an ended
+ * reply or another session's does not count, so a stray session cannot plant text on a ticket) → `setDraft` through `save()`. `mentions/draft/discard` `{ key }`
+ * drops the ticket's draft, and a key with none writes nothing. Nothing here sends a comment: only `mentions/reply` ever does.
+ *
+ * Every answer — `GET` and every POST — is composed by ONE private `payload()`: the poller's payload plus, per issue (in `issues` and `dismissed`), the store's
+ * draft and the live service's `replySession`. The poller stays ignorant of drafts and links, so it never imports the live service.
+ *
  * Every successful POST answers the mentions payload, dismissals applied, so the page renders the answer and needs no second read.
  */
 @Controller('api/jira')
 export class JiraMentionsController {
   constructor(
     private readonly poller: JiraPollerService,
-    private readonly store: JiraMentionsStore
+    private readonly store: JiraMentionsStore,
+    private readonly live: JiraLiveService
   ) {}
 
   /** `GET /api/jira/mentions` — the cache with the dismissals applied; memory only, no call. Unconfigured answers `{ configured: false, detail }`. */
   @Get('mentions')
   mentions(): JiraMentionsPayload {
-    return this.poller.mentionsPayload();
+    return this.payload();
   }
 
   /** `POST /api/jira/mentions/sweep` — one mentions check now, joined, floored and window-refused as the poller decides (`mentionsSweepNow`). */
@@ -50,7 +62,7 @@ export class JiraMentionsController {
     const result = await this.poller.mentionsSweepNow();
     if (result.kind === 'not-armed') throw new HttpException({ message: 'Jira is not being polled' }, 409);
     if (result.kind === 'wait') throw new HttpException({ message: 'rate limited', retryAt: new Date(result.retryAt).toISOString() }, 429);
-    return this.poller.mentionsPayload();
+    return this.payload();
   }
 
   /** `POST /api/jira/mentions/dismiss` `{ key, commentIds }` — hides those open mentions of one ticket until a newer one arrives or the key is restored. */
@@ -68,7 +80,7 @@ export class JiraMentionsController {
       return { commentId, key, created: candidate.created, dismissedAt };
     });
     this.save(() => this.store.dismiss(entries));
-    return this.poller.mentionsPayload();
+    return this.payload();
   }
 
   /** `POST /api/jira/mentions/restore` `{ key }` — drops every dismissal of the ticket; a key with none writes nothing and still answers 200. */
@@ -79,7 +91,38 @@ export class JiraMentionsController {
     const key = this.keyOf(body);
     this.requireConfigured();
     this.save(() => this.store.restore(key));
-    return this.poller.mentionsPayload();
+    return this.payload();
+  }
+
+  /** `POST /api/jira/mentions/draft` `{ key, sessionId, text }` — stores the text a live reply session drafted for the ticket, replacing an earlier draft. */
+  @Post('mentions/draft')
+  @HttpCode(200)
+  @UseGuards(SameOriginPostGuard)
+  draft(@Body() body: unknown): JiraMentionsPayload {
+    const key = this.keyOf(body);
+    const sessionId = (body as { sessionId?: unknown } | null)?.sessionId;
+    if (!isSessionId(sessionId)) throw new HttpException({ error: 'invalid session id' }, 400);
+    const text = (body as { text?: unknown } | null)?.text;
+    if (typeof text !== 'string' || text.trim() === '') throw new HttpException({ error: 'text must be a non-empty string' }, 400);
+    if (text.length > JIRA_REPLY_MAX_CHARS) throw new HttpException({ error: 'text too long' }, 400);
+    this.requireConfigured();
+    if (!this.live.liveLinks().some((l) => l.how === 'reply' && l.key === key && l.sessionId === sessionId)) {
+      throw new HttpException({ error: `no reply session for ${key}` }, 409);
+    }
+    const at = new Date(Date.now()).toISOString();
+    this.save(() => this.store.setDraft(key, { text, sessionId, at }));
+    return this.payload();
+  }
+
+  /** `POST /api/jira/mentions/draft/discard` `{ key }` — drops the ticket's draft; a key with none writes nothing and still answers 200. */
+  @Post('mentions/draft/discard')
+  @HttpCode(200)
+  @UseGuards(SameOriginPostGuard)
+  discardDraft(@Body() body: unknown): JiraMentionsPayload {
+    const key = this.keyOf(body);
+    this.requireConfigured();
+    this.save(() => this.store.dropDraft(key));
+    return this.payload();
   }
 
   /**
@@ -96,6 +139,14 @@ export class JiraMentionsController {
       throw new HttpException({ error: `${key} is not readable` }, 404);
     }
     return unwrapJira(result);
+  }
+
+  /** The poller's payload with each issue's draft and drafting session filled in (R6); the unconfigured shape passes through. */
+  private payload(): JiraMentionsPayload {
+    const base = this.poller.mentionsPayload();
+    if (!base.configured) return base;
+    const fill = (i: JiraMentionIssue): JiraMentionIssue => ({ ...i, draft: this.store.draftFor(i.key), session: this.live.replySession(i.key) });
+    return { ...base, issues: base.issues.map(fill), dismissed: base.dismissed.map(fill) };
   }
 
   /** The body's `key`, or the 400 every key gets (`isJiraKey`, case-sensitive). */
@@ -130,7 +181,7 @@ export class JiraMentionsController {
     try {
       write();
     } catch (err) {
-      console.warn(`jira mentions: could not save dismissals: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`jira mentions: could not save: ${err instanceof Error ? err.message : String(err)}`);
       throw new HttpException({ error: 'could not save — nothing changed' }, 500);
     }
   }
