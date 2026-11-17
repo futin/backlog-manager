@@ -240,7 +240,10 @@ Commit the merge with git's default merge subject — the first line of the merg
 ```bash
 MSG="$(mktemp)"
 cd '<tree>' && head -n1 "$(git rev-parse --git-path MERGE_MSG)" > "$MSG"
-printf '\n%s\n' '<one line per resolved file: path — how>' >> "$MSG"
+cat >> "$MSG" <<'EOF'
+
+<one line per resolved file: path — how>
+EOF
 cd '<tree>' && git commit -F "$MSG"
 ```
 
