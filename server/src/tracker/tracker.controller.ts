@@ -41,9 +41,11 @@ export class TrackerController {
   ) {}
 
   /**
-   * `POST /api/github/sweep` — the popover head's `Sync now`, or one repo's with `{ repo }`. It writes nothing and runs no git: it asks the poller for one
-   * sweep now and then the PR cache for one re-read of the swept repos (past its TTL), and answers the `trackers()` payload so the client replaces its
-   * cache with the new ages. Guard → validate (400: a `repo` that is not an `owner/name` string) → `sweepNow`: `not-armed` is a 409 (no token, or nothing
+   * `POST /api/github/sweep` — the popover head's `Sync now`, or one repo's with `{ repo }` (a row's sync icon, or the PRs page after its own merge). It
+   * writes nothing and runs no git: it asks the poller for one sweep now and then the PR cache for one re-read of the swept repos — past its TTL for an
+   * unnamed press, and at once for a named one unless a read has started since the press (#505, `refreshNow`'s `pressedAt`) — and answers the `trackers()`
+   * payload so the client replaces its cache with the new ages. Guard →
+   * validate (400: a `repo` that is not an `owner/name` string) → `sweepNow`: `not-armed` is a 409 (no token, or nothing
    * connected), `unknown` the 404 `GET /api/prs`'s writes use, `wait` a 429 with the later sleep end as `retryAt`. A 401, a 5xx or a transport failure
    * inside the sweep is the poller's to record (`access`, `detail`) and is a 200 here: the request itself worked. The token is never in a body.
    */
@@ -55,11 +57,13 @@ export class TrackerController {
     const raw = fields.repo;
     if (raw !== undefined && !isRepo(raw)) throw new HttpException({ error: 'repo must be an owner/name repository' }, 400);
     const repo = raw as string | undefined;
+    // Read before the sweep: a PR read that starts after this moment answers the press, whichever press's sweep it rode in on (`refreshNow`).
+    const pressedAt = Date.now();
     const result = await this.poller.sweepNow(repo);
     if (result.kind === 'not-armed') throw new HttpException({ message: 'GitHub is not being polled' }, 409);
     if (result.kind === 'unknown') throw new HttpException({ error: `${repo} is not the repo of a registered GitHub project` }, 404);
     if (result.kind === 'wait') throw new HttpException({ message: 'rate limited', retryAt: new Date(result.retryAt).toISOString() }, 429);
-    await this.prs.refreshNow(this.poller.sweepTargets(repo));
+    await this.prs.refreshNow(this.poller.sweepTargets(repo), Date.now(), repo === undefined ? {} : { pressedAt });
     return this.trackers();
   }
 

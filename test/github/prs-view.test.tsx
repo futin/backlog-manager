@@ -136,6 +136,13 @@ let payload: PullRequestsPayload;
 let reads: number;
 let posts: { url: string; body: unknown }[];
 let answerPost: (url: string, body: unknown) => { status: number; body: unknown };
+/** The post-merge GitHub sweeps (#505), kept apart from `posts` so every PR-write case still reads exactly the writes it made. */
+let sweeps: unknown[];
+let answerSweep: () => { status: number; body: unknown };
+/** The shell's trackers `reload`, which the page calls after a sweep the server accepted. */
+let reloadTrackers: jest.Mock;
+/** Every request in the order it left: a case that needs the sweep BEFORE the page's re-read reads it here. */
+let order: string[];
 
 /** A fresh copy per answer, as a real `json()` gives: a case that edits `payload` between reads must not edit the answer the page already holds. */
 const respond = (status: number, body: unknown) =>
@@ -158,11 +165,21 @@ beforeEach(() => {
   ];
   mockRuns.runs = [];
   answerPost = () => ({ status: 200, body: { ok: true, outcome: 'merged', pr: null, reread: true } });
+  sweeps = [];
+  answerSweep = () => ({ status: 200, body: { platforms: [], projects: [] } });
+  reloadTrackers = jest.fn();
+  order = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    order.push(url);
     if (url === '/api/prs' && init?.method !== 'POST') {
       reads += 1;
       return respond(200, payload);
+    }
+    if (url === '/api/github/sweep') {
+      sweeps.push(JSON.parse(String(init?.body)));
+      const res = answerSweep();
+      return respond(res.status, res.body);
     }
     const body: unknown = JSON.parse(String(init?.body));
     posts.push({ url, body });
@@ -203,7 +220,7 @@ async function clickAndSettle(el: HTMLElement): Promise<void> {
 async function mount(props: { onOpenSettings?: () => void } = {}) {
   const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
   // The shell's PR read is enabled by a registered GitHub project, so the page is mounted under a trackers answer that holds one.
-  const trackers = { data: { platforms: [], projects: [{ source: 'github' }] } as never, loading: false, error: false, reload: () => {}, saveInterval: () => Promise.resolve(), refusals: {} };
+  const trackers = { data: { platforms: [], projects: [{ source: 'github' }] } as never, loading: false, error: false, reload: reloadTrackers, saveInterval: () => Promise.resolve(), refusals: {} };
   const view = render(
     <TrackersContext.Provider value={trackers}>
       <OrchestratorRunsProvider>
@@ -596,6 +613,73 @@ describe('PullRequestsView — blocked actions', () => {
     await flush();
     expect(mainHalf('futin/y#12')).toBeEnabled();
     expect(chevron('futin/y#12')).toBeEnabled();
+  });
+});
+
+describe('PullRequestsView — a merge syncs its repo (#505)', () => {
+  beforeEach(() => storeLayout('cards'));
+
+  async function merge(key: string): Promise<void> {
+    await act(async () => {
+      fireEvent.click(action(key, 'Merge'));
+      await drain();
+    });
+    await clickAndSettle(within(row(key)).getByTestId('pr-merge-confirm-accept'));
+  }
+
+  it.each(['merged', 'already-merged'])('a Merge answered %s posts one sweep naming its repo, reloads the trackers, then re-reads /api/prs', async (outcome) => {
+    answerPost = () => ({ status: 200, body: { ok: true, outcome, pr: null, reread: true } });
+    await mount();
+    const before = reads;
+    order.length = 0;
+    await merge('futin/y#12');
+    expect(sweeps).toEqual([{ repo: 'futin/y' }]);
+    expect(reloadTrackers).toHaveBeenCalledTimes(1);
+    expect(reads).toBe(before + 1);
+    expect(order).toEqual(['/api/prs/merge', '/api/github/sweep', '/api/prs']);
+  });
+
+  it('an update-branch answered update-requested posts no sweep', async () => {
+    answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
+    await mount();
+    await clickAndSettle(action('futin/y#12', 'Update'));
+    expect(posts.map((p) => p.url)).toEqual(['/api/prs/update-branch']);
+    expect(sweeps).toEqual([]);
+    expect(reloadTrackers).not.toHaveBeenCalled();
+  });
+
+  it('an auto-merge arm answered auto-merge-enabled posts no sweep', async () => {
+    answerPost = () => ({ status: 200, body: { ok: true, outcome: 'auto-merge-enabled', pr: null, reread: true } });
+    await mount();
+    await clickAndSettle(action('futin/y#12', 'Auto-merge'));
+    expect(posts.map((p) => p.url)).toEqual(['/api/prs/auto-merge']);
+    expect(sweeps).toEqual([]);
+  });
+
+  it('a Merge the server refused posts no sweep', async () => {
+    answerPost = () => ({ status: 409, body: { error: 'Head branch was modified. Review and try the merge again.' } });
+    await mount();
+    await merge('futin/y#12');
+    expect(sweeps).toEqual([]);
+    expect(reloadTrackers).not.toHaveBeenCalled();
+  });
+
+  it('a merged PR whose sweep is answered 429 still reads merged, with no error text, no trackers reload, and the page re-reads', async () => {
+    answerSweep = () => ({ status: 429, body: { message: 'rate limited', retryAt: new Date(NOW + 600_000).toISOString() } });
+    await mount();
+    const before = reads;
+    await merge('futin/y#12');
+    expect(sweeps).toEqual([{ repo: 'futin/y' }]);
+    expect(reloadTrackers).not.toHaveBeenCalled();
+    expect(reads).toBe(before + 1);
+    expect(within(row('futin/y#12')).getByTestId('pr-outcome')).toHaveTextContent(/^merged$/);
+    expect(screen.queryByText(/rate limited|asked to wait/)).toBeNull();
+  });
+
+  it('with two repos on the page, a merge in one posts the sweep for that repo only', async () => {
+    await mount();
+    await merge('futin/x#9');
+    expect(sweeps).toEqual([{ repo: 'futin/x' }]);
   });
 });
 

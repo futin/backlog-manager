@@ -12,9 +12,11 @@ import { useNow } from '../../hooks/useNow';
 import { useOrchestratorRunsContext } from '../../hooks/OrchestratorRunsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { usePullRequestsContext } from '../../hooks/PullRequestsContext';
+import { useTrackersContext } from '../../hooks/TrackersContext';
 import { emptyRepoNote, openPrCount, parseLayout, PR_LAYOUT_KEY, PR_LAYOUT_OPTIONS, splitReach, type PrLayout } from '../../lib/pr-layouts';
 import type { PrRunContext } from '../../lib/pr-run';
 import { applyUpdateOutcome, findPr, groupRepos, mergeBlock, outcomeLine, updateTransition, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
+import { postSweep } from '../../lib/sweep';
 import type { PrWriteResult } from '../../../../shared/types';
 
 /** The page's own words for the token-less server — an instruction, because the only fix is on the host. */
@@ -55,6 +57,16 @@ const WARNING_CLOCK_MS = 15_000;
  * line is cleared the moment its next write leaves, and a repo shows only its newest `DEPARTED_KEEP` departed lines, so a page left mounted through many
  * writes does not pile them up (#396).
  *
+ * **A merge syncs its repo (#505).** A write answered `merged` or `already-merged` posts the same GitHub sweep a repo's sync icon does
+ * (`postSweep('github', repo)`, the repo handed in by the layout rather than parsed back out of the key) before the page's re-read, and on `ok` reloads the
+ * shell's trackers. Some registered repos require up-to-date branches, so a merge leaves the repo's other PRs behind, and the closed issues are the tracker's;
+ * without this the page showed both only after a manual Sync. The sweep names its repo, which makes the server re-read that repo's PR list inside its TTL,
+ * so the re-read below sees the new state. No other outcome posts one — an update, an auto-merge arm or disarm, a refusal — and a merge GitHub made elsewhere
+ * is the timed sync's. A refused sweep (409, 429, 404, unreachable) is silent: the merge succeeded and its line stays `merged`, a rate-limit sleep is already
+ * on the tracker pill, and the next 60 s read catches up. It is not `useSweep`, whose state is `TrackerChip`'s, so the pill's spinner does not turn for it.
+ * GitHub recomputes the other PRs' merge state asynchronously, so this read can still show the old `canUpdateBranch` for a few seconds; the next regular read
+ * settles it, and no delayed second read is added for it.
+ *
  * **`updating…`.** GitHub answers update-branch with 202 and merges later, so the page marks the PR at the head SHA it asked from (`UpdateMark`), and the row
  * says `updating…` for as long as the mark is PRESENT — no clock of its own, so a render can never free `Update` before a read has judged the update. Any read
  * that shows the head moved drops the mark and says `branch updated`; one that no longer lists the PR drops the mark alone. After `UPDATING_MS` the mark's
@@ -78,6 +90,7 @@ const WARNING_CLOCK_MS = 15_000;
  */
 export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: () => void }) {
   const { data, error, refresh } = usePullRequestsContext();
+  const { reload: reloadTrackers } = useTrackersContext();
   const { items, projects } = useBoard();
   const { runs, starting, remote, remoteStarting } = useOrchestratorRunsContext();
   const now = useNow(true, WARNING_CLOCK_MS);
@@ -154,7 +167,7 @@ export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: 
   }, [data, confirming]);
 
   const write = useCallback(
-    async (key: string, sha: string, call: () => Promise<PrWriteResult>): Promise<void> => {
+    async (key: string, repo: string, sha: string, call: () => Promise<PrWriteResult>): Promise<void> => {
       // The Confirm that started this write (or any other of this PR's) has done its job; it closes before the call, not when the answer lands.
       setConfirming((prev) => (prev === key ? null : prev));
       setInFlight((prev) => new Set(prev).add(key));
@@ -168,14 +181,18 @@ export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: 
       });
       try {
         let outcome: PrOutcome;
+        let merged = false;
         try {
           const result = await call();
           outcome = { text: outcomeLine(result), kind: result.outcome === 'update-requested' ? 'updating' : 'ok' };
           if (result.outcome === 'update-requested') markUpdating(key, sha);
+          merged = result.outcome === 'merged' || result.outcome === 'already-merged';
         } catch (e) {
           outcome = { text: e instanceof Error ? e.message : String(e), kind: 'error' };
         }
         setOutcomes((prev) => ({ ...prev, [key]: outcome }));
+        // A refused sweep says nothing here: the merge itself succeeded, and its line already says so (see the file's doc).
+        if (merged && (await postSweep('github', repo)).ok) reloadTrackers();
         await refresh();
       } finally {
         setInFlight((prev) => {
@@ -185,7 +202,7 @@ export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: 
         });
       }
     },
-    [markUpdating, refresh]
+    [markUpdating, refresh, reloadTrackers]
   );
 
   const ctx: PrRunContext = useMemo(

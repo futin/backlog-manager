@@ -9,7 +9,7 @@ import { AppModule } from '../../server/src/app.module';
 import { REGISTRY_FILE } from '../../server/src/registry/registry.service';
 import { GithubClient } from '../../server/src/tracker/github.client';
 import { SWEEP_FLOOR_MS, TrackerPollerService } from '../../server/src/tracker/poller.service';
-import { PR_TTL_MS } from '../../server/src/tracker/pulls.service';
+import { PR_TTL_MS, PullRequestsService } from '../../server/src/tracker/pulls.service';
 import { GITHUB_TOKEN_ENV } from '../../server/src/tracker/token.util';
 import { listenLoopback } from '../helpers/app';
 import { FAKE_REPO, FakeGithub } from '../helpers/github';
@@ -69,6 +69,11 @@ const sweep = (body: unknown = {}) =>
 /** Issue-list reads per repo: the poller's one call per synced repo. */
 const syncs = (repo: string) => gh.calls.filter((c) => c.method === 'GET' && c.url.includes(`/repos/${repo}/issues?`)).length;
 const prReads = (repo: string) => gh.graphqlCalls('PullRequests', repo).length;
+/** Polls `ready` on the macrotask queue: a held answer leaves the request in flight, and a case waits for the call it is about to race to have gone out. */
+async function waitFor(ready: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !ready(); i += 1) await new Promise((r) => setTimeout(r, 5));
+  if (!ready()) throw new Error('timed out waiting');
+}
 const stateOf = (repo: string) => (poller as unknown as { stateOf(r: string): { sleepUntil: number | null; secondaryUntil: number | null } }).stateOf(repo);
 
 beforeEach(() => {
@@ -179,7 +184,7 @@ describe('POST /api/github/sweep', () => {
     expect(res.body.projects[0]).toMatchObject({ access: 'forbidden', polledAt: polledBefore });
   });
 
-  it('re-reads the PR cache once per swept repo, and only past its TTL', async () => {
+  it('a press naming no repo re-reads the PR cache once per swept repo, and only past its TTL', async () => {
     await build([FAKE_REPO, OTHER], { intervals: { [FAKE_REPO]: '5m', [OTHER]: '5m' } });
     // The cache is cold: the press fills it, one read per repo, joined by two presses.
     await Promise.all([sweep().expect(200), sweep().expect(200)]);
@@ -190,11 +195,82 @@ describe('POST /api/github/sweep', () => {
     await sweep().expect(200);
     expect(syncs(FAKE_REPO)).toBe(2);
     expect(prReads(FAKE_REPO)).toBe(1);
+    expect(prReads(OTHER)).toBe(1);
     // Past the TTL: one more read each.
     skew += PR_TTL_MS;
     await sweep().expect(200);
     expect(prReads(FAKE_REPO)).toBe(2);
     expect(prReads(OTHER)).toBe(2);
+  });
+
+  // #505: the PRs page polls every 60 s, so a sweep right after a merge almost always meets a fresh entry — a named press reads its repo regardless.
+  it('a press naming a repo whose PR entry is inside its TTL re-reads that repo once, and no other', async () => {
+    await build([FAKE_REPO, OTHER], { intervals: { [FAKE_REPO]: '5m', [OTHER]: '5m' } });
+    await request(app.getHttpServer()).get('/api/prs').expect(200);
+    expect(prReads(FAKE_REPO)).toBe(1);
+    expect(prReads(OTHER)).toBe(1);
+    skew += 1_000;
+    await sweep({ repo: FAKE_REPO }).expect(200);
+    expect(prReads(FAKE_REPO)).toBe(2);
+    expect(prReads(OTHER)).toBe(1);
+    // The forced read answered the due time: a GET straight after is served from the cache.
+    await request(app.getHttpServer()).get('/api/prs').expect(200);
+    expect(prReads(FAKE_REPO)).toBe(2);
+  });
+
+  it('a named press while that repo’s PR read is in flight joins it, with no second PR call', async () => {
+    await build([FAKE_REPO], { intervals: { [FAKE_REPO]: '5m' } });
+    const release = gh.holdAnswers('PullRequests');
+    const listing = request(app.getHttpServer()).get('/api/prs').then((r) => r);
+    await waitFor(() => prReads(FAKE_REPO) === 1);
+    const pressing = sweep({ repo: FAKE_REPO }).then((r) => r);
+    await waitFor(() => syncs(FAKE_REPO) === 1);
+    release();
+    expect((await pressing).status).toBe(200);
+    expect((await listing).status).toBe(200);
+    expect(prReads(FAKE_REPO)).toBe(1);
+  });
+
+  it('a named press for a repo asleep in the graphql pool makes no PR read and still answers the trackers payload', async () => {
+    await build([FAKE_REPO], { intervals: { [FAKE_REPO]: '5m' } });
+    await request(app.getHttpServer()).get('/api/prs').expect(200);
+    const entry = (app.get(PullRequestsService) as unknown as { entries: Map<string, { sleeps: Record<string, unknown> }> }).entries.get(FAKE_REPO)!;
+    entry.sleeps.graphql = { until: Date.now() + 600_000, detail: 'rate limited until later' };
+    const res = await sweep({ repo: FAKE_REPO }).expect(200);
+    expect(prReads(FAKE_REPO)).toBe(1);
+    expect(res.body.projects).toHaveLength(1);
+  });
+
+  it('two concurrent named presses for one repo make one sweep call and one PR read', async () => {
+    await build([FAKE_REPO], { intervals: { [FAKE_REPO]: '5m' } });
+    await request(app.getHttpServer()).get('/api/prs').expect(200);
+    skew += 1_000;
+    // The first press's PR read is held, so the second press reaches the cache while it is out — the overlap a real GitHub round trip gives.
+    const release = gh.holdAnswers('PullRequests');
+    const presses = Promise.all([sweep({ repo: FAKE_REPO }).then((r) => r), sweep({ repo: FAKE_REPO }).then((r) => r)]);
+    await waitFor(() => prReads(FAKE_REPO) === 2);
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    expect((await presses).map((r) => r.status)).toEqual([200, 200]);
+    expect(syncs(FAKE_REPO)).toBe(1);
+    expect(prReads(FAKE_REPO)).toBe(2);
+  });
+
+  it('a read that started at or after a press answers it: a second refresh for the same press makes no PR read', async () => {
+    await build([FAKE_REPO], { intervals: { [FAKE_REPO]: '5m' } });
+    await request(app.getHttpServer()).get('/api/prs').expect(200);
+    skew += 1_000;
+    const prs = app.get(PullRequestsService);
+    const pressedAt = Date.now();
+    await prs.refreshNow([FAKE_REPO], Date.now(), { pressedAt });
+    expect(prReads(FAKE_REPO)).toBe(2);
+    // The same press arriving again — the second of two presses whose sweeps were joined, landing after the first one's read did.
+    skew += 10;
+    await prs.refreshNow([FAKE_REPO], Date.now(), { pressedAt });
+    expect(prReads(FAKE_REPO)).toBe(2);
+    // A later press is not answered by that read.
+    await prs.refreshNow([FAKE_REPO], Date.now(), { pressedAt: Date.now() });
+    expect(prReads(FAKE_REPO)).toBe(3);
   });
 
   it('is refused by the guard from another origin and with no content type', async () => {
