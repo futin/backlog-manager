@@ -1,6 +1,7 @@
 import type { PrRunContext } from '../../lib/pr-run';
 import type { PrOutcome, UpdateMark } from '../../lib/prs';
-import type { PrRepoView, PrWriteResult } from '../../../../shared/types';
+import type { DispatchGate } from '../../../../shared/agent';
+import type { PrRepoView, PrResolveState, PrWriteResult } from '../../../../shared/types';
 
 /**
  * What every GitHub › PRs layout is handed by the page (`.claude/DESIGN.md` §8.11; spec `2026-10-29-prs-layouts-design.md`, "What every layout carries"). One
@@ -33,4 +34,16 @@ export interface PrLayoutProps {
   confirming: string | null;
   /** `Merge` sets this row's key; Cancel, Escape and the page's `write` (when the write leaving is this row's) clear it. */
   setConfirming: (key: string | null) => void;
+  /** Every PR's resolve state by `<repo>#<number>` (`resolveIndex`), for the Resolve conflicts row's reason and the status line under the PR. */
+  resolves: ReadonlyMap<string, PrResolveState>;
+  /**
+   * The repo's dispatch gate for a resolve session (`resolveGateFor`): `null` while the agents status is unknown and `hidden` where no session could ever
+   * start — both draw no row (an environment-level block hides the control); `disabled` keeps the row with its reason, `enabled` lets it through.
+   */
+  gateFor: (repo: string) => DispatchGate | null;
+  /**
+   * The page's `resolve`: starts a resolve session for `<repo>#<number>`, holding the key in `inFlight` until the re-read after it has settled. A refusal lands
+   * as an error outcome; a success records none, since the status line says `resolving…` from the re-read on.
+   */
+  resolve: (key: string, repo: string, number: number) => Promise<void>;
 }

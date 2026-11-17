@@ -15,11 +15,13 @@ const FIRST = { token: true, repos: [] };
 jest.mock('../../client/src/hooks/TrackersContext', () => ({ useTrackersContext: () => ({ data: trackers }) }));
 jest.mock('../../client/src/lib/tracker', () => ({ hasTracker: (p: { source: string }[]) => p.some((x) => x.source === 'github') }));
 let readerData: typeof FIRST | null = null;
+const LIVE = { repo: 'futin/x', number: 5, live: { sessionId: 's1' }, outcome: null };
+let readerResolves: (typeof LIVE)[] = [];
 const refresh = () => Promise.resolve(null);
 jest.mock('../../client/src/hooks/usePullRequests', () => ({
   usePullRequests: () => {
     // Set by the test: the first reader answers at once; the remounted one reports nothing yet, so only the provider's own state can show an old read.
-    return { data: readerData, error: null, refresh };
+    return { data: readerData, error: null, refresh, resolves: readerResolves };
   }
 }));
 
@@ -51,4 +53,26 @@ it('clears the stale read when the shell stops reading, so a re-enable does not 
   act(() => rerender(tree()));
   expect(screen.getByTestId('p')).toHaveTextContent('true:null');
   expect(seen).not.toContain('true:data');
+});
+
+it("hands the reader's resolves through while enabled, and [] while disabled", () => {
+  readerData = FIRST;
+  readerResolves = [LIVE];
+  trackers = { projects: [{ source: 'github' }] };
+  let value: ReturnType<typeof usePullRequestsContext> | null = null;
+  function Grab() {
+    value = usePullRequestsContext();
+    return null;
+  }
+  const grab = () => (
+    <PullRequestsProvider>
+      <Grab />
+    </PullRequestsProvider>
+  );
+  const { rerender } = render(grab());
+  expect(value!.resolves).toEqual([LIVE]);
+  trackers = { projects: [] };
+  act(() => rerender(grab()));
+  expect(value!.enabled).toBe(false);
+  expect(value!.resolves).toEqual([]);
 });

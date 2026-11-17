@@ -235,6 +235,28 @@ on the same refs.
 and derives each row's streak from `state.json`, so "exactly one writer" is a statement about writes, not about readers: `tick.mjs` writes the home, the server
 only reads it, and the one file the server does write for the breaker is `settings/tick.json`, outside the home (see the `tick.json` section below).
 
+## `~/.backlog-manager/pr-resolve/` has exactly one writer, and the server only reads it
+
+**pr-resolve** (spec: [2026-11-17-pr-conflict-resolve-design.md](../superpowers/specs/2026-11-17-pr-conflict-resolve-design.md)). Another directory under
+`~/.backlog-manager/` a tool owns outright, keeping the relationship `registry.json`, `run.json`, `retro/` and `tick/` each have with their one writer:
+`skills/pr-resolve/tools/pr-resolve.mjs` writes it, and nothing else does. It holds one outcome file per PR, `<owner>__<repo>__<N>.json`, and one lock per PR
+under `locks/`. `$BM_PR_RESOLVE_HOME` overrides the home, read per call, for the reason `$BM_TICK_HOME` exists: a test process, or somebody running the tool by
+hand, must never write into a real machine's outcomes, and above all never into a lock a live resolve holds.
+
+**The outcome file is how the board learns what a session did, so it has to be a record nobody else can bend.** The server has no read of a session's text: a
+resolve that pushed, stopped or found the branch already up to date says so in the file, and the board's Resolve row and chip are derived from it. A second
+writer — the server marking a resolve done, a route clearing a stale outcome — would make the board say something no session said, and a file written in place
+could be read half-written. So the tool writes it as a temp file in the same directory plus a `rename`, and the server only reads it, skipping a file it cannot
+parse rather than failing the list.
+
+**The lock is the one-at-a-time guarantee, so only the tool may take, judge or remove it.** It is an exclusive create (`'wx'`): of two sessions racing for one
+PR, exactly one wins. Staleness is by age (3 hours) or by a `--reclaim` the server adds only after proving the recorded session dead on the dashboard — never
+by process, because a skill CLI's pid dies with each call and a terminal run has no dashboard to ask. A stale lock is claimed by renaming it aside and
+re-reading it, `claimStale`, a TWIN of `backlog-tick`'s `claimStaleLock` (copied, not imported: a skill's tools import nothing from another skill's, from
+`server/` or from `shared/`), so two claimers of one stale lock cannot both proceed. The server reads the lock to decide whether a click is a second resolve
+(refused) or a reclaim (named in the trigger it composes), and never deletes one: a server that removed a lock it judged dead would be a second judge of
+liveness, and the race the exclusive create closes would reopen between them.
+
 ## A tick does one unit, only when idle, and never executes a plan that awaits review
 
 **backlog-tick.** The skill exists so that a dashboard job can fire as often as it likes — every half hour overnight — and the cost of an unnecessary firing is
@@ -627,7 +649,8 @@ what the two-gate placement deliberately rules out, and widening it would make e
 
 ## `backlog-orchestrate` is the only skill that merges into a base; execute and groom commit and push only in `pr` mode, and may arm GitHub auto-merge
 
-Every other skill in this repo edits item files and nothing else, with one opt-in exception below (`pr` mode, execute's and groom's); `backlog-orchestrate` was
+Every other skill in this repo edits item files and nothing else, with one opt-in exception below (`pr` mode, execute's and groom's) and one skill that exists
+to write git (`pr-resolve`, below); `backlog-orchestrate` was
 the first one to touch git history, and it is still the only one that merges into a base. It can, because of what it alone controls: `backlog-execute`'s "never
 commits, never pushes" limit exists because an
 execute session — headless inside a run, or by hand in the user's own checkout — runs inside a tree it does not own, and staging there could sweep up work that
@@ -649,7 +672,8 @@ run's base: `git -C "<base tree>" pull --ff-only origin <base>` before each item
 `git push -u origin backlog/<n>` from the item worktree under branch mode. For a files project the orchestrator pushes nothing and publishing remains the user's
 call, merge commits or otherwise. The only other pushes in this plugin are execute's and groom's `pr` modes, below — each its own branch only, never `<base>`,
 in files and tracker
-projects alike.
+projects alike — and `pr-resolve`'s, which merges a PR's base into that PR's head in its own detached worktree and pushes the head, never forced and never to
+the base: the direction `--fix`'s `git merge origin/<base>` already takes, so it is a merge into the PR's own branch, never into a base.
 
 **Execute's `pr` mode commits and pushes, and it is this same argument applied to a tree execute owns** (the execute pr-mode spec). The limit above was never
 "execute must not touch git"; it was "no skill stages in a tree it does not own". A hand execute session started with `--finish pr --base <ref>` (the sheet's
@@ -3635,7 +3659,7 @@ The Jira board cache is the second (`JiraPollerService`, one list per board, `po
 honest the same way; everything below is about the tracker's.
 
 **The pull-request cache is the third, and the only one with no clock of its own** (`PullRequestsService`, Plan B of the source-sections change). It is per
-repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep, because the only reader is the shell's one `PullRequestsProvider` — the rail counts open PRs on every page, so the read is no longer a page's —
+repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep (the only other read is a single PR's, spliced like a write's re-read: `readOne`, which the resolve route calls), because the only list reader is the shell's one `PullRequestsProvider` — the rail counts open PRs on every page, so the read is no longer a page's —
 and GitHub › PRs and GitHub › Settings' Access card read its answer. Its 60 s fetch is the cadence and the only thing that arms the cache, and it is mounted
 only while a GitHub project is registered, so a machine with none spends no GraphQL budget on a list nobody is drawing, which is what "the poller is armed only
 while something is connected" asks of it. It is kept honest the same way as the other two: `polledAt` rides on

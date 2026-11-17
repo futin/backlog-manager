@@ -143,8 +143,8 @@ export function mergeMain(pr: PullRequestRow, repo: PrRepoView): { mode: 'merge'
 
 /**
  * Why Update branch is disabled, or `null`. A conflicting PR is refused first, after `sync off` and `updating…`: GitHub's update-branch merges the base in
- * and fails on a conflict, so the key is closed for as long as the conflict stands — a person resolves it in a checkout, and nothing on this page can — and it
- * says `conflicts`, never `already up to date` (GitHub reports a conflicting PR `DIRTY`, not `BEHIND`, and its `viewerCanUpdateBranch` is false, which this
+ * and fails on a conflict, so the key is closed for as long as the conflict stands — the Resolve conflicts row
+ * (`lib/pr-resolve.ts`) is what starts clearing it — and it says `conflicts`, never `already up to date` (GitHub reports a conflicting PR `DIRTY`, not `BEHIND`, and its `viewerCanUpdateBranch` is false, which this
  * function used to read as up to date).
  *
  * A PR GitHub says is BEHIND its base is updatable whatever `canUpdateBranch` says. `canUpdateBranch` is GitHub's `viewerCanUpdateBranch`, and it answers

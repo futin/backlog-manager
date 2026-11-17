@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { hasTracker } from '../lib/tracker';
-import type { PullRequestsPayload } from '../../../shared/types';
+import type { PrResolveState, PullRequestsPayload } from '../../../shared/types';
 import { useTrackersContext } from './TrackersContext';
 import { usePullRequests } from './usePullRequests';
 
@@ -9,20 +9,26 @@ export interface PullRequestsContextValue {
   data: PullRequestsPayload | null;
   error: string | null;
   refresh: () => Promise<PullRequestsPayload | null>;
+  /**
+   * Every PR's resolve state (spec 2026-11-17-pr-conflict-resolve-design.md, "The board"), read on the same tick as `data`; `[]` while disabled or before
+   * the first resolves read answers. It is not judged by `error`: a failed resolves read keeps the last answer (`usePullRequests`).
+   */
+  resolves: PrResolveState[];
   /** Whether the shell is reading PRs at all: a GitHub project is registered. `false` means `data` and `error` are `null` because nothing was asked. */
   enabled: boolean;
 }
 
 const PullRequestsContext = createContext<PullRequestsContextValue | null>(null);
 
-type Read = Pick<PullRequestsContextValue, 'data' | 'error' | 'refresh'>;
+type Read = Pick<PullRequestsContextValue, 'data' | 'error' | 'refresh' | 'resolves'>;
 
-const DISABLED: PullRequestsContextValue = { data: null, error: null, refresh: () => Promise.resolve(null), enabled: false };
+const DISABLED: PullRequestsContextValue = { data: null, error: null, refresh: () => Promise.resolve(null), resolves: [], enabled: false };
 
 /** The one mounted `usePullRequests()`: it renders nothing and reports its answer up, so toggling `enabled` never remounts the tree under the provider. */
 function PullRequestsReader({ onRead }: { onRead: (read: Read) => void }) {
   const read = usePullRequests();
-  useEffect(() => onRead(read), [onRead, read.data, read.error, read.refresh]); // eslint-disable-line react-hooks/exhaustive-deps -- `read` is these three parts
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `read` is these four parts
+  useEffect(() => onRead(read), [onRead, read.data, read.error, read.refresh, read.resolves]);
   return null;
 }
 

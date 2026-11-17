@@ -44,7 +44,8 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   [invariants.md](docs/subsystems/invariants.md#a-stale-plan-mark-is-keyed-by-the-plans-hash-so-a-re-groom-clears-it-and-nothing-else-does)
 - **`backlog-orchestrate` is the only skill that merges into a base; `backlog-execute` and `backlog-groom` commit and push their own branch only in `pr` mode, and may arm GitHub auto-merge on the PR they opened.** Inside a per-item worktree,
   on `backlog/<id>` alone; merged into the run's **base branch** (`main` unless `--base` said otherwise), `--no-ff` only, only once the tree holding that base
-  is verified to have it actually checked out. Execute and groom are the two other skills that write git, and only
+  is verified to have it actually checked out. Execute, groom and `pr-resolve` are the three other skills that write git — `pr-resolve` merging a PR's base
+  into that PR's head in its own detached worktree and pushing the head, never forced (`skills/pr-resolve/SKILL.md`) — and execute and groom only
   when their trigger says `--finish pr` (`skills/backlog-execute/references/pr-mode.md`, `skills/backlog-groom/references/pr-mode.md`): each commits, pushes
   `-u` and runs `gh pr create` only in a tree that holds that one item's work alone — execute in one it cut from local `<base>` as `.worktrees/execute-<id>` on
   `execute/<id>` (or a clean reused worktree with no commits beyond `<base>`), groom in `.worktrees/groom-<id>` on `groom/<id>`, `<id>` with no `#` — never to

@@ -34,6 +34,14 @@ paths: ["server/src/agents/**", "shared/agent.ts", "server/src/jira/prompt.util.
   still proved against the file — and either is then asked of the dashboard gate as the raw string `projectDispatchGate` compares; no `dirName` is derived
   from it. Why:
   [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
+- **`POST /api/agents/dispatch-pr-resolve` is derived like the others, and its trigger is composed from the PR read and the lock file, never the body.**
+  `PrResolveController` rebuilds nothing from the body but `{ repo, number }` (`parseResolveBody`, 400 otherwise) behind `SameOriginPostGuard`, and
+  `PrResolveService.dispatch` runs the ladder in the spec's order — registry and sync (`PullRequestsService.projectFor`), `projectDispatchGate` (502 only when
+  dispatch is on and the dashboard unreachable, as `dispatch-jira`), the fresh `readOne`, then the reservation. **The reservation has no `await` between its
+  check and its `set`**, so of two clicks that both cleared the read exactly one spawns; every 409 after it and a failed spawn delete it first. The one thing a
+  file can put in the prompt is a lock's session id for `--reclaim`, and only `RECLAIMABLE_ID` passes; the live map is memory only and its liveness rule asks the
+  dashboard for ONE session's row (`dashboardSessionRow`), never the capped list. The server reads the skill's lock and outcome files and writes neither. Why:
+  [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
 - **`isItemId` accepts three shapes, and `#` is the one metacharacter among them.** `[a-z]+-\d+` (a files id), `#\d+` and the URN
   `gh:<owner>/<repo>#\d+` — still no whitespace, no newline, no quote, no `;`, no `$`. `#` is safe because nothing this predicate guards reaches a shell: the
   dispatch prompt is prose handed over JSON, and the ONE composition that concatenates caller text — the orchestrate prompt — **never carries a `#` because

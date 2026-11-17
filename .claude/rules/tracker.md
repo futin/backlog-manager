@@ -107,7 +107,7 @@ paths: ["server/src/tracker/**"]
   all — a whole-board failure keeps the last good list and its `polledAt` — and that `polledAt` rides on every board in `GET /api/jira` and on `GET
   /api/jira/boards/:id/issues`. The issue detail, the roots search, the project list and the JQL check are fresh reads and never cached. **The PR cache is
   the third** (`PullRequestsService`, `server/src/tracker/pulls.service.ts`): in memory, per DISTINCT repo, lost on restart, and ON DEMAND — no timer, interval
-  or sweep; a read happens only inside `GET /api/prs` or a write's re-read — served while younger than `PR_TTL_MS` (60 s), with one in-flight read per repo
+  or sweep; a read happens only inside `GET /api/prs`, a write's re-read or `readOne` (the resolve route's one-PR read, spliced like a re-read) — served while younger than `PR_TTL_MS` (60 s), with one in-flight read per repo
   shared by concurrent callers. `polledAt` moves on a successful read only; a failure keeps the last rows and sets `access`/`detail` from `failureVerdict`.
   An hourly-limit verdict sleeps ONE POOL of that repo's entry, `rest` or `graphql` — the one the failed request spent (#395) — through `noteSleep`, which a
   write's verdict reaches too, creating an empty entry; the list read, a re-read and auto-merge check `graphql`, merge and update-branch `rest` plus the

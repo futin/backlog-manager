@@ -3743,8 +3743,14 @@ button.rail-count { cursor: pointer }
 .prs-keys-row[aria-disabled='true'] .prs-keys-sub { color: var(--ink3) }
 .prs-keys-tick { display: inline-flex; flex: none; color: var(--ink) }
 .prs-foot { display: flex; flex-direction: column; gap: 8px; margin-top: 8px }
+/* A stopped resolve's note (`PrResolveLine`) is the one free-text line the keys column carries — the why-line's reasons are a few words each. Uncapped, its
+   max-content width became the column's flex basis, so on a wide Inbox or Cards row the keys dropped under the text even with the title nowhere near its
+   320 px (ui-verify D1, 2026-11-17). Capped, it wraps inside a column no wider than the text's own basis. Scoped to `.prs-row`: Matrix's expansion is a full
+   row of its own and lets the note run. Below the fold the keys take their own line anyway, so the cap is lifted there. */
+.prs-row .prs-resolve-note { max-width: 320px }
 @media (max-width: 700px) {
   .prs-keys-side { flex: 1 0 100%; align-items: flex-start }
+  .prs-row .prs-resolve-note { max-width: none }
 }
 .prs-row-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 15px; font-weight: 500; color: var(--ink) }
 .prs-num { color: var(--ink2); text-decoration: none; flex: none }

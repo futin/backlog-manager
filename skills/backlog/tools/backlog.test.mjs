@@ -3348,6 +3348,42 @@ test('backlog-review says when there is nothing to review', () => {
   )
 })
 
+// --- pr-resolve: the three final lines, the push it never forces, the staging it never widens ------------------------------------------------------
+//
+// A headless pr-resolve session ends on one of three literal lines, and the outcome file the board reads repeats the same outcome — so the line is a
+// vocabulary the board, the session and a person reading a terminal run all share (spec: docs/superpowers/specs/2026-11-17-pr-conflict-resolve-design.md,
+// "The skill"). Its two git rules are the feature's anti-goals: a rewritten PR branch, or a merge commit that swept up an untracked file, is a failure even
+// when everything passes. Nothing else reads SKILL.md, so a trim that drops one of them is green everywhere but here. Read, never imported.
+const PR_RESOLVE_SKILL_MD = fileURLToPath(new URL('../../pr-resolve/SKILL.md', import.meta.url))
+
+test('pr-resolve ends on one of three exact final lines, and a lock stop says who holds it', () => {
+  const text = flat(PR_RESOLVE_SKILL_MD)
+  for (const line of ['pr-resolve: pushed', 'pr-resolve: up to date — nothing pushed', 'pr-resolve: stopped — <one-line reason>']) {
+    assert.ok(text.includes(line), `pr-resolve/SKILL.md lost the final line \`${line}\``)
+  }
+  assert.ok(text.includes('another resolve of #<N> is running'), 'pr-resolve/SKILL.md lost the lock-stop reason')
+})
+
+test('pr-resolve pushes the head never forced and stages by path, never -A', () => {
+  const text = flat(PR_RESOLVE_SKILL_MD)
+  const RULES = [
+    ['git push origin HEAD:<head>', 'the push names the PR head and nothing else'],
+    ['never forced', 'the push is never forced'],
+    ['never `-A`', 'staging is by path, so no untracked file rides into the merge commit'],
+    ['git merge --no-ff --no-commit origin/<base>', 'the merge leaves the commit to the commit step'],
+    ['One judgment hunk aborts the whole resolve', 'a judgment call is never guessed at'],
+    // A tree with no node_modules symlink (the main checkout had none to link) must not turn `rm` into a false install stop.
+    ['rm -f node_modules && pnpm install', 'the lockfile install tolerates a tree that never got a symlink'],
+    // <root> is a value every tool call needs; the block that learns it has to print it, or the session guesses it from its cwd.
+    ['echo "$ROOT"', 'step 1 prints <root> rather than leaving it to be inferred'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(text.includes(needle), `pr-resolve/SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+  // Every spelling of a forced push: `--force` / `--force-with-lease`, the short `-f`, and a `+` refspec (`+HEAD:<head>`), which forces without a flag.
+  assert.ok(!/git push[^`]*(--force|\s-f\b|\s\+)/.test(text), 'pr-resolve/SKILL.md spells a forced push')
+})
+
 // --- backlog-groom's closing "on disk only" line -----------------------------
 //
 // The seam: `backlog-orchestrate`'s gate reads each candidate at the ref its
@@ -3534,6 +3570,8 @@ const CLI_SOURCES = {
   'tick.mjs': fileURLToPath(new URL('../../backlog-tick/tools/tick.mjs', import.meta.url)),
   // backlog-review's CLI. `scope` and `merge` print JSON a driver reads off a pipe, so the same truncation guard applies.
   'review.mjs': fileURLToPath(new URL('../../backlog-review/tools/review.mjs', import.meta.url)),
+  // pr-resolve's CLI. Every subcommand prints one JSON line a headless session reads off a pipe.
+  'pr-resolve.mjs': fileURLToPath(new URL('../../pr-resolve/tools/pr-resolve.mjs', import.meta.url)),
 }
 
 // Comment lines are stripped before matching because retro.mjs's own note
@@ -3565,6 +3603,7 @@ const ENTRY_SHAPES = {
   'jira.mjs': ['process.exitCode = await main('],
   'tick.mjs': ['process.exitCode = await main('],
   'review.mjs': ['process.exitCode = main('],
+  'pr-resolve.mjs': ['process.exitCode = main('],
 }
 
 test('every skill CLI ends through process.exitCode, never process.exit', () => {

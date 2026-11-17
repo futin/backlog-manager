@@ -7,6 +7,7 @@ import { PrMatrix } from './PrMatrix';
 import type { PrLayoutProps } from './pr-layout-props';
 import { Band } from '../ui/Band';
 import { Segmented } from '../ui/Segmented';
+import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
 import { useOrchestratorRunsContext } from '../../hooks/OrchestratorRunsContext';
@@ -14,8 +15,10 @@ import { usePersistedState } from '../../hooks/usePersistedState';
 import { usePullRequestsContext } from '../../hooks/PullRequestsContext';
 import { useTrackersContext } from '../../hooks/TrackersContext';
 import { emptyRepoNote, openPrCount, parseLayout, PR_LAYOUT_KEY, PR_LAYOUT_OPTIONS, splitReach, type PrLayout } from '../../lib/pr-layouts';
+import { resolveGateFor, resolveIndex } from '../../lib/pr-resolve';
 import type { PrRunContext } from '../../lib/pr-run';
 import { applyUpdateOutcome, findPr, groupRepos, mergeBlock, outcomeLine, updateTransition, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
+import { dispatchPrResolve } from '../../lib/prs-api';
 import { postSweep } from '../../lib/sweep';
 import type { PrWriteResult } from '../../../../shared/types';
 
@@ -83,13 +86,21 @@ const WARNING_CLOCK_MS = 15_000;
  * write still ran would send a head SHA the write may already have moved. So `write` also holds `<repo>#<number>` in `inFlight` from before the call until the
  * re-read after it has settled (success AND failure), and every layout hands it to `PrActions` as `busy`.
  *
+ * **Resolve conflicts** (spec 2026-11-17-pr-conflict-resolve-design.md, "The board"). The page reads the agents status itself (`useAgents`) and hands each
+ * layout `gateFor`, the repo's dispatch gate from `resolveGateFor` — `null` until the status lands, `hidden` when agents are off or no registered project maps
+ * the repo, so `PrActions` draws the row only where a session could ever start. The resolve states are the PR provider's (`resolves`, read on the PR poll's
+ * own tick), indexed once here by `<repo>#<number>`. `resolve` is `write`'s sibling for the one write that is not a GitHub call: the same `inFlight` hold and
+ * the same cleared outcome before it leaves, a refusal's sentence recorded as an error outcome, and the same re-read after — but a success records NOTHING,
+ * because what a started session has to say is the status line under the PR (`PrResolveLine`, `resolving…`), which the re-read's resolves answer draws.
+ *
  * No Escape handler here (`Confirm` joins `useDialogEscape` itself) and no page switch (the rail's GitHub tree is the only one). The page scrolls in the well
  * like Settings and reserves no height, so it reads no strip token at all.
  *
  * Default export, because `App` loads it lazily like every other page.
  */
 export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: () => void }) {
-  const { data, error, refresh } = usePullRequestsContext();
+  const { data, error, refresh, resolves } = usePullRequestsContext();
+  const { status } = useAgents();
   const { reload: reloadTrackers } = useTrackersContext();
   const { items, projects } = useBoard();
   const { runs, starting, remote, remoteStarting } = useOrchestratorRunsContext();
@@ -205,6 +216,38 @@ export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: 
     [markUpdating, refresh, reloadTrackers]
   );
 
+  const resolve = useCallback(
+    async (key: string, repo: string, number: number): Promise<void> => {
+      setInFlight((prev) => new Set(prev).add(key));
+      // As in `write`: a new attempt is leaving, so the line that answered the last one goes now.
+      setOutcomes((prev) => {
+        if (!(key in prev)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      try {
+        try {
+          await dispatchPrResolve({ repo, number });
+        } catch (e) {
+          const outcome: PrOutcome = { text: e instanceof Error ? e.message : String(e), kind: 'error' };
+          setOutcomes((prev) => ({ ...prev, [key]: outcome }));
+        }
+        // After success AND refusal: a 409 such as "already resolving" or "no conflicts" is exactly when the row is out of date.
+        await refresh();
+      } finally {
+        setInFlight((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
+    },
+    [refresh]
+  );
+  const resolveMap = useMemo(() => resolveIndex(resolves), [resolves]);
+  const gateFor = useCallback((repo: string) => resolveGateFor(status, repo, projects ?? []), [status, projects]);
+
   const ctx: PrRunContext = useMemo(
     () => ({ projects: projects ?? [], items: items?.items ?? [], runs, remote, remoteStarting }),
     [projects, items, runs, remote, remoteStarting]
@@ -223,7 +266,20 @@ export default function PullRequestsView({ onOpenSettings }: { onOpenSettings?: 
   // The band draws the switch and the count whenever the payload names a repo; the toolbar is only what is left over — the notes — and is not drawn without one.
   const counted = data !== null && data.token && data.repos.length > 0;
   const toolbarNotes = hidden.length > 0 || emptyNote !== null;
-  const props: PrLayoutProps = { repos: shown, outcomes, marks, now, ctx, write, inFlight, confirming, setConfirming };
+  const props: PrLayoutProps = {
+    repos: shown,
+    outcomes,
+    marks,
+    now,
+    ctx,
+    write,
+    inFlight,
+    confirming,
+    setConfirming,
+    resolves: resolveMap,
+    gateFor,
+    resolve
+  };
 
   return (
     <div className="prs">

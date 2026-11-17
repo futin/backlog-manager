@@ -10,9 +10,11 @@ import { Glyph, type GlyphName } from '../../client/src/components/ui/Glyphs';
 import { PrActions } from '../../client/src/components/github/PrActions';
 import { PrFoot } from '../../client/src/components/github/PrFoot';
 import { PrOutcomeLine } from '../../client/src/components/github/PrOutcomeLine';
+import { PrResolveLine } from '../../client/src/components/github/PrResolveLine';
 import type { PrOutcome } from '../../client/src/lib/prs';
 import { mainOf, moreOf, openOf, type MenuRowName } from '../helpers/pr-keys';
-import type { PrRepoView, PrWriteResult, PullRequestRow } from '../../shared/types';
+import type { DispatchGate } from '../../shared/agent';
+import type { PrRepoView, PrResolveState, PrWriteResult, PullRequestRow } from '../../shared/types';
 
 /** A glyph's markup, rendered into a detached container (`Glyph` carries no name attribute, and `react-dom/server` needs TextEncoder, which jsdom lacks). */
 const glyphSvg = (name: GlyphName): string => render(<Glyph name={name} />, { container: document.createElement('div') }).container.innerHTML;
@@ -77,6 +79,10 @@ interface Row {
   outcome?: PrOutcome;
   updating?: boolean;
   omitUpdatingReason?: boolean;
+  /** The Resolve conflicts row's inputs (spec 2026-11-17-pr-conflict-resolve-design.md, "The board"); `gate` defaults to `null`, the unread status. */
+  gate?: DispatchGate | null;
+  resolveState?: PrResolveState;
+  warning?: string | null;
 }
 
 /** `futin/x#5` into `main`, head `SHA5`. */
@@ -93,6 +99,8 @@ const OK: PrWriteResult = { ok: true, outcome: 'auto-merge-enabled', pr: null, r
 let posts: { url: string; body: unknown }[];
 /** The `<repo>#<number>` of every `onWrite` the harness was handed, in order. */
 let writes: string[];
+/** The `<repo>#<number>` of every `onResolve` the harness was handed, in order. */
+let resolves: string[];
 /** When set, every POST is held unanswered until `answerAll()`, so a case can look at the page between the click and the answer. */
 let hold: boolean;
 let held: (() => void)[];
@@ -100,6 +108,7 @@ let held: (() => void)[];
 beforeEach(() => {
   posts = [];
   writes = [];
+  resolves = [];
   hold = false;
   held = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -121,7 +130,7 @@ function Harness({ rows, busy = false, blockedText = false }: { rows: Row[]; bus
   const [confirming, setConfirming] = useState<string | null>(null);
   return (
     <>
-      {rows.map(({ repo: r, pr: p, outcome, updating = false, omitUpdatingReason }) => {
+      {rows.map(({ repo: r, pr: p, outcome, updating = false, omitUpdatingReason, gate = null, resolveState, warning = null }) => {
         const key = `${r.repo}#${p.number}`;
         const onWrite = async (call: () => Promise<PrWriteResult>): Promise<void> => {
           setConfirming((current) => (current === key ? null : current));
@@ -140,6 +149,10 @@ function Harness({ rows, busy = false, blockedText = false }: { rows: Row[]; bus
               onWrite={onWrite}
               omitUpdatingReason={omitUpdatingReason}
               blockedText={blockedText}
+              warning={warning}
+              gate={gate}
+              resolveState={resolveState}
+              onResolve={() => resolves.push(key)}
             />
             <PrFoot
               repo={r}
@@ -597,5 +610,178 @@ describe('PrOutcomeLine', () => {
     expect(screen.getByRole('status')).toHaveTextContent('updating…');
     rerender(<PrOutcomeLine outcome={{ kind: 'error', text: 'GitHub said no' }} updating={false} />);
     expect(screen.getByTestId('pr-outcome')).toHaveClass('prs-outcome-error');
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------------------------------------------------------------------
+   Resolve conflicts (spec `2026-11-17-pr-conflict-resolve-design.md`, "The board"): a fourth Merge-menu row, absent while the agents status is unread or the
+   gate is `hidden` (an environment-level block hides the control, `.claude/rules/board.md`), otherwise drawn and disabled with the first reason that holds.
+   ------------------------------------------------------------------------------------------------------------------------------------------------------- */
+
+const ENABLED: DispatchGate = { control: 'enabled' };
+const SHA_PUSHED = 'd'.repeat(40);
+/** `futin/x#5` with conflicts — the one state the row is enabled in. */
+const conflicting = (over: Partial<PullRequestRow> = {}, repoOver: Partial<PrRepoView> = {}): Row =>
+  x5({ mergeable: 'conflicting', mergeState: 'dirty', ...over }, repoOver);
+const state = (over: Partial<PrResolveState> = {}): PrResolveState => ({ repo: 'futin/x', number: 5, live: null, outcome: null, ...over });
+const resolveRow = (k: string) => within(menu(k)).queryByRole('button', { name: 'Resolve conflicts' });
+
+describe('PrActions — the Resolve conflicts row', () => {
+  it('draws no Resolve conflicts row while the agents status is unread (gate null) — Review Focus 2', async () => {
+    const user = userEvent.setup();
+    render(<Harness rows={[{ ...conflicting(), gate: null }]} />);
+    await user.click(more('futin/x#5'));
+    expect(resolveRow('futin/x#5')).toBeNull();
+    expect(within(menu('futin/x#5')).getAllByRole('button')).toHaveLength(3);
+  });
+
+  it('draws no Resolve conflicts row on a hidden gate', async () => {
+    const user = userEvent.setup();
+    render(<Harness rows={[{ ...conflicting(), gate: { control: 'hidden', reason: 'dispatch is off — set BM_AGENTS=on for the API' } }]} />);
+    await user.click(more('futin/x#5'));
+    expect(resolveRow('futin/x#5')).toBeNull();
+    expect(menu('futin/x#5')).not.toHaveTextContent('BM_AGENTS');
+  });
+
+  it('on an enabled gate and a conflicting PR draws the row last, enabled, with its sub-line, and a click calls onResolve once', async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        rows={[
+          { ...conflicting(), gate: ENABLED },
+          { ...y6({ mergeable: 'conflicting', mergeState: 'dirty' }), gate: ENABLED }
+        ]}
+      />
+    );
+    await user.click(more('futin/x#5'));
+    const rows = within(menu('futin/x#5')).getAllByRole('button');
+    expect(rows.map((b) => document.getElementById(b.getAttribute('aria-labelledby')!)?.textContent)).toEqual([
+      'Merge',
+      'Enable auto-merge',
+      'Update branch',
+      'Resolve conflicts'
+    ]);
+    const row = resolveRow('futin/x#5')!;
+    expect(row).not.toHaveAttribute('aria-disabled');
+    expect(row).toHaveAccessibleDescription('merge main in with a headless session');
+    expect(row.querySelector('.prs-keys-tick')).toBeNull();
+    await user.click(row);
+    expect(resolves).toEqual(['futin/x#5']);
+    expect(posts).toEqual([]);
+    expect(screen.queryByRole('dialog', { name: 'Merge menu' })).toBeNull();
+    expect(more('futin/x#5')).toHaveFocus();
+    // The second row's sub names ITS base, so a row wired to the wrong PR's base fails.
+    await user.click(more('futin/y#6'));
+    expect(resolveRow('futin/y#6')).toHaveAccessibleDescription('merge develop in with a headless session');
+  });
+
+  const VISIBILITY = 'the dashboard does not list /p/x — most likely no Claude session there inside its LOOKBACK_HOURS';
+  const blocked: [string, Row][] = [
+    ['sync off', { ...conflicting({}, { syncOff: 'sync is off for futin/x — turn it on in GitHub › Settings' }), gate: ENABLED }],
+    [VISIBILITY, { ...conflicting(), gate: { control: 'disabled', reason: VISIBILITY } }],
+    ['fork — cannot push', { ...conflicting({ crossRepository: true }), gate: ENABLED }],
+    ['mergeability pending', { ...x5({ mergeable: 'unknown', mergeState: 'unknown' }), gate: ENABLED }],
+    ['no conflicts', { ...x5(), gate: ENABLED }],
+    ['resolving…', { ...conflicting(), gate: ENABLED, resolveState: state({ live: { sessionId: 's1' } }) }],
+    [
+      'resolved — waiting for GitHub',
+      {
+        ...conflicting(),
+        gate: ENABLED,
+        resolveState: state({ outcome: { outcome: 'pushed', reason: 'merged main', fromSha: SHA5, headSha: SHA_PUSHED, sessionId: 's1' } })
+      }
+    ],
+    ['run in progress on this machine', { ...conflicting(), gate: ENABLED, warning: 'run in progress on this machine' }]
+  ];
+  it.each(blocked)('draws `%s` as the sub-line, aria-disabled, and a click calls nothing', async (reason, r) => {
+    const user = userEvent.setup();
+    render(<Harness rows={[r]} />);
+    await user.click(more('futin/x#5'));
+    const row = resolveRow('futin/x#5')!;
+    expect(row).toHaveAttribute('aria-disabled', 'true');
+    expect(row).toHaveAccessibleDescription(reason);
+    await user.click(row);
+    expect(resolves).toEqual([]);
+    expect(posts).toEqual([]);
+  });
+
+  it('a stopped outcome is not a block: the row is enabled again for another try', async () => {
+    const user = userEvent.setup();
+    const stopped = state({ outcome: { outcome: 'stopped', reason: 'tests failed', fromSha: SHA5, headSha: SHA5, sessionId: 's1' } });
+    render(<Harness rows={[{ ...conflicting(), gate: ENABLED, resolveState: stopped }]} />);
+    await user.click(more('futin/x#5'));
+    expect(resolveRow('futin/x#5')).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByTestId('row-futin/x#5')).toHaveTextContent('resolve stopped: tests failed');
+  });
+});
+
+describe('PrResolveLine', () => {
+  const line = () => screen.queryByTestId('pr-resolve');
+  const at = (over: Partial<PullRequestRow> = {}) => pr({ mergeable: 'conflicting', mergeState: 'dirty', ...over });
+
+  it('live with a session id: resolving…, a link to the session', () => {
+    render(<PrResolveLine pr={at()} state={state({ live: { sessionId: 's1' } })} />);
+    expect(line()).toHaveTextContent('resolving…');
+    const link = within(line()!).getByRole('link');
+    expect(link).toHaveTextContent('resolving…');
+    expect(link.getAttribute('href')).toMatch(/\?session=s1$/);
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  it('live while the spawn has not answered (sessionId null): resolving… and no link', () => {
+    render(<PrResolveLine pr={at()} state={state({ live: { sessionId: null } })} />);
+    expect(line()).toHaveTextContent('resolving…');
+    expect(within(line()!).queryByRole('link')).toBeNull();
+  });
+
+  it('pushed while the PR is still at fromSha: resolved — waiting for GitHub', () => {
+    render(<PrResolveLine pr={at()} state={state({ outcome: { outcome: 'pushed', reason: 'ok', fromSha: SHA5, headSha: SHA_PUSHED, sessionId: 's1' } })} />);
+    expect(line()).toHaveTextContent('resolved — waiting for GitHub');
+    expect(within(line()!).queryByRole('link')).toBeNull();
+  });
+
+  it('pushed at headSha once GitHub reads the PR mergeable: nothing', () => {
+    const { container } = render(
+      <PrResolveLine
+        pr={at({ headSha: SHA_PUSHED, mergeable: 'mergeable', mergeState: 'clean' })}
+        state={state({ outcome: { outcome: 'pushed', reason: 'ok', fromSha: SHA5, headSha: SHA_PUSHED, sessionId: 's1' } })}
+      />
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('stopped: resolve stopped: <reason> and a session ↗ link in a new tab with no referrer', () => {
+    render(
+      <PrResolveLine pr={at()} state={state({ outcome: { outcome: 'stopped', reason: 'tests failed', fromSha: SHA5, headSha: SHA5, sessionId: 's9' } })} />
+    );
+    expect(line()).toHaveTextContent(/^resolve stopped: tests failed session ↗$/);
+    const link = within(line()!).getByRole('link', { name: 'session ↗' });
+    expect(link.getAttribute('href')).toMatch(/\?session=s9$/);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer');
+  });
+
+  it('stopped with no session id: the note and no link', () => {
+    render(
+      <PrResolveLine pr={at()} state={state({ outcome: { outcome: 'stopped', reason: 'tests failed', fromSha: SHA5, headSha: SHA5, sessionId: null } })} />
+    );
+    expect(line()).toHaveTextContent(/^resolve stopped: tests failed$/);
+    expect(within(line()!).queryByRole('link')).toBeNull();
+  });
+
+  it('stopped for another head, up-to-date, or nothing: renders nothing', () => {
+    const { container, rerender } = render(
+      <PrResolveLine pr={at()} state={state({ outcome: { outcome: 'stopped', reason: 'tests failed', fromSha: SHA6, headSha: SHA6, sessionId: 's1' } })} />
+    );
+    expect(container).toBeEmptyDOMElement();
+    rerender(
+      <PrResolveLine
+        pr={at()}
+        state={state({ outcome: { outcome: 'up-to-date', reason: 'nothing to merge', fromSha: SHA5, headSha: SHA5, sessionId: 's1' } })}
+      />
+    );
+    expect(container).toBeEmptyDOMElement();
+    rerender(<PrResolveLine pr={at()} state={undefined} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

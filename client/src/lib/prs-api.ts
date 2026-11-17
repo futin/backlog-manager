@@ -1,5 +1,14 @@
 import { errorOf, postJson } from './http';
-import type { PrAutoMergeRequest, PrMergeRequest, PrUpdateBranchRequest, PrWriteOutcome, PrWriteResult, PullRequestsPayload } from '../../../shared/types';
+import type {
+  PrAutoMergeRequest,
+  PrMergeRequest,
+  PrResolvePayload,
+  PrResolveRequest,
+  PrUpdateBranchRequest,
+  PrWriteOutcome,
+  PrWriteResult,
+  PullRequestsPayload
+} from '../../../shared/types';
 
 /**
  * The GitHub › PRs page's four calls (`.claude/DESIGN.md` §8.11), one fetch helper each and nothing else: no state, no polling (`hooks/usePullRequests.ts`
@@ -57,3 +66,24 @@ async function write(path: string, request: PrMergeRequest | PrAutoMergeRequest 
 export const mergePr = (body: PrMergeRequest): Promise<PrWriteResult> => write('/api/prs/merge', body, 'merge');
 export const setAutoMerge = (body: PrAutoMergeRequest): Promise<PrWriteResult> => write('/api/prs/auto-merge', body, 'auto-merge');
 export const updateBranch = (body: PrUpdateBranchRequest): Promise<PrWriteResult> => write('/api/prs/update-branch', body, 'update branch');
+
+/**
+ * The resolve states beside `GET /api/prs`: every PR with a live session or an outcome file. Always a 200 from the server (memory plus a file scan), so a failure
+ * here is the network or a proxy page, and the caller keeps its last answer.
+ */
+export async function fetchPrResolves(): Promise<PrResolvePayload> {
+  const res = await fetch('/api/agents/pr-resolve');
+  if (!res.ok) throw await readError(res, `could not read resolves (${res.status})`);
+  const data: unknown = await res.json().catch(() => null);
+  if (typeof data !== 'object' || data === null || !Array.isArray((data as { resolves?: unknown }).resolves))
+    throw new Error('unexpected /api/agents/pr-resolve response');
+  return data as PrResolvePayload;
+}
+
+/** Starts a headless resolve of one PR. A refusal (sync off, fork, already running, …) rejects with the server's own `error` sentence, like the PR writes. */
+export async function dispatchPrResolve(req: PrResolveRequest): Promise<{ sessionId: string }> {
+  const res = await postJson('/api/agents/dispatch-pr-resolve', req);
+  const sessionId = (res.body as { sessionId?: unknown } | null)?.sessionId;
+  if (!res.ok || typeof sessionId !== 'string') throw new Error(errorOf(res.body, `resolve failed (${res.status})`));
+  return { sessionId };
+}
