@@ -156,7 +156,26 @@ import { authorOf, judgeComments, mentionsUser } from './mentions.util';
  * the cache is read: the payload, the summary, `mentionCandidate`, the thread route (as `judgeComments`' `answeredAfter`) and `postReply`'s own check. A
  * newer mention survives it and brings the ticket back. Entries older than the window are pruned at each check, since nothing that old can be a candidate
  * any more; memory only, so a restart forgets them, by which time the index has caught up. No board cache is spliced: a comment is not a field they show.
+ *
+ * A post Jira did not answer is not a post that did not happen. A transport failure or the `JIRA_TIMEOUT_MS` deadline (status 0) does not cancel a write
+ * Jira already started, and a gateway 5xx commonly follows one that completed — so for those the comment may well sit in the thread. Answering them as a
+ * plain failure, with the draft kept and the key free, left the modal's obvious next step (Post reply again, same text) one click from a second comment
+ * @-mentioning the colleague twice under the user's name. So an UNCONFIRMED failure (status 0 or ≥ 500 on the POST itself) records the key in `uncertain`
+ * with the attempt's start, and answers its own refusal (`unconfirmed`), whose sentence says the reply may have posted. The next `postReply` on that key,
+ * after the same checks and gates, first reads the newest `JIRA_THREAD_MAX` comments — the comment endpoint, not the search, so it carries a write the
+ * index has not caught up with — and when a comment by the connected account exists created at or after the attempt's start (less
+ * `JIRA_REPLY_CLOCK_SLACK_MS`, since `created` is Jira's clock and the start is ours) and after the mention being answered, it ADOPTS that comment: the very
+ * success path a 2xx takes, with no second POST. Otherwise it clears the mark and posts as usual. A read that fails refuses through `routeFailed` and keeps
+ * the mark, so no retry can ever post blind. A definite 4xx keeps today's answer: Jira refused it, nothing was written. Memory only, like `answeredAt`, and
+ * pruned with it — a restart forgets the mark, which costs only the safety net, never a wrong answer.
  */
+
+/**
+ * How far before a failed attempt's start an own comment still counts as that attempt's (header, "The mention reply"): `created` is stamped by Jira's
+ * clock, the start by this machine's, and a skew must not turn a landed reply into a second post. Small, because a comment of mine from before the attempt
+ * is not the attempt — though one that answers the mention would close it anyway.
+ */
+const JIRA_REPLY_CLOCK_SLACK_MS = 30_000;
 
 /** Two "Sync now" presses closer than this share one sweep's answer: the second spends no call (spec §5; the GitHub poller exports its own, same value). */
 export const SWEEP_FLOOR_MS = 5_000;
@@ -214,14 +233,15 @@ export type JiraIssueWriteOutcome = JiraResult<JiraIssueWriteResult> | { ok: fal
 
 /**
  * What `postReply` answers: the posted comment (its `url` the focused-comment link), the two refusals made before any call — `no open mention` (the key is
- * not open in the cache: answered, dismissed, or never there) and `posting` (R4, another post on the key is still out) — or a failure. `sent: true` marks a
- * failure Jira itself answered to the POST, so the route names the comment scope on that 401/403 and never on a refusal made before the call (the gate's,
- * or `unauthorizedRefusal()`'s 401, which is about the token as a whole).
+ * not open in the cache: answered, dismissed, or never there) and `posting` (R4, another post on the key is still out) — `unconfirmed` (the POST went out
+ * and Jira did not answer it: a transport failure, the deadline or a 5xx, so the comment may have landed; header, "The mention reply") or a failure.
+ * `sent: true` marks a failure Jira itself answered to the POST, so the route names the comment scope on that 401/403 and never on a refusal made before the
+ * call (the gate's, or `unauthorizedRefusal()`'s 401, which is about the token as a whole).
  */
 export type JiraReplyOutcome =
   | JiraResult<{ id: string; created: string; url: string }>
   | { ok: false; response: JiraResponse<unknown>; retryAt?: string; access?: JiraAccess; sent: true }
-  | { ok: false; refusal: 'no open mention' | 'posting' };
+  | { ok: false; refusal: 'no open mention' | 'posting' | 'unconfirmed' };
 
 /** A failed fresh read, as the routes receive it. */
 type JiraRefusal = { ok: false; response: JiraResponse<unknown>; retryAt?: string; access?: JiraAccess };
@@ -304,6 +324,11 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private readonly answeredAt = new Map<string, string>();
   /** R4: the keys whose reply POST is out right now. Checked and set with no `await` between, cleared in `postReply`'s `finally`. */
   private readonly replying = new Set<string>();
+  /**
+   * Per key, the start (ms) of a reply POST Jira did not confirm — status 0 or ≥ 500 (header, "The mention reply"). The next `postReply` on the key reads
+   * the thread before it may post. Memory only; pruned with `answeredAt`.
+   */
+  private readonly uncertain = new Map<string, number>();
   /** The check running now, tick-borne or not: a second caller joins it rather than sending a second search (header; `mentionsSweepNow` joins too). */
   private mentionsInFlight: Promise<void> | null = null;
   /** When the last check STARTED — the cadence runs from the attempt, not the success. `null` until one has: due at once after boot. */
@@ -846,7 +871,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
    * `addComment`. The mention targets the author of the ticket's newest open mention (`mentions[0]`, newest first). On a 2xx the ticket leaves the cache and
    * `answeredAt` records Jira's `created` (now, should Jira send none that parses); a failure goes through `routeFailed`, so a 401 resets the boot and a 429
    * opens the window as any read's does, and comes back marked `sent`. No second window check before the POST: nothing is awaited between the gate's and the
-   * send.
+   * send — except on a key marked `uncertain`, whose thread read comes first (header): then the window is checked again after it, as a transition's is.
+   * A status 0 or ≥ 500 on the POST marks the key and answers `unconfirmed` instead of the failure.
    */
   async postReply(key: string, text: string): Promise<JiraReplyOutcome> {
     const issue = applyDismissals(this.unanswered(), this.dismissedPredicate()).issues.find((i) => i.key === key);
@@ -859,17 +885,68 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       const unauthorized = this.unauthorizedRefusal();
       if (unauthorized !== null) return unauthorized;
 
-      const to = issue.mentions[0].author;
+      const answered = issue.mentions[0];
+      const attemptAt = this.uncertain.get(key);
+      if (attemptAt !== undefined) {
+        const landed = await this.landedReply(gate.auth, key, attemptAt, answered.created);
+        if ('refused' in landed) return landed.refused;
+        if (landed.comment !== null) return { ok: true, value: this.replied(gate.auth, key, landed.comment.id, landed.comment.created) };
+        // Read and not there: the earlier attempt never landed, so this one posts — after the window check the read's await made stale.
+        this.uncertain.delete(key);
+        const again = this.gate();
+        if ('refused' in again) return again.refused;
+      }
+
+      const to = answered.author;
+      const startedAt = Date.now();
       const res = await this.client.addComment(gate.auth, key, replyDoc({ accountId: to.accountId, name: to.name }, text));
-      if (!ok(res)) return { ...this.routeFailed(res), sent: true };
-      const id = str(res.data?.id);
-      const created = Number.isNaN(Date.parse(str(res.data?.created))) ? iso(Date.now()) : str(res.data?.created);
-      this.mentions = { ...this.mentions, issues: this.mentions.issues.filter((i) => i.key !== key) };
-      this.answeredAt.set(key, created);
-      return { ok: true, value: { id, created, url: `https://${gate.auth.site}/browse/${key}?focusedCommentId=${id}` } };
+      if (!ok(res)) {
+        const failed = this.routeFailed(res);
+        if (res.status === 0 || res.status >= 500) {
+          this.uncertain.set(key, startedAt);
+          return { ok: false, refusal: 'unconfirmed' };
+        }
+        return { ...failed, sent: true };
+      }
+      return { ok: true, value: this.replied(gate.auth, key, str(res.data?.id), str(res.data?.created)) };
     } finally {
       this.replying.delete(key);
     }
+  }
+
+  /**
+   * A reply landed — POSTed with a 2xx, or adopted from the thread after an unconfirmed attempt: the ticket leaves the cache, `answeredAt` records the
+   * comment's `created` (now, should none parse), and the key's `uncertain` mark goes. One path, so an adopted comment and a posted one answer alike.
+   */
+  private replied(auth: JiraAuth, key: string, id: string, createdRaw: string): { id: string; created: string; url: string } {
+    const created = Number.isNaN(Date.parse(createdRaw)) ? iso(Date.now()) : createdRaw;
+    this.mentions = { ...this.mentions, issues: this.mentions.issues.filter((i) => i.key !== key) };
+    this.answeredAt.set(key, created);
+    this.uncertain.delete(key);
+    return { id, created, url: `https://${auth.site}/browse/${key}?focusedCommentId=${id}` };
+  }
+
+  /**
+   * The uncertain key's thread read (header, "The mention reply"): the newest comment by the connected account created at or after `attemptAt` (less the
+   * clock slack) and strictly after the mention being answered, or `null` when there is none. With `me` unknown there is no "mine" to look for, and a failed
+   * read is a refusal through `routeFailed` — in both cases the caller posts nothing and the mark stays.
+   */
+  private async landedReply(
+    auth: JiraAuth,
+    key: string,
+    attemptAt: number,
+    mentionCreated: string
+  ): Promise<{ comment: { id: string; created: string } | null } | { refused: JiraRefusal }> {
+    const me = this.boot.me;
+    if (me === null) return { refused: this.unauthorizedRefusal() ?? { ok: false, response: synthetic(0, this.boot.detail ?? 'connecting') } };
+    const res = await this.client.comments(auth, key, JIRA_THREAD_MAX);
+    if (!ok(res)) return { refused: this.routeFailed(res) };
+    const floor = Math.max(attemptAt - JIRA_REPLY_CLOCK_SLACK_MS, Date.parse(mentionCreated) + 1 || 0);
+    // Newest first (`orderBy=-created`), so the first match is the newest.
+    const mine = rawComments(Array.isArray(res.data?.comments) ? res.data.comments : []).find(
+      (c) => c.author?.accountId === me.accountId && Date.parse(c.created) >= floor
+    );
+    return { comment: mine === undefined ? null : { id: mine.id, created: mine.created } };
   }
 
   // ── the chain ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1067,6 +1144,10 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     const horizon = Date.now() - JIRA_MENTIONS_WINDOW_DAYS * 86_400_000;
     for (const [key, at] of this.answeredAt) {
       if (Date.parse(at) < horizon) this.answeredAt.delete(key);
+    }
+    // The `uncertain` marks share the clock: an attempt older than the window answers a mention no check can return any more.
+    for (const [key, at] of this.uncertain) {
+      if (at < horizon) this.uncertain.delete(key);
     }
     const me = this.boot.me;
     if (me === null) return;

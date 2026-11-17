@@ -17,6 +17,13 @@ const COMMENT_ID = /^\d{1,20}$/;
 const COMMENT_SCOPE = ' — the token needs write:comment:jira';
 
 /**
+ * The 502 for a reply POST Jira did not confirm (transport, the deadline, a 5xx). Not "failed": the comment may sit in the thread, and the reader should look
+ * before writing a different one. Posting the same text again is safe — the poller reads the thread first and adopts a landed comment rather than repost it.
+ */
+export const replyUnconfirmed = (key: string): string =>
+  `Jira did not confirm the reply to ${key} — it may have posted; check the thread before posting again (Post reply checks it first and never posts twice)`;
+
+/**
  * The Jira › Mentions routes (spec "Routes and shapes"): `GET /api/jira/mentions`, the three POSTs that act on it — `sweep` (the page's own "check now"),
  * `dismiss` and `restore` — and `GET /api/jira/issue/:key/thread`, the modal's fresh read of one ticket's conversation. A controller of its own rather than
  * three more methods on the read and write controllers, because every route here is about one cache and one store, and the two existing controllers'
@@ -42,8 +49,9 @@ const COMMENT_SCOPE = ' — the token needs write:comment:jira';
  * draft and the live service's `replySession`. The poller stays ignorant of drafts and links, so it never imports the live service.
  *
  * **Post reply (plan Task 5, rulings R4/R7).** `POST mentions/reply` `{ key, text }` is the one route that sends `POST issue/{key}/comment`: guard → 400
- * (key, then the draft route's two text sentences) → 503 → `JiraPollerService.postReply`, whose two refusals are this route's 409s — `<KEY> has no open
- * mention — it was answered or dismissed` and `a reply to <KEY> is already being posted` — and whose every other failure is `unwrapJira`'s §8 mapping. Not
+ * (key, then the draft route's two text sentences) → 503 → `JiraPollerService.postReply`, whose two refusals before any call are this route's 409s — `<KEY>
+ * has no open mention — it was answered or dismissed` and `a reply to <KEY> is already being posted` — whose `unconfirmed` (a POST Jira never answered) is a
+ * 502 carrying `replyUnconfirmed`, and whose every other failure is `unwrapJira`'s §8 mapping. Not
  * `jiraWriteOrThrow`: it takes an assign/transition outcome and would read any unknown refusal as `transition not offered`. When Jira answered the POST
  * itself with a 401 or 403 the error gains `COMMENT_SCOPE`, since a token can read and assign and still lack the comment scope; the 401 refused BEFORE any
  * call (`access: unauthorized`) does not, because that one is about the token as a whole. The draft is dropped only after the comment lands, and a drop
@@ -145,6 +153,9 @@ export class JiraMentionsController {
     const result = await this.poller.postReply(key, text);
     if ('refusal' in result) {
       if (result.refusal === 'posting') throw new HttpException({ error: `a reply to ${key} is already being posted` }, 409);
+      // The POST went out and Jira never answered it (transport, the deadline, a 5xx): it may have landed, so this is not "failed". A 502, as an unreachable
+      // Jira is everywhere else; the draft stays, and the next Post reply reads the thread first and adopts a landed comment instead of posting twice.
+      if (result.refusal === 'unconfirmed') throw new HttpException({ error: replyUnconfirmed(key) }, 502);
       throw new HttpException({ error: `${key} has no open mention — it was answered or dismissed` }, 409);
     }
     let posted: { id: string; url: string };

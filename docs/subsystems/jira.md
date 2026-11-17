@@ -169,7 +169,7 @@ was written), `JiraUnknownIdError` a 404 `unknown board` or `unknown skill` by t
 
 Two more POSTs in the same controller, the first calls this server makes that change anything in Jira: `POST /api/jira/issue/assign` `{ key }` and
 `POST /api/jira/issue/transition` `{ key, transitionId }`. The key travels in the body, not the path. They are the board's ONLY Jira writes — a third is a new
-rule, not another route ([invariants.md](invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)). The order is the config writes'
+rule, not another route ([invariants.md](invariants.md#the-boards-jira-writes-are-assign-transition-and-the-mention-reply-nothing-else)). The order is the config writes'
 (guard → validate → configured → the poller), and the controller maps what comes back through `unwrapJira` (§8's table above, `retryAt` verbatim) plus its two
 own sentences.
 
@@ -282,7 +282,10 @@ live `reply` link for that exact key and session id (409 `no reply session for <
 phase-1 code ignores the key — pruned on save by the dismissals' clock. `/mentions/draft/discard` `{ key }` drops it (200 even when there is none). `/mentions/reply`
 `{ key, text }` is the one route that posts (`poller.postReply`): the open-mention check with dismissals and `answeredAt` applied (409 `<KEY> has no open mention — it was
 answered or dismissed`, the draft kept), single-flight per key (409 `a reply to <KEY> is already being posted`), then `POST issue/{key}/comment` with an ADF body that
-opens with an @-mention of the comment's author. A 401 or 403 from Jira gains ` — the token needs write:comment:jira`. On success the ticket leaves the cache, `answeredAt[key]`
+opens with an @-mention of the comment's author. A 401 or 403 from Jira gains ` — the token needs write:comment:jira`. A POST Jira never answered — a transport failure,
+the 10 s deadline or a 5xx — may still have landed, so it is not a failure but 502 `Jira did not confirm the reply to <KEY> — it may have posted; …`, the draft kept and
+the key marked uncertain: the next post on that key first reads the thread's newest comments and adopts one of mine made since the attempt as the posted reply (the same
+200, no second POST), and posts only when there is none; a read that fails posts nothing. On success the ticket leaves the cache, `answeredAt[key]`
 (memory only, applied on read wherever the cache is read, so the payload, the summary, the open-mention gate and the thread's `answeredAfter` agree before the search
 catches up) records the comment's `created`, the draft is dropped, and the answer is the mentions payload plus `posted: { id, url }`. Every mentions payload carries, per
 issue, `draft` (from the store) and `session` (`JiraLiveService.replySession(key)`), composed by the controller so the poller never imports the live service. Text must be a

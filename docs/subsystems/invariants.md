@@ -3903,7 +3903,7 @@ repo (the reason `backlog.mjs` restates `resolveSource`), so `jira.mjs` re-imple
 behind. The tool's copy is not redundant with the server's check: the person can paste the prompt into a terminal and edit the line, and the tool is the
 last thing between that line and `git worktree add`.
 
-## The board's Jira writes are assign and transition, nothing else
+## The board's Jira writes are assign, transition and the mention reply, nothing else
 
 Until phase 3 this server wrote to Jira nowhere: every call was a read and the only file it changed was `jira.json`. Phase 3 ([plan](https://github.com/futin/backlog-manager/blob/fc1d5422/docs/superpowers/plans/2026-10-19-jira-phase-3-writes.md),
 spec §8, §13) adds the first two calls that change anything on Atlassian's side — **assign the issue to me** and **transition it** — and this rule is what keeps
@@ -3917,6 +3917,14 @@ own route, `POST /api/jira/mentions/reply` in `mentions.controller.ts`, rather t
 comment is the first write that adds text under the person's name, which is why it differs from the other two in kind: it is not idempotent (two posts are two
 comments, so the poller holds it single-flight per key), and nothing a session can reach sends it — the session's prompt says never post, `jira.mjs` has no post
 verb, and the route takes `{ key, text }` from the person's edited draft, never a session id.
+
+**A reply Jira did not confirm is read for before it is sent again.** Not idempotent also means a failure is not always a failure: a transport error or the
+10 s deadline does not cancel a write Jira had already begun, and a gateway 5xx often follows one that completed. Answered as a plain failure — draft kept, key
+free, Post reply enabled under the same text — the obvious next click was a second comment @-mentioning the colleague twice under the person's name, and the
+next mentions check, which would have seen the first one, arrives a poll interval too late. So the poller marks such a key `uncertain` with the attempt's
+start, the route says the reply may have posted, and the next post on that key first reads the thread's newest comments (the comment endpoint, which carries
+a write the search index has not caught up with) and adopts a comment of mine created since the attempt as the posted one, instead of sending a second. Only
+an absent comment lets it post; a read that fails posts nothing. A definite 4xx is a refusal Jira made, so it stays an ordinary failure with nothing to look for.
 
 **`{ accountId: null }` is never sent.** Jira reads a null assignee as UNASSIGN, so an assign sent while the identity was unknown would not fail — it would
 succeed at the opposite of what was asked. The poller therefore refuses an assign with no call when `me` is null (`503 no identity`, which heals on the next
@@ -3959,13 +3967,15 @@ are not — each sends one field's new value and Jira orders them — so two bro
 caches on whichever answer is newest. The one-at-a-time guard is the modal's, through the `useAction` hook, which also stops a double click; it is a courtesy
 to the person, not a lock the server relies on.
 
-**`dispatch-jira` is a second caller of the two writes, never a third write.** Phase 5's Start may assign the issue to me and move it before it spawns, and it
+**`dispatch-jira` is a second caller of assign and transition, never a new write.** Phase 5's Start may assign the issue to me and move it before it spawns, and it
 does so through `JiraPollerService.assignToMe` and `transitionIssue` — the same two methods, the same refusals and the same mapping (`jiraWriteOrThrow`, hoisted
-to `unwrap.util.ts` so the three callers cannot word a failure differently) — so counting the poller's write methods still gives two. What the dispatch adds
+to `unwrap.util.ts` so the three callers cannot word a failure differently) — so the dispatch adds none to the poller's write methods, which are assign,
+transition and the mention reply's `postReply`, and it calls only the first two. What the dispatch adds
 is order and bookkeeping, not capability: everything it can refuse is refused before the first write (the transition is checked against a fresh read of what
 the workflow offers, `no identity` before an assign is attempted, the first composition's length), an assign the ticket already carries is skipped rather
 than sent, and a failure after a landed write says so in its own sentence (`— the assign stands`, `— the Jira writes stand`) because the write is not
-undone and a retry must not be invited as though it were. Unassign, assigning anyone else, a comment and a field edit remain a new rule apiece.
+undone and a retry must not be invited as though it were. Unassign, assigning anyone else, any comment but the person's own mention reply and a field edit
+remain a new rule apiece.
 
 ## The board's pull-request writes are merge, auto-merge and update-branch, nothing else, and each re-reads the PR
 
@@ -4003,7 +4013,7 @@ GitHub call makes an outbound request.
 **Each re-reads the PR.** After every outcome but a limit, the write reads the single PR again and splices it into the PR cache — its row while open, its
 removal once merged or closed — rather than patching the cached row to what the person expected: a merge queue, a required check or GitHub's own
 `mergeable` recomputation can make the PR something other than what was asked for. The answer carries that row as `pr` and `reread`; a failed re-read is
-`reread: false` and never an error, because the write has already happened ([the Jira rule](#the-boards-jira-writes-are-assign-and-transition-nothing-else)).
+`reread: false` and never an error, because the write has already happened ([the Jira rule](#the-boards-jira-writes-are-assign-transition-and-the-mention-reply-nothing-else)).
 A merge's `200` splices the PR out even when its re-read fails — GitHub's answer already said it is merged.
 
 **Why the second merge is `already-merged`.** Two clicks on Merge, two tabs, or a merge raced from github.com: the second request is serialised behind the

@@ -86,10 +86,16 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   key is not an open, undismissed ticket in the mentions cache) and `posting` (single-flight per key: a `replying` set checked and set synchronously, cleared in
   `finally`) — then `gate()` and `unauthorizedRefusal()` with no Jira call, then `POST issue/{key}/comment` with `replyDoc`'s ADF: one mention node whose
   account is the newest undismissed mention's author read FROM THE CACHE, never from the request, then the text's paragraphs. A failure maps through
-  `unwrapJira`, and the post's own 401/403 gains ` — the token needs write:comment:jira`. A 2xx drops the ticket from the mentions cache and records
+  `unwrapJira`, and the post's own 401/403 gains ` — the token needs write:comment:jira`; a definite 4xx frees the key as it is. A status 0 or ≥ 500 on the
+  POST is `unconfirmed` instead: the key goes into `uncertain` with the attempt's start and the route answers 502 `replyUnconfirmed(key)` (`Jira did not
+  confirm the reply to <KEY> — it may have posted; …`), the draft kept. The next `postReply` on that key, after the same checks and gates, reads `GET
+  issue/{key}/comment` (the newest `JIRA_THREAD_MAX`) and ADOPTS a comment by `me` created at or after the attempt's start less `JIRA_REPLY_CLOCK_SLACK_MS`
+  (30 s) and after the mention being answered — the 2xx path below, no POST — else clears the mark, checks the 429 window again and posts; a failed read (or
+  `me` unknown) refuses through `routeFailed` with no POST and keeps the mark, which the check prunes with `answeredAt`. A 2xx drops the ticket from the
+  mentions cache and records
   `answeredAt` (key → the comment's `created`), applied on read so the search index's lag cannot bring the ticket back until a newer mention lands; then the
   draft is dropped, a failed drop logged and never an error. No splice into the board caches follows — a comment is not a field they show. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)
+  [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-transition-and-the-mention-reply-nothing-else)
 - **A Jira branch name obeys one rule, in `shared/jira-branch.ts`, and `jira.mjs` carries its one hand-kept copy.** `branchNameProblem` (Table A: `git
   check-ref-format --branch`'s rules, at most `BRANCH_NAME_MAX` = 200 characters, and only `[A-Za-z0-9._/-]` — narrower than git, because the name is pasted
   bare into the `jira.mjs worktree` line of the prompt) and `branchCarriesKey` (Table B: the key case-insensitive, bounded on both sides by a non-alphanumeric

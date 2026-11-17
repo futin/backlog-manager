@@ -12,6 +12,7 @@ import { JiraClient } from '../../server/src/jira/jira.client';
 import { replyDoc } from '../../server/src/jira/adf';
 import { JiraLiveService } from '../../server/src/jira/live.service';
 import { JiraMentionsStore } from '../../server/src/jira/mentions.store';
+import { replyUnconfirmed } from '../../server/src/jira/mentions.controller';
 import { mentionsJql } from '../../server/src/jira/mentions.util';
 import { JIRA_POLL_MS, JiraPollerService, SWEEP_FLOOR_MS } from '../../server/src/jira/poller.service';
 import { REGISTRY_FILE } from '../../server/src/registry/registry.service';
@@ -670,6 +671,8 @@ describe('POST /api/jira/mentions/draft and /draft/discard (plan Task 4)', () =>
 describe('POST /api/jira/mentions/reply (plan Task 5)', () => {
   const reply = (key: unknown, text: unknown) => post('/api/jira/mentions/reply', { key, text });
   const commentPosts = () => fake.calls.filter((c) => c.method === 'POST' && /\/issue\/[^/]+\/comment$/.test(c.url));
+  /** Comment-page reads (the thread route's GET, and the post's own read after an unconfirmed attempt), every key. */
+  const threadReads = () => fake.calls.filter((c) => c.method === 'GET' && /\/issue\/[^/]+\/comment\?/.test(c.url)).length;
   const NO_OPEN = (key: string) => ({ error: `${key} has no open mention — it was answered or dismissed` });
   const store = () => app.get(JiraMentionsStore);
   /** A draft waiting on `key`, written straight into the store — the draft route's own proof (a live reply link) is Task 4's to test. */
@@ -843,12 +846,83 @@ describe('POST /api/jira/mentions/reply (plan Task 5)', () => {
     expect(commentPosts().map((c) => c.url.replace(/^.*\/issue\//, ''))).toEqual(['SUP-208/comment', 'SUP-300/comment']);
   });
 
-  it('R4: the key is free again after a failed post, so a retry is sent', async () => {
+  it('R4: the key is free again after a 5xx, and the retry reads the thread first — no reply there, so it posts once more', async () => {
     await build();
+    seedDraft();
     failPost(500, 'boom');
-    await reply('SUP-208', 'one').expect(502);
+    expect((await reply('SUP-208', 'one').expect(502)).body).toEqual({ error: replyUnconfirmed('SUP-208') });
+    expect(store().draftFor('SUP-208')).toMatchObject({ text: 'drafted' });
+    expect(keysOf((await mentions()).issues)).toContain('SUP-208');
     fake.failNext = null;
+    const before = threadReads();
     await reply('SUP-208', 'one').expect(200);
+    expect(threadReads() - before).toBe(1);
     expect(commentPosts()).toHaveLength(2);
+  });
+
+  describe('a POST Jira did not confirm (status 0 or 5xx) is never posted twice', () => {
+    /** The next comment POST times out at the transport — the request left, no answer came back. */
+    const timeOutPost = () => (fake.failNext = (c) => (c.method === 'POST' && /\/comment$/.test(c.url) ? 'transport' : null));
+
+    it('(a) a timeout, then the reply in the thread: the second click sends no POST and answers posted with that comment', async () => {
+      await build();
+      seedDraft();
+      timeOutPost();
+      expect((await reply('SUP-208', 'Thanks').expect(502)).body).toEqual({ error: replyUnconfirmed('SUP-208') });
+      expect(commentPosts()).toHaveLength(1);
+      fake.failNext = null;
+      // Jira did write it: my comment, stamped a second after the attempt by Jira's clock.
+      const landed = { ...comment(ME, 0, false, 'Thanks'), created: new Date(now + 1_000).toISOString() };
+      fake.addComments('SUP-208', [landed]);
+      now += 5_000;
+      const res = await reply('SUP-208', 'Thanks').expect(200);
+      expect(commentPosts()).toHaveLength(1);
+      expect(fake.posted).toEqual([]);
+      expect(res.body.posted).toEqual({ id: landed.id, url: `https://acme.atlassian.net/browse/SUP-208?focusedCommentId=${landed.id}` });
+      expect(keysOf(res.body.issues)).not.toContain('SUP-208');
+      expect(store().draftFor('SUP-208')).toBeNull();
+      // The adopted comment answers the mention like a posted one: a third click is the no-open-mention 409.
+      expect((await reply('SUP-208', 'Thanks').expect(409)).body).toEqual(NO_OPEN('SUP-208'));
+    });
+
+    it('(b) a timeout, then no reply in the thread: the second click POSTs exactly once — an own comment from before the attempt is not it', async () => {
+      await build();
+      timeOutPost();
+      await reply('SUP-208', 'Thanks').expect(502);
+      fake.failNext = null;
+      // c2 is mine, 90 minutes before the attempt: not the attempt, and older than the mention being answered.
+      expect(c2.author?.accountId).toBe(ME.accountId);
+      const before = threadReads();
+      const res = await reply('SUP-208', 'Thanks').expect(200);
+      expect(threadReads() - before).toBe(1);
+      expect(commentPosts()).toHaveLength(2);
+      expect(fake.posted).toHaveLength(1);
+      expect(res.body.posted.id).toBe(fake.posted[0].id);
+    });
+
+    it('a failed thread read refuses without posting, keeps the mark, and the next click reads again', async () => {
+      await build();
+      timeOutPost();
+      await reply('SUP-208', 'Thanks').expect(502);
+      fake.failNext = (c) => (c.method === 'GET' && /\/comment\?/.test(c.url) ? { status: 503, body: {} } : null);
+      await reply('SUP-208', 'Thanks').expect(502);
+      expect(commentPosts()).toHaveLength(1);
+      fake.failNext = null;
+      const before = threadReads();
+      await reply('SUP-208', 'Thanks').expect(200);
+      expect(threadReads() - before).toBe(1);
+      expect(commentPosts()).toHaveLength(2);
+    });
+
+    it('(c) a definite 4xx keeps its answer, and the retry posts with no thread read first', async () => {
+      await build();
+      failPost(400, 'Comment body is not valid');
+      expect((await reply('SUP-208', 'hi').expect(409)).body).toEqual({ error: 'Jira refused: Comment body is not valid' });
+      fake.failNext = null;
+      const before = threadReads();
+      await reply('SUP-208', 'hi').expect(200);
+      expect(threadReads()).toBe(before);
+      expect(commentPosts()).toHaveLength(2);
+    });
   });
 });
