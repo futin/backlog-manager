@@ -6,9 +6,9 @@ import '@testing-library/jest-dom';
 
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JIRA_STATUS_FLOOR_MS } from '../../client/src/hooks/useJira';
-import { useJiraMentions } from '../../client/src/hooks/useJiraMentions';
+import { JIRA_REPLY_REREAD_MS, useJiraMentions } from '../../client/src/hooks/useJiraMentions';
 import { TRACKER_FETCH_SLACK_MS } from '../../client/src/hooks/useTrackers';
-import type { JiraMentionsPayload, JiraStatusPayload } from '../../shared/types';
+import type { JiraMentionIssue, JiraMentionsPayload, JiraStatusPayload } from '../../shared/types';
 
 /** `useJiraMentions` on the server's clock: one timer at polledAt + the poll + slack, floored; focus refetch; newest read wins; no timer unconfigured. */
 
@@ -401,5 +401,35 @@ describe('useJiraMentions', () => {
     expect(url).toBe('/api/jira/mentions/draft/discard');
     expect(JSON.parse(init.body as string)).toEqual({ key: 'PAY-1' });
     expect(screen.getByTestId('p')).toHaveTextContent('ok:discarded');
+  });
+
+  it('re-reads every 15 s while a shown ticket carries a reply session, and goes back to the server’s clock once none does', async () => {
+    // Task 8: the drafting session hands its draft over between two mentions checks, so while any ticket (open or dismissed) has a `session` the ONE timer
+    // is aimed at JIRA_REPLY_REREAD_MS instead of the 3-minute clock. It is the same `reload`, so the sequence counter still lets a POST win.
+    const issue = (session: JiraMentionIssue['session']): JiraMentionIssue => ({
+      key: 'SUP-1',
+      summary: 's',
+      type: 'Bug',
+      status: { name: 'Open', category: 'new' },
+      boards: [],
+      mentions: [],
+      draft: null,
+      session
+    });
+    const live = { sessionId: 'sess-1', startedAt: iso(30_000), repo: '/r' };
+    fetchMock.mockImplementation(() => res(payload({ dismissed: [issue(live)] })));
+    render(tree());
+    await flush();
+    expect(calls()).toBe(1);
+    await advance(JIRA_REPLY_REREAD_MS - 1);
+    expect(calls()).toBe(1);
+    fetchMock.mockImplementation(() => res(payload({ dismissed: [issue(null)] })));
+    await advance(1);
+    expect(calls()).toBe(2);
+    // No session left: the next read waits for the server's clock again (polled 10 s ago → 170 s + slack).
+    await advance(JIRA_REPLY_REREAD_MS);
+    expect(calls()).toBe(2);
+    await advance(170_000 + TRACKER_FETCH_SLACK_MS - JIRA_REPLY_REREAD_MS);
+    expect(calls()).toBe(3);
   });
 });

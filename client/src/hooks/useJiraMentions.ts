@@ -16,6 +16,7 @@ import { useWindowFocus } from './useWindowFocus';
  * - **Newest read wins** (#231, the same counter as `useJira`): a superseded read writes nothing. A POST's answer also takes a sequence number when it
  *   settles, so a GET that started before it cannot land over it.
  * - A failed read keeps `data`, raises `error` and retries at the floor.
+ * - **While any ticket's reply-draft session is live** the same timer is shortened to `JIRA_REPLY_REREAD_MS` (phase 2), so a draft shows within 15 s.
  *
  * `error` is a `JiraMentionsFailure | null`, shared by reads and writes: `message`, and `retryAt` for a 429 sweep (the page's "Jira asked to wait until"
  * copy). `checking` is true while this hook's own sweep is out, or while the cache has never been stamped (`polledAt` null) and nothing blocks the check —
@@ -47,11 +48,20 @@ export interface JiraMentionsState {
   postReply: (key: string, text: string) => Promise<JiraReplyWrite>;
 }
 
+/**
+ * How soon this hook re-reads while a reply-draft session is live on any ticket (phase 2). The draft lands in the server's store, not in the mentions
+ * sweep, so the 170 s cache clock would leave the modal saying `Drafting a reply` for up to three minutes after the session wrote it. The re-read is the
+ * SAME timer, shortened — never a second one beside it — so the one-timer and newest-read-wins rules above hold unchanged.
+ */
+export const JIRA_REPLY_REREAD_MS = 15_000;
+
 function nextDelay(data: JiraMentionsPayload, now: number): number | null {
   if (!data.configured) return null;
   const polled = data.polledAt === null ? NaN : Date.parse(data.polledAt);
-  if (Number.isNaN(polled)) return JIRA_STATUS_FLOOR_MS;
-  return Math.max(polled + JIRA_MENTIONS_POLL_MS + TRACKER_FETCH_SLACK_MS - now, JIRA_STATUS_FLOOR_MS);
+  const delay = Number.isNaN(polled) ? JIRA_STATUS_FLOOR_MS : Math.max(polled + JIRA_MENTIONS_POLL_MS + TRACKER_FETCH_SLACK_MS - now, JIRA_STATUS_FLOOR_MS);
+  // A dismissed ticket can still carry a session (dismissed while it drafted), and its draft must still land: both lists count.
+  const drafting = [...data.issues, ...data.dismissed].some((i) => i.session !== null);
+  return drafting ? Math.min(delay, JIRA_REPLY_REREAD_MS) : delay;
 }
 
 export function useJiraMentions(): JiraMentionsState {

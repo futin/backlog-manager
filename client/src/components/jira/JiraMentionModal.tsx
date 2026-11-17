@@ -1,11 +1,23 @@
-import { type RefObject, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'react';
 
-import type { JiraIssueDetail, JiraMention, JiraMentionIssue, JiraThreadComment, JiraThreadPayload } from '../../../../shared/types';
+import {
+  JIRA_REPLY_MAX_CHARS,
+  type JiraIssueDetail,
+  type JiraMention,
+  type JiraMentionDraft,
+  type JiraMentionIssue,
+  type JiraSessionsPayload,
+  type JiraThreadComment,
+  type JiraThreadPayload
+} from '../../../../shared/types';
 import { useFetched } from '../../hooks/useFetched';
-import type { JiraMentionsWrite } from '../../hooks/useJiraMentions';
+import type { JiraMentionsWrite, JiraReplyWrite } from '../../hooks/useJiraMentions';
 import { useMountedRef } from '../../hooks/useMountedRef';
-import { fetchJiraDetail, initialsOf, statusTone, typeTone } from '../../lib/jira';
-import { askedAge, chipMentions, fetchJiraThread, mentionIssueType, threadFold } from '../../lib/jira-mentions';
+import { useNarrow } from '../../hooks/useNarrow';
+import { elapsedSince } from '../../lib/item-age';
+import { fetchJiraDetail, initialsOf, repoBasename, statusTone, typeTone } from '../../lib/jira';
+import { askedAge, chipMentions, draftState, fetchJiraThread, mentionIssueType, replyTo, threadFold } from '../../lib/jira-mentions';
+import { openButtons } from '../../lib/jira-sessions';
 import { renderMarkdown } from '../../lib/markdown';
 import { Chevron } from '../ui/Chevron';
 import { Chip } from '../ui/Chip';
@@ -13,13 +25,27 @@ import { Fact } from '../ui/Fact';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
+import { Select } from '../ui/Select';
+import { OpenChip } from './JiraSessionCard';
 
 /** Where the opened ticket stands in the page's latest answer: still waiting, dismissed, or gone from both (answered, or aged out of the window). */
 export type MentionTicketState = 'open' | 'dismissed' | 'gone';
 
+/** A sessions-context link as `/api/jira/sessions` answers it: the link plus its dashboard state, row and since-stamp. */
+export type MentionSessionLink = JiraSessionsPayload['links'][number];
+
+/** The reply this dialog posted, held until the walk leaves the ticket: what the thread appends and the posted line links. */
+interface PostedReply {
+  id: string;
+  url: string;
+  to: string | null;
+  text: string;
+  at: string;
+}
+
 /**
- * DESIGN.md §8.9.7 — the mention modal, thread first (Jira mentions phase 1, Task 10; spec "The mention modal"; mock `ModalA.dc.html` — `ModalB` and
- * `ModalDraft` were not picked, and the draft-a-reply half is phase 2, so nothing here drafts).
+ * DESIGN.md §8.9.7 — the mention modal, thread first (Jira mentions phase 1, Task 10; spec "The mention modal"; mock `ModalA.dc.html`), and since phase 2
+ * (Task 8, mock `ModalDraft.dc.html`) the place a reply is drafted, edited and posted — see **Draft a reply** below.
  *
  * **`Modal`'s split shape, thread on the left.** The head is the Detail dialog's (`.jira-detail-head`: type tile, key, type, project, the board badge, the
  * title as an `h2`) with the walk's `Mention i of N` and its two arrows where Detail has its link out. The facts slot — the LEFT column, and the one that
@@ -47,6 +73,27 @@ export type MentionTicketState = 'open' | 'dismissed' | 'gone';
  *
  * **Every link out is a server-built `url`** (the mention's focused-comment link, the detail's ticket link), opened by `Chip as="a"` in a new tab with no
  * referrer.
+ *
+ * **Draft a reply (phase 2).** Only an OPEN ticket drafts — a dismissed one shows none of this until it is restored, because a reply to a thread the reader
+ * set aside is not what Restore promises. The state is `draftState(issue)`, read from the page's answer on every render, never kept here:
+ * - `idle` — the open footer gains `Draft a reply` (outline, between Dismiss and Reply in Jira), and the ticket column a **Draft session** pane: the repo
+ *   the session will read (`replyRepos`, the ticket project's own first, the page computes it), `· read only`, and the sentence that it never posts. No repo
+ *   mapped anywhere disables the chip with its reason as the title. The click is `onDraft(repo)` — the page's `dispatchReply` — `busy` while it is out, and a
+ *   refusal (409: one reply per key) is the same `role="alert"` line every write here uses.
+ * - `drafting` — the footer is the run card: `Drafting a reply`, the elapsed time from `session.startedAt`, **Open session** and **Stop**. Open session is
+ *   `OpenChip` over `openButtons`' primary decision (Dashboard, desktop or remote) relabelled, and stays a disabled chip until the sessions context carries
+ *   the `(key, sessionId)` link; Stop waits for a `sessionId` (the spawn has not reported one yet) and asks no confirmation — the session is read-only, so
+ *   stopping it loses nothing a person wrote.
+ * - `ready` — the draft box (`DraftReply`, keyed on the ticket): `Your reply`, its age, a fixed `To @<name>` line (`replyTo`: the server prepends that mention
+ *   itself, so the textarea holds the text only, and a newer mention by someone else re-addresses it on the next render), the textarea, the counter against
+ *   `JIRA_REPLY_MAX_CHARS`, the sentence saying where it posts, and Redraft / Discard / Post reply. While the draft's own session is still live (the minutes
+ *   before its link ends) Open session and Stop ride in the box head, and Redraft is disabled: the server allows one reply session per key.
+ * - `replacing` — a newer session is drafting over an older draft: the run card above the old draft, which says it is being replaced and stays postable.
+ * - **posted** (local, dropped by a step to another ticket) — the reply joins the thread as `You · just now`, and the footer says it left the list with
+ *   `View in Jira` (the server's `posted.url`) and, when there is one, `Next mention` (the header arrow's step). The ticket is `gone` from the answer by then,
+ *   so the posted line wins over the gone footer.
+ * The page's hook re-reads every `JIRA_REPLY_REREAD_MS` while any ticket has a session (`useJiraMentions`), which is what moves these states; nothing here
+ * polls.
  */
 export function JiraMentionModal({
   issue,
@@ -59,6 +106,13 @@ export function JiraMentionModal({
   onNext,
   onDismiss,
   onRestore,
+  repos,
+  sessionLink,
+  onDraft,
+  onStop,
+  onDiscard,
+  onPost,
+  onHandover,
   onClose
 }: {
   issue: JiraMentionIssue;
@@ -74,6 +128,15 @@ export function JiraMentionModal({
   onNext: (() => void) | null;
   onDismiss: () => Promise<JiraMentionsWrite>;
   onRestore: () => Promise<JiraMentionsWrite>;
+  /** The repos a drafting session may read, best first (`replyRepos`); empty disables Draft a reply. */
+  repos: readonly string[];
+  /** The sessions context's link for `issue.session`, matched by `(key, sessionId)` — `null` until the sessions poll has seen it. */
+  sessionLink: MentionSessionLink | null;
+  onDraft: (repo: string) => Promise<JiraMentionsWrite>;
+  onStop: (sessionId: string) => Promise<JiraMentionsWrite>;
+  onDiscard: () => Promise<JiraMentionsWrite>;
+  onPost: (text: string) => Promise<JiraReplyWrite>;
+  onHandover: (sessionId: string) => void;
   onClose: () => void;
 }) {
   const mounted = useMountedRef();
@@ -86,11 +149,16 @@ export function JiraMentionModal({
   const [busy, setBusy] = useState(false);
   // The last write's refusal, the server's own sentence; cleared by the next write and by a step to another ticket.
   const [refused, setRefused] = useState<string | null>(null);
+  // The reply this dialog posted on the shown ticket, and the repo picked for the next draft — both one ticket's, so both go with the shownKey reset.
+  const [posted, setPosted] = useState<PostedReply | null>(null);
+  const [pickedRepo, setPickedRepo] = useState<string | null>(null);
   if (shownKey !== issue.key) {
     setShownKey(issue.key);
     setDismissedHere(false);
     setBusy(false);
     setRefused(null);
+    setPosted(null);
+    setPickedRepo(null);
   }
   // The key the dialog shows NOW and the newest write's number, both read by a write's settle — refs, because the settle closure was made on the render that
   // sent it (`JiraDetail`'s `keyRef`). A write belongs to the ticket it was made on: Dismiss on A, Next to B before the post answers, and A's outcome must not
@@ -101,21 +169,22 @@ export function JiraMentionModal({
   keyRef.current = issue.key;
   const writeSeq = useRef(0);
 
-  // `here` is the `dismissedHere` the write means to leave behind; set before the post so the footer answers the click at once, and put back on a refusal.
-  const write = (run: () => Promise<JiraMentionsWrite>, here: boolean): void => {
+  // `here` is the `dismissedHere` the write means to leave behind (a draft write leaves it as it is); set before the post so the footer answers the click at
+  // once, and put back on a refusal. `onOk` runs on the ticket's own success only — the posted state is drawn from it.
+  const write = <W extends JiraMentionsWrite>(run: () => Promise<W>, opts: { here?: boolean; onOk?: (outcome: W) => void } = {}): void => {
     const before = dismissedHere;
     const key = issue.key;
     const seq = ++writeSeq.current;
     setBusy(true);
     setRefused(null);
-    setDismissedHere(here);
+    if (opts.here !== undefined) setDismissedHere(opts.here);
     void run().then((outcome) => {
       if (!mounted.current || keyRef.current !== key || writeSeq.current !== seq) return;
       setBusy(false);
       if (!outcome.ok) {
         setRefused(outcome.message);
         setDismissedHere(before);
-      }
+      } else opts.onOk?.(outcome);
     });
   };
 
@@ -148,6 +217,70 @@ export function JiraMentionModal({
   );
 
   const asking = state !== 'dismissed';
+  const drafts = state === 'open' && posted === null;
+  const phase = draftState(issue);
+  const to = replyTo(issue);
+  const repo = pickedRepo !== null && repos.includes(pickedRepo) ? pickedRepo : (repos[0] ?? null);
+  const session = issue.session;
+  const sessionId = session?.sessionId ?? null;
+  const sessionActs =
+    session === null ? null : (
+      <>
+        <SessionChip link={sessionLink} sessionId={sessionId} onHandover={onHandover} />
+        <Chip size={28} disabled={busy || sessionId === null} onClick={sessionId === null ? undefined : () => write(() => onStop(sessionId))}>
+          Stop
+        </Chip>
+      </>
+    );
+  const runCard =
+    session === null ? null : (
+      <div className="jira-reply-run">
+        <span className="jira-reply-run-dot" aria-hidden="true" />
+        <span className="jira-reply-run-what">
+          <span className="jira-reply-run-title">Drafting a reply</span>
+          {elapsedSince(session.startedAt, now) !== null && <span className="jira-reply-run-sub">{elapsedSince(session.startedAt, now)}</span>}
+        </span>
+        <span className="jira-mention-foot-acts">{sessionActs}</span>
+      </div>
+    );
+  const draftBox = (draft: JiraMentionDraft) => (
+    <DraftReply
+      key={issue.key}
+      issueKey={issue.key}
+      draft={draft}
+      to={to?.name ?? null}
+      now={now}
+      busy={busy}
+      replacing={phase === 'replacing'}
+      // Its own session still live: the box head carries the run's controls (in `replacing` the run card above has them).
+      headActs={phase === 'ready' ? sessionActs : null}
+      redraftBlocked={session !== null}
+      onRedraft={() => {
+        if (repo !== null) write(() => onDraft(repo));
+      }}
+      canRedraft={repo !== null}
+      onDiscard={() => write(onDiscard)}
+      onPost={(text) =>
+        write(() => onPost(text), {
+          onOk: (outcome) => {
+            if (outcome.posted !== undefined) setPosted({ ...outcome.posted, to: to?.name ?? null, text, at: new Date(now).toISOString() });
+          }
+        })
+      }
+    />
+  );
+  const mine: JiraThreadComment | null =
+    posted === null
+      ? null
+      : {
+          id: posted.id,
+          author: { accountId: '', name: me ?? 'You' },
+          created: posted.at,
+          markdown: posted.to === null ? posted.text : `@${posted.to} ${posted.text}`,
+          mine: true,
+          mentionsMe: false,
+          open: false
+        };
   const left = (
     <div className="jira-detail-agent">
       {thread.status === 'failed' ? (
@@ -158,14 +291,42 @@ export function JiraMentionModal({
         <div className="drawer-empty">loading…</div>
       ) : (
         // Keyed on the ticket: `Show N earlier comments` is one thread's choice, and the next ticket opens folded.
-        <Thread key={issue.key} thread={thread.value} focus={mention.commentId} asking={asking} me={me} now={now} />
+        <Thread key={issue.key} thread={thread.value} focus={mention.commentId} asking={asking} me={me} now={now} posted={mine} />
       )}
-      {state === 'open' ? (
+      {posted !== null ? (
+        <div className="jira-mention-done jira-reply-posted">
+          <span>{`Posted to ${issue.key}. The mention left your list.`}</span>
+          <span className="jira-mention-foot-acts">
+            <Chip size={28} as="a" href={posted.url} icon={<Glyph name="external" />}>
+              View in Jira
+            </Chip>
+            {onNext !== null && (
+              <Chip size={28} variant="ink" onClick={onNext}>
+                Next mention
+              </Chip>
+            )}
+          </span>
+        </div>
+      ) : drafts && phase === 'drafting' ? (
+        runCard
+      ) : drafts && issue.draft !== null && (phase === 'ready' || phase === 'replacing') ? (
+        <>
+          {phase === 'replacing' && runCard}
+          {draftBox(issue.draft)}
+        </>
+      ) : state === 'open' ? (
         <div className="jira-mention-foot">
           <span>You have not commented since this mention.</span>
           <span className="jira-mention-foot-acts">
-            <Chip disabled={busy} onClick={() => write(onDismiss, true)}>
+            <Chip disabled={busy} onClick={() => write(onDismiss, { here: true })}>
               Dismiss
+            </Chip>
+            <Chip
+              disabled={busy || repo === null}
+              title={repo === null ? 'Map a repository in Jira › Setup first' : undefined}
+              onClick={repo === null ? undefined : () => write(() => onDraft(repo))}
+            >
+              Draft a reply
             </Chip>
             <Chip variant="ink" as="a" href={mention.url} icon={<Glyph name="external" />}>
               Reply in Jira
@@ -175,7 +336,7 @@ export function JiraMentionModal({
       ) : state === 'dismissed' && dismissedHere ? (
         <div className="jira-mention-done">
           <span>{`Dismissed. It comes back if someone mentions you on ${issue.key} again.`}</span>
-          <Chip size={28} disabled={busy} onClick={() => write(onRestore, false)}>
+          <Chip size={28} disabled={busy} onClick={() => write(onRestore, { here: false })}>
             Undo
           </Chip>
         </div>
@@ -183,7 +344,7 @@ export function JiraMentionModal({
         <div className="jira-mention-foot">
           <span className="jira-mention-foot-acts">
             {state === 'dismissed' && (
-              <Chip disabled={busy} onClick={() => write(onRestore, false)}>
+              <Chip disabled={busy} onClick={() => write(onRestore, { here: false })}>
                 Restore
               </Chip>
             )}
@@ -215,6 +376,33 @@ export function JiraMentionModal({
           )}
         </div>
         {noBoard && <div className="jira-mention-note">This ticket is on none of your boards, so the board cannot open it.</div>}
+        {drafts && (
+          <>
+            <div className="jira-detail-lbl">Draft session</div>
+            <div className="jira-detail-pane jira-reply-session">
+              <span className="jira-reply-repo">
+                <span className="jira-reply-repo-lbl">Repo</span>
+                {session !== null ? (
+                  <span>{repoBasename(session.repo)}</span>
+                ) : repos.length > 0 && repo !== null ? (
+                  <Select<string>
+                    label="Repository"
+                    value={repo}
+                    options={repos.map((r) => ({ value: r, label: repoBasename(r) }))}
+                    onChange={setPickedRepo}
+                    disabled={busy}
+                  />
+                ) : (
+                  <span>no repository mapped</span>
+                )}
+                <span>· read only</span>
+              </span>
+              <p className="jira-reply-session-note">
+                The session reads the thread, the ticket and the code, and writes a draft here. It never posts; Post reply does.
+              </p>
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );
@@ -274,7 +462,22 @@ function TicketFacts({ detail, now }: { detail: JiraIssueDetail; now: number }) 
  * of the thread says so — the footer's Jira link (the mention's focused-comment `url`) is the way to it. Only on a truncated thread: a missing id on a whole
  * thread means the comment was deleted since the last check, which the next check settles, and a line there would be a guess.
  */
-function Thread({ thread, focus, asking, me, now }: { thread: JiraThreadPayload; focus: string; asking: boolean; me: string | null; now: number }) {
+function Thread({
+  thread,
+  focus,
+  asking,
+  me,
+  now,
+  posted
+}: {
+  thread: JiraThreadPayload;
+  focus: string;
+  asking: boolean;
+  me: string | null;
+  now: number;
+  /** The reply this dialog just posted, drawn after the thread: the thread read is the one taken on open, and a re-read only to show it is a wasted call. */
+  posted: JiraThreadComment | null;
+}) {
   const [expanded, setExpanded] = useState(false);
   const focused = useRef<HTMLDivElement>(null);
   const { comments } = thread;
@@ -300,10 +503,11 @@ function Thread({ thread, focus, asking, me, now }: { thread: JiraThreadPayload;
             {`Show ${fold} earlier comment${fold === 1 ? '' : 's'}`}
           </button>
         )}
-        {comments.length === 0 && <p className="jira-detail-none">no comments</p>}
+        {comments.length === 0 && posted === null && <p className="jira-detail-none">no comments</p>}
         {shown.map((c) => (
           <Comment key={c.id} comment={c} focused={c.id === focus ? focused : null} asking={asking && c.open} names={names} now={now} />
         ))}
+        {posted !== null && <Comment comment={posted} focused={null} asking={false} names={names} now={now} />}
       </div>
     </>
   );
@@ -335,6 +539,125 @@ function Comment({
         {age !== null && <span className="jira-mention-when">{age}</span>}
       </div>
       <div className="item-body jira-mention-txt" dangerouslySetInnerHTML={{ __html: chipMentions(renderMarkdown(comment.markdown), names) }} />
+    </div>
+  );
+}
+
+/**
+ * **Open session** for the reply's session: `OpenChip` over `openButtons`' primary decision — the one the Sessions page makes for the same link (Dashboard,
+ * the desktop app, or remote on a phone) — under this dialog's own label. A disabled chip until the sessions context has the link: a click before then has
+ * nowhere to go.
+ */
+function SessionChip({
+  link,
+  sessionId,
+  onHandover
+}: {
+  link: MentionSessionLink | null;
+  sessionId: string | null;
+  onHandover: (sessionId: string) => void;
+}) {
+  const phone = useNarrow();
+  if (link === null || sessionId === null)
+    return (
+      <Chip size={28} disabled title="The session has not reported in yet">
+        Open session
+      </Chip>
+    );
+  const button = { ...openButtons(link, link.row, link.state, { phone, wide: true }).primary, label: 'Open session' };
+  return <OpenChip button={button} sessionId={sessionId} row={link.row} launch={link.surface} primary={false} onHandover={onHandover} />;
+}
+
+/**
+ * The draft box. The textarea is LOCAL state seeded from the draft: a newer draft (a new `at`) replaces the text only while the person has not edited it;
+ * once they have, their words stay and `A newer draft arrived · Use it` offers the swap. Keyed on the ticket by its caller, so a step to another ticket
+ * starts from that ticket's draft. Post is refused for a blank text and past `JIRA_REPLY_MAX_CHARS` (the server's own cap, which it re-checks), and a refused
+ * post keeps the text — the box stays mounted because the draft does.
+ */
+function DraftReply({
+  issueKey,
+  draft,
+  to,
+  now,
+  busy,
+  replacing,
+  headActs,
+  redraftBlocked,
+  canRedraft,
+  onRedraft,
+  onDiscard,
+  onPost
+}: {
+  issueKey: string;
+  draft: JiraMentionDraft;
+  to: string | null;
+  now: number;
+  busy: boolean;
+  replacing: boolean;
+  headActs: ReactNode;
+  redraftBlocked: boolean;
+  canRedraft: boolean;
+  onRedraft: () => void;
+  onDiscard: () => void;
+  onPost: (text: string) => void;
+}) {
+  const [seed, setSeed] = useState({ at: draft.at, text: draft.text });
+  const [text, setText] = useState(draft.text);
+  const edited = text !== seed.text;
+  if (draft.at !== seed.at && !edited) {
+    setSeed({ at: draft.at, text: draft.text });
+    setText(draft.text);
+  }
+  const newer = draft.at !== seed.at;
+  const over = text.length > JIRA_REPLY_MAX_CHARS;
+  const age = askedAge(draft.at, now);
+  return (
+    <div className="jira-reply">
+      <div className="jira-reply-head">
+        <span className="jira-reply-what">
+          <span className="jira-reply-title">Your reply</span>
+          <span className="jira-reply-sub">{`drafted by a session ${age ?? 'just now'} · edit before posting`}</span>
+        </span>
+        {headActs !== null && <span className="jira-mention-foot-acts">{headActs}</span>}
+      </div>
+      {replacing && <div className="jira-reply-note">This draft is being replaced by a new one; it stays postable until the new one arrives.</div>}
+      {newer && (
+        <div className="jira-reply-note">
+          <span>A newer draft arrived · </span>
+          <button
+            type="button"
+            className="jira-mention-more"
+            onClick={() => {
+              setSeed({ at: draft.at, text: draft.text });
+              setText(draft.text);
+            }}
+          >
+            Use it
+          </button>
+        </div>
+      )}
+      {to !== null && <div className="jira-reply-to">{`To @${to}`}</div>}
+      <textarea className="jira-reply-text" aria-label={`Reply to ${to ?? issueKey}`} value={text} rows={6} onChange={(e) => setText(e.target.value)} />
+      <div className="jira-reply-foot">
+        <span>{`Posts to ${issueKey} as you and clears this mention.`}</span>
+        <span className="jira-reply-count" data-over={over ? '' : undefined}>{`${text.length} / ${JIRA_REPLY_MAX_CHARS}`}</span>
+      </div>
+      <div className="jira-reply-acts">
+        <Chip
+          size={28}
+          disabled={busy || redraftBlocked || !canRedraft}
+          title={redraftBlocked ? 'Stop the drafting session first' : !canRedraft ? 'Map a repository in Jira › Setup first' : undefined}
+          onClick={onRedraft}
+        >
+          Redraft
+        </Chip>
+        <Chip size={28} disabled={busy} onClick={onDiscard}>
+          Discard
+        </Chip>
+        <Chip size={28} variant="ink" disabled={busy || text.trim() === '' || over} onClick={() => onPost(text)}>
+          Post reply
+        </Chip>
+      </div>
     </div>
   );
 }

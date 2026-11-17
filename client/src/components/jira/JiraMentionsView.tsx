@@ -1,9 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
-import { useJiraMentions } from '../../hooks/useJiraMentions';
+import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
+import { useJiraMentions, type JiraMentionsWrite } from '../../hooks/useJiraMentions';
 import { useJiraMentionsDismissed, useJiraMentionsView } from '../../hooks/useJiraMentionsView';
 import { useNow } from '../../hooks/useNow';
+import { useSettings } from '../../hooks/useSettings';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
 import {
   JIRA_MENTIONS_VIEWS,
@@ -15,6 +17,7 @@ import {
   type JiraMentionsView as ViewMode,
   type MentionStep
 } from '../../lib/jira-mentions';
+import { dispatchReply, openDesktopJira, replyRepos, stopJira } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
 import type { JiraMentionIssue } from '../../../../shared/types';
 import { Band } from '../ui/Band';
@@ -57,10 +60,19 @@ const VIEW_LABELS: Record<ViewMode, string> = { list: 'List', cards: 'Cards' };
  * off, filtered out) stays on screen with no position; its neighbours are then the ones around the last place it held (`lastAt`), so Previous is the row
  * that was before it and Next the one that took its place. The ticket's state for the footer is read from the same answer: in `issues`, in `dismissed`, or
  * in neither.
+ *
+ * **The reply's writes are wired here too** (phase 2, Task 8), so the modal stays a view of props: `Draft a reply` and `Redraft` are `dispatchReply` with
+ * the launch defaults from Settings, `Stop` is `stopJira`, and each re-reads this page's hook AND the shell's sessions context on success, because the
+ * modal's state is the two answers together (`issue.session` from the mentions store, the `(key, sessionId)` link that Open session needs from the
+ * sessions poll). Discard and Post reply are the hook's own writes, whose answers replace the payload. The repo picker's list is `replyRepos` over the shell
+ * status's `repos` — the ticket's project first — and a `Draft ready` marker on the List row and the card is the List's and the Cards' own (`draft !== null`).
  */
 export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
-  const { data, loading, error, checking, sweep, dismiss, restore } = useJiraMentions();
-  const access = useJiraContext().data?.access;
+  const { data, loading, error, checking, sweep, dismiss, restore, reload, discardDraft, postReply } = useJiraMentions();
+  const status = useJiraContext().data;
+  const access = status?.access;
+  const sessions = useJiraSessionsContext();
+  const { settings } = useSettings();
   const { zone } = useTimeZone();
   // `checked 1 min ago` and the `When` column (`2h`) move by the minute; a wait end disappears within a minute of passing.
   const now = useNow(true);
@@ -114,6 +126,23 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
     return gone === undefined ? null : { issue: gone, state: 'dismissed' };
   };
   const live = shown === null ? null : liveIssue(shown.issue.key);
+  const modalIssue = live?.issue ?? shown?.issue ?? null;
+  const replySession = modalIssue?.session?.sessionId ?? null;
+  const sessionLink =
+    modalIssue === null || replySession === null
+      ? null
+      : (sessions.data?.links.find((l) => l.key === modalIssue.key && l.sessionId === replySession) ?? null);
+  // A dispatch or Stop the dashboard accepted: both answers move, so both are re-read. A thrown sentence is the modal's refusal line.
+  const launch = async (run: () => Promise<unknown>): Promise<JiraMentionsWrite> => {
+    try {
+      await run();
+      reload();
+      void sessions.reload();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  };
 
   return (
     <div className="board" data-testid="jira-mentions-page">
@@ -185,9 +214,9 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
         <div className="board-empty">{`Nothing waiting on you in the last ${data.window} days.`}</div>
       ) : null}
 
-      {shown !== null && (
+      {shown !== null && modalIssue !== null && (
         <JiraMentionModal
-          issue={live?.issue ?? shown.issue}
+          issue={modalIssue}
           mention={shown.mention}
           state={live?.state ?? 'gone'}
           me={data.me}
@@ -198,6 +227,13 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           // Dismiss is the ticket's, as on the page: every mention the latest answer holds for it.
           onDismiss={() => dismiss(shown.issue.key, ids(live?.issue ?? shown.issue))}
           onRestore={() => restore(shown.issue.key)}
+          repos={replyRepos(modalIssue.key.split('-')[0], status?.repos ?? {})}
+          sessionLink={sessionLink}
+          onDraft={(repo) => launch(() => dispatchReply(modalIssue.key, repo, settings))}
+          onStop={(sessionId) => launch(() => stopJira(modalIssue.key, sessionId))}
+          onDiscard={() => discardDraft(modalIssue.key)}
+          onPost={(text) => postReply(modalIssue.key, text)}
+          onHandover={(sessionId) => void openDesktopJira(sessionId).catch(() => undefined)}
           onClose={() => setOpened(null)}
         />
       )}

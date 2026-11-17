@@ -853,7 +853,8 @@ inherited, `<repo> → <target branch>` at 12 `--ink3`, and `polled <age>` of th
 #### 8.9.7 Mentions
 
 The comments that @-mention the reader and still wait on them ([spec](../docs/superpowers/specs/2026-11-16-jira-mentions-design.md); mocks `Main.dc.html`,
-`ListB.dc.html`, `ModalA.dc.html`, `Sync.dc.html` and `Rail.dc.html` in its `-mockups/canvas/`; `ModalB` and `ModalDraft` were not picked). The fourth Jira
+`ListB.dc.html`, `ModalA.dc.html`, `Sync.dc.html` and `Rail.dc.html` in its `-mockups/canvas/`, and since phase 2 `ModalDraft.dc.html` for the reply; `ModalB`
+was not picked). The fourth Jira
 page, between Sessions and Setup, built from the Board's own parts rather than new ones (`JiraMentionsView`).
 
 **The band.** `Band`, as the Board's: the title, then `4 waiting · last 30 days · checked 1 min ago` in List or `3 tickets waiting · …` in Cards, plus
@@ -893,6 +894,18 @@ in the mock). The footer under it: `You have not commented since this mention.`,
 and `Reply in Jira ↗` (primary); after Dismiss, `Dismissed. It comes back if someone mentions you on <KEY> again.` with `Undo`; a dismissed mention opens
 with `Restore` in Dismiss's place. Right, **Ticket**: status, assignee, reporter, priority, parent, updated, the description's first lines, `Open ticket in
 Jira ↗`, and the no-board note when it applies. Its data is a fresh read on open, never the list's cache, because the thread is the point.
+
+**Draft a reply** (phase 2, `ModalDraft.dc.html`) lives inside the same modal — no new dialog — and only on an OPEN ticket; a dismissed one shows none of it
+until restored. Idle: `Draft a reply` (outline) joins the footer between Dismiss and Reply in Jira, disabled with `Map a repository in Jira › Setup first`
+as its title when no repo is mapped, and the right column gains **Draft session** under the ticket: `Repo <name> · read only` (a select of the mapped repos,
+the ticket project's first, until a session holds one) and `The session reads the thread, the ticket and the code, and writes a draft here. It never posts;
+Post reply does.` Drafting: the footer is the run card (`.jira-reply-run`, the thread card's `--strip`) — `Drafting a reply`, the elapsed time, `Open
+session` and `Stop`. Ready: the draft box (`.jira-reply`) — `Your reply`, `drafted by a session <age> · edit before posting`, the fixed `To @<name>` line in
+`--cyan`, the editable textarea, `Posts to <KEY> as you and clears this mention.` beside an `n / 8000` counter that turns `--red` past the cap, then
+`Redraft`, `Discard` and `Post reply` (ink). A newer draft over unedited text replaces it; over edited text it shows `A newer draft arrived · Use it`.
+Replacing: the run card above the old draft, which says it is being replaced. Posted: the reply joins the thread as `You · just now` and the green done line
+says `Posted to <KEY>. The mention left your list.` with `View in Jira ↗` and `Next mention`. A ticket with a draft carries the warn `Draft ready` pill on its
+List row (after the summary) and its card (the foot).
 
 ### 8.10 Releases
 

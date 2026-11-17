@@ -5,6 +5,7 @@ import { excerptParts, mentionIssueType, type JiraMentionRow } from '../../lib/j
 import { Chip } from '../ui/Chip';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
+import { Pill } from '../ui/Pill';
 
 /**
  * DESIGN.md §8.9.7 — Jira › Mentions › List: one row per open mention, in the Board › List's table language (Jira mentions phase 1, Task 8; spec "The page";
@@ -104,6 +105,9 @@ function MentionRow({
             <JiraTypeIcon type={type} />
           </span>
           <span className="jira-issues-cut">{issue.summary}</span>
+          {/* Phase 2: a drafted reply waits on the reader — the warn tone, "waiting on a person". Every row of the ticket carries it: the draft is the
+              ticket's. */}
+          {issue.draft !== null && <Pill tone="warn">Draft ready</Pill>}
         </span>
       </td>
       <td>

@@ -382,3 +382,38 @@ describe('Jira › Mentions — the Cards view', () => {
     expect(cards()).toHaveLength(2);
   });
 });
+
+describe('Jira › Mentions — the Draft ready marker (phase 2, Task 8)', () => {
+  // A ticket whose reply draft waits (`draft !== null`) says so on its List row and its card, so the reader can find the draft again after closing the
+  // modal; a ticket without one says nothing. The marker sits in the Summary cell (List) and the card's foot (Cards) — the slots `Main.dc.html` and
+  // `ListB.dc.html` leave beside the ticket's own words.
+  const DRAFT = { text: 'The backend stores it per branch.', at: ago(2 * MIN), sessionId: 'sess-1' };
+  const marker = (el: Element): Element | null => Array.from(el.querySelectorAll('.ui-pill')).find((p) => p.textContent === 'Draft ready') ?? null;
+
+  it('marks every List row of the ticket with a draft, and no other row', async () => {
+    answer = payload({ issues: [{ ...SUP, draft: DRAFT }, PAY] });
+    renderPage();
+    await settle();
+    const [mara, tomas, pay] = bodyRows();
+    expect(marker(mara)).not.toBeNull();
+    expect(marker(tomas)).not.toBeNull();
+    expect(marker(pay)).toBeNull();
+  });
+
+  it('marks the ticket’s card, and no other card', async () => {
+    answer = payload({ issues: [{ ...SUP, draft: DRAFT }, PAY] });
+    const user = userEvent.setup();
+    renderPage();
+    await settle();
+    await user.click(screen.getByRole('button', { name: 'Cards' }));
+    const card = (key: string): HTMLElement => document.querySelector<HTMLElement>(`.jira-mentions-card[data-key="${key}"]`)!;
+    expect(marker(card('SUP-208'))).not.toBeNull();
+    expect(marker(card('PAY-131'))).toBeNull();
+  });
+
+  it('draws no marker anywhere while no ticket holds a draft', async () => {
+    renderPage();
+    await settle();
+    expect(screen.queryByText('Draft ready')).toBeNull();
+  });
+});
