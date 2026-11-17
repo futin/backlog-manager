@@ -23,6 +23,9 @@ import {
   branchSheetDefaults,
   branchRefusal,
   branchDraft,
+  preferredBranchApplies,
+  lastJiraLink,
+  prefilledLine,
   branchChoiceOf,
   branchDispatchFields,
   draftRefusal,
@@ -1586,6 +1589,50 @@ describe('branch choice derivations', () => {
         target: 'main'
       });
     });
+    // #503: the ticket's last session's branch, passed as a preference.
+    describe('with a preferred branch', () => {
+      const two = refsOf([branch('timify-123-a', true), branch('timify-123-b', true), branch('develop', false)]);
+      const plain = branchDraft('execute', two, 'TIMIFY-123', 'Export', undefined);
+      it('opens on Continue on the preferred branch, where no preference stays on the first ticket branch', () => {
+        expect(branchDraft('execute', two, 'TIMIFY-123', 'Export', undefined, 'timify-123-b')).toMatchObject({ mode: 'continue', continueBranch: 'timify-123-b' });
+        expect(plain).toMatchObject({ mode: 'continue', continueBranch: 'timify-123-a' });
+      });
+      it('a preferred branch the refs do not list is the draft without one', () => {
+        expect(branchDraft('execute', two, 'TIMIFY-123', 'Export', undefined, 'timify-123-x')).toEqual(plain);
+      });
+      it('the mapped checkout\'s own branch is the draft without one', () => {
+        expect(branchDraft('execute', two, 'TIMIFY-123', 'Export', undefined, 'develop')).toEqual(plain);
+      });
+      it('context with a preferred branch still opens on No branch', () => {
+        expect(branchDraft('context', two, 'TIMIFY-123', 'Export', undefined, 'timify-123-b').mode).toBe('none');
+      });
+      it('unavailable or unread refs are the draft without one', () => {
+        const down: JiraRepoRefs = { repo: '/r', available: false, reason: 'does not exist' };
+        expect(branchDraft('execute', down, 'TIMIFY-123', 'Export', { base: 'main' }, 'timify-123-b')).toEqual(
+          branchDraft('execute', down, 'TIMIFY-123', 'Export', { base: 'main' })
+        );
+        expect(branchDraft('execute', null, 'TIMIFY-123', 'Export', undefined, 'timify-123-b')).toEqual(branchDraft('execute', null, 'TIMIFY-123', 'Export', undefined));
+      });
+      it('a preference applied leaves New and its base as the draft without one has them', () => {
+        const preferred = branchDraft('execute', two, 'TIMIFY-123', 'Export', undefined, 'timify-123-b');
+        expect([preferred.newBranch, preferred.base]).toEqual([plain.newBranch, plain.base]);
+      });
+      it('applies to a branch that is not the ticket\'s too, and to a skill action', () => {
+        const other = refsOf([branch('timify-123-a', true), branch('feature/other', false), branch('develop', false)]);
+        expect(branchDraft({ skill: 's_0a1b2c3d' }, other, 'TIMIFY-123', 'Export', undefined, 'feature/other')).toMatchObject({
+          mode: 'continue',
+          continueBranch: 'feature/other'
+        });
+      });
+      it('preferredBranchApplies says the same', () => {
+        expect(preferredBranchApplies('execute', two, 'timify-123-b')).toBe(true);
+        expect(preferredBranchApplies('execute', two, null)).toBe(false);
+        expect(preferredBranchApplies('execute', two, '')).toBe(false);
+        expect(preferredBranchApplies('context', two, 'timify-123-b')).toBe(false);
+        expect(preferredBranchApplies('execute', two, 'develop')).toBe(false);
+      });
+    });
+
     it('the choice keeps only the fields its mode and action own', () => {
       const draft = { mode: 'continue' as const, continueBranch: 'b', newBranch: 'n', base: 'develop', openMr: true, review: true, target: 'main' };
       expect(branchChoiceOf(draft, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: true, target: 'main' });
@@ -1929,6 +1976,31 @@ describe('clampJiraPanelFilters keeps every Delivery filter value the UI offers'
   });
   it('keeps `review-open` by name', () => {
     expect(clampJiraPanelFilters({ delivery: 'review-open' }).delivery).toBe('review-open');
+  });
+});
+
+// #503: the launch sheet prefills from the ticket's last session — which one that is, and the line that says so.
+describe('lastJiraLink and prefilledLine', () => {
+  const l = (key: string, startedAt: string, id: string) => ({ key, startedAt, sessionId: id });
+  it('takes the newest link for the key by startedAt, and null for an unknown key or no links', () => {
+    const links = [l('A', '2026-11-10T10:00:00Z', 'a10'), l('B', '2026-11-10T13:00:00Z', 'b13'), l('A', '2026-11-10T12:00:00Z', 'a12')];
+    expect(lastJiraLink(links, 'A')?.sessionId).toBe('a12');
+    expect(lastJiraLink(links, 'C')).toBeNull();
+    expect(lastJiraLink([], 'A')).toBeNull();
+  });
+  it('recency, not liveness: an ended link newer than a live one wins', () => {
+    const live = { ...l('A', '2026-11-10T10:00:00Z', 'live'), endedAt: null };
+    const ended = { ...l('A', '2026-11-10T12:00:00Z', 'ended'), endedAt: '2026-11-10T12:30:00Z' };
+    expect(lastJiraLink([live, ended], 'A')?.sessionId).toBe('ended');
+  });
+  it('an unparseable startedAt sorts last', () => {
+    expect(lastJiraLink([l('A', 'garbage', 'bad'), l('A', '2026-11-10T10:00:00Z', 'ok')], 'A')?.sessionId).toBe('ok');
+  });
+  it('prefilledLine ages on the elapsedSince ladder, `just now` under a minute, no age for a bad stamp', () => {
+    const now = Date.parse('2026-11-10T14:00:00Z');
+    expect(prefilledLine('2026-11-10T12:00:00Z', now)).toBe('Prefilled from the last session · 2h ago');
+    expect(prefilledLine('2026-11-10T13:59:30Z', now)).toBe('Prefilled from the last session · just now');
+    expect(prefilledLine('garbage', now)).toBe('Prefilled from the last session');
   });
 });
 

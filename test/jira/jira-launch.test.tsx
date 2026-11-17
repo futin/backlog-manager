@@ -24,6 +24,7 @@ import type {
   JiraIssueDetail,
   JiraRefBranch,
   JiraRepoRefs,
+  JiraSessionsPayload,
   JiraStatusPayload,
   ReviewHalf
 } from '../../shared/types';
@@ -209,20 +210,41 @@ let onWrote: jest.Mock;
 
 type ReviewProp = { half: ReviewHalf; mr: { project: string; iid: number; sourceBranch: string }; repos: string[] };
 
-function mount(opts: { initialAction?: JiraAction; status?: Partial<JiraStatusPayload>; issue?: JiraIssue; review?: ReviewProp } = {}) {
+type SessionLink = JiraSessionsPayload['links'][number];
+
+function mount(
+  opts: { initialAction?: JiraAction; status?: Partial<JiraStatusPayload>; issue?: JiraIssue; review?: ReviewProp; links?: SessionLink[] } = {}
+) {
   onClose = jest.fn();
   onStarted = jest.fn();
   onWrote = jest.fn();
-  const tree = (status?: Partial<JiraStatusPayload>) => (
-    <SettingsProvider>
-      <JiraContext.Provider value={{ data: jiraStatus(status), loading: false, error: false, reload: jest.fn() }}>
-        <JiraLaunchSheet issue={opts.issue ?? CARD} initialAction={opts.initialAction ?? 'execute'} review={opts.review} onClose={onClose} onStarted={onStarted} onWrote={onWrote} />
-      </JiraContext.Provider>
-    </SettingsProvider>
-  );
-  const view = render(tree(opts.status));
+  // Without `links` no sessions provider is mounted: the context's default is "nothing known", which every case before #503 was written against.
+  const tree = (status?: Partial<JiraStatusPayload>, links: SessionLink[] | undefined = opts.links) => {
+    const sheet = (
+      <SettingsProvider>
+        <JiraContext.Provider value={{ data: jiraStatus(status), loading: false, error: false, reload: jest.fn() }}>
+          <JiraLaunchSheet issue={opts.issue ?? CARD} initialAction={opts.initialAction ?? 'execute'} review={opts.review} onClose={onClose} onStarted={onStarted} onWrote={onWrote} />
+        </JiraContext.Provider>
+      </SettingsProvider>
+    );
+    return links === undefined ? (
+      sheet
+    ) : (
+      <JiraSessionsContext.Provider value={{ data: { links, reachable: true, rowsAt: null }, reload: jest.fn(() => Promise.resolve()) }}>{sheet}</JiraSessionsContext.Provider>
+    );
+  };
+  let current = opts.status;
+  const view = render(tree(current));
   /** The shell's status landing after the sheet is open — the same sheet, a new context value. */
-  return { ...view, withStatus: (status: Partial<JiraStatusPayload>) => view.rerender(tree(status)) };
+  return {
+    ...view,
+    withStatus: (status: Partial<JiraStatusPayload>) => {
+      current = status;
+      view.rerender(tree(status));
+    },
+    /** A later sessions poll — the same sheet, a new sessions payload. */
+    withSessions: (links: SessionLink[]) => view.rerender(tree(current, links))
+  };
 }
 
 const dialog = (): HTMLElement => screen.getByRole('dialog');
@@ -1096,6 +1118,147 @@ describe('JiraLaunchSheet — the branch', () => {
   about, and Start stays gated on a prompt composed for the CURRENT choice. Fake timers from the moment the first preview has landed: the debounce is the
   clock under test, and `fireEvent.change` is five keystrokes inside one tick of it.
 */
+/*
+  #503: a ticket that already had a session opens from that session's setup — Open in, the repository and the branch — each resolved against live state,
+  with one quiet line saying so. Model, effort and permissions never come from it.
+*/
+describe('JiraLaunchSheet — prefill from the last session', () => {
+  const TWO = { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } };
+  const hoursAgo = (h: number): string => new Date(Date.now() - h * 3_600_000).toISOString();
+  const linkOf = (over: Partial<SessionLink> = {}): SessionLink => ({
+    key: 'PAY-131',
+    sessionId: 'sess-1',
+    how: 'run',
+    action: 'execute',
+    name: 'jira PAY-131',
+    repo: '/Users/ada/pay',
+    branch: null,
+    surface: null,
+    model: null,
+    effort: null,
+    snapshot: { summary: 'Refund partial captures', type: 'Story', parentKey: null },
+    startedAt: hoursAgo(2),
+    endedAt: hoursAgo(1),
+    endReason: 'idle',
+    quietSince: null,
+    reattachedAt: null,
+    state: 'ended',
+    row: null,
+    stateSince: hoursAgo(1),
+    ...over
+  });
+  const hint = (): HTMLElement | null => within(dialog()).queryByText(/^Prefilled from the last session/);
+  const pressedIn = (group: string): string | null =>
+    within(within(dialog()).getByRole('group', { name: group }))
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('aria-pressed') === 'true')?.textContent ?? null;
+  const field = (name: string): HTMLInputElement | HTMLSelectElement => within(dialog()).getByLabelText(name) as HTMLInputElement | HTMLSelectElement;
+
+  it('selects the last session\'s repository among several, previews against it, and says it was prefilled', async () => {
+    mount({ status: TWO, links: [linkOf({ repo: '/Users/ada/pay-web' })] });
+    await waitFor(() => expect(promptBox().value).toBe('prompt for execute in /Users/ada/pay-web'));
+    expect(repoPick('pay-web')).toHaveAttribute('aria-pressed', 'true');
+    expect(promptReads()[0].searchParams.get('repo')).toBe('/Users/ada/pay-web');
+    expect(hint()).toHaveTextContent('Prefilled from the last session · 2h ago');
+  });
+
+  it('seeds nothing from a repository the project no longer maps, and draws no hint when nothing else was taken', async () => {
+    mount({ status: TWO, links: [linkOf({ repo: '/Users/ada/elsewhere' })] });
+    await within(dialog()).findByRole('group', { name: 'Repository' });
+    await waitFor(() => expect(startButton()).toBeDisabled());
+    expect(pressedIn('Repository')).toBeNull();
+    expect(promptReads()).toHaveLength(0);
+    expect(hint()).not.toBeInTheDocument();
+  });
+
+  it('opens on the last session\'s surface over the dashboard default, and Start sends it', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'dashboard' });
+    await ready({ links: [linkOf({ surface: 'desktop' })] });
+    await waitFor(() => expect(pressedIn('Open in')).toBe('Desktop'));
+    expect(hint()).toBeInTheDocument();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toMatchObject({ surface: 'desktop' });
+  });
+
+  it('a session whose surface is unknown falls through to the dashboard default', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'desktop' });
+    await ready({ links: [linkOf({ surface: null })] });
+    await waitFor(() => expect(pressedIn('Open in')).toBe('Desktop'));
+    expect(hint()).not.toBeInTheDocument();
+  });
+
+  it('without Desktop on offer there is no Open in and no surface is sent, whatever the session used', async () => {
+    await ready({ links: [linkOf({ surface: 'desktop' })] });
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    expect(within(dialog()).queryByRole('group', { name: 'Open in' })).not.toBeInTheDocument();
+    expect(hint()).not.toBeInTheDocument();
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).not.toHaveProperty('surface');
+  });
+
+  it('never takes the model or the effort from the session', async () => {
+    await ready({ links: [linkOf({ model: 'opus', effort: 'max', surface: 'desktop' })] });
+    expect(within(dialog()).getByRole('combobox', { name: 'Model' })).toHaveValue('');
+    expect(within(dialog()).getByRole('combobox', { name: 'Effort' })).toHaveValue('');
+  });
+
+  it('continues on the session\'s branch in its own repository only, and another repository listing the same name gets its own defaults', async () => {
+    server.refs = (repo) => ({
+      status: 200,
+      body: refsOf(repo, [refBranch('pay-131-a', { ticket: true }), refBranch('pay-131-b', { ticket: true })])
+    });
+    mount({ status: TWO, links: [linkOf({ repo: '/Users/ada/pay-web', branch: 'pay-131-b' })] });
+    await waitFor(() => expect(pressedIn('Branch mode')).toBe('Continue'));
+    expect(field('Branch').value).toBe('pay-131-b');
+    expect(hint()).toBeInTheDocument();
+    await userEvent.click(repoPick('pay'));
+    await waitFor(() => expect(within(dialog()).queryByText('loading branches…')).not.toBeInTheDocument());
+    await waitFor(() => expect(field('Branch').value).toBe('pay-131-a'));
+    expect(pressedIn('Branch mode')).toBe('Continue');
+  });
+
+  it('a branch the refs no longer list opens on today\'s defaults', async () => {
+    await ready({ links: [linkOf({ branch: 'pay-131-gone' })] });
+    expect(pressedIn('Branch mode')).toBe('New');
+    expect(field('Name').value).toBe('pay-131-refund-partial-captures');
+    expect(hint()).not.toBeInTheDocument();
+  });
+
+  it('no session on this ticket: no hint, and every control as before', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'dashboard' });
+    mount({ status: TWO, links: [linkOf({ key: 'PAY-999', repo: '/Users/ada/pay-web', surface: 'desktop' })] });
+    await waitFor(() => expect(within(dialog()).queryByRole('group', { name: 'Open in' })).toBeInTheDocument());
+    expect(pressedIn('Open in')).toBe('Dashboard');
+    expect(pressedIn('Repository')).toBeNull();
+    expect(hint()).not.toBeInTheDocument();
+  });
+
+  it('a later sessions payload never moves a field the reader set, nor one the first payload seeded', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'dashboard' });
+    const view = mount({ status: TWO, links: [linkOf({ repo: '/Users/ada/pay-web', surface: 'desktop' })] });
+    await waitFor(() => expect(pressedIn('Open in')).toBe('Desktop'));
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'Dashboard' }));
+    view.withSessions([linkOf({ repo: '/Users/ada/pay', surface: 'desktop', startedAt: hoursAgo(0), sessionId: 'sess-2' })]);
+    expect(pressedIn('Open in')).toBe('Dashboard');
+    expect(pressedIn('Repository')).toBe('pay-web');
+  });
+
+  it('a review sheet takes nothing from the session', async () => {
+    server.agents = agents({ desktopAvailable: true, launchSurfaceDefault: 'dashboard' });
+    mount({
+      initialAction: 'review',
+      review: { half: 'request', mr: { project: 'pay/pay', iid: 7, sourceBranch: 'pay-131-mr' }, repos: ['/Users/ada/pay', '/Users/ada/pay-web'] },
+      links: [linkOf({ repo: '/Users/ada/pay-web', surface: 'dashboard', branch: 'pay-131-b' })]
+    });
+    await waitFor(() => expect(pressedIn('Open in')).toBe('Desktop'));
+    expect(pressedIn('Repository')).toBeNull();
+    expect(hint()).not.toBeInTheDocument();
+  });
+});
+
 describe('JiraLaunchSheet — the preview settles before it is asked', () => {
   const nameField = (): HTMLInputElement => within(dialog()).getByLabelText('Name') as HTMLInputElement;
   const modeButton = (name: string): HTMLElement => within(within(dialog()).getByRole('group', { name: 'Branch mode' })).getByRole('button', { name });
