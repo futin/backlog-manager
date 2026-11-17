@@ -77,8 +77,9 @@
   - Add `['/skills/order']` to the three 403 tables (:98, :106, :111).
   - Add `['/skills/order', { ids: 'x' }]` to the 400-before-503 table and `['/skills/order', { ids: [] }]` to the 503 table.
   - Add `['/skills/order', { ids: ['s_0123abcd'] }]` to the unparsable-file 409 table (~:420).
-  - In `describe('skills')`: create two skills via `POST /skills`, `POST /skills/order` with the reversed ids → 200 `{ ok: true }`, `GET /api/jira`'s `skills`
-    is reversed; a missing id → 409 with body `{ error: 'the skill list changed since this page loaded — reload and try again; nothing was written' }`;
+  - In `describe('skills')` (its `jira.json` is SHARED with earlier cases, which leave skills behind — never assume only the two you create): create two
+    skills via `POST /skills`, read the full id list from `GET /api/jira`, `POST /skills/order` with that whole list reversed → 200 `{ ok: true }`, and
+    `GET /api/jira`'s skill ids equal the reversed list; the whole list minus one id → 409 with body `{ error: 'the skill list changed since this page loaded — reload and try again; nothing was written' }`;
     `{ ids: [id, id] }` → 400 `{ error: 'ids holds <id> twice' }`.
 - [ ] **Step 7: run** `pnpm exec jest test/jira/jira-write-routes.test.ts` — new cases FAIL (404 route).
 - [ ] **Step 8: implement** the route (`@Post('skills/order')`, `@HttpCode(200)`, `@UseGuards(SameOriginPostGuard)`), parse → 400, `requireConfigured()`,
@@ -102,6 +103,7 @@
   - Skills `[GROOM, SUMMARISE, REVIEW]`: `Move Groom ticket up` and `Move Review MR down` disabled; the others enabled. Built-in rows have no `Move` buttons.
   - Click `Move Groom ticket down` → exactly one POST to `/api/jira/skills/order` with body `{ ids: ['s_0123abce', 's_0123abcd', 's_0123abcf'] }`; after the
     reload the drawn order is `Summarise changes, Groom ticket, Review MR`.
+  - Click `Move Review MR up` on `[GROOM, SUMMARISE, REVIEW]` → body `{ ids: ['s_0123abcd', 's_0123abcf', 's_0123abce'] }` (pins the up direction).
   - Stale window: make `/api/jira`'s answer a held promise after the first move lands; every `Move …` button is disabled until it resolves, then enabled.
     A second variant: the held reload rejects / answers 500 → the arrows re-enable (via `error`).
   - Refusal: `skillsOrderAnswer` answers 409 `{ error: 'the skill list changed since this page loaded — reload and try again; nothing was written' }` → that
@@ -123,13 +125,14 @@
 ### Task 3: Docs and rule files
 
 **Files (all Modify):** `.claude/rules/jira.md` (writers paragraph ~:14-21), `docs/subsystems/invariants.md` (the jira.json writers section ~:3760),
-`docs/subsystems/jira.md` (:35, :54, :69, :304, :667), `docs/subsystems/api.md` (:229 guarded-POST count), `.claude/DESIGN.md` §8.9.3 Skills paragraph (~:675).
+`docs/subsystems/jira.md` (:35, :54, :69, :140 "Six config POSTs" and the route table under it ~:146-154 — add a `/skills/order` row, :304, :667),
+`docs/subsystems/invariants.md` also at :3755 ("through six routes") and :3766 ("Six writers, one contract"), `docs/subsystems/api.md` (:229 guarded-POST count), `.claude/DESIGN.md` §8.9.3 Skills paragraph (~:675).
 
 - [ ] **Step 1:** in each, "six writers/config routes" → seven, add `writeSkillOrder` / `/skills/order`, and state its contract once in the rule file:
   reorders the whole `skills` array by the ids `readSkill` accepts, keeps every other raw entry after, writes nothing when there is nothing to move, 409
   on a stale set. DESIGN.md: the two arrows, before the default slot, disabled on the first/last skill, while busy, while a remove asks, and until the
   reload after a move lands. Docs only — do not reflow untouched prose.
-- [ ] **Step 2:** `grep -rn "six writers\|six config\|sixteen guarded" docs .claude CLAUDE.md server/src` — every hit either updated or genuinely about
+- [ ] **Step 2:** `grep -rni "six writers\|six config\|six routes\|sixteen guarded\|ten POST" docs .claude CLAUDE.md server/src` — every hit either updated or genuinely about
   something else. Run `test/guards/` suites that read docs (`grep -l "invariants.md\|DESIGN.md" test/guards`).
 - [ ] **Step 3: commit** `docs(jira): the seventh config writer, skills/order`.
 
