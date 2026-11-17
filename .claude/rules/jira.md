@@ -61,8 +61,9 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `JIRA_SEARCH_MAX_CHARS` a 400), upper-cases it for the key test, and otherwise searches `summary ~ ` the escaped text plus `*`. A board query's `jql` is sent
   as `jira.json` holds it, and the check route sends the person's text untouched — bounded only by `JIRA_JQL_MAX_CHARS` (`config.util.ts`). Why:
   [invariants.md](docs/subsystems/invariants.md#every-value-the-server-puts-into-jql-is-quoted-and-escaped-and-a-persons-jql-is-passed-verbatim)
-- **The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key.** The two
-  routes are `POST /api/jira/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }` in `jira-write.controller.ts`, each `SameOriginPostGuard` →
+- **The board's Jira writes are assign, transition and the mention reply, nothing else; assign and transition each re-read the issue and splice it into every
+  board cache holding the key.** The two routes are `POST /api/jira/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }` in
+  `jira-write.controller.ts`, each `SameOriginPostGuard` →
   validate (400: `invalid issue key`, `transitionId must be a non-empty string` — a string of at most `JIRA_TRANSITION_ID_MAX_CHARS`, 64) → configured (503) →
   `JiraPollerService.assignToMe` / `transitionIssue`, whose outcomes go through `jiraWriteOrThrow` (`unwrap.util.ts`, hoisted there beside `unwrapJira` so the read
   controller, these two routes and `dispatch-jira` share one mapping: §8's table and `retryAt` mean the same thing on every route) — its two own refusals are
@@ -79,7 +80,15 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `Date.parse(updated)` keeps the cached copy; equal or unparseable on either side keeps the sweep's, and a key the sweep did not return is dropped as
   before. The answer is `200 { ok: true, reread }` (`JiraIssueWriteResult`): `reread` is true when the re-read's 2xx body was an issue — even if the Done
   window then dropped it — and false when it was not or the call failed (its 401 or 429 still moves the site state through `routeFailed`); a failed re-read
-  never turns the 200 into an error. There is no per-key queue on the server: the modal's `useAction` is the one-at-a-time guard. Why:
+  never turns the 200 into an error. There is no per-key queue on the server: the modal's `useAction` is the one-at-a-time guard. The mention reply is `POST
+  /api/jira/mentions/reply` `{ key, text }` in `mentions.controller.ts`: `SameOriginPostGuard` → validate (400: `invalid issue key`, `text must be a non-empty
+  string`, `text too long` past `JIRA_REPLY_MAX_CHARS`) → configured (503) → `JiraPollerService.postReply`, whose own refusals are 409s — `no open mention` (the
+  key is not an open, undismissed ticket in the mentions cache) and `posting` (single-flight per key: a `replying` set checked and set synchronously, cleared in
+  `finally`) — then `gate()` and `unauthorizedRefusal()` with no Jira call, then `POST issue/{key}/comment` with `replyDoc`'s ADF: one mention node whose
+  account is the newest undismissed mention's author read FROM THE CACHE, never from the request, then the text's paragraphs. A failure maps through
+  `unwrapJira`, and the post's own 401/403 gains ` — the token needs write:comment:jira`. A 2xx drops the ticket from the mentions cache and records
+  `answeredAt` (key → the comment's `created`), applied on read so the search index's lag cannot bring the ticket back until a newer mention lands; then the
+  draft is dropped, a failed drop logged and never an error. No splice into the board caches follows — a comment is not a field they show. Why:
   [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)
 - **A Jira branch name obeys one rule, in `shared/jira-branch.ts`, and `jira.mjs` carries its one hand-kept copy.** `branchNameProblem` (Table A: `git
   check-ref-format --branch`'s rules, at most `BRANCH_NAME_MAX` = 200 characters, and only `[A-Za-z0-9._/-]` — narrower than git, because the name is pasted

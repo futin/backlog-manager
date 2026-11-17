@@ -25,6 +25,10 @@
  *
  * Links are the one place output could do harm in the client, so an href outside `http(s):` and `mailto:` is dropped to its plain text here as well as by the
  * client's sanitising `marked` config (§6.3) — belt and braces, and cheap.
+ *
+ * One WRITE sits at the bottom, `replyDoc` (Jira › Mentions, Post reply): the only document this server ever sends Jira. It has its own narrow types
+ * (`AdfDoc`, `AdfBlock`, `AdfInline`) rather than reusing `AdfNode`, which is the read side's deliberately loose shape for whatever Jira hands back — a
+ * write should be able to emit exactly the nodes it means and nothing the type would merely tolerate.
  */
 
 /** Deepest nesting `adfToMarkdown` follows; anything below is dropped. Real descriptions nest a handful of levels — this is a stack guard, not a feature. */
@@ -308,4 +312,48 @@ function textOf(node: AdfNode, depth: number): string {
 export function adfToText(doc: unknown): string {
   if (!isNode(doc)) return '';
   return textOf(doc, 0).replace(/\s+/g, ' ').trim();
+}
+
+// ── the write side: the mention reply ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The inline nodes `replyDoc` emits — only these. A `text` node is never empty: Jira's ADF validator refuses an empty `text`. */
+export type AdfInline = { type: 'text'; text: string } | { type: 'mention'; attrs: { id: string; text: string } } | { type: 'hardBreak' };
+
+/** A block `replyDoc` emits: a paragraph and nothing else, because a reply typed into a textarea has no structure but paragraphs and line breaks. */
+export type AdfBlock = { type: 'paragraph'; content: AdfInline[] };
+
+/** An ADF document as Jira's comment endpoint takes it (`POST issue/{key}/comment` `{ body }`). */
+export type AdfDoc = { version: 1; type: 'doc'; content: AdfBlock[] };
+
+/**
+ * A plain-text reply → the ADF comment body, opening with an @-mention of `to`, so Jira notifies the person being answered as it would for a reply typed in
+ * Jira itself. The draft session is told to write no leading @-mention (prompt.util.ts, `replyText`) precisely because it is added here, from the cache's
+ * author — an account id a session or a browser could spell wrong never reaches the mention node.
+ *
+ * The text is the person's, edited in a textarea, so the mapping is what a textarea means: CRLF is LF; a blank line (one holding only whitespace counts)
+ * separates paragraphs, and a run of them is one separator, never an empty paragraph; a single newline inside a paragraph is a `hardBreak`; the whole is
+ * trimmed, so neither end carries a stray break. No Markdown is interpreted — a `*` is a `*`, as it is in the box the person typed into. The mention's
+ * display text is `@` + the name with any `@` it already carries stripped, so it is never `@@`. Text that trims to nothing yields the mention alone; the
+ * route refuses blank text before it gets here.
+ */
+export function replyDoc(to: { accountId: string; name: string }, text: string): AdfDoc {
+  const mention: AdfInline = { type: 'mention', attrs: { id: to.accountId, text: `@${to.name.replace(/^@+/, '')}` } };
+  const paragraphs = text
+    .replace(/\r\n?/g, '\n')
+    .trim()
+    .split(/\n[^\S\n]*\n\s*/)
+    .map((p) => p.trim())
+    .filter((p) => p !== '');
+  if (paragraphs.length === 0) return { version: 1, type: 'doc', content: [{ type: 'paragraph', content: [mention] }] };
+  const content: AdfBlock[] = paragraphs.map((p, i) => {
+    const inline: AdfInline[] = [];
+    p.split('\n').forEach((line, j) => {
+      if (j > 0) inline.push({ type: 'hardBreak' });
+      // The mention is followed by a space, carried on the first line's text so the paragraph holds no text node that is only a space.
+      const t = i === 0 && j === 0 ? ` ${line}` : line;
+      if (t !== '') inline.push({ type: 'text', text: t });
+    });
+    return { type: 'paragraph', content: i === 0 ? [mention, ...inline] : inline };
+  });
+  return { version: 1, type: 'doc', content };
 }

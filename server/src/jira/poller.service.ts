@@ -25,7 +25,7 @@ import {
   type JiraThreadPayload,
   type JiraTransition
 } from '../../../shared/types';
-import { adfToMarkdown } from './adf';
+import { adfToMarkdown, replyDoc } from './adf';
 import { readJiraConfig, type JiraConfig } from './config.util';
 import { jiraEnv } from './env.util';
 import { JIRA_RATE_LIMIT_DEFAULT_MS, accessOf } from './errors.util';
@@ -140,6 +140,22 @@ import { authorOf, judgeComments, mentionsUser } from './mentions.util';
  * the SWEEP may not — one in flight across the write, or one answered from a search index that has not caught up, carries the pre-write copy. So
  * `sweepBoard` keeps a cached copy whose `updated` is strictly newer than the sweep's (R5, `keepNewer`). There is no per-key queue (R6): these are not
  * read-modify-write on a body, two browsers racing are Jira's last-write-wins, and R5 keeps the caches on the newest answer.
+ *
+ * ## The mention reply (Jira › Mentions, Post reply; plan rulings R4, R7)
+ *
+ * `postReply` is the third write and the only one that adds text: `POST issue/{key}/comment`, an ADF body opening with an @-mention of the author of the
+ * ticket's NEWEST open mention — read from this cache, never from the request, so a stale page cannot aim a mention at someone the list no longer shows. It
+ * lives here for the assign/transition reasons above plus two of its own. First, the open-mention check is a read of the cache with the dismissals and
+ * `answeredAt` applied, which only this file can make. Second, R4: unlike assign and transition, a post is not idempotent — two lands as two comments — so
+ * it IS single-flight per key: `replying` is checked and set synchronously, with no `await` between the open-mention check and the set, and cleared in a
+ * `finally`. The modal's busy flag cannot stand in for it, because two tabs are two modals.
+ *
+ * A post that lands drops the ticket from the cache and records `answeredAt[key] = created` (R7). The next check's search may not carry the reply yet —
+ * Jira's search index lags its writes by seconds to a minute — and would swap the ticket straight back. So the swap stays whole and filters nothing, like
+ * dismissals, and `unanswered()` drops, ON READ, every candidate created at or before the key's `answeredAt` (the ticket too, once none is left) wherever
+ * the cache is read: the payload, the summary, `mentionCandidate`, the thread route (as `judgeComments`' `answeredAfter`) and `postReply`'s own check. A
+ * newer mention survives it and brings the ticket back. Entries older than the window are pruned at each check, since nothing that old can be a candidate
+ * any more; memory only, so a restart forgets them, by which time the index has caught up. No board cache is spliced: a comment is not a field they show.
  */
 
 /** Two "Sync now" presses closer than this share one sweep's answer: the second spends no call (spec §5; the GitHub poller exports its own, same value). */
@@ -195,6 +211,17 @@ export type JiraResult<T> = { ok: true; value: T } | { ok: false; response: Jira
 
 /** What an issue write answers: a `JiraResult`, or one of the two refusals that are this server's own sentence rather than Jira's (plan R2, §8). */
 export type JiraIssueWriteOutcome = JiraResult<JiraIssueWriteResult> | { ok: false; refusal: 'no identity' | 'transition not offered' };
+
+/**
+ * What `postReply` answers: the posted comment (its `url` the focused-comment link), the two refusals made before any call — `no open mention` (the key is
+ * not open in the cache: answered, dismissed, or never there) and `posting` (R4, another post on the key is still out) — or a failure. `sent: true` marks a
+ * failure Jira itself answered to the POST, so the route names the comment scope on that 401/403 and never on a refusal made before the call (the gate's,
+ * or `unauthorizedRefusal()`'s 401, which is about the token as a whole).
+ */
+export type JiraReplyOutcome =
+  | JiraResult<{ id: string; created: string; url: string }>
+  | { ok: false; response: JiraResponse<unknown>; retryAt?: string; access?: JiraAccess; sent: true }
+  | { ok: false; refusal: 'no open mention' | 'posting' };
 
 /** A failed fresh read, as the routes receive it. */
 type JiraRefusal = { ok: false; response: JiraResponse<unknown>; retryAt?: string; access?: JiraAccess };
@@ -270,6 +297,13 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private last429At: string | null = null;
   /** The mentions check's last good answer, plus why the latest check (if it failed) is not newer. Replaced whole on success (`checkMentions`). */
   private mentions: MentionsCache = { polledAt: null, detail: null, truncated: false, issues: [] };
+  /**
+   * R7 (header, "The mention reply"): per key, Jira's `created` of the reply posted from here. Applied on read by `unanswered()`, never in the swap; pruned
+   * at each check once older than the window. Memory only.
+   */
+  private readonly answeredAt = new Map<string, string>();
+  /** R4: the keys whose reply POST is out right now. Checked and set with no `await` between, cleared in `postReply`'s `finally`. */
+  private readonly replying = new Set<string>();
   /** The check running now, tick-borne or not: a second caller joins it rather than sending a second search (header; `mentionsSweepNow` joins too). */
   private mentionsInFlight: Promise<void> | null = null;
   /** When the last check STARTED — the cadence runs from the attempt, not the success. `null` until one has: due at once after boot. */
@@ -484,7 +518,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   mentionsPayload(): JiraMentionsPayload {
     const env = jiraEnv();
     if (!env.configured) return { configured: false, detail: env.detail };
-    const { issues, dismissed } = applyDismissals(this.mentions.issues, this.dismissedPredicate());
+    const { issues, dismissed } = applyDismissals(this.unanswered(), this.dismissedPredicate());
     return {
       configured: true,
       polledAt: this.mentions.polledAt,
@@ -515,8 +549,10 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     const page = Array.isArray(res.data?.comments) ? res.data.comments : [];
     const comments = rawComments(page).reverse();
     const dismissed = this.dismissedPredicate();
+    // `answeredAfter` is R7's: a reply posted from here that this read may already carry (then my own comment answers it anyway) or may not.
+    const answeredAfter = this.answeredAt.get(key) ?? null;
     const open = new Set(
-      judgeComments({ comments, me: me.accountId, site: gate.auth.site, key, now: Date.now(), windowDays: JIRA_MENTIONS_WINDOW_DAYS })
+      judgeComments({ comments, me: me.accountId, site: gate.auth.site, key, now: Date.now(), windowDays: JIRA_MENTIONS_WINDOW_DAYS, answeredAfter })
         .map((m) => m.commentId)
         .filter((id) => !dismissed(id))
     );
@@ -547,7 +583,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
    * candidate, not an open mention: whether it is already dismissed is the store's question, asked by the route that holds the store.
    */
   mentionCandidate(key: string, commentId: string): JiraMention | null {
-    const issue = this.mentions.issues.find((i) => i.key === key);
+    const issue = this.unanswered().find((i) => i.key === key);
     return issue?.candidates.find((m) => m.commentId === commentId) ?? null;
   }
 
@@ -559,8 +595,29 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private mentionsSummary(): JiraMentionsSummary | null {
     if (!this.mentionsArmed()) return null;
     const { polledAt, detail, truncated } = this.mentions;
-    const count = polledAt === null ? null : applyDismissals(this.mentions.issues, this.dismissedPredicate()).issues.length;
+    const count = polledAt === null ? null : applyDismissals(this.unanswered(), this.dismissedPredicate()).issues.length;
     return { polledAt, count, detail, truncated, retryAt: this.windowEnd() };
+  }
+
+  /**
+   * The cache as every reader sees it (R7): per key with an `answeredAt`, the candidates created at or before it are dropped, and a ticket left with none
+   * goes. A COPY for any ticket it touches — the cache's arrays are read-only to every reader — and the cache itself when nothing was answered. Applied
+   * BEFORE `applyDismissals`, so a ticket whose only remaining candidate is a newer dismissed one lands in `dismissed`, not nowhere. A candidate or an entry
+   * whose instant does not parse is kept: hiding a mention on a reading this code cannot make is the worse error.
+   */
+  private unanswered(): readonly JiraMentionCacheIssue[] {
+    if (this.answeredAt.size === 0) return this.mentions.issues;
+    const out: JiraMentionCacheIssue[] = [];
+    for (const issue of this.mentions.issues) {
+      const cut = Date.parse(this.answeredAt.get(issue.key) ?? '');
+      if (Number.isNaN(cut)) {
+        out.push(issue);
+        continue;
+      }
+      const candidates = issue.candidates.filter((m) => !(Date.parse(m.created) <= cut));
+      if (candidates.length > 0) out.push({ ...issue, mentions: [...candidates], candidates });
+    }
+    return out;
   }
 
   /** One read of the store per payload: a Set, so filtering a hundred tickets is not a hundred scans of the dismissal list. */
@@ -783,6 +840,38 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     return { ok: true, value: { ok: true, reread: await this.splice(auth, key) } };
   }
 
+  /**
+   * `POST /api/jira/mentions/reply` (header, "The mention reply"). Order: the open-mention check (sync, the cache with dismissals and `answeredAt` applied)
+   * → R4's check-and-set (sync — no `await` between the two, so of two posts racing on one key exactly one passes) → `gate()` → `unauthorizedRefusal()` →
+   * `addComment`. The mention targets the author of the ticket's newest open mention (`mentions[0]`, newest first). On a 2xx the ticket leaves the cache and
+   * `answeredAt` records Jira's `created` (now, should Jira send none that parses); a failure goes through `routeFailed`, so a 401 resets the boot and a 429
+   * opens the window as any read's does, and comes back marked `sent`. No second window check before the POST: nothing is awaited between the gate's and the
+   * send.
+   */
+  async postReply(key: string, text: string): Promise<JiraReplyOutcome> {
+    const issue = applyDismissals(this.unanswered(), this.dismissedPredicate()).issues.find((i) => i.key === key);
+    if (issue === undefined) return { ok: false, refusal: 'no open mention' };
+    if (this.replying.has(key)) return { ok: false, refusal: 'posting' };
+    this.replying.add(key);
+    try {
+      const gate = this.gate();
+      if ('refused' in gate) return gate.refused;
+      const unauthorized = this.unauthorizedRefusal();
+      if (unauthorized !== null) return unauthorized;
+
+      const to = issue.mentions[0].author;
+      const res = await this.client.addComment(gate.auth, key, replyDoc({ accountId: to.accountId, name: to.name }, text));
+      if (!ok(res)) return { ...this.routeFailed(res), sent: true };
+      const id = str(res.data?.id);
+      const created = Number.isNaN(Date.parse(str(res.data?.created))) ? iso(Date.now()) : str(res.data?.created);
+      this.mentions = { ...this.mentions, issues: this.mentions.issues.filter((i) => i.key !== key) };
+      this.answeredAt.set(key, created);
+      return { ok: true, value: { id, created, url: `https://${gate.auth.site}/browse/${key}?focusedCommentId=${id}` } };
+    } finally {
+      this.replying.delete(key);
+    }
+  }
+
   // ── the chain ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   private clearTimer(): void {
@@ -974,6 +1063,11 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
 
   /** `byPress`: started by `mentionsSweepNow`, so every call it sends is counted into `pressCalls` rather than left in a tick's figure (header). */
   private async runMentions(auth: JiraAuth, byPress: boolean): Promise<void> {
+    // R7's prune (header): an `answeredAt` older than the window can hide nothing — every mention it covers is out of the window too.
+    const horizon = Date.now() - JIRA_MENTIONS_WINDOW_DAYS * 86_400_000;
+    for (const [key, at] of this.answeredAt) {
+      if (Date.parse(at) < horizon) this.answeredAt.delete(key);
+    }
     const me = this.boot.me;
     if (me === null) return;
     // Read once for the whole check, not once per ticket: up to a hundred tickets ask it, and none of them needs a fresher copy than the check's start.

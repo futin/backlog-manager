@@ -9,7 +9,9 @@ import { JIRA_MENTIONS_DISMISS_MAX, JIRA_REPLY_MAX_CHARS, JIRA_MENTIONS_POLL_MS,
 import * as atomic from '../../server/src/atomic-write.util';
 import { AppModule } from '../../server/src/app.module';
 import { JiraClient } from '../../server/src/jira/jira.client';
+import { replyDoc } from '../../server/src/jira/adf';
 import { JiraLiveService } from '../../server/src/jira/live.service';
+import { JiraMentionsStore } from '../../server/src/jira/mentions.store';
 import { mentionsJql } from '../../server/src/jira/mentions.util';
 import { JIRA_POLL_MS, JiraPollerService, SWEEP_FLOOR_MS } from '../../server/src/jira/poller.service';
 import { REGISTRY_FILE } from '../../server/src/registry/registry.service';
@@ -662,5 +664,191 @@ describe('POST /api/jira/mentions/draft and /draft/discard (plan Task 4)', () =>
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect((await draft(ok).expect(500)).body).toEqual({ error: 'could not save — nothing changed' });
     expect(await mentions()).toEqual(before);
+  });
+});
+
+describe('POST /api/jira/mentions/reply (plan Task 5)', () => {
+  const reply = (key: unknown, text: unknown) => post('/api/jira/mentions/reply', { key, text });
+  const commentPosts = () => fake.calls.filter((c) => c.method === 'POST' && /\/issue\/[^/]+\/comment$/.test(c.url));
+  const NO_OPEN = (key: string) => ({ error: `${key} has no open mention — it was answered or dismissed` });
+  const store = () => app.get(JiraMentionsStore);
+  /** A draft waiting on `key`, written straight into the store — the draft route's own proof (a live reply link) is Task 4's to test. */
+  const seedDraft = (key = 'SUP-208') => store().setDraft(key, { text: 'drafted', sessionId: 'rep-1', at: new Date(T0).toISOString() });
+  const status = async () => (await http().get('/api/jira').expect(200)).body as { access: string };
+  /** Answer the next comment POST with `status` and Jira's sentence; every other call proceeds. */
+  const failPost = (status: number, message: string) =>
+    (fake.failNext = (c) => (c.method === 'POST' && /\/comment$/.test(c.url) ? { status, body: { errorMessages: [message], errors: {} } } : null));
+
+  it('refuses another origin with 403 and posts nothing', async () => {
+    await build();
+    await reply('SUP-208', 'hi').set('origin', 'http://evil.test').expect(403);
+    expect(commentPosts()).toEqual([]);
+  });
+
+  it('validates key, then text (empty, whitespace, not a string, 8 001); exactly 8 000 characters is posted', async () => {
+    await build();
+    expect((await reply('sup-208', 'hi').expect(400)).body).toEqual({ error: 'invalid issue key' });
+    for (const text of ['', '   \n ', 7, null]) {
+      expect((await reply('SUP-208', text).expect(400)).body).toEqual({ error: 'text must be a non-empty string' });
+    }
+    expect((await reply('SUP-208', 'a'.repeat(JIRA_REPLY_MAX_CHARS + 1)).expect(400)).body).toEqual({ error: 'text too long' });
+    expect(commentPosts()).toEqual([]);
+    await reply('SUP-208', 'a'.repeat(JIRA_REPLY_MAX_CHARS)).expect(200);
+    expect(commentPosts()).toHaveLength(1);
+  });
+
+  it('is 503 while unconfigured, after the 400s', async () => {
+    await build({ on: false });
+    expect((await reply('sup-208', 'hi').expect(400)).body).toEqual({ error: 'invalid issue key' });
+    expect((await reply('SUP-208', 'hi').expect(503)).body).toEqual({ error: 'Jira is not configured' });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('is 409 for a key with no open mention — not cached, or every mention dismissed — with no call and the draft kept', async () => {
+    await build();
+    seedDraft();
+    expect((await reply('SUP-999', 'hi').expect(409)).body).toEqual(NO_OPEN('SUP-999'));
+    await dismiss('SUP-208', [c4.id]).expect(200);
+    expect((await reply('SUP-208', 'hi').expect(409)).body).toEqual(NO_OPEN('SUP-208'));
+    expect(commentPosts()).toEqual([]);
+    expect(store().draftFor('SUP-208')).toMatchObject({ text: 'drafted' });
+  });
+
+  it('inside a 429 window answers the window with its stored retryAt and sends nothing', async () => {
+    await build();
+    pastFloor();
+    fake.rateLimit = { retryAfter: 120 };
+    await check().expect(200);
+    fake.rateLimit = null;
+    const retryAt = new Date(now + 120_000).toISOString();
+    expect((await reply('SUP-208', 'hi').expect(503)).body).toEqual({ error: `Jira rate limit — retry after ${retryAt}`, access: 'rate-limited', retryAt });
+    expect(commentPosts()).toEqual([]);
+  });
+
+  it('under access unauthorized answers the 401 body with no call and NO scope suffix — that 401 is about the token, from before any post', async () => {
+    await build();
+    pastFloor();
+    fake.unauthorized = true;
+    await check().expect(200);
+    expect((await status()).access).toBe('unauthorized');
+    fake.unauthorized = false;
+    expect((await reply('SUP-208', 'hi').expect(503)).body).toEqual({ error: 'Jira rejected the credentials', access: 'unauthorized' });
+    expect(commentPosts()).toEqual([]);
+  });
+
+  it('a 401 on the post moves access through routeFailed and names the scope; the draft is kept', async () => {
+    await build();
+    seedDraft();
+    failPost(401, 'Unauthorized');
+    const res = await reply('SUP-208', 'hi').expect(503);
+    expect(res.body).toEqual({ error: 'Jira rejected the credentials — the token needs write:comment:jira', access: 'unauthorized' });
+    expect(commentPosts()).toHaveLength(1);
+    expect((await status()).access).toBe('unauthorized');
+    expect(store().draftFor('SUP-208')).toMatchObject({ text: 'drafted' });
+    expect(keysOf((await mentions()).issues)).toContain('SUP-208');
+  });
+
+  it("a 403 on the post is 502 carrying Jira's sentence and the scope; access unchanged, draft kept", async () => {
+    await build();
+    seedDraft();
+    failPost(403, 'You do not have permission to add comments');
+    const res = await reply('SUP-208', 'hi').expect(502);
+    expect(res.body).toEqual({
+      error: 'Jira refused: You do not have permission to add comments — the token needs write:comment:jira',
+      access: 'forbidden'
+    });
+    expect((await status()).access).toBe('ok');
+    expect(store().draftFor('SUP-208')).toMatchObject({ text: 'drafted' });
+    expect(keysOf((await mentions()).issues)).toContain('SUP-208');
+  });
+
+  it("any other failure is the routes' mapping without the suffix", async () => {
+    await build();
+    failPost(400, 'Comment body is not valid');
+    expect((await reply('SUP-208', 'hi').expect(409)).body).toEqual({ error: 'Jira refused: Comment body is not valid' });
+  });
+
+  it('a 201 answers 200 with posted, drops the ticket and its draft, and leaves every other ticket alone', async () => {
+    await build();
+    seedDraft();
+    seedDraft('SUP-300');
+    const res = await reply('SUP-208', 'Thanks — fixed.\n\nShips Monday.').expect(200);
+    const sent = fake.posted[0];
+    expect(fake.posted).toHaveLength(1);
+    expect(sent.key).toBe('SUP-208');
+    expect(res.body.posted).toEqual({ id: sent.id, url: `https://acme.atlassian.net/browse/SUP-208?focusedCommentId=${sent.id}` });
+    expect(res.body).toMatchObject({ configured: true, window: 30 });
+    expect(keysOf(res.body.issues)).toEqual(['SUP-300', 'SUP-400']);
+    expect(keysOf((await mentions()).issues)).toEqual(['SUP-300', 'SUP-400']);
+    expect(store().draftFor('SUP-208')).toBeNull();
+    expect(store().draftFor('SUP-300')).toMatchObject({ text: 'drafted' });
+    expect(res.body.issues[0].draft).toMatchObject({ text: 'drafted' });
+    expect(poller.mentionCandidate('SUP-300', s300.id)).toMatchObject({ commentId: s300.id });
+    expect(poller.mentionCandidate('SUP-208', c4.id)).toBeNull();
+    // c4 is Mara's: the mention node targets the author of the open mention being answered, from the cache.
+    expect(sent.body).toEqual(replyDoc({ accountId: MARA.accountId, name: MARA.displayName }, 'Thanks — fixed.\n\nShips Monday.'));
+    expect((await http().get('/api/jira').expect(200)).body.mentions.count).toBe(2);
+  });
+
+  it("targets the author of the ticket's NEWEST open mention; a newer dismissed one is not open", async () => {
+    let ivoOld!: SeededComment, mara!: SeededComment, ivoNew!: SeededComment;
+    await build({
+      beforeInit: () => {
+        ivoOld = comment(IVO, 50, true, 'old ping');
+        mara = comment(MARA, 20, true, 'newer ping');
+        ivoNew = comment(IVO, 10, true, 'newest ping');
+        mentionIssue('SUP-500', [ivoOld, mara, ivoNew]);
+      }
+    });
+    await dismiss('SUP-500', [ivoNew.id]).expect(200);
+    await reply('SUP-500', 'hi').expect(200);
+    const body = fake.posted[0].body as ReturnType<typeof replyDoc>;
+    expect(body.content[0].content[0]).toEqual({ type: 'mention', attrs: { id: MARA.accountId, text: `@${MARA.displayName}` } });
+    expect(mara.id).not.toBe(ivoOld.id);
+  });
+
+  it('the thread route marks the answered mention open: false after the post, though the read does not carry the reply', async () => {
+    await build();
+    expect((await http().get('/api/jira/issue/SUP-208/thread').expect(200)).body.comments.find((c: { id: string }) => c.id === c4.id).open).toBe(true);
+    await reply('SUP-208', 'hi').expect(200);
+    const after = (await http().get('/api/jira/issue/SUP-208/thread').expect(200)).body.comments as { id: string; open: boolean }[];
+    expect(after.map((c) => c.id)).not.toContain(fake.posted[0].id);
+    expect(after.find((c) => c.id === c4.id)?.open).toBe(false);
+  });
+
+  it('a failed draft drop is logged and never turns the 200 into an error — the comment is posted', async () => {
+    await build();
+    seedDraft();
+    jest.spyOn(atomic, 'writeJsonAtomic').mockImplementation(() => {
+      throw new Error('disk full');
+    });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const res = await reply('SUP-208', 'hi').expect(200);
+    expect(res.body.posted.id).toBe(fake.posted[0].id);
+    expect(keysOf(res.body.issues)).not.toContain('SUP-208');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('disk full'));
+  });
+
+  it('R4: of two concurrent posts on one key exactly one reaches Jira; the other is 409, and a third after the first is the no-open-mention 409', async () => {
+    await build();
+    const release = fake.holdNextComment();
+    const first = reply('SUP-208', 'one').then((r) => r);
+    await until(() => commentPosts().length === 1);
+    expect((await reply('SUP-208', 'two').expect(409)).body).toEqual({ error: 'a reply to SUP-208 is already being posted' });
+    // The guard is per key: SUP-300's post goes through while SUP-208's is still out.
+    await reply('SUP-300', 'other').expect(200);
+    release();
+    expect((await first).status).toBe(200);
+    expect((await reply('SUP-208', 'three').expect(409)).body).toEqual(NO_OPEN('SUP-208'));
+    expect(commentPosts().map((c) => c.url.replace(/^.*\/issue\//, ''))).toEqual(['SUP-208/comment', 'SUP-300/comment']);
+  });
+
+  it('R4: the key is free again after a failed post, so a retry is sent', async () => {
+    await build();
+    failPost(500, 'boom');
+    await reply('SUP-208', 'one').expect(502);
+    fake.failNext = null;
+    await reply('SUP-208', 'one').expect(200);
+    expect(commentPosts()).toHaveLength(2);
   });
 });
