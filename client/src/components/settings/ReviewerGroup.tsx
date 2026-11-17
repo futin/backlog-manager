@@ -11,7 +11,9 @@ import { ReviewerFields } from './ReviewerFields';
  *
  * Saves on every change, `TimeZoneGroup`'s pattern (`useReviewSetting.save`): the edit shows at once and the POST's answer redraws the card, a refusal puts the
  * server's value back and says so in the shared `role="alert"` wording. `config` is the hook's optimistic copy, so an edit made while an earlier save is still
- * in flight is built on that earlier edit and its POST carries both; only the newest save's answer moves the card. A `fileError` answer means the file exists but could not be read and the pickers show the defaults; the
+ * in flight is built on that earlier edit. The hook serializes the saves — one POST at a time, edits made meanwhile coalesced into one queued POST carrying
+ * the newest config — because the server writes `review.json` in the order POSTs ARRIVE, and two in flight at once could leave it on the older edit (bug
+ * #508); only the newest save's answer moves the card. A `fileError` answer means the file exists but could not be read and the pickers show the defaults; the
  * hint says that saving replaces it, which is what any save does. A failed read draws one `Unavailable` row, `WatchdogGroup`'s shape — no pickers over a
  * value that does not exist.
  */
