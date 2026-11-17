@@ -229,6 +229,8 @@ export function composeJiraPrompt(detail: JiraIssueDetail, action: JiraComposeAc
 export function resolveJiraActionOrThrow(action: JiraAction, skills: JiraSkill[]): JiraComposeAction {
   // review is built by the callers with its MR and half (spec 6), never composed from a bare action: a review reaching here is a malformed request.
   if (action === 'review') throw new HttpException({ error: 'review needs mr and half' }, 400);
+  // reply has its own route (a mention's draft), never `dispatch-jira`: a reply reaching here is a malformed request, refused like a bare review.
+  if (action === 'reply') throw new HttpException({ error: 'reply is drafted from a mention' }, 400);
   if (typeof action === 'string') return { kind: action };
   const skill = skills.find((candidate) => candidate.id === action.skill);
   if (skill === undefined) throw new HttpException({ error: `unknown skill ${action.skill}` }, 400);

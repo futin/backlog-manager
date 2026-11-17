@@ -465,13 +465,15 @@ export class JiraDispatchService {
   /**
    * `POST /api/agents/jira-unlink` — `/jira unlink <KEY>` (spec C9): removes a `branch` or `manual` link and remembers the pair so detection never re-adds it.
    * No dashboard call, so it works with dispatch off. A `run` link refuses (409): dropping it would free the one-run gate under a live Run session, and
-   * only Stop ends one. `missing` is a pair the store does not hold, 404.
+   * only Stop ends one; a `reply` link refuses too (409), its Stop being the mention's. `missing` is a pair the store does not hold, 404.
    */
   unlink(key: string, sessionId: string): { ok: true } {
     const id8 = sessionId.slice(0, 8);
     switch (this.live.unlink(key, sessionId)) {
       case 'run':
         throw new HttpException({ error: `${key} was started by Run ▾ — stop it from the board instead` }, 409);
+      case 'reply':
+        throw new HttpException({ error: `${key} is drafting a reply — stop it from the mention instead` }, 409);
       case 'missing':
         throw new HttpException({ error: `${key} is not linked to session ${id8}` }, 404);
       default:

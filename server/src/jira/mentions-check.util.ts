@@ -112,6 +112,9 @@ export async function runMentionsCheck(input: MentionsCheckInput): Promise<Menti
       status: { name: str(status.name), category: categoryOf(isObj(status.statusCategory) ? status.statusCategory.key : undefined) },
       boards: boardsOf(key),
       mentions: [...candidates],
+      // The poller knows nothing of drafts or reply sessions; the controller fills both from their stores (a later task), so the cache carries `null`.
+      draft: null,
+      session: null,
       candidates
     };
     // `candidates` is newest first, so its head is the ticket's newest mention — the ticket's place in the list.
@@ -142,7 +145,9 @@ export function applyDismissals(
       type: c.type,
       status: { ...c.status },
       boards: [...c.boards],
-      mentions
+      mentions,
+      draft: null,
+      session: null
     });
     if (open.length > 0) issues.push(row(open));
     else if (c.candidates.length > 0) dismissed.push(row([...c.candidates]));

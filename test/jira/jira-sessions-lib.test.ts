@@ -293,6 +293,7 @@ describe('Detail’s pure readings (Jira sessions spec §7.3)', () => {
     expect(linkedHow('run')).toBe('started by Run');
     expect(linkedHow('branch')).toBe('found by its branch');
     expect(linkedHow('manual')).toBe('linked by hand');
+    expect(linkedHow('reply')).toBe('drafting a reply');
     const row = (over: Partial<DashboardRow>): DashboardRow => ({ id: 's', status: 'busy', ...over });
     expect(surfaceWord(link({ surface: 'dashboard' }), row({ desktopOwned: true }))).toBe('Desktop');
     expect(surfaceWord(link({ surface: 'dashboard' }), row({ surface: 'local' }))).toBe('Terminal or app');

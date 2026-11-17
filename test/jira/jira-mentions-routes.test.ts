@@ -178,7 +178,8 @@ describe('GET /api/jira/mentions', () => {
     expect(keysOf(body.issues)).toEqual(['SUP-208', 'SUP-300', 'SUP-400']);
     expect(body.dismissed).toEqual([]);
     const sup = body.issues[0];
-    expect(Object.keys(sup).sort()).toEqual(['boards', 'key', 'mentions', 'status', 'summary', 'type']);
+    expect(Object.keys(sup).sort()).toEqual(['boards', 'draft', 'key', 'mentions', 'session', 'status', 'summary', 'type']);
+    expect(sup).toMatchObject({ draft: null, session: null });
     expect(sup).toMatchObject({ key: 'SUP-208', summary: 'About SUP-208', type: 'Task', status: { name: 'To Do', category: 'new' }, boards: [] });
     expect(sup.mentions.map((m) => m.commentId)).toEqual([c4.id]);
   });

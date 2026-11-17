@@ -49,6 +49,8 @@ const SUP: JiraMentionIssue = {
   type: 'Bug',
   status: { name: 'In Progress', category: 'indeterminate' },
   boards: [],
+  draft: null,
+  session: null,
   mentions: [
     mention('101', 'Ivo Kranjc', '@Andreja does the BE store it?', 3, 'SUP-208'),
     mention('102', 'Mara Ilić', '@Andreja can you confirm the branch timezone?', 5, 'SUP-208')
@@ -60,6 +62,8 @@ const PAY: JiraMentionIssue = {
   type: 'Story',
   status: { name: 'Code Review', category: 'indeterminate' },
   boards: ['Payments Q4'],
+  draft: null,
+  session: null,
   mentions: [mention('201', 'Tomás Reyes', '@Andreja is the 3x retry from your change?', 4, 'PAY-131')]
 };
 const OPS: JiraMentionIssue = {
@@ -68,6 +72,8 @@ const OPS: JiraMentionIssue = {
   type: 'Task',
   status: { name: 'Done', category: 'done' },
   boards: [],
+  draft: null,
+  session: null,
   mentions: [mention('301', 'Lukas Brandt', '@Andreja cleaning up old snapshots tonight', 6 * 24, 'OPS-9')]
 };
 

@@ -928,14 +928,16 @@ export interface JiraSkill {
  * What Run ▾ starts: one of the three built-ins (`review` is never a menu row), or one of this machine's skills by id. Spec §4. A SHAPE, not a lookup — whether the skill exists is the
  * server's question (`GET /api/jira/prompt` and `dispatch-jira` each answer 400 `unknown skill <id>` for an id `jira.json` lacks).
  */
-export type JiraAction = 'execute' | 'context' | 'review' | { skill: string };
+export type JiraAction = 'execute' | 'context' | 'review' | 'reply' | { skill: string };
 
 /** The built-ins' menu words (spec §7), one home so the menu, the launch sheet's Action select and a test read the same strings. */
-export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context' | 'review', string> = {
+export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context' | 'review' | 'reply', string> = {
   execute: 'Work it end to end',
   context: 'Open with the ticket loaded',
   // The label a review link shows on Sessions and the List. Never a menu row: Run ▾ does not offer review, the MR's own button does.
-  review: 'Review the MR'
+  review: 'Review the MR',
+  // Like `review`, a link label and never a menu row: a reply draft starts from the mention on Jira › Mentions, not from Run ▾.
+  reply: 'Draft a reply'
 };
 
 /** Which half of the review a `review` Run does: ask CodeRabbit to review, or fix what it found (spec 6). The server derives it and 409s a mismatch. */
@@ -966,7 +968,7 @@ const JIRA_SKILL_ID_RE = /^s_[0-9a-f]{8}$/;
  * checks only; see `JiraAction`. The inverse is `jiraActionParam`.
  */
 export function parseJiraActionParam(raw: unknown): JiraAction | null {
-  if (raw === 'execute' || raw === 'context' || raw === 'review') return raw;
+  if (raw === 'execute' || raw === 'context' || raw === 'review' || raw === 'reply') return raw;
   if (typeof raw !== 'string' || !raw.startsWith('skill:')) return null;
   const id = raw.slice('skill:'.length);
   return JIRA_SKILL_ID_RE.test(id) ? { skill: id } : null;
@@ -982,7 +984,7 @@ export function jiraActionParam(action: JiraAction): string {
  * has structure, a query string does not — and neither accepts the other's spelling.
  */
 export function parseJiraAction(raw: unknown): JiraAction | null {
-  if (raw === 'execute' || raw === 'context' || raw === 'review') return raw;
+  if (raw === 'execute' || raw === 'context' || raw === 'review' || raw === 'reply') return raw;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
   const keys = Object.keys(raw);
   const skill = (raw as { skill?: unknown }).skill;
@@ -1052,7 +1054,7 @@ export interface JiraLiveSession {
 }
 
 /** How a session came to be linked to a ticket (spec §5): started by Run ▾, detected from its branch, or linked by hand with `/jira link`. */
-export type JiraLinkHow = 'run' | 'branch' | 'manual';
+export type JiraLinkHow = 'run' | 'branch' | 'manual' | 'reply';
 
 /**
  * Why a link ended (spec §5): the dashboard stopped reporting it busy (`idle`), Stop (`stopped`), the 8-hour backstop (`expired`), or an answered, non-full
@@ -1195,6 +1197,22 @@ export const JIRA_THREAD_MAX = 100;
 export const JIRA_MENTIONS_EXCERPT_CHARS = 280;
 /** The most comment ids one dismiss request may carry. */
 export const JIRA_MENTIONS_DISMISS_MAX = 50;
+/** The longest reply draft the board stores or shows, in characters. */
+export const JIRA_REPLY_MAX_CHARS = 8000;
+
+/** The read-only session drafting a reply on a ticket: `sessionId` is `null` while it is still starting. */
+export interface JiraMentionReplySession {
+  sessionId: string | null;
+  startedAt: string;
+  repo: string;
+}
+
+/** A drafted reply the person has not posted yet: the text, when it was written, and the session that wrote it. */
+export interface JiraMentionDraft {
+  text: string;
+  at: string;
+  sessionId: string;
+}
 
 /** One open mention: a comment that @-mentions the user and that they have not answered since. `url` is the focused-comment link. */
 export interface JiraMention {
@@ -1216,6 +1234,10 @@ export interface JiraMentionIssue {
   boards: string[];
   /** Newest first. */
   mentions: JiraMention[];
+  /** The reply draft waiting on this ticket, or `null`. Filled from the draft store by the controller; the poller's payload carries `null`. */
+  draft: JiraMentionDraft | null;
+  /** The session drafting a reply now, or `null`. Filled from the live service by the controller; the poller's payload carries `null`. */
+  session: JiraMentionReplySession | null;
 }
 
 /** `GET /api/jira/mentions` while Jira is not configured: the same "draw nothing Jira" signal `GET /api/jira` gives, with its reason. */

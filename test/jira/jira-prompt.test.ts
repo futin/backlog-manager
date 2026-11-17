@@ -172,13 +172,20 @@ describe('the shared helpers', () => {
   });
 
   it('names the built-ins (review is a link label, never a menu row)', () => {
-    expect(JIRA_BUILTIN_LABELS).toEqual({ execute: 'Work it end to end', context: 'Open with the ticket loaded', review: 'Review the MR' });
+    expect(JIRA_BUILTIN_LABELS).toEqual({ execute: 'Work it end to end', context: 'Open with the ticket loaded', review: 'Review the MR', reply: 'Draft a reply' });
   });
 
   it('parseJiraActionParam reads execute, context and skill:<s_ id>', () => {
     expect(parseJiraActionParam('execute')).toBe('execute');
     expect(parseJiraActionParam('context')).toBe('context');
     expect(parseJiraActionParam('skill:s_0123abcd')).toEqual({ skill: 's_0123abcd' });
+  });
+
+  it('reply parses from both spellings, round-trips, and is never a skill id', () => {
+    expect(parseJiraAction('reply')).toBe('reply');
+    expect(parseJiraActionParam('reply')).toBe('reply');
+    expect(jiraActionParam('reply')).toBe('reply');
+    expect(parseJiraAction({ skill: 'reply' })).toBeNull();
   });
 
   it('parseJiraActionParam refuses everything else', () => {

@@ -40,7 +40,7 @@ function mention(commentId: string, agoMs: number, excerpt = '@Ana can you check
 }
 
 function issue(key: string, mentions: JiraMention[]): JiraMentionIssue {
-  return { key, summary: `Summary ${key}`, type: 'Bug', status: { name: 'To Do', category: 'new' }, boards: [], mentions };
+  return { key, summary: `Summary ${key}`, type: 'Bug', status: { name: 'To Do', category: 'new' }, boards: [], mentions, draft: null, session: null };
 }
 
 function data(over: Partial<JiraMentionsConfigured> = {}): JiraMentionsConfigured {

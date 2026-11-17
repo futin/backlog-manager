@@ -206,6 +206,7 @@ export function sessionDuration(link: Pick<JiraLink, 'startedAt' | 'endedAt'>): 
 
 /** The "linked how" tag on a card (spec §7.3): Run ▾ made it, a branch name matched it, or somebody linked it by hand. */
 export function linkedHow(how: JiraLink['how']): string {
+  if (how === 'reply') return 'drafting a reply';
   return how === 'run' ? 'started by Run' : how === 'branch' ? 'found by its branch' : 'linked by hand';
 }
 
@@ -235,6 +236,6 @@ export function stripTitle(state: JiraSessionState): string | undefined {
 export function runLabel(link: JiraLink, skills: readonly { id: string; name: string }[]): string {
   const a = link.action;
   if (a === null) return link.name;
-  if (a === 'execute' || a === 'context' || a === 'review') return JIRA_BUILTIN_LABELS[a];
+  if (a === 'execute' || a === 'context' || a === 'review' || a === 'reply') return JIRA_BUILTIN_LABELS[a];
   return skills.find((k) => k.id === a.skill)?.name ?? a.skill;
 }

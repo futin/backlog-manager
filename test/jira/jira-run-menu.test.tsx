@@ -169,6 +169,13 @@ describe('Run on — when the toggle draws', () => {
     expect(onPick).toHaveBeenCalledWith(S_1, 'execute');
   });
 
+  it('never offers the reply built-in: a mention draft starts from the mention, not Run ▾', async () => {
+    mount([S_1]);
+    const menu = await openMenu('S-1');
+    expect(within(menu).queryByRole('button', { name: JIRA_BUILTIN_LABELS.reply })).toBeNull();
+    expect(menu).not.toHaveTextContent('Draft a reply');
+  });
+
   it('the left Run half still runs the sub-task', async () => {
     mount([S_1]);
     await userEvent.click(screen.getByRole('button', { name: 'Run S-1' }));

@@ -277,6 +277,15 @@ describe('jira-unlink', () => {
     expect(linkOf('PAY-1', 'sess-1')).toMatchObject({ how: 'run', endedAt: null });
   });
 
+  it('refuses a reply link with its own sentence, and the link stays', async () => {
+    expect(live.reserve('PAY-1', REPO, 'reply')).toBe(true);
+    live.confirm('PAY-1', 'sess-1', { ...RUN_META, action: 'reply' }, 'reply');
+    const res = await post('jira-unlink', { key: 'PAY-1', sessionId: 'sess-1' }).expect(409);
+    expect(res.body).toEqual({ error: 'PAY-1 is drafting a reply — stop it from the mention instead' });
+    expect(linkOf('PAY-1', 'sess-1')).toMatchObject({ how: 'reply', endedAt: null });
+    expect(live.isSuppressed('PAY-1', 'sess-1')).toBe(false);
+  });
+
   it('404s for a pair that is not linked, naming the first 8 characters of the session id', async () => {
     const res = await post('jira-unlink', { key: 'PAY-1', sessionId: 'sess-unknown' }).expect(404);
     expect(res.body).toEqual({ error: 'PAY-1 is not linked to session sess-unk' });
