@@ -157,8 +157,8 @@ running on <KEY>`) and `blockTitle` both use `runBlockTitle` for `live` (so a pa
   - quiet link A in the payload + `status.live` naming a different session B (`starting: false`) → `live`, `a Run on PAY-1 is not quiet yet`.
   - `status.live` starting entry → `live`, `a Run on PAY-1 is starting`.
   - `sessions` null + confirmed `status.live` entry → `live`, `a Run on PAY-1 is not quiet yet`.
-  - two live run links on PAY-1: A quiet (older), B working (newer) → `live`, `a Run on PAY-1 is still working`; A working (older), B `question` (newer) →
-    `a Run on PAY-1 is waiting on you`.
+  - two live run links on PAY-1: A quiet (older), B working (newer) → `live`, `a Run on PAY-1 is still working`; A working (older), B quiet (newer) → `live`,
+    `a Run on PAY-1 is still working`; A working (older), B `question` (newer) → `a Run on PAY-1 is waiting on you`.
   - only a live `branch` link (working) → `ready`; unmapped project → `no-repo` (unchanged cases keep passing).
 - [ ] **Step 2: Update `jira-run-menu.test.tsx:227`** (parent row title) to `a Run on P-1 is not seen by the dashboard`, and **`jira-detail.test.tsx`**:
   lines 644 and 645 → `a Run on PAY-131 is not quiet yet`, line 887 → `a Run on PAY-131 is not seen by the dashboard` (recheck each against its fixture
