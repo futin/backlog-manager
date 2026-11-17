@@ -142,6 +142,10 @@ function subtaskParents(board: ReadonlyMap<string, JiraIssue>): Map<string, stri
 /**
  * Every session the List could draw, before any filter: the links with an id (ended ones too), then the status's Starting reservations. `board` is the loaded
  * list keyed by ticket (every issue, folded or not); `allTickets` widens the scope past the board and the board's sub-tasks' parents. Deduped by row id, so a payload that somehow repeats a pair draws it once.
+ *
+ * A live link that needs the reader (`needsYou`) is in scope whatever the board: the rail's badge counts exactly those across every ticket
+ * (`needsYouCount`), so a board-only List drew a `1` on the rail over a page with nothing to answer — a reply draft on a mentioned ticket that is on no
+ * board was the case that surfaced it. Only that set widens; a working or ended session off the board still waits for All tickets.
  */
 export function buildListRows(
   payload: JiraSessionsPayload | null,
@@ -157,7 +161,8 @@ export function buildListRows(
     if (link.sessionId === null) continue;
     const onBoard = board.has(link.key);
     const via = onBoard ? null : (viaOf.get(link.key) ?? null);
-    if (!onBoard && via === null && !allTickets) continue;
+    const waitsOnYou = link.endedAt === null && needsYou(link.state);
+    if (!onBoard && via === null && !allTickets && !waitsOnYou) continue;
     const id = `${link.key}:${link.sessionId}`;
     if (seen.has(id)) continue;
     seen.add(id);
