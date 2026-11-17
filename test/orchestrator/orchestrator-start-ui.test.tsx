@@ -817,6 +817,30 @@ describe('OrchestrateSheet', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  // #509: an invalid small-group limit is drawn red, so start waits on it rather than sending the last valid pick the screen no longer shows. Stepping back
+  // unmounts the field and discards its draft; coming back remounts it from the committed value, so start is live again.
+  it('disables start while the small-group limit is invalid, and a valid number or a remount from step 2 re-enables it', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+    const section = await screen.findByRole('group', { name: 'Reviewer' });
+    const limit = within(section).getByRole('spinbutton', { name: 'Small group limit' });
+    await userEvent.clear(limit);
+    await userEvent.type(limit, '0');
+    expect(screen.getByRole('button', { name: 'start' })).toBeDisabled();
+    await userEvent.clear(limit);
+    await userEvent.type(limit, '150');
+    expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+    await userEvent.clear(limit);
+    await userEvent.type(limit, '0');
+    expect(screen.getByRole('button', { name: 'start' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'back' }));
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    const remounted = within(await screen.findByRole('group', { name: 'Reviewer' })).getByRole('spinbutton', { name: 'Small group limit' });
+    expect(remounted).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+  });
+
   // #286 — before useAction, `start` had no guard at all: both clicks of one tick POSTed, and the second came back as the run lock's 409.
   it('sends one start for a double-click on start', async () => {
     stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });

@@ -150,6 +150,10 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   const reviewerOffered = isExecute && isPr;
   const { seed: reviewSeed, pick: reviewPick, setPick: setReviewPick } = useReviewPick(reviewerOffered);
   const reviewer = reviewerOffered ? reviewOverride(reviewSeed, reviewPick) : {};
+  // #509: the limit field reports whether its draft parses, and Launch waits while it does not — a red field beside a live Launch sent the last valid pick,
+  // which the person was no longer looking at. Read only while the reviewer is offered; the field's unmount reports `true`, so leaving PR unlocks it anyway.
+  const [limitInvalid, setLimitInvalid] = useState(false);
+  const reviewerBlocked = reviewerOffered && limitInvalid;
   /**
    * The Base select's options — `GET /api/agents/branches`, the Orchestrate sheet's base picker's read (`useOrchestrateDraft.ts`, task-44), keyed on the
    * project so it runs once per sheet open and never again as Finish flips. Skipped (`null`) for a remote groom and for capture, which draw no picker.
@@ -170,7 +174,8 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   // item modal without any of the three remembering to.
 
   const launch = (): void => {
-    if (plan === null) return;
+    // `reviewerBlocked` too: the chip is disabled on it, and this is the defence for any path that reaches `launch` without the chip.
+    if (plan === null || reviewerBlocked) return;
     run(
       () =>
         dispatchAgent({
@@ -229,7 +234,7 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             <Chip size={28} variant="flat" onClick={onClose}>
               cancel
             </Chip>
-            <Chip size={28} variant="ink" disabled={busy || prompt.trim() === '' || runOn.blocked} onClick={launch}>
+            <Chip size={28} variant="ink" disabled={busy || prompt.trim() === '' || runOn.blocked || reviewerBlocked} onClick={launch}>
               {busy ? 'launching…' : runOn.remote ? `Start on ${runOn.label}` : desktop ? 'open in desktop' : 'launch'}
             </Chip>
           </>
@@ -345,7 +350,9 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           )}
 
           {/* The reviewer the PR's review runs on, drawn once the setting has landed: with no seed there is nothing to compare a pick against. */}
-          {reviewerOffered && reviewPick !== null && <ReviewerFields layout="sheet" value={reviewPick} onChange={setReviewPick} />}
+          {reviewerOffered && reviewPick !== null && (
+            <ReviewerFields layout="sheet" value={reviewPick} onChange={setReviewPick} onLimitValidChange={(ok) => setLimitInvalid(!ok)} />
+          )}
 
           {/* One row, three controls: "how should this run" is a single
               decision, and the dashboard's own launch panel groups the same

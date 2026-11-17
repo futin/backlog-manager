@@ -483,6 +483,61 @@ describe('LaunchSheet', () => {
       expect(body.review).toEqual(edited);
     });
 
+    /*
+     * #509: the limit field keeps a draft of its own and commits only a parsable one, so before this fix an invalid draft was drawn red while Launch stayed live
+     * and sent the last valid pick — the screen and the request disagreed. Launch now waits on the field, and a field that unmounts (Models → Same for all
+     * groups, Finish → In place) takes its invalid draft with it, so the sheet unlocks again.
+     */
+    describe('an invalid small-group limit', () => {
+      const openPrReviewer = async () => {
+        localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr' }));
+        const calls = stub({ review: DEFAULT_REVIEW_CONFIG });
+        await openSheet();
+        const section = await screen.findByRole('group', { name: 'Reviewer' });
+        return { calls, section, limit: within(section).getByRole('spinbutton', { name: 'Small group limit' }) };
+      };
+
+      it('disables launch while the draft is 0 or 20000, and a valid 150 enables it and is sent once committed', async () => {
+        const { calls, limit } = await openPrReviewer();
+        await userEvent.clear(limit);
+        await userEvent.type(limit, '0');
+        expect(limit).toHaveAttribute('aria-invalid', 'true');
+        expect(screen.getByRole('button', { name: 'launch' })).toBeDisabled();
+        await userEvent.clear(limit);
+        await userEvent.type(limit, '20000');
+        expect(screen.getByRole('button', { name: 'launch' })).toBeDisabled();
+        await userEvent.clear(limit);
+        await userEvent.type(limit, '150');
+        expect(screen.getByRole('button', { name: 'launch' })).toBeEnabled();
+        // The click blurs the field first, which commits 150 before the click handler runs — the groom's assumption, pinned here.
+        const body = await launchNow(calls);
+        expect((body.review as { smallMaxLines: number }).smallMaxLines).toBe(150);
+      });
+
+      it('unlocks launch when Models goes to Same for all groups and the limit field unmounts', async () => {
+        const { section, limit } = await openPrReviewer();
+        await userEvent.clear(limit);
+        await userEvent.type(limit, '0');
+        expect(screen.getByRole('button', { name: 'launch' })).toBeDisabled();
+        await userEvent.click(within(section).getByRole('button', { name: 'Same for all groups' }));
+        expect(within(section).queryByRole('spinbutton', { name: 'Small group limit' })).toBeNull();
+        expect(screen.getByRole('button', { name: 'launch' })).toBeEnabled();
+      });
+
+      it('unlocks launch when Finish goes to In place, and the request carries no review key', async () => {
+        const { calls, limit } = await openPrReviewer();
+        await userEvent.clear(limit);
+        await userEvent.type(limit, '0');
+        expect(screen.getByRole('button', { name: 'launch' })).toBeDisabled();
+        await userEvent.selectOptions(screen.getByLabelText('Finish'), 'in-place');
+        expect(screen.queryByRole('group', { name: 'Reviewer' })).toBeNull();
+        expect(screen.getByRole('button', { name: 'launch' })).toBeEnabled();
+        const body = await launchNow(calls);
+        expect(body.finish).toBe('in-place');
+        expect('review' in body).toBe(false);
+      });
+    });
+
     it('an in-place finish draws no Reviewer section and never reads the setting', async () => {
       const calls = stub({ review: DEFAULT_REVIEW_CONFIG });
       await openSheet();
