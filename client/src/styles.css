@@ -1912,6 +1912,9 @@ button.rail-count { cursor: pointer }
 .jira-mentions-quote-meta { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--amber-ink) }
 .jira-mentions-quote-text { line-height: 1.45; color: var(--ink); overflow-wrap: anywhere }
 .jira-mentions-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px }
+/* The Draft ready marker's wrapper (List row and card foot): `.ui-pill` has no `flex: none`, and in the List's Summary cell a long summary squeezed it to
+   25 px with its text clipped. A page class, because guard 7 keeps page rules off the `ui-*` families — `.board-col-pill` is the precedent. */
+.jira-mentions-marker { flex: none; display: inline-flex }
 .jira-mentions-card-more { color: var(--ink2) }
 .jira-mentions-card-boards { color: var(--ink3) }
 .jira-mentions-card-acts { display: inline-flex; gap: 6px; margin-left: auto }
@@ -1979,36 +1982,46 @@ button.rail-count { cursor: pointer }
 .jira-mention-desc > * { margin: 0 }
 .jira-mention-note { padding: 10px 12px; border-radius: 10px; font-size: 12px; color: var(--ink2); background: var(--strip-hi) }
 /* Draft a reply (phase 2, mock `ModalDraft.dc.html`) — what the modal's footer becomes while a session drafts, once a draft is ready, and after it posts.
-   The run card and the draft box are the thread card's surface (`--strip`, 12 px radius) so the footer reads as part of the left column; the counter turns
-   `--red` past the server's cap, the colour every refusal in this dialog already uses; nothing is under 11 px (guard 3). */
-.jira-reply-run { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--strip) }
+   The run card is the thread card's surface (`--strip`, 12 px radius) so the footer reads as part of the left column. The draft box is the mock's one
+   bordered card: a head row (title and sub on one line, the head actions right) over a hairline, a borderless textarea, and a `--strip-hi` bar holding the
+   sentence, the counter and the three actions in ONE row. The card's border turns `--cyan` while the text has focus — the textarea itself has no border to
+   colour. The counter turns `--red` past the server's cap, the colour every refusal in this dialog already uses; nothing is under 11 px (guard 3). */
+.jira-reply-run { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 12px; background: var(--strip) }
 .jira-reply-run-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fill-live); flex: none }
 .jira-reply-run-what { display: inline-flex; flex-direction: column; gap: 2px; min-width: 0 }
 .jira-reply-run-title { font-size: 13px; font-weight: 600; color: var(--ink) }
 .jira-reply-run-sub { font-size: 12px; color: var(--ink2) }
-.jira-reply { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; background: var(--strip); min-width: 0 }
-.jira-reply-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px }
-.jira-reply-what { display: inline-flex; flex-direction: column; gap: 2px; min-width: 0 }
+.jira-reply {
+  display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--hairline2); border-radius: 12px; background: var(--strip)
+}
+.jira-reply:has(> .jira-reply-text:focus) { border-color: var(--cyan) }
+.jira-reply-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--hairline) }
+.jira-reply-what { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0 }
 .jira-reply-title { font-size: 13px; font-weight: 600; color: var(--ink) }
 .jira-reply-sub { font-size: 12px; color: var(--ink2) }
 .jira-reply-note {
-  display: flex; flex-wrap: wrap; align-items: center; padding: 8px 10px; border-radius: 10px; font-size: 12px; color: var(--ink2); background: var(--strip-hi)
+  display: flex; flex-wrap: wrap; align-items: center; margin: 10px 14px 0; padding: 8px 10px; border-radius: 10px; font-size: 12px; color: var(--ink2);
+  background: var(--strip-hi)
 }
 .jira-reply-note > .jira-mention-more { padding: 0 }
-.jira-reply-to { font-size: 12.5px; font-weight: 500; color: var(--cyan) }
+.jira-reply-to { padding: 10px 14px 0; font-size: 12.5px; font-weight: 500; color: var(--cyan) }
 .jira-reply-text {
-  width: 100%; min-height: 120px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: 10px; resize: vertical;
-  font-size: 13.5px; line-height: 1.45; color: var(--ink); background: var(--steel)
+  display: block; width: 100%; min-height: 150px; padding: 12px 14px; border: 0; resize: vertical;
+  font-size: 13.5px; line-height: 1.5; color: var(--ink); background: var(--strip)
 }
-.jira-reply-text:focus { outline: none; border-color: var(--cyan) }
-.jira-reply-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; color: var(--ink2) }
+.jira-reply-text:focus { outline: none }
+.jira-reply-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 14px; border-top: 1px solid var(--hairline);
+  font-size: 12px; color: var(--ink2); background: var(--strip-hi)
+}
 .jira-reply-count { margin-left: auto; font-variant-numeric: tabular-nums }
 .jira-reply-count[data-over] { color: var(--red); font-weight: 600 }
-.jira-reply-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px }
+.jira-reply-acts { display: inline-flex; flex-wrap: wrap; gap: 8px }
 .jira-reply-session { display: flex; flex-direction: column; gap: 8px }
 .jira-reply-repo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; color: var(--ink) }
 .jira-reply-repo-lbl { color: var(--ink2) }
-.jira-reply-session-note { margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink2) }
+.jira-reply-repo-name { font-weight: 600 }
+.jira-reply-session-note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink2) }
 
 /* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
    what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px

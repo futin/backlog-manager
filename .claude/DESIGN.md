@@ -900,12 +900,13 @@ until restored. Idle: `Draft a reply` (outline) joins the footer between Dismiss
 as its title when no repo is mapped, and the right column gains **Draft session** under the ticket: `Repo <name> · read only` (a select of the mapped repos,
 the ticket project's first, until a session holds one) and `The session reads the thread, the ticket and the code, and writes a draft here. It never posts;
 Post reply does.` Drafting: the footer is the run card (`.jira-reply-run`, the thread card's `--strip`) — `Drafting a reply`, the elapsed time, `Open
-session` and `Stop`. Ready: the draft box (`.jira-reply`) — `Your reply`, `drafted by a session <age> · edit before posting`, the fixed `To @<name>` line in
-`--cyan`, the editable textarea, `Posts to <KEY> as you and clears this mention.` beside an `n / 8000` counter that turns `--red` past the cap, then
-`Redraft`, `Discard` and `Post reply` (ink). A newer draft over unedited text replaces it; over edited text it shows `A newer draft arrived · Use it`.
+session` and `Stop`. Ready: the draft box (`.jira-reply`), one card with a `--hairline2` border that turns `--cyan` while its text has focus — a head row
+(`Your reply` and `drafted by a session <age> · edit before posting` on one line, the head actions right) over a hairline, the fixed `To @<name>` line in
+`--cyan`, the borderless editable textarea, and a `--strip-hi` bar holding `Posts to <KEY> as you and clears this mention.`, an `n / 8000` counter that
+turns `--red` past the cap, and `Redraft`, `Discard` and `Post reply` (ink) in one row. A newer draft over unedited text replaces it; over edited text it shows `A newer draft arrived · Use it`.
 Replacing: the run card above the old draft, which says it is being replaced. Posted: the reply joins the thread as `You · just now` and the green done line
-says `Posted to <KEY>. The mention left your list.` with `View in Jira ↗` and `Next mention`. A ticket with a draft carries the warn `Draft ready` pill on its
-List row (after the summary) and its card (the foot).
+says `Posted to <KEY>. The mention left your list.` with `View in Jira ↗` and `Next mention`, both outline. A ticket with a draft carries the warn `Draft
+ready` pill on its List row (after the summary) and its card (the foot), each inside a `.jira-mentions-marker` wrapper that holds it at its own width.
 
 ### 8.10 Releases
 

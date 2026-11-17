@@ -302,7 +302,7 @@ export function JiraMentionModal({
               View in Jira
             </Chip>
             {onNext !== null && (
-              <Chip size={28} variant="ink" onClick={onNext}>
+              <Chip size={28} onClick={onNext}>
                 Next mention
               </Chip>
             )}
@@ -384,7 +384,7 @@ export function JiraMentionModal({
               <span className="jira-reply-repo">
                 <span className="jira-reply-repo-lbl">Repo</span>
                 {session !== null ? (
-                  <span>{repoBasename(session.repo)}</span>
+                  <span className="jira-reply-repo-name">{repoBasename(session.repo)}</span>
                 ) : repos.length > 0 && repo !== null ? (
                   <Select<string>
                     label="Repository"
@@ -639,25 +639,26 @@ function DraftReply({
       )}
       {to !== null && <div className="jira-reply-to">{`To @${to}`}</div>}
       <textarea className="jira-reply-text" aria-label={`Reply to ${to ?? issueKey}`} value={text} rows={6} onChange={(e) => setText(e.target.value)} />
+      {/* One bar under the text, as the mock draws it: the sentence, the counter pushed right, then the three actions — never a second row of buttons. */}
       <div className="jira-reply-foot">
         <span>{`Posts to ${issueKey} as you and clears this mention.`}</span>
         <span className="jira-reply-count" data-over={over ? '' : undefined}>{`${text.length} / ${JIRA_REPLY_MAX_CHARS}`}</span>
-      </div>
-      <div className="jira-reply-acts">
-        <Chip
-          size={28}
-          disabled={busy || redraftBlocked || !canRedraft}
-          title={redraftBlocked ? 'Stop the drafting session first' : !canRedraft ? 'Map a repository in Jira › Setup first' : undefined}
-          onClick={onRedraft}
-        >
-          Redraft
-        </Chip>
-        <Chip size={28} disabled={busy} onClick={onDiscard}>
-          Discard
-        </Chip>
-        <Chip size={28} variant="ink" disabled={busy || text.trim() === '' || over} onClick={() => onPost(text)}>
-          Post reply
-        </Chip>
+        <span className="jira-reply-acts">
+          <Chip
+            size={28}
+            disabled={busy || redraftBlocked || !canRedraft}
+            title={redraftBlocked ? 'Stop the drafting session first' : !canRedraft ? 'Map a repository in Jira › Setup first' : undefined}
+            onClick={onRedraft}
+          >
+            Redraft
+          </Chip>
+          <Chip size={28} disabled={busy} onClick={onDiscard}>
+            Discard
+          </Chip>
+          <Chip size={28} variant="ink" disabled={busy || text.trim() === '' || over} onClick={() => onPost(text)}>
+            Post reply
+          </Chip>
+        </span>
       </div>
     </div>
   );

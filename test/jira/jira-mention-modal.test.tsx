@@ -831,6 +831,11 @@ describe('the mention modal — Draft a reply (phase 2, Task 8; mock `ModalDraft
     expect(btn('Redraft')).toBeEnabled();
     expect(btn('Discard')).toBeEnabled();
     expect(btn('Post reply')).toBeEnabled();
+    // The mock's one bar under the text (ui-verify): the sentence, the counter and all three actions share `.jira-reply-foot` — the buttons are not a
+    // second row of their own.
+    const foot = d.querySelector<HTMLElement>('.jira-reply-foot')!;
+    expect(foot).toContainElement(counter());
+    for (const name of ['Redraft', 'Discard', 'Post reply']) expect(foot).toContainElement(btn(name));
     await user.clear(box());
     await user.type(box(), 'Stored per branch; fix is ours.');
     await user.click(btn('Post reply'));
@@ -922,6 +927,8 @@ describe('the mention modal — Draft a reply (phase 2, Task 8; mock `ModalDraft
     expect(within(mine).getByText('You')).toBeInTheDocument();
     expect(within(mine).getByText('just now')).toBeInTheDocument();
     expect(mine).toHaveTextContent('@Ivo Kranjc Stored per branch.');
+    // Both of the posted line's chips are outline, as the mock draws them: nothing is left to do here, so there is no primary (ui-verify).
+    expect(within(done).getByRole('button', { name: 'Next mention' })).toHaveClass('ui-chip-outline');
     await user.click(within(done).getByRole('button', { name: 'Next mention' }));
     await settle();
     expect(crumbs()).toContain('PAY-131');

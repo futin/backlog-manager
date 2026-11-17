@@ -398,6 +398,8 @@ describe('Jira › Mentions — the Draft ready marker (phase 2, Task 8)', () =>
     expect(marker(mara)).not.toBeNull();
     expect(marker(tomas)).not.toBeNull();
     expect(marker(pay)).toBeNull();
+    // Held at its own width by a page-class wrapper (`flex: none`): bare in the Summary cell's flex row, a long summary squeezed it to "Draft read" (ui-verify).
+    expect(marker(mara)!.parentElement).toHaveClass('jira-mentions-marker');
   });
 
   it('marks the ticket’s card, and no other card', async () => {
@@ -408,6 +410,7 @@ describe('Jira › Mentions — the Draft ready marker (phase 2, Task 8)', () =>
     await user.click(screen.getByRole('button', { name: 'Cards' }));
     const card = (key: string): HTMLElement => document.querySelector<HTMLElement>(`.jira-mentions-card[data-key="${key}"]`)!;
     expect(marker(card('SUP-208'))).not.toBeNull();
+    expect(marker(card('SUP-208'))!.parentElement).toHaveClass('jira-mentions-marker');
     expect(marker(card('PAY-131'))).toBeNull();
   });
 

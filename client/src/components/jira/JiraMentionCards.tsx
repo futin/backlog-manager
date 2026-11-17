@@ -97,7 +97,12 @@ export function JiraMentionCards({
             </div>
             <div className="jira-mentions-card-foot">
               {more !== null && <span className="jira-mentions-card-more">{more}</span>}
-              {issue.draft !== null && <Pill tone="warn">Draft ready</Pill>}
+              {/* The same wrapper as the List row's, so the marker is one shape on both layouts and never shrinks inside a crowded foot. */}
+              {issue.draft !== null && (
+                <span className="jira-mentions-marker">
+                  <Pill tone="warn">Draft ready</Pill>
+                </span>
+              )}
               <span className={issue.boards.length === 0 ? 'jira-mentions-card-boards muted' : 'jira-mentions-card-boards'}>
                 {issue.boards.length === 0 ? 'on none of your boards' : `on ${issue.boards.join(', ')}`}
               </span>

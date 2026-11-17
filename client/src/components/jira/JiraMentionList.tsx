@@ -106,8 +106,13 @@ function MentionRow({
           </span>
           <span className="jira-issues-cut">{issue.summary}</span>
           {/* Phase 2: a drafted reply waits on the reader — the warn tone, "waiting on a person". Every row of the ticket carries it: the draft is the
-              ticket's. */}
-          {issue.draft !== null && <Pill tone="warn">Draft ready</Pill>}
+              ticket's. The `.jira-mentions-marker` wrapper holds it at its own width: as a bare flex child of the row it shrank to 25 px ("Draft read")
+              beside a long summary, because `.ui-pill` carries no `flex: none` and guard 7 forbids page CSS naming it (ui-verify). */}
+          {issue.draft !== null && (
+            <span className="jira-mentions-marker">
+              <Pill tone="warn">Draft ready</Pill>
+            </span>
+          )}
         </span>
       </td>
       <td>
