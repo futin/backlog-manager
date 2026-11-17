@@ -61,9 +61,14 @@ title `feat(jira): draft and post a reply from the mentions modal`.
 - **R1 — the scope probe sends no comment.** The spec's Task 1 posts a comment on a scratch ticket and has it deleted by hand. Instead: `POST issue/{key}/comment`
   with body `{}` on a ticket the user is mentioned on. Jira answers **400** (`Comment body can not be empty`) once auth and scope pass, and **401/403**
   when the token's scopes lack the comment write — so the scope is proved and nothing is written. Only if the answer is neither (e.g. 201 or 5xx) does the
-  task stop and ask the user for a scratch ticket, as the spec describes.
+  task stop and ask the user for a scratch ticket, as the spec describes. **Assumption, recorded as such:** that Jira checks auth and scope before it
+  validates the body; a 400 is taken as proof on that assumption, and the live Post in Task 10 (with the user's yes) is the real proof. The ticket is one
+  the user names, not one picked from the cache, so even the improbable 2xx lands where the user chose. The probe is an outbound POST to Jira, so an
+  unattended run holds it for the user (it gates shipping, not building — Tasks 2–9 do not read its result).
 - **R2 — a `reply` dispatch is narrow on the wire.** `mode` must be `'none'`, `assign` false, `transitionId` null, no `branch|base|target|openMr|review`, no
-  `prompt` — else the R2 400 above. The modal is the only caller; anything else is a hand-made request, and a read-only drafting session with a worktree,
+  `prompt`, and `surface` absent or `'dashboard'` — else the R2 400 above (`surface: 'desktop'` is refused because a desktop hand-over answers no session id,
+  so there would be no link for the draft route to prove; the sentence stays the one above). `launch`'s desktop no-id branch
+  (`jira-dispatch.service.ts:325`, `this.live.release(req.key)`) still takes the kind, so no future caller can drop a Run's reservation from a reply. The modal is the only caller; anything else is a hand-made request, and a read-only drafting session with a worktree,
   an assign or an edited prompt (which could carry thread text) contradicts the spec.
 - **R3 — the modal launches with the launch sheet's defaults, no sheet.** Model/effort `settings.dispatchDefaultModel` (and the effort default the sheet
   uses), permission `defaultModeFor('reply', settings.jiraDefaultPermission)` which returns `acceptEdits` when the setting is blank (the session must run
@@ -77,9 +82,12 @@ title `feat(jira): draft and post a reply from the mentions modal`.
 - **R6 — the payload carries `draft` and `session` per issue, filled by the controller.** `JiraMentionsController` composes every answer through one private
   `payload()` = `poller.mentionsPayload()` + the store's draft and `JiraLiveService.replySession(key)` per issue (in `issues` and `dismissed`). The poller
   stays ignorant of drafts and links — it never imports the live service.
-- **R7 — `answeredAt` lives in the poller, memory only,** `Map<key, ISO>`; passed as `answeredAfter` to every `judgeComments` call for that key (the check and
-  the thread route); applied again at swap time; an entry older than the window is dropped at the next check. A restart forgets it — the search has caught
-  up by then (the lag is seconds to a minute).
+- **R7 — `answeredAt` lives in the poller, memory only, and is applied ON READ, like dismissals.** `Map<key, ISO>`. The check's swap stays a whole swap that
+  filters nothing (`poller.service.ts:995-996`); instead one private helper drops, per key, every candidate whose `created` is at or before
+  `answeredAt[key]` (and the issue when none is left), and it runs wherever the cache is read: `mentionsPayload()` (after `applyDismissals`, so the payload,
+  the status summary's count and Task 3's open-mention gate all see it), `mentionCandidate`, and `postReply`'s own open-mention check. The thread route passes
+  `answeredAt[key]` as `judgeComments`' `answeredAfter`. An entry older than the window is dropped at the next check. A restart forgets it — the search
+  has caught up by then (the lag is seconds to a minute).
 
 ## Review Focus
 
@@ -91,7 +99,7 @@ title `feat(jira): draft and post a reply from the mentions modal`.
    and the modal's fixed `To @Name` line shows that same name, so the person sees the address change before posting. Tests in Tasks 5 and 8.
 4. **Reply text shapes** — CRLF line ends, three blank lines between paragraphs, trailing whitespace, a single newline inside a paragraph, whitespace-only
    text, exactly 8 000 and 8 001 characters. Paragraphs split on blank-line runs, a single newline is a `hardBreak`, whitespace-only is a 400, the bound is
-   inclusive. Tests in Task 5 (ADF builder, route bounds) and Task 7 (client counter).
+   inclusive. Tests in Task 5 (ADF builder, route bounds) and Task 8 (client counter).
 5. **A check in flight while the post lands** — the swap must not resurrect the ticket (the search has not indexed the reply yet). Poller test in Task 5.
 
 ---
@@ -142,6 +150,7 @@ title `feat(jira): draft and post a reply from the mentions modal`.
     is starting or live — the two kinds coexist; `get('PAY-1')` and `snapshot()` never show a reply (starting or live); `confirm(..., 'reply')` writes a link
     with `how: 'reply'`, `action: 'reply'`; `release('PAY-1', 'reply')` drops only the reply reservation, a run reservation on the key survives;
     `replySession` returns `{ sessionId: null, ... }` while starting, the link's id once confirmed, `null` once the link ends (`end(..., 'stopped')`);
+    two keys: a reply reserved or live on `PAY-1` leaves `reserve('PAY-2', repo, 'reply')` true and `replySession('PAY-2')` `null`;
     `JIRA_LIVE_CAP` counts reply reservations and reply links; a stale reply reservation is dropped at the top of the next call like a run one; the store
     round-trips a `how: 'reply'` link through save + load (today it would be dropped as `has no known how`).
   - `linkedHow('reply')` → `'drafting a reply'`; the session/list action label for `'reply'` → `'Draft a reply'`.
@@ -149,9 +158,11 @@ title `feat(jira): draft and post a reply from the mentions modal`.
 - [ ] **Step 3: Implement.** Widen the types and parsers. In `live.service.ts` add a second memory map `startingReply` beside `starting` and a private
   `liveReply(key)`; `reserve` with `kind: 'reply'` refuses while `startingReply` has the key or `liveReply(key)` is non-empty, never looks at `run` entries;
   `liveCount`, `expire` and `evictOldestConfirmed` (which must still never evict a starting entry of either kind) cover both maps. `get`, `snapshot`,
-  `confirmed`, `hasConfirmed` stay `run`-only — say so in the header comment, which today lists them as run-only "for the same reason". `addLink` and
-  `unlink` keep refusing anything but `branch`/`manual` (a reply link is ended by Stop or the reconciler, never unlinked by hand — `unlink` answers `'run'`
-  for it today; make it answer the same refusal for `reply` and test it). Callers that list built-ins for a menu (`JiraRunMenu`, `JiraSkillsGroup`,
+  `confirmed`, `hasConfirmed` stay `run`-only — say so in the header comment, which today lists them as run-only "for the same reason". `addLink` keeps
+  refusing anything but `branch`/`manual`. `unlink` today refuses only `how === 'run'` (`live.service.ts:255`), so a reply link would be REMOVED by hand:
+  widen its return to `'removed' | 'missing' | 'run' | 'reply'`, answer `'reply'` for a reply link (nothing removed, nothing suppressed), and make
+  `JiraDispatchService.unlink` map it to 409 `<KEY> is drafting a reply — stop it from the mention instead`; test both (a reply link survives
+  `jira-unlink`, the 409 sentence exact). Callers that list built-ins for a menu (`JiraRunMenu`, `JiraSkillsGroup`,
   `SettingsView`'s default-action select, `JiraLaunchSheet`'s Action select) must NOT gain a `reply` row — check each and add one assertion to an existing
   suite that the Run ▾ menu offers no `Draft a reply`.
 - [ ] **Step 4: Run** the three suites plus `pnpm run typecheck` — PASS.
@@ -191,10 +202,17 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   - the spawned prompt (captured from the fake dashboard's `POST /api/spawn`) contains the key, `jira.mjs show PAY-1`, `jira.mjs thread PAY-1`,
     `jira.mjs draft PAY-1`, the words `never post`, and NONE of the ticket's summary, description or comment text (seed a distinctive string in each).
   - success writes a link with `how: 'reply'`; the response's `assigned` is false and no assign/transition call reached the fake Jira.
-  - `GET /api/jira/prompt?action=reply&key=PAY-1&repo=...&mode=none` composes the same text the spawn got (preview = spawn).
+  - `GET /api/jira/prompt?action=reply&key=PAY-1&repo=...&mode=none` composes the same text the spawn got (preview = spawn), with the repo mapped to `SUP`
+    only (the any-project rule holds on the preview too); a repo mapped nowhere → 400 `/x/repo is not mapped to any Jira project`; `action=nope` → 400
+    `action must be execute, context, review, reply or skill:<id>`. The preview asks no open-mention gate (it reads; the dispatch is what refuses).
+  - two keys: a reply starting on `PAY-1` does not refuse a reply on `PAY-2` (the reservation is per key).
+  - `surface: 'desktop'` with `action: 'reply'` → the R2 400.
 - [ ] **Step 2: Run** `pnpm exec jest test/jira/agents-dispatch-jira.test.ts test/jira/jira-prompt.test.ts` — FAIL.
 - [ ] **Step 3: Implement.**
   - Controller: after the action parse, if `action === 'reply'` apply R2 before the branch choice is parsed.
+  - `server/src/jira/jira.controller.ts` (`GET /api/jira/prompt`, add to this task's Files): its own 400 sentence (`:205`) gains `reply`; for `reply` the
+    repo check (`:227-228`, the key's own project today) becomes the any-project rule with the any-project sentence, shared with the dispatch through one
+    helper in `jira/` (the edge runs agents → jira, so the dispatch imports it, never the reverse).
   - Service `dispatch`: for `reply`, between the config read and the dashboard gate — the open-mention gate, then the repo rule (`normaliseRepoPath`, then
     member of ANY `config.repos[*]` list; the 400 names `req.repo` as sent, like the sibling sentence). Then `reserve(key, repo, 'reply')`, whose refusal is
     the reply 409 (not `busy()`'s run sentences). The failure `catch` releases with `'reply'`.
@@ -208,7 +226,10 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   "the four built-ins"; the repo sentence gains "— except `reply`, whose repo may be mapped to ANY project (most mentioned tickets live in unmapped projects),
   still proved against the file and asked of the dashboard gate". `jira.md`: a new bullet after the `review` one — `reply` is the fourth built-in, dispatched
   only from the mention modal, R2's wire shape, its two gates and its own reservation, its prompt's read orders and "never post", and that its label is a
-  label for links and the List, never a menu row. Run `pnpm exec jest test/guards/claude-rules.test.ts`.
+  label for links and the List, never a menu row. That bullet is far over the 80-word cap for an unanchored one (`.claude/rules/tests.md`, pinned by
+  `claude-rules.test.ts`), so it ends `Why: [invariants.md](docs/subsystems/invariants.md#a-reply-draft-session-reads-only-and-only-a-persons-click-posts)`,
+  and THIS task writes that `invariants.md` section (the reasoning: why the session never posts, why no thread text enters the prompt, why the repo may be
+  any project's) — Task 9 only extends it. Run `pnpm exec jest test/guards/` (claude-rules and the doc-link guard).
 - [ ] **Step 6: Commit** `feat(jira): dispatch a read-only reply-draft session`.
 
 ---
@@ -231,6 +252,7 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   - store: a v1 file with no `drafts` loads with no drafts and its dismissals intact; `setDraft` then reload returns it; a malformed draft entry (no text, an
     `at` that does not parse, a non-string session id) is dropped alone with the rest kept; on save a draft whose `at` is older than 30 days + 1 day grace is
     pruned and one 30 days old is kept; `dropDraft` of a missing key writes no file (mtime unchanged).
+    Two keys: `setDraft('PAY-1', …)` then `dropDraft('PAY-1')` leaves `draftFor('PAY-2')` as it was.
   - `POST /api/jira/mentions/draft` `{ key, sessionId, text }`: cross-origin → 403 (guard); bad key → 400 `invalid issue key`; `sessionId: 'x y'` → 400
     `invalid session id`; `text: '   '` → 400 `text must be a non-empty string`; 8 001 characters → 400 `text too long`; exactly 8 000 → 200; unconfigured →
     503; no live reply link for that `(key, sessionId)` (none, a `run` link, an ended reply link, a reply link of another session) → 409
@@ -262,7 +284,10 @@ title `feat(jira): draft and post a reply from the mentions modal`.
 - Test: `test/jira/jira-adf.test.ts`, `test/jira/jira-mentions-routes.test.ts`, `test/jira/jira-mentions-poller.test.ts`, `test/jira/jira-client.test.ts`
 
 **Interfaces:**
-- Produces: `replyDoc(to: { accountId: string; name: string }, text: string): AdfDoc` (a `doc` v1 whose first paragraph opens with
+- Produces: `export type AdfDoc = { version: 1; type: 'doc'; content: AdfBlock[] }` in `server/src/jira/adf.ts` (new; `AdfBlock` a paragraph whose
+  `content` holds `text`, `mention` and `hardBreak` nodes — only what `replyDoc` emits; the file's existing private `AdfNode` is the READ side's loose shape
+  and stays as it is);
+  `replyDoc(to: { accountId: string; name: string }, text: string): AdfDoc` (a `doc` v1 whose first paragraph opens with
   `{ type: 'mention', attrs: { id, text: '@' + name } }` and a space, then the text's first paragraph; later paragraphs follow);
   `JiraClient.addComment(auth: JiraAuth, key: string, body: AdfDoc): Promise<JiraResponse<{ id: string; created: string }>>`;
   `JiraPollerService.postReply(key: string, text: string): Promise<JiraResult<{ id: string; created: string; url: string }> | { ok: false; refusal: 'no open mention' | 'posting' }>`;
@@ -275,22 +300,27 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   - client: `addComment` sends `POST issue/PAY-1/comment` with `{ body: <doc> }` through `request` (the fake records method, path, body; no new auth path).
   - route `POST /api/jira/mentions/reply` `{ key, text }`: guard 403; 400s for key and text (empty, whitespace, 8 001; 8 000 passes); 503 unconfigured; a key
     not open in the cache → 409 `PAY-1 has no open mention — it was answered or dismissed` and the draft kept; a 429 window → 429 with `retryAt`, no call;
-    `access: unauthorized` → 401 body, no call; Jira 403 on the post → the mapped error whose sentence names `write:comment:jira`, draft kept; Jira 201 →
+    `access: unauthorized` → 401 body, no call, and NO scope suffix (that 401 is about the token, from before any post); Jira 401 on the post → through
+    `routeFailed` like assign's (the site's `access` turns `unauthorized`), the 401 body unsuffixed, draft kept; Jira 403 on the post → 403 whose sentence
+    ends `— the token needs write:comment:jira`, draft kept, the site's `access` unchanged; Jira 201 →
     200 with `posted.id`, `posted.url` (the focused-comment link), the ticket gone from `issues`, its draft gone from the store, and the fake Jira received
     a body whose mention targets the author of the ticket's NEWEST open mention — seed two open mentions by different authors and assert the newer one wins
     (Review Focus 3); a dismissed mention is not "open" for that choice.
   - R4: two concurrent posts on one key (the fake's comment answer held on a deferred) → exactly one `POST .../comment` reaches the fake; the other answers 409
-    `a reply to PAY-1 is already being posted`; after the first resolves, a third answers the no-open-mention 409 (Review Focus 1).
+    `a reply to PAY-1 is already being posted`; after the first resolves, a third answers the no-open-mention 409 (Review Focus 1). While PAY-1's post is
+    held, a post on `PAY-2` goes through (the guard is per key).
   - R7 / poller: after a 201 whose `created` is T, the next check's search still returns the ticket WITHOUT the reply (index lag) and the mention older than
     T → the ticket stays out of `issues`; a NEW mention created after T → the ticket is back. A check started before the post and resolving after it swaps
-    in without the ticket (Review Focus 5). The thread route marks the old mention `open: false` after the post.
+    in without the ticket (Review Focus 5). The thread route marks the old mention `open: false` after the post. Two keys: a post on `PAY-1` leaves an open
+    `PAY-2` mention in `issues` and `mentionCandidate('PAY-2', …)` unchanged.
 - [ ] **Step 2: Run** the four suites — FAIL.
-- [ ] **Step 3: Implement.** `postReply` order: R4 check-and-set (sync) → open-mention check against the cache with dismissals applied (sync) → `gate()` →
-  `unauthorizedRefusal()` → `addComment` → on 2xx: drop the key from `this.mentions.issues`, set `answeredAt[key] = created`, answer; on failure
-  `routeFailed`. The controller maps `no open mention`/`posting` to the 409s, otherwise `jiraWriteOrThrow`, adding the scope name to a 401/403 sentence
-  (`… — the token needs write:comment:jira`); on success it calls `store.dropDraft(key)` (a failed drop is logged, never turns the 200 into an error — the
-  comment is posted) and answers `{ ...payload(), posted }`. R7: `runMentionsCheck` takes `answeredAfter: (key) => string | undefined`; the swap re-reads
-  `answeredAt` at swap time, as it does dismissals; prune entries older than the window at each check.
+- [ ] **Step 3: Implement.** `postReply` order (the spec's, with R4 added after it): open-mention check against the cache with dismissals and `answeredAt`
+  applied (sync) → R4 check-and-set (sync, no `await` between the two) → `gate()` → `unauthorizedRefusal()` → `addComment` → on 2xx: drop the key from
+  `this.mentions.issues`, set `answeredAt[key] = created`, answer; on failure `routeFailed`. The controller maps `no open mention`/`posting` to the 409s
+  itself, then hands every other outcome to `unwrapJira` (`unwrap.util.ts:13`) — NOT `jiraWriteOrThrow`, which takes `JiraIssueWriteOutcome` and maps any
+  unknown refusal to `transition not offered` — appending `— the token needs write:comment:jira` to the error only when the post itself answered 403; on
+  success it calls `store.dropDraft(key)` (a failed drop is logged, never turns the 200 into an error — the comment is posted) and answers
+  `{ ...payload(), posted }`. R7 as ruled: on read, never in the swap; prune entries older than the window at each check.
 - [ ] **Step 4: Run** the four suites + `test/jira/jira-write-routes.test.ts` + typecheck — PASS.
 - [ ] **Step 5: Rule files.** `jira.md`'s writes bullet: "assign and transition, nothing else" → "assign, transition and the mention reply, nothing else",
   with the reply route's order (guard → 400 → 503 → open-mention 409 → single-flight 409 → `gate()` → `unauthorizedRefusal()` → `POST issue/{key}/comment`),
@@ -395,9 +425,15 @@ Mock: [`ModalDraft.dc.html`](../specs/2026-11-16-jira-mentions-mockups/canvas/Mo
   - `drafting`: `Drafting a reply`, the elapsed time from `session.startedAt`, `Open session` (disabled until the sessions context has the link) and `Stop`
     (disabled while `sessionId` is null); Stop calls `stopJira(key, sessionId)`.
   - `ready`: `Your reply`, `drafted by a session <age> · edit before posting`, a fixed `To @<replyTo name>` line above an editable textarea prefilled with
-    `draft.text`, a character counter that turns into an error past 8 000 and disables Post reply, `Posts to <KEY> as you and clears this mention.`,
-    `Redraft`, `Discard`, `Post reply`. Editing the textarea then Post sends the EDITED text. Whitespace-only text disables Post.
+    `draft.text`, a character counter, `Posts to <KEY> as you and clears this mention.`, `Redraft`, `Discard`, `Post reply`. Editing the textarea then
+    Post sends the EDITED text. Whitespace-only text disables Post. Exactly 8 000 characters leaves Post enabled; 8 001 disables it and turns the counter
+    into an error (Review Focus 4).
+  - `ready` while the draft's own session is still live (the normal case for about two minutes after hand-over, until the quiet rule ends the link): the
+    draft is editable and postable, Redraft disabled with title `Stop the drafting session first` (spec: Redraft obeys the one-reply-per-key gate whenever a
+    reply link is live).
   - `replacing`: the old draft stays visible with a "being replaced" note, Redraft disabled with title `Stop the drafting session first`.
+  - a newer draft arrives (a new `draft.at`) while the person has NOT edited → the box takes the new text; while they HAVE edited → the box keeps their
+    text and shows `A newer draft arrived · Use it`, and `Use it` swaps the new text in.
   - Redraft with no live session → `dispatchReply` again (the draft stays until the new one arrives); Discard → `postJiraMentions('draft/discard', { key })`.
   - Post reply 200 → **posted** state: the reply appended to the thread as `You · just now`, `Posted to <KEY>. The mention left your list.`, `View in Jira`
     (the `posted.url`), `Next mention` (walks to the next row as the existing stepper does; absent on the last one). A refusal keeps the text in the box and
@@ -409,8 +445,10 @@ Mock: [`ModalDraft.dc.html`](../specs/2026-11-16-jira-mentions-mockups/canvas/Mo
 - [ ] **Step 2: Run** `pnpm exec jest test/jira/jira-mention-modal.test.tsx test/jira/jira-mentions-page.test.tsx` — FAIL.
 - [ ] **Step 3: Implement** against the mock. The textarea's text is local state seeded from `draft.text` when the draft's `at` changes (a new draft
   replaces unsaved edits only when the person has not edited — if they have, keep their edits and show `A newer draft arrived · Use it`), and the client
-  polls nothing new: `useJiraMentions` already re-reads, and while a draft session is live the view asks it for a re-read every 15 s (stop when the state
-  leaves `drafting`/`replacing`).
+  polls nothing new: `useJiraMentions` already re-reads, and while any shown ticket's `session !== null` the view asks it for a re-read every 15 s (stop when
+  no `session` is left, so `ready` with a live session keeps re-reading until the link ends). That is a second periodic trigger on a hook that
+  `.claude/rules/board.md` says has ONE timer: edit that bullet in this task (add `board.md` to Files) — the 15 s re-read, when it runs, and that it goes
+  through the same sequence-numbered `reload` so a POST's answer still wins over an older GET.
 - [ ] **Step 4: Run** both suites + `test/jira/jira-mentions-lib.test.ts` + `pnpm run typecheck` — PASS. Source guards: `grep -l useJiraSessionsContext test/`
   and `grep -l useJiraMentions test/` — add every hit to the run (CLAUDE.md "Touched includes the source guards").
 - [ ] **Step 5: Commit** `feat(client): draft, edit and post a reply in the mention modal`.
