@@ -59,7 +59,7 @@ const CHIP_LABEL: Record<ListChip, string> = { all: 'All', 'needs-you': 'Needs y
  * nobody found it. The summary button stays the keyboard's way in — a `tr` takes no focus — and a click on any control inside the row (`Open`, `Reopen`,
  * `Run ▾` and its panel, which is drawn inside the cell, not in a portal) is that control's alone, as is a click that ends a text selection.
  * A row that needs a person wears the amber wash the deck's strip does; an ended row is set in the quiet ink.
- * **Open** is the deck's: `openButtons(..., { wide: false })` through Detail's own `OpenChip`, so C2's Desktop rule lives in one place and its refusal draws
+ * **Open** is the deck's: `openButtons(..., { wide: false })` through `SessionOpen.tsx`'s `OpenChip`, so C2's Desktop rule lives in one place and its refusal draws
  * in the alert line under the table. An ended row's is `Reopen` — and `Run ▾`, but ONLY while the ticket has no live `run` link and no Starting reservation
  * (`runChipState`, the one-run gate): a second Start on a ticket that is already being run is exactly what the server would refuse. A Starting row has no
  * buttons, because every one needs a session id.
