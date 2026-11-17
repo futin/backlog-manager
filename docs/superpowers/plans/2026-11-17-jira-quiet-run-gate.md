@@ -34,8 +34,8 @@ with the plan where the code shows it is wrong — say so in the commit body.
 3. **Two live Runs on one key, one quiet, one working.** `reserve` refuses, the 409 names the working one, the chip is disabled with the same phrase. Tests
    in Task 2 and Task 3.
 4. **Review over a quiet Run.** A review on a key whose only live Run is quiet is still refused (`already has a session`). Test in Task 2.
-5. **Cap refusal while the key's Run is quiet.** Every slot starting, the key's only live Run quiet: the 409 must be `too many Jira sessions are starting — try
-   again in a moment`, not `has a Run not quiet yet`. Test in Task 2.
+5. **Per-key scoping.** A working Run on PAY-2 must not block a Run on PAY-1, whose only live Run is quiet. Test in Task 2. (The cap cannot refuse while any
+   confirmed link is live — `evictOldestConfirmed` ends one — so `busy`'s last branch is a defensive fallback, not a tested path.)
 
 ---
 
@@ -95,8 +95,8 @@ link (`how === 'run'`, `endedAt === null`) whose phrase is `null`.
   `starting` entry still wins).
 
 The dispatch passes `yieldToQuiet = req.action !== 'review'` for kind `run`. `busy(key, strict)`: `get(key)` null → `too many…`; a starting entry → `<KEY> is
-starting`; strict (review) → `<KEY> already has a session`; else `runBlock(key)` non-null → `<KEY> has a Run <phrase>`; else (every live Run yields, so the
-refusal was the cap) → `too many Jira sessions are starting — try again in a moment`.
+starting`; strict (review) → `<KEY> already has a session`; else `runBlock(key)` non-null → `<KEY> has a Run <phrase>`; else → `too many Jira sessions are
+starting — try again in a moment` (defensive: with a confirmed link live the cap evicts instead of refusing, so this branch is not reachable today).
 
 - [ ] **Step 1: Write failing `jira-live.test.ts` cases** (new `describe('the quiet gate')`; build links through the existing confirm + `markQuiet` +
   `setRows` helpers the file already uses):
@@ -105,17 +105,21 @@ refusal was the cap) → `too many Jira sessions are starting — try again in a
     `not seen by the dashboard`.
   - quiet link, then `markUnreachable` → `false`, `not seen by the dashboard`.
   - row `working` → `false`, `still working`; row `question` + `remoteReply` → `waiting on you`; `quietSince` null with row `idle` → `not quiet yet`.
-  - two live Runs on one key: A quiet (older), B working (newer) → `false`, `runBlock` `still working`; A working (older), B quiet (newer) → `still working`.
+  - two live Runs on one key: A quiet (older), B working (newer) → `false`, `runBlock` `still working`; A working (older), B quiet (newer) → `still working`;
+    A working (older), B `question` + `remoteReply` (newer) → `waiting on you`; the swap (A question older, B working newer) → `still working`.
+  - per key: a working Run on PAY-2 beside a quiet Run on PAY-1 → `reserve('PAY-1', …, true)` `true`, `runBlock('PAY-1')` `null`, `runBlock('PAY-2')` `still
+    working`.
   - a `run` reservation on the key (`reserve` then no confirm) → a second `reserve(…, true)` is `false`.
-  - after a yielding reserve + confirm, the key holds two live `run` links; `snapshot()[key].sessionId` is the newer one's, whatever their order in the store.
+  - `snapshot()` newest-wins: write a links file (`BM_JIRA_LINKS_FILE`) holding two live `run` links on PAY-1 with distinct `startedAt`, the NEWER one first
+    in the array, load a fresh service → `snapshot()['PAY-1'].sessionId` is the newer one's (today's last-in-store code returns the older one).
 - [ ] **Step 2: Write failing `agents-dispatch-jira.test.ts` cases** next to the existing 409 tests (~line 318–330):
   - a confirmed, quiet Run on PAY-1 (row `idle`, `quietSince` set) → a second execute dispatch on PAY-1 is 200 and spawns.
   - a confirmed Run with row `working` → 409 `{ error: 'PAY-1 has a Run still working' }`.
   - change the existing "409 `<KEY>` already has a session for a confirmed key" case: with no row and no `quietSince` it is now `PAY-1 has a Run not seen by
     the dashboard`.
   - a review dispatch over a quiet Run → 409 `PAY-2 already has a session` (the existing review case near line 953 keeps passing unchanged).
-  - every slot starting (`JIRA_LIVE_CAP`) and PAY-1's only live Run quiet → 409 `too many Jira sessions are starting — try again in a moment`.
-  - The concurrent case near line 664 keeps its regex; a second Start racing the first is still refused while the first is `starting`.
+  - The concurrent case near line 664: its regex becomes `/^PAY-1 (is starting|has a Run not seen by the dashboard)$/` — an execute can no longer answer
+    `already has a session`, and a refusal after the first confirms (no rows) reads `not seen by the dashboard`; still exactly one 200 and one spawn.
 - [ ] **Step 3: Run** `pnpm exec jest test/jira/jira-live.test.ts test/jira/agents-dispatch-jira.test.ts` — expect the new cases to FAIL.
 - [ ] **Step 4: Implement** `reserve`'s argument, `runBlock`, `snapshot`'s newest-wins, the dispatch's argument and `busy`. Update the comments that state
   the one-run gate (`reserve`'s doc, the dispatch header's step 4, `busy`'s doc) and the three docs listed above, keeping each `Why:` link.
@@ -153,9 +157,12 @@ running on <KEY>`) and `blockTitle` both use `runBlockTitle` for `live` (so a pa
   - quiet link A in the payload + `status.live` naming a different session B (`starting: false`) → `live`, `a Run on PAY-1 is not quiet yet`.
   - `status.live` starting entry → `live`, `a Run on PAY-1 is starting`.
   - `sessions` null + confirmed `status.live` entry → `live`, `a Run on PAY-1 is not quiet yet`.
+  - two live run links on PAY-1: A quiet (older), B working (newer) → `live`, `a Run on PAY-1 is still working`; A working (older), B `question` (newer) →
+    `a Run on PAY-1 is waiting on you`.
   - only a live `branch` link (working) → `ready`; unmapped project → `no-repo` (unchanged cases keep passing).
-- [ ] **Step 2: Update `jira-run-menu.test.tsx:227`** (parent row title) to the new title for its fixture, and **`jira-detail.test.tsx`**: lines 644, 645 and
-  887 take the title their fixture now derives; line 935's band text becomes `Next Run can start once this one is quiet.` for a non-quiet fixture; add one
+- [ ] **Step 2: Update `jira-run-menu.test.tsx:227`** (parent row title) to `a Run on P-1 is not seen by the dashboard`, and **`jira-detail.test.tsx`**:
+  lines 644 and 645 → `a Run on PAY-131 is not quiet yet`, line 887 → `a Run on PAY-131 is not seen by the dashboard` (recheck each against its fixture
+  and say so in the commit body if one differs); line 935's band text becomes `Next Run can start once this one is quiet.` for a non-quiet fixture; add one
   case where the only live Run is quiet → `Run ▾` enabled and the band reads `Quiet — a new Run can start now.`; and one with only a live `branch` link →
   no `.jira-detail-next`. Line 1547 and `test/jira/jira-setup.test.tsx:1006` are the worktree `Remove` button (`JiraWorktreeRow.tsx:79`), a different
   control out of scope: both keep `a session is running on <KEY>`.
