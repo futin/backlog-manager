@@ -216,6 +216,7 @@ beforeEach(() => {
       return dispatchHold === null ? send() : dispatchHold.then(send);
     }
     if (url === '/api/agents/jira-stop') return res({ ok: true });
+    if (url === '/api/agents/jira-open-desktop') return res({ error: 'the dashboard could not hand the session to the desktop app' }, 500);
     if (url === '/api/jira/mentions/draft/discard') {
       const { key } = JSON.parse(init?.body as string) as { key: string };
       answer = { ...answer, issues: answer.issues.map((i) => (i.key === key ? { ...i, draft: null } : i)) };
@@ -971,6 +972,23 @@ describe('the mention modal — Draft a reply (phase 2, Task 8; mock `ModalDraft
     await poll();
     expect(within(dialog()).queryByText('Drafting a reply')).toBeNull();
     expect(btn('Draft a reply')).toBeEnabled();
+  });
+
+  it('a refused Desktop hand-over from Open session says the server’s sentence instead of doing nothing (fix round 1)', async () => {
+    // The one primary that hands over: an ENDED link with no launch surface, whose dashboard row rests (`openButtons` → desktop, `openTarget` → handover).
+    withSup({ draft: draft('Stored per branch.', 2), session: session('sess-1', 3) });
+    sessions = {
+      links: [{ ...link('sess-1'), surface: null, state: 'ended', endedAt: hoursAgo(1 / 60), row: { id: 'sess-1', status: 'idle', surface: 'dashboard' } }],
+      reachable: true,
+      rowsAt: null
+    };
+    const user = userEvent.setup();
+    await openSup(user);
+    await user.click(btn('Open session'));
+    await settle();
+    expect(fetchMock.mock.calls.filter(([u]) => u === '/api/agents/jira-open-desktop')).toHaveLength(1);
+    expect(within(dialog()).getByRole('alert')).toHaveTextContent('the dashboard could not hand the session to the desktop app');
+    expect(box().value).toBe('Stored per branch.');
   });
 
   it('a dismissed ticket offers no Draft a reply until it is restored', async () => {

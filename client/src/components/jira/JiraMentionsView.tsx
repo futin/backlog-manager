@@ -132,12 +132,15 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
     modalIssue === null || replySession === null
       ? null
       : (sessions.data?.links.find((l) => l.key === modalIssue.key && l.sessionId === replySession) ?? null);
-  // A dispatch or Stop the dashboard accepted: both answers move, so both are re-read. A thrown sentence is the modal's refusal line.
-  const launch = async (run: () => Promise<unknown>): Promise<JiraMentionsWrite> => {
+  // A call to the agents routes as the modal's write outcome: a thrown sentence is its refusal line, never swallowed. `reread` is for a dispatch or Stop the
+  // dashboard accepted — both answers move, so both are re-read; a Desktop hand-over moves neither.
+  const attempt = async (run: () => Promise<unknown>, reread: boolean): Promise<JiraMentionsWrite> => {
     try {
       await run();
-      reload();
-      void sessions.reload();
+      if (reread) {
+        reload();
+        void sessions.reload();
+      }
       return { ok: true };
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : String(e) };
@@ -229,11 +232,11 @@ export function JiraMentionsView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onRestore={() => restore(shown.issue.key)}
           repos={replyRepos(modalIssue.key.split('-')[0], status?.repos ?? {})}
           sessionLink={sessionLink}
-          onDraft={(repo) => launch(() => dispatchReply(modalIssue.key, repo, settings))}
-          onStop={(sessionId) => launch(() => stopJira(modalIssue.key, sessionId))}
+          onDraft={(repo) => attempt(() => dispatchReply(modalIssue.key, repo, settings), true)}
+          onStop={(sessionId) => attempt(() => stopJira(modalIssue.key, sessionId), true)}
           onDiscard={() => discardDraft(modalIssue.key)}
           onPost={(text) => postReply(modalIssue.key, text)}
-          onHandover={(sessionId) => void openDesktopJira(sessionId).catch(() => undefined)}
+          onHandover={(sessionId) => attempt(() => openDesktopJira(sessionId), false)}
           onClose={() => setOpened(null)}
         />
       )}

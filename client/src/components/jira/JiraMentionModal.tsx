@@ -136,7 +136,8 @@ export function JiraMentionModal({
   onStop: (sessionId: string) => Promise<JiraMentionsWrite>;
   onDiscard: () => Promise<JiraMentionsWrite>;
   onPost: (text: string) => Promise<JiraReplyWrite>;
-  onHandover: (sessionId: string) => void;
+  /** The dashboard's hand-over to the Desktop app; its outcome goes through `write`, so a refusal is this dialog's alert line like any other write's. */
+  onHandover: (sessionId: string) => Promise<JiraMentionsWrite>;
   onClose: () => void;
 }) {
   const mounted = useMountedRef();
@@ -226,7 +227,7 @@ export function JiraMentionModal({
   const sessionActs =
     session === null ? null : (
       <>
-        <SessionChip link={sessionLink} sessionId={sessionId} onHandover={onHandover} />
+        <SessionChip link={sessionLink} sessionId={sessionId} onHandover={(id) => write(() => onHandover(id))} />
         <Chip size={28} disabled={busy || sessionId === null} onClick={sessionId === null ? undefined : () => write(() => onStop(sessionId))}>
           Stop
         </Chip>
