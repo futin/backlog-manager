@@ -175,7 +175,9 @@ the `error` verbatim and exits `1` through its generic non-2xx path — not `5`:
 `POST /api/github/sweep` (`tracker.controller.ts`, guarded like the agents POSTs) is the GitHub popover head's `Sync now`, every repo or one with `{ repo }`. It
 writes nothing: it asks `TrackerPollerService.sweepNow` for one sweep of `sweepTargets` — the named repo or every connected one, less any `off` or asleep —
 regardless of their intervals, joins a sweep already in flight, and answers `done` with no call inside `SWEEP_FLOOR_MS` (5 s) of the last one; then
-`PullRequestsService.refreshNow` re-reads those repos' PR lists, each only past `PR_TTL_MS`, and the route answers the `GET /api/trackers` payload. 400 for a
+`PullRequestsService.refreshNow` re-reads those repos' PR lists — an unnamed press each only past `PR_TTL_MS`, a press naming its repo that one at once,
+inside its TTL, through the same `dueAt` an update-branch uses, unless a read has started since the press (#505) — and the route answers the
+`GET /api/trackers` payload. 400 for a
 `repo` that fails `isRepo`, 409 `{ message: 'GitHub is not being polled' }` with nothing armed, 404 for a repo no registered GitHub project is connected to,
 429 `{ message: 'rate limited', retryAt }` for a named repo still asleep (the later of its two sleeps); a 401, a 5xx or a transport failure inside the sweep is
 the poller's to record and is a 200 here.
@@ -186,7 +188,7 @@ into GraphQL's own rate pool (`graphqlRate`), never REST's. `pulls.service.ts` (
 inside `GET /api/prs` or a write; an entry is re-read once the later of its last success (`polledAt`) and its last attempt is `PR_TTL_MS` (60 s) old, so a
 failing repo is retried once a minute too; a failure keeps the last rows and their `polledAt`; a limit sleeps one pool of the entry — `rest` or `graphql`, the one the
 failed request spent, since GitHub counts them apart (#395) — and a secondary one the poller's repo as well (marking it `rate-limited` there too). The list
-read checks `graphql`; merge and update-branch check `rest` and the poller's own REST sleep. An accepted update-branch makes the entry due again `PR_UPDATING_MS` (30 s) later, inside the TTL, so the
+read checks `graphql`; merge and update-branch check `rest` and the poller's own REST sleep. A sweep naming the repo makes the entry due at once (above). An accepted update-branch makes the entry due again `PR_UPDATING_MS` (30 s) later, inside the TTL, so the
 page's one re-read after `updating…` reaches GitHub; a list read that lands after a write spliced the repo keeps its attempt time but drops its rows; a
 successful read clears only a `graphql` sleep that has run out. `pulls.controller.ts` serves the routes:
 

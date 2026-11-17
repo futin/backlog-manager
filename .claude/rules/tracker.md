@@ -116,8 +116,10 @@ paths: ["server/src/tracker/**"]
   and the secondary detail, as its own verdict does. A typed GraphQL `RATE_LIMITED` is a limit whatever `remaining` says (`GithubResponse.rateLimited`).
   `splice` puts a write's re-read row in place without moving `polledAt`, counts down `total` on a removal and up only on a complete list, and bumps the
   entry's `splices`: a list read that lands with a different count drops its rows (the attempt still counts), and a successful read clears the `graphql` sleep only
-  when it has run out. An `update-requested` sets `dueAt = now + PR_UPDATING_MS` (`shared/types.ts`, also the client's `UPDATING_MS`): `refresh` reads an
-  entry past its `dueAt` inside the TTL too, still joining a read in flight. Each write reads its clock when its serialised turn comes. **The Jira mentions cache
+  when it has run out. An `update-requested` sets `dueAt = now + PR_UPDATING_MS` (`shared/types.ts`, also the client's `UPDATING_MS`), and a
+  `POST /api/github/sweep` naming its repo sets `dueAt` to the press's time unless a read has started since (`refreshNow`'s `pressedAt`, #505; an
+  unnamed press keeps the TTL): `refresh` reads an entry past its `dueAt` inside the TTL too, still joining a read in flight.
+  Each write reads its clock when its serialised turn comes. **The Jira mentions cache
   is the fifth** (`JiraPollerService`, `server/src/jira/poller.service.ts`, one result for the whole site, not per board): in memory, lost on restart, replaced
   whole by a check or not at all, and its `polledAt` moves on a successful check only — a failure keeps the last rows and `polledAt` and sets its own `detail`.
   It rides the board poller's chain rather than a second one, and `polledAt` rides on `GET /api/jira/mentions` and on `GET /api/jira`'s `mentions`. The thread

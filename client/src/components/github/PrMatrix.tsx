@@ -91,7 +91,7 @@ function MatrixExpand({ r, props, id }: { r: RankedPr; props: PrLayoutProps; id:
   const { pr, repo, key } = r;
   const updating = props.marks[key] !== undefined;
   const outcome = props.outcomes[key]?.kind === 'updating' ? undefined : props.outcomes[key];
-  const write = (call: () => Promise<PrWriteResult>) => props.write(key, pr.headSha, call);
+  const write = (call: () => Promise<PrWriteResult>) => props.write(key, repo.repo, pr.headSha, call);
   return (
     <tr className="prs-matrix-expand" id={id} data-testid={`pr-expand-${key}`}>
       <td colSpan={COLUMN_COUNT}>
