@@ -60,7 +60,7 @@ export function PrResolveLine({ pr, state }: { pr: PullRequestRow; state: PrReso
     );
   }
   return (
-    <p className="prs-why" data-testid="pr-resolve" role="status">
+    <p className="prs-why prs-resolve-note" data-testid="pr-resolve" role="status">
       {`resolve stopped: ${outcome.reason}`}
       {outcome.sessionId !== null && (
         <>
