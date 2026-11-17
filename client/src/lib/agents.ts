@@ -26,7 +26,16 @@ import type {
   WatchdogConfig,
   WatchdogStatus
 } from '../../../shared/types';
-import { EFFORTS, MODELS, REVIEW_EFFORTS, REVIEW_MODELS, REVIEW_SMALL_MAX_LINES_MAX, REVIEW_SMALL_MAX_LINES_MIN, reviewFlags } from '../../../shared/agent';
+import {
+  EFFORTS,
+  MODELS,
+  REVIEW_EFFORTS,
+  REVIEW_MODELS,
+  REVIEW_SMALL_MAX_LINES_MAX,
+  REVIEW_SMALL_MAX_LINES_MIN,
+  reviewFlags,
+  reviewWord
+} from '../../../shared/agent';
 import { errorOf } from './http';
 import { EXECUTE_FINISHES } from '../../../shared/types';
 
@@ -462,12 +471,11 @@ export function modelEffortFlags(model: string, effort: string): { model?: strin
 }
 
 /**
- * The Reviewer pickers' words (spec §7), one home for the Settings card and both launch sheets. `''` is the unset member of each select — `null` on the wire,
- * which `ReviewerFields` translates at the select — because a native select's value is a string. The unset model names what the agent runs
- * without a flag (Opus) so a reader can see what "default" will mean.
+ * The Reviewer pickers' options (spec §7), one home for the Settings card and both launch sheets. The words themselves come from `reviewWord` in
+ * `shared/agent.ts`, which the Run detail line's `reviewerLabel` reads too, so a picked word and the run that used it read the same. `''` is the unset member
+ * of each select — `null` on the wire, which `ReviewerFields` translates at the select — because a native select's value is a string. The unset model names
+ * what the agent runs without a flag (Opus) so a reader can see what "default" will mean.
  */
-const REVIEW_WORD: Record<string, string> = { xhigh: 'XHigh' };
-const reviewWord = (x: string): string => REVIEW_WORD[x] ?? x.charAt(0).toUpperCase() + x.slice(1);
 export const REVIEW_MODEL_OPTIONS: { value: '' | ReviewModel; label: string }[] = [
   { value: '', label: 'Agent default (Opus)' },
   ...REVIEW_MODELS.map((m) => ({ value: m, label: reviewWord(m) }))

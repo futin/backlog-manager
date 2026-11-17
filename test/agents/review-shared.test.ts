@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { DEFAULT_REVIEW_CONFIG, REVIEW_FLAG, parseReviewConfig, reviewFlags, reviewerLabel } from '../../shared/agent';
+import { DEFAULT_REVIEW_CONFIG, REVIEW_FLAG, parseReviewConfig, reviewFlags, reviewWord, reviewerLabel } from '../../shared/agent';
 import type { ReviewConfig } from '../../shared/types';
 
 /** The reviewer config's shared helpers. `skills/backlog-review/tools/review.test.mjs` pins the twin in `review.mjs` against the same source. */
@@ -115,6 +115,20 @@ describe('reviewerLabel', () => {
   it('reads an unset config', () => {
     expect(reviewerLabel(undefined)).toBe('Reviewer: default');
     expect(reviewerLabel(null)).toBe('Reviewer: default');
+  });
+});
+
+// The one home of the Reviewer words (#533): the pickers and the Run detail line both read it, so these rows are what both surfaces print.
+describe('reviewWord', () => {
+  it.each<[string, string]>([
+    ['xhigh', 'XHigh'],
+    ['opus', 'Opus'],
+    ['fable', 'Fable'],
+    ['max', 'Max'],
+    ['low', 'Low'],
+    ['', '']
+  ])('prints %j as %j', (input, expected) => {
+    expect(reviewWord(input)).toBe(expected);
   });
 });
 

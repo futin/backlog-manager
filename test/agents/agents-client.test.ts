@@ -9,10 +9,12 @@ import {
   cancelPauseOrchestrate,
   parseSmallMaxLines,
   pauseOrchestrate,
+  REVIEW_EFFORT_OPTIONS,
+  REVIEW_MODEL_OPTIONS,
   sessionUrl,
   startOrchestrate
 } from '../../client/src/lib/agents';
-import { REVIEW_SMALL_MAX_LINES_MAX, REVIEW_SMALL_MAX_LINES_MIN } from '../../shared/agent';
+import { REVIEW_EFFORTS, REVIEW_MODELS, REVIEW_SMALL_MAX_LINES_MAX, REVIEW_SMALL_MAX_LINES_MIN, reviewWord } from '../../shared/agent';
 import rawFixture from '../fixtures/orchestrator-run.json';
 import type {
   AgentDispatchRequest,
@@ -398,5 +400,19 @@ describe('parseSmallMaxLines', () => {
     ['12a', null]
   ])('parses %j as %p', (input, expected) => {
     expect(parseSmallMaxLines(input)).toBe(expected);
+  });
+});
+
+// The pickers print the same words as the Run detail line (#533): every option but the unset one is a member of the shared list, in its order, labelled by
+// the shared `reviewWord` — a local word map would pass the render suites until the day the two spellings drift, and this row is what catches it first.
+describe('the Reviewer picker options', () => {
+  it.each([
+    ['model', REVIEW_MODEL_OPTIONS, REVIEW_MODELS, 'Agent default (Opus)'],
+    ['effort', REVIEW_EFFORT_OPTIONS, REVIEW_EFFORTS, 'Default']
+  ] as [string, { value: string; label: string }[], readonly string[], string][])('labels every %s option with reviewWord', (_n, options, members, unset) => {
+    expect(options[0]).toEqual({ value: '', label: unset });
+    const rest = options.slice(1);
+    expect(rest.map((o) => o.value)).toEqual([...members]);
+    for (const o of rest) expect(o.label).toBe(reviewWord(o.value));
   });
 });
