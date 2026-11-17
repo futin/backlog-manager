@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 
-import { ADF_MEDIA_NAME_MAX, ADF_PLACEHOLDER_RE, adfToMarkdown, adfToText, escapeMarkdown } from '../../server/src/jira/adf';
+import { ADF_MEDIA_NAME_MAX, ADF_PLACEHOLDER_RE, adfToMarkdown, adfToText, escapeMarkdown, replyDoc } from '../../server/src/jira/adf';
 
 /**
  * Jira integration, spec §8 (ADF → Markdown) and §14 P10 (the node inventory seen on real descriptions). One minimal fixture per node kind; every fixture is
@@ -408,5 +408,67 @@ describe('adfToText', () => {
 
   it.each([null, undefined, 'a string', 42, [], {}])('%j → empty string', (value) => {
     expect(adfToText(value)).toBe('');
+  });
+});
+
+/**
+ * The WRITE side (Jira › Mentions, plan Task 5): the one document this server ever sends Jira, a reply that opens by @-mentioning the person it answers.
+ * Plain text in, ADF out — paragraphs on blank lines, a `hardBreak` on a single newline, nothing empty, so Jira never sees a node it would refuse.
+ */
+describe('replyDoc', () => {
+  const MARA = { accountId: 'acc-m', name: 'Mara Ilić' };
+  const mention = { type: 'mention', attrs: { id: 'acc-m', text: '@Mara Ilić' } };
+
+  it('opens the first paragraph with the mention and a space, and puts a later paragraph after it', () => {
+    expect(replyDoc(MARA, 'Hi\n\nSecond')).toEqual({
+      version: 1,
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [mention, { type: 'text', text: ' Hi' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Second' }] }
+      ]
+    });
+  });
+
+  it('turns a single newline, CRLF included, into a hardBreak inside one paragraph', () => {
+    expect(replyDoc(MARA, 'a\r\nb').content).toEqual([
+      { type: 'paragraph', content: [mention, { type: 'text', text: ' a' }, { type: 'hardBreak' }, { type: 'text', text: 'b' }] }
+    ]);
+  });
+
+  it('makes no empty paragraph from a run of blank lines, a whitespace-only line among them', () => {
+    expect(replyDoc(MARA, 'a\n\n\n\nb').content).toHaveLength(2);
+    expect(replyDoc(MARA, 'a\n  \n\t\nb').content).toEqual([
+      { type: 'paragraph', content: [mention, { type: 'text', text: ' a' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'b' }] }
+    ]);
+  });
+
+  it('trims trailing spaces and newlines, so the document ends on the last word', () => {
+    expect(replyDoc(MARA, 'Thanks  \n\n \n').content).toEqual([{ type: 'paragraph', content: [mention, { type: 'text', text: ' Thanks' }] }]);
+  });
+
+  it('targets the given account id with exactly one @, even for a name that already carries one', () => {
+    const first = (d: ReturnType<typeof replyDoc>) => d.content[0].content[0];
+    expect(first(replyDoc(MARA, 'x'))).toEqual(mention);
+    expect(first(replyDoc({ accountId: 'acc-m', name: '@Mara Ilić' }, 'x'))).toEqual(mention);
+  });
+
+  it("leaves the mention node out for an author with no account id (authorOf's '' for an author-less comment), and the leading space with it", () => {
+    const anon = { accountId: '', name: 'Someone' };
+    expect(replyDoc(anon, 'Hi\nthere\n\nSecond')).toEqual({
+      version: 1,
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'Hi' }, { type: 'hardBreak' }, { type: 'text', text: 'there' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Second' }] }
+      ]
+    });
+    expect(JSON.stringify(replyDoc(anon, 'x'))).not.toContain('mention');
+    expect(replyDoc(anon, '  ').content).toEqual([{ type: 'paragraph', content: [] }]);
+  });
+
+  it('round-trips through the read side as the person would see it', () => {
+    expect(adfToMarkdown(replyDoc(MARA, 'Hi there\nline two\n\nSecond')).markdown).toBe('@Mara Ilić Hi there\nline two\n\nSecond');
   });
 });

@@ -4,6 +4,7 @@ import { askedAge, earlierText, excerptParts, mentionCards, mentionIssueType, ty
 import { Chip } from '../ui/Chip';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
+import { Pill } from '../ui/Pill';
 
 /**
  * DESIGN.md §8.9.7 — Jira › Mentions › Cards: one card per ticket (Jira mentions phase 1, Task 9; spec "The page", Cards; mock `ListB.dc.html`).
@@ -96,6 +97,12 @@ export function JiraMentionCards({
             </div>
             <div className="jira-mentions-card-foot">
               {more !== null && <span className="jira-mentions-card-more">{more}</span>}
+              {/* The same wrapper as the List row's, so the marker is one shape on both layouts and never shrinks inside a crowded foot. */}
+              {issue.draft !== null && (
+                <span className="jira-mentions-marker">
+                  <Pill tone="warn">Draft ready</Pill>
+                </span>
+              )}
               <span className={issue.boards.length === 0 ? 'jira-mentions-card-boards muted' : 'jira-mentions-card-boards'}>
                 {issue.boards.length === 0 ? 'on none of your boards' : `on ${issue.boards.join(', ')}`}
               </span>

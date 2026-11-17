@@ -1,4 +1,5 @@
 import type { DeliveryFilter } from './delivery';
+import type { Settings } from './settings';
 import { errorOf } from './http';
 import { elapsedSince, formatCreated } from './item-age';
 import { countdownReading, pollAge, pollProgress, type PollReading } from './tracker';
@@ -914,7 +915,9 @@ export function jiraSettingOf(action: JiraAction): string {
  */
 export function defaultModeFor(action: JiraAction, setting: '' | PermissionMode): PermissionMode {
   if (setting !== '') return setting;
-  // `review` edits code and pushes like `execute`, so it takes the same default (CodeRabbit spec §5.2); only `context` reads and plans.
+  // `review` edits code and pushes like `execute`, so it takes the same default (CodeRabbit spec §5.2); only `context` reads and plans. `reply` takes
+  // `acceptEdits` too, though its session writes nothing: it must run `jira.mjs` through Bash, which `plan` mode refuses, and read-only is the prompt's
+  // own rule (plan ruling R3), as `review` and `execute` rely on theirs.
   return action === 'context' ? 'plan' : 'acceptEdits';
 }
 
@@ -1395,4 +1398,42 @@ export async function unlinkJira(key: string, sessionId: string): Promise<void> 
 /** `POST /api/agents/jira-open-desktop` — the dashboard's own hand-over to the Desktop app, guarded there (C2). Rejects with the server's sentence. */
 export async function openDesktopJira(sessionId: string): Promise<void> {
   await postAgents<{ ok: true }>('/api/agents/jira-open-desktop', { sessionId });
+}
+
+/**
+ * The launch a mention's `Draft a reply` makes, with no sheet (plan ruling R3): the launch sheet's defaults for model, effort and permission, remote control
+ * on, and no `surface` (a dashboard launch). `mode`, `assign` and `transitionId` are sent EXPLICITLY, as `'none'`, `false` and `null`: the server refuses a
+ * `reply` body that omits them or carries anything else (ruling R2), so a read-only drafting session can never get a worktree, an assign, a transition or an
+ * edited prompt — which could carry thread text — from this call.
+ */
+export function dispatchReply(
+  key: string,
+  repo: string,
+  settings: Pick<Settings, 'dispatchDefaultModel' | 'dispatchDefaultEffort' | 'jiraDefaultPermission'>
+): Promise<JiraDispatchResult> {
+  const { dispatchDefaultModel: model, dispatchDefaultEffort: effort } = settings;
+  return dispatchJira({
+    key,
+    repo,
+    action: 'reply',
+    assign: false,
+    transitionId: null,
+    mode: 'none',
+    ...(model === '' ? {} : { model }),
+    ...(effort === '' ? {} : { effort }),
+    permissionMode: defaultModeFor('reply', settings.jiraDefaultPermission),
+    remoteControl: true
+  });
+}
+
+/**
+ * The repos the reply picker offers: the project's own, in `jira.json` order, then every other mapped repo, each once. An unmapped project therefore gets
+ * every mapped repo (a ticket's project need not be mapped for a read-only draft), and nothing mapped gives `[]` — the modal then says there is no repo.
+ */
+export function replyRepos(projectKey: string, repos: Record<string, string[]>): string[] {
+  const own = repos[projectKey] ?? [];
+  const rest = Object.entries(repos)
+    .filter(([k]) => k !== projectKey)
+    .flatMap(([, list]) => list);
+  return [...new Set([...own, ...rest])];
 }

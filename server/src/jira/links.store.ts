@@ -53,7 +53,7 @@ export function jiraLinksFile(env: NodeJS.ProcessEnv = process.env): string {
   return env.BM_JIRA_LINKS_FILE || join(homedir(), '.backlog-manager', 'settings', 'jira-links.json');
 }
 
-const HOWS: readonly JiraLinkHow[] = ['run', 'branch', 'manual'];
+const HOWS: readonly JiraLinkHow[] = ['run', 'branch', 'manual', 'reply'];
 const REASONS: readonly JiraEndReason[] = ['idle', 'stopped', 'expired', 'gone'];
 
 const EMPTY = (): JiraLinksState => ({ links: [], suppressed: [], neverLink: [] });

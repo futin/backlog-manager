@@ -51,7 +51,7 @@ base is usually the repo's usual one, but "sometimes we start from a feature bra
 
   A later "Jira as an orchestrator source" project can reuse what this one builds.
 - Writing the branch link into Jira. The board's Jira writes stay assign and transition
-  ([invariant](../../subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)). Jira's own GitHub/GitLab development panel picks
+  ([invariant](../../subsystems/invariants.md#the-boards-jira-writes-are-assign-transition-and-the-mention-reply-nothing-else)). Jira's own GitHub/GitLab development panel picks
   the link up from the key in the branch name, at no cost to us.
 - One session spanning several repos.
 - Any git write by the server.

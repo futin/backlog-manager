@@ -67,8 +67,8 @@ through `POST /api/settings/review` and read by `review.mjs` — server → tool
 In `settings/` too sits `jira-links.json`, which links each Jira ticket to the agent sessions working it: the
 server alone
 reads and writes it, whole and atomically, and no skill reads it ([subsystems/jira.md](subsystems/jira.md#the-link-store)).
-In `settings/` too sits `jira-mentions.json`, the mentions the reader dismissed: the server alone writes it, through `POST /api/jira/mentions/dismiss` and
-`/mentions/restore`, and no skill reads it ([subsystems/jira.md](subsystems/jira.md#mentions-jira-mentions-phase-1-spec)).
+In `settings/` too sits `jira-mentions.json`, the mentions the reader dismissed: the server alone writes it, through `POST /api/jira/mentions/dismiss`,
+`/mentions/restore` and, for a ticket's reply draft, `/mentions/draft` and `/mentions/draft/discard`, and no skill reads it ([subsystems/jira.md](subsystems/jira.md#mentions-jira-mentions-phase-1-spec)).
 
 ### The API — [full doc](subsystems/api.md)
 
@@ -101,11 +101,10 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   Atlassian's gateway, a poller that sweeps the boards in `~/.backlog-manager/settings/jira.json` into in-memory caches (the second cache whose age is
   rendered), a mentions cache of the open comments that @-mention you (the fifth), and twelve read routes under `/api/jira` (`/prompt` composes a Run
   session's prompt; `/refs` and `/worktrees` read a mapped repo's git; `/sessions` lists the linked sessions; `/mentions` is the cached list and
-  `/issue/:key/thread` a fresh read of one ticket's comments), plus thirteen guarded POSTs — six config writes to `jira.json` (`/boards`,
+  `/issue/:key/thread` a fresh read of one ticket's comments), plus sixteen guarded POSTs — six config writes to `jira.json` (`/boards`,
   `/boards/delete`, `/repos`, since phase 5a
-  `/skills`, `/skills/delete`, and `/repo-defaults`), the two sweeps `/boards/sweep` and `/sweep`, three for mentions (`/mentions/sweep`, and
-  `/mentions/dismiss` and `/mentions/restore`, which write `~/.backlog-manager/settings/jira-mentions.json`) and, since phase 3, two writes to Jira itself
-  (`/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }`), the only writes this server makes to Jira. A link store of Jira sessions (several
+  `/skills`, `/skills/delete`, and `/repo-defaults`), the two sweeps `/boards/sweep` and `/sweep`, six for mentions (`/mentions/sweep`, `/mentions/dismiss`, `/mentions/restore`, `/mentions/draft` and `/mentions/draft/discard`, which write `~/.backlog-manager/settings/jira-mentions.json`, and `/mentions/reply`) and, since phase 3, two writes to Jira itself
+  (`/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }`), plus the reply comment `/mentions/reply` posts on a person's click, the only writes this server makes to Jira. A link store of Jira sessions (several
   per ticket, kept in
   `~/.backlog-manager/settings/jira-links.json`) sits here too, driven from
   `agents/` by `POST /api/agents/dispatch-jira`, `/jira-stop`, `/jira-link` and `/jira-unlink` — part of the
@@ -186,8 +185,8 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   `jira.json`'s six guarded write routes, `POST /api/jira/boards`,
   `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, the mentions POSTs `POST
   /api/jira/mentions/sweep` (which only checks now and writes nothing),
-  `/mentions/dismiss` and `/mentions/restore` (which write `settings/jira-mentions.json`), beside the two writes to Jira itself,
-  `POST /api/jira/issue/assign` and `/issue/transition`, and the persisted link store `JiraLiveService` (every session linked to a ticket key, live and ended,
+  `/mentions/dismiss`, `/mentions/restore`, `/mentions/draft` and `/mentions/draft/discard` (which write `settings/jira-mentions.json`), beside the writes to Jira itself,
+  `POST /api/jira/issue/assign`, `/issue/transition` and `/mentions/reply` (the reply comment, on a person's click), and the persisted link store `JiraLiveService` (every session linked to a ticket key, live and ended,
   kept across a restart),
   → [docs/subsystems/jira.md](subsystems/jira.md)), `gitlab/` (the read-only GitLab client, the MR poller and its cache, `GET /api/gitlab` and
   `POST /api/gitlab/sweep`, → [docs/subsystems/gitlab.md](subsystems/gitlab.md)) — those four are the outbound-calling modules, and the ONLY four —

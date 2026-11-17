@@ -126,6 +126,114 @@ describe('reserve / confirm / release / end', () => {
   });
 });
 
+describe('the reply reservation kind', () => {
+  const REPLY_META = { ...META, action: 'reply' } as const;
+
+  it('a reply is not blocked by a live run, and a second reply is refused while starting and while live', () => {
+    live.reserve('PAY-1', REPO);
+    live.confirm('PAY-1', 'run-1', META);
+    expect(live.reserve('PAY-1', REPO, 'reply')).toBe(true);
+    expect(live.reserve('PAY-1', REPO, 'reply')).toBe(false);
+    live.confirm('PAY-1', 'rep-1', REPLY_META, 'reply');
+    expect(live.reserve('PAY-1', REPO, 'reply')).toBe(false);
+  });
+
+  it('a run reserves while a reply is starting or live: the kinds coexist', () => {
+    expect(live.reserve('PAY-1', REPO, 'reply')).toBe(true);
+    expect(live.reserve('PAY-1', REPO)).toBe(true);
+    live.confirm('PAY-1', 'rep-1', REPLY_META, 'reply');
+    expect(live.reserve('PAY-2', REPO)).toBe(true);
+    expect(live.reserve('PAY-1', REPO)).toBe(false); // its own run reservation is still pending
+  });
+
+  it('get and snapshot never show a reply, starting or live', () => {
+    live.reserve('PAY-1', REPO, 'reply');
+    expect(live.get('PAY-1')).toBeNull();
+    expect(live.snapshot()).toEqual({});
+    live.confirm('PAY-1', 'rep-1', REPLY_META, 'reply');
+    expect(live.get('PAY-1')).toBeNull();
+    expect(live.snapshot()).toEqual({});
+    expect(live.confirmed()).toEqual([]);
+    expect(live.hasConfirmed()).toBe(false);
+  });
+
+  it('confirm writes a how: reply, action: reply link', () => {
+    live.reserve('PAY-1', REPO, 'reply');
+    live.confirm('PAY-1', 'rep-1', REPLY_META, 'reply');
+    expect(live.liveLinks()).toEqual([expect.objectContaining({ key: 'PAY-1', sessionId: 'rep-1', how: 'reply', action: 'reply', repo: REPO })]);
+  });
+
+  it('release of a reply drops only the reply reservation; a run reservation survives, and the reverse', () => {
+    live.reserve('PAY-1', REPO);
+    live.reserve('PAY-1', REPO, 'reply');
+    live.release('PAY-1', 'reply');
+    expect(live.get('PAY-1')?.sessionId).toBeNull();
+    expect(live.reserve('PAY-1', REPO, 'reply')).toBe(true);
+    live.release('PAY-1');
+    expect(live.get('PAY-1')).toBeNull();
+    expect(live.replySession('PAY-1')).toEqual({ sessionId: null, startedAt: new Date(T0).toISOString(), repo: REPO });
+  });
+
+  it('replySession: starting, then the link id, then null once the link ends; other keys see null', () => {
+    expect(live.replySession('PAY-1')).toBeNull();
+    live.reserve('PAY-1', REPO, 'reply');
+    expect(live.replySession('PAY-1')).toEqual({ sessionId: null, startedAt: new Date(T0).toISOString(), repo: REPO });
+    expect(live.replySession('PAY-2')).toBeNull();
+    expect(live.reserve('PAY-2', REPO, 'reply')).toBe(true);
+    live.confirm('PAY-1', 'rep-1', REPLY_META, 'reply');
+    expect(live.replySession('PAY-1')).toEqual({ sessionId: 'rep-1', startedAt: new Date(T0).toISOString(), repo: REPO });
+    live.end('PAY-1', 'rep-1', 'stopped');
+    expect(live.replySession('PAY-1')).toBeNull();
+  });
+
+  it('replySession answers the newest live reply link', () => {
+    live.reserve('PAY-1', REPO, 'reply');
+    live.confirm('PAY-1', 'old', REPLY_META, 'reply');
+    live.end('PAY-1', 'old', 'idle');
+    jest.setSystemTime(T0 + 1000);
+    live.reserve('PAY-1', REPO, 'reply');
+    live.confirm('PAY-1', 'new', REPLY_META, 'reply');
+    expect(live.replySession('PAY-1')?.sessionId).toBe('new');
+  });
+
+  it('JIRA_LIVE_CAP counts reply reservations and reply links', () => {
+    for (let i = 0; i < JIRA_LIVE_CAP; i++) live.reserve(`PAY-${i}`, REPO, 'reply');
+    expect(live.reserve('PAY-X', REPO, 'reply')).toBe(false); // all starting: nothing to evict
+    expect(live.reserve('PAY-X', REPO)).toBe(false);
+  });
+
+  it('a confirmed reply is evicted oldest-first at the cap, never a starting one', () => {
+    live.reserve('PAY-0', REPO, 'reply');
+    live.confirm('PAY-0', 'rep-0', REPLY_META, 'reply');
+    for (let i = 1; i < JIRA_LIVE_CAP; i++) live.reserve(`PAY-${i}`, REPO, 'reply');
+    jest.setSystemTime(T0 + 1000);
+    expect(live.reserve('PAY-NEW', REPO, 'reply')).toBe(true);
+    expect(live.replySession('PAY-0')).toBeNull();
+    expect(live.replySession('PAY-1')).not.toBeNull();
+  });
+
+  it('a stale reply reservation is dropped at the top of the next call', () => {
+    live.reserve('PAY-1', REPO, 'reply');
+    jest.setSystemTime(T0 + JIRA_LIVE_TTL_MS + 1);
+    expect(live.replySession('PAY-1')).toBeNull();
+    expect(live.reserve('PAY-1', REPO, 'reply')).toBe(true);
+  });
+
+  it('a how: reply link survives save + load', () => {
+    live.reserve('PAY-1', REPO, 'reply');
+    live.confirm('PAY-1', 'rep-1', REPLY_META, 'reply');
+    expect(new JiraLiveService().liveLinks()).toEqual([expect.objectContaining({ key: 'PAY-1', how: 'reply', action: 'reply' })]);
+  });
+
+  it('unlink refuses a reply link and suppresses nothing', () => {
+    live.reserve('PAY-1', REPO, 'reply');
+    live.confirm('PAY-1', 'rep-1', REPLY_META, 'reply');
+    expect(live.unlink('PAY-1', 'rep-1')).toBe('reply');
+    expect(live.liveLinks()).toHaveLength(1);
+    expect(live.isSuppressed('PAY-1', 'rep-1')).toBe(false);
+  });
+});
+
 describe('confirmed / hasConfirmed', () => {
   it('a starting entry alone is neither listed nor counted', () => {
     live.reserve('PAY-1', REPO);

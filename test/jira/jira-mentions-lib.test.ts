@@ -5,6 +5,7 @@ import { accessPhrase } from '../../client/src/lib/jira';
 import {
   askedAge,
   checkedAge,
+  draftState,
   excerptParts,
   failureOfMentions,
   isJiraMentionsPayload,
@@ -12,9 +13,11 @@ import {
   mentionRows,
   mentionsBand,
   mentionsCheckGate,
+  postJiraReply,
+  replyTo,
   type JiraMentionsFailure
 } from '../../client/src/lib/jira-mentions';
-import { JIRA_MENTIONS_ISSUE_CAP, type JiraMention, type JiraMentionIssue, type JiraMentionsConfigured } from '../../shared/types';
+import { JIRA_MENTIONS_ISSUE_CAP, type JiraMentionDraft, type JiraMentionReplySession, type JiraMention, type JiraMentionIssue, type JiraMentionsConfigured } from '../../shared/types';
 
 /*
   `lib/jira-mentions.ts` read directly (spec "The page", "Sync now, two ways"; DESIGN.md §8.9.7). The page, hook and chip suites reach these functions
@@ -40,7 +43,7 @@ function mention(commentId: string, agoMs: number, excerpt = '@Ana can you check
 }
 
 function issue(key: string, mentions: JiraMention[]): JiraMentionIssue {
-  return { key, summary: `Summary ${key}`, type: 'Bug', status: { name: 'To Do', category: 'new' }, boards: [], mentions };
+  return { key, summary: `Summary ${key}`, type: 'Bug', status: { name: 'To Do', category: 'new' }, boards: [], mentions, draft: null, session: null };
 }
 
 function data(over: Partial<JiraMentionsConfigured> = {}): JiraMentionsConfigured {
@@ -204,5 +207,64 @@ describe('mentionCards', () => {
     const [card] = mentionCards(rows);
     expect(card.mention.commentId).toBe('2');
     expect(card.earlier).toBe(1);
+  });
+});
+
+describe('the reply draft shape and derivations', () => {
+  const draft = (sessionId = 's-1'): JiraMentionDraft => ({ text: 'Hi', at: ago(MIN), sessionId });
+  const session = (sessionId: string | null = 's-1'): JiraMentionReplySession => ({ sessionId, startedAt: ago(MIN), repo: '/r/a' });
+  const withDS = (d: JiraMentionDraft | null, s: JiraMentionReplySession | null): JiraMentionIssue => ({ ...issue('SUP-1', [mention('1', HOUR)]), draft: d, session: s });
+
+  it('the guard takes a ticket with or without draft/session (an older server) and refuses a draft that is not an object or null', () => {
+    const { draft: _d, session: _s, ...older } = issue('SUP-1', [mention('1', HOUR)]);
+    expect(isJiraMentionsPayload(data({ issues: [older as JiraMentionIssue] }))).toBe(true);
+    expect(isJiraMentionsPayload(data({ issues: [withDS(draft(), session())] }))).toBe(true);
+    expect(isJiraMentionsPayload(data({ issues: [{ ...issue('SUP-1', []), draft: 'x' as unknown as JiraMentionDraft }] }))).toBe(false);
+    expect(isJiraMentionsPayload(data({ issues: [{ ...issue('SUP-1', []), session: 3 as unknown as JiraMentionReplySession }] }))).toBe(false);
+  });
+
+  it('draftState: idle, drafting (also while starting), ready (no session, or the live session wrote it), replacing (an older session wrote it)', () => {
+    expect(draftState(withDS(null, null))).toBe('idle');
+    expect(draftState(withDS(null, session()))).toBe('drafting');
+    expect(draftState(withDS(null, session(null)))).toBe('drafting');
+    expect(draftState(withDS(draft(), null))).toBe('ready');
+    expect(draftState(withDS(draft('s-1'), session('s-1')))).toBe('ready');
+    expect(draftState(withDS(draft('s-old'), session('s-new')))).toBe('replacing');
+    expect(draftState(withDS(draft('s-old'), session(null)))).toBe('replacing');
+  });
+
+  it('replyTo is the newest mention’s author', () => {
+    expect(replyTo(issue('SUP-1', [mention('9', MIN), mention('8', HOUR)]))).toEqual({ accountId: 'acc-9', name: 'Author 9' });
+    expect(replyTo(issue('SUP-1', []))).toBeNull();
+  });
+});
+
+describe('postJiraReply', () => {
+  const fetchMock = jest.fn();
+  beforeEach(() => {
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+  const res = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
+
+  it('resolves the payload and the posted comment on a 200, sending { key, text }', async () => {
+    fetchMock.mockReturnValueOnce(res({ ...data(), posted: { id: '77', url: 'https://x/browse/SUP-1?focusedCommentId=77' } }));
+    const out = await postJiraReply('SUP-1', 'Thanks');
+    expect(out.posted).toEqual({ id: '77', url: 'https://x/browse/SUP-1?focusedCommentId=77' });
+    expect(out.payload.configured).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/jira/mentions/reply');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ key: 'SUP-1', text: 'Thanks' });
+  });
+
+  it('rejects with the server’s sentence on the 400, and keeps a 503’s retryAt', async () => {
+    fetchMock.mockReturnValueOnce(res({ error: 'text too long' }, 400));
+    await expect(postJiraReply('SUP-1', 'x')).rejects.toMatchObject({ message: 'text too long', status: 400, retryAt: null });
+    const until = ago(-5 * MIN);
+    fetchMock.mockReturnValueOnce(res({ error: 'Jira asked to wait', retryAt: until }, 503));
+    await expect(postJiraReply('SUP-1', 'x')).rejects.toMatchObject({ message: 'Jira asked to wait', status: 503, retryAt: until });
+  });
+
+  it('rejects a 200 without a posted comment as malformed', async () => {
+    fetchMock.mockReturnValueOnce(res(data()));
+    await expect(postJiraReply('SUP-1', 'x')).rejects.toMatchObject({ status: 0 });
   });
 });

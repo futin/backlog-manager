@@ -21,7 +21,7 @@ import { jiraEnv, repoRoots } from '../jira/env.util';
 import { JiraLiveService } from '../jira/live.service';
 import { JiraPollerService } from '../jira/poller.service';
 import type { JiraIssueWriteOutcome } from '../jira/poller.service';
-import { composeJiraPrompt, resolveJiraActionOrThrow } from '../jira/prompt.util';
+import { anyProjectRepoOrThrow, composeJiraPrompt, resolveJiraActionOrThrow } from '../jira/prompt.util';
 import type { JiraComposeAction } from '../jira/prompt.util';
 import { readRepoRefs } from '../jira/refs.util';
 import { jiraWriteOrThrow, unwrapJira } from '../jira/unwrap.util';
@@ -95,6 +95,14 @@ interface ReviewLaunch {
  *  8. `live.confirm`, `reconciler.arm()` and the answer — or, for a desktop answer with no id, `live.release` and a `session: null` answer. A review's branch
  *     hold is dropped at either: the confirmed link's stored `branch` takes over the gate, and an id-less session is one nothing can see to gate on.
  *
+ * A REPLY (Jira mentions, "Draft a reply") takes the same path with three differences. Step 2's repo rule is replaced, and preceded by the open-mention gate:
+ * the key must be in the mentions payload's `issues` (not cached, or every mention on it dismissed, is 400 `<KEY> has no open mention` — there is nothing to
+ * answer), then the repo must be mapped to ANY project (`anyProjectRepoOrThrow`, shared with the preview), because most tickets a person is @-mentioned on
+ * live in projects they never mapped. Step 4 reserves in the reply's own map (`reserve(key, repo, 'reply')`), so a Run and a reply draft on one key coexist and
+ * only a second reply is refused (409 `a reply is already being drafted for <KEY>`); every release and the `confirm` name that kind, so no failure path of a
+ * reply can drop a Run's reservation. Step 6 never writes: the controller's R2 shape made `assign` false and `transitionId` null. The answer's `startedAt` is
+ * the reply session's (`replySession`), since `get` is the Run's reader and would answer a Run on the same key.
+ *
  * Every failure from step 5 on runs through one `catch` that releases the reservation, so no failure class can leave a key `starting` until the 8-hour expiry
  * — a retry after any of them is a fresh Start, never a 409. `release` only drops a STARTING entry, so the catch cannot take down a session that did start.
  * The same `catch` drops a review's branch hold, by its token.
@@ -127,11 +135,22 @@ export class JiraDispatchService {
     const action: JiraComposeAction | null = req.action === 'review' ? null : resolveJiraActionOrThrow(req.action, config.skills);
     // A project key holds no `-` (`JIRA_PROJECT_KEY_RE`), so the first one ends it.
     const project = req.key.slice(0, req.key.indexOf('-'));
+    const kind = req.action === 'reply' ? 'reply' : 'run';
     // Normalised exactly as `/prompt` does it and as `parseReposWrite` stored it: the mapping is compared, the gate asked and the session spawned in this one
-    // spelling, which is also the `{repo}` the prompt carries — so the preview and the spawned prompt are the same text.
-    const repo = normaliseRepoPath(req.repo, homedir());
-    if (repo === null || !(config.repos[project] ?? []).includes(repo)) {
-      throw new HttpException({ error: `${req.repo} is not mapped to ${project}` }, 400);
+    // spelling, which is also the `{repo}` the prompt carries — so the preview and the spawned prompt are the same text. A reply asks first whether there is
+    // anything to answer (from the poller's memory, no call), then maps its repo against every project rather than the key's own (header).
+    let repo: string | null;
+    if (kind === 'reply') {
+      const mentions = this.poller.mentionsPayload();
+      if (!mentions.configured || !mentions.issues.some((issue) => issue.key === req.key)) {
+        throw new HttpException({ error: `${req.key} has no open mention` }, 400);
+      }
+      repo = anyProjectRepoOrThrow(req.repo, config.repos, homedir());
+    } else {
+      repo = normaliseRepoPath(req.repo, homedir());
+      if (repo === null || !(config.repos[project] ?? []).includes(repo)) {
+        throw new HttpException({ error: `${req.repo} is not mapped to ${project}` }, 400);
+      }
     }
 
     const status = await this.agents.status();
@@ -153,7 +172,7 @@ export class JiraDispatchService {
 
     // From here to the branch hold's insert there is no `await`: the key reservation, the branch gate's reads (the hold map, the live links, the kept rows,
     // `mainCheckoutOf`'s synchronous file read) and the insert run in one turn of the event loop, so of two reviews racing for one branch exactly one holds it.
-    if (!this.live.reserve(req.key, repo)) throw this.busy(req.key);
+    if (!this.live.reserve(req.key, repo, kind)) throw kind === 'reply' ? this.replyBusy(req.key) : this.busy(req.key);
     let hold: BranchHold | null = null;
     if (review !== null) {
       const branch = review.mr.sourceBranch;
@@ -167,7 +186,7 @@ export class JiraDispatchService {
     try {
       return await this.launch(req, composeAction, repo, workspace, status.spawnMaxPermission, review === null ? null : { mr: review.mr, hold });
     } catch (err) {
-      this.live.release(req.key);
+      this.live.release(req.key, kind);
       this.dropHold(hold);
       throw err;
     }
@@ -321,8 +340,11 @@ export class JiraDispatchService {
 
     // A dashboard from before the desktop hand-over: the app took the launch and minted its own id, so there is no session to confirm, watch or stop.
     // Released, not left `starting`, or the key would refuse every Start until the 8-hour expiry. Today's dashboard answers an id and takes the path below.
+    const kind = req.action === 'reply' ? 'reply' : 'run';
     if (!('sessionId' in spawned)) {
-      this.live.release(req.key);
+      // Unreachable for a reply today — R2 refuses its desktop surface, and `launchInProject` turns an id-less answer to a launch without one into a 502 —
+      // but the kind is still named, so no later change to either can make a reply's branch here drop the Run's reservation on the same key.
+      this.live.release(req.key, kind);
       this.dropHold(review?.hold ?? null);
       return { surface: 'desktop', assigned, transitioned: transition?.name ?? null, session: null };
     }
@@ -338,7 +360,7 @@ export class JiraDispatchService {
       model: req.model ?? null,
       effort: req.effort ?? null,
       snapshot: { summary: detail.summary, type: detail.type.name, parentKey: detail.parent?.key ?? null }
-    });
+    }, kind);
     // The link now stores the review's branch, so the gate's link read covers it from here; holding it too would outlive the session's end.
     this.dropHold(review?.hold ?? null);
     // The map now holds a session the dashboard can end without telling us; the reconciler is what notices. Idempotent, and only a `setTimeout` — nothing here awaits it.
@@ -347,7 +369,12 @@ export class JiraDispatchService {
       sessionId: spawned.sessionId,
       assigned,
       transitioned: transition?.name ?? null,
-      session: { name: jiraSessionName(req.key), startedAt: this.live.get(req.key)?.startedAt ?? new Date().toISOString(), repo }
+      // `get` is the Run's reader: on a key holding both, it would answer the Run's start for a reply.
+      session: {
+        name: jiraSessionName(req.key),
+        startedAt: (kind === 'reply' ? this.live.replySession(req.key)?.startedAt : this.live.get(req.key)?.startedAt) ?? new Date().toISOString(),
+        repo
+      }
     };
   }
 
@@ -465,13 +492,15 @@ export class JiraDispatchService {
   /**
    * `POST /api/agents/jira-unlink` — `/jira unlink <KEY>` (spec C9): removes a `branch` or `manual` link and remembers the pair so detection never re-adds it.
    * No dashboard call, so it works with dispatch off. A `run` link refuses (409): dropping it would free the one-run gate under a live Run session, and
-   * only Stop ends one. `missing` is a pair the store does not hold, 404.
+   * only Stop ends one; a `reply` link refuses too (409), its Stop being the mention's. `missing` is a pair the store does not hold, 404.
    */
   unlink(key: string, sessionId: string): { ok: true } {
     const id8 = sessionId.slice(0, 8);
     switch (this.live.unlink(key, sessionId)) {
       case 'run':
         throw new HttpException({ error: `${key} was started by Run ▾ — stop it from the board instead` }, 409);
+      case 'reply':
+        throw new HttpException({ error: `${key} is drafting a reply — stop it from the mention instead` }, 409);
       case 'missing':
         throw new HttpException({ error: `${key} is not linked to session ${id8}` }, 404);
       default:
@@ -496,6 +525,15 @@ export class JiraDispatchService {
     const entry = this.live.get(key);
     if (entry === null) return new HttpException({ error: 'too many Jira sessions are starting — try again in a moment' }, 409);
     return new HttpException({ error: entry.sessionId === null ? `${key} is starting` : `${key} already has a session` }, 409);
+  }
+
+  /**
+   * A refused reply reservation: another reply is starting or live on the key — or, with none, every live slot is a starting entry (`reserve`'s cap), which
+   * is `busy`'s own sentence. Never `busy`'s Run sentences otherwise: a Run on the key does not refuse a reply, so naming it would be wrong.
+   */
+  private replyBusy(key: string): HttpException {
+    if (this.live.replySession(key) === null) return new HttpException({ error: 'too many Jira sessions are starting — try again in a moment' }, 409);
+    return new HttpException({ error: `a reply is already being drafted for ${key}` }, 409);
   }
 }
 

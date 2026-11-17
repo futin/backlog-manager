@@ -66,9 +66,15 @@ function isMentionIssue(v: unknown): boolean {
     isRecord(v.status) &&
     Array.isArray(v.boards) &&
     Array.isArray(v.mentions) &&
-    v.mentions.every(isMention)
+    v.mentions.every(isMention) &&
+    // `draft` and `session` are absent from an older server's answer (read as none), but a present value must be an object or null: the modal reads
+    // `draft.text` and `session.sessionId` without a null-safe expression.
+    optionalRecord(v.draft) &&
+    optionalRecord(v.session)
   );
 }
+
+const optionalRecord = (v: unknown): boolean => v === undefined || v === null || isRecord(v);
 
 function isMention(v: unknown): boolean {
   return (
@@ -99,11 +105,29 @@ export async function fetchJiraMentions(): Promise<JiraMentionsPayload> {
 }
 
 /** A write to one of the mentions routes; resolves the new payload, rejects with a `JiraMentionsFailure`. */
-export async function postJiraMentions(path: 'sweep' | 'dismiss' | 'restore', body: object): Promise<JiraMentionsPayload> {
+export async function postJiraMentions(path: 'sweep' | 'dismiss' | 'restore' | 'draft/discard', body: object): Promise<JiraMentionsPayload> {
   const res = await postJson(`/api/jira/mentions/${path}`, body);
   if (!res.ok) throw failureOfMentions(res.status, res.body, `Jira answered ${res.status}`);
   if (!isJiraMentionsPayload(res.body)) throw { message: 'malformed response', retryAt: null, status: 0 } satisfies JiraMentionsFailure;
   return res.body;
+}
+
+/**
+ * `POST /api/jira/mentions/reply` — the one route that writes a Jira comment. Resolves the new payload and the posted comment; rejects with a
+ * `JiraMentionsFailure` whose message is the server's sentence (`text too long`, a 409, or the 503 rate-limit sentence with its `retryAt`).
+ */
+export async function postJiraReply(
+  key: string,
+  text: string
+): Promise<{ payload: JiraMentionsPayload; posted: { id: string; url: string } }> {
+  const res = await postJson('/api/jira/mentions/reply', { key, text });
+  if (!res.ok) throw failureOfMentions(res.status, res.body, `Jira answered ${res.status}`);
+  const body = res.body;
+  const posted = isRecord(body) && isRecord(body.posted) ? body.posted : null;
+  if (!isJiraMentionsPayload(body) || posted === null || typeof posted.id !== 'string' || typeof posted.url !== 'string') {
+    throw { message: 'malformed response', retryAt: null, status: 0 } satisfies JiraMentionsFailure;
+  }
+  return { payload: body, posted: { id: posted.id, url: posted.url } };
 }
 
 export const asMentionsFailure = (e: unknown): JiraMentionsFailure =>
@@ -461,4 +485,24 @@ export function chipMentions(html: string, names: readonly string[]): string {
       return inCode > 0 ? part : part.replace(re, (m) => `<span class="jira-mentions-at">${m}</span>`);
     })
     .join('');
+}
+
+// ── Draft a reply ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Where a ticket's reply draft stands. `idle`: no session, no draft. `drafting`: a session (even one still starting, `sessionId: null`) and no draft.
+ * `ready`: a draft and no session, or a draft the live session itself wrote. `replacing`: a draft from an older session while a newer one is live — the
+ * old text stays editable and postable until the new one overwrites it.
+ */
+export function draftState(issue: JiraMentionIssue): 'idle' | 'drafting' | 'ready' | 'replacing' {
+  const { draft, session } = issue;
+  if (!draft) return session ? 'drafting' : 'idle';
+  if (!session || session.sessionId === draft.sessionId) return 'ready';
+  return 'replacing';
+}
+
+/** Who a reply is addressed to: the author of the newest open mention (`mentions` is newest first), or `null` when none is left. */
+export function replyTo(issue: JiraMentionIssue): { accountId: string; name: string } | null {
+  const a = issue.mentions[0]?.author;
+  return a === undefined ? null : { accountId: a.accountId, name: a.name };
 }

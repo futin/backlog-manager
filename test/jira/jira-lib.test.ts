@@ -60,6 +60,8 @@ import {
   isJiraStatusPayload,
   parseJiraBoardIssues,
   defaultModeFor,
+  dispatchReply,
+  replyRepos,
   jiraSettingOf,
   jiraWritesStand,
   resolveJiraAction,
@@ -1927,5 +1929,44 @@ describe('clampJiraPanelFilters keeps every Delivery filter value the UI offers'
   });
   it('keeps `review-open` by name', () => {
     expect(clampJiraPanelFilters({ delivery: 'review-open' }).delivery).toBe('review-open');
+  });
+});
+
+describe('defaultModeFor for a reply', () => {
+  it('is acceptEdits when the setting is blank (the session runs jira.mjs through Bash, which plan refuses), else the setting', () => {
+    expect(defaultModeFor('reply', '')).toBe('acceptEdits');
+    expect(defaultModeFor('reply', 'plan')).toBe('plan');
+  });
+});
+
+describe('replyRepos', () => {
+  it('lists the project’s own repos first, then every other mapped repo, each once', () => {
+    expect(replyRepos('PAY', { PAY: ['/a'], SUP: ['/b', '/a'] })).toEqual(['/a', '/b']);
+    expect(replyRepos('XYZ', { PAY: ['/a'], SUP: ['/b', '/a'] })).toEqual(['/a', '/b']);
+    expect(replyRepos('PAY', {})).toEqual([]);
+  });
+});
+
+describe('dispatchReply', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  // The server refuses a reply body that omits mode/assign/transitionId or carries anything else (plan ruling R2), so the exact body is the contract.
+  it('posts the narrow R2 body with the three values explicit, and the sheet’s defaults', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ assigned: false, transitioned: null }) } as Response));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await dispatchReply('PAY-1', '/r/a', { dispatchDefaultModel: 'opus', dispatchDefaultEffort: '', jiraDefaultPermission: '' });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/agents/dispatch-jira');
+    expect(JSON.parse(init.body as string)).toEqual({
+      key: 'PAY-1',
+      repo: '/r/a',
+      action: 'reply',
+      assign: false,
+      transitionId: null,
+      mode: 'none',
+      model: 'opus',
+      permissionMode: 'acceptEdits',
+      remoteControl: true
+    });
   });
 });

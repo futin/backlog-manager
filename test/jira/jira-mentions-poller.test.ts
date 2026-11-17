@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { JIRA_MENTIONS_ISSUE_CAP, JIRA_MENTIONS_POLL_MS, JIRA_THREAD_MAX, type JiraBoard } from '../../shared/types';
+import { JIRA_MENTIONS_ISSUE_CAP, JIRA_MENTIONS_POLL_MS, JIRA_MENTIONS_WINDOW_DAYS, JIRA_THREAD_MAX, type JiraBoard } from '../../shared/types';
 import { JiraClient } from '../../server/src/jira/jira.client';
 import { MENTION_SEARCH_FIELDS, mentionsJql } from '../../server/src/jira/mentions.util';
 import { JIRA_POLL_MS, JiraPollerService, SWEEP_FLOOR_MS } from '../../server/src/jira/poller.service';
@@ -409,5 +409,95 @@ describe('calls', () => {
     now = T0 + JIRA_MENTIONS_POLL_MS;
     await poller.tick();
     expect(poller.status().calls.sweep).toBe(3);
+  });
+});
+
+/**
+ * R7 (plan Task 5): a posted reply hides the mentions it answered at once, though the search index that feeds the next check has not caught up with it.
+ * The fake never appends a POSTed comment to its threads (`FakeJira.posted`), so every check here returns the ticket WITHOUT the reply — the lag — and the
+ * poller's `answeredAt`, applied on read, is the only thing that can keep the ticket out.
+ */
+describe('a posted reply (R7: answeredAt, applied on read)', () => {
+  const keys = () => {
+    const p = poller.mentionsPayload();
+    return p.configured ? p.issues.map((i) => i.key) : null;
+  };
+  const answeredAt = () => (poller as unknown as { answeredAt: Map<string, string> }).answeredAt;
+
+  it('keeps the ticket out while the index lags, and a NEW mention after the reply brings it back', async () => {
+    mentionIssue('SUP-208', [comment(MARA, 120, ME)]);
+    mentionIssue('SUP-300', [comment(IVO, 60, ME)]);
+    await poller.tick();
+    expect(keys()).toEqual(['SUP-300', 'SUP-208']);
+
+    const posted = await poller.postReply('SUP-208', 'done');
+    expect(posted).toMatchObject({ ok: true, value: { id: fake.posted[0].id, created: iso(T0) } });
+    expect(keys()).toEqual(['SUP-300']);
+    expect(poller.status().mentions?.count).toBe(1);
+
+    now = T0 + JIRA_MENTIONS_POLL_MS;
+    await poller.tick();
+    // The check swapped the ticket back into the cache whole — nothing is filtered in the swap — and the read hides it.
+    expect(poller.mentionsCache().issues.map((i) => i.key)).toContain('SUP-208');
+    expect(keys()).toEqual(['SUP-300']);
+    expect(poller.status().mentions?.count).toBe(1);
+
+    const fresh = comment(MARA, -1, ME);
+    fake.addComments('SUP-208', [fresh]);
+    now = T0 + 2 * JIRA_MENTIONS_POLL_MS;
+    await poller.tick();
+    expect(keys()).toEqual(['SUP-208', 'SUP-300']);
+    expect(poller.mentionCandidate('SUP-208', fresh.id)).toMatchObject({ commentId: fresh.id });
+  });
+
+  it('a check started before the post and resolving after it swaps in without the ticket', async () => {
+    mentionIssue('SUP-208', [comment(MARA, 120, ME)]);
+    await poller.tick();
+    now = T0 + JIRA_MENTIONS_POLL_MS;
+    const release = fake.holdNextSearch();
+    const tick = poller.tick();
+    for (let i = 0; i < 500 && mentionSearches() < 2; i++) await new Promise((r) => setImmediate(r));
+    expect(mentionSearches()).toBe(2);
+    expect((await poller.postReply('SUP-208', 'done')).ok).toBe(true);
+    release();
+    await tick;
+    expect(keys()).toEqual([]);
+  });
+
+  it('leaves another key alone: its row and its candidate are unchanged', async () => {
+    const theirs = comment(IVO, 60, ME);
+    mentionIssue('SUP-208', [comment(MARA, 120, ME)]);
+    mentionIssue('SUP-300', [theirs]);
+    await poller.tick();
+    const before = poller.mentionCandidate('SUP-300', theirs.id);
+    await poller.postReply('SUP-208', 'done');
+    expect(keys()).toEqual(['SUP-300']);
+    expect(poller.mentionCandidate('SUP-300', theirs.id)).toEqual(before);
+  });
+
+  it('refuses a key with no open mention, and a second post while the first is out, before any call', async () => {
+    mentionIssue('SUP-208', [comment(MARA, 120, ME)]);
+    await poller.tick();
+    const calls = fake.calls.length;
+    expect(await poller.postReply('SUP-999', 'x')).toEqual({ ok: false, refusal: 'no open mention' });
+    const release = fake.holdNextComment();
+    const first = poller.postReply('SUP-208', 'one');
+    expect(await poller.postReply('SUP-208', 'two')).toEqual({ ok: false, refusal: 'posting' });
+    release();
+    expect((await first).ok).toBe(true);
+    expect(await poller.postReply('SUP-208', 'three')).toEqual({ ok: false, refusal: 'no open mention' });
+    expect(fake.calls.length).toBe(calls + 1);
+  });
+
+  it('drops an answeredAt entry older than the window at the next check', async () => {
+    mentionIssue('SUP-208', [comment(MARA, 120, ME)]);
+    await poller.tick();
+    await poller.postReply('SUP-208', 'done');
+    now = T0 + JIRA_MENTIONS_POLL_MS;
+    await poller.tick();
+    expect([...answeredAt().keys()]).toEqual(['SUP-208']);
+    now = T0 + JIRA_MENTIONS_WINDOW_DAYS * 24 * 60 * MIN + MIN;
+    await poller.tick();
+    expect(answeredAt().size).toBe(0);
   });
 });

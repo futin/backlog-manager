@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { asMentionsFailure, fetchJiraMentions, postJiraMentions, type JiraMentionsFailure } from '../lib/jira-mentions';
+import { asMentionsFailure, fetchJiraMentions, postJiraMentions, postJiraReply, type JiraMentionsFailure } from '../lib/jira-mentions';
 import { JIRA_MENTIONS_POLL_MS, type JiraMentionsPayload } from '../../../shared/types';
 import { useJiraContext } from './JiraContext';
 import { JIRA_STATUS_FLOOR_MS } from './useJira';
@@ -16,6 +16,7 @@ import { useWindowFocus } from './useWindowFocus';
  * - **Newest read wins** (#231, the same counter as `useJira`): a superseded read writes nothing. A POST's answer also takes a sequence number when it
  *   settles, so a GET that started before it cannot land over it.
  * - A failed read keeps `data`, raises `error` and retries at the floor.
+ * - **While any ticket's reply-draft session is live** the same timer is shortened to `JIRA_REPLY_REREAD_MS` (phase 2), so a draft shows within 15 s.
  *
  * `error` is a `JiraMentionsFailure | null`, shared by reads and writes: `message`, and `retryAt` for a 429 sweep (the page's "Jira asked to wait until"
  * copy). `checking` is true while this hook's own sweep is out, or while the cache has never been stamped (`polledAt` null) and nothing blocks the check —
@@ -27,6 +28,8 @@ import { useWindowFocus } from './useWindowFocus';
  */
 export type JiraMentionsWrite = { ok: true } | { ok: false; message: string };
 
+export type JiraReplyWrite = JiraMentionsWrite & { posted?: { id: string; url: string } };
+
 export interface JiraMentionsState {
   data: JiraMentionsPayload | null;
   loading: boolean;
@@ -36,13 +39,29 @@ export interface JiraMentionsState {
   checking: boolean;
   dismiss: (key: string, ids: string[]) => Promise<JiraMentionsWrite>;
   restore: (key: string) => Promise<JiraMentionsWrite>;
+  /** Drops the key's reply draft; the answer replaces `data`. */
+  discardDraft: (key: string) => Promise<JiraMentionsWrite>;
+  /**
+   * Posts the reply to Jira (the one comment write). A second call for a key already out RESOLVES WITH THE FIRST ONE'S OUTCOME, not `ok`: the modal draws
+   * "Posted" from `ok`, and an `ok` for a click whose post it never saw land would say so over a post that then failed.
+   */
+  postReply: (key: string, text: string) => Promise<JiraReplyWrite>;
 }
+
+/**
+ * How soon this hook re-reads while a reply-draft session is live on any ticket (phase 2). The draft lands in the server's store, not in the mentions
+ * sweep, so the 170 s cache clock would leave the modal saying `Drafting a reply` for up to three minutes after the session wrote it. The re-read is the
+ * SAME timer, shortened — never a second one beside it — so the one-timer and newest-read-wins rules above hold unchanged.
+ */
+export const JIRA_REPLY_REREAD_MS = 15_000;
 
 function nextDelay(data: JiraMentionsPayload, now: number): number | null {
   if (!data.configured) return null;
   const polled = data.polledAt === null ? NaN : Date.parse(data.polledAt);
-  if (Number.isNaN(polled)) return JIRA_STATUS_FLOOR_MS;
-  return Math.max(polled + JIRA_MENTIONS_POLL_MS + TRACKER_FETCH_SLACK_MS - now, JIRA_STATUS_FLOOR_MS);
+  const delay = Number.isNaN(polled) ? JIRA_STATUS_FLOOR_MS : Math.max(polled + JIRA_MENTIONS_POLL_MS + TRACKER_FETCH_SLACK_MS - now, JIRA_STATUS_FLOOR_MS);
+  // A dismissed ticket can still carry a session (dismissed while it drafted), and its draft must still land: both lists count.
+  const drafting = [...data.issues, ...data.dismissed].some((i) => i.session !== null);
+  return drafting ? Math.min(delay, JIRA_REPLY_REREAD_MS) : delay;
 }
 
 export function useJiraMentions(): JiraMentionsState {
@@ -103,25 +122,33 @@ export function useJiraMentions(): JiraMentionsState {
   // A write's answer replaces `data` and re-arms the timer from its stamp. Taking a sequence number here retires any read still in flight. A success
   // also re-reads the SHELL status: the rail's Jira › Mentions count and the popover's `Mentions · N` come from `status.mentions.count`, which would
   // otherwise disagree with this page for up to a poll interval after the reader's own click.
-  const write = useCallback(
-    async (path: 'sweep' | 'dismiss' | 'restore', body: object): Promise<JiraMentionsWrite> => {
-      try {
-        const data = await postJiraMentions(path, body);
-        if (!mounted.current) return { ok: true };
-        latest.current += 1;
-        setState({ data, loading: false, error: null });
-        clear();
-        const ms = nextDelay(data, Date.now());
-        if (ms !== null) timer.current = setTimeout(reload, ms);
-        reloadStatus.current();
-        return { ok: true };
-      } catch (e) {
-        const failure = asMentionsFailure(e);
-        if (mounted.current) setState((prev) => ({ ...prev, error: failure }));
-        return { ok: false, message: failure.message };
-      }
+  const landed = useCallback(
+    (data: JiraMentionsPayload): { ok: true } => {
+      if (!mounted.current) return { ok: true };
+      latest.current += 1;
+      setState({ data, loading: false, error: null });
+      clear();
+      const ms = nextDelay(data, Date.now());
+      if (ms !== null) timer.current = setTimeout(reload, ms);
+      reloadStatus.current();
+      return { ok: true };
     },
     [clear, reload]
+  );
+  const failed = useCallback((e: unknown): { ok: false; message: string } => {
+    const failure = asMentionsFailure(e);
+    if (mounted.current) setState((prev) => ({ ...prev, error: failure }));
+    return { ok: false, message: failure.message };
+  }, []);
+  const write = useCallback(
+    async (path: 'sweep' | 'dismiss' | 'restore' | 'draft/discard', body: object): Promise<JiraMentionsWrite> => {
+      try {
+        return landed(await postJiraMentions(path, body));
+      } catch (e) {
+        return failed(e);
+      }
+    },
+    [landed, failed]
   );
 
   const sweep = useCallback(async (): Promise<void> => {
@@ -149,9 +176,34 @@ export function useJiraMentions(): JiraMentionsState {
   const dismiss = useCallback((key: string, ids: string[]) => once(key, () => write('dismiss', { key, commentIds: ids })), [once, write]);
   const restore = useCallback((key: string) => once(key, () => write('restore', { key })), [once, write]);
 
+  const discardDraft = useCallback((key: string) => once(key, () => write('draft/discard', { key })), [once, write]);
+
+  // Single-flight per key, sharing the OUTCOME: the second caller gets the first one's promise (a `once` would resolve it `ok` without a post). The
+  // server's own `replying` set is the cross-tab guard; this one stops a double click here from drawing a 409 over a post that worked.
+  const replying = useRef(new Map<string, Promise<JiraReplyWrite>>());
+  const postReply = useCallback(
+    (key: string, text: string): Promise<JiraReplyWrite> => {
+      const out = replying.current.get(key);
+      if (out !== undefined) return out;
+      const run = (async (): Promise<JiraReplyWrite> => {
+        try {
+          const { payload, posted } = await postJiraReply(key, text);
+          return { ...landed(payload), posted };
+        } catch (e) {
+          return failed(e);
+        } finally {
+          replying.current.delete(key);
+        }
+      })();
+      replying.current.set(key, run);
+      return run;
+    },
+    [landed, failed]
+  );
+
   const d = state.data;
   const blocked = (access !== undefined && access !== 'ok') || (d !== null && d.configured && d.retryAt !== null);
   const checking = sweeping || (d !== null && d.configured && d.polledAt === null && !blocked);
 
-  return { ...state, reload, sweep, checking, dismiss, restore };
+  return { ...state, reload, sweep, checking, dismiss, restore, discardDraft, postReply };
 }

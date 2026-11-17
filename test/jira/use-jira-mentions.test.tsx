@@ -6,9 +6,9 @@ import '@testing-library/jest-dom';
 
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JIRA_STATUS_FLOOR_MS } from '../../client/src/hooks/useJira';
-import { useJiraMentions } from '../../client/src/hooks/useJiraMentions';
+import { JIRA_REPLY_REREAD_MS, useJiraMentions } from '../../client/src/hooks/useJiraMentions';
 import { TRACKER_FETCH_SLACK_MS } from '../../client/src/hooks/useTrackers';
-import type { JiraMentionsPayload, JiraStatusPayload } from '../../shared/types';
+import type { JiraMentionIssue, JiraMentionsPayload, JiraStatusPayload } from '../../shared/types';
 
 /** `useJiraMentions` on the server's clock: one timer at polledAt + the poll + slack, floored; focus refetch; newest read wins; no timer unconfigured. */
 
@@ -331,5 +331,105 @@ describe('useJiraMentions', () => {
       outcome = await last.restore('PAY-1');
     });
     expect(outcome).toEqual({ ok: false, message: 'could not save — nothing changed' });
+  });
+  const issueRow = { key: 'PAY-1', summary: 's', type: 'Bug', status: { name: 'To Do', category: 'new' }, boards: [], mentions: [], draft: null, session: null };
+
+  it('postReply: a 200 replaces data (the ticket gone) and resolves ok with the posted comment', async () => {
+    fetchMock.mockImplementation((u: string, init?: RequestInit) => res(init === undefined ? payload({ issues: [issueRow] as never }) : { ...payload({ me: 'posted' }), posted: { id: '5', url: 'https://x/5' } }));
+    render(tree());
+    await flush();
+    let out: unknown;
+    await act(async () => {
+      out = await last.postReply('PAY-1', 'Thanks');
+    });
+    expect(out).toEqual({ ok: true, posted: { id: '5', url: 'https://x/5' } });
+    expect(screen.getByTestId('p')).toHaveTextContent('ok:posted');
+    expect(statusReload).toHaveBeenCalled();
+  });
+
+  it('postReply: a 409 resolves { ok: false, message } with data unchanged and error set', async () => {
+    render(tree());
+    await flush();
+    fetchMock.mockImplementation(() => res({ error: 'a reply to PAY-1 is already being posted' }, 409));
+    let out: unknown;
+    await act(async () => {
+      out = await last.postReply('PAY-1', 'Thanks');
+    });
+    expect(out).toEqual({ ok: false, message: 'a reply to PAY-1 is already being posted' });
+    expect(last.error?.message).toBe('a reply to PAY-1 is already being posted');
+    expect(screen.getByTestId('p')).toHaveTextContent('ok:Ada');
+  });
+
+  it('postReply: a 503 rate-limit answer carries its retryAt into error', async () => {
+    render(tree());
+    await flush();
+    const until = new Date(Date.now() + 60_000).toISOString();
+    fetchMock.mockImplementation(() => res({ error: 'Jira asked to wait', retryAt: until }, 503));
+    await act(async () => {
+      await last.postReply('PAY-1', 'Thanks');
+    });
+    expect(last.error).toMatchObject({ message: 'Jira asked to wait', retryAt: until, status: 503 });
+  });
+
+  it('postReply: two calls for one key while the first is out send ONE request and both resolve the same outcome', async () => {
+    render(tree());
+    await flush();
+    const d = deferred();
+    fetchMock.mockImplementation(() => d.promise);
+    let a: Promise<unknown> = Promise.resolve();
+    let b: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      a = last.postReply('PAY-1', 'Thanks');
+      b = last.postReply('PAY-1', 'Thanks');
+    });
+    expect(fetchMock.mock.calls.filter(([, init]) => init !== undefined)).toHaveLength(1);
+    await act(async () => {
+      d.resolve(await res({ error: 'nope' }, 409));
+    });
+    expect(await a).toEqual({ ok: false, message: 'nope' });
+    expect(await b).toEqual({ ok: false, message: 'nope' });
+  });
+
+  it('discardDraft posts the key and replaces data with the answer', async () => {
+    render(tree());
+    await flush();
+    fetchMock.mockImplementation(() => res(payload({ me: 'discarded' })));
+    await act(async () => {
+      await last.discardDraft('PAY-1');
+    });
+    const [url, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    expect(url).toBe('/api/jira/mentions/draft/discard');
+    expect(JSON.parse(init.body as string)).toEqual({ key: 'PAY-1' });
+    expect(screen.getByTestId('p')).toHaveTextContent('ok:discarded');
+  });
+
+  it('re-reads every 15 s while a shown ticket carries a reply session, and goes back to the server’s clock once none does', async () => {
+    // Task 8: the drafting session hands its draft over between two mentions checks, so while any ticket (open or dismissed) has a `session` the ONE timer
+    // is aimed at JIRA_REPLY_REREAD_MS instead of the 3-minute clock. It is the same `reload`, so the sequence counter still lets a POST win.
+    const issue = (session: JiraMentionIssue['session']): JiraMentionIssue => ({
+      key: 'SUP-1',
+      summary: 's',
+      type: 'Bug',
+      status: { name: 'Open', category: 'new' },
+      boards: [],
+      mentions: [],
+      draft: null,
+      session
+    });
+    const live = { sessionId: 'sess-1', startedAt: iso(30_000), repo: '/r' };
+    fetchMock.mockImplementation(() => res(payload({ dismissed: [issue(live)] })));
+    render(tree());
+    await flush();
+    expect(calls()).toBe(1);
+    await advance(JIRA_REPLY_REREAD_MS - 1);
+    expect(calls()).toBe(1);
+    fetchMock.mockImplementation(() => res(payload({ dismissed: [issue(null)] })));
+    await advance(1);
+    expect(calls()).toBe(2);
+    // No session left: the next read waits for the server's clock again (polled 10 s ago → 170 s + slack).
+    await advance(JIRA_REPLY_REREAD_MS);
+    expect(calls()).toBe(2);
+    await advance(170_000 + TRACKER_FETCH_SLACK_MS - JIRA_REPLY_REREAD_MS);
+    expect(calls()).toBe(3);
   });
 });

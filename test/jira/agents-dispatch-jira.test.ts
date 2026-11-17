@@ -16,8 +16,10 @@ import { REGISTRY_FILE } from '../../server/src/registry/registry.service';
 import { DEFAULT_MODEL } from '../../shared/agent';
 import type { DashboardRow, GitlabMr, GitlabReview, JiraRefBranch, JiraRepoRefs, JiraStatusPayload } from '../../shared/types';
 import { listenLoopback } from '../helpers/app';
+import { mentionsJql } from '../../server/src/jira/mentions.util';
+import { JIRA_MENTIONS_WINDOW_DAYS } from '../../shared/types';
 import { FakeJira, makeRawIssue, RUN_META } from '../helpers/jira';
-import type { FailNext } from '../helpers/jira';
+import type { FailNext, SeededComment } from '../helpers/jira';
 import { makeRegistry } from '../helpers/store';
 
 /**
@@ -119,11 +121,48 @@ function writeConfig(over: Record<string, unknown> = {}): void {
   writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL], ...over }));
 }
 
-/** A fresh app on a fresh fake, booted. `failNext` is in force for the boot, which is how a case gets a poller with no identity. */
-async function build(opts: { failNext?: FailNext } = {}): Promise<void> {
+/** The comment text every seeded mention carries — distinctive, so a case can prove it never reaches a prompt. */
+const MENTION_TEXT = 'QUOKKA-THREAD-TEXT please look at the refund cron';
+
+/**
+ * Seeds an open mention on `key` before the boot: the issue (if the case has not seeded it), one comment by someone else @-mentioning the fake's `me`, and
+ * the mentions search answering the key — so the boot tick's mentions check puts it in the cache exactly as a real check would
+ * (`jira-mentions-routes.test.ts`).
+ */
+function seedMention(key: string, n: number): void {
+  if (!fake.issues.has(key)) fake.issues.set(key, makeRawIssue({ key }));
+  const comment: SeededComment = {
+    id: String(30_000 + n),
+    author: { accountId: 'acc-m', displayName: 'Mara Ilić' },
+    created: new Date(Date.now() - 30 * 60_000).toISOString(),
+    body: {
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'mention', attrs: { id: fake.me.accountId, text: '@Ada Lovelace' } },
+            { type: 'text', text: ` ${MENTION_TEXT}` }
+          ]
+        }
+      ]
+    }
+  };
+  fake.addComments(key, [comment]);
+  const jql = mentionsJql(fake.me.accountId, JIRA_MENTIONS_WINDOW_DAYS);
+  fake.answers.set(jql, [...(fake.answers.get(jql) ?? []), key]);
+}
+
+/**
+ * A fresh app on a fresh fake, booted. `failNext` is in force for the boot, which is how a case gets a poller with no identity; `mentions` are the keys the
+ * boot's mentions check finds an open mention on (the reply cases' gate).
+ */
+async function build(opts: { failNext?: FailNext; mentions?: string[] } = {}): Promise<void> {
   fake = new FakeJira();
   fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
   fake.transitions.set('PAY-1', [START]);
+  (opts.mentions ?? []).forEach((key, i) => seedMention(key, i));
   fake.failNext = opts.failNext ?? null;
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(REGISTRY_FILE)
@@ -193,8 +232,8 @@ describe('refusals before the reservation — no Jira write, no spawn, nothing r
   it.each([
     ['a lower-case key', { key: 'pay-1' }, 'invalid issue key'],
     ['no key', { key: undefined }, 'invalid issue key'],
-    ['an unknown action', { action: 'nope' }, 'action must be execute, context, review or { skill: <id> }'],
-    ['the query spelling of a skill', { action: 'skill:s_0123abcd' }, 'action must be execute, context, review or { skill: <id> }'],
+    ['an unknown action', { action: 'nope' }, 'action must be execute, context, review, reply or { skill: <id> }'],
+    ['the query spelling of a skill', { action: 'skill:s_0123abcd' }, 'action must be execute, context, review, reply or { skill: <id> }'],
     ['a blank repo', { repo: '  ' }, 'repo is required'],
     ['a string assign', { assign: 'yes' }, 'assign must be true or false'],
     ['a numeric transitionId', { transitionId: 31 }, 'transitionId must be null or a non-empty string'],
@@ -812,7 +851,7 @@ describe('review', () => {
       ['no half', { half: undefined }, 'half must be request or fix'],
       ['a capitalised half', { half: 'Fix' }, 'half must be request or fix'],
       ['openMr on a review', { openMr: true }, 'openMr is only for execute with a branch'],
-      ['an unknown action, mr and half present', { action: 'reveiw' }, 'action must be execute, context, review or { skill: <id> }']
+      ['an unknown action, mr and half present', { action: 'reveiw' }, 'action must be execute, context, review, reply or { skill: <id> }']
     ])('400 for %s', async (_label, over, error) => {
       expect((await post(body(over)).expect(400)).body).toEqual({ error });
       untouched();
@@ -1026,6 +1065,242 @@ describe('review', () => {
     it('an edited prompt spawns as written', async () => {
       await post(body({ prompt: 'Fix the review on !42 my way.' })).expect(200);
       expect(sent.spawns[0].prompt).toBe('Fix the review on !42 my way.');
+    });
+  });
+});
+
+/**
+ * The `reply` action (Jira mentions "Draft a reply", plan Task 3; rulings R2 and the spec's two gates): a read-only session that drafts a reply to an open
+ * mention. Narrow on the wire (mode none, no assign, no transition, no edited prompt, a dashboard launch), refused unless the key holds an open mention, its
+ * repo may be mapped to ANY project, and it reserves in its own map — so it coexists with a Run on the key but not with a second reply.
+ */
+describe('reply', () => {
+  const REPLY = {
+    key: 'PAY-1',
+    repo: REPO,
+    action: 'reply',
+    assign: false,
+    transitionId: null,
+    mode: 'none',
+    permissionMode: 'acceptEdits',
+    remoteControl: true
+  };
+  const R2 = 'a reply takes mode none, no assign, no transition and no edited prompt';
+  const previewOf = (over: Record<string, string> = {}) => {
+    const query = new URLSearchParams({ key: 'PAY-1', action: 'reply', repo: REPO, mode: 'none', ...over });
+    return request(app.getHttpServer()).get(`/api/jira/prompt?${query.toString()}`);
+  };
+  const replyLinks = () => live.liveLinks().filter((l) => l.how === 'reply');
+
+  describe('R2 — the wire shape, before anything else', () => {
+    let sent: Sent;
+    let callsAtStart: number;
+
+    beforeEach(async () => {
+      await build({ mentions: ['PAY-1'] });
+      sent = stubDashboard({ desktop: true });
+      callsAtStart = fake.calls.length;
+    });
+
+    it.each([
+      ['mode new', { mode: 'new', branch: 'pay-1-x', base: 'develop' }],
+      ['mode continue', { mode: 'continue', branch: 'pay-1-x' }],
+      ['a branch beside mode none', { branch: 'pay-1-x' }],
+      ['an openMr', { openMr: true }],
+      ['a review flag', { review: true }],
+      ['assign true', { assign: true }],
+      ['a missing assign', { assign: undefined }],
+      ['a transition', { transitionId: '31' }],
+      ['an edited prompt', { prompt: 'x' }],
+      ['the desktop surface', { surface: 'desktop' }]
+    ])('400 for %s — no Jira call, no reservation, no spawn', async (_label, over) => {
+      expect((await post({ ...REPLY, ...over }).expect(400)).body).toEqual({ error: R2 });
+      expect(fake.calls.length).toBe(callsAtStart);
+      expect(sent.spawns).toEqual([]);
+      expect(live.replySession('PAY-1')).toBeNull();
+    });
+
+    it('the dashboard surface and openMr/review sent as false are the narrow shape too', async () => {
+      await post({ ...REPLY, surface: 'dashboard', openMr: false, review: false }).expect(200);
+      expect(sent.spawns).toHaveLength(1);
+    });
+  });
+
+  describe('the open-mention gate and the any-project repo rule', () => {
+    it('400 `<KEY> has no open mention` for a key the mentions cache does not hold — no reservation, no spawn', async () => {
+      await build({ mentions: ['PAY-1'] });
+      fake.issues.set('PAY-9', makeRawIssue({ key: 'PAY-9' }));
+      const sent = stubDashboard();
+      expect((await post({ ...REPLY, key: 'PAY-9' }).expect(400)).body).toEqual({ error: 'PAY-9 has no open mention' });
+      expect(sent.spawns).toEqual([]);
+      expect(live.replySession('PAY-9')).toBeNull();
+    });
+
+    it('the same 400 once every mention on the key is dismissed', async () => {
+      await build({ mentions: ['PAY-1'] });
+      const sent = stubDashboard();
+      await request(app.getHttpServer())
+        .post('/api/jira/mentions/dismiss')
+        .set('content-type', 'application/json')
+        .send(JSON.stringify({ key: 'PAY-1', commentIds: ['30000'] }))
+        .expect(200);
+      expect((await post(REPLY).expect(400)).body).toEqual({ error: 'PAY-1 has no open mention' });
+      expect(sent.spawns).toEqual([]);
+    });
+
+    it("200 with the repo mapped only to another project (SUP) — the any-project rule — and the dashboard gate is asked with that repo", async () => {
+      writeConfig({ repos: { SUP: [REPO] } });
+      await build({ mentions: ['PAY-1'] });
+      const sent = stubDashboard();
+      await post(REPLY).expect(200);
+      expect(sent.spawns[0]).toMatchObject({ project: '-dir-0', name: 'jira PAY-1' });
+    });
+
+    it('the dashboard gate still refuses a repo the dashboard cannot see', async () => {
+      writeConfig({ repos: { SUP: [REPO] } });
+      await build({ mentions: ['PAY-1'] });
+      const sent = stubDashboard({ projectPaths: ['/elsewhere'] });
+      await post(REPLY).expect(409);
+      expect(sent.spawns).toEqual([]);
+      expect(live.replySession('PAY-1')).toBeNull();
+    });
+
+    it('400 `<repo> is not mapped to any Jira project` for a repo no project maps, quoting the repo as sent', async () => {
+      await build({ mentions: ['PAY-1'] });
+      const sent = stubDashboard({ projectPaths: ['/x/repo'] });
+      expect((await post({ ...REPLY, repo: '/x/repo' }).expect(400)).body).toEqual({ error: '/x/repo is not mapped to any Jira project' });
+      expect(sent.spawns).toEqual([]);
+    });
+  });
+
+  describe('its own reservation', () => {
+    it('a live run link on the key does not refuse a reply', async () => {
+      await build({ mentions: ['PAY-1'] });
+      expect(live.reserve('PAY-1', REPO)).toBe(true);
+      live.confirm('PAY-1', 'run-1', RUN_META);
+      stubDashboard();
+      await post(REPLY).expect(200);
+      expect(live.get('PAY-1')).toMatchObject({ sessionId: 'run-1' });
+      expect(replyLinks().map((l) => l.sessionId)).toEqual(['sess-1']);
+    });
+
+    it('409 `a reply is already being drafted for <KEY>` while the first reply is starting, and again once it is live', async () => {
+      await build({ mentions: ['PAY-1'] });
+      let open!: () => void;
+      const sent = stubDashboard({ firstSpawnGate: new Promise<void>((resolve) => (open = resolve)) });
+      const first = post(REPLY).then((res) => res);
+      for (let i = 0; i < 500 && sent.spawns.length === 0; i++) await new Promise((r) => setImmediate(r));
+      expect(live.replySession('PAY-1')).toMatchObject({ sessionId: null });
+      expect((await post(REPLY).expect(409)).body).toEqual({ error: 'a reply is already being drafted for PAY-1' });
+      open();
+      expect((await first).status).toBe(200);
+      expect((await post(REPLY).expect(409)).body).toEqual({ error: 'a reply is already being drafted for PAY-1' });
+      expect(sent.spawns).toHaveLength(1);
+    });
+
+    it('is per key: a reply starting on PAY-1 does not refuse one on PAY-2', async () => {
+      await build({ mentions: ['PAY-1', 'PAY-2'] });
+      let open!: () => void;
+      const sent = stubDashboard({ firstSpawnGate: new Promise<void>((resolve) => (open = resolve)) });
+      const first = post(REPLY).then((res) => res);
+      for (let i = 0; i < 500 && sent.spawns.length === 0; i++) await new Promise((r) => setImmediate(r));
+      await post({ ...REPLY, key: 'PAY-2' }).expect(200);
+      open();
+      expect((await first).status).toBe(200);
+      expect(sent.spawns).toHaveLength(2);
+    });
+
+    it('a failed spawn releases the reply reservation (a retry dispatches) and leaves a run reservation on the key alone', async () => {
+      await build({ mentions: ['PAY-1'] });
+      expect(live.reserve('PAY-1', REPO)).toBe(true);
+      stubDashboard({ spawn: { ok: false, status: 500, body: { error: 'boom' } } });
+      await post(REPLY).expect(502);
+      expect(live.replySession('PAY-1')).toBeNull();
+      expect(live.get('PAY-1')).toMatchObject({ sessionId: null });
+      stubDashboard();
+      await post(REPLY).expect(200);
+      expect(live.get('PAY-1')).toMatchObject({ sessionId: null });
+    });
+  });
+
+  describe('Start', () => {
+    it('spawns the reply prompt — the key and the three commands, never post — with none of the ticket or thread text', async () => {
+      await build({ mentions: ['PAY-1'] });
+      fake.issues.set(
+        'PAY-1',
+        makeRawIssue({
+          key: 'PAY-1',
+          fields: {
+            summary: 'WOMBAT-SUMMARY refunds double-post',
+            description: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'NUMBAT-DESCRIPTION run the cron' }] }] }
+          }
+        })
+      );
+      const sent = stubDashboard();
+      await post(REPLY).expect(200);
+      const prompt = sent.spawns[0].prompt as string;
+      for (const needle of ['PAY-1', 'jira.mjs show PAY-1', 'jira.mjs thread PAY-1', 'jira.mjs draft PAY-1', 'never post']) expect(prompt).toContain(needle);
+      for (const absent of ['WOMBAT', 'NUMBAT', 'QUOKKA', 'refund cron']) expect(prompt).not.toContain(absent);
+    });
+
+    it("confirms a `reply` link, answers assigned false and the reply session's own start, and writes nothing to Jira", async () => {
+      await build({ mentions: ['PAY-1'] });
+      const arm = jest.spyOn(app.get(JiraLiveReconciler), 'arm');
+      stubDashboard();
+      const res = await post(REPLY).expect(200);
+      expect(writes()).toEqual([]);
+      expect(replyLinks()).toEqual([expect.objectContaining({ key: 'PAY-1', sessionId: 'sess-1', how: 'reply', action: 'reply', repo: REPO, branch: null })]);
+      // The Run gate never sees a reply.
+      expect(live.get('PAY-1')).toBeNull();
+      expect(res.body).toEqual({
+        sessionId: 'sess-1',
+        assigned: false,
+        transitioned: null,
+        session: { name: 'jira PAY-1', startedAt: live.replySession('PAY-1')?.startedAt, repo: REPO }
+      });
+      expect(arm).toHaveBeenCalled();
+    });
+
+    // A reply never sends `surface: 'desktop'` (R2), so `launchInProject` reads an id-less answer as a dashboard breaking its contract — the 502 every
+    // headless launch gets — and the failure `catch` is what releases. The point is which reservation it releases.
+    it('an id-less answer is a 502 that releases the reply reservation, not a run reservation on the key', async () => {
+      await build({ mentions: ['PAY-1'] });
+      expect(live.reserve('PAY-1', REPO)).toBe(true);
+      stubDashboard({ spawn: { body: { surface: 'desktop' } } });
+      expect((await post(REPLY).expect(502)).body).toEqual({ error: 'spawn returned no session id' });
+      expect(live.replySession('PAY-1')).toBeNull();
+      expect(live.get('PAY-1')).toMatchObject({ sessionId: null });
+    });
+  });
+
+  describe('GET /api/jira/prompt — the preview', () => {
+    it('composes the same text the spawn got, with the repo mapped to SUP only (the any-project rule holds on the preview too)', async () => {
+      writeConfig({ repos: { SUP: [REPO] } });
+      await build({ mentions: ['PAY-1'] });
+      const sent = stubDashboard();
+      await post(REPLY).expect(200);
+      expect((await previewOf().expect(200)).text).toBe(sent.spawns[0].prompt);
+    });
+
+    it('asks no open-mention gate: it reads, the dispatch is what refuses', async () => {
+      await build();
+      expect((await previewOf().expect(200)).text).toContain('jira.mjs draft PAY-1');
+    });
+
+    it('400 `<repo> is not mapped to any Jira project` for a repo no project maps', async () => {
+      await build();
+      expect((await previewOf({ repo: '/x/repo' }).expect(400)).body).toEqual({ error: '/x/repo is not mapped to any Jira project' });
+    });
+
+    it('400 for an unknown action names reply among the actions', async () => {
+      await build();
+      expect((await previewOf({ action: 'nope' }).expect(400)).body).toEqual({ error: 'action must be execute, context, review, reply or skill:<id>' });
+    });
+
+    it('refuses a branch choice for a reply with the R2 sentence, so no preview shows a workspace a dispatch would refuse', async () => {
+      await build();
+      expect((await previewOf({ mode: 'new', branch: 'pay-1-x', base: 'develop' }).expect(400)).body).toEqual({ error: R2 });
+      expect((await previewOf({ openMr: 'true' }).expect(400)).body).toEqual({ error: R2 });
     });
   });
 });

@@ -67,10 +67,10 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 | `links.store.ts`     | the link store's file I/O — `loadLinks`, `saveLinks`, `jiraLinksFile` (`~/.backlog-manager/settings/jira-links.json`, `BM_JIRA_LINKS_FILE`); no rule about what is kept |
 | `jira.controller.ts` | the ten read routes (six, phase 5's `GET /prompt`, the repo/branch work's `GET /refs` and `GET /worktrees`, and the sessions page's `GET /sessions`) |
 | `jira-write.controller.ts` | the ten POST routes — six config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work), the two sweeps that write nothing (`/sweep`, `/boards/sweep`) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
-| `mentions.controller.ts` | the mentions routes: `GET /mentions`, `GET /issue/:key/thread` and the three POSTs `/mentions/sweep`, `/mentions/dismiss`, `/mentions/restore` (→ [Mentions](#mentions-jira-mentions-phase-1-spec)) |
+| `mentions.controller.ts` | the mentions routes: `GET /mentions`, `GET /issue/:key/thread` and the six POSTs `/mentions/sweep`, `/mentions/dismiss`, `/mentions/restore`, `/mentions/draft`, `/mentions/draft/discard` and `/mentions/reply` (→ [Mentions](#mentions-jira-mentions-phase-1-spec)) |
 | `mentions-check.util.ts` | the pure judge of one ticket's comments: is an open mention the user's own, newer than their latest comment, not dismissed |
 | `mentions.util.ts` | the mentions' shared shapes and helpers (the excerpt, the ADF walk's output, the summary) |
-| `mentions.store.ts` | the dismissals file's I/O (`~/.backlog-manager/settings/jira-mentions.json`); the server is its one writer, no skill reads it |
+| `mentions.store.ts` | the dismissals' and reply drafts' file I/O (`~/.backlog-manager/settings/jira-mentions.json`); the server is its one writer, no skill reads it |
 | `jira.module.ts`     | `JiraModule` — the two controllers, the poller, the client (a factory value, the one place a suite swaps in a fake `fetch`) and since phase 5a `JiraLiveService`, all three exported for `AgentsModule` to import, never the reverse |
 
 `agents/` holds the other half of Run, in `jira-agents.controller.ts` (five POSTs: `dispatch-jira`, `jira-stop`, `jira-link`, `jira-unlink` and
@@ -107,13 +107,13 @@ unconfigured, then ask the poller — so a malformed request never reads as an e
 | `GET /api/jira/search?q=`         | ≤ 20 issues for the roots picker; `q` required (400), trimmed, blank → `[]` with no call, over 100 characters → 400            |
 | `GET /api/jira/projects`          | every project the credentials see, `{ key, name }[]` sorted by key, paged by `startAt`                                          |
 | `GET /api/jira/jql/check?jql=`    | `{ ok: true, count }` or `{ ok: false, message }` (Jira rejected it — still a 200); `jql` required, over 2 000 characters → 400  |
-| `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&review&target&mrProject&mrIid&half` | `text/plain`: `composeJiraPrompt`'s answer (`mrProject`, `mrIid` and `half` only for `action=review`, the iid a string here). Refusals in order: 400 `invalid issue key`, 400 `action must be execute, context, review or skill:<id>`, 400 `repo is required`, for `action=review` 400 `mr must be { project, iid }` and 400 `half must be request or fix`, the branch choice's 400s (`parseBranchChoice`, [below](#branch-and-worktree-the-repobranch-work)), 503, 409 (`jira.json` unreadable), 400 `unknown skill <id>`, the issue read (§8), 400 `<repo> is not mapped to <PROJECT>` (`repos[detail.project.key]`, repo normalised like a stored path), the refs' 409s (`resolveWorkspace`), 400 `prompt too long` |
+| `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&review&target&mrProject&mrIid&half` | `text/plain`: `composeJiraPrompt`'s answer (`mrProject`, `mrIid` and `half` only for `action=review`, the iid a string here). Refusals in order: 400 `invalid issue key`, 400 `action must be execute, context, review, reply or { skill: <id> }`, 400 `repo is required`, for `action=review` 400 `mr must be { project, iid }` and 400 `half must be request or fix`, the branch choice's 400s (`parseBranchChoice`, [below](#branch-and-worktree-the-repobranch-work)), 503, 409 (`jira.json` unreadable), 400 `unknown skill <id>`, the issue read (§8), 400 `<repo> is not mapped to <PROJECT>` (`repos[detail.project.key]`, repo normalised like a stored path), the refs' 409s (`resolveWorkspace`), 400 `prompt too long` |
 | `GET /api/jira/refs?repo&key`     | `JiraRepoRefs` for one mapped repo, as of its last fetch. 400 `repo is required`, 400 `invalid issue key` (`key` is optional), 503, 409, 400 `<repo> is not mapped`; an unreadable repo is a 200 with `available: false` and its reason |
 | `GET /api/jira/worktrees`         | `{ worktrees, unavailable }` — every working tree of every distinct mapped path, and each repo that could not be read with its reason; never an error for one repo |
 | `GET /api/jira/sessions?open=1`   | `JiraSessionsPayload` — every link, live and ended, with its derived `state`, the dashboard's `row` (`null` for an ended link or a live one the dashboard does not list) and `stateSince`, plus `reachable`, `rowsAt` and `saveError` (the link store's latest failed save, `null` once one lands; the List draws it as an amber line above the rows); memory only, and answered while unconfigured (no 503). `?open=1` marks a Jira page open, which quickens the reconciler |
 
 Every route but the first, `/sessions` and the mentions pair answers 503 `Jira is not configured` while unconfigured; `GET /mentions` answers 200 `{ configured: false,
-detail }` and `POST /mentions/sweep` answers 409 (the dismiss and restore writes and `GET /issue/:key/thread` stay 503, after their 400s). `GET /api/jira` fills `live` from the link store in the
+detail }` and `POST /mentions/sweep` answers 409 (the dismiss, restore, draft, discard and reply writes and `GET /issue/:key/thread` stay 503, after their 400s). `GET /api/jira` fills `live` from the link store in the
 controller (the poller
 never sees it; an unconfigured server keeps `{}`; only the live `run` links are in it), and `GET /api/jira/issue/:key` fills `session` the same way. A failed
 Jira call is mapped
@@ -169,7 +169,7 @@ was written), `JiraUnknownIdError` a 404 `unknown board` or `unknown skill` by t
 
 Two more POSTs in the same controller, the first calls this server makes that change anything in Jira: `POST /api/jira/issue/assign` `{ key }` and
 `POST /api/jira/issue/transition` `{ key, transitionId }`. The key travels in the body, not the path. They are the board's ONLY Jira writes — a third is a new
-rule, not another route ([invariants.md](invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)). The order is the config writes'
+rule, not another route ([invariants.md](invariants.md#the-boards-jira-writes-are-assign-transition-and-the-mention-reply-nothing-else)). The order is the config writes'
 (guard → validate → configured → the poller), and the controller maps what comes back through `unwrapJira` (§8's table above, `retryAt` verbatim) plus its two
 own sentences.
 
@@ -271,6 +271,26 @@ the CALLS meter and share the one 429 window; a failure keeps the last rows and 
 the server alone writes) and `GET /issue/:key/thread`, the modal's fresh read. `GET /api/jira` carries a `mentions` summary `{ polledAt, count, detail,
 truncated, retryAt }` for the chip's popover row and the rail count. The client is `JiraMentionsView` (List and Cards behind a remembered switch), the
 `JiraMentionModal` (the ninth dialog) and `useJiraMentions`, whose age prints as `checked 1 min ago` through `checkedAge` in `lib/jira-mentions.ts`.
+
+**The reply (phase 2).** The modal's `Draft a reply` starts a read-only session on the built-in `reply` action (`POST /api/agents/dispatch-jira` with `action: 'reply'`,
+mode `none`, no assign, no transition, no edited prompt, a dashboard launch; the repo may be mapped to any project, and the key needs an open mention, else 400
+`<KEY> has no open mention`). Its link is `how: 'reply'`, reserved in its own map so it never blocks, or is blocked by, a Run on the key; a second live one is a 409
+`a reply is already being drafted for <KEY>`, and `jira-unlink` refuses it (409 `<KEY> is drafting a reply — stop it from the mention instead`). The session reads
+with `jira.mjs show` and `jira.mjs thread` and hands its text over with `jira.mjs draft`, which POSTs `/mentions/draft` `{ key, sessionId, text }`: the route proves a
+live `reply` link for that exact key and session id (409 `no reply session for <KEY>`, 400 `invalid session id`), then `mentions.store.ts` keeps ONE draft per key
+`{ key, text, sessionId, at }` — an optional `drafts` array in `jira-mentions.json` version 1, so a file without it reads as no drafts, a bad entry costs only itself and
+phase-1 code ignores the key — pruned on save by the dismissals' clock. `/mentions/draft/discard` `{ key }` drops it (200 even when there is none). `/mentions/reply`
+`{ key, text }` is the one route that posts (`poller.postReply`): the open-mention check with dismissals and `answeredAt` applied (409 `<KEY> has no open mention — it was
+answered or dismissed`, the draft kept), single-flight per key (409 `a reply to <KEY> is already being posted`), then `POST issue/{key}/comment` with an ADF body that
+opens with an @-mention of the comment's author. A 401 or 403 from Jira gains ` — the token needs write:comment:jira`. A POST Jira never answered — a transport failure,
+the 10 s deadline or a 5xx — may still have landed, so it is not a failure but 502 `Jira did not confirm the reply to <KEY> — it may have posted; …`, the draft kept and
+the key marked uncertain: the next post on that key first reads the thread's newest comments and adopts one of mine made since the attempt as the posted reply (the same
+200, no second POST), and posts only when there is none; a read that fails posts nothing. On success the ticket leaves the cache, `answeredAt[key]`
+(memory only, applied on read wherever the cache is read, so the payload, the summary, the open-mention gate and the thread's `answeredAfter` agree before the search
+catches up) records the comment's `created`, the draft is dropped, and the answer is the mentions payload plus `posted: { id, url }`. Every mentions payload carries, per
+issue, `draft` (from the store) and `session` (`JiraLiveService.replySession(key)`), composed by the controller so the poller never imports the live service. Text must be a
+non-empty string of at most `JIRA_REPLY_MAX_CHARS` (8 000), else 400 `text must be a non-empty string` or `text too long`. The reasoning is in
+[invariants.md](invariants.md#a-reply-draft-session-reads-only-and-only-a-persons-click-posts).
 
 ## `jira.json`'s reader and writers
 
@@ -462,8 +482,8 @@ repository's default branch", and only if the review approves apply the done-tra
 skill has no `references/review.md` (a server ahead of the plugin) the session stops: no transition, no push, no merge request. It adds at most 500 characters of
 fixed text; with `review` off the prompt is byte for byte what it was.
 
-`GET /api/jira/prompt?key=&action=&repo=` answers `text/plain`. Its refusals, in order: 400 `invalid issue key`; 400 `action must be execute, context, review or
-skill:<id>`; 400 `repo is required`; 503 not configured; 409 for an unreadable `jira.json`; 400 `unknown skill <id>`; the issue read through §8's mapping; 400
+`GET /api/jira/prompt?key=&action=&repo=` answers `text/plain`. Its refusals, in order: 400 `invalid issue key`; 400 `action must be execute, context, review, reply or
+{ skill: <id> }`; 400 `repo is required`; 503 not configured; 409 for an unreadable `jira.json`; 400 `unknown skill <id>`; the issue read through §8's mapping; 400
 `<repo> is not mapped to <PROJECT>`; the refs' 409s; 400 `prompt too long`. The branch choice's 400s come right after `repo is required` — after a review's
 `mr` and `half` 400s, which only shape the query and ask GitLab nothing (the dispatch is what checks the MR against the cache). The repo is normalised
 as `parseReposWrite` stored it (`~` expanded, one trailing slash dropped).
@@ -476,7 +496,7 @@ Jira has moved to another project, where the key keeps its old prefix and the de
 `JiraLiveService` (`live.service.ts`) holds the persisted link store in memory: `~/.backlog-manager/settings/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it, as
 `BM_JIRA_FILE` does `jira.json`), read once at construction by `loadLinks` and rewritten whole by `saveLinks` after every change but a `starting` reservation —
 a temp file in the same directory, then `rename`, the server its one writer. The file is `{ version: 1, links, suppressed, neverLink }`. A `JiraLink`
-(`shared/types.ts`) is the key, the session id, `how` (`run`, `branch` or `manual`), the action, the session's name, the repo, the branch, the surface, the
+(`shared/types.ts`) is the key, the session id, `how` (`run`, `branch`, `manual` or `reply`), the action, the session's name, the repo, the branch, the surface, the
 model and effort, a ticket snapshot (summary, type, the parent key Jira reports), `startedAt`, `endedAt` with an `endReason` (`idle`, `stopped`, `expired` or
 `gone`), `quietSince` and `reattachedAt`; `(key, sessionId)` is its identity, so a key may hold several. `suppressed` and `neverLink` are `(key, sessionId)`
 pairs, each capped at `JIRA_PAIR_LIST_CAP` (1,000, oldest out). **A file that does not parse, or whose `version` is not 1, loads as empty** with one warning and
@@ -518,7 +538,7 @@ nothing and written nothing.
 
 | status | `error` |
 | ------ | ------- |
-| 400 | `invalid issue key`; `action must be execute, context, review or { skill: <id> }`; `mr must be { project, iid }`; `half must be request or fix`; `review needs mr and half`; `repo is required`; `surface must be dashboard or desktop`; `prompt must be a non-empty string`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `review must be true or false`, `review is only for execute with a branch`, `target is only for openMr with continue`, a name failing Table A) |
+| 400 | `invalid issue key`; `action must be execute, context, review, reply or { skill: <id> }`; `mr must be { project, iid }`; `half must be request or fix`; `review needs mr and half`; `repo is required`; `surface must be dashboard or desktop`; `prompt must be a non-empty string`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `review must be true or false`, `review is only for execute with a branch`, `target is only for openMr with continue`, a name failing Table A) |
 | 503 | `Jira is not configured`; `no identity` |
 | 409 | `settings/jira.json <reason> — fix or delete it by hand`; `the desktop app is not available on this machine's dashboard — launch on Dashboard instead`; `<branch> exists — switch to Continue`; `<branch> is checked out in the mapped checkout <repo>`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment`; for a review, `a session is live on <branch>`, `no review state for !<iid> yet`, `nothing to review on !<iid>`, `!<iid> has too many threads to read`, `the review on !<iid> moved on — reopen the sheet` |
 | 400 | `unknown skill <id>`; `<repo> is not mapped to <PROJECT>`; `transition not offered`; `prompt too long`; for a review, `!<iid> is not an open merge request of <KEY>`, `<repo> is not a review candidate for !<iid>`, `a review continues <branch>` |

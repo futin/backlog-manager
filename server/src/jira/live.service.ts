@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { jiraSessionName } from '../../../shared/types';
-import type { DashboardRow, JiraEndReason, JiraLink, JiraLiveSession, JiraSaveError } from '../../../shared/types';
+import type { DashboardRow, JiraEndReason, JiraLink, JiraLiveSession, JiraMentionReplySession, JiraSaveError } from '../../../shared/types';
 import { loadLinks, saveLinks } from './links.store';
 import type { JiraLinkPair } from './links.store';
 
@@ -43,6 +43,11 @@ const same = (a: JiraLinkPair, key: string, sessionId: string): boolean => a.key
  * dependency: `AgentsModule` already imports `JiraModule`, so the dispatch reserves, confirms or releases through this provider, the reconciler reads
  * `confirmed()` and ends entries, and the controller composes `live` / `session` from `snapshot()`. The poller never sees it.
  *
+ * A `reply` (a read-only session drafting a reply to a mention) reserves in its OWN map, `startingReply`, beside `starting`, and is refused only by another live or
+ * starting `reply` on the key — so a Run and a reply draft on one key coexist, and neither gate looks at the other kind. `get`, `snapshot`, `confirmed` and
+ * `hasConfirmed` stay `run`-only for the reason below, a reply never showing through them; `replySession` is the reply's own reader. The cap, the 8-hour expiry
+ * and eviction count both maps. `unlink` refuses a `reply` link too: it is ended from the mention, never removed by hand.
+ *
  * The one-run gate is unchanged and `run`-only. A Run is `starting` from `reserve` until `confirm` hands it the dashboard's session id; `reserve` is a
  * synchronous check-and-set, so two concurrent dispatches for the same key cannot both pass it, and it ignores `branch` and `manual` links, which the user
  * started outside this board. `get`, `snapshot`, `confirmed` and `hasConfirmed` read the `run` entries alone, for the same reason: their readers (the gate, Stop's
@@ -69,6 +74,7 @@ const same = (a: JiraLinkPair, key: string, sessionId: string): boolean => a.key
 @Injectable()
 export class JiraLiveService {
   private readonly starting = new Map<string, Starting>();
+  private readonly startingReply = new Map<string, Starting>();
   private entries: JiraLink[];
   private readonly reposListeners: (() => void)[] = [];
 
@@ -90,12 +96,16 @@ export class JiraLiveService {
     this.neverLink = state.neverLink;
   }
 
-  /** Claims `key` for a Run in `repo`. False when a live `run` entry already holds it, or the store is full of starting entries. */
-  reserve(key: string, repo: string): boolean {
+  /**
+   * Claims `key` for a Run (the default) or a reply draft in `repo`. A Run is refused while a live `run` entry or a `run` reservation holds the key; a reply
+   * while a live `reply` link or a reply reservation does — the kinds never look at each other. Either is refused when the store is full of starting entries.
+   */
+  reserve(key: string, repo: string, kind: 'run' | 'reply' = 'run'): boolean {
     this.expire();
-    if (this.starting.has(key) || this.liveRun(key).length > 0) return false;
+    const map = this.reservations(kind);
+    if (map.has(key) || this.liveOf(key, kind).length > 0) return false;
     if (this.liveCount() >= JIRA_LIVE_CAP && !this.evictOldestConfirmed()) return false;
-    this.starting.set(key, { repo, startedAt: Date.now() });
+    map.set(key, { repo, startedAt: Date.now() });
     return true;
   }
 
@@ -103,16 +113,19 @@ export class JiraLiveService {
    * The dashboard answered: the reservation on `key` becomes a `run` link with `sessionId`. A key that was released or expired in the meantime stays gone —
    * nothing is resurrected — and so does a pair that has already ended: it keeps its end.
    */
-  confirm(key: string, sessionId: string, meta: JiraConfirmMeta): void {
+  confirm(key: string, sessionId: string, meta: JiraConfirmMeta, kind: 'run' | 'reply' = 'run'): void {
     this.expire();
-    const reserved = this.starting.get(key);
+    const map = this.reservations(kind);
+    const reserved = map.get(key);
     if (reserved === undefined) return;
-    this.starting.delete(key);
+    map.delete(key);
     const existing = this.find(key, sessionId);
     if (existing !== undefined) {
+      // A reply never upgrades or rewrites another kind's entry, and a pair that ended keeps its end.
+      if (kind === 'reply') return;
       // The board's own Run met the same session already linked by detection or by hand: it becomes the Run (one entry, the Run's meta merged in, its
       // reservation consumed above), so the one-run gate sees it. Anything else — an ended pair — keeps its end.
-      if (existing.endedAt === null && existing.how !== 'run') {
+      if (existing.endedAt === null && (existing.how === 'branch' || existing.how === 'manual')) {
         existing.how = 'run';
         existing.action = meta.action;
         existing.name = meta.name;
@@ -129,7 +142,7 @@ export class JiraLiveService {
     this.entries.push({
       key,
       sessionId,
-      how: 'run',
+      how: kind,
       action: meta.action,
       name: meta.name,
       repo: reserved.repo,
@@ -147,9 +160,18 @@ export class JiraLiveService {
     this.persist();
   }
 
-  /** Drops a `starting` Run — the spawn failed. A confirmed one, and any `branch`/`manual` link, is left alone. */
-  release(key: string): void {
-    this.starting.delete(key);
+  /** Drops a `starting` Run or reply — the spawn failed — of that `kind` only. A confirmed one, and any `branch`/`manual` link, is left alone. */
+  release(key: string, kind: 'run' | 'reply' = 'run'): void {
+    this.reservations(kind).delete(key);
+  }
+
+  /** The key's reply draft in flight: the starting reservation (no session id yet), else the newest live `reply` link, else `null`. */
+  replySession(key: string): JiraMentionReplySession | null {
+    this.expire();
+    const reserved = this.startingReply.get(key);
+    if (reserved !== undefined) return { sessionId: null, startedAt: new Date(reserved.startedAt).toISOString(), repo: reserved.repo };
+    const reply = this.liveOf(key, 'reply').sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
+    return reply === undefined ? null : { sessionId: reply.sessionId, startedAt: reply.startedAt, repo: reply.repo };
   }
 
   /** The key's live `run` entry, `starting` included; a live `branch`/`manual` link never shows through. */
@@ -248,11 +270,12 @@ export class JiraLiveService {
   }
 
   /** Removes a `branch`/`manual` link and remembers the pair so detection never re-adds it (C9). `run` refuses — only Stop ends one — and `missing` is no such pair. */
-  unlink(key: string, sessionId: string): 'removed' | 'missing' | 'run' {
+  unlink(key: string, sessionId: string): 'removed' | 'missing' | 'run' | 'reply' {
     this.expire();
     const link = this.find(key, sessionId);
     if (link === undefined) return 'missing';
     if (link.how === 'run') return 'run';
+    if (link.how === 'reply') return 'reply';
     this.entries = this.entries.filter((l) => l !== link);
     this.remember(this.suppressed, key, sessionId);
     this.persist();
@@ -406,12 +429,20 @@ export class JiraLiveService {
     return this.entries.find((l) => l.key === key && l.sessionId === sessionId);
   }
 
+  private liveOf(key: string, how: 'run' | 'reply'): JiraLink[] {
+    return this.entries.filter((l) => l.key === key && l.how === how && l.endedAt === null);
+  }
+
   private liveRun(key: string): JiraLink[] {
-    return this.entries.filter((l) => l.key === key && l.how === 'run' && l.endedAt === null);
+    return this.liveOf(key, 'run');
+  }
+
+  private reservations(kind: 'run' | 'reply'): Map<string, Starting> {
+    return kind === 'reply' ? this.startingReply : this.starting;
   }
 
   private liveCount(): number {
-    return this.starting.size + this.entries.filter((l) => l.endedAt === null).length;
+    return this.starting.size + this.startingReply.size + this.entries.filter((l) => l.endedAt === null).length;
   }
 
   private endLink(link: JiraLink, reason: JiraEndReason, now: number): void {
@@ -432,7 +463,7 @@ export class JiraLiveService {
   private expire(): void {
     const now = Date.now();
     const cutoff = now - JIRA_LIVE_TTL_MS;
-    for (const [key, s] of this.starting) if (s.startedAt < cutoff) this.starting.delete(key);
+    for (const map of [this.starting, this.startingReply]) for (const [key, s] of map) if (s.startedAt < cutoff) map.delete(key);
     let changed = false;
     for (const l of this.entries) {
       // The clock restarts at a re-attach: an entry the dashboard shows working again has just proved it is not the stale thing the backstop is for.

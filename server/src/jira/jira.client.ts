@@ -1,6 +1,9 @@
+import type { AdfDoc } from './adf';
+
 /**
  * A thin client over `fetch` for the dozen endpoints of Jira Cloud's REST API this app reads and — since Jira phase 3 — the two it writes, `PUT issue/{key}/assignee`
- * and `POST issue/{key}/transitions` (spec §3, §6 and §8). Its own file, no Nest decorators
+ * and `POST issue/{key}/transitions` (spec §3, §6 and §8), plus the mention reply's `POST issue/{key}/comment` (Jira › Mentions). Its own file, no Nest
+ * decorators
  * and no injected dependencies beyond `fetch`, so a test can construct one over `FakeJira.fetch` and drive every branch without standing a module up — the
  * branches that are hard to reach are the failure ones (a 429 window, a 401 mid-sweep, a deadline), and those are exactly the ones a live Jira can never
  * schedule. It is the shape of `tracker/github.client.ts`: nothing here throws on an HTTP status, and every failure is a value the caller branches on.
@@ -162,6 +165,16 @@ export class JiraClient {
    */
   async transition(auth: JiraAuth, key: string, transitionId: string): Promise<JiraResponse<null>> {
     return this.request('POST', `${gatewayBase(auth.cloudId)}/issue/${encodeURIComponent(key)}/transitions`, auth, { transition: { id: transitionId } });
+  }
+
+  /**
+   * Adds a comment (Jira › Mentions, Post reply): `POST issue/{key}/comment` with `{ body }`, an ADF document, answered 201 with the new comment's `id` and
+   * `created`. The third write this client makes and the only one that ADDS text to Jira; its one caller is `JiraPollerService.postReply`, reached only from
+   * the person's Post reply click (`POST /api/jira/mentions/reply`) — no session, schedule or retry. The token needs `write:comment:jira` for it, a scope
+   * the reads and the other two writes never asked for, which is why the route names it on a 401/403.
+   */
+  async addComment(auth: JiraAuth, key: string, body: AdfDoc): Promise<JiraResponse<{ id: string; created: string }>> {
+    return this.request('POST', `${gatewayBase(auth.cloudId)}/issue/${encodeURIComponent(key)}/comment`, auth, { body });
   }
 
   /** One page of projects, fifty at a time from `startAt`. */
