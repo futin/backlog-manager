@@ -625,8 +625,10 @@ The look is DESIGN.md §8.9.1 (`Run ▾` and the strip), §8.9.2 (the modal's ro
 section (nine dialogs). The browser still never talks to Jira or the dashboard: every request below is to this server.
 
 - **`Run ▾`** (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the Detail dialog's agent column. It decides nothing:
-  `runChipState(issue, status)` (`lib/jira.ts`) answers `no-repo` (a dashed chip that opens nothing, its title naming `Jira › Setup › Repositories`), `live`
-  (disabled, titled `a session is running on <KEY>`) or `ready` (a `Popover` of the two built-ins, the skills with `skillCommand`'s slash command as a hint,
+  `runChipState(issue, status, sessions)` (`lib/jira.ts`) answers `no-repo` (a dashed chip that opens nothing, its title naming `Jira › Setup ›
+  Repositories`), `live` (a `starting` reservation on the key, or a live Run on it that does not yield by `runYields`; disabled, titled by `runBlockTitle` as
+  `a Run on <KEY> is <phrase>`, the phrase being `starting` or the same `runBlockPhrase` words the server's 409 ends in) or `ready` (no hold, or every live Run
+  on the key quiet: a `Popover` of the two built-ins, the skills with `skillCommand`'s slash command as a hint,
   and the note `opens the launch sheet`), the row `Jira default action` resolves to listed first with the hint `default`. It is drawn with agents off. On a card
   its wrapper stops the click and Enter/Space, the link-out's precedent, and `jira-run-open` lets the card overflow while the panel is open.
 - **The launch sheet** (`components/jira/JiraLaunchSheet.tsx`) composes `ui/FormSheet` and is hosted ONCE, in `JiraView`, after the modal; both homes of `Run ▾`
