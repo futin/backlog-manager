@@ -92,7 +92,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
 - **A Jira session is a persisted link, and Stop, a quiet dashboard or the 8-hour backstop each end it.** `JiraLiveService` (`server/src/jira/live.service.ts`,
   NOT `JiraService`) holds the link store in memory and writes it whole after every change but a `starting` reservation: `server/src/jira/links.store.ts`,
   `~/.backlog-manager/settings/jira-links.json` (`BM_JIRA_LINKS_FILE` overrides it), version 1, the server its one writer, through
-  `writeJsonAtomic`. It holds `links` (`JiraLink`: key, session id, `how` — `run`, `branch`, `manual` or `reply` — action, repo, branch, surface, model, effort, a ticket
+  `writeJsonAtomic`. It holds `links` (`JiraLink`: key, session id, `how` — `run`, `branch`, `manual` or `reply` —
+  action, repo, branch, surface, model, effort, a ticket
   snapshot, `startedAt`, `endedAt` with an `endReason` of `idle`, `stopped`, `expired` or `gone`, `quietSince` and `reattachedAt`), plus the `suppressed` and
   `neverLink` pairs (each capped at 1,000, oldest out); `(key, sessionId)` is a link's identity, and a key may hold several. A file that does not parse, or
   whose `version` is not 1, loads EMPTY with one warning and is renamed `jira-links.json.bad-<ISO>` at the first save — never overwritten, and left alone by a
@@ -108,7 +109,9 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   page is open; a read that OPENS the page (`pageOpen` was false) fires `JiraLiveService.onPageOpened`, and the reconciler drops a pending 60 s timer for a 15 s one.
   The one-run gate is `run`-only. The dispatch RESERVES the key (`starting`, memory only, never written, dropped by a restart) before its first Jira write, and
   `reserve` is a synchronous check-and-set refusing while a live `run` link or a reservation holds the key — so of two Starts exactly one passes, the other 409s
-  `<KEY> is starting` / `already has a session`; a live `branch` or `manual` link is the user's own and blocks nothing. A `reply` reserves in its own map beside `starting`, refused only by another live or starting `reply` on the key, so a Run and a reply draft on one key coexist; `get`/`snapshot`/`confirmed` stay `run`-only, and `unlink` refuses a `reply` link (409). Every failure after the reservation runs
+  `<KEY> is starting` / `already has a session`; a live `branch` or `manual` link is the user's own and blocks nothing.
+  A `reply` reserves in its own map beside `starting`, refused only by another live or starting `reply` on the key, so a Run and a reply draft on one key
+  coexist; `get`/`snapshot`/`confirmed` stay `run`-only, and `unlink` refuses a `reply` link (409). Every failure after the reservation runs
   through one `catch` that `release`s it; `release` touches only a `starting` entry, so it can never drop a session that did start, and a refused `reserve`
   releases nothing (it would drop the other request's entry). `confirm` follows the spawn and turns the reservation into a `run` link (over a live `branch` or
   `manual` link for the same pair it upgrades that entry to `run`); a key released meanwhile
