@@ -332,4 +332,74 @@ describe('useJiraMentions', () => {
     });
     expect(outcome).toEqual({ ok: false, message: 'could not save — nothing changed' });
   });
+  const issueRow = { key: 'PAY-1', summary: 's', type: 'Bug', status: { name: 'To Do', category: 'new' }, boards: [], mentions: [], draft: null, session: null };
+
+  it('postReply: a 200 replaces data (the ticket gone) and resolves ok with the posted comment', async () => {
+    fetchMock.mockImplementation((u: string, init?: RequestInit) => res(init === undefined ? payload({ issues: [issueRow] as never }) : { ...payload({ me: 'posted' }), posted: { id: '5', url: 'https://x/5' } }));
+    render(tree());
+    await flush();
+    let out: unknown;
+    await act(async () => {
+      out = await last.postReply('PAY-1', 'Thanks');
+    });
+    expect(out).toEqual({ ok: true, posted: { id: '5', url: 'https://x/5' } });
+    expect(screen.getByTestId('p')).toHaveTextContent('ok:posted');
+    expect(statusReload).toHaveBeenCalled();
+  });
+
+  it('postReply: a 409 resolves { ok: false, message } with data unchanged and error set', async () => {
+    render(tree());
+    await flush();
+    fetchMock.mockImplementation(() => res({ error: 'a reply to PAY-1 is already being posted' }, 409));
+    let out: unknown;
+    await act(async () => {
+      out = await last.postReply('PAY-1', 'Thanks');
+    });
+    expect(out).toEqual({ ok: false, message: 'a reply to PAY-1 is already being posted' });
+    expect(last.error?.message).toBe('a reply to PAY-1 is already being posted');
+    expect(screen.getByTestId('p')).toHaveTextContent('ok:Ada');
+  });
+
+  it('postReply: a 503 rate-limit answer carries its retryAt into error', async () => {
+    render(tree());
+    await flush();
+    const until = new Date(Date.now() + 60_000).toISOString();
+    fetchMock.mockImplementation(() => res({ error: 'Jira asked to wait', retryAt: until }, 503));
+    await act(async () => {
+      await last.postReply('PAY-1', 'Thanks');
+    });
+    expect(last.error).toMatchObject({ message: 'Jira asked to wait', retryAt: until, status: 503 });
+  });
+
+  it('postReply: two calls for one key while the first is out send ONE request and both resolve the same outcome', async () => {
+    render(tree());
+    await flush();
+    const d = deferred();
+    fetchMock.mockImplementation(() => d.promise);
+    let a: Promise<unknown> = Promise.resolve();
+    let b: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      a = last.postReply('PAY-1', 'Thanks');
+      b = last.postReply('PAY-1', 'Thanks');
+    });
+    expect(fetchMock.mock.calls.filter(([, init]) => init !== undefined)).toHaveLength(1);
+    await act(async () => {
+      d.resolve(await res({ error: 'nope' }, 409));
+    });
+    expect(await a).toEqual({ ok: false, message: 'nope' });
+    expect(await b).toEqual({ ok: false, message: 'nope' });
+  });
+
+  it('discardDraft posts the key and replaces data with the answer', async () => {
+    render(tree());
+    await flush();
+    fetchMock.mockImplementation(() => res(payload({ me: 'discarded' })));
+    await act(async () => {
+      await last.discardDraft('PAY-1');
+    });
+    const [url, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    expect(url).toBe('/api/jira/mentions/draft/discard');
+    expect(JSON.parse(init.body as string)).toEqual({ key: 'PAY-1' });
+    expect(screen.getByTestId('p')).toHaveTextContent('ok:discarded');
+  });
 });

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpException, Param, Post, UseGuards } from '@nestjs/common';
 
 import { JIRA_MENTIONS_DISMISS_MAX, JIRA_REPLY_MAX_CHARS, isJiraKey } from '../../../shared/types';
-import type { JiraMentionIssue, JiraMentionsConfigured, JiraMentionsPayload, JiraThreadPayload } from '../../../shared/types';
+import type { JiraMentionIssue, JiraMentionReplyAnswer, JiraMentionsConfigured, JiraMentionsPayload, JiraThreadPayload } from '../../../shared/types';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import { jiraEnv } from './env.util';
 import { JiraLiveService } from './live.service';
@@ -15,9 +15,6 @@ const COMMENT_ID = /^\d{1,20}$/;
 
 /** Appended to the error when Jira answered the reply POST itself with a 401 or 403: the one scope a token that reads and assigns fine may still lack. */
 const COMMENT_SCOPE = ' — the token needs write:comment:jira';
-
-/** `POST /api/jira/mentions/reply`'s answer: the mentions payload after the post, plus the new comment's id and focused-comment link. */
-export type JiraMentionReplyAnswer = JiraMentionsConfigured & { posted: { id: string; url: string } };
 
 /**
  * The Jira › Mentions routes (spec "Routes and shapes"): `GET /api/jira/mentions`, the three POSTs that act on it — `sweep` (the page's own "check now"),

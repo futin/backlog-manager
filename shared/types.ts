@@ -1266,6 +1266,9 @@ export interface JiraMentionsConfigured {
 }
 export type JiraMentionsPayload = JiraMentionsConfigured | JiraMentionsUnconfigured;
 
+/** `POST /api/jira/mentions/reply`'s answer: the mentions payload after the post, plus the new comment's id and focused-comment link. */
+export type JiraMentionReplyAnswer = JiraMentionsConfigured & { posted: { id: string; url: string } };
+
 /**
  * The status payload's slice of the mentions cache, so the chip popover and the rail count draw from the read they already make. `count` is waiting tickets.
  */
