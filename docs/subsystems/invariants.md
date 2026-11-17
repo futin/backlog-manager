@@ -2142,7 +2142,9 @@ invalid entry, a case-insensitive duplicate (the first wins) and anything past t
 launched to is a card the person can see and fix, where a thrown error would blank the whole list. That repair is a VIEW, never written back (#349): every
 POST edits the raw file it read and keeps every row and key it did not change — a dropped row, a shadowed duplicate, a ninth entry, a key this version does
 not know — because the old write-the-view shape erased a person's hand-edited row the first time they saved an unrelated setting. `jira.json`'s writer
-keeps the same contract.
+keeps the same contract. The one exception is a delete, which removes every row of that machine's name, in any case and whether or not it validates (#420):
+a name is one machine case-insensitively, so deleting only the kept row let the next read promote the duplicate it had shadowed into the freed slot, and the
+delete looked like it did nothing. A row of another name — past the cap included — is another machine and stays, the way `jira.json`'s `deleteBoard` works.
 
 **Tokens are env-only, and no response carries one.** A remote's token is `BM_AGENTS_TOKEN_<NAME uppercased>`, home's is `BM_AGENTS_TOKEN`, and neither is in
 the file, the view or any error: `DashboardsView` carries `tokenSet` (a boolean) and `tokenVar` (the variable's NAME, so the card can say which one to set), and
@@ -2205,6 +2207,14 @@ The execute sheet's Finish picker follows the same rule: `executeDefaultFinish` 
 `EXECUTE_FINISHES`, so a stored `'merge'`, a number or a missing key reads as in-place) seeds it on every open and the last launch never does. Its Base select
 is the one place the rule goes further — there is no stored base at all, because a branch name remembered from last week is a ref that may no longer exist, so
 the select opens on the literal `main` and is sent only under PR.
+
+The Jira launch sheet seeds Open in, the repository and the branch from the ticket's last linked session (#503), and that is not the sticky pick this section
+rejects. The values are this ticket's own — what the previous session on the same ticket ran with — not a global pick from last week carried onto unrelated
+work. Each is re-validated against live state before it is used: the repository only while the project still maps it, Open in only while the dashboard says
+`desktopAvailable`, the branch only while the chosen repository's refs still list it, so a ref that has gone costs nothing but the fallback to today's
+defaults. And none of them spends: a sticky `max` costs money on every launch it rides, while a repository, a surface or a branch decides only where the work
+happens. Model, effort, permissions and the execute finish are the controls that spend or widen, and they still never come from the last launch, on this
+sheet as on every other.
 
 A groom's sheet is seeded the same way by `groomDefaultFinish` (same default, same `pickOne` clamp), and the two PR toggles beside the picker by
 `prAutoMergeDefault` and `prFixDefault` (booleans, default `false`, clamped by `pickBool`, so a stored string reads as the default). Fix only has meaning once

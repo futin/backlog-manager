@@ -18,6 +18,7 @@ import type {
   JiraDispatchResult,
   JiraIssue,
   JiraIssueDetail,
+  JiraLink,
   JiraLiveSession,
   JiraProjectRef,
   JiraRefBranch,
@@ -1229,28 +1230,75 @@ export interface BranchDraft {
 }
 
 /**
- * The draft the sheet opens with (spec §5.3): `branchSheetDefaults` decides the mode, and the two modes it did not pick are filled anyway, as they would open
+ * The ticket's last launch (#503): the most recent link for `key` by `startedAt`, or `null`. Every `how` counts — a session found by its branch is still the
+ * previous session on this ticket — and so does an ended one: the question is "what did the last session on this ticket use", not "what is running", so
+ * recency wins over liveness. An unparseable `startedAt` sorts last rather than throwing; on a tie the first in the payload's order stands.
+ */
+export function lastJiraLink<T extends Pick<JiraLink, 'key' | 'startedAt'>>(links: readonly T[], key: string): T | null {
+  const at = (l: T): number => {
+    const ms = Date.parse(l.startedAt);
+    return Number.isNaN(ms) ? -Infinity : ms;
+  };
+  let best: T | null = null;
+  for (const l of links) if (l.key === key && (best === null || at(l) > at(best))) best = l;
+  return best;
+}
+
+/**
+ * The launch sheet's one quiet line when it took anything from the ticket's last session (#503): `Prefilled from the last session · 2h ago`, the age on
+ * `elapsedSince`'s ladder — the one the Jira session cards print `startedAt` with. Its `now` rung reads `just now`, since `now ago` is not a phrase, and an
+ * unparseable stamp drops the age rather than printing a wrong one.
+ */
+export function prefilledLine(startedAt: string, now: number): string {
+  const age = elapsedSince(startedAt, now);
+  const lead = 'Prefilled from the last session';
+  if (age === null) return lead;
+  return `${lead} · ${age === 'now' ? 'just now' : `${age} ago`}`;
+}
+
+/**
+ * Whether the launch sheet's branch draft opens on the last session's branch (#503): never for `context`, which writes no code and opens on No branch; only
+ * against refs that were read, since unread refs cannot say the branch still exists; and only for a branch that IS listed and is not the mapped checkout's
+ * own, because `branchRefusal` refuses a Continue on that one — the same reason `branchSheetDefaults` skips it (Ruling 15). Anything else falls back to the
+ * draft without a preference, so a branch deleted since the session ended costs nothing.
+ */
+export function preferredBranchApplies(action: JiraAction, refs: JiraRepoRefs | null, preferred: string | null): boolean {
+  if (action === 'context' || preferred === null || preferred === '') return false;
+  if (refs === null || !refs.available) return false;
+  return preferred !== refs.mainBranch && refs.branches.some((b) => b.name === preferred);
+}
+
+/**
+ * The draft the sheet opens with (spec §5.3):`branchSheetDefaults` decides the mode, and the two modes it did not pick are filled anyway, as they would open
  * if picked — New from the pattern and the default base (the same call with the ticket's branches taken away, so one derivation names both), Continue on the
  * first ticket branch the mapped checkout does not hold, else nothing. The MR target opens on the repo's default base — the stored one when refs could not be
  * read — and the Open MR switch always opens off (spec §5.6) while Review before finishing opens ON — a review before the work is called done is the default, and
  * turning it off is the person's explicit choice.
+ *
+ * `preferred` is the branch the ticket's last session used (#503), passed only when that session ran in the repository this draft is for. When
+ * `preferredBranchApplies`, the draft opens on Continue on it — even if that session launched with New, since its branch exists now — and is otherwise
+ * exactly the draft without one.
  */
 export function branchDraft(
   action: JiraAction,
   refs: JiraRepoRefs | null,
   key: string,
   summary: string,
-  defaults: JiraRepoDefaults | undefined
+  defaults: JiraRepoDefaults | undefined,
+  preferred: string | null = null
 ): BranchDraft {
   const picked = branchSheetDefaults(action, refs, key, summary, defaults);
   const bare = refs !== null && refs.available ? { ...refs, branches: [] } : refs;
   const fresh = branchSheetDefaults('execute', bare, key, summary, defaults);
   const ticket = refs !== null && refs.available ? refs.branches.find((b) => b.ticket && b.name !== refs.mainBranch) : undefined;
+  // The ticket's last session's branch (#503) overrides only the mode and the Continue field: New and its base keep their own derivation, so flipping to New
+  // still shows the pattern name rather than an empty field.
+  const prefer = preferredBranchApplies(action, refs, preferred);
   return {
-    mode: picked.mode,
+    mode: prefer ? 'continue' : picked.mode,
     newBranch: fresh.branch,
     base: fresh.base,
-    continueBranch: picked.mode === 'continue' ? picked.branch : (ticket?.name ?? ''),
+    continueBranch: prefer && preferred !== null ? preferred : picked.mode === 'continue' ? picked.branch : (ticket?.name ?? ''),
     openMr: false,
     review: true,
     target: refs !== null && refs.available ? (refs.defaultBase ?? '') : (defaults?.base ?? '')

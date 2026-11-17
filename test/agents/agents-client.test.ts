@@ -7,10 +7,12 @@ import {
   fetchOrchestratorArchive,
   fetchOrchestratorRuns,
   cancelPauseOrchestrate,
+  parseSmallMaxLines,
   pauseOrchestrate,
   sessionUrl,
   startOrchestrate
 } from '../../client/src/lib/agents';
+import { REVIEW_SMALL_MAX_LINES_MAX, REVIEW_SMALL_MAX_LINES_MIN } from '../../shared/agent';
 import rawFixture from '../fixtures/orchestrator-run.json';
 import type {
   AgentDispatchRequest,
@@ -375,5 +377,26 @@ describe('sessionUrl', () => {
 
   it('encodes the id rather than interpolating it raw', () => {
     expect(sessionUrl('http://dash', 'a b&c')).toBe('http://dash/?session=a%20b%26c');
+  });
+});
+
+// The Settings field's parse must accept exactly what `parseReviewConfig` (shared/agent.ts) accepts — a whole number within the exported bounds, no coercion —
+// because a value the client sends and the server refuses fails the save with nothing on screen to say why. A number input lets a sign, a decimal point and
+// an exponent through, so `Number(text)` alone would take `1.5` and `1e3`; the bounds rows read the constants, so moving a bound moves the row with it.
+describe('parseSmallMaxLines', () => {
+  it.each<[string, number | null]>([
+    [String(REVIEW_SMALL_MAX_LINES_MIN), REVIEW_SMALL_MAX_LINES_MIN],
+    [String(REVIEW_SMALL_MAX_LINES_MAX), REVIEW_SMALL_MAX_LINES_MAX],
+    [' 300 ', 300],
+    [String(REVIEW_SMALL_MAX_LINES_MIN - 1), null],
+    [String(REVIEW_SMALL_MAX_LINES_MAX + 1), null],
+    ['-1', null],
+    ['1.5', null],
+    ['1e3', null],
+    ['', null],
+    ['   ', null],
+    ['12a', null]
+  ])('parses %j as %p', (input, expected) => {
+    expect(parseSmallMaxLines(input)).toBe(expected);
   });
 });

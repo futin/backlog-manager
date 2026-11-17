@@ -50,6 +50,10 @@ export interface BranchState {
  *
  * The re-seed is a `setState` during render, React's own idiom for state derived from a changed input, rather than an effect: an effect would commit one frame
  * with the old draft, and the preview's `useFetched` would already have asked the server about the previous repository's branch by then.
+ *
+ * `preferred` is the ticket's last session's branch (#503), which the sheet passes only while the repository picked is that session's own — a branch of
+ * another repository is not a ref of this one. It is read at each re-seed, never applied to a draft the person has already edited, so it is one more input
+ * to the defaults and not a second writer of the draft.
  */
 export function useBranchState(
   action: JiraAction,
@@ -57,7 +61,8 @@ export function useBranchState(
   key: string,
   summary: string,
   defaults: JiraRepoDefaults | undefined,
-  locked: string | null = null
+  locked: string | null = null,
+  preferred: string | null = null
 ): BranchState {
   const actionKey = jiraActionParam(action);
   const refs = useFetched(repo === '' ? null : () => fetchJiraRefs(repo, key), [repo, key]);
@@ -69,7 +74,7 @@ export function useBranchState(
   if (visit.repo !== repo) setVisit({ repo, n: visit.n + 1 });
   const [seed, setSeed] = useState<{ action: string; visit: number | null }>({ action: actionKey, visit: null });
   if (seed.action !== actionKey || (settled && seed.visit !== visit.n)) {
-    setDraft(branchDraft(action, known, key, summary, defaults));
+    setDraft(branchDraft(action, known, key, summary, defaults, preferred));
     setSeed({ action: actionKey, visit: settled ? visit.n : seed.visit });
   }
 

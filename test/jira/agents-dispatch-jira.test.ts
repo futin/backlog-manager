@@ -567,6 +567,8 @@ describe('Start', () => {
 
     const spawn = sent.spawns[0];
     expect(spawn).toMatchObject({ project: '-dir-0', name: 'jira PAY-1', permissionMode: 'acceptEdits', model: DEFAULT_MODEL, remoteControl: false });
+    // Only a reply is one-shot: a Run is the session a person follows up in, so its spawn body carries no `oneShot` key at all.
+    expect(spawn).not.toHaveProperty('oneShot');
     // No copy of the ticket: the session reads it with `jira.mjs show`, so its status and assignee are whatever the writes left.
     const prompt = spawn.prompt as string;
     expect(
@@ -1241,6 +1243,15 @@ describe('reply', () => {
       const prompt = sent.spawns[0].prompt as string;
       for (const needle of ['PAY-1', 'jira.mjs show PAY-1', 'jira.mjs thread PAY-1', 'jira.mjs draft PAY-1', 'never post']) expect(prompt).toContain(needle);
       for (const absent of ['WOMBAT', 'NUMBAT', 'QUOKKA', 'refund cron']) expect(prompt).not.toContain(absent);
+    });
+
+    // Close when done: a draft is one turn's work handed over through `jira.mjs draft`, so the session must end with that turn rather than hold in the
+    // dashboard's Stop-hook reply window — where it reads `question` and lights the rail's Needs-you badge for a session nobody needs to answer.
+    it('launches the reply one-shot (`oneShot: true`, the dashboard\'s Close when done)', async () => {
+      await build({ mentions: ['PAY-1'] });
+      const sent = stubDashboard();
+      await post(REPLY).expect(200);
+      expect(sent.spawns[0]).toMatchObject({ oneShot: true, remoteControl: true });
     });
 
     it("confirms a `reply` link, answers assigned false and the reply session's own start, and writes nothing to Jira", async () => {

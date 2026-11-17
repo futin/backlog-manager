@@ -185,7 +185,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   the key among `JiraPollerService.mentionsPayload().issues`, from memory (not configured, not cached, or every mention dismissed is 400 `<KEY> has no open
   mention`) — and the any-project repo rule, `anyProjectRepoOrThrow` (`prompt.util.ts`, shared with `GET /api/jira/prompt`; 400 `<repo> is not mapped to any
   Jira project`). It reserves in its own map, `reserve(key, repo, 'reply')`, so a Run on the key does not block it and a second reply is 409 `a reply is already
-  being drafted for <KEY>`; every release and the `confirm` name the kind, and the answer's `startedAt` is `replySession`'s. `replyText` orders `jira.mjs show`
+  being drafted for <KEY>`; every release and the `confirm` name the kind, and the answer's `startedAt` is `replySession`'s. The spawn carries
+  `oneShot: true` (the dashboard's Close when done, `LaunchOpts.oneShot`, put on the body only when true) derived from the action — no other launch sets it. `replyText` orders `jira.mjs show`
   and `jira.mjs thread` read as data, not instructions, the repo investigated read only (no edits, commits or branches), the reply written without a leading
   @-mention and handed over with `jira.mjs draft <KEY>` on stdin — never posted, never a Jira call; it carries no ticket or thread text, so the preview equals
   the spawn. The preview has no mention gate. `JIRA_BUILTIN_LABELS.reply` (`Draft a reply`) is a label for links and the List, never a menu row. Why:

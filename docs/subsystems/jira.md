@@ -273,7 +273,8 @@ truncated, retryAt }` for the chip's popover row and the rail count. The client 
 `JiraMentionModal` (the ninth dialog) and `useJiraMentions`, whose age prints as `checked 1 min ago` through `checkedAge` in `lib/jira-mentions.ts`.
 
 **The reply (phase 2).** The modal's `Draft a reply` starts a read-only session on the built-in `reply` action (`POST /api/agents/dispatch-jira` with `action: 'reply'`,
-mode `none`, no assign, no transition, no edited prompt, a dashboard launch; the repo may be mapped to any project, and the key needs an open mention, else 400
+mode `none`, no assign, no transition, no edited prompt, a dashboard launch sent one-shot — `oneShot: true`, the dashboard's Close when done, derived from the
+action, so the session ends with its drafting turn instead of holding in the reply window, where it would read `question` and light Needs-you; the repo may be mapped to any project, and the key needs an open mention, else 400
 `<KEY> has no open mention`). Its link is `how: 'reply'`, reserved in its own map so it never blocks, or is blocked by, a Run on the key; a second live one is a 409
 `a reply is already being drafted for <KEY>`, and `jira-unlink` refuses it (409 `<KEY> is drafting a reply — stop it from the mention instead`). The session reads
 with `jira.mjs show` and `jira.mjs thread` and hands its text over with `jira.mjs draft`, which POSTs `/mentions/draft` `{ key, sessionId, text }`: the route proves a
@@ -356,7 +357,8 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
 - **Jira › Sessions** (`components/jira/JiraSessionsView.tsx`, `JiraBandSub.tsx`). The session table, `JiraSessionList`, on a page of its own: the shared board pick and
   load (`usePickedJiraBoard`), its own `Search sessions` text, no FilterBar and no view switch. The table's bar is drawn in every state and `All tickets` on is scoped
   to every linked ticket whatever the board is doing, so the rail badge's click (page `sessions`, filters `{ chip: 'needs-you', allTickets: true }`) never waits on a
-  board read. The five list filters stay `useJiraListFilters`' module store.
+  board read. With All tickets off, a live session that needs you is drawn even off the board (`buildListRows`), so the page always holds what the rail's
+  Needs-you badge counts. The five list filters stay `useJiraListFilters`' module store.
 - **The Detail dialog** (`components/jira/JiraDetail.tsx`, the former issue modal) composes `ui/Modal` and `ui/Fact` as `ItemModal` does, and keeps the
   modal's slot on the Escape stack. Its facts column is the ticket's sessions (below); everything the issue modal drew sits on the right. It draws every fact
   the card carried at once, and reads `GET /api/jira/issue/:key` fresh on open for the description (through `renderMarkdown`, `lib/markdown.ts`, the sanitising
@@ -635,7 +637,13 @@ section (nine dialogs). The browser still never talks to Jira or the dashboard: 
   for every action, else `plan` for `context` and `acceptEdits` for the rest), clamped to the host's ceiling —
   and model and effort seed from Settings. While the agents status says `desktopAvailable`, an `Open in` Dashboard | Desktop pill (the board LaunchSheet's
   control) sits under the action, for any action, seeded once from `launchSurfaceDefault`, and Start sends its pick as `surface`; under Desktop only remote
-  control is disabled (and sent Off) — permissions, model and effort still drive the headless first turn. Start stays HOME-ONLY under multi-dashboard: the sheet draws no machine picker and `dispatch-jira` takes no
+  control is disabled (and sent Off) — permissions, model and effort still drive the headless first turn. **A ticket that already had a session opens from
+  that session's setup** (#503): the newest link for the key by `startedAt` (`lastJiraLink`, any `how`, live or ended), read through the shell's
+  `useJiraSessionsContext()` and frozen the first render that payload is known, seeds Open in (its `surface`, while the control is drawn; a `null` one falls
+  through to `launchSurfaceDefault`), the repository (only a path the project still maps) and the branch (Continue on it, only in that session's own
+  repository and only while its refs list it and it is not the mapped checkout's — `preferredBranchApplies`), each resolved on its own, and one
+  `.sheet-note` reads `Prefilled from the last session · <age>` when any of them was taken. Model, effort, permissions and the execute finish still never
+  come from it, and a review sheet takes nothing from it. Start stays HOME-ONLY under multi-dashboard: the sheet draws no machine picker and `dispatch-jira` takes no
   `machine`, because the mapped repository is a path in this machine's `jira.json` and means nothing on another. A landed Start calls `onStarted`, which reloads
   the shell's status (the strip) and the sessions payload and nudges the board. The server
   applies `Assign to me` and `Move to` BEFORE the spawn, so a Start refused after a write landed ends its sentence `— the assign stands` or `— the Jira writes

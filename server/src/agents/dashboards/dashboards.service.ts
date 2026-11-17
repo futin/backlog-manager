@@ -183,7 +183,10 @@ export class DashboardsService {
     });
   }
 
-  /** Drops the entry and its id in `order`. An unknown name is a 404 — the card only offers a delete for a row it drew. */
+  /**
+   * Drops the machine — every raw row of its name, in any case — and its id in `order`. An unknown name is a 404 — the card only offers a delete for a row
+   * it drew, and the name must be that row's exact spelling.
+   */
   deleteEntry(body: unknown): DashboardsView {
     if (!isPlainObject(body)) throw bad('bad body');
     const { name } = body;
@@ -191,11 +194,13 @@ export class DashboardsService {
     return this.edit((cur, raw) => {
       if (!cur.dashboards.some((d) => d.name === name)) throw new HttpException({ error: `no dashboard named "${name}"` }, 404);
       const dashboards = cur.dashboards.filter((d) => d.name !== name);
-      // Only the row the view drew goes. A later row of the same lowercased name that the reader dropped as a duplicate is no longer shadowed and is live on
-      // the next read if it validates — it was hidden, never deleted, and deleting it too would remove a row nobody asked to remove.
-      const rows = rawRows(raw);
-      const rawAt = keptRowAt(raw, name);
-      if (rawAt >= 0) rows.splice(rawAt, 1);
+      // A name is one machine case-insensitively — the reader's first-wins rule, the upsert's clash 400 and the shared token variable all say so — so the
+      // delete removes every raw row of that name, wherever it sits and whether or not it validates: the kept row, a duplicate the reader shadowed, one past
+      // the cap, a half-broken one. Removing only the kept row (#349) let the next read promote a shadowed `box` into the slot a deleted `Box` left, so the
+      // delete looked like it did nothing (#420). `jira.json`'s `deleteBoard`/`deleteSkill` have the same contract. A row of ANOTHER name stays where it
+      // was, past the cap included — that is a different machine nobody asked to delete, and the freed slot drawing it is the cap working.
+      const lower = name.toLowerCase();
+      const rows = rawRows(raw).filter((r) => !(isPlainObject(r) && typeof r.name === 'string' && r.name.toLowerCase() === lower));
       return {
         ...raw,
         dashboards: rows,
