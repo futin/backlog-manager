@@ -15,6 +15,7 @@ import { JIRA_PAGE_KEY } from '../../client/src/lib/jira-page';
 import { SETTINGS_STORAGE_KEY } from '../../client/src/lib/settings';
 import type { JiraBoardStatus, JiraIssue, JiraSkill, JiraStatusPayload } from '../../shared/types';
 import { NoGitlab } from '../helpers/no-gitlab';
+import { readStyles, ruleBlocks } from '../helpers/css-rule';
 
 /*
   Jira › Setup (Jira phase 2; spec §6.4; DESIGN.md §8.9.3) — the real page over a mocked `fetch`, in `jira-board.test.tsx`'s style: the Boards
@@ -1131,6 +1132,15 @@ describe('the Connection banner', () => {
     statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] } });
     await renderSetup();
     expect(document.body.textContent).not.toContain('@');
+  });
+
+  /*
+    #541: the banner is the one full-width card between the band and `.set-cols`, and `.set` has no gap of its own (the band's 16 px bottom margin spaces
+    the first card on every other Settings page), so the banner has to carry its own 16 px or it sits flush on the Boards / Skills cards. jsdom computes no
+    layout, so the rule is read from the sheet.
+  */
+  it('keeps 16 px between the banner and the cards under it (#541)', () => {
+    expect(ruleBlocks(readStyles(), '.jira-setup-banner').some((b) => /(^|[;\s])margin-bottom:\s*16px\b/.test(b))).toBe(true);
   });
 });
 
