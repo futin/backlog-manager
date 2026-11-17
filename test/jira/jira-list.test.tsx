@@ -285,6 +285,26 @@ describe('the Sessions page', () => {
   });
 
   /*
+    The rail's Needs-you badge counts every live link that needs the reader, whatever the board (`needsYouCount`), so a List scoped to the board drew `1` on the
+    rail over a page with nothing to answer — a reply draft on a mentioned ticket that is on no board was the case that surfaced it. A live link that needs the
+    reader is in scope with All tickets off; one that is merely working, or has ended, off the board is still not.
+  */
+  it('with All tickets off, a live off-board session that needs you is drawn — a working or ended off-board one is not', async () => {
+    links = [
+      link({ key: 'PAY-131', id: 'on1', state: 'working', startedAt: hoursAgo(3) }),
+      link({ key: 'ZZ-7', id: 'off-q', state: 'reply', startedAt: hoursAgo(2), summary: 'Off board question' }),
+      link({ key: 'ZZ-8', id: 'off-w', state: 'working', startedAt: hoursAgo(1), summary: 'Off board working' }),
+      link({ key: 'ZZ-9', id: 'off-e', state: 'ended', startedAt: daysAgo(2), endedAt: daysAgo(1), summary: 'Off board ended' })
+    ];
+    await renderList();
+    expect(await screen.findByText('Off board question')).toBeInTheDocument();
+    expect([...rowTags()].sort()).toEqual(['PAY-131:working', 'ZZ-7:reply']);
+    expect(screen.queryByText('Off board working')).toBeNull();
+    expect(screen.queryByText('Off board ended')).toBeNull();
+    expect(chipCount('Needs you')).toBe('1');
+  });
+
+  /*
     A session run on a sub-task's parent story (`Run on`, #499) is linked to the PARENT's key, and the parent is usually on no board — so with All tickets off
     the person's own running session vanished from Sessions. A parent of a sub-task the board holds is in scope, marked `via <SUB-TASK>`; a story's epic is
     not (the `Run on` toggle's own condition: only a sub-task's parent owns its branch).

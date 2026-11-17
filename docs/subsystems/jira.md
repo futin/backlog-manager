@@ -357,7 +357,8 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
 - **Jira › Sessions** (`components/jira/JiraSessionsView.tsx`, `JiraBandSub.tsx`). The session table, `JiraSessionList`, on a page of its own: the shared board pick and
   load (`usePickedJiraBoard`), its own `Search sessions` text, no FilterBar and no view switch. The table's bar is drawn in every state and `All tickets` on is scoped
   to every linked ticket whatever the board is doing, so the rail badge's click (page `sessions`, filters `{ chip: 'needs-you', allTickets: true }`) never waits on a
-  board read. The five list filters stay `useJiraListFilters`' module store.
+  board read. With All tickets off, a live session that needs you is drawn even off the board (`buildListRows`), so the page always holds what the rail's
+  Needs-you badge counts. The five list filters stay `useJiraListFilters`' module store.
 - **The Detail dialog** (`components/jira/JiraDetail.tsx`, the former issue modal) composes `ui/Modal` and `ui/Fact` as `ItemModal` does, and keeps the
   modal's slot on the Escape stack. Its facts column is the ticket's sessions (below); everything the issue modal drew sits on the right. It draws every fact
   the card carried at once, and reads `GET /api/jira/issue/:key` fresh on open for the description (through `renderMarkdown`, `lib/markdown.ts`, the sanitising
