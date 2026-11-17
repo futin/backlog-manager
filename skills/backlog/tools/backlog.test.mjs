@@ -3372,11 +3372,16 @@ test('pr-resolve pushes the head never forced and stages by path, never -A', () 
     ['never `-A`', 'staging is by path, so no untracked file rides into the merge commit'],
     ['git merge --no-ff --no-commit origin/<base>', 'the merge leaves the commit to the commit step'],
     ['One judgment hunk aborts the whole resolve', 'a judgment call is never guessed at'],
+    // A tree with no node_modules symlink (the main checkout had none to link) must not turn `rm` into a false install stop.
+    ['rm -f node_modules && pnpm install', 'the lockfile install tolerates a tree that never got a symlink'],
+    // <root> is a value every tool call needs; the block that learns it has to print it, or the session guesses it from its cwd.
+    ['echo "$ROOT"', 'step 1 prints <root> rather than leaving it to be inferred'],
   ]
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `pr-resolve/SKILL.md lost the rule: ${rule} (${needle})`)
   }
-  assert.ok(!/git push[^`]*--force/.test(text), 'pr-resolve/SKILL.md spells a forced push')
+  // Every spelling of a forced push: `--force` / `--force-with-lease`, the short `-f`, and a `+` refspec (`+HEAD:<head>`), which forces without a flag.
+  assert.ok(!/git push[^`]*(--force|\s-f\b|\s\+)/.test(text), 'pr-resolve/SKILL.md spells a forced push')
 })
 
 // --- backlog-groom's closing "on disk only" line -----------------------------

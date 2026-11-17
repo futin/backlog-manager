@@ -34,7 +34,7 @@ has proved that session dead — never type one, never invent one; pass it throu
 - **The target holds a `#`, so single-quote it in the shell** (`'owner/repo#12'`) — unquoted, the shell reads `#12` as a comment.
 - **Every tool call runs from the main checkout**, `cd '<root>' && node "${CLAUDE_PLUGIN_ROOT}/skills/pr-resolve/tools/pr-resolve.mjs" …`: the tool derives the
   worktree paths from its cwd, and a call made from inside a tree would name a lock and trees that do not exist. `<root>` is the main working tree,
-  `git worktree list --porcelain | sed -n '1s/^worktree //p'`, read once in step 1.
+  `git worktree list --porcelain | sed -n '1s/^worktree //p'`: step 1's first block prints it as its first line, and every later `<root>` is that line.
 - **Shell variables do not survive between Bash calls.** Run each fenced block below as ONE call, and carry the values this session learns — `<root>`, `<head>`,
   `<base>`, `<fromSha>`, the tool's paths — as literal text in later commands, never as a variable set in an earlier call.
 - **The tool's exit codes:** `0` ok, `2` usage (the stderr line says what), `3` lock refused. It prints one JSON line on stdout.
@@ -68,10 +68,12 @@ Parse the target. `parse` refuses anything not `owner/repo#N` (exit `2`), and pr
 
 ```bash
 ROOT="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
+echo "$ROOT"
 cd "$ROOT" && node "${CLAUDE_PLUGIN_ROOT}/skills/pr-resolve/tools/pr-resolve.mjs" parse '<owner>/<repo>#<N>' [--reclaim <sessionId>]
 ```
 
-It prints `{ repo, number, reclaim, tree, baseTree, lockFile, outcomeFile }`: `tree` is `<root>/.worktrees/pr-resolve-<N>`, `baseTree` is
+The first line printed is `<root>` — an absolute path, written as literal text in every later command. The tool then prints
+`{ repo, number, reclaim, tree, baseTree, lockFile, outcomeFile }`: `tree` is `<root>/.worktrees/pr-resolve-<N>`, `baseTree` is
 `<root>/.worktrees/pr-resolve-<N>-base`. Exit `2`, or no git checkout at all, is an **early stop** naming the problem.
 
 Confirm the checkout's `origin` is that repo: `git -C '<root>' remote get-url origin`, read as `owner/repo` whatever its form (`https://github.com/o/r.git`,
@@ -179,8 +181,8 @@ examples are where the line between the two classes is drawn, and that line is t
 **Judgment — the session never guesses:** both sides changed the same logic; a deletion on one side and an edit on the other; a semantic choice between two
 behaviours; or **any hunk the session is not confident about**.
 
-**One judgment hunk aborts the whole resolve**: classify every hunk first, resolve nothing while one judgment hunk exists, and stop — `git merge --abort`,
-remove the trees, step 8 with the list of each judgment file and hunk and why. A partly resolved merge is never pushed.
+**One judgment hunk aborts the whole resolve**: classify every hunk first, resolve nothing while one judgment hunk exists, and stop — go to step 8, whose (a)
+aborts the merge and (b) removes the trees, with the list of each judgment file and hunk and why. A partly resolved merge is never pushed.
 
 When every hunk is mechanical, resolve each one by editing the file (no conflict marker may remain), and keep a list — file, and how — for the commit body and
 the comment.
@@ -193,11 +195,12 @@ the comment.
    dependencies; the install then regenerates the lockfile from the merged manifest:
 
    ```bash
-   cd '<tree>' && rm node_modules && pnpm install
+   cd '<tree>' && rm -f node_modules && pnpm install
    ```
 
-   `rm node_modules` with no trailing slash removes the link and never follows it. Use the project's own manager — the one its lockfile and `packageManager`
-   name: `pnpm-lock.yaml` → `pnpm install`, `package-lock.json` → `npm install`, `yarn.lock` → `yarn install`. **An install that fails or is denied is a stop.**
+   `rm -f node_modules` with no trailing slash removes the link and never follows it, and is a no-op when the main checkout had no `node_modules` to link. Use
+   the project's own manager — the one its lockfile and `packageManager` name: `pnpm-lock.yaml` → `pnpm install`, `package-lock.json` → `npm install`,
+   `yarn.lock` → `yarn install`. **An install that fails or is denied is a stop.**
 
 A generated file is regenerated the same way, with the generator the repo's own scripts name — a generated file whose generator cannot be found is a hunk the
 session is not confident about, so judgment.
@@ -257,7 +260,8 @@ In this order, **each act attempted even when an earlier one failed**:
 - **(a)** Abort the merge if one is still in progress — every stop after step 4, the install and cannot-run stops included, leaves nothing half-merged:
   `cd '<tree>' && if git rev-parse -q --verify MERGE_HEAD >/dev/null; then git merge --abort; fi`.
 - **(b)** Remove the trees THIS session created, and only those: `git -C '<root>' worktree remove --force '<path>'` for each, then
-  `git -C '<root>' worktree prune`.
+  `git -C '<root>' worktree prune`. A tree already gone (step 6 removes `<baseTree>` as soon as its re-run ends) is skipped, not a failure:
+  `[ -d '<path>' ] && git -C '<root>' worktree remove --force '<path>'`; only a tree still present after its removal is one that would not go.
 - **(c)** Release the lock:
 
   ```bash
