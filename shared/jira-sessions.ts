@@ -32,6 +32,40 @@ export function sessionState(link: JiraLink, row: DashboardRow | null, reachable
   return 'quiet';
 }
 
+/**
+ * Why a live Run still holds its key against the next Run, in the words both the dispatch's 409 (`<KEY> has a Run <phrase>`) and the disabled chip's title
+ * (`a Run on <KEY> is <phrase>`) end with — one list, so the server and the client cannot word one state two ways.
+ */
+export type RunBlockPhrase = 'not seen by the dashboard' | 'waiting on you' | 'still working' | 'not quiet yet';
+
+/**
+ * The quiet-only Run gate (spec 2026-11-17-jira-quiet-run-gate-design.md, Design → One predicate): `null` when this link would let the next Run on its key
+ * start, else the reason it will not, first match wins.
+ *
+ * A link yields only when ALL of: the reconciler has marked it quiet (`quietSince` — set only past the 2-minute grace, on a row neither `working` nor
+ * `question`), the dashboard's latest good read carries a row for it, and `sessionState` reads that row as Quiet. The row requirement is what makes "every
+ * unknown blocks" true. `quietSince` is persisted while the rows are memory only, so straight after a restart a link can carry `quietSince` with no row at all;
+ * `sessionState` reads a null row as `quiet` (its totality rule, above) because for a BADGE "unknown" must never raise an alarm — but for a GATE it is the
+ * opposite: a link the server knows nothing current about may be mid-turn, so it blocks. The same holds for a row that fell off a full 50-row list, which
+ * leaves `quietSince` standing (the reconciler proves nothing from an absent row in a full list). An unreachable dashboard is `lost`, which blocks too.
+ *
+ * The states that want a person (`plan`, `permission`, `reply`, `answer`) block as `waiting on you`: a second Run there would start beside a session that is
+ * only paused for an answer. `quiet` without `quietSince` yet — inside the grace, or idle for less than one reconcile tick — is `not quiet yet`.
+ */
+export function runBlockPhrase(link: JiraLink, row: DashboardRow | null, reachable: boolean): RunBlockPhrase | null {
+  if (!reachable || row === null) return 'not seen by the dashboard';
+  const state = sessionState(link, row, reachable);
+  if (needsYou(state)) return 'waiting on you';
+  if (state === 'working') return 'still working';
+  if (state === 'quiet' && link.quietSince !== null) return null;
+  return 'not quiet yet';
+}
+
+/** True when this is a LIVE `run` link that would let the next Run on its key start — `runBlockPhrase` is `null` for it. Other links never gate a Run. */
+export function runYields(link: JiraLink, row: DashboardRow | null, reachable: boolean): boolean {
+  return link.how === 'run' && link.endedAt === null && runBlockPhrase(link, row, reachable) === null;
+}
+
 /** The states that want a person — the Needs-you list and the rail badge count exactly these. */
 export function needsYou(state: JiraSessionState): boolean {
   return state === 'plan' || state === 'permission' || state === 'reply' || state === 'answer';

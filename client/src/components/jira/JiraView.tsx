@@ -90,7 +90,7 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
     setLaunch({ issue, action: 'review', review: { half, mr: { project: mr.project, iid: mr.iid, sourceBranch: mr.sourceBranch }, repos } });
   // A Start that landed, or a Start refused after the server's writes landed (the ticket moved either way): reload the shell's status, nudge the board, and
   // re-ask the sessions payload too — Detail's `sessionLive` and the List's `canRun` read it, and left to its own 15 s clock they would offer Start again
-  // on a ticket the server now holds a run on (the one-run 409).
+  // on a ticket the server now holds a run on (the Run gate's 409).
   const landed = (): void => {
     reload();
     void reloadSessions();

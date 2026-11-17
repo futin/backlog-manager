@@ -640,3 +640,116 @@ describe('jiraLinksFile default', () => {
     expect(compose).toMatch(/^\s*- \$\{HOME\}\/\.backlog-manager\/settings:\$\{HOME\}\/\.backlog-manager\/settings\s*$/m);
   });
 });
+
+/**
+ * The quiet-only Run gate (spec 2026-11-17-jira-quiet-run-gate-design.md): `reserve(key, repo, 'run', true)` lets a Run through beside live Runs on the
+ * key that all yield (`runYields` — `quietSince` set AND a current row that reads Quiet), and `runBlock` names why the newest one that does not yield
+ * still holds the key. Strict (`yieldToQuiet` false, the review's call) keeps today's rule.
+ */
+describe('the quiet gate', () => {
+  const QUIET = new Date(T0 + 60_000).toISOString();
+  const idle = (id: string) => ({ id, status: 'idle' });
+
+  /** A confirmed Run on `key` started at `at` ms — reserved through the yielding path, so every live Run already on the key must yield. */
+  function runOn(key: string, sessionId: string, at: number): void {
+    jest.setSystemTime(at);
+    expect(live.reserve(key, REPO, 'run', true)).toBe(true);
+    live.confirm(key, sessionId, { ...META, name: jiraSessionName(key) });
+  }
+
+  /** Two live Runs on PAY-1: `a` (older, made quiet so `b` could start) and `b` (newer, quiet too). The case then sets the rows it wants. */
+  function twoRuns(): void {
+    runOn('PAY-1', 'a', T0);
+    live.markQuiet('PAY-1', 'a', QUIET);
+    live.setRows([idle('a')], T0 + 1000);
+    runOn('PAY-1', 'b', T0 + 5000);
+    live.markQuiet('PAY-1', 'b', QUIET);
+  }
+
+  it('a quiet Run yields to the next Run, but not to a strict (review) reserve', () => {
+    runOn('PAY-1', 's1', T0);
+    live.markQuiet('PAY-1', 's1', QUIET);
+    live.setRows([idle('s1')], Date.now());
+    expect(live.runBlock('PAY-1')).toBeNull();
+    expect(live.reserve('PAY-1', REPO, 'run')).toBe(false);
+    expect(live.reserve('PAY-1', REPO, 'run', true)).toBe(true);
+  });
+
+  it('after a restart the persisted quietSince alone does not yield: no row yet is not seen by the dashboard', () => {
+    runOn('PAY-1', 's1', T0);
+    live.markQuiet('PAY-1', 's1', QUIET);
+    const fresh = new JiraLiveService();
+    expect(fresh.links()[0].quietSince).toBe(QUIET);
+    expect(fresh.reserve('PAY-1', REPO, 'run', true)).toBe(false);
+    expect(fresh.runBlock('PAY-1')).toBe('not seen by the dashboard');
+  });
+
+  it('an unreachable dashboard blocks a quiet Run as not seen by the dashboard', () => {
+    runOn('PAY-1', 's1', T0);
+    live.markQuiet('PAY-1', 's1', QUIET);
+    live.setRows([idle('s1')], Date.now());
+    live.markUnreachable(Date.now());
+    expect(live.reserve('PAY-1', REPO, 'run', true)).toBe(false);
+    expect(live.runBlock('PAY-1')).toBe('not seen by the dashboard');
+  });
+
+  it.each([
+    ['a working row', { id: 's1', status: 'working' }, QUIET, 'still working'],
+    ['a question row with a remote reply', { id: 's1', status: 'question', remoteReply: true }, QUIET, 'waiting on you'],
+    ['an idle row before quietSince', { id: 's1', status: 'idle' }, null, 'not quiet yet']
+  ])('%s blocks: %s', (_name, row, quietSince, phrase) => {
+    runOn('PAY-1', 's1', T0);
+    if (quietSince !== null) live.markQuiet('PAY-1', 's1', quietSince);
+    live.setRows([row], Date.now());
+    expect(live.reserve('PAY-1', REPO, 'run', true)).toBe(false);
+    expect(live.runBlock('PAY-1')).toBe(phrase);
+  });
+
+  it.each([
+    ['older quiet, newer working', [idle('a'), { id: 'b', status: 'working' }], 'still working'],
+    ['older working, newer quiet', [{ id: 'a', status: 'working' }, idle('b')], 'still working'],
+    ['older working, newer waiting', [{ id: 'a', status: 'working' }, { id: 'b', status: 'question', remoteReply: true }], 'waiting on you'],
+    ['older waiting, newer working', [{ id: 'a', status: 'question', remoteReply: true }, { id: 'b', status: 'working' }], 'still working']
+  ])('two live Runs on one key, %s: blocked, named by the newest that does not yield', (_name, rows, phrase) => {
+    twoRuns();
+    live.setRows(rows, Date.now());
+    expect(live.reserve('PAY-1', REPO, 'run', true)).toBe(false);
+    expect(live.runBlock('PAY-1')).toBe(phrase);
+  });
+
+  it('two live Runs on one key that are both quiet let a third through', () => {
+    twoRuns();
+    live.setRows([idle('a'), idle('b')], Date.now());
+    expect(live.reserve('PAY-1', REPO, 'run', true)).toBe(true);
+  });
+
+  it('is per key: a working Run on PAY-2 does not hold PAY-1', () => {
+    runOn('PAY-1', 's1', T0);
+    runOn('PAY-2', 's2', T0 + 1000);
+    live.markQuiet('PAY-1', 's1', QUIET);
+    live.setRows([idle('s1'), { id: 's2', status: 'working' }], Date.now());
+    expect(live.runBlock('PAY-1')).toBeNull();
+    expect(live.runBlock('PAY-2')).toBe('still working');
+    expect(live.reserve('PAY-1', REPO, 'run', true)).toBe(true);
+    expect(live.reserve('PAY-2', REPO, 'run', true)).toBe(false);
+  });
+
+  it('a run reservation on the key still refuses a yielding reserve', () => {
+    expect(live.reserve('PAY-1', REPO, 'run', true)).toBe(true);
+    expect(live.reserve('PAY-1', REPO, 'run', true)).toBe(false);
+  });
+
+  it('snapshot reports the newest live Run on a key, whatever the store order', () => {
+    const run = (sessionId: string, at: number) => ({
+      ...link('PAY-1', sessionId, { action: 'execute', name: 'jira PAY-1' }, at),
+      how: 'run',
+      endedAt: null,
+      endReason: null,
+      quietSince: null
+    });
+    writeFileSync(file, JSON.stringify({ version: 1, links: [run('newer', T0 + 60_000), run('older', T0)] }));
+    const fresh = new JiraLiveService();
+    expect(fresh.links()).toHaveLength(2);
+    expect(fresh.snapshot()['PAY-1'].sessionId).toBe('newer');
+  });
+});

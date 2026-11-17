@@ -323,13 +323,34 @@ describe('refusals before the reservation — no Jira write, no spawn, nothing r
     expect(live.get('PAY-1')).toMatchObject({ sessionId: null, repo: REPO });
   });
 
-  it('409 <KEY> already has a session for a confirmed key', async () => {
+  // The quiet-only Run gate (spec 2026-11-17-jira-quiet-run-gate-design.md): a confirmed Run the server has no current row for — here, before any reconciler
+  // tick — cannot be judged quiet, so it holds the key, and the 409 says why in the shared phrase.
+  it('409 <KEY> has a Run not seen by the dashboard for a confirmed key with no row', async () => {
     live.reserve('PAY-1', REPO);
     live.confirm('PAY-1', 'sess-old', RUN_META);
-    expect((await post(BODY).expect(409)).body).toEqual({ error: 'PAY-1 already has a session' });
+    expect((await post(BODY).expect(409)).body).toEqual({ error: 'PAY-1 has a Run not seen by the dashboard' });
     expect(fake.calls.length).toBe(callsAtStart);
     expect(sent.spawns).toEqual([]);
     expect(live.get('PAY-1')).toMatchObject({ sessionId: 'sess-old' });
+  });
+
+  it('409 <KEY> has a Run still working for a confirmed Run whose row is working', async () => {
+    live.reserve('PAY-1', REPO);
+    live.confirm('PAY-1', 'sess-old', RUN_META);
+    live.setRows([{ id: 'sess-old', status: 'working' }], Date.now());
+    expect((await post(BODY).expect(409)).body).toEqual({ error: 'PAY-1 has a Run still working' });
+    expect(fake.calls.length).toBe(callsAtStart);
+    expect(sent.spawns).toEqual([]);
+  });
+
+  it('a quiet Run on the key yields: the next Run starts beside it, and both stay live', async () => {
+    live.reserve('PAY-1', REPO);
+    live.confirm('PAY-1', 'sess-old', RUN_META);
+    live.markQuiet('PAY-1', 'sess-old', new Date().toISOString());
+    live.setRows([{ id: 'sess-old', status: 'idle' }], Date.now());
+    await post(BODY).expect(200);
+    expect(sent.spawns).toHaveLength(1);
+    expect(live.liveLinks().filter((l) => l.key === 'PAY-1').map((l) => l.sessionId).sort()).toEqual(['sess-1', 'sess-old']);
   });
 
   it('409 too many Jira sessions are starting when the map is full of starting entries', async () => {
@@ -661,7 +682,7 @@ describe('Start', () => {
     const [a, b] = await Promise.all([post(BODY), post(BODY)]);
     expect([a.status, b.status].sort()).toEqual([200, 409]);
     const refused = a.status === 409 ? a : b;
-    expect(refused.body.error).toMatch(/^PAY-1 (is starting|already has a session)$/);
+    expect(refused.body.error).toMatch(/^PAY-1 (is starting|has a Run not seen by the dashboard)$/);
     expect(sent.spawns).toHaveLength(1);
     expect(writes()).toEqual(['PUT /issue/PAY-1/assignee', 'POST /issue/PAY-1/transitions']);
     expect(live.get('PAY-1')).toMatchObject({ sessionId: 'sess-1' });
@@ -953,6 +974,16 @@ describe('review', () => {
     it('409 <KEY> already has a session for a live run link on the key — the ticket gate is unchanged', async () => {
       live.reserve('PAY-2', MAIN);
       live.confirm('PAY-2', 'sess-old', RUN_META);
+      expect((await post(body()).expect(409)).body).toEqual({ error: 'PAY-2 already has a session' });
+      expect(sent.spawns).toEqual([]);
+    });
+
+    // A review keeps the strict key check (spec, Unchanged): a quiet Run that would let the next RUN through still refuses a review, in the old words.
+    it('409 <KEY> already has a session for a QUIET run link on the key — a review does not take the quiet gate', async () => {
+      live.reserve('PAY-2', MAIN);
+      live.confirm('PAY-2', 'sess-old', RUN_META);
+      live.markQuiet('PAY-2', 'sess-old', new Date().toISOString());
+      live.setRows([{ id: 'sess-old', status: 'idle' }], Date.now());
       expect((await post(body()).expect(409)).body).toEqual({ error: 'PAY-2 already has a session' });
       expect(sent.spawns).toEqual([]);
     });

@@ -4064,11 +4064,17 @@ reached no response: the latest failure (`{ message, at }`, cleared by the next 
 says the links are not being saved. Retention keeps the list from growing for ever — per key every live link and the
 20 newest ended ones, and a key whose newest end is over 90 days old with nothing live goes — and so do the caps on the suppressed and never-link lists.
 
-**The order protects the one-run-per-ticket rule, and so does what the store refuses to end.** The key is reserved (`starting`) BEFORE the dispatch's first Jira
+**The order protects the per-ticket Run gate, and so does what the store refuses to end.** The key is reserved (`starting`) BEFORE the dispatch's first Jira
 write, by a synchronous check-and-set: of two Starts that both cleared the dashboard gate exactly one passes, because nothing can run between the check and the
 set. Reserving after the writes would let two requests each assign and transition the ticket before one found out it had lost. The gate is about the Run on the
 key, so it reads `run` links alone: a session the user started on the ticket's branch outside this board is a link worth showing, and must neither block a Run
-nor offer a Stop the board did not start. Every failure after the reservation releases it through one `catch`, so no failure class leaves a key `starting` until
+nor offer a Stop the board did not start. Since 2026-11-17 the gate is quiet-only for a Run (spec `2026-11-17-jira-quiet-run-gate-design.md`): a live Run
+that has finished its turn holds the dashboard's reply window for up to ten minutes, and waiting that out — or pressing Stop — to start the next Run on the
+same ticket was the wait the person asked to lose. So a Run passes beside live Runs on the key once every one of them yields (`runYields`: marked quiet by the
+reconciler AND reading Quiet in its latest good read), and every unknown still blocks — no row since a restart, a row past a full list, an unreachable
+dashboard — because a session the server knows nothing current about may be mid-turn, and two sessions working in one checkout is the failure the gate exists
+to prevent. A review keeps the strict check: its own gate reads only the MR's branch, so a quiet Run on another branch would otherwise pass while the client
+still blocks. Every failure after the reservation releases it through one `catch`, so no failure class leaves a key `starting` until
 the 8-hour backstop; `release` touches a `starting` entry and nothing else, so a late failure path can never drop a session that did start, and a Start whose
 own `reserve` was refused releases nothing, because the entry in the store is the OTHER request's. At the cap of 100 the oldest live link is ended as `expired`,
 never deleted — it keeps its line in the history — and a `starting` one is never touched: its spawn is in flight and will confirm or release it, and ending it

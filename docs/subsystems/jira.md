@@ -509,7 +509,7 @@ is renamed `jira-links.json.bad-<ISO>` at the first save — never overwritten, 
 session id, a known `how` or a `startedAt` is dropped alone, with a warning, and the rest load. A save that throws is logged and ignored, so a launch never
 fails for it. Retention (`JIRA_HISTORY_PER_KEY` 20, `JIRA_HISTORY_MAX_AGE_MS` 90 days) runs on every save.
 
-The methods, by what reads them. **The Run's** — `reserve` (the synchronous one-run-per-key gate), `confirm` (over a live `branch` or `manual` link for the same
+The methods, by what reads them. **The Run's** — `reserve` (the synchronous per-key Run gate: quiet-only for a Run, strict for a review), `runBlock` (why a Run is refused), `confirm` (over a live `branch` or `manual` link for the same
 pair it upgrades that entry to `run`), `release` (a `starting` entry only) — and the
 reads that serve them, `get`, `snapshot` (the status payload's `live`), `confirmed` and `hasConfirmed`, all of which see `run` links alone. **The reconciler's
 and the page's** — `links`, `liveLinks` and `hasLive` (every `how`), `end(key, sessionId, reason)`, `reattach`, `markQuiet` and `clearQuiet`, and the dashboard
@@ -545,7 +545,7 @@ nothing and written nothing.
 | ------ | ------- |
 | 400 | `invalid issue key`; `action must be execute, context, review, reply or { skill: <id> }`; `mr must be { project, iid }`; `half must be request or fix`; `review needs mr and half`; `repo is required`; `surface must be dashboard or desktop`; `prompt must be a non-empty string`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `review must be true or false`, `review is only for execute with a branch`, `target is only for openMr with continue`, a name failing Table A) |
 | 503 | `Jira is not configured`; `no identity` |
-| 409 | `settings/jira.json <reason> — fix or delete it by hand`; `the desktop app is not available on this machine's dashboard — launch on Dashboard instead`; `<branch> exists — switch to Continue`; `<branch> is checked out in the mapped checkout <repo>`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment`; for a review, `a session is live on <branch>`, `no review state for !<iid> yet`, `nothing to review on !<iid>`, `!<iid> has too many threads to read`, `the review on !<iid> moved on — reopen the sheet` |
+| 409 | `settings/jira.json <reason> — fix or delete it by hand`; `the desktop app is not available on this machine's dashboard — launch on Dashboard instead`; `<branch> exists — switch to Continue`; `<branch> is checked out in the mapped checkout <repo>`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> has a Run <phrase>` (`not seen by the dashboard`, `waiting on you`, `still working` or `not quiet yet` — a Run beside a live Run on the key that is not quiet); for a review, `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment`; for a review, `a session is live on <branch>`, `no review state for !<iid> yet`, `nothing to review on !<iid>`, `!<iid> has too many threads to read`, `the review on !<iid> moved on — reopen the sheet` |
 | 400 | `unknown skill <id>`; `<repo> is not mapped to <PROJECT>`; `transition not offered`; `prompt too long`; for a review, `!<iid> is not an open merge request of <KEY>`, `<repo> is not a review candidate for !<iid>`, `a review continues <branch>` |
 | 502 | dispatch is on and the dashboard is unreachable (the gate's reason); a spawn the dashboard refused |
 | as §8 | the issue read, the assign and the transition, through `unwrapJira` / `jiraWriteOrThrow` — `retryAt` verbatim; an assign or transition failure is prefixed `assign: ` / `transition: ` |
@@ -628,8 +628,10 @@ The look is DESIGN.md §8.9.1 (`Run ▾` and the strip), §8.9.2 (the modal's ro
 section (nine dialogs). The browser still never talks to Jira or the dashboard: every request below is to this server.
 
 - **`Run ▾`** (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the Detail dialog's agent column. It decides nothing:
-  `runChipState(issue, status)` (`lib/jira.ts`) answers `no-repo` (a dashed chip that opens nothing, its title naming `Jira › Setup › Repositories`), `live`
-  (disabled, titled `a session is running on <KEY>`) or `ready` (a `Popover` of the two built-ins, the skills with `skillCommand`'s slash command as a hint,
+  `runChipState(issue, status, sessions)` (`lib/jira.ts`) answers `no-repo` (a dashed chip that opens nothing, its title naming `Jira › Setup ›
+  Repositories`), `live` (a `starting` reservation on the key, or a live Run on it that does not yield by `runYields`; disabled, titled by `runBlockTitle` as
+  `a Run on <KEY> is <phrase>`, the phrase being `starting` or the same `runBlockPhrase` words the server's 409 ends in) or `ready` (no hold, or every live Run
+  on the key quiet: a `Popover` of the two built-ins, the skills with `skillCommand`'s slash command as a hint,
   and the note `opens the launch sheet`), the row `Jira default action` resolves to listed first with the hint `default`. It is drawn with agents off. On a card
   its wrapper stops the click and Enter/Space, the link-out's precedent, and `jira-run-open` lets the card overflow while the panel is open.
 - **The launch sheet** (`components/jira/JiraLaunchSheet.tsx`) composes `ui/FormSheet` and is hosted ONCE, in `JiraView`, after the modal; both homes of `Run ▾`
@@ -752,7 +754,7 @@ The CodeRabbit review work adds `review-state`, `review-copy` and `gitlab-review
 `jira-delivery-surfaces`, `jira-board`, `jira-lib` and `delivery-lib`.
 `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a per-request failure hook; `test/helpers/env.ts` blanks
 the three keys so no suite inherits a developer's credentials. `test/guards/compose-env.test.ts` pins the compose passthrough.
-The Jira sessions work adds `jira-sessions-state` (`sessionState` and `needsYou`) and widens `jira-live` (the store, its file, retention, the one-run gate),
+The Jira sessions work adds `jira-sessions-state` (`sessionState` and `needsYou`) and widens `jira-live` (the store, its file, retention, the quiet-only Run gate),
 `agents-jira-live` (the quiet clock, re-attach, the pace), `agents-jira-stop` (`{ key, sessionId }`) and `jira-routes` (`GET /sessions`),
 and adds `agents-jira-link` (the link and unlink routes, supertest), the pure `jira-sessions-lib` (`lib/jira-sessions.ts`: the Open buttons, durations, the
 ticket's sessions) and the jsdom suites `jira-list` (the Sessions page's session table; the Board's issue List is in `jira-board`), `jira-view-store` (the Board and List switch's module store) and `jira-sessions-hook`

@@ -8,7 +8,7 @@ import type { JiraEndReason, JiraLink, JiraLinkHow } from '../../../shared/types
 
 /**
  * The link store's file (Jira sessions, spec §5): which Jira ticket each agent session is linked to, live and ended. File I/O only — load, save and the path;
- * every rule about WHAT is kept (the one-run gate, retention, the TTL) is `JiraLiveService`'s, which holds the state in memory and calls `saveLinks` after
+ * every rule about WHAT is kept (the Run gate, retention, the TTL) is `JiraLiveService`'s, which holds the state in memory and calls `saveLinks` after
  * each change.
  *
  * The server is the one writer, and the file is written whole and atomically — a temp file in the same directory, then `rename` — as `syncConfigFile`'s

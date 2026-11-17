@@ -60,8 +60,8 @@ const CHIP_LABEL: Record<ListChip, string> = { all: 'All', 'needs-you': 'Needs y
  * `Run ▾` and its panel, which is drawn inside the cell, not in a portal) is that control's alone, as is a click that ends a text selection.
  * A row that needs a person wears the amber wash the deck's strip does; an ended row is set in the quiet ink.
  * **Open** is the deck's: `openButtons(..., { wide: false })` through `SessionOpen.tsx`'s `OpenChip`, so C2's Desktop rule lives in one place and its refusal draws
- * in the alert line under the table. An ended row's is `Reopen` — and `Run ▾`, but ONLY while the ticket has no live `run` link and no Starting reservation
- * (`runChipState`, the one-run gate): a second Start on a ticket that is already being run is exactly what the server would refuse. A Starting row has no
+ * in the alert line under the table. An ended row's is `Reopen` — and `Run ▾`, but ONLY while `runChipState` is not `live` (no Starting reservation and no
+ * live `run` link on the ticket that is not quiet — the quiet-only Run gate): a Start there is exactly what the server would refuse. A Starting row has no
  * buttons, because every one needs a session id.
  */
 export function JiraSessionList({
@@ -313,7 +313,7 @@ function ListRowView({
   const run = link !== null ? runLabel(link, data?.skills ?? []) : (starting?.name ?? '');
   const sessionId = link?.sessionId ?? null;
   const buttons = link !== null && sessionId !== null ? openButtons(link, sessionRow, state, { phone, wide: false }) : null;
-  // The one-run gate, read where the deck's and Detail's are: a live `run` link or a Starting reservation hides `Run ▾`, a live branch link does not.
+  // The Run gate, read where the deck's and Detail's are: a Starting reservation or a live Run that is not quiet hides `Run ▾`; a quiet Run or a branch link does not.
   const canRun = row.ended && data !== null && runChipState(issue, data, payload) !== 'live';
   const open = (): void => onOpenIssue(issue, row.onBoard ? childrenOf : null);
   const onRowClick = (e: MouseEvent<HTMLTableRowElement>): void => {

@@ -36,8 +36,8 @@ function inCandidate(path: string | undefined, repos: readonly string[]): boolea
 /**
  * The live-session gate (spec §5.2): the session that blocks the button and where it is live (`null` for the ticket, the MR's source branch otherwise), or
  * `null` when nothing blocks. Structured rather than a sentence so the reason line can set the name apart; `reviewGateText` words it. Two checks, ticket first:
- * - **On the ticket:** a live `run` link on the key, or any `status.live` entry for it (a `starting` reservation has no link yet) — the one-run gate `Run`
- *   applies. A `branch` or `manual` link on the key does not count here; the branch check catches it when it sits on the MR's branch.
+ * - **On the ticket:** a live `run` link on the key, quiet or not, or any `status.live` entry for it (a `starting` reservation has no link yet) — the strict
+ *   ticket check a review's dispatch keeps (a Run's own gate is quiet-only, spec 2026-11-17-jira-quiet-run-gate-design.md). A `branch` or `manual` link on the key does not count here; the branch check catches it when it sits on the MR's branch.
  * - **On the branch:** a live link of any `how` whose stored `branch` is the MR's source branch in a candidate repo, or whose dashboard row is `working` or
  *   `question` on that branch in a candidate checkout.
  * The client sees only the links and rows it already reads; dispatch's 409 covers an in-flight reservation from another tab.
