@@ -68,7 +68,8 @@ function stubDashboard(): void {
       Promise.resolve({ ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) } as Response);
     if (url.endsWith('/api/spawn')) {
       spawns.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-      if (dash.hang === true) return new Promise<Response>((resolve) => hung.push(() => resolve({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response)));
+      if (dash.hang === true)
+        return new Promise<Response>((resolve) => hung.push(() => resolve({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response)));
       spawnCount += 1;
       return dash.spawnStatus !== undefined && dash.spawnStatus !== 200
         ? reply({ error: 'boom' }, dash.spawnStatus)
@@ -121,7 +122,10 @@ function writeLock(repo: string, n: number, sessionId: string | null, at: number
   writeFileSync(join(home, 'locks', `${fileKey(repo, n)}.lock`), JSON.stringify({ sessionId, at: new Date(at).toISOString() }));
 }
 
-const post = (body: unknown): request.Test => request(app.getHttpServer()).post('/api/agents/dispatch-pr-resolve').send(body as object);
+const post = (body: unknown): request.Test =>
+  request(app.getHttpServer())
+    .post('/api/agents/dispatch-pr-resolve')
+    .send(body as object);
 const get = (): request.Test => request(app.getHttpServer()).get('/api/agents/pr-resolve');
 const spawned = (): number => urls.filter((u) => u.endsWith('/api/spawn')).length;
 
@@ -133,7 +137,12 @@ async function until(done: () => boolean, ms = 3000): Promise<void> {
   }
 }
 
-async function boot(projects: { name: string; repo: string }[] = [{ name: 'web', repo: REPO }, { name: 'api', repo: 'acme/api' }]): Promise<void> {
+async function boot(
+  projects: { name: string; repo: string }[] = [
+    { name: 'web', repo: REPO },
+    { name: 'api', repo: 'acme/api' }
+  ]
+): Promise<void> {
   paths = projects.map((p) => makeProject(`prr-${p.name}`, [], JSON.stringify({ kind: 'github', repo: p.repo })));
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(REGISTRY_FILE)
@@ -177,7 +186,14 @@ describe('the ladder', () => {
 
   it('400s a malformed body', async () => {
     const want = 'body must be { repo: "owner/name", number }';
-    for (const body of [{}, { repo: 'acme/web', number: '7' }, { repo: 'acme', number: 7 }, { repo: 'acme/web', number: 0 }, { repo: 'acme/web', number: 1.5 }, []]) {
+    for (const body of [
+      {},
+      { repo: 'acme/web', number: '7' },
+      { repo: 'acme', number: 7 },
+      { repo: 'acme/web', number: 0 },
+      { repo: 'acme/web', number: 1.5 },
+      []
+    ]) {
       const res = await post(body).expect(400);
       expect(res.body.error).toBe(want);
     }
@@ -418,7 +434,10 @@ describe('an unreadable registry', () => {
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const broken = join(mkdtempSync(join(tmpdir(), 'bm-brokenreg-')), 'registry.json');
     writeFileSync(broken, '{"projects": [');
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(REGISTRY_FILE).useValue(broken).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(REGISTRY_FILE)
+      .useValue(broken)
+      .compile();
     app = moduleRef.createNestApplication();
     await app.init();
     await listenLoopback(app);
@@ -495,7 +514,7 @@ describe('GET /api/agents/pr-resolve', () => {
       expect((await resolves(Date.now() + GRACE + 1000)).resolves[0].live).toEqual({ sessionId: 'sess-1' });
     });
 
-    it('an outcome file carrying the entry\'s session id ends it, inside the grace and with no lookup', async () => {
+    it("an outcome file carrying the entry's session id ends it, inside the grace and with no lookup", async () => {
       writeOutcome(REPO, 7, outcome({ sessionId: 'sess-1' }));
       const before = urls.length;
       const listed = await resolves(Date.now() + 1000);
@@ -533,7 +552,12 @@ describe('GET /api/agents/pr-resolve', () => {
 
 describe('parseFileKey', () => {
   it('round-trips fileKey, including a repo name with a double underscore', () => {
-    for (const [repo, n] of [['acme/web', 7], ['acme/my__lib', 12], ['acme/_x', 3], ['acme/x_', 4]] as const) {
+    for (const [repo, n] of [
+      ['acme/web', 7],
+      ['acme/my__lib', 12],
+      ['acme/_x', 3],
+      ['acme/x_', 4]
+    ] as const) {
       expect(parseFileKey(fileKey(repo, n))).toEqual({ repo, number: n });
     }
     expect(parseFileKey('notakey')).toBeNull();

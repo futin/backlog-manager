@@ -113,7 +113,8 @@ export class PrResolveService {
     const age = Date.now() - lock.at;
     // An id a prompt may not carry is treated as no id at all: nothing can be reclaimed by name, so the lock is honoured for the same 3 hours the tool honours
     // it and then ignored, rather than refusing forever on a file only the tool's own TTL would ever clear.
-    if (lock.sessionId === null || !RECLAIMABLE_ID.test(lock.sessionId)) return age < NULL_LOCK_TTL_MS ? refuse(running, 409) : resolveTrigger(repo, number, null);
+    if (lock.sessionId === null || !RECLAIMABLE_ID.test(lock.sessionId))
+      return age < NULL_LOCK_TTL_MS ? refuse(running, 409) : resolveTrigger(repo, number, null);
     if (age < JIRA_LIVE_GRACE_MS) return refuse(running, 409);
     let row: Awaited<ReturnType<typeof dashboardSessionRow>>;
     try {
