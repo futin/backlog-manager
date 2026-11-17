@@ -1129,9 +1129,20 @@ export function reviewFlags(c: ReviewConfig | null): string[] {
   ];
 }
 
-const REVIEW_WORDS: Record<string, string> = { xhigh: 'XHigh' };
-const word = (x: string): string => REVIEW_WORDS[x] ?? x.charAt(0).toUpperCase() + x.slice(1);
-const pairLabel = (p: ReviewConfig['same']): string => `${p.model === null ? 'Agent default' : word(p.model)} · ${p.effort === null ? 'Default' : word(p.effort)}`;
+const SPECIAL_SPELLINGS: Record<string, string> = { xhigh: 'XHigh' };
+
+/**
+ * A Reviewer model or effort word as the board prints it (spec §7): the one home of those words for the Reviewer pickers (`client/src/lib/agents.ts` — the
+ * Settings card and both launch sheets) and the Run detail line (`reviewerLabel`), so a word cannot read one way where it is picked and another where the run
+ * that used it is shown. A word with a special spelling goes into `SPECIAL_SPELLINGS` above and nowhere else — `test/guards/review-words.test.ts` fails on
+ * a second copy; every other word is capitalised.
+ */
+export function reviewWord(x: string): string {
+  return SPECIAL_SPELLINGS[x] ?? x.charAt(0).toUpperCase() + x.slice(1);
+}
+
+const pairLabel = (p: ReviewConfig['same']): string =>
+  `${p.model === null ? 'Agent default' : reviewWord(p.model)} · ${p.effort === null ? 'Default' : reviewWord(p.effort)}`;
 
 /** One line saying who reviews, for a run row or a PR card. An unset config (a run recorded before the setting existed) is `Reviewer: default`. */
 export function reviewerLabel(c: ReviewConfig | null | undefined): string {
