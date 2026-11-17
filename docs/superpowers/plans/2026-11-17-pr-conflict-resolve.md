@@ -51,7 +51,7 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
 2. **The agents status not landed yet** → the Resolve row is not drawn at all (no flash of an enabled row that then hides). Pinned in Task 6.
 3. **A double click before the POST answers** → the second click is swallowed (the row is disabled while the page's in-flight set holds the PR). Pinned in
    Task 6.
-4. **A resolve entry for a PR the list no longer shows** (merged or closed meanwhile) → ignored by the client, nothing throws. Pinned in Task 5.
+4. **A resolve entry for a PR the list no longer shows** (merged or closed meanwhile) → ignored by the client, nothing throws. Pinned in Task 6.
 5. **A leftover lock written by a terminal run** (`sessionId: null`) → the route cannot prove it dead by id: younger than 3 h → 409 already running; older →
    plain trigger (the tool reclaims by age). Pinned in Task 4. (This case is the plan's call; the spec's rung 7 names only a lock with an id.)
 
@@ -62,7 +62,8 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
 **Files:**
 - Create: `skills/pr-resolve/tools/pr-resolve-lib.mjs`, `skills/pr-resolve/tools/pr-resolve.mjs`
 - Test: `skills/pr-resolve/tools/pr-resolve.test.mjs` (node runner — sits at the `tools/` level, the glob does not descend)
-- Modify: `skills/backlog/tools/backlog.test.mjs` — `CLI_SOURCES` (line ~3519) gains `'pr-resolve.mjs'`; `ENTRY_SHAPES` (line ~3560) gains
+- Modify: `skills/backlog/tools/backlog.test.mjs` — `CLI_SOURCES` (line ~3519, name → absolute path) gains a `'pr-resolve.mjs'` key resolved from
+  `../../pr-resolve/tools/pr-resolve.mjs` the way its siblings are; `ENTRY_SHAPES` (line ~3560) gains
   `'pr-resolve.mjs': ['process.exitCode = main(']`
 
 **Interfaces — Produces (lib, all synchronous):**
@@ -97,6 +98,7 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
   other tool suites use):
   - `parseTarget`: `acme/web#12` → `{ owner:'acme', name:'web', repo:'acme/web', number:12 }`; `acme/web.js#3` accepted; `acme/web`, `acme/web#0`,
     `acme/web#-1`, `acme/web#1x`, `acme_x/web#1`, ``, `acme/web#12 ` → `null`.
+  - `fileKey('acme/my__lib', 12)` → `acme__my__lib__12`, and the server's `parseFileKey` (Task 4) splits it back; `parseTarget('acme/my__lib#12')` accepted.
   - `paths` with cwd `/r`, home `/h`, `acme/web#12` → tree `/r/.worktrees/pr-resolve-12`, baseTree `/r/.worktrees/pr-resolve-12-base`, lock
     `/h/locks/acme__web__12.lock`, outcome `/h/acme__web__12.json`.
   - `takeLock` fresh → `{ taken:true, recovered:false }` and the file holds `{ sessionId:'s1', at }`; a second `takeLock` with `s2` → `{ taken:false }`.
@@ -113,7 +115,7 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
     stopped --from aaa --head bbb` → exit 2; `outcome … --outcome pushed --from aaa` (no head) → exit 2.
 - [ ] **Step 2: Run** `node --test skills/pr-resolve/tools/pr-resolve.test.mjs` — expect FAIL (module not found).
 - [ ] **Step 3: Implement** the lib and the CLI to the interfaces above.
-- [ ] **Step 4: Run** the suite again — PASS; then `pnpm run test:skills` scoped to `skills/backlog/tools/backlog.test.mjs` (the `CLI_SOURCES` /
+- [ ] **Step 4: Run** the suite again — PASS; then `node --test skills/backlog/tools/backlog.test.mjs` (the `CLI_SOURCES` /
   `ENTRY_SHAPES` guard) — PASS.
 - [ ] **Step 5: Commit** — `git add` the three new files and `backlog.test.mjs`; `feat(skills): pr-resolve tool — target parse, lock, outcome file`.
 
@@ -146,7 +148,8 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
   unrelated edit; formatting-only; lockfile/generated) and per judgment class (same logic both sides; delete vs edit; semantic choice; not confident).
 
 - [ ] **Step 1: Write the failing test** — the guard list change in `skills-plugin-root.test.ts` (the `pr-resolve/SKILL.md calls its tools through
-  ${CLAUDE_PLUGIN_ROOT}` case).
+  ${CLAUDE_PLUGIN_ROOT}` case); and needle cases in `skills/backlog/tools/backlog.test.mjs` (where `.claude/rules/tests.md` puts skill-prose
+  cases) for the three exact final lines, `never forced` and the never-`-A` rule in `skills/pr-resolve/SKILL.md`.
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/guards/skills-plugin-root.test.ts` — FAIL (no `skills/pr-resolve/SKILL.md`).
 - [ ] **Step 3: Write** `SKILL.md` and `references/classify.md`; then the rules and docs edits above.
 - [ ] **Step 4: Run** `pnpm run test:jest -- test/guards/skills-plugin-root.test.ts test/guards/claude-rules.test.ts` and
@@ -164,10 +167,11 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
 **Interfaces — Produces:**
 - `projectFor(repo: string): { ok: true; path: string } | { ok: false; status: 404 | 409; error: string }` — `registeredRepos()` lookup (404 with the
   exact sentence), then `this.poller.syncOffBlock(path)` (409 with its sentence). Throws `registryProjectsOr503`'s 503 as `registeredRepos` does.
-- `readOne(repo: string, number: number, at?: number): Promise<{ ok: true; pr: PullOne } | { ok: false; status: 503 | 429 | 502; error: string }>` — no
-  token → 503 `NO_TOKEN`; `asleepDetail(repo, now, 'graphql')` → 429 with that detail; then `readPull`: failure → `failureVerdict` → `noteSleep(…,
-  'graphql')` and 429 with `verdict.detail` when it is a limit, else 502 `could not read <repo>#<n> from GitHub`; success → `splice(repo, openRow(pr),
-  number)` and `{ ok: true, pr }`. Not serialised behind writes (it writes nothing).
+- `readOne(repo: string, number: number, at?: number): Promise<{ ok: true; pr: PullOne | null } | { ok: false; status: 503 | 429 | 502; error: string }>`
+  — no token → 503 `NO_TOKEN`; `asleepDetail(repo, now, 'graphql')` → 429 with that detail; then `readPull`: a 404 answer (`readPull`'s not-found shape,
+  `pulls.query.ts:251`) → `splice(repo, null, number)` and `{ ok: true, pr: null }` (the route words it as not open, spec rung 5); any other failure →
+  `failureVerdict` → `noteSleep(…, 'graphql')` and 429 with `verdict.detail` when it is a limit, else 502 `could not read <repo>#<n> from GitHub`; success →
+  `splice(repo, openRow(pr), number)` and `{ ok: true, pr }`. Not serialised behind writes (it writes nothing).
 
 - [ ] **Step 1: Write the failing tests:**
   - `projectFor('acme/web')` with two registered projects on that repo → the FIRST path in registry order.
@@ -179,6 +183,7 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
   - read answers 500 → 502 `could not read acme/web#7 from GitHub`.
   - read answers an OPEN PR → `ok: true`, and the cached list now holds that row (spliced); a CLOSED one → `ok: true`, `pr.state === 'CLOSED'`, and the row
     is gone from the cache.
+  - read answers GraphQL's null `pullRequest` (no such PR) → `{ ok: true, pr: null }`, not a 502, and any cached row for that number is gone.
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/github/prs-read-one.test.ts` — FAIL.
 - [ ] **Step 3: Implement** both methods; `registeredRepos` stays private (the new method is its public face).
 - [ ] **Step 4: Run** that suite plus `test/github/prs-write.test.ts test/github/prs-cache.test.ts` — PASS.
@@ -211,14 +216,15 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
   - `dispatch(body: unknown): Promise<{ sessionId: string }>` — the spec's ladder 1–7, throwing `HttpException({ error }, status)`; then
     `agents.spawnInProject(path, { prompt: trigger, name: \`pr-resolve ${repo}#${n}\`, permissionMode: 'auto', maxPermission: status.spawnMaxPermission,
     remoteControl: false })` — no `model`, no `effort`. Rung 4's status code follows `JiraDispatchService`'s convention (502 when
-    `status.enabled && !status.reachable`, else 409) — the spec leaves codes to an existing convention. Rung 5 maps `readOne`'s refusals through, then: state
-    not `OPEN` → 409 not open; `row.crossRepository` → 409 fork; `mergeable === 'unknown'` → 409 computing; `'mergeable'` → 409 no conflicts. Rung 6 is
+    `status.enabled && !status.reachable`, else 409) — the spec leaves codes to an existing convention. Rung 5 maps `readOne`'s refusals through, then: `pr`
+    `null` (not found) or state not `OPEN` → 409 not open; `row.crossRepository` → 409 fork; `mergeable === 'unknown'` → 409 computing; `'mergeable'` → 409 no conflicts. Rung 6 is
     synchronous with no `await` between the check and the `set`. Rung 7: no lock → plain; lock `sessionId === null` → 409 while younger than 3 h, plain
     trigger after; lock younger than `JIRA_LIVE_GRACE_MS` → 409; `dashboardSessionRow` throws → 409; row `processLive === true` → 409; else `--reclaim <id>`.
     Every 409 after rung 6 and a spawn failure delete the reservation before throwing. Success stores the minted `sessionId` on the entry.
   - `list(now = Date.now()): Promise<PrResolvePayload>` — every outcome file under the home (missing dir → none) plus every live-map entry, merged per
     `repo#n`; entries judged dead are deleted from the map; dashboard lookups run under one `Promise.all`.
-  - Live rule (private `isLive(entry, now, cfg)`): outcome file carries the entry's `sessionId` → dead (no call); `now - startedAt < JIRA_LIVE_GRACE_MS` →
+  - Live rule (private `isLive(entry, now, cfg)`): the entry's `sessionId` is NON-NULL and the outcome file carries that same id → dead (no call) — a
+    `null` never matches, so a terminal run's outcome file (`sessionId: null`) cannot kill a reservation still spawning; `now - startedAt < JIRA_LIVE_GRACE_MS` →
     live; `sessionId === null` past the grace → live (a spawn still hanging); `dashboardSessionRow` throws → live; `null` row → dead; `processLive === true`
     → live; else dead.
 - `PrResolveController` (`@Controller('api/agents')`): `@UseGuards(SameOriginPostGuard) @Post('dispatch-pr-resolve') @HttpCode(201)` → `dispatch(body)`;
@@ -229,26 +235,36 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
   - Ladder, one case per rung in order, each asserting status and exact `error`: `{}` → 400; `{ repo:'acme/web', number:'7' }` → 400; unregistered → 404;
     sync off → 409 sync sentence; agents off → 409 with `projectDispatchGate`'s text; dashboard unreachable → 502 with its text; project not listed → 409
     `the dashboard does not list <path> — most likely no Claude session there inside its LOOKBACK_HOURS`; no token → 503; asleep → 429 detail; read failure
-    → 502; CLOSED → 409 `acme/web#7 is not open`; fork → 409; `unknown` → 409; `mergeable` → 409 `acme/web#7 has no conflicts`.
+    → 502; CLOSED → 409 `acme/web#7 is not open`; MERGED → the same 409; not found (`readOne` → `pr: null`) → the same 409; fork → 409; `unknown` → 409;
+    `mergeable` → 409 `acme/web#7 has no conflicts`.
   - Happy path → 201 `{ sessionId }`; the dashboard spawn body has `prompt === '/backlog-manager:pr-resolve acme/web#7'`, `model === DEFAULT_MODEL`,
     `'effort' in body === false`, `remoteControl === false`, and its project is the dirName of the FIRST of two registered paths sharing `acme/web`.
   - A second POST while the first's entry is inside the grace → 409 `a resolve of acme/web#7 is already running`.
   - Two POSTs fired together (both reach rung 5 before either spawns — hold the fake `readOne` on one shared promise, then release) → exactly one spawn, one
-    201 and one 409.
+    201 and one 409 — run once with no outcome file and once with an outcome file `{ sessionId: null, … }` for `acme/web#7` already on disk (a terminal
+    run's), still exactly one spawn.
+  - Keying: with `acme/web#7` live, POSTs for `acme/web#8` and for `acme/api#7` (a second registered repo) both answer 201.
+  - Spawn held open past the grace (fake dashboard spawn never answers; clock past `JIRA_LIVE_GRACE_MS`): GET lists `acme/web#7` with `live: { sessionId:
+    null }`, and a second POST → 409 already running.
   - Spawn fails (dashboard 500) → the error returns, and an immediate retry is NOT refused as already running.
   - Leftover lock `{ sessionId:'old', at: now-10min }`, dashboard row for `old` with `processLive: true` → 409; with no row → 201 and the prompt ends
     ` --reclaim old`; dashboard unreachable on that lookup → 409. Lock `at: now-30s` → 409 without asking the dashboard. Lock `sessionId:null` at now-1h → 409;
     at now-4h → 201, plain trigger.
   - `GET /api/agents/pr-resolve` with no home dir → `{ resolves: [] }`. With a valid outcome file `acme__web__7.json`, a truncated one `acme__web__8.json`,
-    and a live entry for #9 → two entries (#7 outcome only, #9 live only), #8 skipped.
+    and a live entry for #9 → two entries (#7 outcome only, #9 live only), #8 skipped. Also skipped: `acme__web__10.json` holding valid JSON with
+    `outcome: 'done'` (Review Focus 1's hand-edited file), and a file named `notakey.json`. `acme__my__lib__12.json` (repo `acme/my__lib`) → listed as
+    `repo: 'acme/my__lib', number: 12`. One PR with BOTH an older outcome file (`sessionId: 'old'`) and a live entry (`sessionId: 'new'`, inside grace) → ONE
+    entry carrying `live` and `outcome`.
   - Live rule via GET (clock injected through `list(now)` or a fake timer): entry inside grace, dashboard 404 → still listed live; past grace, row with
-    `processLive: false` → gone; past grace, dashboard unreachable → still live; outcome file carrying the entry's sessionId → `live: null`.
+    `processLive: false` → gone; past grace, dashboard unreachable → still live; outcome file carrying the entry's sessionId → `live: null`; entry with
+    `sessionId: null` inside grace beside an outcome file with `sessionId: null` → still live.
   - Parallel lookups: three live entries, the fake dashboard delays each row by 300 ms → GET answers in < 600 ms.
   - Origin guard: the cross-origin POST to `/api/agents/dispatch-pr-resolve` → 403.
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/agents/agents-dispatch-pr-resolve.test.ts test/agents/agents-origin-guard.test.ts` — FAIL.
 - [ ] **Step 3: Implement** util, service, controller, module wiring, shared types.
 - [ ] **Step 4: Run** the two suites plus `test/agents/default-model.test.ts`, `pnpm run typecheck` — PASS. Then `grep -l` `test/` for `spawnInProject`,
-  `dashboardSessionRow`, `projectDispatchGate`, `JIRA_LIVE_GRACE_MS`, `syncOffBlock` and run every suite it names.
+  `dashboardSessionRow`, `projectDispatchGate`, `JIRA_LIVE_GRACE_MS`, `syncOffBlock` and run every suite it names, plus `test/guards/claude-rules.test.ts` (the
+  `dispatch-watchdog.md` edit joins the existing `dispatch-jira` bullet, or is a new bullet within that guard's limits).
 - [ ] **Step 5: Commit** — by path; `feat(agents): dispatch-pr-resolve route and resolve state read`.
 
 ### Task 5: Client lib — derivations and API calls
@@ -298,9 +314,9 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
 - Modify: `client/src/components/github/PullRequestsView.tsx` — `useAgents()` for the status; builds `gateFor` with `resolveGateFor(status, repo,
   projects)`; `resolve` mirrors `write`'s in-flight and outcome handling (adds the key to `inFlight`, clears the old outcome, POSTs `dispatchPrResolve`,
   on rejection records `{ kind: 'error', text: <server sentence> }`, on success records nothing, then `await refresh()`, then drops the key).
-- Modify: `client/src/components/github/PrActions.tsx` — new props `ctx`, `now`, `gate: DispatchGate | null`, `resolveState: PrResolveState | undefined`,
+- Modify: `client/src/components/github/PrActions.tsx` — new props `warning: string | null` (the row's `prRunWarning`, which `PrRow` and `PrMatrix` already compute — passed down, not recomputed), `gate: DispatchGate | null`, `resolveState: PrResolveState | undefined`,
   `onResolve: () => void`; the fourth row `{ id: 'resolve', glyph: <builder's pick>, tone: 'neutral', label: 'Resolve conflicts', sub: \`merge ${base} in
-  with a headless session\`, block: resolveBlock(…, prRunWarning(pr, repo.repo, ctx, now)), act: onResolve, primary: false }`, appended only when `gate !==
+  with a headless session\`, block: resolveBlock(…, warning), act: onResolve, primary: false }`, appended only when `gate !==
   null && gate.control !== 'hidden'`; header comment updated (the menu's rows, the resolve row's hidden/disabled split per `.claude/rules/board.md`).
 - Create: `client/src/components/github/PrResolveLine.tsx` — drawn by `PrActions` under the strip (sibling of the why-line), cites `.claude/DESIGN.md` §8.11:
   live → `Chip` (`components/ui/Chip.tsx`) `resolving…`, an `<a>` to `sessionUrl(linkBase, id)` when the id is non-null, plain text when `null`; shown `pushed` → `Chip`
@@ -317,8 +333,12 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
     nothing else → row enabled, sub reads `merge main in with a headless session` (base `main`).
   - Each reason drawn as the row's sub with `aria-disabled="true"`, and a click sends no POST: `sync off`, a `disabled` gate's text, `fork — cannot push`,
     `mergeability pending`, `no conflicts`, `resolving…`, `resolved — waiting for GitHub`, a pipeline-held PR's `prRunWarning` text verbatim (head
-    `backlog/task-3` with a fresh run holding it in `ctx`).
-  - Enabled row click → `onResolve` called once; with `busy` true the strip is disabled and the menu closed (Review Focus 3).
+    `backlog/3`, `ctx` with a project mapped to the repo and a `running` run on that project holding item 3 → `run in progress on this machine`;
+    `pr-run.ts`'s `ITEM_HEAD` is `^(?:backlog|execute)/(\d+)$`).
+  - Enabled row click → `onResolve` called once.
+  - Review Focus 3, in `PullRequestsView` (`prs-view.test.tsx`): the POST to `/api/agents/dispatch-pr-resolve` held on an unresolved promise, Resolve
+    clicked, the menu reopened and Resolve clicked again → exactly ONE POST was sent (pins that `resolve` puts the key into `inFlight` before the POST
+    answers, not only that a busy strip is disabled).
   - `PrResolveLine`: live with id → `resolving…` with an href ending `?session=s1`; live with `null` → `resolving…` and no link; pushed at `fromSha` →
     `resolved — waiting for GitHub`; pushed at `headSha` while `mergeable` → nothing; stopped → `resolve stopped: tests failed` and a `session ↗` link;
     stopped with `sessionId: null` → no link; stopped for another head → nothing.
@@ -343,3 +363,7 @@ that section and the existing `PrActions` row anatomy instead of a mock file. Th
 - [ ] **Step 3:** Invoke `/ui-verify` with those fixtures; no mock to compare (the spec decided none) — check against `.claude/DESIGN.md` §8.11 row anatomy:
   menu row tile, label and sub alignment with its siblings; the line's wrap at phone width (375 px) with no horizontal scroll; dark and light.
 - [ ] **Step 4:** Fix defects, re-run, record the report path for the final review.
+- [ ] **Step 5: Name the live precondition.** Nothing above runs the skill for real: `skills/` changes nothing until the branch is committed, pushed and
+  `pnpm run plugin:sync` reinstalls the plugin (CLAUDE.md invariant), and the API needs a restart for the new routes. Push and `plugin:sync` are the user's
+  call (held), so the closing report lists them as the precondition and hands the person one end-to-end check: after sync and restart, click Resolve on a
+  real conflicting PR and confirm the session starts, the chip shows, and the outcome line lands.
