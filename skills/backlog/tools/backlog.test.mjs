@@ -3534,6 +3534,8 @@ const CLI_SOURCES = {
   'tick.mjs': fileURLToPath(new URL('../../backlog-tick/tools/tick.mjs', import.meta.url)),
   // backlog-review's CLI. `scope` and `merge` print JSON a driver reads off a pipe, so the same truncation guard applies.
   'review.mjs': fileURLToPath(new URL('../../backlog-review/tools/review.mjs', import.meta.url)),
+  // pr-resolve's CLI. Every subcommand prints one JSON line a headless session reads off a pipe.
+  'pr-resolve.mjs': fileURLToPath(new URL('../../pr-resolve/tools/pr-resolve.mjs', import.meta.url)),
 }
 
 // Comment lines are stripped before matching because retro.mjs's own note
@@ -3565,6 +3567,7 @@ const ENTRY_SHAPES = {
   'jira.mjs': ['process.exitCode = await main('],
   'tick.mjs': ['process.exitCode = await main('],
   'review.mjs': ['process.exitCode = main('],
+  'pr-resolve.mjs': ['process.exitCode = main('],
 }
 
 test('every skill CLI ends through process.exitCode, never process.exit', () => {
