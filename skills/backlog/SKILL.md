@@ -81,7 +81,8 @@ The commands and flags that exist only here, one line each:
 - `comment <id> --body <file>` appends a comment without moving anything.
 - `body <id> --body <file> --if-updated-at <iso>` replaces the item's body, refusing if the body changed since you read it (a claim's own label or comment write does not count). Only `backlog-groom` uses it.
 - `review <id> on|off` sets or clears the issue's `in-review` label — the guard every gate reads as `a PR is open for this item`, so pushed work waiting on a
-  reviewer is never executed twice. `backlog-execute` in `pr` mode runs `on` right after it pushes; run `off` yourself when the PR closes without merging.
+  reviewer is never executed twice. `backlog-execute` in `pr` mode runs `on` right after it pushes, and in `in-place` mode in place of closing the issue, so
+  committed-but-unpushed work is guarded too; run `off` yourself when the PR closes without merging or the in-place work is dropped.
   A `Refs #<n>` PR merged into the default branch stops the guard blocking by itself (the board derives it); `off` then only tidies the label.
   Refused in a files project, which has no label to carry it.
 - `plan-review <id> on|off` sets or clears the issue's `plan-review` label — the guard every gate reads as `this plan awaits review`, put there by an unattended

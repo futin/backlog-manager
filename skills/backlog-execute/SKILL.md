@@ -146,9 +146,21 @@ session to.
 
 **`## Outcome` goes into a temp file and becomes a comment**, on both paths and in the same words either way:
 
-- **Archiving** — write the Outcome to a temp file, `stop <id> --keep-started`, then
-  `move <id> done --outcome /tmp/outcome.md`. The closing comment carries it. In `pr` mode there is no `move`: `references/pr-mode.md` §5 and §8 hold the
-  claim through review and push, and the PR's merge closes the issue.
+- **Archiving** — **no `move`, in either finish mode: this skill never closes a tracker issue.** Closing it is what tells every machine that the work is
+  on the remote, and an execute session never pushes to the default branch. In `pr` mode `references/pr-mode.md` §5 and §8 hold the claim through review and
+  push, and the PR's merge closes the issue. In `in-place` mode the work exists only in this tree, so write the Outcome to a temp file, then, in this order:
+
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" review <id> on
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" comment <id> --body /tmp/outcome.md
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop <id> --keep-started
+  ```
+
+  The `in-review` label takes over from the claim, so no gate — the board's Run, a tick, an orchestrator run on any machine — executes the item a second time
+  while its fix waits to be pushed. A failed label write undoes nothing: the comment and the release still run, and the final message says the guard is missing,
+  with the `review <id> on` command. If this session commits — a prompt that asks for it — the commit message's last line is `Closes #<n>`, so GitHub shuts the
+  issue (and `in-review` with it) the moment that commit reaches the default branch. Either way the final message says the issue is still open on purpose and
+  closes on push: with `Closes #<n>` in a commit when this session made one, otherwise asking the person to put it in theirs.
 - **Verification failed** — the same text, through `comment <id> --body /tmp/outcome.md`, and **nothing moves**. Same rule as a files project: no proof, no
   archive.
 

@@ -5276,11 +5276,15 @@ test('backlog-groom documents the body patch and what a refusal means', () => {
   assert.match(text, /re-read and re-apply/i)
 })
 
-// Execute's two Outcome paths, both of which change in a tracker project and neither of which may quietly become the other: the archive path moves the item,
-// the failure path does not.
-test('backlog-execute documents both tracker Outcome paths', () => {
+// Execute's two Outcome paths, both of which change in a tracker project and neither of which may quietly become the other. Neither closes the issue: an
+// in-place archive used to `move <id> done`, which shut #194 on GitHub while its fix was still an unpushed local commit, so every machine read the work as
+// landed. The archive path now guards the item with `in-review`, comments and releases, and leaves the close to a `Closes #<n>` commit reaching the default
+// branch; the failure path comments and moves nothing.
+test('backlog-execute documents both tracker Outcome paths, and neither closes the issue', () => {
   const text = flat(EXECUTE_SKILL_MD)
-  assert.match(text, /move <id> done --outcome/)
+  assert.doesNotMatch(text, /move <id> done --outcome/, 'an execute session closed a tracker issue before its work was pushed')
+  assert.match(text, /review <id> on/)
+  assert.match(text, /Closes #<n>/)
   assert.match(text, /comment <id> --body/)
   assert.match(text, /nothing moves/)
 })

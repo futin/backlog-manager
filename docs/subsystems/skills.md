@@ -36,7 +36,7 @@ its own, `backlog/run-<date>-<n>`, which `init` creates at the tip of the branch
 [invariants.md](invariants.md#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run).
 
 `backlog-execute` has a per-run **finish mode**, read from its trigger: `--finish in-place|pr`, with `--base <ref>` beside `pr`. `in-place` — the default, and
-what an absent flag means — is execute as it always was: it works in the tree it starts in and never commits or pushes. `pr` makes execute one of the two other
+what an absent flag means — is execute as it always was: it works in the tree it starts in and never commits or pushes. In a tracker project an `in-place` execute never closes the issue either: it posts the Outcome as a comment, puts `in-review` on so no gate runs the item again, and releases the claim, and the issue closes when a commit carrying `Closes #<n>` reaches the default branch — a board prompt's commit rule makes the session write that line into its own commit. `pr` makes execute one of the two other
 skills that write git (groom is the other, below): it works in its own
 worktree (`.worktrees/execute-<id>` on `execute/<id>`, cut from local `base`, or a clean reused linked worktree), commits there, has `backlog-reviewer` review
 the diff (at most two fix rounds), pushes that branch and opens a pull request into `base` with `gh pr create`. It never merges, never pushes `base`, never
