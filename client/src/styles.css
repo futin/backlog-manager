@@ -2067,6 +2067,13 @@ button.rail-count { cursor: pointer }
 .jira-setup-default { flex: none; font-size: 11px; color: var(--ink3) }
 .jira-setup-move { flex: none; display: flex; gap: 4px } /* The ↑/↓ pair keeps its 28 px chips whole and close: the row's 10 px gap would split them. */
 .jira-setup-skill .jira-setup-x { margin-left: 0 }
+/* At phone width a skill row's controls (↑ ↓, `Make default`, ×) take ~200 px and crushed the name to an ellipsis of two letters (2026-11-17 ui-verify),
+   so the name takes the first line beside its 28 px tile (+ the row's 10 px gap) and the controls wrap under it, pushed right by the first one. */
+@media (max-width: 700px) {
+  .jira-setup-skill { flex-wrap: wrap; row-gap: 4px }
+  .jira-setup-skill .jira-run-text { flex-basis: calc(100% - 38px) }
+  .jira-setup-skill .jira-run-text + * { margin-left: auto }
+}
 /* The connection banner (spec §4.4): one wrapping row — the 40 px initials disc, who is connected, three figures, the status pill — with the server's `detail`
    on a red line under it when the pill is not Healthy. Page-local classes only (guard 7); one face, 11 px floor. */
 /* The banner is the one card on any `.set` page that sits straight in `.set` rather than in a `.set-col`, between the band and `.set-cols`. `.set` has no gap
