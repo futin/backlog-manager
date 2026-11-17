@@ -682,8 +682,13 @@ export interface PullRequestsPayload {
 // Spec: docs/superpowers/specs/2026-11-12-gitlab-connection-design.md §5–§6. Read-only, in memory, keyed by GitLab project; `server/src/gitlab/poller.service.ts`
 // is the one writer of everything below.
 
-/** One sweep every two minutes (spec §6.3), plus an immediate one when the poller arms. A `setTimeout` chain, never a `setInterval`. */
-export const GITLAB_POLL_MS = 120_000;
+/**
+ * The GitLab sweep's cadence when `~/.backlog-manager/settings/gitlab-sync.json` says nothing usable (#527) — every missing, malformed or unknown value in
+ * that file reads as this. One of `SYNC_INTERVALS`, so the old two-minute constant could not be kept: `1m` matches Jira's default and halves the review
+ * latency that prompted #522, and a sweep is a few dozen GETs, which GitLab's 429 window (it still overrides any interval) bounds either way. The sweep is a
+ * `setTimeout` chain, never a `setInterval`, plus an immediate sweep when the poller arms.
+ */
+export const DEFAULT_GITLAB_INTERVAL: SyncInterval = '1m';
 /** How long the sweep route waits on the sweep it joined or started before answering anyway; the `JIRA_SAVE_SWEEP_WAIT_MS` precedent. */
 export const GITLAB_SWEEP_WAIT_MS = 20_000;
 /** The 429 window when GitLab sends no `Retry-After`. */
@@ -766,7 +771,8 @@ export type GitlabState = 'unconfigured' | 'checking' | 'rejected' | 'unreachabl
 /**
  * The Sources row's facts, answered from memory and env with no outbound call. `site` is the configured hostname (`null` unconfigured), `user` the identity
  * read's answer, never the token. `httpStatus`/`reason` explain a `rejected` or `unreachable` state. `mappedRepos` counts distinct GitLab projects on the
- * site; `foundHosts` the other hosts mapped repos' remotes named; `retryAt` the 429 window's end as ISO while it is still ahead.
+ * site; `foundHosts` the other hosts mapped repos' remotes named; `retryAt` the 429 window's end as ISO while it is still ahead; `interval` the sweep
+ * cadence this machine is set to.
  */
 export interface GitlabStatus {
   state: GitlabState;
@@ -780,6 +786,9 @@ export interface GitlabStatus {
   mappedRepos: number;
   foundHosts: string[];
   problems: GitlabRepoProblem[];
+  /** The EFFECTIVE sweep interval on this machine — `gitlab-sync.json`'s value, else `DEFAULT_GITLAB_INTERVAL` — present in every state, `unconfigured`
+   *  included, because it is a fact about this machine that takes effect whenever GitLab is configured. */
+  interval: SyncInterval;
 }
 
 /** `GET /api/gitlab`. `jiraProjects` is keyed by Jira project key — each the views of the GitLab projects that key maps on the site. */

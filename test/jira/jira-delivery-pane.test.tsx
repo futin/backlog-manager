@@ -64,6 +64,7 @@ function status(over: Partial<GitlabStatus> = {}): GitlabStatus {
     mappedRepos: 2,
     foundHosts: [],
     problems: [],
+    interval: '1m',
     ...over
   };
 }

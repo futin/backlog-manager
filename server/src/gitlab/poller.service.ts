@@ -4,9 +4,9 @@ import {
   GITLAB_FINISHED_DAYS,
   GITLAB_IDENTITY_RETRY_MS,
   GITLAB_PAGES_PER_PROJECT,
-  GITLAB_POLL_MS,
   GITLAB_RATE_LIMIT_DEFAULT_MS,
   GITLAB_SWEEP_WAIT_MS,
+  SYNC_INTERVALS,
   type GitlabMr,
   type GitlabPayload,
   type GitlabPipeline,
@@ -14,7 +14,8 @@ import {
   type GitlabReview,
   type GitlabRepoProblem,
   type GitlabState,
-  type GitlabStatus
+  type GitlabStatus,
+  type SyncInterval
 } from '../../../shared/types';
 import { REVIEW_REREAD_MS, reviewState } from '../../../shared/review';
 import { readJiraConfig } from '../jira/config.util';
@@ -24,11 +25,16 @@ import { GITLAB_REVIEW_PAGES, gitlabEnv, gitlabReviewBot } from './env.util';
 import { GITLAB_PER_PAGE, GitlabClient, type GitlabResponse, type RawMr } from './gitlab.client';
 import { foldReview, type RawDiscussion } from './review.util';
 import { foldMrState, foldPipeline, mrKeys, resolveGitlabProjects, type GitlabMapping, type GitlabProjectTarget } from './mapping.util';
+import { readGitlabInterval } from './sync-config.util';
 
 /**
  * The GitLab poller: the one writer of the in-memory MR cache `GET /api/gitlab` serves, and of the identity and state the Sources row draws (spec §5.2,
  * §6.3, §6.4). The tracker poller's shape — a `setTimeout` chain armed only while there is something to poll, one sweep in flight that every caller joins —
  * with the Jira poller's 429 window: one stored `retryAt`, expired where it is read rather than by a timer.
+ *
+ * **The cadence is this machine's setting** (#527): `gitlab-sync.json`'s interval (`readGitlabInterval`, `1m` by default), read fresh at every `schedule()`
+ * and chosen in Jira › Setup › GitLab. `off` PARKS the poller rather than disarming it — armed, with no schedule: one cold-boot sweep, then only `Sync now`
+ * or a repos save sweeps — so the delivery surfaces gating on `armed` stay up. A write calls `reschedule()`, so a new interval counts from the click.
  *
  * **Decoupled from the Jira boards and the Jira poller** (spec §6.3). What it polls is every GitLab project a `jira.json` repo's `origin` names on the site,
  * and the cache is keyed by the ticket keys those projects' MRs carry — not by the keys on a board. So Detail can show an MR for a ticket no board holds
@@ -56,6 +62,8 @@ export interface GitlabPollerDeps {
   readOrigin?: (repoPath: string) => Promise<string | null>;
   env?: () => NodeJS.ProcessEnv;
   now?: () => number;
+  /** The sweep interval; `readGitlabInterval()`, read at every use and never cached, so a write lands on the next `schedule()` without a restart. */
+  interval?: () => SyncInterval;
 }
 
 type IdentityVerdict =
@@ -109,6 +117,11 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
   private stopped = false;
   /** An `arm()` that landed while a sweep was running: that sweep may have derived its mapping before the save it signals, so if it then disarms, it re-arms. */
   private armWhileSweeping = false;
+  /**
+   * Armed with no schedule: the interval is `off`, so `schedule()` made no timer. The poller still has mapped projects and answers `Sync now`; it sweeps only
+   * when asked (a press, a repos save, bootstrap). Cleared on a sweep's entry (as the timer is), by `disarm()` and by an unconfigured `arm()`.
+   */
+  private parked = false;
 
   /** The 429 window's end, epoch ms. Expired where read (`retryAtNow`), never by a timer — the Jira poller's rule. */
   private retryAt: number | null = null;
@@ -130,6 +143,7 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
   private readonly readOrigin: (repoPath: string) => Promise<string | null>;
   private readonly env: () => NodeJS.ProcessEnv;
   private readonly now: () => number;
+  private readonly interval: () => SyncInterval;
 
   constructor(
     private readonly client: GitlabClient,
@@ -140,6 +154,7 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
     this.readOrigin = deps.readOrigin ?? ((repoPath) => runGit(['-C', repoPath, 'remote', 'get-url', 'origin']));
     this.env = deps.env ?? (() => process.env);
     this.now = deps.now ?? Date.now;
+    this.interval = deps.interval ?? (() => readGitlabInterval());
     // A repo mapped after boot arms the poller without a restart (spec §6.3). `arm()` never throws and never awaits, so the save that emits this is never
     // held up by GitLab.
     live.onReposChanged(() => this.arm());
@@ -148,10 +163,11 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
   /**
    * A tick is coming OR one is running. Unlike the tracker's `timer !== null`, a sweep in flight counts: a sweep clears its own timer on entry and makes
    * the next one only at its end, so a timer-only answer would read `false` for the whole of every sweep — and every delivery surface that gates on
-   * `armed` would blink out each time GitLab is asked.
+   * `armed` would blink out each time GitLab is asked. And `parked` counts too (#527): under an `off` interval there is never a timer between sweeps, yet the
+   * poller has mapped projects and answers `Sync now` — a timer-or-sweep answer would make every delivery surface vanish the moment someone picks `off`.
    */
   get armed(): boolean {
-    return this.timer !== null || this.inFlight !== null;
+    return this.timer !== null || this.inFlight !== null || this.parked;
   }
 
   onApplicationBootstrap(): void {
@@ -174,6 +190,7 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
     if (this.stopped) return;
     if (!gitlabEnv(this.env()).configured) {
       this.clearTimer();
+      this.parked = false;
       return;
     }
     if (this.inFlight !== null) {
@@ -181,11 +198,27 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
       return;
     }
     if (this.timer !== null) return;
+    // No timer: unarmed, or parked under `off`. Either way sweep once now — a mapping change must not wait for someone to press `Sync now` — and the
+    // sweep's own `schedule()` parks it again if the interval is still `off`.
     void this.tick();
   }
 
   disarm(): void {
     this.clearTimer();
+    this.parked = false;
+  }
+
+  /**
+   * The interval was just written (`POST /api/gitlab/sync`): make it count from now. Stopped or not armed → nothing (the next `arm()` reads the file). A sweep
+   * in flight → nothing (its end calls `schedule()`, which reads the file fresh). Otherwise — a pending timer, or parked — drop the old schedule and make a
+   * new one: `5m` → `15s` sweeps 15 s later rather than up to five minutes later, `1m` → `off` cancels the pending sweep, `off` → `1m` sweeps a minute
+   * later. Never an immediate sweep: that is `Sync now`.
+   */
+  reschedule(): void {
+    if (this.stopped || !this.armed || this.inFlight !== null) return;
+    this.clearTimer();
+    this.parked = false;
+    this.schedule();
   }
 
   /** One sweep — the running one when there is one, so an older sweep can never write the cache after a newer one (spec §6.3). */
@@ -197,6 +230,7 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
       if (this.armWhileSweeping) {
         this.armWhileSweeping = false;
         // The sweep that just ended may have read the repos before the save that armed it; if it left no successor, sweep once more with the new ones.
+        // "No timer", never `!this.armed`: a sweep that parked (interval `off`) reads armed, and must still get its one extra sweep.
         if (this.timer === null && !this.stopped) this.arm();
       }
     });
@@ -206,8 +240,9 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
 
   /**
    * Read again. In order: inside a 429 window → `wait` with the stored end, no call; a sweep in flight (the immediate one `arm()` starts included) → join
-   * it, bounded, then `not-armed` if it left no timer (nothing to poll) else `done`; no timer → `not-armed`; else start a sweep and wait for it, bounded
-   * by `GITLAB_SWEEP_WAIT_MS` — past the bound it answers `done` anyway and the sweep finishes behind it, the Jira save-sweep's precedent.
+   * it, bounded, then `not-armed` if it left the poller unarmed (nothing to poll) else `done`; not armed → `not-armed`; else (a pending timer, or parked
+   * under `off`) start a sweep and wait for it, bounded by `GITLAB_SWEEP_WAIT_MS` — past the bound it answers `done` anyway and the sweep finishes behind
+   * it, the Jira save-sweep's precedent.
    */
   async sweepNow(): Promise<GitlabSweepResult> {
     const retryAt = this.retryAtNow(this.now());
@@ -240,7 +275,8 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
           retryAt: null,
           mappedRepos: 0,
           foundHosts: [],
-          problems: []
+          problems: [],
+          interval: this.interval()
         },
         jiraProjects: {},
         mrs: []
@@ -288,7 +324,8 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
         retryAt: retryAt === null ? null : iso(retryAt),
         mappedRepos: projects.length,
         foundHosts: [...(mapping?.foundHosts ?? [])],
-        problems: [...cannotRead, ...origins, ...capped]
+        problems: [...cannotRead, ...origins, ...capped],
+        interval: this.interval()
       },
       jiraProjects,
       mrs
@@ -405,8 +442,10 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
   // ---- the sweep ------------------------------------------------------------------------------------------------------------------------------------
 
   private async sweep(): Promise<void> {
-    // Consumed on entry; the successor is made at the end, and `armed` still reads true meanwhile through `inFlight`.
+    // Consumed on entry; the successor is made at the end, and `armed` still reads true meanwhile through `inFlight`. `parked` is consumed the same way, so
+    // a sweep that finds zero projects on the site still disarms.
     this.clearTimer();
+    this.parked = false;
     let successor = false;
     try {
       successor = await this.sweepOnce();
@@ -659,10 +698,16 @@ export class GitlabPollerService implements OnApplicationBootstrap, OnApplicatio
 
   private schedule(): void {
     if (this.stopped || this.timer !== null) return;
-    // Inside a 429 window the next sweep waits the window out rather than finding it open and asking nothing.
+    // Read fresh every time: the setting has one writer and no notification but `reschedule()`, so the file is the truth.
+    const ms = SYNC_INTERVALS[this.interval()];
+    if (ms === null) {
+      this.parked = true;
+      return;
+    }
+    // Inside a 429 window the next sweep waits the window out rather than finding it open and asking nothing — whatever the interval (#527, decision 5).
     const now = this.now();
     const retryAt = this.retryAtNow(now);
-    const delay = retryAt === null ? GITLAB_POLL_MS : Math.max(GITLAB_POLL_MS, retryAt - now);
+    const delay = retryAt === null ? ms : Math.max(ms, retryAt - now);
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.tick();

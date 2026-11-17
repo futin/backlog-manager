@@ -5,10 +5,10 @@ them (the files on disk, or a polled GitHub repo), reading the orchestrator's ru
 boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), polling the merge requests of the GitLab projects those boards' mapped repos name
 (`gitlab/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), deriving the tick breaker's board from the tick home (`tick/`), and — behind a switch that is off
 by default — asking another local process to start a Claude Code session, which since multi-dashboard may be a process on another machine. It writes no item
-file and no run file; the only bytes it owns are nine files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
+file and no run file; the only bytes it owns are ten files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
 `tracker-sync.json`, since Jira phase 2 `jira.json`, since the Jira sessions work its link store `jira-links.json`, for the tick breaker `tick.json`, for
 the machine list `dashboards.json` and, for the board's one
-time zone, `timezone.json`, and for the reviewer, `review.json` (both `settings/`). Its writes to
+time zone, `timezone.json`, for the reviewer, `review.json`, and for the GitLab poller's cadence, `gitlab-sync.json` (all `settings/`). Its writes to
 Jira itself (phase 3's issue assign and transition) are calls, not files.
 
 ## Modules
@@ -267,7 +267,8 @@ worktree` makes the same checks on the host.
 The fourth outbound-calling module (the GitLab connection, spec `2026-11-12-gitlab-connection-design.md`), and read-only toward GitLab: a `fetch` client on
 `https://<BM_GITLAB_SITE>/api/v4` that refuses every redirect and pages by number, a poller armed only while `BM_GITLAB_SITE` and `BM_GITLAB_TOKEN` are set
 and a repo Jira › Setup maps has its `origin` on the site, and the in-memory MR cache it fills (the fourth cache whose age is rendered, as each project's
-`polledAt`). It reads `jira.json`'s `repos` and one git verb, `remote get-url`; it writes no file and owns no setting. Two routes:
+`polledAt`). It reads `jira.json`'s `repos` and one git verb, `remote get-url`; it writes one file, `settings/gitlab-sync.json` (its sweep interval, #527),
+and owns that one setting. Three routes:
 
 - `GET /api/gitlab` — `GitlabPayload` (`{ status, jiraProjects, mrs }`) from memory: the Sources row's state, identity and problems, each Jira key's mapped
   GitLab projects, and every cached MR with the ticket keys it carries. Never a token, never a remote's userinfo.
@@ -276,6 +277,10 @@ and a repo Jira › Setup maps has its `origin` on the site, and the in-memory M
   `coderabbitai`.
 - `POST /api/gitlab/sweep` — guarded; `arm()` then a sweep, waited for up to `GITLAB_SWEEP_WAIT_MS`: 200 `{ ok: true }`, 409 when there is nothing to poll,
   429 with `retryAt` inside a rate-limit window.
+- `POST /api/gitlab/sync` — guarded; `{ interval }`, one of `SYNC_INTERVALS`' keys, else 400 `interval must be one of 15s, 1m, 5m, off`. Writes
+  `settings/gitlab-sync.json` (`BM_GITLAB_SYNC_FILE` overrides it) through `writeGitlabInterval`, then `reschedule()`s the poller so the new interval takes
+  effect at once; 200 `{ interval }` as read back. A file that exists but does not parse is a 409 naming it, nothing written. Jira › Setup's `GitLab` card is
+  its one caller.
 
 A repos save reaches it through `JiraLiveService.onReposChanged`, so `gitlab/` imports `JiraModule` and never the Jira poller. `AgentsModule` imports
 `GitlabModule` for the review dispatch below, which reads the cache (`findMr`, `reposFor`) and makes no GitLab call; the edge runs agents → gitlab and never

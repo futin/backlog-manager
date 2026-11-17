@@ -111,8 +111,9 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   [Jira integration](superpowers/specs/2026-10-15-jira-integration-design.md); [full doc](subsystems/jira.md).
 - **`gitlab/`** — the fourth outbound-calling module, and only while `BM_GITLAB_SITE` and `BM_GITLAB_TOKEN` are both set: a read-only GitLab client that
   never follows a redirect, and a poller armed only while a repo Jira › Setup maps has its `origin` on the site, sweeping those projects' merge requests
-  into an in-memory cache (the fourth cache whose age is rendered); `GET /api/gitlab` and one guarded `POST /api/gitlab/sweep`. It writes nothing, to GitLab
-  or to disk — part of the [GitLab connection](superpowers/specs/2026-11-12-gitlab-connection-design.md); [full doc](subsystems/gitlab.md).
+  into an in-memory cache (the fourth cache whose age is rendered); `GET /api/gitlab`, one guarded `POST /api/gitlab/sweep` and one guarded
+  `POST /api/gitlab/sync`. It writes nothing to GitLab, and to disk only its sweep interval, `settings/gitlab-sync.json` (#527) — part of the
+  [GitLab connection](superpowers/specs/2026-11-12-gitlab-connection-design.md); [full doc](subsystems/gitlab.md).
 - **`registry/`** — read-only view of the registry file.
 - **`hub/`** — three read-only Lookout widgets (open work, projects, this machine's run state) at `/api/hub/widgets`, served through the `lookout-widgets`
   package (#249). No actions, so no write path; it reads runs through the pure service read, so a hub poll never arms the watchdog. The run widget opens
@@ -188,8 +189,9 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   `/mentions/dismiss`, `/mentions/restore`, `/mentions/draft` and `/mentions/draft/discard` (which write `settings/jira-mentions.json`), beside the writes to Jira itself,
   `POST /api/jira/issue/assign`, `/issue/transition` and `/mentions/reply` (the reply comment, on a person's click), and the persisted link store `JiraLiveService` (every session linked to a ticket key, live and ended,
   kept across a restart),
-  → [docs/subsystems/jira.md](subsystems/jira.md)), `gitlab/` (the read-only GitLab client, the MR poller and its cache, `GET /api/gitlab` and
-  `POST /api/gitlab/sweep`, → [docs/subsystems/gitlab.md](subsystems/gitlab.md)) — those four are the outbound-calling modules, and the ONLY four —
+  → [docs/subsystems/jira.md](subsystems/jira.md)), `gitlab/` (the read-only GitLab client, the MR poller and its cache, `GET /api/gitlab`,
+  `POST /api/gitlab/sweep` and `POST /api/gitlab/sync`, → [docs/subsystems/gitlab.md](subsystems/gitlab.md)) — those four are the outbound-calling
+  modules, and the ONLY four —
   `orchestrator/` (a read-only
   view of the run-state directory, plus the in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the
   server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (three read-only Lookout widgets at `/api/hub/widgets` via

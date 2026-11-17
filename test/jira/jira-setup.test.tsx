@@ -13,7 +13,8 @@ import { setJiraPage } from '../../client/src/hooks/useJiraPage';
 import { JIRA_BOARD_KEY, JIRA_QUERY_PRESETS, accessPhrase, boardRowLine } from '../../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../../client/src/lib/jira-page';
 import { SETTINGS_STORAGE_KEY } from '../../client/src/lib/settings';
-import type { JiraBoardStatus, JiraIssue, JiraSkill, JiraStatusPayload } from '../../shared/types';
+import { GitlabContext, type GitlabContextValue } from '../../client/src/hooks/GitlabContext';
+import type { GitlabPayload, GitlabStatus, JiraBoardStatus, JiraIssue, JiraSkill, JiraStatusPayload } from '../../shared/types';
 import { NoGitlab } from '../helpers/no-gitlab';
 import { readStyles, ruleBlocks } from '../helpers/css-rule';
 
@@ -1335,5 +1336,158 @@ describe('the Skills card', () => {
     skillsAnswer = () => Promise.reject(new Error('down'));
     await userEvent.click(addSkillChip());
     expect(await within(skillsCard()).findByText('the skill was not saved — the server did not answer')).toBeInTheDocument();
+  });
+});
+
+/* ── the GitLab card (#527) ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/* The page mounted as `renderSetup` mounts it, but under a GitLab context this case builds — `NoGitlab`'s raw-provider shape with a value of its own — so
+   each case states exactly which answer the card is drawing from, and `refresh` is a mock a case can hold open to see the pill stay disabled. */
+async function renderSetupWithGitlab(value: GitlabContextValue): Promise<void> {
+  onOpenJiraPage = jest.fn((p) => setJiraPage(p));
+  render(
+    <main>
+      <SettingsProvider>
+        <JiraProvider>
+          <GitlabContext.Provider value={value}>
+            <JiraView onOpenJiraPage={onOpenJiraPage} />
+          </GitlabContext.Provider>
+        </JiraProvider>
+      </SettingsProvider>
+    </main>
+  );
+  await screen.findByRole('heading', { name: 'Boards' });
+}
+
+function gitlabStatus(over: Partial<GitlabStatus> = {}): GitlabStatus {
+  return {
+    state: 'connected',
+    site: 'gitlab.example.com',
+    malformedSite: false,
+    user: { username: 'ada', name: 'Ada Lovelace' },
+    httpStatus: 200,
+    reason: null,
+    armed: true,
+    retryAt: null,
+    mappedRepos: 2,
+    foundHosts: [],
+    problems: [],
+    interval: '5m',
+    ...over
+  };
+}
+
+const gitlabPayload = (over: Partial<GitlabStatus> = {}): GitlabPayload => ({ status: gitlabStatus(over), jiraProjects: {}, mrs: [] });
+const gitlabValue = (data: GitlabPayload | null, refresh: GitlabContextValue['refresh'] = jest.fn(() => Promise.resolve(data))): GitlabContextValue => ({
+  data,
+  error: null,
+  refresh
+});
+
+const gitlabCard = (): HTMLElement | null => screen.queryByRole('heading', { name: 'GitLab' })?.closest('section') ?? null;
+const gitlabPill = (): HTMLElement => within(gitlabCard() as HTMLElement).getByRole('group', { name: 'Sync interval' });
+const pressed = (): string[] =>
+  within(gitlabPill())
+    .getAllByRole('button')
+    .filter((b) => b.getAttribute('aria-pressed') === 'true')
+    .map((b) => b.textContent ?? '');
+const syncPosts = (): Sent[] => posts('/api/gitlab/sync');
+
+describe('the GitLab card', () => {
+  let syncAnswer: (body: { interval: string }) => Promise<Response>;
+
+  beforeEach(() => {
+    syncAnswer = (body) => answer({ interval: body.interval });
+    // The suite's fetch stub knows no GitLab route; this case's own answer sits in front of it, recorded in `sent` the same way.
+    const inner = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) !== '/api/gitlab/sync') return inner(input, init);
+      sent.push({ url: String(input), init });
+      return syncAnswer(JSON.parse(String(init?.body)));
+    }) as unknown as typeof fetch;
+  });
+
+  it('draws nothing while the GitLab answer has not arrived (case 27)', async () => {
+    await renderSetupWithGitlab(gitlabValue(null));
+    expect(gitlabCard()).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Sync interval' })).toBeNull();
+  });
+
+  it('draws nothing while GitLab is unconfigured — there is no poller to pace (case 28)', async () => {
+    await renderSetupWithGitlab(gitlabValue(gitlabPayload({ state: 'unconfigured', site: null })));
+    expect(gitlabCard()).toBeNull();
+  });
+
+  it('draws nothing for a status with no interval — an API older than this client — rather than a value the server never said (case 29)', async () => {
+    const { interval: _omitted, ...older } = gitlabStatus();
+    await renderSetupWithGitlab(gitlabValue({ status: older as GitlabStatus, jiraProjects: {}, mrs: [] }));
+    expect(gitlabCard()).toBeNull();
+  });
+
+  it('draws the card: this machine, the four intervals in the shared order, the server’s value selected, the site in the hint (case 30)', async () => {
+    await renderSetupWithGitlab(gitlabValue(gitlabPayload()));
+    const card = gitlabCard() as HTMLElement;
+    expect(card).not.toBeNull();
+    expect(within(card).getByText('this machine')).toBeInTheDocument();
+    expect(within(gitlabPill()).getAllByRole('button').map((b) => b.textContent)).toEqual(['15s', '1m', '5m', 'off']);
+    expect(pressed()).toEqual(['5m']);
+    expect(within(card).getByText('gitlab.example.com · every mapped repo, one sweep')).toBeInTheDocument();
+  });
+
+  it('posts nothing when the selected value is picked again (case 31)', async () => {
+    const refresh = jest.fn(() => Promise.resolve(null));
+    await renderSetupWithGitlab(gitlabValue(gitlabPayload(), refresh));
+    await userEvent.click(within(gitlabPill()).getByRole('button', { name: '5m' }));
+    expect(syncPosts()).toHaveLength(0);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('posts the pick as JSON, holds the pill disabled through the post AND the refetch, then refreshes once (case 32)', async () => {
+    let landPost!: () => void;
+    syncAnswer = (body) => new Promise((resolve) => (landPost = () => resolve(answer({ interval: body.interval }) as unknown as Response)));
+    let landRefresh!: () => void;
+    const refresh = jest.fn(() => new Promise<GitlabPayload | null>((resolve) => (landRefresh = () => resolve(null))));
+    await renderSetupWithGitlab(gitlabValue(gitlabPayload(), refresh));
+
+    await userEvent.click(within(gitlabPill()).getByRole('button', { name: '15s' }));
+    expect(syncPosts()).toHaveLength(1);
+    const [post] = syncPosts();
+    expect(JSON.parse(String(post.init?.body))).toEqual({ interval: '15s' });
+    expect(new Headers(post.init?.headers).get('content-type')).toBe('application/json');
+    const buttons = within(gitlabPill()).getAllByRole('button');
+    buttons.forEach((b) => expect(b).toBeDisabled());
+
+    await act(async () => landPost());
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    buttons.forEach((b) => expect(b).toBeDisabled());
+
+    await act(async () => landRefresh());
+    await waitFor(() => buttons.forEach((b) => expect(b).toBeEnabled()));
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the old value selected on a 409 and shows the server’s sentence in the hint (case 33)', async () => {
+    const sentence = 'settings/gitlab-sync.json does not parse as JSON — fix or delete it by hand; nothing was written';
+    syncAnswer = () => answer({ error: sentence }, 409);
+    await renderSetupWithGitlab(gitlabValue(gitlabPayload()));
+    await userEvent.click(within(gitlabPill()).getByRole('button', { name: '15s' }));
+    expect(await within(gitlabCard() as HTMLElement).findByText(sentence)).toBeInTheDocument();
+    expect(pressed()).toEqual(['5m']);
+    expect(within(gitlabCard() as HTMLElement).queryByText('gitlab.example.com · every mapped repo, one sweep')).toBeNull();
+  });
+
+  it('says a request that never reached the server could not save, in its own words', async () => {
+    syncAnswer = () => Promise.reject(new Error('Failed to fetch'));
+    await renderSetupWithGitlab(gitlabValue(gitlabPayload()));
+    await userEvent.click(within(gitlabPill()).getByRole('button', { name: 'off' }));
+    expect(await within(gitlabCard() as HTMLElement).findByText('could not save — Failed to fetch')).toBeInTheDocument();
+    expect(pressed()).toEqual(['5m']);
+  });
+
+  it('names both files the page writes in the band’s sub-line (case 34)', async () => {
+    await renderSetupWithGitlab(gitlabValue(gitlabPayload()));
+    const sub = screen.getByText(/the boards this machine follows/);
+    expect(sub.textContent).toContain('jira.json');
+    expect(sub.textContent).toContain('gitlab-sync.json');
   });
 });

@@ -384,6 +384,7 @@ describe('the band', () => {
       mappedRepos: 1,
       foundHosts: [],
       problems: [],
+      interval: '1m',
       ...over
     },
     jiraProjects: { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false, repos: [] }] },
@@ -1908,7 +1909,8 @@ describe('the Delivery quick filter', () => {
       retryAt: null,
       mappedRepos: 1,
       foundHosts: [],
-      problems: []
+      problems: [],
+      interval: '1m'
     },
     jiraProjects: state === 'connected' ? { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false, repos: [] }] } : {},
     mrs: state === 'connected' ? mrs : []

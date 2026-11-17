@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 
 import { dashboardsFile } from '../../server/src/agents/dashboards/dashboards-file.util';
+import { gitlabSyncFile } from '../../server/src/gitlab/sync-config.util';
 import { jiraConfigFile } from '../../server/src/jira/config.util';
 import { jiraLinksFile } from '../../server/src/jira/links.store';
 import { jiraMentionsFile } from '../../server/src/jira/mentions.store';
@@ -28,6 +29,7 @@ const ROOT = join(__dirname, '..', '..');
 /** Each writing module, by path under `server/src`, and the default path(s) it writes to. */
 const WRITERS: Record<string, string[]> = {
   'agents/dashboards/dashboards-file.util.ts': [dashboardsFile({})],
+  'gitlab/sync-config.util.ts': [gitlabSyncFile({})],
   'jira/config.util.ts': [jiraConfigFile({})],
   'jira/links.store.ts': [jiraLinksFile({})],
   'jira/mentions.store.ts': [jiraMentionsFile({})],

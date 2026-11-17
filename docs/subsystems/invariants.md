@@ -2643,6 +2643,11 @@ would silently reset every other repo to `15s`; reading it as the default is har
 a fixed object, so validation is per entry: a bad value costs its own repo its setting, never a neighbour's. No skill reads it; `backlog.mjs` learns of it only
 through the 409 the server answers while a repo is `off`.
 
+`settings/gitlab-sync.json` (#527, `server/src/gitlab/sync-config.util.ts`) is its GitLab twin and takes the same posture point for point — read fresh, cached
+nowhere, every failure reading as the default (`1m`), one writer (`writeGitlabInterval`, reached only from `POST /api/gitlab/sync`), written through
+`writeJsonAtomic`, a file that exists but does not parse refused with a 409 and left untouched. It is one value, `{ interval }`, not a map, because the GitLab
+poller reads every mapped project in one sweep; other keys a person adds by hand survive a write. No skill reads it.
+
 `settings/timezone.json` (#241, `server/src/settings/timezone-config.util.ts`) holds the one zone every device draws the board in. It joins `settings/` for
 `watchdog.json`'s reason — a value a person sets from Settings, which a server-side write must reach — and follows its posture: read fresh, never cached, every
 failure reading as the default (`null`, each browser's own zone), one writer (`writeTimeZone`, reached only from `POST /api/settings/timezone`), written through
@@ -3849,8 +3854,8 @@ names on the site (`resolveGitlabProjects`, through `runGit`'s `remote get-url`,
 per-repo lines carry namespace paths and basenames only, never a remote URL. The host decides only WHETHER a repo is on the site (`remoteOnSite`: the same
 host, ssh or scp on any port, https on none or 443, plain http never); the URL the request goes to is still built from `BM_GITLAB_SITE`.
 
-**Armed only while a mapped repo is on the site.** The poller is the tracker poller's `setTimeout` chain (`GITLAB_POLL_MS`, two minutes, plus an immediate
-sweep when it arms): `arm()` — from the bootstrap hook, from a `jira.json` repos save through `JiraLiveService.onReposChanged`, and from
+**Armed only while a mapped repo is on the site.** The poller is the tracker poller's `setTimeout` chain (at `settings/gitlab-sync.json`'s interval, `1m` by
+default and `off` parking it, plus an immediate sweep when it arms): `arm()` — from the bootstrap hook, from a `jira.json` repos save through `JiraLiveService.onReposChanged`, and from
 `POST /api/gitlab/sweep` — is a signal, and the sweep re-derives the mapping and disarms on the tick that finds no project on the site. An unconfigured
 install makes no call to GitLab at all; a configured one with nothing mapped makes only the identity read. It does not follow the Jira boards: the cache is
 keyed by the ticket keys the mapped projects' MRs carry, so Detail can show an MR for a ticket no board holds, a board edit never re-aims it, and `gitlab/`
@@ -4274,7 +4279,7 @@ the only module that dials GitLab, which is what the outbound-calling modules ru
 So `AgentsModule` imports `GitlabModule`, and the edge runs agents → gitlab and never back, like agents → jira. It is acyclic because `GitlabModule` imports
 `JiraModule` (for `JiraLiveService.onReposChanged`) and `JiraModule` imports neither `agents/` nor `gitlab/`'s module: `jira/prompt.util.ts` takes one pure
 helper, `isGitlabProjectPath`, from `gitlab/remote.util.ts` — a file with no Nest in it — to shape an MR's project path, which is why that helper lives there
-and not in the poller. The price is that a review is decided on cache age: the GitLab sweep runs every two minutes and a review's own facts can be ten minutes
+and not in the poller. The price is that a review is decided on cache age: the GitLab sweep runs at this machine's interval (`1m` by default, `off` possible) and a review's own facts can be ten minutes
 old, so dispatch can accept a review the MR has since outgrown. The half check (a 409 when the cached state no longer derives the half the sheet previewed) and
 the session's own read of the MR through its skill are what catch that; the spec accepts the window rather than pay for a live read on every click.
 

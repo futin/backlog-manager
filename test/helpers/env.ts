@@ -97,6 +97,15 @@ process.env.BM_ORCH_CONTROL_HOME ||= mkdtempSync(join(tmpdir(), 'bm-control-'));
 process.env.BM_TRACKER_SYNC_FILE ||= join(mkdtempSync(join(tmpdir(), 'bm-tracker-sync-')), 'tracker-sync.json');
 
 /**
+ * `BM_GITLAB_SYNC_FILE` — the GitLab sweep interval file (#527, `server/src/gitlab/sync-config.util.ts`), defaulted for both halves at once, for the
+ * `BM_TRACKER_SYNC_FILE` reason above. Its untouched default is the developer's real `~/.backlog-manager/settings/gitlab-sync.json`: READ by every GitLab
+ * poller `schedule()` and every `GET /api/gitlab`, so a real `off` would park a suite's poller; and WRITTEN by `POST /api/gitlab/sync`, so a suite posting
+ * to it would change the developer's real cadence. A file under a fresh temp directory that does not exist yet reads as `1m`, the default. `||=`, like
+ * the ones above.
+ */
+process.env.BM_GITLAB_SYNC_FILE ||= join(mkdtempSync(join(tmpdir(), 'bm-gitlab-sync-')), 'gitlab-sync.json');
+
+/**
  * `BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN` — the Jira credentials (`server/src/jira/env.util.ts`), blanked here for the same class of reason
  * `BM_WATCHDOG=off` is set, but for the outbound half: the Jira poller is armed the moment all three are present, and any suite that builds `AppModule` and
  * calls `app.init()` then makes a REAL request to a REAL site at boot (the `tenant_info` lookup and the identity probe, then a sweep every poll). A suite

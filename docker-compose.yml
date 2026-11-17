@@ -176,7 +176,8 @@ services:
       # The one directory the server itself writes to — watchdog.json
       # (watchdog-config.util.ts), each project's pause or stop request under
       # orchestrator-control/ (pause-control.util.ts), tracker-sync.json
-      # (tracker/sync-config.util.ts), jira.json (jira/config.util.ts),
+      # (tracker/sync-config.util.ts), gitlab-sync.json
+      # (gitlab/sync-config.util.ts), jira.json (jira/config.util.ts),
       # tick.json (tick/tick-breaker.util.ts), dashboards.json
       # (agents/dashboards/dashboards-file.util.ts), jira-links.json
       # (jira/links.store.ts), jira-mentions.json (jira/mentions.store.ts), timezone.json
