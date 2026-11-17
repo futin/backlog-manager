@@ -678,6 +678,40 @@ export interface PullRequestsPayload {
   repos: PrRepoView[];
 }
 
+// ── PR conflict resolve ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Spec: docs/superpowers/specs/2026-11-17-pr-conflict-resolve-design.md. The board's Resolve conflicts action starts a headless `pr-resolve` session; the
+// server keeps the in-memory live map (`agents/pr-resolve.service.ts`) and reads the skill's outcome files, and the client joins the two to the PR list.
+
+/** `POST /api/agents/dispatch-pr-resolve`'s body — nothing else is read: the trigger is derived server-side from the PR read and the lock file. */
+export interface PrResolveRequest {
+  repo: string;
+  number: number;
+}
+
+/** The skill's outcome file (`~/.backlog-manager/pr-resolve/<owner>__<repo>__<N>.json`) without its `at`. `sessionId` is `null` when the skill's session had no id. */
+export interface PrResolveOutcome {
+  outcome: 'pushed' | 'stopped' | 'up-to-date';
+  reason: string;
+  /** The PR head the resolve started from. */
+  fromSha: string;
+  /** The head after it: the pushed merge commit for `pushed`, `fromSha` for the other two. */
+  headSha: string;
+  sessionId: string | null;
+}
+
+/** One PR's resolve state: a live session (`sessionId` is `null` while the spawn is still answering) and/or the last outcome on disk. */
+export interface PrResolveState {
+  repo: string;
+  number: number;
+  live: { sessionId: string | null } | null;
+  outcome: PrResolveOutcome | null;
+}
+
+/** `GET /api/agents/pr-resolve`'s answer: every PR with a live entry or an outcome file. */
+export interface PrResolvePayload {
+  resolves: PrResolveState[];
+}
+
 // ── GitLab connection (Jira › delivery) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Spec: docs/superpowers/specs/2026-11-12-gitlab-connection-design.md §5–§6. Read-only, in memory, keyed by GitLab project; `server/src/gitlab/poller.service.ts`
 // is the one writer of everything below.

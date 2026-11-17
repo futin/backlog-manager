@@ -355,6 +355,19 @@ the machine is `home`.
 - `POST /api/agents/jira-open-desktop` `{ sessionId }` — Open in Desktop for a dashboard-surface session: the dashboard's own guarded hand-over
   (`POST /api/spawn` with `{ resume, surface: 'desktop' }`), its status and `{ error }` passed through unchanged; 400 `invalid session id`, 409 when dispatch is
   off, 502 for an unreachable dashboard or a 200 that does not say `surface: 'desktop'`. No key, and Jira is never called.
+- `POST /api/agents/dispatch-pr-resolve` `{ repo, number }` — the board's Resolve conflicts (`pr-resolve.controller.ts` → `PrResolveService.dispatch`), behind
+  `SameOriginPostGuard`. Nothing else is read: the trigger `/backlog-manager:pr-resolve <repo>#<n>` is composed from a fresh one-PR read
+  (`PullRequestsService.readOne`) and the PR's lock file, never the body. The ladder, each refusal an `{ error }`: 400 malformed body; 404 / 409 from
+  `projectFor` (a repo no registered GitHub project has, sync off); the dashboard gate's own sentence (409, or 502 when dispatch is on and the dashboard is
+  unreachable); the read's 503 / 429 / 502; 409 not open (closed, merged, not found), a fork, mergeability still computing, or no conflicts; then one
+  synchronous reservation in the in-memory live map (409 `a resolve of <repo>#<n> is already running`); then the lock file — none is the plain trigger, a
+  lock whose owner the dashboard still reports `processLive` (or younger than the 120 s grace, or an unreachable dashboard) is that same 409, a dead owner
+  adds `--reclaim <id>`, a lock with no session id refuses for 3 hours. It spawns at the repo's FIRST registered project, default model and effort, and answers
+  201 `{ sessionId }`; every refusal after the reservation, and a failed spawn, drops it first.
+- `GET /api/agents/pr-resolve` — `{ resolves: PrResolveState[] }`: every PR with a live entry (memory only, lost on restart on purpose) or an outcome file
+  under `~/.backlog-manager/pr-resolve/` (the skill's tool is its one writer; `$BM_PR_RESOLVE_HOME` overrides the home). An entry is dropped when an outcome
+  file carries its session id, and past the 120 s grace when the dashboard's one-session row says it is not live; a lookup that throws counts as live. The
+  lookups run in parallel, and a file that is not a key or fails validation is skipped. The client joins this to `GET /api/prs` by `repo#number` and head SHA.
 - `GET /api/agents/watchdog`, `POST /api/agents/watchdog/config` — the run watchdog's live state, read out of this process's own memory and the settings file it
   owns, plus the four server-side knobs behind it.
 - `GET /api/agents/merge-check` — a local, read-only look at whether a project's main tree is in a state that can receive a merge.

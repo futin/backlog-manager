@@ -134,6 +134,8 @@ describe('the agents POST guard', () => {
     if (verb === 'dispatch-jira') {
       return { key: 'PAY-1', repo: projectPath, action: 'execute', assign: false, transitionId: null, permissionMode: 'plan', remoteControl: false };
     }
+    // dispatch-pr-resolve names a PR, not an item: a body its controller would accept, so a 403 here is the guard's alone.
+    if (verb === 'dispatch-pr-resolve') return { repo: 'futin/x', number: 7 };
     // jira-stop, jira-link and jira-unlink name a ticket and one of its sessions.
     if (verb === 'jira-stop' || verb === 'jira-open-desktop' || verb === 'jira-link' || verb === 'jira-unlink') return { key: 'PAY-1', sessionId: 'sess-1' };
     return verb === 'orchestrate' || verb === 'resume' || verb === 'pause' || verb === 'stop' ? { project: projectPath } : verb === 'watchdog/config' ? { enabled: true } : body();
@@ -156,6 +158,7 @@ describe('the agents POST guard', () => {
     '/api/agents/pause',
     '/api/agents/stop',
     '/api/agents/dispatch-jira',
+    '/api/agents/dispatch-pr-resolve',
     '/api/agents/jira-stop',
     '/api/agents/jira-open-desktop',
     '/api/agents/jira-link',

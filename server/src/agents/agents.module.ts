@@ -7,6 +7,8 @@ import { DashboardsController } from './dashboards/dashboards.controller';
 import { DashboardsService } from './dashboards/dashboards.service';
 import { MachinesService } from './dashboards/machines.service';
 import { OffersService } from './dashboards/offers.service';
+import { PrResolveController } from './pr-resolve.controller';
+import { PrResolveService } from './pr-resolve.service';
 import { OrchestrateArgsService } from './orchestrate-args.service';
 import { UsageService } from './dashboards/usage.service';
 import { ItemsAbortController } from './items-abort.controller';
@@ -84,11 +86,16 @@ import { GitlabModule } from '../gitlab/gitlab.module';
  * `GitlabModule` arrived with the CodeRabbit review action (spec §6): `JiraDispatchService` reads `GitlabPollerService`'s cache (`findMr`, `reposFor`) to
  * check the MR a review names and derive its half, and makes no GitLab call of its own. The edge runs agents → gitlab and never back, like agents → jira;
  * `GitlabModule` imports `JiraModule` (for `JiraLiveService.onReposChanged`), which imports neither, so there is no cycle and no `forwardRef`.
+ *
+ * `PrResolveController` / `PrResolveService` (PR conflict resolve) are the board's Resolve conflicts action: `POST /api/agents/dispatch-pr-resolve` reads one PR
+ * through `PullRequestsService` (the agents → tracker edge `TrackerModule`'s import above already makes) and spawns the skill session through
+ * `AgentsService`; `GET /api/agents/pr-resolve` is the live map plus the skill's outcome files. The state lives here and not in `TrackerModule` because
+ * `GET /api/prs` cannot read it without the edge running tracker → agents, a cycle Nest cannot construct; the client joins the two reads instead.
  */
 @Module({
   // `TrackerModule` for the poller's `syncOffBlock` (#17) — no cycle: it imports only `RegistryModule`.
   imports: [RegistryModule, ItemsModule, OrchestratorModule, TrackerModule, JiraModule, GitlabModule],
-  controllers: [AgentsController, DashboardsController, ItemsAbortController, JiraAgentsController],
+  controllers: [AgentsController, DashboardsController, ItemsAbortController, JiraAgentsController, PrResolveController],
   providers: [
     AgentsService,
     DashboardStatusService,
@@ -99,6 +106,7 @@ import { GitlabModule } from '../gitlab/gitlab.module';
     MachinesService,
     OffersService,
     OrchestrateArgsService,
+    PrResolveService,
     SameOriginPostGuard,
     UsageService,
     WatchdogService
