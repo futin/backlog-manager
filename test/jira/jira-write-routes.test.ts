@@ -95,7 +95,7 @@ describe('the guard, on all six config routes and the board sweep', () => {
   });
   afterAll(() => app.close());
 
-  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
+  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete'], ['/skills/order']])(
     'POST %s with no content type is 403, and nothing is written',
     async (path) => {
       await request(app.getHttpServer()).post(`/api/jira${path}`).send('{}').expect(403);
@@ -103,12 +103,12 @@ describe('the guard, on all six config routes and the board sweep', () => {
     }
   );
 
-  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])('POST %s from another origin is 403', async (path) => {
+  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete'], ['/skills/order']])('POST %s from another origin is 403', async (path) => {
     await post(path, {}).set('origin', 'http://evil.test').expect(403);
     expect(existsSync(file)).toBe(false);
   });
 
-  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
+  it.each([['/boards'], ['/boards/delete'], ['/boards/sweep'], ['/sweep'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete'], ['/skills/order']])(
     'POST %s to a Host the allowlist does not know is 403',
     async (path) => {
       await post(path, {}).set('host', 'evil.example:4322').expect(403);
@@ -131,7 +131,8 @@ describe('unconfigured', () => {
     ['/repos', { project: 'pay', paths: [] }],
     ['/repo-defaults', { path: '', base: null, namePattern: null }],
     ['/skills', { name: '', prompt: 'p' }],
-    ['/skills/delete', {}]
+    ['/skills/delete', {}],
+    ['/skills/order', { ids: 'x' }]
   ])('answers a malformed POST %s with its 400 before the 503', async (path, body) => {
     await post(path, body).expect(400);
   });
@@ -143,7 +144,8 @@ describe('unconfigured', () => {
     ['/repos', { project: 'PAY', paths: ['/a/b'] }],
     ['/repo-defaults', { path: '/a/b', base: 'develop', namePattern: null }],
     ['/skills', SKILL],
-    ['/skills/delete', { id: 's_0123abcd' }]
+    ['/skills/delete', { id: 's_0123abcd' }],
+    ['/skills/order', { ids: [] }]
   ])('answers a valid POST %s with 503 Jira is not configured, and creates no file', async (path, body) => {
     expect((await post(path, body).expect(503)).body).toEqual({ error: 'Jira is not configured' });
     expect(existsSync(file)).toBe(false);
@@ -297,6 +299,28 @@ describe('configured, against a healthy Jira', () => {
       expect((await post('/skills/delete', { id: board.id }).expect(404)).body).toEqual({ error: 'unknown skill' });
       expect((await status()).boards.some((b) => b.id === board.id)).toBe(true);
     });
+
+    // This block's jira.json is shared with every case above, which leave skills behind — so each case orders the WHOLE stored list, never only its own.
+    it('POST /skills/order stores the whole list in the order sent, answers { ok: true }, and GET /api/jira reads it back', async () => {
+      await post('/skills', SKILL).expect(200);
+      await post('/skills', { name: 'Second', prompt: 'Second {key}' }).expect(200);
+      const ids = (await status()).skills.map((s) => s.id);
+      expect(ids.length).toBeGreaterThanOrEqual(2);
+      const reversed = [...ids].reverse();
+      expect((await post('/skills/order', { ids: reversed }).expect(200)).body).toEqual({ ok: true });
+      expect((await status()).skills.map((s) => s.id)).toEqual(reversed);
+    });
+
+    it('POST /skills/order missing a stored id is 409 saying the list changed, and nothing moves', async () => {
+      const ids = (await status()).skills.map((s) => s.id);
+      const res = await post('/skills/order', { ids: ids.slice(1).reverse() }).expect(409);
+      expect(res.body).toEqual({ error: 'the skill list changed since this page loaded — reload and try again; nothing was written' });
+      expect((await status()).skills.map((s) => s.id)).toEqual(ids);
+    });
+
+    it('POST /skills/order with an id twice is 400 naming it', async () => {
+      expect((await post('/skills/order', { ids: ['s_0123abcd', 's_0123abcd'] }).expect(400)).body).toEqual({ error: 'ids holds s_0123abcd twice' });
+    });
   });
 
   it('POST /repos stores one spelling, and an empty list removes the key', async () => {
@@ -423,7 +447,8 @@ describe('configured, a jira.json that does not parse (Review Focus 2)', () => {
     ['/repo-defaults', { path: '/a/b', base: 'develop', namePattern: null }],
     ['/skills', SKILL],
     ['/skills', { ...SKILL, id: 's_0123abcd' }],
-    ['/skills/delete', { id: 's_0123abcd' }]
+    ['/skills/delete', { id: 's_0123abcd' }],
+    ['/skills/order', { ids: ['s_0123abcd'] }]
   ])('POST %s is 409, names jira.json and says nothing was written, and leaves the file byte-identical', async (path, body) => {
     const res = await post(path, body).expect(409);
     expect(res.body.error).toContain('jira.json');

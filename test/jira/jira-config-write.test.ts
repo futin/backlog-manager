@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   JIRA_JQL_MAX_CHARS,
   JiraConfigUnreadableError,
+  JiraSkillOrderStaleError,
   JiraUnknownIdError,
   deleteBoard,
   deleteSkill,
@@ -14,12 +15,14 @@ import {
   parseBoardWrite,
   parseRepoDefaultsWrite,
   parseReposWrite,
+  parseSkillOrder,
   parseSkillWrite,
   readJiraConfig,
   writeBoard,
   writeRepoDefaults,
   writeRepos,
   writeSkill,
+  writeSkillOrder,
   type JiraBoardWrite
 } from '../../server/src/jira/config.util';
 
@@ -462,6 +465,92 @@ describe('deleteSkill', () => {
     }
     expect((thrown as JiraUnknownIdError).kind).toBe('board');
     expect((thrown as Error).message).toBe('no board with id b_12345678');
+  });
+});
+
+const sk3 = { id: 's_00000003', name: 'Groom', prompt: 'Groom {key}' };
+
+describe('parseSkillOrder', () => {
+  it('accepts an array of non-empty strings, the empty one included', () => {
+    expect(parseSkillOrder({ ids: ['s_00000001', 's_00000002'] })).toEqual({ ok: true, value: ['s_00000001', 's_00000002'] });
+    expect(parseSkillOrder({ ids: [] })).toEqual({ ok: true, value: [] });
+  });
+
+  it.each([[{}], [{ ids: 's_00000001' }], [{ ids: [7] }], [{ ids: [''] }], [null]])('refuses %p with the array sentence', (body) => {
+    expect(parseSkillOrder(body)).toEqual({ ok: false, error: 'ids must be an array of non-empty strings' });
+  });
+
+  it('refuses an id the body repeats, naming it', () => {
+    expect(parseSkillOrder({ ids: ['s_00000001', 's_00000002', 's_00000001'] })).toEqual({ ok: false, error: 'ids holds s_00000001 twice' });
+  });
+});
+
+// A user-set order (2026-11-17 skill-order spec): the seventh writer, and the first that rewrites the whole array's ORDER rather than merging one entry.
+describe('writeSkillOrder', () => {
+  const STALE = 'the skill list changed since this page loaded — reload and try again; nothing was written';
+
+  it('rewrites the skills in the given order, keeping each entry\'s extra keys and every other top-level key', () => {
+    put({ interval: 60, skills: [{ ...sk1, x: 1 }, sk2, sk3] });
+    writeSkillOrder(['s_00000003', 's_00000001', 's_00000002'], file);
+    expect(parsed()).toEqual({ interval: 60, skills: [sk3, { ...sk1, x: 1 }, sk2] });
+  });
+
+  it.each([
+    ['a missing id', ['s_00000001', 's_00000002']],
+    ['an extra id', ['s_00000001', 's_00000002', 's_00000003', 's_0000000f']],
+    ['an unknown id in place of a stored one', ['s_00000001', 's_00000002', 's_0000000f']]
+  ])('refuses %s as stale, byte-identical', (_what, ids) => {
+    put({ skills: [sk1, sk2, sk3] });
+    const before = readFileSync(file, 'utf8');
+    let thrown: unknown;
+    try {
+      writeSkillOrder(ids, file);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(JiraSkillOrderStaleError);
+    expect((thrown as Error).message).toBe(STALE);
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  });
+
+  it('never asks for an entry the reader drops, and keeps every such entry after the ordered ones in its own order', () => {
+    const bad = { id: 's_00000009', name: '', prompt: 'p' };
+    put({ skills: [sk1, bad, sk2, { name: 'no id' }] });
+    writeSkillOrder(['s_00000002', 's_00000001'], file);
+    expect(parsed().skills).toEqual([sk2, sk1, bad, { name: 'no id' }]);
+    expect(() => writeSkillOrder(['s_00000001', 's_00000002', 's_00000009'], file)).toThrow(JiraSkillOrderStaleError);
+  });
+
+  it('moves raw entries sharing one id together, at that id\'s place', () => {
+    const again = { ...sk1, name: 'Review again' };
+    put({ skills: [sk1, sk2, again] });
+    writeSkillOrder(['s_00000002', 's_00000001'], file);
+    expect(parsed().skills).toEqual([sk2, sk1, again]);
+  });
+
+  it('writes nothing when the order is unchanged', () => {
+    // Formatting the writer would never produce: if it survives, nothing was written.
+    const text = `{"skills":[${JSON.stringify(sk1)}, ${JSON.stringify(sk2)}]   }`;
+    put(text);
+    writeSkillOrder(['s_00000001', 's_00000002'], file);
+    expect(readFileSync(file, 'utf8')).toBe(text);
+  });
+
+  it('creates no file when there is none and nothing to order, and leaves a non-array skills alone', () => {
+    rmSync(file, { force: true });
+    writeSkillOrder([], file);
+    expect(readdirSync(dir)).toEqual([]);
+    const text = '{"skills":"oops"}';
+    put(text);
+    writeSkillOrder([], file);
+    expect(readFileSync(file, 'utf8')).toBe(text);
+  });
+
+  it('refuses an unreadable file, byte-identical', () => {
+    put('{ "skills": [');
+    const bad = readFileSync(file, 'utf8');
+    expect(() => writeSkillOrder(['s_00000001'], file)).toThrow(JiraConfigUnreadableError);
+    expect(readFileSync(file, 'utf8')).toBe(bad);
   });
 });
 

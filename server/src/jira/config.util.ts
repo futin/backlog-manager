@@ -267,8 +267,8 @@ export function readJiraConfig(file: string = jiraConfigFile()): JiraConfig {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
-// Writers (phase 2). Called by the six config POST routes under `/api/jira` (boards, boards/delete, repos, repo-defaults, skills, skills/delete) and nothing
-// else.
+// Writers (phase 2). Called by the seven config POST routes under `/api/jira` (boards, boards/delete, repos, repo-defaults, skills, skills/delete,
+// skills/order) and nothing else.
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
 
 /**
@@ -298,6 +298,18 @@ export class JiraUnknownIdError extends Error {
   ) {
     super(`no ${kind} with id ${id}`);
     this.name = 'JiraUnknownIdError';
+  }
+}
+
+/**
+ * Thrown by `writeSkillOrder` when the ids it was handed are not exactly the set of skills the file holds, and mapped to a 409 by the route. A 409 and not
+ * `JiraUnknownIdError`'s per-id 404, because what is wrong is the whole list the page drew from — another tab added or removed a skill since — not one id,
+ * and the only cure is to reload. Nothing was written.
+ */
+export class JiraSkillOrderStaleError extends Error {
+  constructor() {
+    super('the skill list changed since this page loaded — reload and try again; nothing was written');
+    this.name = 'JiraSkillOrderStaleError';
   }
 }
 
@@ -384,6 +396,22 @@ export function parseSkillWrite(body: unknown): Parsed<JiraSkillWrite> {
   const value: JiraSkillWrite = { name: body.name.trim(), prompt: body.prompt.trim() };
   if (id !== undefined) value.id = id;
   return { ok: true, value };
+}
+
+/**
+ * Validate a `POST /api/jira/skills/order` body: `ids`, an array of non-empty strings with no id twice. Only the SHAPE is checked here — whether the ids are
+ * the file's skills is `writeSkillOrder`'s question, answered against the file it is about to write. No length bound of its own: the writer refuses any set
+ * that is not exactly the stored one, which bounds it.
+ */
+export function parseSkillOrder(body: unknown): Parsed<string[]> {
+  const ids = isRecord(body) ? body.ids : undefined;
+  if (!Array.isArray(ids) || !ids.every(nonEmptyString)) return { ok: false, error: 'ids must be an array of non-empty strings' };
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) return { ok: false, error: `ids holds ${id} twice` };
+    seen.add(id);
+  }
+  return { ok: true, value: ids };
 }
 
 /**
@@ -617,4 +645,37 @@ export function deleteSkill(id: string, file: string = jiraConfigFile()): void {
   const rest = skills.filter((entry) => !(isRecord(entry) && entry.id === id));
   if (rest.length === skills.length) throw new JiraUnknownIdError(id, 'skill');
   writeJsonAtomic(file, { ...current, skills: rest });
+}
+
+/**
+ * Put the skills in the order `ids` names (2026-11-17 skill-order spec) — the seventh writer, and the only one that rewrites the array's ORDER rather than
+ * merging one entry. `ids` must be exactly the distinct ids of the entries `readSkill` ACCEPTS, which is what `GET /api/jira` showed the page: an entry the
+ * reader drops (a hand-edit with an empty name, a bad id) is never asked for, so it can never wedge the route behind a "reload" the page cannot act on. Any
+ * other set is `JiraSkillOrderStaleError`, nothing written.
+ *
+ * The rewrite works on the RAW entries, as `deleteSkill` does: for each id, every raw entry holding it (a hand-edit can duplicate an id, and the reader keeps
+ * both) goes there in its relative order; every remaining raw entry — no id, or one the reader drops — follows, in its own order, untouched. An order that is
+ * already the stored one writes nothing — no rename, and no file created where there was none.
+ */
+export function writeSkillOrder(ids: string[], file: string = jiraConfigFile()): void {
+  const current = readRawForWrite(file);
+  const raw = Array.isArray(current.skills) ? current.skills : [];
+  const stored: string[] = [];
+  raw.forEach((entry, i) => {
+    const skill = readSkill(entry, file, `skill #${i}`);
+    if (skill !== null && !stored.includes(skill.id)) stored.push(skill.id);
+  });
+  if (ids.length !== stored.length || !ids.every((id) => stored.includes(id))) throw new JiraSkillOrderStaleError();
+  if (ids.every((id, i) => id === stored[i])) return;
+  const placed = new Set<unknown>();
+  const ordered: unknown[] = [];
+  for (const id of ids) {
+    for (const entry of raw) {
+      if (isRecord(entry) && entry.id === id) {
+        ordered.push(entry);
+        placed.add(entry);
+      }
+    }
+  }
+  writeJsonAtomic(file, { ...current, skills: [...ordered, ...raw.filter((entry) => !placed.has(entry))] });
 }
