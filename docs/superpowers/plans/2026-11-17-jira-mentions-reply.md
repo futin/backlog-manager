@@ -70,7 +70,7 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   `jira.mjs` through Bash, which `plan` mode refuses; read-only is the prompt's rule, as `review`/`execute` rely on theirs), `remoteControl: true`, no
   `surface` (a dashboard launch). The repo picker is the only launch control the modal draws.
 - **R4 — the post is single-flight per key on the server.** A `replying: Set<string>` in the poller, checked and set synchronously before the first await,
-  cleared in `finally`. The modal's `useAction` guard is not enough: two tabs, or a double click racing a re-render, would post twice.
+  cleared in `finally`. The modal's `busy` flag and the hook's per-key `once` are not enough: two tabs, or a second window, would post twice.
 - **R5 — drafts live in `jira-mentions.json` version 1, as an optional array.** A file without `drafts` reads as no drafts; the loader's per-entry fallback
   applies to drafts too (one bad entry costs itself). No version bump: phase-1 code reading a phase-2 file ignores the unknown key, and a rollback loses
   nothing it ever knew. Drafts prune on save when `at` is older than `JIRA_MENTIONS_WINDOW_DAYS` + `PRUNE_GRACE_MS`, the dismissals' clock.
@@ -335,8 +335,9 @@ title `feat(jira): draft and post a reply from the mentions modal`.
 
 **Files:**
 - Modify: `client/src/lib/jira-mentions.ts` (shape guard, posts, derivations)
-- Modify: `client/src/lib/jira.ts` (`defaultModeFor` handles `'reply'` → the non-`context` branch; R3)
-- Test: `test/jira/jira-mentions-lib.test.ts`, `test/jira/jira-lib.test.ts`
+- Modify: `client/src/lib/jira.ts` (`defaultModeFor`'s comment names `reply` beside `review` — the code's non-`context` branch already answers `acceptEdits`; R3)
+- Modify: `client/src/hooks/useJiraMentions.ts` (`discardDraft`, `postReply`, through its existing `write`/`once`, replacing the payload on success)
+- Test: `test/jira/jira-mentions-lib.test.ts`, `test/jira/jira-lib.test.ts`, the hook's existing suite (`grep -l useJiraMentions test/`)
 
 **Interfaces:**
 - Produces: `postJiraMentions(path: 'sweep' | 'dismiss' | 'restore' | 'draft/discard', body: object)` (widened);
@@ -345,7 +346,11 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   `replyRepos(projectKey: string, repos: Record<string, string[]>): string[]` — the project's own repos first in `jira.json` order, then every other mapped
   repo, de-duplicated; `draftState(issue: JiraMentionIssue): 'idle' | 'drafting' | 'ready' | 'replacing'` — `idle` no session and no draft; `drafting` a
   session and no draft; `ready` a draft and no session, or a draft written BY the live session; `replacing` a draft from an older session while a newer
-  session is live; `replyTo(issue): { accountId: string; name: string } | null` — the author of `mentions[0]`.
+  session is live; `replyTo(issue): { accountId: string; name: string } | null` — the author of `mentions[0]`;
+  `JiraMentionsState` gains `discardDraft(key: string): Promise<JiraMentionsWrite>` and
+  `postReply(key: string, text: string): Promise<JiraMentionsWrite & { posted?: { id: string; url: string } }>` — never rejecting, like `dismiss`; a second
+  `postReply` for a key already out resolves with the first one's outcome rather than `ok` without posting (the modal must not draw "Posted" for a click
+  whose post it never saw land).
 
 - [ ] **Step 1: Write the failing tests.**
   - `isJiraMentionsPayload` accepts issues with and without `draft`/`session` (an older server) and rejects a `draft` that is not an object or null.
@@ -354,6 +359,9 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   - `replyTo` returns the newest mention's author.
   - `defaultModeFor('reply', '')` → `'acceptEdits'`; with a setting → the setting.
   - `postJiraReply` resolves `posted` on 200 and rejects with `text too long` on that 400 (fetch mocked as the existing post tests do).
+  - hook: `postReply` 200 replaces `data` (the ticket gone) and resolves `{ ok: true, posted }`; a 409 resolves `{ ok: false, message }` with `data` unchanged
+    and `error` set; two `postReply` calls for one key while the first is out send ONE request and both resolve the same outcome; `discardDraft` replaces
+    `data` with the answer's.
 - [ ] **Step 2: Run** the two suites — FAIL. **Step 3: Implement.** **Step 4: Run** — PASS.
 - [ ] **Step 5: Commit** `feat(client): mentions reply helpers`.
 
