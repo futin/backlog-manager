@@ -164,7 +164,7 @@ test('formatStatus: not configured is stderr only and exit 3, with the dash only
 })
 
 test('USAGE has one line per command, and API_DOWN_CODE is 5', () => {
-  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'link', 'unlink', 'status', 'worktree']) {
+  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'link', 'unlink', 'thread', 'draft', 'status', 'worktree']) {
     assert.match(USAGE, new RegExp(`^\\s*jira\\.mjs ${cmd}\\b`, 'm'), `USAGE has no line for ${cmd}`)
   }
   assert.equal(API_DOWN_CODE, 5)
@@ -1120,6 +1120,123 @@ test('worktree leaves a real node_modules directory in an attached tree a direct
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// thread and draft — the mention-reply pair. `thread` reads the conversation through this server; `draft` hands text to the board's own route and a person
+// posts it. Neither reaches Jira, and no verb here comments.
+
+/** `runCliEnv` with a stdin: the text is written and the pipe closed, so `draft`'s read-to-end returns. */
+function runCliStdin(port, env, stdin, ...args) {
+  return new Promise((resolve) => {
+    const childEnv = { ...process.env, BM_API_PORT: String(port), ...env }
+    for (const [name, value] of Object.entries(childEnv)) if (value === undefined) delete childEnv[name]
+    const child = spawn('node', [SCRIPT, ...args], { env: childEnv })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (c) => (stdout += c))
+    child.stderr.on('data', (c) => (stderr += c))
+    child.on('close', (status) => resolve({ status, stdout, stderr }))
+    child.stdin.end(stdin)
+  })
+}
+const draftAs = (session, stdin, routes, ...args) => withApi(routes, (port) => runCliStdin(port, { CLAUDE_CODE_SESSION_ID: session }, stdin, ...args))
+const threadRoute = (answer) => ({ '/api/jira/issue/PAY-1/thread': (_b, { method }) => (method === 'GET' ? answer : undefined) })
+const draftRoute = (answer) => ({ '/api/jira/mentions/draft': (_b, { method }) => (method === 'POST' ? answer : undefined) })
+
+const threadComment = (id, name, created, markdown) => ({ id, author: { accountId: `a-${id}`, name }, created, markdown, mine: false, mentionsMe: false, open: false })
+
+test('thread reads the ticket thread and prints each comment: author, created and markdown, in the order served, with the truncation line', async () => {
+  const body = {
+    key: 'PAY-1',
+    total: 5,
+    truncated: true,
+    comments: [threadComment('1', 'Ada', '2026-11-01T10:00:00.000Z', 'first **bold**'), threadComment('2', 'Bob', '2026-11-02T11:00:00.000Z', 'second\n\nline')],
+  }
+  const { out, requests } = await cli(threadRoute({ body }), 'thread', 'pay-1')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(requests.length, 1)
+  assert.deepEqual([requests[0].method, requests[0].path], ['GET', '/api/jira/issue/PAY-1/thread'])
+  assert.ok(out.stdout.includes('(3 earlier not shown)'), out.stdout)
+  const at = (s) => out.stdout.indexOf(s)
+  assert.ok(at('Ada') >= 0 && at('2026-11-01T10:00:00.000Z') >= 0 && at('first **bold**') >= 0)
+  assert.ok(at('Ada') < at('first **bold**') && at('first **bold**') < at('Bob') && at('Bob') < at('second\n\nline'), 'oldest first, each header before its text')
+  const quiet = await cli(threadRoute({ body: { ...body, total: 2, truncated: false } }), 'thread', 'PAY-1')
+  assert.equal(quiet.out.status, 0)
+  assert.ok(!quiet.out.stdout.includes('earlier not shown'))
+})
+
+test("thread maps the server's refusals: a 404 is 2 with its sentence, a stack that is down is 5, bad usage sends nothing", async () => {
+  const { out } = await cli(threadRoute({ status: 404, body: { error: 'PAY-1 was not found' } }), 'thread', 'PAY-1')
+  assert.equal(out.status, 2)
+  assert.equal(out.stderr.trim(), 'PAY-1 was not found')
+  const { server } = fakeApi({})
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  await new Promise((resolve) => server.close(resolve))
+  const down = await runCli(port, 'thread', 'PAY-1')
+  assert.equal(down.status, API_DOWN_CODE)
+  for (const args of [['thread'], ['thread', 'PAY'], ['thread', 'PAY-1', 'PAY-2'], ['thread', '--x']]) {
+    const bad = await cli({}, ...args)
+    assert.equal(bad.out.status, 1, args.join(' '))
+    assert.equal(bad.requests.length, 0)
+  }
+})
+
+test('draft posts the key, this session id and the stdin text verbatim to the board route, and says a person posts it', async () => {
+  const { out, requests } = await draftAs(SESSION, 'hello\n\nworld', draftRoute({ body: { configured: true } }), 'draft', 'pay-1')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(requests.length, 1)
+  const [r] = requests
+  assert.deepEqual([r.method, r.path], ['POST', '/api/jira/mentions/draft'])
+  assert.equal(r.headers['content-type'], 'application/json')
+  assert.equal(r.headers.origin, undefined)
+  assert.equal(r.headers.authorization, undefined)
+  assert.deepEqual(r.body, { key: 'PAY-1', sessionId: SESSION, text: 'hello\n\nworld' })
+  assert.equal(out.stdout.trim().split('\n').length, 1)
+  assert.match(out.stdout, /PAY-1/)
+  assert.match(out.stdout, /on the board/)
+  assert.match(out.stdout, /person/)
+})
+
+test('draft with empty or blank stdin, or outside a session, or with a bad key is usage: exit 1 and nothing sent', async () => {
+  for (const stdin of ['', '  \n\t\n']) {
+    const { out, requests } = await draftAs(SESSION, stdin, draftRoute({ body: {} }), 'draft', 'PAY-1')
+    assert.equal(out.status, 1, JSON.stringify(stdin))
+    assert.equal(requests.length, 0)
+  }
+  const noSession = await draftAs(undefined, 'text', draftRoute({ body: {} }), 'draft', 'PAY-1')
+  assert.equal(noSession.out.status, 1)
+  assert.match(noSession.out.stderr, /CLAUDE_CODE_SESSION_ID/)
+  assert.equal(noSession.requests.length, 0)
+  for (const args of [['draft'], ['draft', 'PAY'], ['draft', 'PAY-1', 'PAY-2'], ['draft', '--x']]) {
+    const bad = await draftAs(SESSION, 'text', {}, ...args)
+    assert.equal(bad.out.status, 1, args.join(' '))
+    assert.equal(bad.requests.length, 0)
+  }
+})
+
+test('draft prints the 409 sentence verbatim with exit 2, and a stack that is down is 5', async () => {
+  const { out } = await draftAs(SESSION, 'text', draftRoute({ status: 409, body: { error: 'no reply session for PAY-1' } }), 'draft', 'PAY-1')
+  assert.equal(out.status, 2)
+  assert.equal(out.stderr.trim(), 'no reply session for PAY-1')
+  const { server } = fakeApi({})
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  await new Promise((resolve) => server.close(resolve))
+  const down = await runCliStdin(port, { CLAUDE_CODE_SESSION_ID: SESSION }, 'text', 'draft', 'PAY-1')
+  assert.equal(down.status, API_DOWN_CODE)
+})
+
+test('jira.mjs has no verb that posts: post, comment and reply are unknown commands, and USAGE lists thread and draft', async () => {
+  assert.match(USAGE, /jira\.mjs thread <KEY>/)
+  assert.match(USAGE, /jira\.mjs draft <KEY>/)
+  for (const cmd of ['post', 'comment', 'reply']) {
+    const { out, requests } = await cli({}, cmd, 'PAY-1')
+    assert.equal(out.status, 1, cmd)
+    assert.match(out.stderr, new RegExp(`unknown command: ${cmd}`))
+    assert.equal(requests.length, 0)
+  }
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
 // The source guard (spec §10's half a test can hold). Comment lines are stripped first: the header may well name Atlassian while saying it is never called.
 
 const codeLines = () =>
@@ -1164,7 +1281,7 @@ test('jira/SKILL.md is the jira skill, triggered by /jira', () => {
 
 test('jira/SKILL.md documents every command, through the braced plugin root', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8')
-  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'link', 'unlink', 'status', 'worktree']) {
+  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'link', 'unlink', 'thread', 'draft', 'status', 'worktree']) {
     assert.match(text, new RegExp(`jira\\.mjs ${cmd}\\b`), `SKILL.md never shows jira.mjs ${cmd}`)
   }
   const nodeLines = text.split('\n').filter((line) => /\bnode\s+"/.test(line))

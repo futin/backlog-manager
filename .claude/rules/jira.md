@@ -28,8 +28,8 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `/repo-defaults` takes `null` for unset (both `null` deletes the entry) and adds
   one check after the 409, a 400 `<path> is not mapped` unless SOME project maps the path. Why:
   [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
-- **The Jira token never leaves the server: the browser and `jira.mjs` both go through the server's own routes (`/api/jira`, and
-  `/api/agents/jira-link|jira-unlink` for `link` and `unlink`), and the poller is armed while the site is configured and not `unsupported`.**
+- **The Jira token never leaves the server: the browser and `jira.mjs` both go through the server's own routes (`/api/jira`, `/api/jira/mentions/draft`
+  for `draft`, and `/api/agents/jira-link|jira-unlink` for `link` and `unlink`), and the poller is armed while the site is configured and not `unsupported`.**
   `jiraEnv()` (`env.util.ts`) reads `BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN` (spelled once, in `JIRA_ENV`) per call, trimmed, never cached; whitespace
   is absent, the site is lower-cased and must pass `isJiraHostname`, and `detail` names the first problem — emptiness first, in site/email/token order, then the
   hostname shape. Every call is `JiraClient.request`'s: the gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3` (`GATEWAY_HOST`, not configurable),
@@ -44,7 +44,7 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   board, one owed its cold sweep, a forced one) and no longer the chain's. The rule is judged at the end of every sweep, after its awaits, on the boot's
   `access` alone — `owed()` reads neither `jira.json` nor the env (the sweep checked the env at its start), so no board can change it. `skills/jira/tools/jira.mjs` dials `http://127.0.0.1:${BM_API_PORT || 4322}` and nothing else — `jira.mjs
   link|unlink <KEY>` POST `{ key, sessionId }` to `/api/agents/jira-link|jira-unlink`, the session id read from `CLAUDE_CODE_SESSION_ID` (unset is exit `1`,
-  nothing sent) — reads no `BM_JIRA_*` and sends no `authorization` header; the source guard in `jira.test.mjs` (comment lines stripped) holds all three. Its
+  nothing sent; `draft` sends `{ key, sessionId, text }` with its session id the same way) — reads no `BM_JIRA_*` and sends no `authorization` header; the source guard in `jira.test.mjs` (comment lines stripped) holds all three. Its
   one allowed `BM_JIRA_` name is `BM_JIRA_FETCH_RETRY_MS`, `worktree`'s pause before its one fetch retry (default 1 000 ms) — a test knob, carrying nothing of
   Jira's — and its second is `BM_JIRA_FETCH_TIMEOUT_MS`, the bound on each `worktree` fetch (default 60 s), a test knob too. Why:
   [invariants.md](docs/subsystems/invariants.md#the-jira-token-never-leaves-the-server-and-the-poller-is-armed-while-the-site-is-configured)
