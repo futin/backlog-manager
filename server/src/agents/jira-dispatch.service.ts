@@ -521,6 +521,12 @@ export class JiraDispatchService {
    * The 409 for a key `reserve` refused, worded from what the map holds. `reserve` says only "no"; the entry says why — a reservation still waiting on the
    * dashboard, a session that started, or (no entry at all) a map whose every slot is a starting entry, which `reserve` will not evict.
    */
+  private busy(key: string): HttpException {
+    const entry = this.live.get(key);
+    if (entry === null) return new HttpException({ error: 'too many Jira sessions are starting — try again in a moment' }, 409);
+    return new HttpException({ error: entry.sessionId === null ? `${key} is starting` : `${key} already has a session` }, 409);
+  }
+
   /**
    * A refused reply reservation: another reply is starting or live on the key — or, with none, every live slot is a starting entry (`reserve`'s cap), which
    * is `busy`'s own sentence. Never `busy`'s Run sentences otherwise: a Run on the key does not refuse a reply, so naming it would be wrong.
@@ -528,12 +534,6 @@ export class JiraDispatchService {
   private replyBusy(key: string): HttpException {
     if (this.live.replySession(key) === null) return new HttpException({ error: 'too many Jira sessions are starting — try again in a moment' }, 409);
     return new HttpException({ error: `a reply is already being drafted for ${key}` }, 409);
-  }
-
-  private busy(key: string): HttpException {
-    const entry = this.live.get(key);
-    if (entry === null) return new HttpException({ error: 'too many Jira sessions are starting — try again in a moment' }, 409);
-    return new HttpException({ error: entry.sessionId === null ? `${key} is starting` : `${key} already has a session` }, 409);
   }
 }
 
