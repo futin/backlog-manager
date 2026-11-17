@@ -84,9 +84,13 @@ describe('shownOutcome', () => {
     expect(shownOutcome(pr({ headSha: 'f1' }), o)).toBe(o);
   });
 
-  it.each(['conflicting', 'unknown'] as const)('shows a pushed outcome at its head while GitHub reads %s', (mergeable) => {
+  it('shows a pushed outcome at its head while GitHub reads unknown', () => {
     const o = outcome({ outcome: 'pushed' });
-    expect(shownOutcome(pr({ headSha: 'h2', mergeable }), o)).toBe(o);
+    expect(shownOutcome(pr({ headSha: 'h2', mergeable: 'unknown' }), o)).toBe(o);
+  });
+
+  it('hides a pushed outcome at its head while GitHub reads conflicting: the base moved again', () => {
+    expect(shownOutcome(pr({ headSha: 'h2', mergeable: 'conflicting' }), outcome({ outcome: 'pushed' }))).toBeNull();
   });
 
   it('hides a pushed outcome at its head once the PR reads mergeable', () => {
@@ -124,6 +128,10 @@ describe('resolveBlock', () => {
   it('says resolving… over a shown pushed outcome', () => {
     const s = state({ live: { sessionId: null }, outcome: pushed });
     expect(resolveBlock(pr({ headSha: 'f1' }), repo(), ENABLED, s, null)).toBe('resolving…');
+  });
+
+  it('leaves the row enabled when a pushed outcome is at its head and GitHub reads conflicting', () => {
+    expect(resolveBlock(pr({ headSha: 'h2', mergeable: 'conflicting' }), repo(), ENABLED, state({ outcome: pushed }), null)).toBeNull();
   });
 
   it('says resolved — waiting for GitHub over a warning', () => {

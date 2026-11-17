@@ -197,7 +197,8 @@ sibling route answers within that budget however many entries there are. No time
 
 **Last outcome.** Matched to the PR's current head SHA as the PR list reports it: `stopped` and `up-to-date` show while the head equals `headSha` (which
 equals `fromSha` for them) — they stay until somebody pushes. `pushed` shows while the head equals `fromSha` (the list has not re-read since the push —
-up to the PR cache's TTL, an accepted gap) or equals `headSha` while GitHub still reads the PR `conflicting` or `unknown`. Any other head shows nothing.
+up to the PR cache's TTL, an accepted gap) or equals `headSha` while GitHub reads the PR `unknown`. `conflicting` at the pushed head means the base moved
+again, so the row is enabled for another try. Any other head shows nothing.
 Restart loses only the live map; the outcome file and the PR comment survive it.
 
 ### The board
@@ -241,8 +242,8 @@ Restart loses only the live map; the outcome file and the PR comment survive it.
   the session id drops it; the route is in the origin-guard list.
 - `GET /api/agents/pr-resolve`: a live entry and an outcome file both listed; a slow dashboard lookup does not serialise the others.
 - Client: the row hidden on every `hidden` gate verdict; each disabled reason in table order with its exact text; the `resolving…` chip with and without
-  a session link; the outcome renderings, including `pushed` at `fromSha` (shows), at `headSha` while `conflicting` (shows), at `headSha` while
-  `mergeable` (gone), and a `stopped` file for another head (gone).
+  a session link; the outcome renderings, including `pushed` at `fromSha` (shows), at `headSha` while `unknown` (shows), at `headSha` while
+  `conflicting` (gone, row enabled), at `headSha` while `mergeable` (gone), and a `stopped` file for another head (gone).
 - Skill tool (node, beside the tool): argument parsing (with and without `--reclaim`); the two worktree paths; an exclusive lock take where a second take
   fails; a stale lock (by age, and by a matching `--reclaim`) claimed by exactly one of two claimers; a `--reclaim` naming another session not honoured;
   the outcome file's shape (`fromSha`, `headSha`, `sessionId: null` when the env var is unset) and its temp-plus-rename write under `$BM_PR_RESOLVE_HOME`.

@@ -13,15 +13,17 @@ import type { AgentsStatus, PrRepoView, PrResolveOutcome, PrResolveState, Projec
  * The last outcome that still describes THIS PR, or `null`. An outcome is a claim about one head, so it stops showing the moment the PR moves on:
  *  - `stopped` / `up-to-date` show while the PR is at the head the resolve read (`headSha`; the skill writes `fromSha` there for both), because a push by
  *    somebody else makes the reason stale and the next click deserves a clean row;
- *  - `pushed` shows while the PR is still at `fromSha` (GitHub's PR cache, up to its TTL, has not seen our push yet) or at `headSha` while GitHub still
- *    reads the PR `conflicting` or `unknown` (it has seen the push and not finished re-computing mergeability). Once it reads `mergeable` the note has
- *    done its job, and any other head is somebody else's push.
+ *  - `pushed` shows while the PR is still at `fromSha` (GitHub's PR cache, up to its TTL, has not seen our push yet, so whatever it reads is the old
+ *    answer) or at `headSha` while GitHub reads the PR `unknown` (it has seen the push and not finished re-computing mergeability). The list reads head and
+ *    mergeability in one GitHub read, so `conflicting` at the pushed merge commit means the base moved during the resolve and the PR conflicts again: the
+ *    note must not show, or the row would stay disabled on "resolved — waiting for GitHub" forever. `mergeable` means the note has done its job, and any
+ *    other head is somebody else's push.
  */
 export function shownOutcome(pr: PullRequestRow, outcome: PrResolveOutcome | null): PrResolveOutcome | null {
   if (outcome === null) return null;
   if (outcome.outcome === 'pushed') {
     if (pr.headSha === outcome.fromSha) return outcome;
-    if (pr.headSha === outcome.headSha && pr.mergeable !== 'mergeable') return outcome;
+    if (pr.headSha === outcome.headSha && pr.mergeable === 'unknown') return outcome;
     return null;
   }
   return pr.headSha === outcome.headSha ? outcome : null;
