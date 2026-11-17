@@ -46,21 +46,30 @@ removes one, and nothing moves one. Both `JiraSkillsGroup` and `JiraRunMenu` dra
   neighbours and sends the full order through the card's existing `write()` with the fallback `the order was not saved` — same busy guard, same
   reload-on-success, same error line under the add row (`<fallback> (HTTP <status>)` / `<fallback> — the server did not answer` when the body has no sentence).
   A refused move (409 included) leaves the drawn list until the next refetch, as a refused remove does today — accepted; the sentence says to reload.
+  - **No moves on a stale list:** `reload()` is not awaited and `busy` clears first, so after a LANDED move the arrows would act on the old list (a second
+    `↓` on `a` of `[a,b,c]` posts the already-stored order; an `↑` on `c` posts `[a,c,b]` and undoes the move). The card therefore records the `data` object
+    the landed move was made against and keeps every arrow disabled while `useJiraContext().data` is still that object; the next answer (a new object)
+    re-enables them, and so does `error` turning true (a failed reload must not lock the arrows for good).
+  - **Duplicated ids:** the swap and the first/last disabling run on the DISTINCT-id list (first occurrence), not on the drawn rows; a row that repeats an
+    id draws the same arrows, with the same enabled state, as that id's first row.
 - **Run menu:** no change; it already follows the array.
 - **Docs/comments:** this is a seventh config writer and the first that reorders rather than merging ONE entry, so the rule that says "the six writers …
   and nothing else … merge ONE entry" must name it and its contract: `.claude/rules/jira.md` (the writers paragraph), the matching section of
   `docs/subsystems/invariants.md`, the writers banner at `config.util.ts` (~line 270), `jira-write.controller.ts` and `jira.module.ts` headers,
-  `docs/subsystems/jira.md` (module table, writers section, Setup card line) and `docs/subsystems/api.md` (the guarded-POST count), and the card's header
-  comment.
+  `docs/subsystems/jira.md` (module table, writers section, Setup card line) and `docs/subsystems/api.md` (the guarded-POST count), the card's header
+  comment, and `.claude/DESIGN.md` §8.9.3's Skills paragraph (the two arrows, their place before the default slot, when they are disabled).
 
 ## Tests
 
 - Server (`test/jira/`): a valid reorder rewrites the file in the new order and keeps extra keys; missing id → 409; extra/unknown id → 409; duplicate in
   the body → 400 naming it; non-array / empty-string id → 400; an entry `readSkill` drops (empty name, id `s_x`) is not required in `ids` and stays after
   the ordered ones; two raw entries sharing one id move together; an unchanged order and `ids: []` with a missing file write nothing (no file created);
-  an unreadable file → 409 unchanged; unconfigured → the same answer the other skill routes give.
+  an unreadable file → 409 unchanged; unconfigured → the same answer the other skill routes give. `/skills/order` joins every hand-written route table in
+  `test/jira/jira-write-routes.test.ts` (no content type, another origin, unknown Host → 403, nothing written) — the `grep -l` step below will not surface
+  that file, since it names no new symbol.
 - Client: first row's ↑ and last row's ↓ are disabled; clicking ↓ on the first of three POSTs `{ ids: [b, a, c] }` and reloads; a refused write shows the
-  server's sentence and draws no local reorder.
+  server's sentence and draws no local reorder; after a landed move every arrow stays disabled until a new `data` object arrives (or `error` turns true);
+  a list `[a, b, a2(id a), c]` posts each id once (`↓` on `a` → `{ ids: [b, a, c] }`) and the repeated row's arrows match `a`'s.
 - Run `grep -l` over `test/` for each new symbol / route string (guard suites that count routes) and include the hits in the scoped run.
 
 ## Left to the builder
