@@ -43,6 +43,7 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   - `invalid session id` (400, draft route — the link routes' sentence)
   - `<KEY> has no open mention — it was answered or dismissed` (409, reply route; the draft is kept)
   - `a reply to <KEY> is already being posted` (409, reply route; plan ruling R4)
+  - `<KEY> is drafting a reply — stop it from the mention instead` (409, `jira-unlink` on a reply link; Task 2)
   - `text must be a non-empty string` / `text too long` (400, draft and reply routes)
   - `a reply takes mode none, no assign, no transition and no edited prompt` (400, dispatch; plan ruling R2)
 - Copy (from the spec and `ModalDraft.dc.html`): `Drafting a reply` · `Your reply` · `drafted by a session <age> · edit before posting` ·
@@ -84,8 +85,9 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   stays ignorant of drafts and links — it never imports the live service.
 - **R7 — `answeredAt` lives in the poller, memory only, and is applied ON READ, like dismissals.** `Map<key, ISO>`. The check's swap stays a whole swap that
   filters nothing (`poller.service.ts:995-996`); instead one private helper drops, per key, every candidate whose `created` is at or before
-  `answeredAt[key]` (and the issue when none is left), and it runs wherever the cache is read: `mentionsPayload()` (after `applyDismissals`, so the payload,
-  the status summary's count and Task 3's open-mention gate all see it), `mentionCandidate`, and `postReply`'s own open-mention check. The thread route passes
+  `answeredAt[key]` (and the issue when none is left), and it runs wherever the cache is read: `mentionsPayload()` (after `applyDismissals`, so the payload
+  and Task 3's open-mention gate see it), `mentionsSummary()` (`poller.service.ts:562`, which calls `applyDismissals` itself and never `mentionsPayload()`, so
+  the rail's and popover's `count` needs it too), `mentionCandidate`, and `postReply`'s own open-mention check. The thread route passes
   `answeredAt[key]` as `judgeComments`' `answeredAfter`. An entry older than the window is dropped at the next check. A restart forgets it — the search
   has caught up by then (the lag is seconds to a minute).
 
@@ -108,12 +110,13 @@ title `feat(jira): draft and post a reply from the mentions modal`.
 
 **Files:** none committed except a one-line result appended to this plan's "Probe result" section below.
 
-- [ ] **Step 1:** Pick a key from `GET http://127.0.0.1:4322/api/jira/mentions` (`issues[0].key`); if the stack is down, start it (`pnpm run docker:up`) or
-  ask the user for a key they are mentioned on.
+- [ ] **Step 1:** Ask the user for the key (R1: a ticket they name, never one picked from the cache). An unattended run does not ask: it holds Task 1 for
+  the user, leaves Probe result empty and goes on with Task 2.
 - [ ] **Step 2:** Send `POST https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/issue/<KEY>/comment` with JSON body `{}` and the Basic auth built from
   `BM_JIRA_EMAIL`/`BM_JIRA_TOKEN` read from the repo's `.env` **inside one `node -e` script that never prints the token or the header**. `cloudId` comes
   from `https://<BM_JIRA_SITE>/_edge/tenant_info`. Print only the status and Jira's `errorMessages`/`errors`.
-- [ ] **Step 3:** Interpret: **400** → scope present, record `400 — comment write in scope (<date>)`. **401/403** → stop the plan; tell the user the token
+- [ ] **Step 3:** Interpret: **400** → scope present, record `400 — comment write in scope (<date>)`. **401/403** → stop before shipping (Tasks 2–9 may
+  already be built; nothing is pushed or opened); tell the user the token
   needs `write:comment:jira` (granular) or `write:jira-work` (classic) and that nothing was written. Anything else → stop and ask for a scratch ticket (spec's
   original probe).
 - [ ] **Step 4:** Commit the result line: `git commit -m "docs(jira): record the comment-scope probe"`.
@@ -161,8 +164,10 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   `confirmed`, `hasConfirmed` stay `run`-only — say so in the header comment, which today lists them as run-only "for the same reason". `addLink` keeps
   refusing anything but `branch`/`manual`. `unlink` today refuses only `how === 'run'` (`live.service.ts:255`), so a reply link would be REMOVED by hand:
   widen its return to `'removed' | 'missing' | 'run' | 'reply'`, answer `'reply'` for a reply link (nothing removed, nothing suppressed), and make
-  `JiraDispatchService.unlink` map it to 409 `<KEY> is drafting a reply — stop it from the mention instead`; test both (a reply link survives
-  `jira-unlink`, the 409 sentence exact). Callers that list built-ins for a menu (`JiraRunMenu`, `JiraSkillsGroup`,
+  `JiraDispatchService.unlink` (`server/src/agents/jira-dispatch.service.ts:470-479`, whose `default:` arm would otherwise answer `{ ok: true }` for
+  `'reply'`) map it to 409 `<KEY> is drafting a reply — stop it from the mention instead`. Add that file and `test/jira/agents-jira-link.test.ts` to this
+  task's Files; the failing case (a reply link survives `jira-unlink`, the 409 sentence exact) is written in Step 1 and its suite joins the Step 2 and
+  Step 4 runs. Callers that list built-ins for a menu (`JiraRunMenu`, `JiraSkillsGroup`,
   `SettingsView`'s default-action select, `JiraLaunchSheet`'s Action select) must NOT gain a `reply` row — check each and add one assertion to an existing
   suite that the Run ▾ menu offers no `Draft a reply`.
 - [ ] **Step 4: Run** the three suites plus `pnpm run typecheck` — PASS.
@@ -277,8 +282,8 @@ title `feat(jira): draft and post a reply from the mentions modal`.
 **Files:**
 - Modify: `server/src/jira/adf.ts` (`replyDoc`)
 - Modify: `server/src/jira/jira.client.ts` (`addComment`)
-- Modify: `server/src/jira/poller.service.ts` (`postReply`, R4 `replying`, R7 `answeredAt` threaded into `runMentions`/`checkMentions` swap and `thread`)
-- Modify: `server/src/jira/mentions-check.util.ts` (accept a per-key `answeredAfter` lookup and pass it to `judgeComments`)
+- Modify: `server/src/jira/poller.service.ts` (`postReply`, R4 `replying`, R7 `answeredAt`: the on-read helper at the four read sites, and the `thread`
+  route passing `answeredAt[key]` as `judgeComments`' existing `answeredAfter` — `mentions.util.ts:79`; the check and its swap are unchanged)
 - Modify: `server/src/jira/mentions.controller.ts` (`POST mentions/reply`)
 - Modify: `.claude/rules/jira.md` (writes bullet), `CLAUDE.md` (item-files bullet)
 - Test: `test/jira/jira-adf.test.ts`, `test/jira/jira-mentions-routes.test.ts`, `test/jira/jira-mentions-poller.test.ts`, `test/jira/jira-client.test.ts`
@@ -301,8 +306,10 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   - route `POST /api/jira/mentions/reply` `{ key, text }`: guard 403; 400s for key and text (empty, whitespace, 8 001; 8 000 passes); 503 unconfigured; a key
     not open in the cache → 409 `PAY-1 has no open mention — it was answered or dismissed` and the draft kept; a 429 window → 429 with `retryAt`, no call;
     `access: unauthorized` → 401 body, no call, and NO scope suffix (that 401 is about the token, from before any post); Jira 401 on the post → through
-    `routeFailed` like assign's (the site's `access` turns `unauthorized`), the 401 body unsuffixed, draft kept; Jira 403 on the post → 403 whose sentence
-    ends `— the token needs write:comment:jira`, draft kept, the site's `access` unchanged; Jira 201 →
+    `routeFailed` like assign's (the site's `access` turns `unauthorized`), then `jiraHttpError`'s mapping (`errors.util.ts:63-66`) with the suffix: 503
+    `Jira rejected the credentials — the token needs write:comment:jira`, draft kept; Jira 403 on the post → 502
+    `Jira refused: <Jira's message> — the token needs write:comment:jira`, draft kept, the site's `access` unchanged (spec: "401/403 naming the scope");
+    Jira 201 →
     200 with `posted.id`, `posted.url` (the focused-comment link), the ticket gone from `issues`, its draft gone from the store, and the fake Jira received
     a body whose mention targets the author of the ticket's NEWEST open mention — seed two open mentions by different authors and assert the newer one wins
     (Review Focus 3); a dismissed mention is not "open" for that choice.
@@ -318,7 +325,8 @@ title `feat(jira): draft and post a reply from the mentions modal`.
   applied (sync) → R4 check-and-set (sync, no `await` between the two) → `gate()` → `unauthorizedRefusal()` → `addComment` → on 2xx: drop the key from
   `this.mentions.issues`, set `answeredAt[key] = created`, answer; on failure `routeFailed`. The controller maps `no open mention`/`posting` to the 409s
   itself, then hands every other outcome to `unwrapJira` (`unwrap.util.ts:13`) — NOT `jiraWriteOrThrow`, which takes `JiraIssueWriteOutcome` and maps any
-  unknown refusal to `transition not offered` — appending `— the token needs write:comment:jira` to the error only when the post itself answered 403; on
+  unknown refusal to `transition not offered` — appending `— the token needs write:comment:jira` to the error only when the post itself answered 401 or 403
+  (never to `unauthorizedRefusal()`'s pre-call 401); on
   success it calls `store.dropDraft(key)` (a failed drop is logged, never turns the 200 into an error — the comment is posted) and answers
   `{ ...payload(), posted }`. R7 as ruled: on read, never in the swap; prune entries older than the window at each check.
 - [ ] **Step 4: Run** the four suites + `test/jira/jira-write-routes.test.ts` + typecheck — PASS.
@@ -480,3 +488,5 @@ Mock: [`ModalDraft.dc.html`](../specs/2026-11-16-jira-mentions-mockups/canvas/Mo
 - [ ] **Step 3:** Fix what the comparison finds (each fix with its test), re-run the touched suites, commit `fix(client): mentions reply matches the mock`
   if anything changed.
 - [ ] **Step 4:** Note in the PR body what was verified live and what was not (the post itself, unless the user approved one).
+- [ ] **Step 5: Probe gate.** Before any push or PR, read this plan's Probe result. While it is empty or records a 401/403, do not open the PR: report
+  the branch as built-but-unshippable and hand Task 1 to the user (R1).
