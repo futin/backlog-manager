@@ -30,8 +30,8 @@ import { JiraPollerService } from './poller.service';
 import { jiraWriteOrThrow } from './unwrap.util';
 
 /**
- * The ten POST routes under `/api/jira` — `POST /boards/sweep` (the chip's per-board `now`, which writes nothing and asks the poller for a board save's
- * sweep), and nine write routes, seven of them config writes (Jira phase 2, spec §5 and §8; the two skill routes, `POST /skills` and
+ * The eleven POST routes under `/api/jira` — `POST /sweep` and `POST /boards/sweep` (the chip's per-board `now`), which write nothing and ask the poller for a
+ * sweep, and nine write routes, seven of them config writes (Jira phase 2, spec §5 and §8; the two skill routes, `POST /skills` and
  * `POST /skills/delete`, are phase 5's, `POST /repo-defaults` the repo/branch work's, and `POST /skills/order` the 2026-11-17 skill-order spec's),
  * `POST /boards`, `POST /boards/delete`, `POST /repos`, `POST /repo-defaults`, `POST /skills`, `POST /skills/delete` and `POST /skills/order`, the only callers of the
  * writers in `config.util.ts`, and two of them writes to JIRA itself (phase 3), `POST /issue/assign` and
@@ -49,7 +49,7 @@ import { jiraWriteOrThrow } from './unwrap.util';
  * the poller's business to be a no-op there.
  *
  * Two failures are the writers' own and are mapped here, once: `JiraConfigUnreadableError` is a 409 carrying its message (the file exists, a person has to
- * repair it, and nothing was written — #270's refusal, restated for six writers), and `JiraUnknownIdError` is a 404 `unknown board` or `unknown skill` by the kind it carries (the board sentence and
+ * repair it, and nothing was written — #270's refusal, restated for seven writers), and `JiraUnknownIdError` is a 404 `unknown board` or `unknown skill` by the kind it carries (the board sentence and
  * status are the read route's for a malformed or absent id). Anything else the writer throws is an I/O failure and stays Nest's 500.
  *
  * The two issue writes differ from the config writes in what they are gated on, and the difference is deliberate (§8): they ARE refused while `access` is

@@ -32,7 +32,7 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
   `read:jira-work`, `write:jira-work` and `read:jira-user`; a classic token works as it is. All three or none: any one missing (or blank) is
   `configured: false`, and every route but `GET /api/jira` answers 503. Compose passes each through as `'${BM_JIRA_<NAME>:-}'`, never a literal.
 - **Per machine, in `~/.backlog-manager/settings/jira.json`** (`BM_JIRA_FILE` overrides): `{ boards, repos, repoDefaults, skills }`. The server is its one
-  writer since phase 2 — the Setup page's boards and repository map, and since phase 5a its skills, through the six config write routes below — and a hand edit
+  writer since phase 2 — the Setup page's boards and repository map, and since phase 5a its skills, through the seven config write routes below — and a hand edit
   still lands, because every reader reads it fresh and every writer merges one entry into the RAW file. A skill is `{ id, name, prompt }` with an `s_` id: a
   template the Run launch sheet offers beside the two built-ins, filled in by the composer (below). `repoDefaults` (the repo/branch work) maps an absolute
   mapped path to `{ base?, namePattern? }`: the base a New branch is cut from and the pattern it is named by, per PATH because one checkout can serve two
@@ -51,7 +51,7 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 | file                 | what it holds                                                                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `env.util.ts`        | `jiraEnv()` — the three variables, read per call, trimmed, never cached; `JIRA_ENV` is their one spelling and `isJiraHostname` the site check; `repoRoots()` reads `BM_REPO_ROOTS` (`REPO_ROOTS_ENV`), `null` on a host-run API |
-| `config.util.ts`     | `readJiraConfig()` and the per-entry readers (`readBoard`, `readQuery`, `readRepos`, `readRepoDefaults`, `readSkill`); `isJiraId`, `JIRA_JQL_MAX_CHARS`; since phase 2 the write half — `parseBoardWrite`, `parseReposWrite`, `normaliseRepoPath`, `mintJiraId`, the six writers `writeBoard`, `deleteBoard`, `writeRepos`, `writeRepoDefaults` (with `parseRepoDefaultsWrite`), `writeSkill`, `deleteSkill` (with `parseSkillWrite`), and their two refusals `JiraConfigUnreadableError`, `JiraUnknownIdError` (which carries the entry kind, `board` or `skill`) |
+| `config.util.ts`     | `readJiraConfig()` and the per-entry readers (`readBoard`, `readQuery`, `readRepos`, `readRepoDefaults`, `readSkill`); `isJiraId`, `JIRA_JQL_MAX_CHARS`; since phase 2 the write half — `parseBoardWrite`, `parseReposWrite`, `normaliseRepoPath`, `mintJiraId`, the seven writers `writeBoard`, `deleteBoard`, `writeRepos`, `writeRepoDefaults` (with `parseRepoDefaultsWrite`), `writeSkill`, `deleteSkill` (with `parseSkillWrite`), `writeSkillOrder` (with `parseSkillOrder`), and their three refusals `JiraConfigUnreadableError`, `JiraUnknownIdError` (which carries the entry kind, `board` or `skill`), `JiraSkillOrderStaleError` |
 | `jira.client.ts`     | `JiraClient` — one `fetch` wrapper over the endpoints read and, since phase 3, the two it writes (`assign`, `transition`); the gateway, the one auth header, the call counter, the deadline; `jqlString` |
 | `errors.util.ts`     | `accessOf` and `jiraHttpError` — the one mapping from a Jira response to an access state and to an HTTP error (spec §8)                        |
 | `identity.ts`        | `JiraBootState` — the four boot answers, the token kind, the site-level `access`/`detail`, the 429 window and the 15 s → 5 min back-off        |
@@ -66,7 +66,7 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 | `live.service.ts`    | `JiraLiveService` — the ticket–session link store, in memory over a file (phase 5a's map, persisted since the Jira sessions work, → [the link store](#the-link-store)); not `JiraService`, the spec's name for it |
 | `links.store.ts`     | the link store's file I/O — `loadLinks`, `saveLinks`, `jiraLinksFile` (`~/.backlog-manager/settings/jira-links.json`, `BM_JIRA_LINKS_FILE`); no rule about what is kept |
 | `jira.controller.ts` | the ten read routes (six, phase 5's `GET /prompt`, the repo/branch work's `GET /refs` and `GET /worktrees`, and the sessions page's `GET /sessions`) |
-| `jira-write.controller.ts` | the ten POST routes — six config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work), the two sweeps that write nothing (`/sweep`, `/boards/sweep`) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
+| `jira-write.controller.ts` | the eleven POST routes — seven config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work, `/skills/order` in the skill-order work), the two sweeps that write nothing (`/sweep`, `/boards/sweep`) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
 | `mentions.controller.ts` | the mentions routes: `GET /mentions`, `GET /issue/:key/thread` and the six POSTs `/mentions/sweep`, `/mentions/dismiss`, `/mentions/restore`, `/mentions/draft`, `/mentions/draft/discard` and `/mentions/reply` (→ [Mentions](#mentions-jira-mentions-phase-1-spec)) |
 | `mentions-check.util.ts` | the pure judge of one ticket's comments: is an open mention the user's own, newer than their latest comment, not dismissed |
 | `mentions.util.ts` | the mentions' shared shapes and helpers (the excerpt, the ADF walk's output, the summary) |
@@ -137,7 +137,7 @@ what `GET /api/jira` says — rather than the `unreachable` its synthesised stat
 
 ### The config write routes (phase 2; skills in 5a)
 
-Six config POSTs in `jira-write.controller.ts`, the only callers of the writers — POSTs because the app has no PUT or DELETE route anywhere. Each carries
+Seven config POSTs in `jira-write.controller.ts`, the only callers of the writers — POSTs because the app has no PUT or DELETE route anywhere. Each carries
 `SameOriginPostGuard` (`application/json` and a same-origin `Origin`, 403 otherwise), and inside each the order is fixed: guard → validate (400, naming the
 field) → configured (503 `Jira is not configured`) → write (404 / 409) → re-aim the poller. Every error body is `{ error }`. They are not gated on `access`:
 a save while the credential is rejected or the site `unsupported` touches only `jira.json`, and the sweep that follows is the poller's to skip.
@@ -152,6 +152,7 @@ a save while the credential is rejected or the site `unsupported` touches only `
 | `POST /api/jira/repo-defaults`  | `{ path, base, namePattern }`           | `{ path, base, namePattern }` as stored, `null` for unset; both `null` deletes the path's entry; a base failing Table A or a pattern failing `patternProblem` is a 400 naming the field; after the 409, 400 `<path> is not mapped` unless SOME project maps it; re-aims nothing |
 | `POST /api/jira/skills`         | `{ id?, name, prompt }`                 | the skill as stored, an `s_` id minted on create; a trimmed `name` of 1–60 and `prompt` of 1–2 000; 404 `unknown skill` for an `id` the file does not hold; re-aims nothing |
 | `POST /api/jira/skills/delete`  | `{ id }`                                | `{ ok: true }`; 404 `unknown skill`, a second delete included                                      |
+| `POST /api/jira/skills/order`   | `{ ids }`                               | `{ ok: true }`; the whole list in the new order; 400 for a non-array, an empty or non-string id, or `ids holds <id> twice`; 409 `the skill list changed since this page loaded — reload and try again; nothing was written` when the set is not exactly the stored skills' ids; an order already stored writes nothing; re-aims nothing |
 
 `parseBoardWrite` holds spec §5's bounds: a trimmed `name` of 1–80; an `interval` in `SYNC_INTERVALS`; at most 20 roots, each passing `isJiraKey`,
 deduplicated; at most 10 queries, each a trimmed `label` of 1–80 and a `jql` of 1–`JIRA_JQL_MAX_CHARS`; at least one root or query. A non-string, non-null
@@ -301,10 +302,12 @@ needs a `q_` id, a label and JQL; a repos key must be a project key and each pat
 `repoDefaults` key must be an absolute normalised path, and each of its values falls back on its own — and each dropped entry or value is warned once. An
 `interval` that is missing or not one of `15s`, `1m`, `5m`, `off` reads `1m`.
 
-The six writers (three in phase 2, `writeSkill` and `deleteSkill` in 5a, `writeRepoDefaults` in the repo/branch work) follow `writeSyncInterval`'s shape: read
+The seven writers (three in phase 2, `writeSkill` and `deleteSkill` in 5a, `writeRepoDefaults` in the repo/branch work, `writeSkillOrder` in the skill-order
+work) follow `writeSyncInterval`'s shape: read
 the RAW file; ENOENT starts from `{}`; a file that cannot be read or does not parse
 throws `JiraConfigUnreadableError` and writes nothing; a parsed non-object is replaced; otherwise merge ONE entry — a board by id (keeping its position in
-`boards`), one project's path list by key, one path's defaults by path, a skill by id (keeping its position in `skills`) — and keep everything else, malformed
+`boards`), one project's path list by key, one path's defaults by path, a skill by id (keeping its position in `skills`); `writeSkillOrder` alone moves entries, every raw skill whose id the reader accepts to its place in
+`ids`, the rest after them in their old relative order — and keep everything else, malformed
 entries and unknown top-level keys included, then write
 `JSON.stringify(next, null, 2) + '\n'` to a temp file in the same directory and `rename` it over. Ids are `b_`/`q_`/`s_` plus eight lower-case hex digits,
 minted against every id the file already holds, malformed entries' included, so a minted id never collides.
@@ -664,7 +667,8 @@ section (nine dialogs). The browser still never talks to Jira or the dashboard: 
   `useAction` as the two writes, so one guard and one
   error line serve all three; a landed stop reloads the status and nudges the board.
 - **Skills and the default action.** `JiraSkillsGroup` (Jira › Setup, under Connection) lists the two locked built-ins and one row per stored skill, with an
-  add row and a `×` that asks through `ui/Confirm`; every write is one of the six config routes and reloads the shell's status. Settings › Local › Dispatch
+  add row, `↑`/`↓` on each skill row and a `×` that asks through `ui/Confirm`; every write is one of the seven config routes and reloads the shell's
+  status. Settings › Local › Dispatch
   gains `Jira default action`, drawn only while Jira is configured. It is read by `Run ▾`, not by the sheet — every way into the sheet passes the clicked
   row — which lists the resolved default first, marked `default`; `resolveJiraAction(setting, skills)` reads a deleted skill's id as `execute` in the select
   and in the menu alike, without rewriting the stored value. `Jira default permission` sits under it on the same condition and is read by the sheet, not the
