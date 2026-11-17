@@ -486,6 +486,7 @@ zone math, and `test/guards/time-zone-guard.test.ts` refuses a `Date`'s local ge
 The `Reviewer` card (`ReviewerGroup`) closes that column, with the same `this machine` pill: which model and effort review a change, `Same for all groups`
 (one `Model` and `Effort`) or `Big and small groups` (two pairs and the changed-line limit under which a group takes the small pair). It reads and writes
 `settings/review.json` through `GET`/`POST /api/settings/review` (`useReviewSetting`), saving on every change; the edit shows at once from an optimistic copy,
+saves go one POST at a time with edits made meanwhile coalesced into one queued POST (the server writes in arrival order, bug #508),
 only the newest save's answer moves the card, and a refused save puts the server's value back with the same one red line. A `fileError` answer draws a hint
 that the file was ignored and the defaults are shown. The pickers are one component, `ReviewerFields`, drawn here as `SettingsRow`s and in two launch sheets
 as `.sheet-field`s: the execute sheet when its finish is a PR (a groom's PR gets none), and the Orchestrate sheet's modes step. Each sheet seeds them once

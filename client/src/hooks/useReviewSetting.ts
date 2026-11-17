@@ -26,10 +26,15 @@ export interface ReviewSettingState {
  * launch sheets, which seed their picker from it and must not have the seed move under a pick the person already made.
  *
  * `save` follows `TimeZoneContext`'s contract — `saveError` cleared before the await, the screen redrawn from the POST's answer (the config the server
- * wrote), and a refusal showing the server's value, which is what the error row says — with two additions the Settings card needs because it has six fields
- * where the time zone has one, so a second edit can land while the first save is still in flight (task-11 review, Minor 1):
- *  - The edit is shown at once, from an optimistic copy (`pending`) set BEFORE the await. The card builds every next config from the `config` it was handed,
- *    so without this a second edit is built from the last server answer and its POST silently drops the first edit's change.
+ * wrote), and a refusal showing the server's value, which is what the error row says — with three additions the Settings card needs because it has six fields
+ * where the time zone has one, so a second edit can be made while the first save is still in flight (task-11 review, Minor 1; bug #508):
+ *  - The edit is shown at once, from an optimistic copy (`pending`) set BEFORE anything waits. The card builds every next config from the `config` it was
+ *    handed, so without this a second edit is built from the last server answer and its POST silently drops the first edit's change.
+ *  - Saves are serialized: at most one POST is in flight, and an edit made meanwhile is QUEUED, not sent. The server writes `review.json` last-write-wins by
+ *    ARRIVAL order, and two POSTs in flight at once can arrive in either order, so the file could end on the older edit while the card showed the newer one
+ *    (bug #508). Queued edits coalesce — the newest replaces any already queued, which loses nothing because it was built on the optimistic copy and so
+ *    carries every earlier edit — and the queue is sent the moment the in-flight POST settles, whether it was answered, refused or failed. N edits during one
+ *    POST cost exactly one more POST, carrying the newest config. A queued edit is still sent after the card unmounts: the person made it and saw it on screen.
  *  - Only the newest save may move the screen: each save takes a sequence number, as `useTrackers` does (#231), and an answer that is not the newest's
  *    changes nothing on screen. A superseded success is still kept as the server's value (`confirmed`, newest-wins by sequence number too), so a refused
  *    newest save falls back to what the server really holds rather than to the first read. A superseded refusal says nothing: the newer save carried its
@@ -49,11 +54,14 @@ export function useReviewSetting(enabled = true): ReviewSettingState {
   const latest = useRef(0);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const save = useCallback(
-    async (config: ReviewConfig) => {
-      const seq = ++latest.current;
-      setPending(config);
-      setSaveError(null);
+  // The one POST in flight and the edit queued behind it (bug #508). Refs, not state: queuing an edit must not render, and the next `save` reads the flag
+  // synchronously. `queued` is ONE slot — a newer edit overwrites it — and its `done` settles every `save` call that was coalesced into it.
+  const inFlight = useRef(false);
+  const queued = useRef<QueuedSave | null>(null);
+
+  // One POST and its answer. Never throws: a refusal or a network failure is handled here, so the drain loop below always goes on to the queued save.
+  const post = useCallback(
+    async (config: ReviewConfig, seq: number) => {
       try {
         const fresh = await updateReviewSetting(config);
         if (!mountedRef.current) return;
@@ -71,6 +79,33 @@ export function useReviewSetting(enabled = true): ReviewSettingState {
     [mountedRef]
   );
 
+  const save = useCallback(
+    (config: ReviewConfig): Promise<void> => {
+      const seq = ++latest.current;
+      setPending(config);
+      setSaveError(null);
+      if (inFlight.current) {
+        if (queued.current === null) queued.current = queuedSave(config, seq);
+        else Object.assign(queued.current, { config, seq });
+        return queued.current.done;
+      }
+      const first = queuedSave(config, seq);
+      inFlight.current = true;
+      void (async () => {
+        let next: QueuedSave | null = first;
+        while (next !== null) {
+          await post(next.config, next.seq);
+          next.resolve();
+          next = queued.current;
+          queued.current = null;
+        }
+        inFlight.current = false;
+      })();
+      return first.done;
+    },
+    [post]
+  );
+
   const read = fetched.value;
   const config: ReviewConfig | null = pending ?? confirmed ?? (read === null ? null : stripFileError(read));
   const status = fetched.status === 'ok' ? 'ok' : fetched.status === 'failed' ? 'failed' : 'loading';
@@ -82,6 +117,20 @@ export function useReviewSetting(enabled = true): ReviewSettingState {
     save,
     saveError
   };
+}
+
+/** A save waiting for the POST in flight to settle; `done` resolves once the POST carrying its config has settled. */
+interface QueuedSave {
+  config: ReviewConfig;
+  seq: number;
+  done: Promise<void>;
+  resolve: () => void;
+}
+
+function queuedSave(config: ReviewConfig, seq: number): QueuedSave {
+  let resolve!: () => void;
+  const done = new Promise<void>((r) => (resolve = r));
+  return { config, seq, done, resolve };
 }
 
 function stripFileError(setting: ReviewConfig & { fileError?: true }): ReviewConfig {
