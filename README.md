@@ -105,8 +105,8 @@ pause, resume or stop the run afterwards.
   already on disk. A project connected to a tracker has no
   item files at all: there the skills' writes reach GitHub through this app's API, which holds the credential — see [Architecture](#architecture).
 - **Its writes outside your disk are a short, closed list.** A tracker project's issues, through eleven guarded `/api/items/*` routes; an open pull request's
-  merge, auto-merge and update-branch, from GitHub › PRs; a Jira issue's assignee and status. Nothing else is written to GitHub or Jira, GitLab is only ever
-  read, and the server never writes git.
+  merge, auto-merge and update-branch, from GitHub › PRs; a Jira issue's assignee and status; and a reply comment on a ticket that mentions you, posted only by
+  your click on Post reply, never by a session. Nothing else is written to GitHub or Jira, GitLab is only ever read, and the server never writes git.
 
 ### Architecture
 

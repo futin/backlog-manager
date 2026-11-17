@@ -224,11 +224,12 @@ keys are set and the site is not `unsupported` (mentions are owed with no board 
 `jira.json` reader, the ADF converter and the ticket block. Twelve read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
 fresh (`?format=text` for the ticket block), the roots search, the project list, the JQL check, (phase 5a) `/prompt`, the composed Run prompt as `text/plain`,
 and (Jira mentions) `/mentions`, the cached list, and `/issue/:key/thread`, a fresh read of the comments behind one — and
-thirteen guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
+sixteen guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
 since the repo/branch work `/repo-defaults`), `/boards/sweep` (the chip's per-board `now`, which writes nothing and asks the poller for a save's sweep),
-`/sweep` (the popover head's site-wide `Sync now`, which writes nothing either and answers the status payload), three for mentions (`/mentions/sweep`, which
-checks now behind the same 409/429 refusals as the board sweep, and `/mentions/dismiss` and `/mentions/restore`, which write `settings/jira-mentions.json`, the dismissals file)
-and two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each followed by a re-read of the issue that is spliced into every board cache
+`/sweep` (the popover head's site-wide `Sync now`, which writes nothing either and answers the status payload), six for mentions (`/mentions/sweep`, which
+checks now behind the same 409/429 refusals as the board sweep, `/mentions/dismiss` and `/mentions/restore`, which write `settings/jira-mentions.json`, the dismissals file,
+`/mentions/draft` and `/mentions/draft/discard`, which keep or drop one reply draft per ticket in the same file, and `/mentions/reply`, which posts it)
+and three writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`; since mentions phase 2, the reply comment through `/mentions/reply`), each followed by a re-read of the issue that is spliced into every board cache
 holding it. Since 5a the module also owns `JiraLiveService`, the ticket–session link store (memory over `~/.backlog-manager/settings/jira-links.json`) behind the status
 payload's `live`, an issue's `session` and `GET /sessions`; the two POSTs that
 fill and end its links live in `agents/`, below, because they call the dashboard. The credentials are read per call and reach no payload. → [jira.md](jira.md),
@@ -331,7 +332,7 @@ the machine is `home`.
   optional `unqueueFailed` (ids as `run.json` spells them) and never fails the stop — the spawned `--abort` repeats the sweep.
 - `POST /api/agents/dispatch-jira` — a Jira ticket's Run (`jira-agents.controller.ts` → `JiraDispatchService.dispatch`): reserve the key in the link store,
   optionally
-  assign and transition in Jira, then spawn a session in the mapped repository. The action is a pick from the body, never derived; the prompt is composed server-side
+  assign and transition in Jira, then spawn a session in the mapped repository. The action is a pick from the body, never derived (`execute`, `context`, `review`, `reply` or `{ skill: <id> }`); the prompt is composed server-side
   by `composeJiraPrompt` — unless the body carries the launch sheet's edited `prompt` (a non-empty string of at most 4 000, else a 400 before any write), which
   is spawned as written. A failure after a Jira write says the write stands. Since the repo/branch work the body also carries the branch choice (`mode`,
   `branch`, `base`, `openMr`, `review`, `target`, above), checked before anything is reserved or written. An optional `surface` (`dashboard` | `desktop`) is item

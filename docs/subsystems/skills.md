@@ -79,7 +79,8 @@ that tree and branch as a groom already taken. `skills/backlog-groom/references/
   exiled into a child that is reaped before the parent's call returns. Its exit codes are private (`0`/`3`/`5`) and `apiCall` maps them onto the tool's own
   `8` (the stack is down) and `9` (a refusal this command cannot absorb).
 - `skills/jira/tools/jira.mjs` — the `jira` skill's CLI (Jira phase 4): `show`, `transitions`, `transition`, `assign` and `status`, each one to three requests to
-  `/api/jira` on `127.0.0.1`, plus `link` and `unlink`, one request each to `/api/agents/jira-link`/`jira-unlink` carrying `CLAUDE_CODE_SESSION_ID` (Jira
+  `/api/jira` on `127.0.0.1`, plus `thread` (the ticket's recent comments, a fresh read) and `draft` (the reply text on stdin, handed to `/api/jira/mentions/draft`
+  with `CLAUDE_CODE_SESSION_ID`; it has no post verb, a person's click posts), plus `link` and `unlink`, one request each to `/api/agents/jira-link`/`jira-unlink` carrying `CLAUDE_CODE_SESSION_ID` (Jira
   sessions). API-only except `worktree`, which runs git in the mapped repo (below); the API commands have no files mode and write no file,
   and none of it carries a Jira credential, the server being Jira's one caller.
   Exit `0` success, `1` usage (a key that is not one included — nothing is sent), `2` a 4xx, `3` a 5xx, `5` the stack is down.

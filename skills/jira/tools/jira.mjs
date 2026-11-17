@@ -12,6 +12,9 @@
 // know, since it is not the caller's parent process. Their routes live under `/api/agents` because the link store is that module's, with the dashboard call
 // it makes to confirm the session exists; nothing in them reaches Jira's token or API beyond the one read that proves the key is real.
 //
+// `draft` hands the reply session's text to the board's `/api/jira/mentions/draft` and nothing more: this tool never posts, and a person's click on the
+// board is what sends a reply to Jira. `thread` is a read of the ticket's recent comments.
+//
 // What it is not: a Jira client. It never calls Atlassian, reads no `BM_JIRA_*` variable and sends no `authorization` header (spec §10). The server is
 // Jira's ONE caller on this machine, which keeps three things single: one rate-limit budget, one 429 window, one identity. And a token that never reaches a
 // session's environment is a token a ticket's text cannot ask that session to print. The suite's source guard holds the code to this.

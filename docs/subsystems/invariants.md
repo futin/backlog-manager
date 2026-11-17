@@ -1630,8 +1630,8 @@ of `out-of-scope/`. Archive's Out of scope column is the only surface that rende
 
 **The Jira clause (phase 5).** `POST /api/agents/dispatch-jira` cannot derive its action: a Jira issue has no file whose state says what comes next, so there is
 nothing for `deriveAction` to read and nothing for a second implementation to drift from. The action is a PICK, and the rule's other half still holds — the
-server never takes a string on trust. It is one of a closed set: the three built-ins, `execute`, `context` and `review`, and the skills `jira.json` holds right
-now. The controller refuses anything outside the shape (`parseJiraAction`: `execute`, `context`, `review` or an object whose only key is `skill`, holding an
+server never takes a string on trust. It is one of a closed set: the four built-ins, `execute`, `context`, `review` and `reply`, and the skills `jira.json` holds right
+now. The controller refuses anything outside the shape (`parseJiraAction`: `execute`, `context`, `review`, `reply` or an object whose only key is `skill`, holding an
 `s_` plus eight hex digits id; anything else is a 400); the
 service then proves a skill id against the file it has just read (`resolveJiraActionOrThrow`, 400 `unknown skill <id>`), before Jira or the dashboard is asked.
 A bare `review` is a 400 there too (`review needs mr and half`): a review is built only from the `mr` and `half` the controller validates and the GitLab
@@ -3911,6 +3911,13 @@ the list at two. A third (comment, edit a field, create, unassign, assign someon
 the pattern": a credential that can write to a person's tracker is the sharpest thing this server holds, and the size of what it may do with it should be a
 fact a reader can check by counting routes (`POST /api/jira/issue/assign` and `/issue/transition`, in `jira-write.controller.ts`).
 
+**The third write is the mention reply, and only a person's click sends it (Jira mentions phase 2).** That rule did its job: the comment is a new write, so it came
+with its own section ([a reply-draft session reads only, and only a person's click posts](#a-reply-draft-session-reads-only-and-only-a-persons-click-posts)) and its
+own route, `POST /api/jira/mentions/reply` in `mentions.controller.ts`, rather than riding an assign-shaped route. The count a reader checks is now three, and the
+comment is the first write that adds text under the person's name, which is why it differs from the other two in kind: it is not idempotent (two posts are two
+comments, so the poller holds it single-flight per key), and nothing a session can reach sends it — the session's prompt says never post, `jira.mjs` has no post
+verb, and the route takes `{ key, text }` from the person's edited draft, never a session id.
+
 **`{ accountId: null }` is never sent.** Jira reads a null assignee as UNASSIGN, so an assign sent while the identity was unknown would not fail — it would
 succeed at the opposite of what was asked. The poller therefore refuses an assign with no call when `me` is null (`503 no identity`, which heals on the next
 successful `myself`), and the body's accountId is always the poller's own `me`: a request cannot name anyone else, and one that tries is ignored. While the
@@ -4298,6 +4305,12 @@ The repo may be mapped to ANY project, unlike every other dispatch's, because a 
 proved against `jira.json` and asked of the dashboard gate — a repo mapped nowhere is a 400 — so the wider rule admits no path the person did not configure.
 A reply also needs an open mention on the key: with none there is nothing to answer, and a dispatch that does not check would let any key through the
 narrow door. The draft reserves in its own map, so it never blocks, or is blocked by, a Run on the same ticket.
+
+**The link kind is `reply`, and a draft is proved by it.** `JiraLinkHow` gains `'reply'` beside `run`, `branch` and `manual`, because the draft route must know that
+the caller is the live reply session of THAT key: `POST /mentions/draft` accepts text only for a live `reply` link whose key and session id both match, so a
+Run's session, a manual link or a hand-made request cannot plant a draft under a ticket. Unlinking one is refused (the person stops it from the mention, where the
+draft's own controls live), and a reply link never shows through the Run readers (`get`, `snapshot`, `confirmed`, `hasConfirmed`), so it neither takes nor frees a Run's reservation. A draft is
+text a stranger's thread may have shaped, which is why it is only ever shown for editing: it reaches Jira after a person has read it, through `/mentions/reply`.
 
 ## The CodeRabbit button belongs to the MR, never to Run
 
