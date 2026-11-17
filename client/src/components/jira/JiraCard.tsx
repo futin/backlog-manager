@@ -12,7 +12,7 @@ import { Marker } from '../ui/Marker';
 import { SpreadBar } from '../ui/SpreadBar';
 import { JiraRunMenu } from './JiraRunMenu';
 import { MrChip } from './MrChip';
-import { OpenChip } from './JiraSessionCard';
+import { OpenChip } from './SessionOpen';
 
 /**
  * JiraCard — one issue on the Jira board (Jira phase 2, spec §6.2; DESIGN.md §8.9.1, which applies §8.3's card to a Jira issue).
