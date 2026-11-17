@@ -3652,7 +3652,7 @@ The Jira board cache is the second (`JiraPollerService`, one list per board, `po
 honest the same way; everything below is about the tracker's.
 
 **The pull-request cache is the third, and the only one with no clock of its own** (`PullRequestsService`, Plan B of the source-sections change). It is per
-repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep, because the only reader is the shell's one `PullRequestsProvider` — the rail counts open PRs on every page, so the read is no longer a page's —
+repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep (the only other read is a single PR's, spliced like a write's re-read: `readOne`, which the resolve route calls), because the only list reader is the shell's one `PullRequestsProvider` — the rail counts open PRs on every page, so the read is no longer a page's —
 and GitHub › PRs and GitHub › Settings' Access card read its answer. Its 60 s fetch is the cadence and the only thing that arms the cache, and it is mounted
 only while a GitHub project is registered, so a machine with none spends no GraphQL budget on a list nobody is drawing, which is what "the poller is armed only
 while something is connected" asks of it. It is kept honest the same way as the other two: `polledAt` rides on

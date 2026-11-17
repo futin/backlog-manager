@@ -29,7 +29,7 @@ import {
  * pull requests except the client shell's one reader (`PullRequestsProvider`, armed only while a GitHub project is registered; spec §4.9a — the rail counts
  * open PRs on every page), so a sweep would spend GraphQL budget on a list nobody is drawing and break "the poller is armed only while something
  * is connected" in spirit — a tab closed an hour ago would still be polling. So this service has NO `setTimeout`, no interval and no sweep: a read happens
- * only inside `list()` (a `GET /api/prs`), inside a write's re-read (task 4), or inside `refreshNow` (a `POST /api/github/sweep` — a person's press, or
+ * only inside `list()` (a `GET /api/prs`), inside a write's re-read (task 4), inside `readOne` (the resolve route's one-PR read, spliced like a re-read), or inside `refreshNow` (a `POST /api/github/sweep` — a person's press, or
  * the PRs page's sync after its own merge). The shell reader's 60 s poll is the only cadence, and it
  * stops when no GitHub project is registered or the tab closes.
  *
@@ -366,6 +366,52 @@ export class PullRequestsService {
       if (asleep !== null) return { ok: false, status: 429, error: asleep };
       return fn(token, now);
     });
+  }
+
+  /**
+   * The resolve route's repo → project step: the FIRST registered project on `repo` (registry order, as `registeredRepos` resolves it) — `404` with the
+   * write ladder's sentence when none is, then `409` with `syncOffBlock`'s sentence, its one home, when sync is off for it. Throws `registryProjectsOr503`'s
+   * 503 for a registry that cannot be read, exactly as every write does. Nothing here is outbound.
+   */
+  projectFor(repo: string): { ok: true; path: string } | { ok: false; status: 404 | 409; error: string } {
+    const path = this.registeredRepos().get(repo);
+    if (path === undefined) return { ok: false, status: 404, error: `${repo} is not the repo of a registered GitHub project` };
+    const off = this.poller.syncOffBlock(path);
+    if (off !== null) return { ok: false, status: 409, error: off };
+    return { ok: true, path };
+  }
+
+  /**
+   * One PR read fresh from GitHub, for the resolve route: `503` for no token, `429` while the `graphql` pool is asleep (no request), then `readPull`.
+   * A GitHub 404 (`readPull`'s shape for GraphQL's null `pullRequest`) is `{ ok: true, pr: null }` — the route words it as not open — and removes any cached row;
+   * a limit sleeps the pool through `noteSleep` and is `429` with the verdict's detail; anything else is `502`. A PR read in any other state is answered
+   * as is, and `splice`d like a write's re-read (its row while open, its removal otherwise). Not serialised behind writes: it writes nothing.
+   */
+  async readOne(
+    repo: string,
+    number: number,
+    at?: number
+  ): Promise<{ ok: true; pr: PullOne | null } | { ok: false; status: 503 | 429 | 502; error: string }> {
+    const token = githubToken();
+    if (token === null) return { ok: false, status: 503, error: NO_TOKEN };
+    const now = at ?? Date.now();
+    const asleep = this.asleepDetail(repo, now, 'graphql');
+    if (asleep !== null) return { ok: false, status: 429, error: asleep };
+    const res = await readPull(this.client, repo, number, { token });
+    if (res.status === 404) {
+      this.splice(repo, null, number);
+      return { ok: true, pr: null };
+    }
+    if (!succeeded(res) || res.data === null) {
+      const verdict = failureVerdict(res, now);
+      if (verdict !== null) {
+        this.noteSleep(repo, verdict, 'graphql');
+        if (verdict.sleepUntil !== null) return { ok: false, status: 429, error: verdict.detail ?? `HTTP ${res.status}` };
+      }
+      return { ok: false, status: 502, error: `could not read ${repo}#${number} from GitHub` };
+    }
+    this.splice(repo, openRow(res.data), number);
+    return { ok: true, pr: res.data };
   }
 
   /** Make `repo`'s entry due no later than `until`, whatever its TTL says — never later than a due time already set. An entry never read is due anyway. */
