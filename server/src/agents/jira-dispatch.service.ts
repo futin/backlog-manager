@@ -79,8 +79,9 @@ interface ReviewLaunch {
  *     nothing, transitioned nothing and spawned nothing, and leaves the live map exactly as it found it. Refs the server cannot read (`available: false`) make
  *     no refusal; `jira.mjs worktree` re-checks both on the host. The resolved workspace is what the composition carries, so the spawned prompt names the
  *     same worktree the preview did.
- *  4. `live.reserve` — the one-session-per-ticket gate, synchronous, so of two Starts that both cleared step 3 exactly one passes it. A refusal here reserved
- *     nothing and so releases nothing: releasing would drop the OTHER request's starting entry.
+ *  4. `live.reserve` — the per-ticket Run gate, synchronous, so of two Starts that both cleared step 3 exactly one passes it. A Run passes beside live Runs
+ *     on the key that are all quiet (`yieldToQuiet`, spec 2026-11-17-jira-quiet-run-gate-design.md); a review keeps the strict one-session check. A refusal
+ *     here reserved nothing and so releases nothing: releasing would drop the OTHER request's starting entry.
  *  4b. a REVIEW only: the live-session branch gate (spec §5.2), synchronous too, then the branch hold. A refusal releases the key this request just took and
  *     touches no branch hold — the one it lost to is another dispatch's.
  *  5. after the reservation, still before any write: `no identity` (503) when an assign is asked and the poller has no `me`; a fresh detail read (§8's mapping);
@@ -172,7 +173,8 @@ export class JiraDispatchService {
 
     // From here to the branch hold's insert there is no `await`: the key reservation, the branch gate's reads (the hold map, the live links, the kept rows,
     // `mainCheckoutOf`'s synchronous file read) and the insert run in one turn of the event loop, so of two reviews racing for one branch exactly one holds it.
-    if (!this.live.reserve(req.key, repo, kind)) throw kind === 'reply' ? this.replyBusy(req.key) : this.busy(req.key);
+    const strict = req.action === 'review';
+    if (!this.live.reserve(req.key, repo, kind, !strict)) throw kind === 'reply' ? this.replyBusy(req.key) : this.busy(req.key, strict);
     let hold: BranchHold | null = null;
     if (review !== null) {
       const branch = review.mr.sourceBranch;
@@ -495,7 +497,7 @@ export class JiraDispatchService {
 
   /**
    * `POST /api/agents/jira-unlink` — `/jira unlink <KEY>` (spec C9): removes a `branch` or `manual` link and remembers the pair so detection never re-adds it.
-   * No dashboard call, so it works with dispatch off. A `run` link refuses (409): dropping it would free the one-run gate under a live Run session, and
+   * No dashboard call, so it works with dispatch off. A `run` link refuses (409): dropping it would free the Run gate under a live Run session, and
    * only Stop ends one; a `reply` link refuses too (409), its Stop being the mention's. `missing` is a pair the store does not hold, 404.
    */
   unlink(key: string, sessionId: string): { ok: true } {
@@ -522,13 +524,24 @@ export class JiraDispatchService {
   }
 
   /**
-   * The 409 for a key `reserve` refused, worded from what the map holds. `reserve` says only "no"; the entry says why — a reservation still waiting on the
-   * dashboard, a session that started, or (no entry at all) a map whose every slot is a starting entry, which `reserve` will not evict.
+   * The 409 for a key `reserve` refused, worded from what the map holds. `reserve` says only "no"; the store says why, first match wins:
+   *
+   * - no entry at all: a map whose every slot is a starting entry, which `reserve` will not evict — `too many Jira sessions are starting …`;
+   * - a reservation still waiting on the dashboard — `<KEY> is starting`;
+   * - a review (`strict`), which does not take the quiet gate: any live Run refuses it — `<KEY> already has a session`, today's words;
+   * - a Run held by a live Run that does not yield — `<KEY> has a Run <phrase>`, the phrase `runBlock`'s (the shared `runBlockPhrase` of the newest such
+   *   link), so the 409 and the disabled chip's title name the same state in the same words;
+   * - else the cap sentence again, defensively: with a confirmed link live the cap evicts instead of refusing, so a Run refused with every live Run yielding
+   *   is not reachable today, and if it ever is, "try again" is the honest answer.
    */
-  private busy(key: string): HttpException {
+  private busy(key: string, strict: boolean): HttpException {
+    const tooMany = new HttpException({ error: 'too many Jira sessions are starting — try again in a moment' }, 409);
     const entry = this.live.get(key);
-    if (entry === null) return new HttpException({ error: 'too many Jira sessions are starting — try again in a moment' }, 409);
-    return new HttpException({ error: entry.sessionId === null ? `${key} is starting` : `${key} already has a session` }, 409);
+    if (entry === null) return tooMany;
+    if (entry.sessionId === null) return new HttpException({ error: `${key} is starting` }, 409);
+    if (strict) return new HttpException({ error: `${key} already has a session` }, 409);
+    const phrase = this.live.runBlock(key);
+    return phrase === null ? tooMany : new HttpException({ error: `${key} has a Run ${phrase}` }, 409);
   }
 
   /**

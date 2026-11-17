@@ -123,9 +123,14 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `stateSince`. It is memory only — it dials neither Jira nor the
   dashboard, so an unconfigured server answers it too, with no 503 — and `?open=1` (the Jira section's own read, never the rail badge's) tells the reconciler a
   page is open; a read that OPENS the page (`pageOpen` was false) fires `JiraLiveService.onPageOpened`, and the reconciler drops a pending 60 s timer for a 15 s one.
-  The one-run gate is `run`-only. The dispatch RESERVES the key (`starting`, memory only, never written, dropped by a restart) before its first Jira write, and
-  `reserve` is a synchronous check-and-set refusing while a live `run` link or a reservation holds the key — so of two Starts exactly one passes, the other 409s
-  `<KEY> is starting` / `already has a session`; a live `branch` or `manual` link is the user's own and blocks nothing.
+  The Run gate is `run`-only and quiet-only. The dispatch RESERVES the key (`starting`, memory only, never written, dropped by a restart) before its first Jira
+  write, and `reserve` is a synchronous check-and-set refusing while a reservation holds the key — so of two Starts exactly one passes, the other 409s `<KEY> is
+  starting` — and while a live `run` link does, unless the dispatch passes `yieldToQuiet` (every action but `review`) and EVERY live `run` link on the key
+  yields: `runYields` (`shared/jira-sessions.ts`) — `quietSince` set, a row for it in the reconciler's latest good read, and `sessionState` Quiet; no row (a
+  restart, a row past a full list) or an unreachable dashboard blocks. A key may so hold several live Runs; `get`, `snapshot` and `runBlock` read the newest by
+  `startedAt`. A Run's refusal is `<KEY> has a Run <phrase>`, the phrase `runBlockPhrase`'s for the newest live Run that does not yield (`not seen by the
+  dashboard`, `waiting on you`, `still working`, `not quiet yet`); a review keeps the strict check and `<KEY> already has a session`. A live `branch` or
+  `manual` link is the user's own and blocks nothing.
   A `reply` reserves in its own map beside `starting`, refused only by another live or starting `reply` on the key, so a Run and a reply draft on one key
   coexist; `get`/`snapshot`/`confirmed` stay `run`-only, and `unlink` refuses a `reply` link (409). Every failure after the reservation runs
   through one `catch` that `release`s it; `release` touches only a `starting` entry, so it can never drop a session that did start, and a refused `reserve`

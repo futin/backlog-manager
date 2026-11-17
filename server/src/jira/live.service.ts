@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
+import { runBlockPhrase, runYields } from '../../../shared/jira-sessions';
+import type { RunBlockPhrase } from '../../../shared/jira-sessions';
 import { jiraSessionName } from '../../../shared/types';
 import type { DashboardRow, JiraEndReason, JiraLink, JiraLiveSession, JiraMentionReplySession, JiraSaveError } from '../../../shared/types';
 import { loadLinks, saveLinks } from './links.store';
@@ -48,9 +50,10 @@ const same = (a: JiraLinkPair, key: string, sessionId: string): boolean => a.key
  * `hasConfirmed` stay `run`-only for the reason below, a reply never showing through them; `replySession` is the reply's own reader. The cap, the 8-hour expiry
  * and eviction count both maps. `unlink` refuses a `reply` link too: it is ended from the mention, never removed by hand.
  *
- * The one-run gate is unchanged and `run`-only. A Run is `starting` from `reserve` until `confirm` hands it the dashboard's session id; `reserve` is a
- * synchronous check-and-set, so two concurrent dispatches for the same key cannot both pass it, and it ignores `branch` and `manual` links, which the user
- * started outside this board. `get`, `snapshot`, `confirmed` and `hasConfirmed` read the `run` entries alone, for the same reason: their readers (the gate, Stop's
+ * The Run gate is `run`-only, and quiet-only for a Run (spec 2026-11-17-jira-quiet-run-gate-design.md): a live Run on the key refuses the next one until
+ * every live Run there yields (`runYields`), while a review keeps the strict one-run check. A Run is `starting` from `reserve` until `confirm` hands it the
+ * dashboard's session id; `reserve` is a synchronous check-and-set, so two concurrent dispatches for the same key cannot both pass it, and it ignores `branch`
+ * and `manual` links, which the user started outside this board. `get`, `snapshot`, `confirmed` and `hasConfirmed` read the `run` entries alone, for the same reason: their readers (the gate, Stop's
  * starting check, the run chip) are about the Run on the key, and a detected branch link showing through them would block a Run or offer a Stop that is not
  * the board's to give. `release` undoes a reserve whose spawn failed and refuses to touch a confirmed entry — a late failure path must never drop a session
  * that did start.
@@ -60,7 +63,7 @@ const same = (a: JiraLinkPair, key: string, sessionId: string): boolean => a.key
  *
  * An entry that ENDS stays as history (`end`, with a reason), and stays ended: a late `confirm` for a pair that has ended does not revive it. Only `reattach`
  * does, from the dashboard's own row (spec C5), and it re-opens the pair's own entry rather than adding one. `unlink` removes a `branch`/`manual` link and
- * remembers the pair so detection never re-adds it (C9); it refuses a `run` link, because dropping one would free the one-run gate under a live session.
+ * remembers the pair so detection never re-adds it (C9); it refuses a `run` link, because dropping one would free the Run gate under a live session.
  * Retention is C6's and runs on every save: per ticket the live entries and the 20 newest ended ones, and a ticket idle for 90 days with nothing live goes.
  *
  * Time is `Date.now()`, never `new Date()`, like the poller (`poller.service.ts`), so a suite that sets the system time moves expiry and eviction with it.
@@ -97,13 +100,26 @@ export class JiraLiveService {
   }
 
   /**
-   * Claims `key` for a Run (the default) or a reply draft in `repo`. A Run is refused while a live `run` entry or a `run` reservation holds the key; a reply
-   * while a live `reply` link or a reply reservation does — the kinds never look at each other. Either is refused when the store is full of starting entries.
+   * Claims `key` for a Run (the default) or a reply draft in `repo`. A Run is refused while a `run` reservation holds the key — two Starts never race, whatever
+   * `yieldToQuiet` says — and while a live `run` link does, unless `yieldToQuiet` is set and EVERY live `run` link on the key yields (`runYields`: the
+   * reconciler marked it quiet AND its row in the latest good read reads Quiet — the quiet-only Run gate, spec 2026-11-17-jira-quiet-run-gate-design.md). The
+   * dispatch sets it for every Run action except a review, which keeps the strict key check because its own branch gate looks only at the MR's branch and
+   * the client's `reviewGate` still blocks on any live Run. A key can therefore hold several live `run` links, which is why `get`, `snapshot` and `runBlock`
+   * read the newest. A reply is refused while a live `reply` link or a reply reservation does — the kinds never look at each other. Either is refused when
+   * the store is full of starting entries.
+   *
+   * Still one synchronous check-and-set: the rows and reachability it reads are memory the reconciler keeps here (`setRows` / `markUnreachable`), so no
+   * `await` sits between the check and the `set`, and of two Starts that both see a quiet key exactly one reserves it.
    */
-  reserve(key: string, repo: string, kind: 'run' | 'reply' = 'run'): boolean {
+  reserve(key: string, repo: string, kind: 'run' | 'reply' = 'run', yieldToQuiet = false): boolean {
     this.expire();
     const map = this.reservations(kind);
-    if (map.has(key) || this.liveOf(key, kind).length > 0) return false;
+    if (map.has(key)) return false;
+    const holders = this.liveOf(key, kind);
+    if (holders.length > 0) {
+      const yields = kind === 'run' && yieldToQuiet && holders.every((l) => runYields(l, this.rowFor(l.sessionId as string) ?? null, this.up));
+      if (!yields) return false;
+    }
     if (this.liveCount() >= JIRA_LIVE_CAP && !this.evictOldestConfirmed()) return false;
     map.set(key, { repo, startedAt: Date.now() });
     return true;
@@ -124,7 +140,7 @@ export class JiraLiveService {
       // A reply never upgrades or rewrites another kind's entry, and a pair that ended keeps its end.
       if (kind === 'reply') return;
       // The board's own Run met the same session already linked by detection or by hand: it becomes the Run (one entry, the Run's meta merged in, its
-      // reservation consumed above), so the one-run gate sees it. Anything else — an ended pair — keeps its end.
+      // reservation consumed above), so the Run gate sees it. Anything else — an ended pair — keeps its end.
       if (existing.endedAt === null && (existing.how === 'branch' || existing.how === 'manual')) {
         existing.how = 'run';
         existing.action = meta.action;
@@ -183,12 +199,32 @@ export class JiraLiveService {
     return run === undefined ? null : { sessionId: run.sessionId, repo: run.repo, startedAt: run.startedAt };
   }
 
-  /** The `live` field of `GET /api/jira`: every live `run` entry, `starting` included, `branch`/`manual` links not (their readers arrive with the List). */
+  /**
+   * Why the key's live Runs still refuse the next Run: the `runBlockPhrase` of the NEWEST (by `startedAt`) live `run` link on the key that does not yield,
+   * or `null` when every one yields (or there is none). The dispatch's 409 ends with it (`<KEY> has a Run <phrase>`); the newest, because it is the one the
+   * band and the chip already show, so the refusal names the session the person is looking at. Ignores a reservation — `busy` checks that first.
+   */
+  runBlock(key: string): RunBlockPhrase | null {
+    this.expire();
+    for (const l of this.liveRun(key).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))) {
+      const phrase = runBlockPhrase(l, this.rowFor(l.sessionId as string) ?? null, this.up);
+      if (phrase !== null) return phrase;
+    }
+    return null;
+  }
+
+  /**
+   * The `live` field of `GET /api/jira`: one entry per key with a live `run` entry, `starting` included, `branch`/`manual` links not (their readers arrive
+   * with the List). With several live Runs on a key (the quiet-only gate lets one start beside a quiet one) it reports the NEWEST by `startedAt`, not
+   * whichever the store happens to hold last — a store loaded from disk keeps no promise about order. A `starting` reservation still wins over both.
+   */
   snapshot(): Record<string, JiraLiveSession> {
     this.expire();
     const out: Record<string, JiraLiveSession> = {};
     for (const l of this.entries) {
-      if (l.how === 'run' && l.endedAt === null) {
+      if (l.how !== 'run' || l.endedAt !== null) continue;
+      const held = out[l.key];
+      if (held === undefined || Date.parse(l.startedAt) > Date.parse(held.startedAt)) {
         out[l.key] = { name: l.name, sessionId: l.sessionId, startedAt: l.startedAt, repo: l.repo, starting: false };
       }
     }
@@ -256,7 +292,7 @@ export class JiraLiveService {
   /**
    * Adds a detected (`branch`) or hand-made (`manual`) link, live. `suppressed` when a person unlinked this pair, `exists` when the pair is already in the
    * store, live or ended — a pair that ended comes back through `reattach`, never through here. A `run` link is made only by `reserve` + `confirm`, which is
-   * the one-run gate; adding one here would walk round it.
+   * the Run gate; adding one here would walk round it.
    */
   addLink(link: Omit<JiraLink, 'endedAt' | 'endReason' | 'quietSince' | 'reattachedAt'>): 'added' | 'exists' | 'suppressed' {
     if (link.how === 'run' || link.sessionId === null) throw new Error('addLink takes a branch or manual link with a session id');
