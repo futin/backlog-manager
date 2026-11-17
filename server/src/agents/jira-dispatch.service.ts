@@ -332,6 +332,10 @@ export class JiraDispatchService {
         model: req.model,
         effort: req.effort,
         remoteControl: req.remoteControl,
+        // A reply draft is one turn's work, handed over through `jira.mjs draft`: launched one-shot it ends with that turn instead of holding in the
+        // dashboard's reply window, where it would read `question` and light the rail's Needs-you badge for a session nobody has to answer. Derived from
+        // the action, like everything else a reply's narrow shape fixes — the request has no field for it.
+        oneShot: req.action === 'reply',
         surface: req.surface
       });
     } catch (err) {

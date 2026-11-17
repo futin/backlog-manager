@@ -264,6 +264,12 @@ interface LaunchOpts {
   model?: unknown;
   effort?: unknown;
   remoteControl: boolean;
+  /**
+   * The dashboard's Close when done (`SpawnRequest.oneShot`): the child ends with its last turn instead of holding in the Stop hook's reply window. Put on
+   * the body only when true, so every launch that does not ask is byte-identical to one from before the field existed — and an older dashboard that does not
+   * know the key never sees it. Only the Jira reply draft sets it (`JiraDispatchService`), derived from the action, never from the request.
+   */
+  oneShot?: boolean;
   machine?: Machine;
   remotePath?: string;
 }
@@ -731,6 +737,7 @@ export class AgentsService {
       // Strictly `=== true`, matching the dashboard's own parse rule for this
       // field: anything else means off.
       remoteControl: opts.remoteControl === true,
+      ...(opts.oneShot === true ? { oneShot: true } : {}),
       ...(opts.surface === undefined ? {} : { surface: opts.surface })
     });
   }

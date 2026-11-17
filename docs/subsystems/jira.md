@@ -273,7 +273,8 @@ truncated, retryAt }` for the chip's popover row and the rail count. The client 
 `JiraMentionModal` (the ninth dialog) and `useJiraMentions`, whose age prints as `checked 1 min ago` through `checkedAge` in `lib/jira-mentions.ts`.
 
 **The reply (phase 2).** The modal's `Draft a reply` starts a read-only session on the built-in `reply` action (`POST /api/agents/dispatch-jira` with `action: 'reply'`,
-mode `none`, no assign, no transition, no edited prompt, a dashboard launch; the repo may be mapped to any project, and the key needs an open mention, else 400
+mode `none`, no assign, no transition, no edited prompt, a dashboard launch sent one-shot — `oneShot: true`, the dashboard's Close when done, derived from the
+action, so the session ends with its drafting turn instead of holding in the reply window, where it would read `question` and light Needs-you; the repo may be mapped to any project, and the key needs an open mention, else 400
 `<KEY> has no open mention`). Its link is `how: 'reply'`, reserved in its own map so it never blocks, or is blocked by, a Run on the key; a second live one is a 409
 `a reply is already being drafted for <KEY>`, and `jira-unlink` refuses it (409 `<KEY> is drafting a reply — stop it from the mention instead`). The session reads
 with `jira.mjs show` and `jira.mjs thread` and hands its text over with `jira.mjs draft`, which POSTs `/mentions/draft` `{ key, sessionId, text }`: the route proves a
