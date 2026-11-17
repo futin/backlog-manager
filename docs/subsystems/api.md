@@ -226,8 +226,8 @@ keys are set and the site is not `unsupported` (mentions are owed with no board 
 `jira.json` reader, the ADF converter and the ticket block. Twelve read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
 fresh (`?format=text` for the ticket block), the roots search, the project list, the JQL check, (phase 5a) `/prompt`, the composed Run prompt as `text/plain`,
 and (Jira mentions) `/mentions`, the cached list, and `/issue/:key/thread`, a fresh read of the comments behind one — and
-sixteen guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
-since the repo/branch work `/repo-defaults`), `/boards/sweep` (the chip's per-board `now`, which writes nothing and asks the poller for a save's sweep),
+seventeen guarded POSTs: seven config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`,
+`/skills/delete`; since the repo/branch work `/repo-defaults`; since the skill-order work `/skills/order`), `/boards/sweep` (the chip's per-board `now`, which writes nothing and asks the poller for a save's sweep),
 `/sweep` (the popover head's site-wide `Sync now`, which writes nothing either and answers the status payload), six for mentions (`/mentions/sweep`, which
 checks now behind the same 409/429 refusals as the board sweep, `/mentions/dismiss` and `/mentions/restore`, which write `settings/jira-mentions.json`, the dismissals file,
 `/mentions/draft` and `/mentions/draft/discard`, which keep or drop one reply draft per ticket in the same file, and `/mentions/reply`, which posts it)

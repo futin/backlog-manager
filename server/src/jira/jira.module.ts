@@ -10,8 +10,8 @@ import { JiraPollerService } from './poller.service';
 
 /**
  * The Jira seam's own module (Jira phase 1, spec §12): the poller, the client it calls through, the nine read routes (six in phase 1, `GET /prompt` in
- * phase 5, `GET /refs` and `GET /worktrees` in the repo/branch work) and — since phase 2 — the eight write routes of `JiraWriteController`: six config writes
- * (three in phase 2, the skills pair in phase 5a, `POST /repo-defaults` in the repo/branch work) that touch `jira.json` and the poller and never Jira
+ * phase 5, `GET /refs` and `GET /worktrees` in the repo/branch work) and — since phase 2 — the nine write routes of `JiraWriteController`: seven config writes
+ * (three in phase 2, the skills pair in phase 5a, `POST /repo-defaults` in the repo/branch work, `POST /skills/order` in the skill-order work) that touch `jira.json` and the poller and never Jira
  * itself, and the two issue writes of phase 3 that do call Jira. It mirrors `TrackerModule`
  * (`server/src/tracker/tracker.module.ts`), and for the same reasons.
  *

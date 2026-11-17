@@ -11,14 +11,18 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   `readBoard`, `readQuery`, `readRepos`, `readRepoDefaults` and `readSkill` each drop only the entry that fails (a board whose id is not a `b_` id or whose name
   is empty, a root
   that fails `isJiraKey`, a query, a repos key or path, a skill), with one `console.warn` naming the file and the entry; a missing or unknown `interval` reads
-  `DEFAULT_JIRA_INTERVAL`. The six writers are `writeBoard`, `deleteBoard`, `writeRepos`, `writeRepoDefaults`, `writeSkill` and `deleteSkill` (same file),
-  called by `POST /api/jira/boards`, `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete` (`jira-write.controller.ts`) and by nothing
-  else. Each is `writeSyncInterval`'s contract: read the RAW file (ENOENT starts from `{}`; a parsed non-object is replaced), merge ONE entry — a board by id,
+  `DEFAULT_JIRA_INTERVAL`. The seven writers are `writeBoard`, `deleteBoard`, `writeRepos`, `writeRepoDefaults`, `writeSkill`, `deleteSkill` and
+  `writeSkillOrder` (same file), called by `POST /api/jira/boards`, `/boards/delete`, `/repos`, `/repo-defaults`, `/skills`, `/skills/delete` and
+  `/skills/order` (`jira-write.controller.ts`) and by nothing else. Each is `writeSyncInterval`'s contract: read the RAW file (ENOENT starts from `{}`; a parsed non-object is replaced), merge ONE entry — a board by id,
   one project's list by key, one path's defaults by path, a skill by id (`s_` ids, a name of
   at most 60 characters, a prompt of at most 2 000) — keeping every other entry, malformed ones and unknown top-level keys included, then
   write through `writeJsonAtomic`. A file that exists and cannot be read or parsed throws `JiraConfigUnreadableError`, which the
   route answers as a 409 carrying its message (`… nothing was written`) with the file byte-identical; an update or delete naming an id the file does not hold
-  throws `JiraUnknownIdError`, which carries the entry kind and is a 404 `unknown board` or `unknown skill`. A handler runs guard (`SameOriginPostGuard`) → validate (400) → configured (503) → write → re-aim, and
+  throws `JiraUnknownIdError`, which carries the entry kind and is a 404 `unknown board` or `unknown skill`. `writeSkillOrder` is the one writer that
+  moves entries rather than merging one: `{ ids }` must be exactly the distinct ids `readSkill` accepts (400 for a non-array, an empty or non-string id, or
+  an id twice; otherwise `JiraSkillOrderStaleError`, a 409 `the skill list changed since this page loaded — reload and try again; nothing was written`),
+  every raw entry carrying each id moves to its place in that order, every other raw entry keeps its relative order after them, and an order already
+  stored writes nothing and creates no file. A handler runs guard (`SameOriginPostGuard`) → validate (400) → configured (503) → write → re-aim, and
   config writes stay open under `access: unauthorized`, because they touch only `jira.json`. A saved board then awaits `boardSaved` (sweeps that board,
   bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer) — and so does `POST /api/jira/boards/sweep` `{ id }`, the chip's
   per-board `now`, which writes nothing: guard → 400 → 503 → 409 for an unreadable file → 404 `unknown board` → `boardSaved`, never a second sweep path; a deleted one calls `boardDeleted` and `arm()`; repos and skills re-aim

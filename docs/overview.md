@@ -55,8 +55,8 @@ Seven artefacts hold everything, and the single-writer column is the load-bearin
 
 The `settings/` row is the one exception to the direction of travel: everything else under `~/.backlog-manager` flows tool → server, and the control file — one
 per project, holding a pause request or a stop request (bug-39) — flows server → tool. The retro home travels nowhere at all — one tool writes it and the same tool reads it back on the next sweep. The run file's own single-writer
-guarantee is untouched by it. `settings/` also holds `jira.json`, which the server reads and writes through six guarded config routes (`POST /api/jira/boards`, `/boards/delete`,
-`/repos`, `/skills`, `/skills/delete` and `/repo-defaults`), and a hand edit still lands ([subsystems/jira.md](subsystems/jira.md)), and `dashboards.json`, the
+guarantee is untouched by it. `settings/` also holds `jira.json`, which the server reads and writes through seven guarded config routes (`POST /api/jira/boards`, `/boards/delete`,
+`/repos`, `/skills`, `/skills/delete`, `/skills/order` and `/repo-defaults`), and a hand edit still lands ([subsystems/jira.md](subsystems/jira.md)), and `dashboards.json`, the
 list of other machines a launch can go to, which the server alone reads and writes through four guarded routes under `/api/dashboards` — no skill reads it
 ([workflows/remote-machine.md](workflows/remote-machine.md)). And it holds `tick.json`, the tick breaker's halt threshold, the tick's default plan-review and open-PR caps (a job's
 `--max-plans` / `--max-prs` flag still wins) and per-project resets, which travels
@@ -101,9 +101,9 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   Atlassian's gateway, a poller that sweeps the boards in `~/.backlog-manager/settings/jira.json` into in-memory caches (the second cache whose age is
   rendered), a mentions cache of the open comments that @-mention you (the fifth), and twelve read routes under `/api/jira` (`/prompt` composes a Run
   session's prompt; `/refs` and `/worktrees` read a mapped repo's git; `/sessions` lists the linked sessions; `/mentions` is the cached list and
-  `/issue/:key/thread` a fresh read of one ticket's comments), plus sixteen guarded POSTs — six config writes to `jira.json` (`/boards`,
+  `/issue/:key/thread` a fresh read of one ticket's comments), plus seventeen guarded POSTs — seven config writes to `jira.json` (`/boards`,
   `/boards/delete`, `/repos`, since phase 5a
-  `/skills`, `/skills/delete`, and `/repo-defaults`), the two sweeps `/boards/sweep` and `/sweep`, six for mentions (`/mentions/sweep`, `/mentions/dismiss`, `/mentions/restore`, `/mentions/draft` and `/mentions/draft/discard`, which write `~/.backlog-manager/settings/jira-mentions.json`, and `/mentions/reply`) and, since phase 3, two writes to Jira itself
+  `/skills`, `/skills/delete`, `/repo-defaults`, and since the skill-order work `/skills/order`), the two sweeps `/boards/sweep` and `/sweep`, six for mentions (`/mentions/sweep`, `/mentions/dismiss`, `/mentions/restore`, `/mentions/draft` and `/mentions/draft/discard`, which write `~/.backlog-manager/settings/jira-mentions.json`, and `/mentions/reply`) and, since phase 3, two writes to Jira itself
   (`/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }`), plus the reply comment `/mentions/reply` posts on a person's click, the only writes this server makes to Jira. A link store of Jira sessions (several
   per ticket, kept in
   `~/.backlog-manager/settings/jira-links.json`) sits here too, driven from
@@ -183,8 +183,8 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   the read-only `trackers` route and `tracker-sync.json`'s reader/writer, and the PRs page's on-demand per-repo PR cache behind `GET /api/prs` and its three
   guarded writes, `POST /api/prs/merge`, `/auto-merge` and `/update-branch`), `jira/` (the Jira Cloud client, the board poller and its caches, the mentions
   cache, the twelve read routes under `/api/jira` — `GET /prompt`, `/refs`, `/worktrees`, `/sessions`, `/mentions` and `/issue/:key/thread` among them —
-  `jira.json`'s six guarded write routes, `POST /api/jira/boards`,
-  `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, the mentions POSTs `POST
+  `jira.json`'s seven guarded write routes, `POST /api/jira/boards`,
+  `/boards/delete`, `/repos`, `/repo-defaults`, `/skills`, `/skills/delete` and `/skills/order`, in `jira-write.controller.ts`, the mentions POSTs `POST
   /api/jira/mentions/sweep` (which only checks now and writes nothing),
   `/mentions/dismiss`, `/mentions/restore`, `/mentions/draft` and `/mentions/draft/discard` (which write `settings/jira-mentions.json`), beside the writes to Jira itself,
   `POST /api/jira/issue/assign`, `/issue/transition` and `/mentions/reply` (the reply comment, on a person's click), and the persisted link store `JiraLiveService` (every session linked to a ticket key, live and ended,

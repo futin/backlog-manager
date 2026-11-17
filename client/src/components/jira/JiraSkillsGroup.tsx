@@ -6,7 +6,7 @@ import { useMountedRef } from '../../hooks/useMountedRef';
 import { useSettings } from '../../hooks/useSettings';
 import { jiraSettingOf, resolveJiraAction, skillCommand } from '../../lib/jira';
 import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
-import type { JiraSkill } from '../../../../shared/types';
+import type { JiraSkill, JiraStatusPayload } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Confirm } from '../ui/Confirm';
 import { GlyphTile } from '../ui/GlyphTile';
@@ -28,7 +28,8 @@ const BUILT_INS: { id: 'execute' | 'context'; label: string; sub: string; glyph:
 
 /**
  * Jira › Setup › Skills (Jira phase 5, spec §6.4; DESIGN.md §8.9.3, and §8.6 for the card language) — the named prompts a Jira card's `Run ▾` can start a
- * session with, beside the two the board always has. It is `jira.json`'s `skills` list, written by the server alone (`POST /api/jira/skills`, `/skills/delete`).
+ * session with, beside the two the board always has. It is `jira.json`'s `skills` list, written by the server alone (`POST /api/jira/skills`, `/skills/delete`,
+ * `/skills/order`).
  *
  * - **The Run menu's rows** (restyle spec §4.4): a `GlyphTile` (play and document for the two built-ins, sparkle for a skill), the label over a command
  *   sub-line, and on the right `default` on the row `resolveJiraAction(settings.jiraDefaultAction, skills)` names, `Make default` on every other. Under
@@ -39,6 +40,13 @@ const BUILT_INS: { id: 'execute' | 'context'; label: string; sub: string; glyph:
  * - **A skill's row** keeps its `×`, which asks through `ui/Confirm` inline in its place — a skill is a name other people's `Run ▾` menus and a stored default
  *   may already point at, and the confirmation says what is lost rather than "are you sure". Only one row asks at a time. The sub-line is the template's
  *   first word when it is a slash command (`skillCommand`, as the menu draws it); the whole template is the row's title, for a long one.
+ * - **↑ and ↓** (2026-11-17 skill-order spec) sit on every skill row before the default slot, never on a built-in — those stay pinned above. A click
+ *   swaps the skill with its neighbour and POSTs the WHOLE order to `/api/jira/skills/order`; the server refuses (409) a set that is not exactly what it stores,
+ *   so a stale tab cannot drop or invent a skill. The order is built from the DISTINCT ids, first occurrence winning, so a hand-duplicated id is sent once
+ *   and its repeated row draws the same arrows as its first. `↑` is disabled on the first skill, `↓` on the last, both while a write is in flight, while
+ *   that row's remove `Confirm` is open, and after a landed move until `GET /api/jira` answers anew: `reload()` is not awaited and `busy` clears first, so
+ *   without that wait a second click would act on the list drawn BEFORE the move — posting the stored order again or undoing it. The wait is on the `data`
+ *   object the move was made against; a new object ends it, and so does `error`, so a failed reload cannot lock the arrows for good.
  * - **The add row**: a name field, a template textarea and `Add`, which stays disabled until both hold something after trim. The template is sent trimmed
  *   and otherwise as typed — placeholders are the SERVER's to expand, so this card holds no second parser to drift from it.
  * - **The hint** names the six placeholders and says what the list does NOT do: a skill has to exist in the repo or the Claude install, and this list only
@@ -52,7 +60,7 @@ const BUILT_INS: { id: 'execute' | 'context'; label: string; sub: string; glyph:
  * no row. A landed write reloads even if this page has gone (`reload` is the shell's, which outlives it), for the reason `JiraBoardSheet`'s save does.
  */
 export function JiraSkillsGroup() {
-  const { data, reload } = useJiraContext();
+  const { data, error: unreadable, reload } = useJiraContext();
   const mounted = useMountedRef();
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -63,11 +71,16 @@ export function JiraSkillsGroup() {
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The `data` object the last LANDED move was made against. While the context still holds that very object the reload has not answered, and the list
+  // drawn is the pre-move one — see the header's ↑/↓ bullet.
+  const [movedAgainst, setMovedAgainst] = useState<JiraStatusPayload | null>(null);
 
   const skills: JiraSkill[] = data?.skills ?? [];
   const { settings, update } = useSettings();
   const preferred = jiraSettingOf(resolveJiraAction(settings.jiraDefaultAction, skills));
   const ready = name.trim() !== '' && prompt.trim() !== '';
+  const order = [...new Set(skills.map((k) => k.id))];
+  const stale = movedAgainst !== null && data === movedAgainst && !unreadable;
 
   /** POST one write. Resolves `true` when the server stored it; the sentence for a refusal goes under the add row. */
   async function write(url: string, body: unknown, fallback: string): Promise<boolean> {
@@ -103,16 +116,57 @@ export function JiraSkillsGroup() {
     await write('/api/jira/skills/delete', { id: skill.id }, 'the skill was not removed');
   }
 
+  /** Swap skill `id` with its neighbour `by` places away in the distinct-id order and store the whole order. */
+  async function move(id: string, by: -1 | 1): Promise<void> {
+    const at = order.indexOf(id);
+    const to = at + by;
+    if (at < 0 || to < 0 || to >= order.length) return;
+    const ids = [...order];
+    [ids[at], ids[to]] = [ids[to], ids[at]];
+    const against = data;
+    if ((await write('/api/jira/skills/order', { ids }, 'the order was not saved')) && mounted.current) setMovedAgainst(against);
+  }
+
+  /** The ↑/↓ pair for one skill row; a repeated id gets its first row's pair, since both act on the same place in `order`. */
+  function arrows(skill: JiraSkill): ReactNode {
+    const at = order.indexOf(skill.id);
+    const locked = busy || stale || asking === skill.id;
+    return (
+      <span className="jira-setup-move">
+        <Chip variant="flat" size={28} aria-label={`Move ${skill.name} up`} disabled={locked || at <= 0} onClick={() => void move(skill.id, -1)}>
+          ↑
+        </Chip>
+        <Chip
+          variant="flat"
+          size={28}
+          aria-label={`Move ${skill.name} down`}
+          disabled={locked || at >= order.length - 1}
+          onClick={() => void move(skill.id, 1)}
+        >
+          ↓
+        </Chip>
+      </span>
+    );
+  }
+
   /** One row in the Run menu's shape. `setting` is the string `jiraDefaultAction` stores for it: a built-in's id or the skill's own. */
-  function row(id: string, label: string, sub: string, glyph: GlyphName, setting: string, title?: string, trailing?: ReactNode, code = false) {
+  function row(
+    key: string,
+    label: string,
+    sub: string,
+    glyph: GlyphName,
+    setting: string,
+    { title, leading, trailing, code = false }: { title?: string; leading?: ReactNode; trailing?: ReactNode; code?: boolean } = {}
+  ) {
     const isDefault = setting === preferred;
     return (
-      <div key={id} className="set-row jira-setup-skill" title={title}>
+      <div key={key} className="set-row jira-setup-skill" title={title}>
         <GlyphTile glyph={glyph} tone={isDefault ? 'green' : 'neutral'} />
         <span className="jira-run-text">
           <span className="jira-run-label">{label}</span>
           {sub !== '' && <span className={code ? 'jira-run-sub jira-setup-code' : 'jira-run-sub'}>{sub}</span>}
         </span>
+        {leading}
         {isDefault ? (
           <span className="jira-setup-default">default</span>
         ) : (
@@ -130,14 +184,10 @@ export function JiraSkillsGroup() {
       <div className="jira-run-head">Built in</div>
       {BUILT_INS.map((r) => row(r.id, r.label, r.sub, r.glyph, r.id))}
       {skills.length > 0 && <div className="jira-run-head">Skills on this machine · {skills.length}</div>}
-      {skills.map((skill) =>
-        row(
-          skill.id,
-          skill.name,
-          skillCommand(skill.prompt) ?? '',
-          'sparkle',
-          skill.id,
-          skill.prompt,
+      {skills.map((skill, i) => {
+        // A hand-duplicated id would give two rows one key; the repeat is keyed by its index, the first keeps the id.
+        const key = skills.findIndex((k) => k.id === skill.id) === i ? skill.id : `${skill.id}#${i}`;
+        const trailing =
           asking === skill.id ? (
             <Confirm
               label={`Remove ${skill.name}`}
@@ -153,10 +203,9 @@ export function JiraSkillsGroup() {
             <button type="button" className="jira-setup-x" aria-label={`Remove ${skill.name}`} disabled={busy} onClick={() => setAsking(skill.id)}>
               ×
             </button>
-          ),
-          true
-        )
-      )}
+          );
+        return row(key, skill.name, skillCommand(skill.prompt) ?? '', 'sparkle', skill.id, { title: skill.prompt, leading: arrows(skill), trailing, code: true });
+      })}
       <div className="set-row set-row-stacked jira-skill-add">
         <input
           className="set-text jira-skill-add-name"
