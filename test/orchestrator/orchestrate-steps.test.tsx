@@ -119,6 +119,8 @@ function makeDraft(
     start: jest.fn(),
     review: null,
     setReview: jest.fn(),
+    reviewLimitInvalid: false,
+    setReviewLimitInvalid: jest.fn(),
     ...rest
   };
 }

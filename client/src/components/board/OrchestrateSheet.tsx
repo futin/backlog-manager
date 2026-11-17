@@ -116,7 +116,7 @@ export function OrchestrateSheet({
   // Every piece of the run's state but `step` — the picks, the three reads, the selection, the order and `start` — is the hook's (#306), and the step views
   // below are presentational over what it returns.
   const draft = useOrchestrateDraft({ project, source, items, spawnMaxPermission, refresh, onClose });
-  const { busy, emptySelection, runOn, start } = draft;
+  const { busy, emptySelection, runOn, start, reviewLimitInvalid } = draft;
   /**
    * Which of the three steps is on screen (design §7). Held here rather than
    * derived from anything, because it is the one piece of this sheet's state
@@ -191,7 +191,7 @@ export function OrchestrateSheet({
             </Chip>
           )}
           {step === 3 && (
-            <Chip size={28} variant="ink" onClick={start} disabled={busy || emptySelection || runOn.blocked}>
+            <Chip size={28} variant="ink" onClick={start} disabled={busy || emptySelection || runOn.blocked || reviewLimitInvalid}>
               {busy ? 'starting…' : runOn.remote ? `Start on ${runOn.label}` : 'start'}
             </Chip>
           )}

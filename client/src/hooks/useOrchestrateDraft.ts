@@ -76,6 +76,12 @@ export interface OrchestrateDraft {
   /** The Reviewer pick, seeded once from the saved setting; `null` until that read lands (forever if it fails), and the step draws no section while it is. */
   review: ReviewConfig | null;
   setReview: (config: ReviewConfig) => void;
+  /**
+   * #509: whether the Reviewer's limit field holds a draft that does not parse. Step 3's Start waits on it, so the run never gets the last valid pick while
+   * the field on screen is red; the field's unmount (stepping back, `Same for all groups`) reports it clear.
+   */
+  reviewLimitInvalid: boolean;
+  setReviewLimitInvalid: (invalid: boolean) => void;
 }
 
 export interface OrchestrateDraftInput {
@@ -98,6 +104,7 @@ export function useOrchestrateDraft({ project, source, items, spawnMaxPermission
   // Reviewer coverage task 11. Every run reviews each item whatever its merge mode, so the sheet always reads the setting; the start body carries `review`
   // only when the pick differs from it (`buildStartRequest`).
   const { seed: reviewSeed, pick: review, setPick: setReview } = useReviewPick(true);
+  const [reviewLimitInvalid, setReviewLimitInvalid] = useState(false);
   const allowedModes = modesUpTo(spawnMaxPermission);
   // Same rule LaunchSheet's own defaultMode gets from the server
   // (`clampMode('auto', status.spawnMaxPermission)`, agents.service.ts's
@@ -361,6 +368,8 @@ export function useOrchestrateDraft({ project, source, items, spawnMaxPermission
   };
 
   const start = (): void => {
+    // The Start chip is disabled on it too (`OrchestrateSheet`); this is the defence for a path that reaches `start` without the chip.
+    if (reviewLimitInvalid) return;
     run(
       () =>
         startOrchestrate(
@@ -478,6 +487,8 @@ export function useOrchestrateDraft({ project, source, items, spawnMaxPermission
     error,
     start,
     review,
-    setReview
+    setReview,
+    reviewLimitInvalid,
+    setReviewLimitInvalid
   };
 }

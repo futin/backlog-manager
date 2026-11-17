@@ -491,7 +491,9 @@ only the newest save's answer moves the card, and a refused save puts the server
 that the file was ignored and the defaults are shown. The pickers are one component, `ReviewerFields`, drawn here as `SettingsRow`s and in two launch sheets
 as `.sheet-field`s: the execute sheet when its finish is a PR (a groom's PR gets none), and the Orchestrate sheet's modes step. Each sheet seeds them once
 from the saved setting (`useReviewPick`) and sends a `review` override only when the pick differs from that seed (`reviewOverride`, `lib/agents.ts`) — never
-`review: null`, which the server refuses. The Runs detail sheet's facts show who reviewed a run as one line, `Reviewer: …` (`reviewerLabel`, `shared/agent.ts`),
+`review: null`, which the server refuses. The limit field keeps its own draft and commits only a value that parses, but reports whether the draft parses
+(`onLimitValidChange`), so both sheets' Launch / Start stay disabled while it is drawn red rather than sending the last valid pick (#509); its unmount reports
+it valid, so leaving PR, picking `Same for all groups` or stepping back from the modes step unlocks the sheet. The Runs detail sheet's facts show who reviewed a run as one line, `Reviewer: …` (`reviewerLabel`, `shared/agent.ts`),
 from the config the run recorded at `init`; a run recorded before the setting existed, or a value that fails `parseReviewConfig`, reads `Reviewer: default`.
 
 The watchdog card is one of six places Settings writes to the server — GitHub › Settings' sync picker, since #17, the `Backlog tick` card's threshold and two

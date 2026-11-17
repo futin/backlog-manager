@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { REVIEW_EFFORT_OPTIONS, REVIEW_MODE_OPTIONS, REVIEW_MODEL_OPTIONS, parseSmallMaxLines } from '../../lib/agents';
 import { REVIEW_SMALL_MAX_LINES_MAX, REVIEW_SMALL_MAX_LINES_MIN } from '../../../../shared/agent';
@@ -23,15 +23,22 @@ type PairName = 'same' | 'big' | 'small';
  *
  * The limit is the one field with a draft of its own (`LimitField`): a number typed half-way — `1` on the way to `150` — must not be sent, and an out-of-range
  * one must say so rather than snap back. So it commits on blur or Enter, only a value `parseSmallMaxLines` accepts, and draws `aria-invalid` otherwise.
+ *
+ * The draft stays local, but whether it parses is reported upward through `onLimitValidChange` (#509): the two launch sheets pass it so Launch / Start wait
+ * on a red field instead of sending the last valid pick, which the person is no longer looking at — the screen and the request would disagree. Settings ›
+ * Shared's card passes nothing: it saves on commit and has no launch to block.
  */
 export function ReviewerFields({
   value,
   onChange,
-  layout = 'rows'
+  layout = 'rows',
+  onLimitValidChange
 }: {
   value: ReviewConfig;
   onChange: (next: ReviewConfig) => void;
   layout?: 'rows' | 'sheet';
+  /** Told whether the limit field's draft parses — `false` while it is red, `true` once it parses again or the field unmounts. */
+  onLimitValidChange?: (valid: boolean) => void;
 }) {
   const setPair = (name: PairName, pair: ReviewPair) => onChange({ ...value, [name]: pair });
   const modelSelect = (name: PairName, label: string) => (
@@ -50,7 +57,9 @@ export function ReviewerFields({
       onChange={(e) => setPair(name, { ...value[name], effort: e === '' ? null : e })}
     />
   );
-  const limit = <LimitField value={value.smallMaxLines} onCommit={(n) => onChange({ ...value, smallMaxLines: n })} />;
+  const limit = (
+    <LimitField value={value.smallMaxLines} onCommit={(n) => onChange({ ...value, smallMaxLines: n })} onValidChange={onLimitValidChange} />
+  );
   const modes = (
     <Segmented<ReviewConfig['mode']> label="Models" pill value={value.mode} options={REVIEW_MODE_OPTIONS} onChange={(mode) => onChange({ ...value, mode })} />
   );
@@ -107,8 +116,23 @@ export function ReviewerFields({
  * The small-group limit as a 36 px text field (`.set-text`, page CSS for the §8.6 family's text member) holding the string as typed. Not `ui/NumberField`: that
  * one commits whatever it is given on blur and re-seeds by key, with no state in which a value is shown but refused. The draft follows `value` when the
  * committed number changes from outside (a save's answer, a seed), adjusted during render so no frame shows the stale text.
+ *
+ * `onValidChange` hears the draft's validity from an effect keyed on the boolean — never during render, which would set a parent's state mid-render — and the
+ * cleanup reports `true`. The cleanup is load-bearing: the field unmounts when Models goes to `Same for all groups`, when the launch sheet's Finish leaves PR
+ * and when the Orchestrate sheet steps back from step 3, and an unmounted field's discarded draft is not invalid — a sheet that kept the flag would stay locked.
+ * The effect is keyed on validity alone, not on the callback: both sheets pass an inline arrow around a state setter, a new identity every render, so keying on
+ * it would re-report on every keystroke. That is safe only because the arrow does nothing but call a stable setter — a caller whose callback closes over
+ * changing state would have it read stale here.
  */
-function LimitField({ value, onCommit }: { value: number; onCommit: (n: number) => void }) {
+function LimitField({
+  value,
+  onCommit,
+  onValidChange
+}: {
+  value: number;
+  onCommit: (n: number) => void;
+  onValidChange?: (valid: boolean) => void;
+}) {
   const [draft, setDraft] = useState(String(value));
   const [shown, setShown] = useState(value);
   if (shown !== value) {
@@ -116,6 +140,13 @@ function LimitField({ value, onCommit }: { value: number; onCommit: (n: number) 
     setDraft(String(value));
   }
   const parsed = parseSmallMaxLines(draft);
+  const valid = parsed !== null;
+  useEffect(() => {
+    if (onValidChange === undefined) return;
+    onValidChange(valid);
+    return () => onValidChange(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on validity alone; see the doc comment
+  }, [valid]);
   const commit = () => {
     if (parsed !== null && parsed !== value) onCommit(parsed);
   };
