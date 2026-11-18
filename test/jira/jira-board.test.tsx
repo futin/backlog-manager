@@ -424,10 +424,11 @@ describe('a newer sweep in the status (the chip’s `now`)', () => {
 });
 
 describe('the band', () => {
-  it('reads bandSub’s text for the board under the title', async () => {
+  // ALPHA's list has one parent behind it: PAY-131's off-board PAY-99 (the other three sit in `No parent`, which is not one).
+  it('reads bandSub’s text for the board under the title, `1 parent` in the singular', async () => {
     await renderAlpha();
-    const sub = bandSub(ALPHA, 'acme.atlassian.net', Date.now(), { issues: 4, cards: 4 });
-    expect(sub.text).toBe('acme.atlassian.net · 4 issues from 1 root and 1 query · polled 10m ago');
+    const sub = bandSub(ALPHA, 'acme.atlassian.net', Date.now(), { issues: 4, parents: 1 });
+    expect(sub.text).toBe('acme.atlassian.net · 4 issues from 1 root and 1 query · 1 parent · polled 10m ago');
     expect(document.querySelector('.ui-band-sub')?.textContent).toBe(sub.text);
     expect(document.querySelector('.jira-band-sub')).not.toHaveClass('failing');
   });
@@ -505,12 +506,13 @@ describe('the band', () => {
     expect(sub).toHaveClass('failing');
     expect(sub.textContent).toContain("Field 'foo' does not exist");
   });
-  it('the band counts the loaded list, not the status poll, and adds the cards part', async () => {
+  // GROUP's parents: PAY-120 and the nested PAY-160 (on-board headers) and PAY-999 (off-board) — `No parent` is not one.
+  it('the band counts the loaded list, not the status poll, and adds the parents part', async () => {
     await renderGroup();
-    expect(document.querySelector('.jira-band-sub')?.textContent).toBe('acme.atlassian.net · 7 issues from 1 root and 1 query · 3 cards · polled 10m ago');
+    expect(document.querySelector('.jira-band-sub')?.textContent).toBe('acme.atlassian.net · 7 issues from 1 root and 1 query · 3 parents · polled 10m ago');
   });
 
-  it('the band reads the status count, with no cards part, while the list has not loaded', async () => {
+  it('the band reads the status count, with no parents part, while the list has not loaded', async () => {
     const answered = global.fetch;
     global.fetch = jest.fn((input: RequestInfo | URL) =>
       /\/issues$/.test(String(input)) ? new Promise<Response>(() => {}) : answered(input)
@@ -519,12 +521,51 @@ describe('the band', () => {
     await screen.findByText('loading…');
     await waitFor(() => expect(document.querySelector('.jira-band-sub')?.textContent).toBe(bandSub(ALPHA, 'acme.atlassian.net', Date.now(), null).text));
     expect(document.querySelector('.jira-band-sub')?.textContent).toContain(' · 4 issues ');
-    expect(document.querySelector('.jira-band-sub')?.textContent).not.toContain('card');
+    expect(document.querySelector('.jira-band-sub')?.textContent).not.toContain('parent');
   });
 
-  it('on a list where nothing folds the band has no cards part', async () => {
-    await renderAlpha();
-    expect(document.querySelector('.jira-band-sub')?.textContent).not.toContain('card');
+  it('a board of parentless issues has no parents part', async () => {
+    lists[ALPHA.id] = [PAY_120, PAY_140, PAY_151];
+    renderPage();
+    await screen.findByText('Refund flows');
+    expect(document.querySelector('.jira-band-sub')?.textContent).toBe('acme.atlassian.net · 3 issues from 1 root and 1 query · polled 10m ago');
+  });
+
+  /*
+    Sixteen issues under eight parents (parent-lanes spec §6.1), on a query-only board: four on-board headers PAY-201..204 with one card each, and four
+    off-board parents PAY-901..904 with two cards each. Half the issues are Bugs, so a Type filter hides half of them — and the band, which describes the
+    board and not the view, does not move.
+  */
+  const EIGHT = (() => {
+    const out: JiraIssue[] = [];
+    const typeOf = (n: number): JiraIssue['type'] => (n % 2 === 0 ? { name: 'Bug', level: 0, subtask: false } : { name: 'Story', level: 0, subtask: false });
+    let n = 0;
+    const next = (key: string, parent: JiraIssue['parent']): void => {
+      out.push(issue({ key, summary: `Issue ${key}`, type: typeOf(n), parent, updated: daysAgoStamp(n) }));
+      n += 1;
+    };
+    for (const h of [201, 202, 203, 204]) {
+      next(`PAY-${h}`, null);
+      next(`PAY-${h + 100}`, { key: `PAY-${h}`, summary: `Header ${h}`, type: null, status: null });
+    }
+    for (const p of [901, 902, 903, 904]) {
+      next(`PAY-${p + 10}`, { key: `PAY-${p}`, summary: `Off-board ${p}`, type: null, status: null });
+      next(`PAY-${p + 20}`, { key: `PAY-${p}`, summary: `Off-board ${p}`, type: null, status: null });
+    }
+    return out;
+  })();
+  const QUERY_ONLY = { ...ALPHA, roots: [] as string[] };
+
+  it('sixteen issues under eight parents read `16 issues from 1 query · 8 parents`, and a filter that hides half of them moves nothing', async () => {
+    statusAnswer = status({ boards: [BETA, QUERY_ONLY] });
+    lists[ALPHA.id] = EIGHT;
+    renderPage();
+    await screen.findByText('Issue PAY-301');
+    const before = document.querySelector('.jira-band-sub')?.textContent;
+    expect(before).toBe('acme.atlassian.net · 16 issues from 1 query · 8 parents · polled 10m ago');
+    await pick('Type', 'Bug');
+    expect(screen.queryByText('Issue PAY-301')).toBeNull();
+    expect(document.querySelector('.jira-band-sub')?.textContent).toBe(before);
   });
 
   // Review Focus 5: the band counts the unfiltered list, whatever the filters hide.
@@ -533,7 +574,7 @@ describe('the band', () => {
     const before = document.querySelector('.jira-band-sub')?.textContent;
     await pick('Type', 'Sub-task');
     expect(document.querySelector('.jira-band-sub')?.textContent).toBe(before);
-    expect(before).toContain('7 issues from 1 root and 1 query · 3 cards');
+    expect(before).toContain('7 issues from 1 root and 1 query · 3 parents');
   });
 });
 
@@ -1410,6 +1451,29 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
     expect(within(screen.getByTestId('cell-PAY-160-todo')).getByText('Folded sub-task')).toBeInTheDocument();
     expect(headOf('PAY-160')).toHaveAttribute('data-kind', 'board');
+  });
+
+  // Parent-lanes spec §5: the mark names the issue's direct parent on the board or off it — the lane to look in — with the parent's summary as its title.
+  it('a deck card on an issue with an off-board parent draws `↳ <parent>` titled with the parent’s summary', async () => {
+    await renderRun({ live: { 'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } });
+    const [deck] = await waitFor(() => {
+      const found = deckCards('PAY-131');
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    const mark = deck.querySelector('.ui-fold');
+    expect(mark).toHaveTextContent('↳ PAY-99');
+    expect(mark).toHaveAttribute('title', 'Payments platform');
+  });
+
+  it('a deck card on a parentless issue draws no mark', async () => {
+    await renderRun({ live: { 'PAY-151': { sessionId: 's1', name: 'jira PAY-151', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } });
+    const [deck] = await waitFor(() => {
+      const found = deckCards('PAY-151');
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    expect(deck.querySelector('.ui-fold')).toBeNull();
   });
 
   it('a deck card shows the session\'s context as a 4 px meter reading `context 42%`', async () => {

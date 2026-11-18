@@ -18,6 +18,7 @@ import {
   boardFilterOptions,
   effectiveBoardFilters,
   fetchJiraWorktrees,
+  laneParents,
   laneViews,
   matchesBoardFilters,
   ticketWorktrees,
@@ -82,12 +83,13 @@ const NO_TREES: readonly JiraWorktree[] = [];
  * **One lane per parent** (parent-lanes spec §3; DESIGN.md §8.9.1). `laneBoard` (through `usePickedJiraBoard`) is the one walk: every issue with an
  * on-board child is a lane header, every other issue a card in its parent's lane — an on-board header, an off-board stub, or `No parent`. This page only
  * filters it (`laneViews`) and hands the same views to `JiraLaneBoard` and to the List; it never walks a parent chain itself. The walk is memoised on the list, so the minute tick
- * re-renders the cards without re-walking up to 500 issues. The band's `N cards` still counts the fold's tops (`fold.tops`).
+ * re-renders the cards without re-walking up to 500 issues. The band's `M parents` counts the same lanes (`laneParents`).
  *
- * **The band's numbers are the LOADED list's**, unfiltered: its length and its tops, so `17 issues · 5 cards` counts one list — not the status poll's
- * `board.count`, a different poller one interval apart. They are passed only once the list has loaded, which is exactly the condition under which the
- * columns are drawn (not loading, and not a failed first read with nothing in hand); before that the band reads today's line from `board.count`, so it
- * can never claim cards the columns are not drawing.
+ * **The band's numbers are the LOADED list's**, unfiltered: its length and its parent lanes at every depth (`laneParents`, `No parent` not counted — parent-lanes
+ * spec §6.1), so `16 issues · 8 parents` counts one list — not the status poll's `board.count`, a different poller one interval apart — and describes the
+ * board, not the view, so a filter never moves it. They are passed only once the list has loaded, which is exactly the condition under which the lanes are
+ * drawn (not loading, and not a failed first read with nothing in hand); before that the band reads today's line from `board.count`, so it can never claim
+ * parents the lanes are not drawing.
  *
  * Clicking a card calls `onOpenIssue(issue, childrenOf)` — the slot the issue modal fills, plus the lanes' parent → children index as a snapshot, so the
  * modal's Children tree can reach the grandchildren the detail read does not return without a Jira call of its own (grouped-board spec §6).
@@ -129,7 +131,7 @@ export function JiraBoardView({
   nudge: number;
 }) {
   const { data } = useJiraContext();
-  const { boards, board, unreadable, pick, list, fold, lanes, loaded, shown } = usePickedJiraBoard(nudge);
+  const { boards, board, unreadable, pick, list, lanes, loaded, shown } = usePickedJiraBoard(nudge);
   // Card ages are relative (`now`, `4m`, `2h`, `6d`), so a minute's tick is plenty; the band's seconds have their own clock below.
   const now = useNow(true);
 
@@ -160,15 +162,15 @@ export function JiraBoardView({
   }, [filters, options, me, deliveryIndex]);
   const sessions = useJiraSessionsContext();
   const [view] = useJiraView();
-  // Memoised on the fold, the lanes, the filters, the sessions answer and the minute's `now` — `now` only since the `Review open` filter, whose match
-  // depends on the clock (a stuck review stops reading `reviewing`); neither model is rebuilt by it, and the filter pass over up to 500 issues is a map
+  // Memoised on the lanes, the filters, the sessions answer and the minute's `now` — `now` only since the `Review open` filter, whose match
+  // depends on the clock (a stuck review stops reading `reviewing`); the lane model is not rebuilt by it, and the filter pass over up to 500 issues is a map
   // lookup each. ONE predicate answers for every surface (parent-lanes spec §3.5): the panel's filters and the search AND, while a delivery filter is picked
   // and GitLab's index is loaded, the issue's OWN delivery. Filters match per issue — no fold, so no F1 ring: a lane is drawn when its subtree holds a match
   // or its own header matches (`laneViews`), and the deck keeps a live session whose own ticket matches.
   const { views, deck, matching, cells, ended } = useMemo(() => {
     const byDelivery = applied.delivery === 'all' || deliveryIndex === null ? null : (i: JiraIssue) => matchesDelivery(applied.delivery, ticketDelivery(i, deliveryIndex), now);
     const matches = (i: JiraIssue): boolean => matchesBoardFilters(i, applied, me) && (byDelivery === null || byDelivery(i));
-    const agents = boardAgents(fold, sessions.data, live);
+    const agents = boardAgents(list.issues, lanes.parentOf, sessions.data, live);
     return {
       views: laneViews(lanes, matches),
       deck: agents.filter((e) => matches(e.issue)),
@@ -178,7 +180,7 @@ export function JiraBoardView({
       cells: sessionCells(agents, sessions.data?.links ?? []),
       ended: endedByKey(sessions.data)
     };
-  }, [fold, lanes, list.issues, applied, me, sessions.data, live, deliveryIndex, now]);
+  }, [lanes, list.issues, applied, me, sessions.data, live, deliveryIndex, now]);
   // A typed search opens every lane and locks the chevrons (spec §3.6) — exactly when `matchesBoardFilters` reads `search` as a filter at all.
   const searching = filters.search.trim() !== '';
   // The folds and the off-board read are the page's, not a view's (see "The List is the same page's other view" above), and are called before the early
@@ -214,7 +216,7 @@ export function JiraBoardView({
         title={board.name}
         sub={
           <>
-            <JiraBandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />
+            <JiraBandSub board={shown} site={data?.site ?? ''} counts={loaded ? { issues: list.issues.length, parents: laneParents(lanes) } : null} />
             {/* GitLab's line counts the issues the filters keep — every matching issue, lane header or card — so a filter narrows it with the board
                 (spec §7.2). Drawn only once the list has loaded: before that nothing matches and the line would read `no merge requests`. */}
             {loaded && <GitlabBandLine issues={matching} />}

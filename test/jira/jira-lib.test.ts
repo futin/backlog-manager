@@ -38,9 +38,6 @@ import {
   transitionOptions,
   JIRA_SWEEP_CALL_CEILING,
   bandSub,
-  cardFold,
-  childrenLine,
-  foldBoard,
   laneBoard,
   NO_PARENT_LANE,
   laneViews,
@@ -52,13 +49,9 @@ import {
   laneOverrides,
   laneOpen,
   setLaneFold,
-  foldMatches,
   foldProgress,
-  matchMarker,
   modalTree,
   progressLine,
-  sortTops,
-  rolledUpdated,
   boardRowLine,
   boardsForSetup,
   callsReading,
@@ -89,12 +82,12 @@ import {
   typeTone,
   statusTone
 } from '../../client/src/lib/jira';
-import type { JiraFold, JiraLane, JiraLanes, JiraLaneFolds, JiraLaneView } from '../../client/src/lib/jira';
+import type { JiraLane, JiraLanes, JiraLaneFolds, JiraLaneView } from '../../client/src/lib/jira';
 import { DELIVERY_FILTER_LABELS, effectiveDeliveryFilter } from '../../client/src/lib/delivery';
 import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../../client/src/lib/jira';
 import { modelEffortFlags } from '../../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../../client/src/lib/jira-page';
-import { boardAgents, childSessions, deckCrumb, deckGroup, deckTally, endedByKey, endedLine, sessionCells, topSessionCell } from '../../client/src/lib/jira-deck';
+import { boardAgents, childSessions, deckCrumb, deckGroup, deckTally, endedByKey, endedLine, sessionCells } from '../../client/src/lib/jira-deck';
 import { elapsedSince, formatCreated } from '../../client/src/lib/item-age';
 import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraRepoRefs, JiraSessionsPayload, JiraSkill, JiraStatusPayload } from '../../shared/types';
 import { daysAgoStamp } from '../helpers/dates';
@@ -851,12 +844,12 @@ describe('sweepLine', () => {
 
 // ── The fold (grouped-board spec §3–§6) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-describe('the fold', () => {
+describe('foldProgress, modalTree and the band’s lane counts', () => {
   const now = Date.now();
 
   /**
    * An issue keyed `key` under `parent` (`null` for none), updated `h` hours before `now`. Every case gives each issue a distinct `h`, so the
-   * `sortForBoard` order every `under` and `childrenOf` list is held in is a fact of the case rather than an accident of insertion order.
+   * `sortForBoard` order a `childrenOf` list is held in is a fact of the case rather than an accident of insertion order.
    */
   const n = (key: string, parent: string | null, h: number, over: Partial<JiraIssue> = {}): JiraIssue =>
     issue({
@@ -866,129 +859,9 @@ describe('the fold', () => {
       updated: ago(now, h * HOUR),
       ...over
     });
-  const keys = (list: readonly JiraIssue[] | undefined): string[] => (list ?? []).map((i) => i.key);
-  const asObject = (m: ReadonlyMap<string, readonly JiraIssue[]>): Record<string, string[]> => Object.fromEntries([...m].map(([k, v]) => [k, keys(v)]));
   const todo = { status: { name: 'To Do', category: 'new' as const } };
   const doing = { status: { name: 'In Progress', category: 'indeterminate' as const } };
   const done = { status: { name: 'Done', category: 'done' as const } };
-
-  /** `foldBoard`, plus the one property every case owes: each input key lands exactly once, as a top or in exactly one `under` list. */
-  function fold(input: JiraIssue[]): JiraFold {
-    const f = foldBoard(input);
-    const landed = [...keys(f.tops), ...[...f.under.values()].flatMap((l) => keys(l))].sort();
-    expect(landed).toEqual(keys(input).sort());
-    return f;
-  }
-
-  describe('foldBoard', () => {
-    it('folds a depth-1 child under its parent', () => {
-      const f = fold([n('E1', null, 5), n('S1', 'E1', 3)]);
-      expect(keys(f.tops)).toEqual(['E1']);
-      expect(asObject(f.under)).toEqual({ E1: ['S1'] });
-      expect(asObject(f.childrenOf)).toEqual({ E1: ['S1'] });
-      expect(f.childrenOf.has('S1')).toBe(false);
-    });
-
-    it('folds depth 2 and 3 into the topmost ancestor, in sortForBoard order, with one childrenOf edge per level', () => {
-      const f = fold([n('E1', null, 5), n('S1', 'E1', 3), n('T1', 'S1', 4), n('U1', 'T1', 1)]);
-      expect(keys(f.tops)).toEqual(['E1']);
-      expect(asObject(f.under)).toEqual({ E1: ['U1', 'S1', 'T1'] });
-      expect(asObject(f.childrenOf)).toEqual({ E1: ['S1'], S1: ['T1'], T1: ['U1'] });
-    });
-
-    it('makes an issue whose parent is off the board a top, and its crumb still names that parent', () => {
-      const s2 = n('S2', 'X-9', 2);
-      const f = fold([n('E1', null, 5), s2]);
-      expect(keys(f.tops)).toEqual(['E1', 'S2']);
-      expect(f.under.size).toBe(0);
-      expect(crumbText(crumbOf(s2, board({ roots: [] }), null))).toBe('↳ X-9 X-9 summary');
-    });
-
-    it('lifts the open children of a parent dropped by the Done window (absent from the list)', () => {
-      const f = fold([n('S1', 'E1', 3), n('T1', 'S1', 4)]);
-      expect(keys(f.tops)).toEqual(['S1']);
-      expect(asObject(f.under)).toEqual({ S1: ['T1'] });
-    });
-
-    it('folds a query hit that is also a descendant of a root like any other descendant', () => {
-      const f = fold([n('E1', null, 5), n('S1', 'E1', 3), n('Q1', 'S1', 2)]);
-      expect(keys(f.tops)).toEqual(['E1']);
-      expect(keys(f.under.get('E1'))).toContain('Q1');
-      expect(asObject(f.childrenOf)).toEqual({ E1: ['S1'], S1: ['Q1'] });
-    });
-
-    it('terminates on a self-parent, which is its own top', () => {
-      const f = fold([n('A', 'A', 1)]);
-      expect(keys(f.tops)).toEqual(['A']);
-      expect(f.under.size).toBe(0);
-      expect(f.childrenOf.size).toBe(0);
-    });
-
-    it('draws a two-cycle as both members side by side, in input order, with no edge between them', () => {
-      const f = fold([n('A', 'B', 1), n('B', 'A', 2)]);
-      expect(keys(f.tops)).toEqual(['A', 'B']);
-      expect(f.under.size).toBe(0);
-      expect(f.childrenOf.size).toBe(0);
-    });
-
-    it('folds a child of a cycle member under that member, and nothing between the members', () => {
-      const f = fold([n('A', 'B', 1), n('B', 'A', 2), n('C', 'A', 3)]);
-      expect(keys(f.tops)).toEqual(['A', 'B']);
-      expect(asObject(f.under)).toEqual({ A: ['C'] });
-      expect(asObject(f.childrenOf)).toEqual({ A: ['C'] });
-    });
-
-    it('never mutates the list it is given', () => {
-      const input = [n('T1', 'S1', 4), n('E1', null, 5), n('U1', 'T1', 1), n('S1', 'E1', 3)];
-      const before = [...input];
-      fold(input);
-      expect(input).toHaveLength(before.length);
-      input.forEach((x, i) => expect(x).toBe(before[i]));
-    });
-  });
-
-  describe('sortTops', () => {
-    it('ranks a top by the newest updated across it and everything folded under it', () => {
-      const p = n('P', null, 5 * 24);
-      const q = n('Q', null, 24);
-      const f = fold([q, p, n('P1', 'P', 0)]);
-      expect(keys(sortTops(f.tops, f.under))).toEqual(['P', 'Q']);
-    });
-
-    it('breaks a tie on the newest stamp by key in plain string order', () => {
-      const f = fold([n('B-2', null, 3), n('A-1', null, 3)]);
-      expect(keys(sortTops(f.tops, f.under))).toEqual(['A-1', 'B-2']);
-    });
-
-    it('sorts an unparseable stamp last, and returns a new array', () => {
-      const tops = [n('X', null, 0, { updated: 'not a date' }), n('Y', null, 30 * 24)];
-      const sorted = sortTops(tops, new Map());
-      expect(keys(sorted)).toEqual(['Y', 'X']);
-      expect(sorted).not.toBe(tops);
-      expect(keys(tops)).toEqual(['X', 'Y']);
-    });
-  });
-
-  describe('rolledUpdated', () => {
-    it('is the newest folded issue\u2019s stamp, as given, when a child is newer than the top', () => {
-      const p = n('P', null, 5 * 24);
-      const c = n('P1', 'P', 24);
-      const f = fold([p, c]);
-      expect(rolledUpdated(f.tops[0], f.under)).toBe(c.updated);
-    });
-
-    it('is the top\u2019s own stamp with nothing folded under it', () => {
-      const p = n('P', null, 3);
-      expect(rolledUpdated(p, new Map())).toBe(p.updated);
-    });
-
-    it('skips an unparseable top stamp for a parseable child, and is null when nothing parses', () => {
-      const bad = n('P', null, 0, { updated: 'not a date' });
-      const c = n('P1', 'P', 2);
-      expect(rolledUpdated(bad, new Map([['P', [c]]]))).toBe(c.updated);
-      expect(rolledUpdated(bad, new Map([['P', [n('P2', 'P', 0, { updated: '' })]]]))).toBeNull();
-    });
-  });
 
   describe('foldProgress and progressLine', () => {
     const many = (count: number, over: Partial<JiraIssue>, tag: string): JiraIssue[] => Array.from({ length: count }, (_, i) => n(`${tag}${i}`, null, i, over));
@@ -1007,74 +880,6 @@ describe('the fold', () => {
     it('is null when there is nothing to count', () => {
       expect(foldProgress([])).toEqual({ done: 0, doing: 0, todo: 0 });
       expect(progressLine({ done: 0, doing: 0, todo: 0 })).toBeNull();
-    });
-  });
-
-  describe('childrenLine', () => {
-    it.each([
-      [0, 0, null],
-      [1, 0, '1 child'],
-      [3, 0, '3 children'],
-      [1, 1, '1 child · 1 below them'],
-      [2, 7, '2 children · 7 below them']
-    ])('(%i, %i) → %p', (direct, deeper, line) => {
-      expect(childrenLine(direct, deeper)).toBe(line);
-    });
-  });
-
-  describe('cardFold', () => {
-    const f = foldBoard([n('E1', null, 5), n('S1', 'E1', 3, doing), n('T1', 'S1', 4, done), n('U1', 'T1', 1, todo), n('R', null, 6)]);
-
-    it('reads the top’s direct children, everything deeper, and the spread', () => {
-      expect(cardFold('E1', f)).toEqual({
-        line: '1 child · 2 below them',
-        progress: { done: 1, doing: 1, todo: 1 },
-        caption: '1 done · 1 in progress · 1 to do'
-      });
-    });
-
-    it('is null for a top with nothing folded', () => {
-      expect(cardFold('R', f)).toBeNull();
-    });
-  });
-
-  describe('foldMatches (F1)', () => {
-    const f = foldBoard([n('E1', null, 5), n('S1', 'E1', 3), n('T1', 'S1', 4), n('R', null, 6)]);
-    const only = (...ks: string[]) => (i: JiraIssue): boolean => ks.includes(i.key);
-
-    it('keeps every top that matches on its own, with no ring keys', () => {
-      expect(Object.fromEntries(foldMatches(f, () => true))).toEqual({ E1: [], R: [] });
-    });
-
-    it('keeps a top for a folded match alone, naming that match', () => {
-      expect(Object.fromEntries(foldMatches(f, only('T1')))).toEqual({ E1: ['T1'] });
-    });
-
-    it('draws no ring keys on a top that matches itself, even when folded issues match too', () => {
-      expect(Object.fromEntries(foldMatches(f, only('E1', 'T1')))).toEqual({ E1: [] });
-    });
-
-    it('hides everything when nothing matches', () => {
-      expect(foldMatches(f, () => false).size).toBe(0);
-    });
-
-    it('keeps a matching cycle member on its own', () => {
-      const cycle = foldBoard([n('A', 'B', 1), n('B', 'A', 2)]);
-      expect(Object.fromEntries(foldMatches(cycle, only('B')))).toEqual({ B: [] });
-    });
-  });
-
-  describe('matchMarker', () => {
-    it('is null for no match', () => {
-      expect(matchMarker([])).toBeNull();
-    });
-
-    it('names a single match in the word itself', () => {
-      expect(matchMarker(['PAY-162'])).toEqual({ word: '1 match: PAY-162', title: undefined });
-    });
-
-    it('counts several and puts their keys in the title', () => {
-      expect(matchMarker(['PAY-162', 'PAY-161'])).toEqual({ word: '2 matches', title: 'PAY-162, PAY-161' });
     });
   });
 
@@ -1119,33 +924,31 @@ describe('the fold', () => {
     });
   });
 
-  describe('bandSub with a fold', () => {
+  describe('bandSub with the lane counts', () => {
     const site = 'acme.atlassian.net';
-    const b = board({ count: 14, polledAt: ago(now, 12 * SECOND) });
+    const b = board({ count: 14, roots: [], polledAt: ago(now, 12 * SECOND) });
 
-    it('counts the loaded list and adds the cards part after the sources', () => {
-      expect(bandSub(b, site, now, { issues: 17, cards: 5 }).text).toBe(
-        'acme.atlassian.net · 17 issues from 2 roots and 1 query · 5 cards · polled 12 s ago'
-      );
+    it('counts the loaded list and adds the parents part after the sources', () => {
+      expect(bandSub(b, site, now, { issues: 16, parents: 8 }).text).toBe('acme.atlassian.net · 16 issues from 1 query · 8 parents · polled 12 s ago');
     });
 
-    it('reads today’s line exactly when nothing folds', () => {
-      expect(bandSub(b, site, now, { issues: 14, cards: 14 }).text).toBe(bandSub(b, site, now, null).text);
+    it('says 1 parent in the singular', () => {
+      expect(bandSub(b, site, now, { issues: 3, parents: 1 }).text).toContain(' · 3 issues from 1 query · 1 parent · ');
     });
 
-    it('says 1 card in the singular', () => {
-      expect(bandSub(b, site, now, { issues: 3, cards: 1 }).text).toContain(' · 1 card · ');
+    it('draws no parents part when no lane has a parent, and reads the loaded count rather than the status poll’s', () => {
+      const text = bandSub(b, site, now, { issues: 4, parents: 0 }).text;
+      expect(text).toBe('acme.atlassian.net · 4 issues from 1 query · polled 12 s ago');
+      expect(text).not.toContain('parent');
     });
 
-    it('draws no cards part on an empty list', () => {
-      const text = bandSub(b, site, now, { issues: 0, cards: 0 }).text;
-      expect(text).toContain('0 issues');
-      expect(text).not.toContain('card');
+    it('reads today’s line from the status count while the list has not loaded', () => {
+      expect(bandSub(b, site, now, null).text).toBe('acme.atlassian.net · 14 issues from 1 query · polled 12 s ago');
     });
 
     it('still ends on the cap', () => {
-      const text = bandSub(board({ truncated: true, polledAt: ago(now, 12 * SECOND) }), site, now, { issues: 17, cards: 5 }).text;
-      expect(text).toContain(' · 5 cards · ');
+      const text = bandSub(board({ truncated: true, polledAt: ago(now, 12 * SECOND) }), site, now, { issues: 17, parents: 5 }).text;
+      expect(text).toContain(' · 5 parents · ');
       expect(text.endsWith(' · first 500 shown')).toBe(true);
     });
   });
@@ -1176,8 +979,8 @@ describe('laneBoard', () => {
     Object.fromEntries([...m].map(([k, v]) => [k, keys(v).sort()]));
 
   /**
-   * `laneBoard`, plus the two properties every fixture owes. Each input key is drawn exactly once across the whole tree, as an on-board header or as a
-   * card (§1.4: never twice, never dropped). And `childrenOf` is the fold's own index for the same input (§1.5) — Task 6 removes that line with `foldBoard`.
+   * `laneBoard`, plus the property every fixture owes: each input key is drawn exactly once across the whole tree, as an on-board header or as a card
+   * (§1.4: never twice, never dropped). What `childrenOf` holds is pinned by its own cases below (§1.5).
    */
   function lanes(input: JiraIssue[]): JiraLanes {
     const l = laneBoard(input);
@@ -1189,7 +992,6 @@ describe('laneBoard', () => {
     };
     l.lanes.forEach(visit);
     expect(drawn.sort()).toEqual(keys(input).sort());
-    expect(l.childrenOf).toEqual(foldBoard(input).childrenOf);
     return l;
   }
 
@@ -2173,11 +1975,14 @@ describe('lib/jira-deck', () => {
   const top = issue({ key: 'PAY-1', summary: 'Top' });
   const child = issue({ key: 'PAY-2', summary: 'Child', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-1', summary: 'Top', type: null, status: null } });
   const other = issue({ key: 'PAY-3', summary: 'Other' });
-  const fold = foldBoard([top, child, other]);
+  /** `boardAgents` over `issues` as the page calls it: the loaded list and the kept parents `laneBoard` read off that same list. */
+  const agentsOn = (issues: JiraIssue[], payload: JiraSessionsPayload | null, live: Record<string, JiraLiveSession> = {}) =>
+    boardAgents(issues, laneBoard(issues).parentOf, payload, live);
+  const loaded = [top, child, other];
 
   it('boardAgents gives one session linked to two on-board tickets two entries with distinct ids', () => {
-    const entries = boardAgents(fold, answer([link('PAY-1', 's1', 'working', 3), link('PAY-3', 's1', 'working', 3)]), {});
-    expect(entries.map((e) => e.top.key).sort()).toEqual(['PAY-1', 'PAY-3']);
+    const entries = agentsOn(loaded, answer([link('PAY-1', 's1', 'working', 3), link('PAY-3', 's1', 'working', 3)]));
+    expect(entries.map((e) => e.issue.key).sort()).toEqual(['PAY-1', 'PAY-3']);
     expect(new Set(entries.map((e) => e.id)).size).toBe(2);
   });
 
@@ -2189,8 +1994,8 @@ describe('lib/jira-deck', () => {
   });
 
   it('boardAgents orders by group, then newest start, and draws a reservation from `live` and never an ended link', () => {
-    const entries = boardAgents(
-      fold,
+    const entries = agentsOn(
+      loaded,
       answer([
         link('PAY-1', 'a', 'quiet', 5),
         link('PAY-3', 'b', 'working', 4),
@@ -2205,66 +2010,66 @@ describe('lib/jira-deck', () => {
   });
 
   it('boardAgents ignores a live entry that is not starting, and every payload when none has loaded', () => {
-    expect(boardAgents(fold, null, { 'PAY-1': { ...reservation(1), starting: false, sessionId: 's' } })).toEqual([]);
+    expect(agentsOn(loaded, null, { 'PAY-1': { ...reservation(1), starting: false, sessionId: 's' } })).toEqual([]);
   });
 
-  it('a session on a folded child belongs to the top, and its crumb names the top', () => {
-    const [entry] = boardAgents(fold, answer([link('PAY-2', 'c', 'working', 2)]), {});
-    expect(entry.issue.key).toBe('PAY-2');
-    expect(entry.top.key).toBe('PAY-1');
-    expect(deckCrumb(entry, [])).toMatch(/^↳ PAY-1 · /);
-    expect(deckCrumb(entry, [])).toContain('pay');
-    const [own] = boardAgents(fold, answer([link('PAY-1', 'a', 'working', 2)]), {});
-    expect(deckCrumb(own, [])).not.toContain('↳');
-  });
+  /*
+    The deck on the lane model (parent-lanes spec §5): an entry names the parent the lanes KEPT for its own issue — `↳ <KEY>` on the card and the crumb's
+    lead — whichever kind of lane that is. PAY-42 sits under on-board PAY-41; PAY-71 and PAY-72 name each other, so the walk drops both links (§1.4);
+    PAY-11 and PAY-12 sit under off-board PAY-1, each carrying its own copy of the parent, and PAY-12 — the fresher — is the one the lane's stub is read from.
+  */
+  describe('boardAgents and deckCrumb on the lane model', () => {
+    const p41 = issue({ key: 'PAY-41', summary: 'Ledger epic', updated: hoursAgo(9) });
+    const p42 = issue({ key: 'PAY-42', summary: 'Ledger story', parent: { key: 'PAY-41', summary: 'Ledger epic', type: null, status: null }, updated: hoursAgo(8) });
+    const p71 = issue({ key: 'PAY-71', summary: 'Loop one', parent: { key: 'PAY-72', summary: 'Loop two', type: null, status: null }, updated: hoursAgo(7) });
+    const p72 = issue({ key: 'PAY-72', summary: 'Loop two', parent: { key: 'PAY-71', summary: 'Loop one', type: null, status: null }, updated: hoursAgo(6) });
+    const p11 = issue({ key: 'PAY-11', summary: 'Card form', parent: { key: 'PAY-1', summary: 'Checkout', type: null, status: null }, updated: hoursAgo(5) });
+    const p12 = issue({ key: 'PAY-12', summary: 'Wallet form', parent: { key: 'PAY-1', summary: 'Checkout v2', type: null, status: null }, updated: hoursAgo(2) });
+    const deep = [p41, p42, p71, p72, p11, p12];
+    const only = (key: string, live: Record<string, JiraLiveSession> = {}) => {
+      const entries = agentsOn(deep, answer([link(key, 'w', 'working', 1)]), live).filter((e) => e.issue.key === key);
+      expect(entries).toHaveLength(1);
+      return entries[0];
+    };
 
-  describe('topSessionCell (the List\u2019s Session cell)', () => {
-    const tree = foldBoard([top, child, other]);
-    const cellOf = (links: Link[], live: Record<string, JiraLiveSession> = {}) => topSessionCell(boardAgents(tree, answer(links), live), links, tree);
-
-    it('names the deck\u2019s lead session per top with its own `since`: needs you on a child beats working on the top', () => {
-      expect(cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-2', 'b', 'plan', 2)]).get('PAY-1')).toEqual({ state: 'plan', since: hoursAgo(2), on: 'PAY-2', more: 1 });
+    it('names the on-board parent the lanes kept', () => {
+      expect(only('PAY-42').parent?.key).toBe('PAY-41');
     });
 
-    it('a live plan on the top gives { plan, since }', () => {
-      const links = [link('PAY-1', 'a', 'plan', 4)];
-      expect(cellOf(links).get('PAY-1')).toEqual({ state: 'plan', since: links[0].stateSince, on: null, more: 0 });
+    it('names no parent for a cycle member, whose link the walk dropped', () => {
+      expect(only('PAY-71').parent).toBeNull();
     });
 
-    it('lets the newest start lead inside one group: a reservation on a child outranks an older lost session on the top', () => {
-      expect(cellOf([link('PAY-1', 'a', 'lost', 2)], { 'PAY-2': { ...reservation(1), starting: true } }).get('PAY-1')?.state).toBe('starting');
+    it('names an off-board parent with the card’s OWN copy of it, not the lane stub’s', () => {
+      // The stub is the fresher sibling's copy — the case only discriminates while the two differ.
+      const offLane = laneBoard(deep).lanes.find((l) => l.key === 'PAY-1');
+      expect(offLane?.stub?.summary).toBe('Checkout v2');
+      const entry = only('PAY-11');
+      expect(entry.parent?.key).toBe('PAY-1');
+      expect(entry.parent?.summary).toBe('Checkout');
     });
 
-    it('prefers a live child over an older ended top', () => {
-      const cell = cellOf([link('PAY-2', 'b', 'working', 2), link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) })]);
-      expect(cell.get('PAY-1')?.state).toBe('working');
+    it('draws no entry for a session on a key that is not in the loaded list', () => {
+      expect(agentsOn(deep, answer([link('PAY-99', 'x', 'working', 1)]))).toEqual([]);
     });
 
-    it('reads an ended session on a folded child as { ended, since: endedAt }', () => {
-      const cell = cellOf([link('PAY-2', 'b', 'ended', 5, { endedAt: hoursAgo(2) })]);
-      expect(cell.get('PAY-1')).toEqual({ state: 'ended', since: hoursAgo(2), on: 'PAY-2', more: 0 });
+    it('draws a starting reservation from `live` as today, with its parent', () => {
+      const [entry] = agentsOn(deep, answer([]), { 'PAY-42': reservation(1) });
+      expect(entry.state).toBe('starting');
+      expect(entry.issue.key).toBe('PAY-42');
+      expect(entry.parent?.key).toBe('PAY-41');
     });
 
-    it('takes the newer of two ended links', () => {
-      const cell = cellOf([link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) }), link('PAY-2', 'b', 'ended', 6, { endedAt: hoursAgo(3) })]);
-      expect(cell.get('PAY-1')?.since).toBe(hoursAgo(3));
-    });
-
-    it('names the child the lead runs on (`on`), and `null` when the lead runs on the top itself', () => {
-      expect(cellOf([link('PAY-2', 'b', 'working', 1)]).get('PAY-1')).toMatchObject({ on: 'PAY-2', more: 0 });
-      // The top's own session leads (newer start in the same group), so the cell is the top's and the child's is only counted.
-      expect(cellOf([link('PAY-1', 'a', 'working', 1), link('PAY-2', 'b', 'working', 4)]).get('PAY-1')).toMatchObject({ on: null, more: 1 });
-    });
-
-    it('names the top for an ended session on the top itself, so an ended cell says where it ran too', () => {
-      const cell = cellOf([link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) }), link('PAY-2', 'b', 'ended', 9, { endedAt: hoursAgo(9) })]);
-      expect(cell.get('PAY-1')).toMatchObject({ state: 'ended', on: null, more: 0 });
-    });
-
-    it('has no key with nothing live or ended, and keeps two tops apart', () => {
-      expect(cellOf([]).size).toBe(0);
-      const both = cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-3', 'b', 'quiet', 2)]);
-      expect([...both].map(([k, v]) => [k, v.state])).toEqual([['PAY-1', 'working'], ['PAY-3', 'quiet']]);
+    it('deckCrumb leads with `↳ <parent>` unless told not to, and never without a parent', () => {
+      const withParent = only('PAY-42');
+      expect(deckCrumb(withParent, [])).toMatch(/^↳ PAY-41 · /);
+      expect(deckCrumb(withParent, [])).toContain('pay');
+      expect(deckCrumb(withParent, [], { lead: false })).not.toContain('↳');
+      expect(deckCrumb(only('PAY-71'), [])).not.toContain('↳');
+      // A parentless issue on the first fixture reads the run's own words alone.
+      const [own] = agentsOn(loaded, answer([link('PAY-1', 'a', 'working', 2)]));
+      expect(own.parent).toBeNull();
+      expect(deckCrumb(own, [])).not.toContain('↳');
     });
   });
 
@@ -2288,7 +2093,8 @@ describe('lib/jira-deck', () => {
       expect(keys(childSessions([child, grand], payload, {}))).toEqual([['PAY-2', 'plan'], ['PAY-4', 'working']]);
       const [first] = childSessions([child, grand], payload, {});
       expect(first.issue).toBe(child);
-      expect(first.top).toBe(child);
+      // A Children row is not a lane: it draws no `↳`, so the entry names no parent.
+      expect(first.parent).toBeNull();
       expect(first.since).toBe(payload.links[1].stateSince);
     });
 
@@ -2307,10 +2113,9 @@ describe('lib/jira-deck', () => {
   */
   describe('sessionCells', () => {
     const lanesOf = [top, child, other, issue({ key: 'PAY-12' }), issue({ key: 'PAY-13' }), issue({ key: 'PAY-14' }), issue({ key: 'PAY-15' })];
-    const f = foldBoard(lanesOf);
 
     it('leads a key with its first live entry in deckOrder, counts the rest as `more`, and gives each key its own entry', () => {
-      const agents = boardAgents(f, answer([link('PAY-12', 'w', 'working', 2), link('PAY-12', 'p', 'plan', 4), link('PAY-13', 'q', 'quiet', 1)]), {});
+      const agents = agentsOn(lanesOf, answer([link('PAY-12', 'w', 'working', 2), link('PAY-12', 'p', 'plan', 4), link('PAY-13', 'q', 'quiet', 1)]), {});
       const cells = sessionCells(agents, []);
       const twelve = cells.get('PAY-12');
       expect(twelve?.state).toBe('plan');
@@ -2329,14 +2134,14 @@ describe('lib/jira-deck', () => {
     });
 
     it('a live session wins over an ended one on the same key, and a key with neither has no entry', () => {
-      const agents = boardAgents(f, answer([link('PAY-13', 'q', 'quiet', 1)]), {});
+      const agents = agentsOn(lanesOf, answer([link('PAY-13', 'q', 'quiet', 1)]), {});
       const cells = sessionCells(agents, [link('PAY-13', 'z', 'ended', 9, { endedAt: hoursAgo(5) })]);
       expect(cells.get('PAY-13')?.state).toBe('quiet');
       expect(cells.has('PAY-15')).toBe(false);
     });
 
     it('a session on a child gives its parent’s key no entry', () => {
-      const agents = boardAgents(f, answer([link('PAY-2', 'c', 'working', 2)]), {});
+      const agents = agentsOn(lanesOf, answer([link('PAY-2', 'c', 'working', 2)]), {});
       const cells = sessionCells(agents, [link('PAY-2', 'd', 'ended', 9, { endedAt: hoursAgo(5) })]);
       expect(cells.get('PAY-2')?.state).toBe('working');
       expect(cells.has('PAY-1')).toBe(false);

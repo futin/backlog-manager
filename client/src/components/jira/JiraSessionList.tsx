@@ -42,7 +42,7 @@ const CHIP_LABEL: Record<ListChip, string> = { all: 'All', 'needs-you': 'Needs y
  * the deck draws, as a table a person can scan, filter and search — and the only place a session on a ticket off the board, or one that has ended, is a row.
  *
  * **It draws what `lib/jira-list.ts` derived** — which sessions are in scope, which ended rows the window hides, the counts and both orders — and holds no
- * copy of any. The page hands in the loaded list's `issues`, the band's search text and the fold's `childrenOf`; everything else it reads from the shell
+ * copy of any. The page hands in the loaded list's `issues`, the band's search text and the lanes' `childrenOf`; everything else it reads from the shell
  * (`useJiraContext`: the Starting reservations, the skills, the site) and from the ONE sessions answer (`useJiraSessionsContext` — this view starts no poll of
  * its own, so the List, the deck and `Run ▾` can never disagree for a tick). The List's own filters are `hooks/useJiraListFilters`'s, shared with the rail
  * badge (C4), which sets `needs-you` and All tickets from outside the page.
@@ -52,8 +52,8 @@ const CHIP_LABEL: Record<ListChip, string> = { all: 'All', 'needs-you': 'Needs y
  * All tickets toggle that widens the scope from the picked board's tickets to every linked one.
  *
  * **The row.** State · Ticket · Run · Repo and branch · Where · Model · Context · Started · For · Open. The ticket cell is the type glyph, the key and the
- * summary as a button that opens Detail (§8.9.2) — with the fold's `childrenOf` for a ticket on the board, and none for one drawn from its link's snapshot,
- * which has no fold to hand the Children tree. A row in scope only as the parent of a board sub-task (`row.via`, `lib/jira-list.ts`) adds `· via <SUB-TASK>`
+ * summary as a button that opens Detail (§8.9.2) — with the lanes' `childrenOf` for a ticket on the board, and none for one drawn from its link's snapshot,
+ * which has no lanes to hand the Children tree. A row in scope only as the parent of a board sub-task (`row.via`, `lib/jira-list.ts`) adds `· via <SUB-TASK>`
  * after its key in `jira-list-mark`'s quiet ink, so the person sees why their parent-story session sits on a board that does not hold the story.
  * **The whole row opens Detail too** (`rowOpens`): a summary-only target read as plain text until hovered, so
  * nobody found it. The summary button stays the keyboard's way in — a `tr` takes no focus — and a click on any control inside the row (`Open`, `Reopen`,

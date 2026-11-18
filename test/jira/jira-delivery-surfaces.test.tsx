@@ -219,15 +219,14 @@ describe('the review chip (CodeRabbit spec §5.3, variant X)', () => {
 });
 
 describe('the deck card’s MR chip', () => {
-  it('reads the session’s own ticket — a folded child’s MR, not its top’s', () => {
-    const top = issue('TIMIFY-100');
+  it('reads the session’s own ticket — a child’s MR, not its parent’s', () => {
     const child = sub('TIMIFY-131', 'TIMIFY-100');
     const entry: DeckEntry = {
       id: 'TIMIFY-131',
       state: 'starting',
       group: 'other',
       issue: child,
-      top,
+      parent: child.parent,
       link: null,
       starting: { name: 'timify-131', sessionId: null, startedAt: ago(1), repo: '/r/timify', starting: true },
       startedAt: ago(1),

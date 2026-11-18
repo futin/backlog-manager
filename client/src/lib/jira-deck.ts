@@ -1,16 +1,16 @@
 import { needsYou, type JiraSessionState } from '../../../shared/jira-sessions';
-import type { JiraIssue, JiraLiveSession, JiraSessionsPayload } from '../../../shared/types';
-import { repoBasename, type JiraFold } from './jira';
+import type { JiraIssue, JiraLiveSession, JiraParentRef, JiraSessionsPayload } from '../../../shared/types';
+import { repoBasename, type JiraLanes } from './jira';
 import { runLabel, surfaceWord, type SessionLink } from './jira-sessions';
 import { pollAge } from './tracker';
 
 /**
- * jira-deck.ts — what the Board view draws from the fold, the lanes and the sessions payload: the agent deck above the lanes, and each lane card's session
+ * jira-deck.ts — what the Board view draws from the lanes and the sessions payload: the agent deck above the lanes, and each lane card's session
  * reading (Jira sessions spec §7.1; parent-lanes spec §3.4; DESIGN.md §8.9.1). Pure, and the one home of these derivations — `JiraBoardView` memoises them
  * and the components draw what they return, so no component holds a copy of "which session a card leads with" or "which card comes first".
  *
- * **The deck is the live sessions on this board, one card each.** A session counts for a board when its key is on that board's LOADED list — a top or anything
- * folded under one — so a ticket two boards both hold shows its card on each of them (the controller's ruling), and a session on a ticket off every loaded
+ * **The deck is the live sessions on this board, one card each.** A session counts for a board when its key is on that board's LOADED list — at any lane
+ * depth, a parent's own card as much as a child's — so a ticket two boards both hold shows its card on each of them (the controller's ruling), and a session on a ticket off every loaded
  * list shows on no board (the Sessions page is where it lives). `starting` never comes from `GET /api/jira/sessions`: a reservation has no link until the dashboard
  * answers, so a Starting card is built from the status's `live[key]` entry (`JiraStartingCard`'s and Detail's approach); Lost contact IS in the payload, as the
  * state the server derived.
@@ -32,16 +32,20 @@ export function deckGroup(state: JiraSessionState): DeckGroup {
   return 'other';
 }
 
-/** One card of the deck: a live session, the ticket it runs on, and the top issue that ticket is drawn under. */
+/** One card of the deck: a live session, the ticket it runs on, and the parent that ticket's lane names. */
 export interface DeckEntry {
   /** Stable between polls — the session's id, or the key for a reservation, which has none yet. */
   id: string;
   state: JiraSessionState;
   group: DeckGroup;
-  /** The ticket the session runs on — the top itself, or an issue folded under it. */
+  /** The ticket the session runs on — any issue on the loaded list, at any lane depth. */
   issue: JiraIssue;
-  /** The top issue `issue` folds into (`issue` itself when it is a top). A card whose `issue` is not its `top` names the top in its crumb. */
-  top: JiraIssue;
+  /**
+   * `issue`'s DIRECT parent as the lanes keep it (`JiraLanes.parentOf`, parent-lanes spec §5) — on the board or off it, since an off-board parent still heads
+   * a lane — and `null` for an issue with no parent or a cycle member, whose link the walk drops. A card with one names it as `↳ <KEY>`; the topmost ancestor
+   * is not named, because the lane the card sits in is the direct parent's.
+   */
+  parent: JiraParentRef | null;
   /** `null` while the Run is only a reservation (`starting`). */
   link: SessionLink | null;
   /** The reservation's own record when `link` is `null` — it carries the name and repo the card can say. */
@@ -68,23 +72,27 @@ export function deckOrder(a: { group: DeckGroup; startedAt: string; id: string }
  * Every live session whose ticket is on the loaded list, ordered for the deck: group first (Needs you, Working, Quiet, Starting/Lost), then newest start
  * first within the group, then by id so two equal instants never swap between polls. An ended link is not live; a reservation whose key is off the list is
  * not this board's.
+ *
+ * `parentOf` is the same input's `laneBoard(issues).parentOf` — the caller already holds the lanes, and taking the walk's answer rather than reading
+ * `issue.parent` here is what keeps a cycle member's card from naming a parent the lanes did not draw it under.
  */
-export function boardAgents(fold: JiraFold, payload: JiraSessionsPayload | null, live: Readonly<Record<string, JiraLiveSession>>): DeckEntry[] {
-  const on = new Map<string, { issue: JiraIssue; top: JiraIssue }>();
-  for (const top of fold.tops) {
-    on.set(top.key, { issue: top, top });
-    for (const under of fold.under.get(top.key) ?? []) on.set(under.key, { issue: under, top });
-  }
+export function boardAgents(
+  issues: readonly JiraIssue[],
+  parentOf: JiraLanes['parentOf'],
+  payload: JiraSessionsPayload | null,
+  live: Readonly<Record<string, JiraLiveSession>>
+): DeckEntry[] {
+  const on = new Map(issues.map((issue) => [issue.key, { issue, parent: parentOf.get(issue.key) ?? null }] as const));
   return liveEntries(on, payload, live);
 }
 
 /**
- * The one reading of "which sessions are live on these tickets", shared by the deck (`boardAgents`, over a board's fold) and Detail (`childSessions`, over a
+ * The one reading of "which sessions are live on these tickets", shared by the deck (`boardAgents`, over a board's loaded list) and Detail (`childSessions`, over a
  * ticket's Children tree), so the two can never disagree on what counts as live: a linked session that has not ended, or a `starting` reservation from the
- * status. `on` maps each ticket key to the issue and the top it is drawn under; a key not in it is not this caller's. Sorted in `deckOrder`.
+ * status. `on` maps each ticket key to the issue and the parent its card names; a key not in it is not this caller's. Sorted in `deckOrder`.
  */
 function liveEntries(
-  on: ReadonlyMap<string, { issue: JiraIssue; top: JiraIssue }>,
+  on: ReadonlyMap<string, { issue: JiraIssue; parent: JiraParentRef | null }>,
   payload: JiraSessionsPayload | null,
   live: Readonly<Record<string, JiraLiveSession>>
 ): DeckEntry[] {
@@ -125,62 +133,17 @@ function liveEntries(
 /**
  * Detail's reading of the sessions under a ticket (DESIGN.md §8.9.2): for each of `issues` — the Children tree's rows, at any depth — that has a live
  * session, the one the deck would lead that ticket with, in `deckOrder`. One entry per issue, not per session: a Children row wears one state pill, and the
- * Agent pane's `on a child` line names the first entry and counts the rest. Each entry's `top` is its own issue — a Children row is not a fold, and nothing here
- * draws a `↳` crumb.
+ * Agent pane's `on a child` line names the first entry and counts the rest. Each entry's `parent` is `null` — the tree already places the row under its
+ * parent, and nothing here draws a `↳` crumb.
  */
 export function childSessions(
   issues: readonly JiraIssue[],
   payload: JiraSessionsPayload | null,
   live: Readonly<Record<string, JiraLiveSession>>
 ): DeckEntry[] {
-  const on = new Map(issues.map((issue) => [issue.key, { issue, top: issue }] as const));
+  const on = new Map(issues.map((issue) => [issue.key, { issue, parent: null }] as const));
   const seen = new Set<string>();
   return liveEntries(on, payload, live).filter((e) => !seen.has(e.issue.key) && (seen.add(e.issue.key), true));
-}
-
-/** One List Session cell (`topSessionCell`). */
-export interface TopSessionCell {
-  state: JiraSessionState;
-  since: string;
-  /** The folded ticket the cell's session runs on, or `null` when it runs on the top itself — the cell's `↳ <key>` pill. */
-  on: string | null;
-  /** How many OTHER live sessions the card carries (on the top or anything folded under it) — the cell's `+N`. Always 0 for an ended cell. */
-  more: number;
-}
-
-/**
- * The List's Session cell: per top, the session the deck leads that card with, else the newest one that ENDED on it. A live entry is the FIRST one
- * `boardAgents` returned for the top — those are already in `deckOrder` (group, newest start, id), so this adds no ordering of its own: a card with `needs you`
- * on a child and `working` on itself reads `needs you` in both places — and its `since` is the entry's own. With none live, the newest ended link (`endedAt`)
- * on the top or on any issue folded under it reads `ended`, `since` = that `endedAt`; a live session always wins, so a cell never says both. A top with
- * neither has no key.
- *
- * `on` names the folded ticket the cell's session ran on when it is not the top — the row is the top's, so without it a `Working` cell on an epic whose
- * sub-task is the one being worked reads as if the epic were, and opening the epic shows `No session on this ticket`. `more` counts the card's other live
- * sessions, so a cell that names one of two never reads as the only one.
- */
-export function topSessionCell(agents: readonly DeckEntry[], links: readonly SessionLink[], fold: JiraFold): Map<string, TopSessionCell> {
-  const out = new Map<string, TopSessionCell>();
-  for (const e of agents) {
-    const cur = out.get(e.top.key);
-    if (cur !== undefined) cur.more += 1;
-    else out.set(e.top.key, { state: e.state, since: e.since, on: e.issue.key === e.top.key ? null : e.issue.key, more: 0 });
-  }
-  const topOf = new Map<string, string>();
-  for (const top of fold.tops) {
-    topOf.set(top.key, top.key);
-    for (const under of fold.under.get(top.key) ?? []) topOf.set(under.key, top.key);
-  }
-  const newest = new Map<string, { since: string; key: string }>();
-  for (const l of links) {
-    if (l.endedAt === null) continue;
-    const top = topOf.get(l.key);
-    if (top === undefined || out.has(top)) continue;
-    const cur = newest.get(top);
-    if (cur === undefined || ms(l.endedAt) > ms(cur.since)) newest.set(top, { since: l.endedAt, key: l.key });
-  }
-  for (const [top, { since, key }] of newest) out.set(top, { state: 'ended', since, on: key === top ? null : key, more: 0 });
-  return out;
 }
 
 /** The header's tally: how many cards want a person and how many are working — the two numbers a glance at the deck is for. */
@@ -189,13 +152,13 @@ export function deckTally(entries: readonly DeckEntry[]): { needs: number; worki
 }
 
 /**
- * The crumb on a deck card (§7.1): `run · repo · surface · model`, ellipsised on the right of the head. A session on a ticket folded under a top leads with
- * `↳ <top key>` — the card shows the session's own key, and this is what says which card of the board it hangs under. A reservation knows only its name and
- * repo, so the surface and the model are absent rather than guessed.
+ * The crumb on a deck card (§7.1): `run · repo · surface · model`, ellipsised on the right of the head. A session on a ticket with a parent leads with
+ * `↳ <parent key>` (parent-lanes spec §5) — the card shows the session's own key, and this is what says which lane of the board it sits in, on the board
+ * or off it. A reservation knows only its name and repo, so the surface and the model are absent rather than guessed.
  */
 export function deckCrumb(entry: DeckEntry, skills: readonly { id: string; name: string }[], opts: { lead?: boolean } = {}): string {
-  // `lead: false` leaves the `↳ top` out: the deck card draws it as a pill beside the key and keeps the crumb to the run's own words.
-  const parts: (string | null)[] = [opts.lead === false || entry.issue.key === entry.top.key ? null : `↳ ${entry.top.key}`];
+  // `lead: false` leaves the `↳ parent` out: the deck card draws it as a pill beside the key and keeps the crumb to the run's own words.
+  const parts: (string | null)[] = [opts.lead === false || entry.parent === null ? null : `↳ ${entry.parent.key}`];
   const { link, starting } = entry;
   if (link !== null) {
     const row = link.row;

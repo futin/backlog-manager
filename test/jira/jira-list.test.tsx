@@ -526,6 +526,43 @@ describe('the Sessions page', () => {
     expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
   });
 
+  /*
+    The band's `M parents` is `bandSub`'s, one function for both pages (parent-lanes spec §1.5, §6.1): PAY-140 sits under on-board PAY-120 and PAY-131
+    under off-board PAY-99 — two lanes with a parent behind them — and PAY-141 under PAY-140 makes PAY-140 a nested header, a third. Detail opened from a
+    row gets the lanes' `childrenOf`, so its Children tree hangs PAY-141 under the PAY-140 the fresh read returned.
+  */
+  const withParents = (): JiraIssue[] => [
+    ISSUES['PAY-120'],
+    { ...ISSUES['PAY-140'], parent: { key: 'PAY-120', summary: 'Refund flows', type: null, status: null } },
+    { ...issue('PAY-141', 'Receipt font fallback'), parent: { key: 'PAY-140', summary: 'Currency symbol missing on receipts', type: null, status: null } },
+    { ...ISSUES['PAY-131'], parent: { key: 'PAY-99', summary: 'Payments platform', type: null, status: null } },
+    ISSUES['PAY-151']
+  ];
+
+  it('the band reads `M parents` over the loaded list, as the Board page does', async () => {
+    lists[ALPHA.id] = withParents();
+    await renderList();
+    await waitFor(() => expect(document.querySelectorAll('.jira-band-sub')[1]?.textContent).toMatch(/^acme\.atlassian\.net · 5 issues from 1 query · 3 parents · polled /));
+  });
+
+  it('a row’s Detail still gets the lanes’ children: a grandchild on the board hangs under the child the read returned', async () => {
+    lists[ALPHA.id] = withParents();
+    links = [link({ key: 'PAY-120', id: 'w1', state: 'working', startedAt: hoursAgo(1) })];
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === '/api/jira/issue/PAY-120'
+        ? ok({ ...ISSUES['PAY-120'], description: '', children: [withParents()[1]], transitions: [], boards: [], session: null })
+        : base(input, init)
+    ) as unknown as typeof fetch;
+    await renderList();
+    await waitFor(() => expect(rowTags()).toEqual(['PAY-120:working']));
+    await userEvent.click(within(screen.getByRole('row', { name: 'Session on PAY-120' })).getByRole('button', { name: 'Refund flows' }));
+    const dialog = await screen.findByRole('dialog', { name: /^PAY-120 / });
+    await within(dialog).findByRole('heading', { name: 'Children' });
+    const tree = Array.from(dialog.querySelectorAll<HTMLElement>('.jira-tree > li')).map((li) => `${li.querySelector('.jira-tree-key')?.textContent}/${li.dataset.depth}`);
+    expect(tree).toEqual(['PAY-140/0', 'PAY-141/1']);
+  });
+
   it('with All tickets off and no boards, draws the bar and `No boards yet` with an Open Setup chip — and All tickets on draws the off-board rows', async () => {
     statusAnswer = status({ boards: [] });
     links = [link({ key: 'OFFBOARD-9', id: 'o1', state: 'working', startedAt: hoursAgo(1), summary: 'Off board thing' })];

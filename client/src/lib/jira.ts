@@ -145,8 +145,8 @@ export function sortForBoard(issues: readonly JiraIssue[]): JiraIssue[] {
 }
 
 /**
- * An issue's `updated` as epoch ms, an unparseable stamp as 0 (the oldest) — shared by `sortForBoard`, `sortTops` and `laneBoard`'s lane stamp, so none
- * of them can age a stamp a second way.
+ * An issue's `updated` as epoch ms, an unparseable stamp as 0 (the oldest) — shared by `sortForBoard` and `laneBoard`'s lane stamp, so neither can age a
+ * stamp a second way.
  */
 const updatedMs = (i: JiraIssue): number => {
   const t = Date.parse(i.updated);
@@ -232,52 +232,13 @@ export function initialsOf(name: string): string {
   return letters.length === 0 ? '?' : letters.join('');
 }
 
-// ── The fold ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── The parent walk ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The on-board parent → direct-children index the fold builds (grouped-board spec §3), read by the issue modal's tree for whichever issue it shows.
- * `ReadonlyMap` where the spec writes `Map`: no reader may write the fold, and the type says so.
+ * The on-board parent → direct-children index the parent walk builds (parent-lanes spec §1.5), read by the issue modal's tree for whichever issue it shows
+ * and by Detail's `childSessions`. `ReadonlyMap` where the spec writes `Map`: no reader may write it, and the type says so.
  */
 export type JiraChildrenIndex = ReadonlyMap<string, readonly JiraIssue[]>;
-
-/**
- * The board as cards (grouped-board spec §3): `tops` are the issues drawn as cards, in the input list's order (`sortTops` orders them, per column);
- * `under` holds, per top key, every issue folded under it at any depth; `childrenOf` is the fold's own parent → direct-children edges. Both maps are SPARSE
- * — a key with nothing under it has no entry, and readers use `?? []` — and every list in them is in `sortForBoard` order.
- */
-export interface JiraFold {
-  tops: JiraIssue[];
-  under: ReadonlyMap<string, readonly JiraIssue[]>;
-  childrenOf: JiraChildrenIndex;
-}
-
-/**
- * Every on-board descendant folds into its TOPMOST on-board ancestor (G-A, grouped-board spec §3). The walk is `walkParents`, the ONE walk of the parent
- * chain in the client, which `laneBoard` reads too — the board, the band count, the filters and the modal tree all read its result, and none of them
- * follows `parent.key` upward on its own (§8 anti-goal), because two walks are two answers to "which card is this issue on" the first time they disagree
- * about an edge case.
- *
- * `top(X)` is X when X has no parent, when its parent is not in this list (off the board: dropped by the 14-day Done window, cut by the 500 cap, or never
- * fetched — "on the board" means the loaded list, exactly), or when the walk up from X comes back to X; otherwise it is `top(parent(X))`. Jira has no
- * cycles, but this list is our own cache, and a malformed one must not hang the page: a cycle's members are each their own top, drawn side by side, and
- * anything hanging off a cycle folds under the first cycle member its walk meets. Memoised per key, so the whole list costs one pass.
- *
- * `childrenOf` holds only FOLD edges — a non-top issue under the parent it folded through — so a top is nobody's child and the index is acyclic by
- * construction; the modal's tree recurses it with no guard of its own beyond the "each key once" set it keeps for reparents. The input is the poller's
- * cache copy and is never mutated.
- */
-export function foldBoard(issues: readonly JiraIssue[]): JiraFold {
-  const { topOf, childrenOf } = walkParents(issues);
-  const tops: JiraIssue[] = [];
-  const under = new Map<string, JiraIssue[]>();
-  for (const i of issues) {
-    // Every key was resolved by the walk; the fallback only keeps an impossible miss from dropping a card.
-    const top = topOf.get(i.key) ?? i.key;
-    if (top === i.key) tops.push(i);
-    else pushTo(under, top, i);
-  }
-  return { tops, under: sortedLists(under), childrenOf };
-}
 
 /** Append `i` to `m`'s list at `k`, creating it — the sparse-map shape every index in this section has. */
 const pushTo = (m: Map<string, JiraIssue[]>, k: string, i: JiraIssue): void => {
@@ -289,12 +250,19 @@ const pushTo = (m: Map<string, JiraIssue[]>, k: string, i: JiraIssue): void => {
 const sortedLists = (m: Map<string, JiraIssue[]>): Map<string, JiraIssue[]> => new Map([...m].map(([k, v]) => [k, sortForBoard(v)]));
 
 /**
- * The ONE walk of the parent chain in the client, which `foldBoard` and `laneBoard` both read (parent-lanes spec §1.4, §1.5): two walks would be two
- * answers to "is this issue in a cycle" the first time they disagreed about an edge case, and the fold and the lanes must hand Detail the same tree.
+ * The ONE walk of the parent chain in the client, which `laneBoard` reads (parent-lanes spec §1.4, §1.5) — the lanes, the band count, the filters, the deck
+ * and the modal tree all read its result, and none of them follows `parent.key` upward on its own, because two walks are two answers to "is this issue in
+ * a cycle" the first time they disagree about an edge case.
  *
- * `topOf` maps every key to its topmost on-board ancestor, as `foldBoard`'s doc comment states it. `parentOf` is the parent link the walk KEEPS for every
- * key: the issue's own `parent` — on the board or off it — except for a cycle member, whose link is dropped (`null`, the same as no parent at all), so
- * every reader that names a parent names one the lanes actually drew it under. `childrenOf` holds only the kept edges whose parent is on the board.
+ * `topOf` maps every key to its topmost on-board ancestor: X itself when X has no parent, when its parent is not in this list (off the board: dropped by the
+ * 14-day Done window, cut by the 500 cap, or never fetched — "on the board" means the loaded list, exactly), or when the walk up from X comes back to X;
+ * otherwise `topOf(parent(X))`. Jira has no cycles, but this list is our own cache, and a malformed one must not hang the page: a cycle's members are each
+ * their own top, and anything hanging off a cycle reaches the first cycle member its walk meets. Memoised per key, so the whole list costs one pass.
+ *
+ * `parentOf` is the parent link the walk KEEPS for every key: the issue's own `parent` — on the board or off it — except for a cycle member, whose link is
+ * dropped (`null`, the same as no parent at all), so every reader that names a parent names one the lanes actually drew it under. `childrenOf` holds only
+ * the kept edges whose parent is on the board, so it is acyclic by construction and the modal's tree recurses it with no guard of its own beyond the "each
+ * key once" set it keeps for reparents. The input is the poller's cache copy and is never mutated.
  *
  * A key is a cycle member exactly when its parent is on the board and the walk still made it its own top: an issue with an on-board parent is otherwise
  * never its own top, because the walk only stops at a node with no on-board parent or at a loop.
@@ -352,37 +320,6 @@ function walkParents(issues: readonly JiraIssue[]): {
   return { topOf, parentOf, childrenOf: sortedLists(childrenOf) };
 }
 
-/**
- * The tops' order within a column (grouped-board spec §3, Sort): the newest `updated` across the top AND everything folded under it, descending, with
- * `sortForBoard`'s key tie-break. Activity on a child therefore lifts its parent — the flat board sorted by the issue's own stamp, and a parent whose
- * subtasks are being worked would otherwise sink. The sort key is never drawn: the card's age stays the top's own (`cardAgeStamp`). Returns a new array.
- */
-export function sortTops(tops: readonly JiraIssue[], under: JiraFold['under']): JiraIssue[] {
-  const newest = new Map(tops.map((t) => [t.key, stampMs(rolledUpdated(t, under))] as const));
-  const at = (t: JiraIssue): number => newest.get(t.key) ?? updatedMs(t);
-  return [...tops].sort((a, b) => at(b) - at(a) || byKey(a, b));
-}
-
-const stampMs = (iso: string | null): number => (iso === null ? 0 : Date.parse(iso));
-
-/**
- * The newest parseable `updated` across a top and everything folded under it (`under.get(top.key)`), as the ISO string the issue carried — the value
- * `sortTops` ranks by, exported so the List's Updated column prints the very stamp the row was sorted on (a column that read the top's own `updated` would
- * show `5d` on a row the sort lifted for work done today). `null` when no stamp parses: the sort treats that as the oldest and the cell draws nothing.
- */
-export function rolledUpdated(top: JiraIssue, under: JiraFold['under']): string | null {
-  let best: string | null = null;
-  let bestMs = 0;
-  for (const i of [top, ...(under.get(top.key) ?? [])]) {
-    const t = Date.parse(i.updated);
-    if (!Number.isNaN(t) && (best === null || t > bestMs)) {
-      best = i.updated;
-      bestMs = t;
-    }
-  }
-  return best;
-}
-
 /** How far along the issues under a card are, by column — `columnOf`'s three buckets, so the bar can never disagree with the columns. */
 export interface JiraProgress {
   done: number;
@@ -394,41 +331,6 @@ export function foldProgress(issues: readonly JiraIssue[]): JiraProgress {
   const p: JiraProgress = { done: 0, doing: 0, todo: 0 };
   for (const i of issues) p[columnOf(i)] += 1;
   return p;
-}
-
-/**
- * Everything a card's fold block draws (grouped-board spec §4): the `C children · D below them` line, the spread and its caption. `null` for a top with
- * nothing folded under it, which draws no block at all — its Jira subtask count is not this board's business.
- */
-export function cardFold(topKey: string, fold: JiraFold): { line: string; progress: JiraProgress; caption: string } | null {
-  const all = fold.under.get(topKey);
-  if (all === undefined || all.length === 0) return null;
-  const direct = (fold.childrenOf.get(topKey) ?? []).length;
-  const progress = foldProgress(all);
-  const line = childrenLine(direct, all.length - direct);
-  const caption = progressLine(progress);
-  // An issue under the top means a chain that ends in a direct child of it (so `direct > 0`), and every issue lands in a bucket (so the sum is not
-  // zero): both are non-null here. The guard is that reasoning made checkable, not a case that can happen.
-  if (line === null || caption === null) return null;
-  return { line, progress, caption };
-}
-
-/**
- * The tops a filter shows (F1, grouped-board spec §5): a top is shown when IT matches — with no ring keys, because a card that matches needs no "why is this
- * here" — or, failing that, when any issue folded under it matches, carrying those keys in `under`'s order for the ring's marker. A top with neither is
- * absent. `keep` is the board's `matchesBoardFilters` per issue, unchanged, so a filter means the same thing folded or not.
- */
-export function foldMatches(fold: JiraFold, keep: (issue: JiraIssue) => boolean): Map<string, string[]> {
-  const shown = new Map<string, string[]>();
-  for (const top of fold.tops) {
-    if (keep(top)) {
-      shown.set(top.key, []);
-      continue;
-    }
-    const hits = (fold.under.get(top.key) ?? []).filter(keep).map((i) => i.key);
-    if (hits.length > 0) shown.set(top.key, hits);
-  }
-  return shown;
 }
 
 /** One row of the issue modal's Children tree: the issue, and how deep it sits (0 for a direct child). */
@@ -496,7 +398,7 @@ export interface JiraLane {
 }
 
 /**
- * The lane model: the root lanes in drawing order, the fold's `childrenOf` index for the same input (§1.5 — Detail's tree, `modalTree` and
+ * The lane model: the root lanes in drawing order, the walk's `childrenOf` index for the same input (§1.5 — Detail's tree, `modalTree` and
  * `childSessions` read it), and every on-board key's KEPT parent (§1.4), which the crumb, the `↳` chip and the deck read instead of the raw field.
  */
 export interface JiraLanes {
@@ -719,7 +621,7 @@ export function setLaneFold(folds: JiraLaneFolds, boardId: string, board: JiraLa
 // ── Sentences ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** `1 root`, `2 roots`; `queries` is the one plural that is not the noun plus `s`. */
-const count = (n: number, noun: 'root' | 'query' | 'issue' | 'card'): string => `${n} ${n === 1 ? noun : noun === 'query' ? 'queries' : `${noun}s`}`;
+const count = (n: number, noun: 'root' | 'query' | 'issue' | 'parent'): string => `${n} ${n === 1 ? noun : noun === 'query' ? 'queries' : `${noun}s`}`;
 
 /** The same, or `null` for zero, which every sentence below omits rather than print. */
 const countOrNull = (n: number, noun: 'root' | 'query' | 'issue'): string | null => (n > 0 ? count(n, noun) : null);
@@ -745,26 +647,6 @@ export function laneCountText(n: number): string {
  */
 export function browseUrl(site: string, key: string): string | null {
   return site === '' ? null : `https://${site}/browse/${key}`;
-}
-
-/**
- * The fold block's first line (grouped-board spec §4, the mock's wording): `C children · D below them`, where C is the direct children on the board and D
- * everything deeper; `C children` (`1 child`) when nothing is deeper. `null` with no direct child, which draws no block.
- */
-export function childrenLine(direct: number, deeper: number): string | null {
-  if (direct === 0) return null;
-  const head = `${direct} ${direct === 1 ? 'child' : 'children'}`;
-  return deeper > 0 ? `${head} · ${deeper} below them` : head;
-}
-
-/**
- * The F1 ring's marker (grouped-board spec §5): `1 match: PAY-162` names the one folded match in the word itself; past one the word is `N matches` and the
- * keys go to the marker's `title`, since a card cannot hold a list. `null` for no match — a top that matches on its own draws no marker.
- */
-export function matchMarker(keys: readonly string[]): { word: string; title: string | undefined } | null {
-  if (keys.length === 0) return null;
-  if (keys.length === 1) return { word: `1 match: ${keys[0]}`, title: undefined };
-  return { word: `${keys.length} matches`, title: keys.join(', ') };
 }
 
 /**
@@ -795,22 +677,23 @@ export function failurePhrase(failures: readonly JiraBoardFailure[]): string | n
  * when there are several) — a partial list must never read as a whole one, and Jira's sentence ("Field 'foo' does not exist") is the one a person can act
  * on. A truncated list ends on the cap, always last, so it is never mistaken for the whole of the board either.
  *
- * `fold` is the loaded list's two numbers (grouped-board spec §4): its length and its tops, both UNFILTERED. With it, the issue count is the list's own
- * rather than the status poll's `board.count` — a different poller that can disagree with the list for one interval, and a line that says "17 issues · 5
- * cards" has to count one list — and an `M cards` part follows the sources whenever something folds (`1 card` in the singular). `null` means the list has
- * not loaded, and reads today's line from `board.count`, with no cards part. Required, with no default, for `now`'s reason: a default is how the next call
- * site forgets it.
+ * `counts` is the loaded list's two numbers (parent-lanes spec §6.1): its length and `laneParents` — the lanes with a parent behind them, `No parent` not
+ * counted — both UNFILTERED, since the band describes the board and not the view. With it, the issue count is the list's own rather than the status
+ * poll's `board.count` — a different poller that can disagree with the list for one interval, and a line that says "16 issues · 8 parents" has to count
+ * one list — and an `M parents` part follows the sources whenever there is a parent to count (`1 parent` in the singular). `null` means the list has not
+ * loaded, and reads today's line from `board.count`, with no parents part. Required, with no default, for `now`'s reason: a default is how the next call
+ * site forgets it. The Board and the Sessions page both read it, so the two bands cannot count one board two ways.
  */
 export function bandSub(
   board: JiraBoardStatus,
   site: string,
   now: number,
-  fold: { issues: number; cards: number } | null
+  counts: { issues: number; parents: number } | null
 ): { text: string; failing: boolean } {
   const sources = [countOrNull(board.roots.length, 'root'), countOrNull(board.queries.length, 'query')].filter((s): s is string => s !== null);
-  const issues = fold === null ? board.count : fold.issues;
+  const issues = counts === null ? board.count : counts.issues;
   const parts = [site, `${count(issues, 'issue')}${sources.length > 0 ? ` from ${sources.join(' and ')}` : ''}`];
-  if (fold !== null && fold.cards < fold.issues) parts.push(count(fold.cards, 'card'));
+  if (counts !== null && counts.parents > 0) parts.push(count(counts.parents, 'parent'));
   parts.push(polledPhrase(board.polledAt, now));
   const failure = failurePhrase(board.failures);
   if (failure !== null) parts.push(failure);

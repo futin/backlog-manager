@@ -8,8 +8,8 @@ import type { JiraBoardStatus } from '../../../../shared/types';
  * The band's sub-line on its own one-second clock: `polled 12 s ago` needs seconds, and ticking the whole page for it would re-render every card once a
  * second for a date that changes once a day. `.failing` is the red reading — the class rather than a colour on the text, so the theme owns the red.
  */
-export function JiraBandSub({ board, site, fold }: { board: JiraBoardStatus; site: string; fold: { issues: number; cards: number } | null }) {
+export function JiraBandSub({ board, site, counts }: { board: JiraBoardStatus; site: string; counts: { issues: number; parents: number } | null }) {
   const now = useNow(true, 1_000);
-  const sub = bandSub(board, site, now, fold);
+  const sub = bandSub(board, site, now, counts);
   return <span className={sub.failing ? 'jira-band-sub failing' : 'jira-band-sub'}>{sub.text}</span>;
 }
