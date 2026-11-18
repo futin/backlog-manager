@@ -14,7 +14,7 @@ import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
-import { foldBoard } from '../../client/src/lib/jira';
+import { laneBoard, laneViews } from '../../client/src/lib/jira';
 import type { DeckEntry } from '../../client/src/lib/jira-deck';
 import type { GitlabMr, GitlabReview, GitlabPayload, GitlabProjectView, GitlabStatus, JiraBoard, JiraIssue, JiraStatusPayload } from '../../shared/types';
 import { daysAgoStamp } from '../helpers/dates';
@@ -244,10 +244,24 @@ describe('the deck card’s MR chip', () => {
 });
 
 describe('the List’s Delivery column', () => {
-  function drawList(tops: JiraIssue[], data: GitlabPayload | null) {
+  /* The List as the page draws it — the loaded issues as lanes, nothing filtered, every lane open — without the page around it: the folds and the off-board
+     read are the page's hooks, so they are stood in for here; the Delivery cell reads neither. */
+  function drawList(issues: JiraIssue[], data: GitlabPayload | null) {
+    const lanes = laneBoard(issues);
     return shell(
       data,
-      <JiraIssueList tops={tops} fold={foldBoard(tops)} sessions={new Map()} now={now} filtered={false} onOpenIssue={jest.fn()} onRun={jest.fn()} />
+      <JiraIssueList
+        views={laneViews(lanes, () => true)}
+        folds={{ isOpen: () => true, toggle: () => {}, locked: false }}
+        sessions={new Map()}
+        parentOf={lanes.parentOf}
+        site="acme.atlassian.net"
+        read={{ reading: null, failed: null, ask: jest.fn() }}
+        now={now}
+        filtered={false}
+        onOpenIssue={jest.fn()}
+        onRun={jest.fn()}
+      />
     );
   }
   const headers = (): string[] => screen.getAllByRole('columnheader').map((h) => h.textContent || h.getAttribute('aria-label') || '');
@@ -304,6 +318,16 @@ describe('the List’s Delivery column', () => {
     expect(cell('PAY-120').textContent).toBe('');
   });
 
+  it('leaves an off-board header row’s Delivery cell empty, even when the parent’s own key has an MR — the row is a stub, not a read issue', () => {
+    const parent = { key: 'TIMIFY-1', summary: 'Platform epic', type: null, status: null };
+    drawList([issue('TIMIFY-123', { parent })], payload([mr({ keys: ['TIMIFY-1'] })]));
+    const row = document.querySelector('tr[data-lane="TIMIFY-1"]') as HTMLElement;
+    const at = headers().indexOf('Delivery');
+    expect(row.querySelectorAll('td')).toHaveLength(headers().length);
+    expect(row.querySelectorAll('td')[at].textContent).toBe('');
+    expect(cell('TIMIFY-123').textContent).toBe('no MR');
+  });
+
   it('draws no Delivery column while GitLab is unconfigured', () => {
     drawList([issue('TIMIFY-123')], payload([], {}, { state: 'unconfigured', armed: false }));
     expect(headers()).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Priority', 'Assignee', 'Sprint', 'Updated', 'Run']);
@@ -314,7 +338,8 @@ describe('the List’s Delivery column', () => {
     const tops = [issue('TIMIFY-123'), issue('TIMIFY-124'), issue('PAY-120')];
     drawList(tops, payload([], { TIMIFY: [{ ...MICRO, polledAt: null, failed: true }] }, { state: 'rejected', httpStatus: 401, user: null }));
     expect(headers()).toContain('Delivery');
-    expect(document.querySelectorAll('tbody tr')).toHaveLength(3);
+    // Three issue rows; the `No parent` header row above them is the lane's heading and has no key.
+    expect(document.querySelectorAll('tbody tr[data-key]')).toHaveLength(3);
     expect(cell('TIMIFY-123').textContent).toBe('—');
     expect(cell('TIMIFY-124').textContent).toBe('—');
     expect(cell('PAY-120').textContent).toBe('');

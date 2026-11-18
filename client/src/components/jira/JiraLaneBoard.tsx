@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 
-import { useLaneFolds } from '../../hooks/useLaneFolds';
-import { useOffBoardParent } from '../../hooks/useOffBoardParent';
+import type { LaneFoldState } from '../../hooks/useLaneFolds';
+import type { OffBoardRead } from '../../hooks/useOffBoardParent';
 import {
   JIRA_COLUMNS,
   LANE_INDENT_CAP,
@@ -36,9 +36,9 @@ const NO_ENDED: readonly SessionLink[] = [];
  * flat chip with `aria-expanded`. Which cells are open is this component's state, keyed `<lane key>:<column>`, lost on reload as the shelves' was; a key
  * whose lane has left the board is simply never read again.
  *
- * **Folds are `useLaneFolds`'** (§3.6), handed the UNFILTERED lanes so a toggle under a filter never prunes an override for a lane that is only hidden.
- * **The off-board read is `useOffBoardParent`'s**, one for the whole board, so the newest click on any off-board header is the only one that may open
- * Detail; `drawn` is the off-board lanes the filter leaves, read when an answer lands.
+ * **Folds are `useLaneFolds`'** (§3.6) and **the off-board read is `useOffBoardParent`'s**, both owned by the page (`JiraBoardView`) and handed in, because
+ * the List draws the same lanes with the same folds (§4.1): a fold made in either view is the other's, and the newest click on any off-board header, in
+ * either view, is the only one that may open Detail.
  *
  * Empty: the column header stays with its zeros and one line under it — the List's words, `No issues` for an empty loaded list and `No issues match`
  * when the filters hide everything.
@@ -46,8 +46,8 @@ const NO_ENDED: readonly SessionLink[] = [];
 export function JiraLaneBoard({
   views,
   lanes,
-  boardId,
-  searching,
+  folds,
+  read,
   total,
   cells,
   ended,
@@ -60,10 +60,10 @@ export function JiraLaneBoard({
   onRun
 }: {
   views: readonly JiraLaneView[];
-  /** The UNFILTERED lanes of the loaded list — the folds' prune and the kept parents (`parentOf`). */
+  /** The UNFILTERED lanes of the loaded list — the kept parents (`parentOf`). */
   lanes: JiraLanes;
-  boardId: string;
-  searching: boolean;
+  folds: LaneFoldState;
+  read: OffBoardRead;
   /** How many issues the loaded list holds — `No issues` at 0, `No issues match` otherwise. */
   total: number;
   cells: ReadonlyMap<string, SessionCell>;
@@ -76,10 +76,7 @@ export function JiraLaneBoard({
   onOpenIssue: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
-  const folds = useLaneFolds(boardId, lanes, searching);
   const counts = useMemo(() => laneColumnCounts(views), [views]);
-  const drawnOff = useMemo(() => new Set(views.filter((v) => v.lane.kind === 'off').map((v) => v.lane.key)), [views]);
-  const read = useOffBoardParent(onOpenIssue, drawnOff);
   const [openCells, setOpenCells] = useState<ReadonlySet<string>>(() => new Set());
   const isLive = (key: string): boolean => (cells.get(key)?.lead ?? null) !== null;
   const toggleCell = (id: string): void =>

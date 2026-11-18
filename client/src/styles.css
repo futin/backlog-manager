@@ -1869,6 +1869,19 @@ button.rail-count { cursor: pointer }
 /* The whole row opens the modal (`rowOpens`), so it wears the pointer and the session table's half-transparent hover fill. */
 .jira-issues-row { cursor: pointer }
 .jira-issues-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }
+/* A lane's header row (parent-lanes spec §4.2) sits on the page's own ground, so the eye finds the groups before it reads a cell; the hover fill above still
+   wins on an on-board header, which opens Detail like any row. An off-board or `No parent` header has no issue behind it and opens nothing on a row click. */
+.jira-issues-lane td { background-color: var(--board) }
+.jira-issues-lane[data-kind='off'], .jira-issues-lane[data-kind='none'] { cursor: default }
+.jira-issues-lane[data-kind='off']:hover td, .jira-issues-lane[data-kind='none']:hover td { background-color: var(--board) }
+/* The lane chevron is 28 px in a 44 px row; it pulls left into the cell's padding so the title lines up near where a card row's starts. */
+.jira-issues-summary .jira-lane-chev { margin-left: -6px }
+.jira-issues-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600 }
+/* Indent is padding inside the Key cell, never a column (spec §4.1): `data-depth` is the lane depth capped at LANE_INDENT_CAP (3). The step is 14 px, not the
+   Board's 24, because the Key column is a fixed 108 px and a twelve-character key must still mostly fit at the cap. */
+.jira-issues-row td.jira-issues-key[data-depth='1'] { padding-left: 26px }
+.jira-issues-row td.jira-issues-key[data-depth='2'] { padding-left: 40px }
+.jira-issues-row td.jira-issues-key[data-depth='3'] { padding-left: 54px }
 /* The box rounds at 12 px and clips nothing at wide widths, so the last row's hover fill would paint square past it: its corner cells round to the 11 px inside
    the 1 px border. The head's corners too, for a head that ever wears a fill. */
 .jira-issues-row:last-child td:first-child { border-bottom-left-radius: 11px }
@@ -1880,11 +1893,11 @@ button.rail-count { cursor: pointer }
 /* The session's reading is the word AND its age: the age is `flex: none` and only the word ellipsises. `white-space: pre` keeps the space before ` · ` that a flex item would otherwise drop at its line start. */
 .jira-issues-sess { display: flex; min-width: 0 }
 .jira-issues-age { flex: none; white-space: pre }
-/* The cell's second line, drawn only when the session runs on a folded ticket: that ticket's `FoldMark`, and `+N` for the card's other live sessions, which
-   never shrinks — the mark takes the ellipsis. Two lines in this one cell grow its row a little; every other row keeps the 44 px. */
-.jira-issues-stack { display: flex; flex-direction: column; gap: 3px; min-width: 0 }
-.jira-issues-on { display: flex; align-items: center; gap: 4px; min-width: 0 }
+/* `+N` for the key's other live sessions sits after the age and never shrinks — the state's word takes the ellipsis. */
 .jira-issues-more { flex: none; font-size: 11px; color: var(--ink3) }
+/* An off-board header row's Summary when its parent read failed: the line, then the failure sentence under it. Two lines grow that one row a little. */
+.jira-issues-stack { display: flex; flex-direction: column; gap: 3px; min-width: 0 }
+.jira-issues-stack .jira-modal-error { margin: 0; white-space: normal }
 .jira-issues-key a { color: var(--ink2); text-decoration: none }
 .jira-issues-key a:hover { text-decoration: underline }
 .jira-issues-title {
