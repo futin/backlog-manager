@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 
-import { JIRA_BOARD_KEY, foldBoard, pickBoard, type JiraFold } from '../lib/jira';
+import { JIRA_BOARD_KEY, foldBoard, laneBoard, pickBoard, type JiraFold, type JiraLanes } from '../lib/jira';
 import type { JiraBoardStatus } from '../../../shared/types';
 import { useJiraContext } from './JiraContext';
 import { useJiraBoard, type JiraBoardState } from './useJiraBoard';
@@ -14,6 +14,11 @@ export interface PickedJiraBoard {
   pick: (id: string) => void;
   list: JiraBoardState;
   fold: JiraFold;
+  /**
+   * The loaded list as parent lanes (parent-lanes spec §1) — the Board's model, built once here so every reader (the Board, the deck's crumbs, Detail's
+   * tree through `childrenOf`) reads one answer. Beside `fold` until the List and the Sessions page stop reading the fold.
+   */
+  lanes: JiraLanes;
   /** "The list has loaded" — the condition the columns are drawn under, read once so the band and the columns cannot disagree about it. */
   loaded: boolean;
   /** `board` with its `polledAt` advanced to the list's own when that is newer (the two pollers run one interval apart). */
@@ -38,10 +43,11 @@ export function usePickedJiraBoard(nudge: number): PickedJiraBoard {
   // The ONLY id a page ever asks the server about (the one stored pick).
   const list = useJiraBoard(board?.id ?? null, board?.interval ?? null, nudge);
   const fold = useMemo(() => foldBoard(list.issues), [list.issues]);
+  const lanes = useMemo(() => laneBoard(list.issues), [list.issues]);
   const loaded = !list.loading && !(list.error && list.issues.length === 0);
   const shown: JiraBoardStatus | null =
     board !== null && list.polledAt !== null && newer(list.polledAt, board.polledAt) ? { ...board, polledAt: list.polledAt } : board;
-  return { boards, board, unreadable, pick: setStored, list, fold, loaded, shown };
+  return { boards, board, unreadable, pick: setStored, list, fold, lanes, loaded, shown };
 }
 
 /** Whether stamp `a` is strictly later than `b` (an unparseable or absent `b` loses). */

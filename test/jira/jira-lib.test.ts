@@ -94,7 +94,7 @@ import { DELIVERY_FILTER_LABELS, effectiveDeliveryFilter } from '../../client/sr
 import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../../client/src/lib/jira';
 import { modelEffortFlags } from '../../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../../client/src/lib/jira-page';
-import { SHELF_LIMIT, boardAgents, boardShelves, childSessions, deckCrumb, deckGroup, deckTally, endedLine, topSessionCell } from '../../client/src/lib/jira-deck';
+import { boardAgents, childSessions, deckCrumb, deckGroup, deckTally, endedByKey, endedLine, sessionCells, topSessionCell } from '../../client/src/lib/jira-deck';
 import { elapsedSince, formatCreated } from '../../client/src/lib/item-age';
 import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraRepoRefs, JiraSessionsPayload, JiraSkill, JiraStatusPayload } from '../../shared/types';
 import { daysAgoStamp } from '../helpers/dates';
@@ -284,6 +284,13 @@ describe('crumbOf', () => {
 
   it('reads nothing for an issue that is none of those', () => {
     expect(crumbOf(issue({ key: 'PAY-4' }), b, me)).toBeNull();
+  });
+
+  // Parent-lanes spec §1.4: the crumb reads the parent the lane model KEPT. A cycle member's raw parent is ignored, so it reads `mine` when it is mine.
+  it('reads mine when the kept parent handed in is null, whatever the raw field says', () => {
+    const raw = issue({ key: 'PAY-5', parent: { key: 'PAY-6', summary: 'Cycle', type: null, status: null }, assignee: mine });
+    expect(crumbOf(raw, b, me, null)).toEqual({ kind: 'mine' });
+    expect(crumbOf(raw, b, me)).toEqual({ kind: 'parent', key: 'PAY-6', summary: 'Cycle' });
   });
 
   it('never reads mine while me is unknown', () => {
@@ -2294,37 +2301,57 @@ describe('lib/jira-deck', () => {
     });
   });
 
-  it('boardShelves takes a top with a live session on itself or a folded child off its shelf, and leaves the others', () => {
-    const agents = boardAgents(fold, answer([link('PAY-2', 'c', 'working', 2)]), {});
-    const shown = foldMatches(fold, () => true);
-    const shelves = boardShelves(fold, shown, agents, null);
-    expect(shelves.map((s) => s.slug)).toEqual(['todo', 'doing', 'done']);
-    expect(shelves[0].cards.map((c) => c.issue.key)).toEqual(['PAY-3']);
+  /*
+    The lane card's session cell (parent-lanes spec §3.4): keyed by the session's OWN issue — a card is one issue now, and nothing rolls up to a top. PAY-12 has
+    two live entries, the needs-you one first in `deckOrder`; PAY-13 one; PAY-14 only ended links; PAY-2 is a child whose session must not reach PAY-1.
+  */
+  describe('sessionCells', () => {
+    const lanesOf = [top, child, other, issue({ key: 'PAY-12' }), issue({ key: 'PAY-13' }), issue({ key: 'PAY-14' }), issue({ key: 'PAY-15' })];
+    const f = foldBoard(lanesOf);
+
+    it('leads a key with its first live entry in deckOrder, counts the rest as `more`, and gives each key its own entry', () => {
+      const agents = boardAgents(f, answer([link('PAY-12', 'w', 'working', 2), link('PAY-12', 'p', 'plan', 4), link('PAY-13', 'q', 'quiet', 1)]), {});
+      const cells = sessionCells(agents, []);
+      const twelve = cells.get('PAY-12');
+      expect(twelve?.state).toBe('plan');
+      expect(twelve?.since).toBe(hoursAgo(4));
+      expect(twelve?.more).toBe(1);
+      expect(twelve?.lead).toBe(agents[0]);
+      expect(twelve?.lead?.id).toBe('PAY-12:p');
+      expect(cells.get('PAY-13')).toEqual({ state: 'quiet', since: hoursAgo(1), more: 0, lead: agents.find((e) => e.id === 'PAY-13:q') });
+    });
+
+    it('reads `ended` with the newest endedAt for a key with ended links and none live', () => {
+      const one = link('PAY-14', 'a', 'ended', 9, { endedAt: hoursAgo(7) });
+      expect(sessionCells([], [one]).get('PAY-14')).toEqual({ state: 'ended', since: hoursAgo(7), more: 0, lead: null });
+      const newer = link('PAY-14', 'b', 'ended', 6, { endedAt: hoursAgo(3) });
+      expect(sessionCells([], [one, newer]).get('PAY-14')).toEqual({ state: 'ended', since: hoursAgo(3), more: 0, lead: null });
+    });
+
+    it('a live session wins over an ended one on the same key, and a key with neither has no entry', () => {
+      const agents = boardAgents(f, answer([link('PAY-13', 'q', 'quiet', 1)]), {});
+      const cells = sessionCells(agents, [link('PAY-13', 'z', 'ended', 9, { endedAt: hoursAgo(5) })]);
+      expect(cells.get('PAY-13')?.state).toBe('quiet');
+      expect(cells.has('PAY-15')).toBe(false);
+    });
+
+    it('a session on a child gives its parent’s key no entry', () => {
+      const agents = boardAgents(f, answer([link('PAY-2', 'c', 'working', 2)]), {});
+      const cells = sessionCells(agents, [link('PAY-2', 'd', 'ended', 9, { endedAt: hoursAgo(5) })]);
+      expect(cells.get('PAY-2')?.state).toBe('working');
+      expect(cells.has('PAY-1')).toBe(false);
+    });
   });
 
-  it('boardShelves applies the filter to the shelves while the deck exclusion stays independent of it', () => {
-    const agents = boardAgents(fold, answer([link('PAY-3', 'x', 'working', 1)]), {});
-    // A filter that keeps nothing: the live top is not resurrected, and the others are gone by the filter.
-    const none = boardShelves(fold, foldMatches(fold, () => false), agents, null);
-    expect(none.every((s) => s.cards.length === 0)).toBe(true);
-    // A filter that keeps only the live top: it stays off the shelves.
-    const onlyLive = boardShelves(fold, foldMatches(fold, (i) => i.key === 'PAY-3'), agents, null);
-    expect(onlyLive.every((s) => s.cards.length === 0)).toBe(true);
-  });
-
-  it('boardShelves hangs each top’s own ended sessions on its row, newest end first', () => {
-    const payload = answer([
-      link('PAY-3', 'o', 'ended', 9, { endedAt: hoursAgo(8) }),
-      link('PAY-3', 'n', 'ended', 5, { endedAt: hoursAgo(2) }),
-      link('PAY-2', 'f', 'ended', 5, { endedAt: hoursAgo(1) })
-    ]);
-    const shelves = boardShelves(fold, foldMatches(fold, () => true), [], payload);
-    const rows = Object.fromEntries(shelves[0].cards.map((c) => [c.issue.key, c.ended.map((l) => l.sessionId)]));
-    expect(rows).toEqual({ 'PAY-3': ['n', 'o'], 'PAY-1': [] });
-  });
-
-  it('SHELF_LIMIT is 8, 8 and 3', () => {
-    expect(SHELF_LIMIT).toEqual({ todo: 8, doing: 8, done: 3 });
+  it('endedByKey lists each key’s ended links newest end first, and leaves a live link out', () => {
+    const old = link('PAY-3', 'o', 'ended', 9, { endedAt: hoursAgo(8) });
+    const fresh = link('PAY-3', 'n', 'ended', 5, { endedAt: hoursAgo(2) });
+    const other = link('PAY-2', 'f', 'ended', 5, { endedAt: hoursAgo(1) });
+    const running = link('PAY-3', 'r', 'working', 1);
+    const byKey = endedByKey(answer([old, fresh, other, running]));
+    expect(byKey.get('PAY-3')?.map((l) => l.sessionId)).toEqual(['n', 'o']);
+    expect(byKey.get('PAY-2')?.map((l) => l.sessionId)).toEqual(['f']);
+    expect(endedByKey(null).size).toBe(0);
   });
 
   it('endedLine: nothing for none, a Reopen for one, `N sessions` for several', () => {

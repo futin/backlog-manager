@@ -14,7 +14,7 @@ import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
-import { cardFold, foldBoard } from '../../client/src/lib/jira';
+import { foldBoard } from '../../client/src/lib/jira';
 import type { DeckEntry } from '../../client/src/lib/jira-deck';
 import type { GitlabMr, GitlabReview, GitlabPayload, GitlabProjectView, GitlabStatus, JiraBoard, JiraIssue, JiraStatusPayload } from '../../shared/types';
 import { daysAgoStamp } from '../helpers/dates';
@@ -153,12 +153,11 @@ const OPEN_REVIEW: GitlabReview = {
 
 const BOARD: JiraBoard = { id: 'b1', name: 'Timify', roots: [], queries: [], interval: '5m' };
 
-/** One shelf card for `top`, folded over `board` (the whole board's issues) as the Board page folds it. */
-function drawCard(top: JiraIssue, data: GitlabPayload | null, board: JiraIssue[] = [top]) {
-  const fold = foldBoard(board);
+/** One lane card for `top` — no parent, no session, as a card in the `No parent` lane draws. */
+function drawCard(top: JiraIssue, data: GitlabPayload | null) {
   return shell(
     data,
-    <JiraCard issue={top} board={BOARD} me={null} now={now} fold={cardFold(top.key, fold)} matches={[]} ended={[]} trees={[]} onOpen={jest.fn()} onRun={jest.fn()} />
+    <JiraCard issue={top} board={BOARD} me={null} now={now} parent={null} session={null} ended={[]} trees={[]} onOpen={jest.fn()} onRun={jest.fn()} />
   );
 }
 
@@ -167,7 +166,7 @@ const chips = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElem
 
 afterEach(cleanup);
 
-describe('the shelf card’s MR chip', () => {
+describe('the lane card’s MR chip', () => {
   it('draws the lead MR in the marker row, before Run ▾', () => {
     drawCard(issue('TIMIFY-123'), payload([mr({ iid: 415, pipeline: 'failed' })]));
     const chip = within(markers()).getByText('!415 · ✕ pipeline failed');
@@ -196,10 +195,9 @@ describe('the shelf card’s MR chip', () => {
     expect(screen.queryByText(/no MR/)).toBeNull();
   });
 
-  it('draws nothing on a folded top whose child has an MR and the top none — the card is the top’s own', () => {
+  it('draws nothing on a parent whose child has an MR and the parent none — the chip is the issue’s own', () => {
     const top = issue('TIMIFY-100');
-    const child = sub('TIMIFY-131', 'TIMIFY-100');
-    drawCard(top, payload([mr({ iid: 415, keys: ['TIMIFY-131'] })]), [top, child]);
+    drawCard(top, payload([mr({ iid: 415, keys: ['TIMIFY-131'] })]));
     expect(chips()).toEqual([]);
   });
 

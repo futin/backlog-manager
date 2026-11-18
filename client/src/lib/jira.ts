@@ -192,10 +192,18 @@ export type JiraCrumb = { kind: 'root' } | { kind: 'parent'; key: string; summar
  * Why an issue is on this board, as the card's one crumb. Precedence is the reading order of "how did this get here": it IS a followed root, else it is
  * under something (the parent is the more specific fact), else it is simply assigned to me — the case a saved `assignee = currentUser()` query produces.
  * `me: null` (identity not known yet) never reads `mine`: an unknown person is nobody's assignee.
+ *
+ * `parent` is the parent to read, defaulting to the raw field. The Board passes the parent the lane model KEPT (`JiraLanes.parentOf`, parent-lanes spec
+ * §1.4): a link `walkParents` dropped to break a cycle is no parent there, so the card falls through to `mine` rather than naming a lane it is not in.
  */
-export function crumbOf(issue: JiraIssue, board: JiraBoard, me: { accountId: string } | null): JiraCrumb {
+export function crumbOf(
+  issue: JiraIssue,
+  board: JiraBoard,
+  me: { accountId: string } | null,
+  parent: JiraParentRef | null = issue.parent
+): JiraCrumb {
   if (board.roots.includes(issue.key)) return { kind: 'root' };
-  if (issue.parent !== null) return { kind: 'parent', key: issue.parent.key, summary: issue.parent.summary };
+  if (parent !== null) return { kind: 'parent', key: parent.key, summary: parent.summary };
   if (me !== null && issue.assignee !== null && issue.assignee.accountId === me.accountId) return { kind: 'mine' };
   return null;
 }
@@ -724,6 +732,19 @@ export function progressLine(p: JiraProgress): string | null {
   const parts = [p.done > 0 ? `${p.done} done` : null, p.doing > 0 ? `${p.doing} in progress` : null, p.todo > 0 ? `${p.todo} to do` : null];
   const said = parts.filter((s): s is string => s !== null);
   return said.length > 0 ? said.join(' · ') : null;
+}
+
+/** A lane header's count (parent-lanes spec §3.2): the matching issues of its subtree, `1 issue` / `n issues`. */
+export function laneCountText(n: number): string {
+  return count(n, 'issue');
+}
+
+/**
+ * An off-board parent's `↗` (parent-lanes spec §3.2): `https://<site>/browse/<KEY>`, composed as `stubIssue` composes a stub's url — or `null` while the
+ * status has not said the site, which draws no link rather than a relative one.
+ */
+export function browseUrl(site: string, key: string): string | null {
+  return site === '' ? null : `https://${site}/browse/${key}`;
 }
 
 /**

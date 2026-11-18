@@ -17,17 +17,17 @@ import { MrChip } from './MrChip';
 import { SessionOpen } from './SessionOpen';
 
 /**
- * JiraAgentDeck — the live sessions on the picked board, one card each, above the status shelves (Jira sessions spec §7.1; DESIGN.md §8.9.1).
+ * JiraAgentDeck — the live sessions on the picked board, one card each, above the lanes (Jira sessions spec §7.1; DESIGN.md §8.9.1).
  *
  * **It draws what `lib/jira-deck.ts` derived** — the order (Needs you, Working, Quiet, Starting and Lost contact; newest first within), which sessions belong
  * to this board, and the crumb's words — and holds no copy of any of them. The page hands in the entries ALREADY filtered by the page's search and filters, so
- * the deck and the shelves answer one filter. With nothing live the section is not drawn at all: an empty "Agents" heading on every quiet board would be a
+ * the deck and the lanes answer one filter. With nothing live the section is not drawn at all: an empty "Agents" heading on every quiet board would be a
  * line of furniture, and the band's switch already says where the sessions are.
  *
  * **The card is a session's face, not a ticket's.** It wears `.ui-stripe` in the state's tone (`sessionTone`); its first line is the tone's dot, spec §6's
  * words for the state and how long THIS server has seen the session in it (no phase: none is served); the head — type glyph, the session's OWN key and, only
  * when the session runs on a ticket folded under another card, a `↳ <top>` pill; the summary, a button that opens Detail on that ticket; the crumb
- * `run · repo · surface · model`; the MR chip on a line of its own (below); a 4 px context `Meter`; and `SessionOpen`, the split Open. The card is not a `role="button"` the way a shelf row is: it has buttons of its own,
+ * `run · repo · surface · model`; the MR chip on a line of its own (below); a 4 px context `Meter`; and `SessionOpen`, the split Open. The card is not a `role="button"` the way a lane card is: it has buttons of its own,
  * and a card that is itself one would nest them.
  *
  * **The MR chip** (GitLab connection spec §7.2, mock `Cards.dc.html`): a ticket with a live session is the one most likely to have an open MR, so the deck

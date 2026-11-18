@@ -22,7 +22,7 @@ import { Pill } from '../ui/Pill';
  *
  * `todo`, `doing` and `done` are the Jira board's three columns (Jira phase 2): a tracker's status categories, which are neither a backlog TYPE nor a
  * rejection, so they join the union as slugs with no ramp hue of their own. Without a `tone` each draws the same plain `Dot` the `out-of-scope` column
- * does. The Jira shelves pass `tone` (the restyle, spec §4.3), and then the column draws a page-local `.board-col-dot` and `.board-col-count` instead,
+ * does. The Jira shelves passed `tone` until parent lanes (no caller now) (the restyle, spec §4.3), and then the column draws a page-local `.board-col-dot` and `.board-col-count` instead,
  * styled under `.board-col[data-tone]`: the rules key on the tone and not the slug, so `styles.css` still carries no `.board-col-<slug>` rule for these three.
  */
 export type BoardColumnSlug = 'refactors' | 'ideas' | 'bugs' | 'tasks' | 'out-of-scope' | 'todo' | 'doing' | 'done';
@@ -72,12 +72,12 @@ export function BoardColumn({
   slug: BoardColumnSlug;
   label: string;
   count: number;
-  /** Jira restyle §4.3: only `JiraShelves` passes it. It tones the header: the dot is a page-local `.board-col-dot` and the count a `.board-col-count` span
+  /** Jira restyle §4.3: only the Jira shelves passed it, and they are gone (parent lanes). It tones the header: the dot is a page-local `.board-col-dot` and the count a `.board-col-count` span
    *  because `Dot` has no such tones and a page rule naming `.ui-dot` / `.ui-pill` fails design-guards guard 7. The `--steel` ground is NOT this prop's any
    *  more — it is `ground`'s, so a column can have one without a tone. Absent, the column draws its ramp `Dot` and neutral `Pill` as it always did. */
   tone?: 'todo' | 'doing' | 'done';
   /** Opt-in `--steel` ground (radius 16, 12 px padding, the header inside it — mock `Board.dc.html`; user override of restyle spec §4.3, 2026-11-06, which
-   *  limited it to Jira). `BoardView` and `JiraShelves` pass it; `ArchiveView` does not, because its sticky `.archive-month` paints `--board` and would read
+   *  limited it to Jira). `BoardView` passes it (the Jira shelves did); `ArchiveView` does not, because its sticky `.archive-month` paints `--board` and would read
    *  as a white band across a steel column. Drawn by `.board-col[data-ground]`; `data-tone` keeps only the dot's colour. */
   ground?: boolean;
   children: ReactNode;

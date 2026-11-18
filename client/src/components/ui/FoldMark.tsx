@@ -1,15 +1,17 @@
 /**
- * FoldMark — the `↳ <key>` pill that says a session runs on a different ticket from the one the surface is drawn for (.claude/DESIGN.md §8.9.1).
+ * FoldMark — the `↳ <key>` pill that names another ticket a surface's own one hangs under or runs on (.claude/DESIGN.md §8.9.1).
  *
- * Two surfaces draw it, which is why it lives here and not in either of them: the deck card, where the session's own ticket is the card's key and the mark
- * names the TOP it folds under, and the List's Session cell, where the row is the top and the mark names the folded ticket the session actually runs on. The
- * arrow reads the same both ways — "this, under/over that" — and the look must not differ between them, or the same relation reads as two.
+ * Three surfaces draw it, which is why it lives here and not in any of them: the deck card, where the session's own ticket is the card's key and the mark
+ * names that ticket's direct parent; the List's Session cell, where the mark names the ticket the session actually runs on; and an on-board lane header,
+ * where it names the header issue's own kept parent (parent-lanes spec §3.2). The arrow reads the same every way — "this, under/over that" — and the look
+ * must not differ between them, or the same relation reads as two.
  *
- * It states a fact and is never a control, so it is a span with no role; `title` carries the whole key when a narrow cell cuts it.
+ * It states a fact and is never a control, so it is a span with no role. `title` is the hover text: the whole key by default, for a narrow cell that cuts
+ * it, or what the caller knows about that ticket — the lane header passes the parent's summary, since the key is already on the pill.
  */
-export function FoldMark({ issueKey }: { issueKey: string }) {
+export function FoldMark({ issueKey, title }: { issueKey: string; title?: string }) {
   return (
-    <span className="ui-fold" title={issueKey}>
+    <span className="ui-fold" title={title ?? issueKey}>
       {`↳ ${issueKey}`}
     </span>
   );
