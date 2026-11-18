@@ -746,7 +746,8 @@ describe('parseJiraBoardIssues', () => {
   });
 
   it('reads a parent without a type or status as null for each, keeps both when present, and leaves a null parent null', () => {
-    const bare = { ...row, parent: { key: 'PAY-1', summary: 'Checkout', type: null, status: null } };
+    // The wire shape of an older server: the parent has no type or status key at all.
+    const bare = { ...row, parent: { key: 'PAY-1', summary: 'Checkout' } };
     expect(parseJiraBoardIssues({ issues: [bare] })?.issues[0].parent).toEqual({ key: 'PAY-1', summary: 'Checkout', type: null, status: null });
     const full = {
       ...row,

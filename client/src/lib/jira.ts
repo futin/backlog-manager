@@ -1019,7 +1019,12 @@ export function parseJiraBoardIssues(value: unknown): JiraBoardIssuesPayload | n
   const rows = issues.filter(isRow).map((row) => {
     if (!object(row.parent)) return row;
     const { type, status } = row.parent as Unchecked<JiraParentRef>;
-    return { ...row, parent: { ...row.parent, type: object(type) ? (type as JiraParentRef['type']) : null, status: object(status) ? (status as JiraParentRef['status']) : null } };
+    const parent: JiraParentRef = {
+      ...row.parent,
+      type: object(type) ? (type as JiraParentRef['type']) : null,
+      status: object(status) ? (status as JiraParentRef['status']) : null
+    };
+    return { ...row, parent };
   });
   return { issues: rows, polledAt: typeof polledAt === 'string' ? polledAt : null };
 }
