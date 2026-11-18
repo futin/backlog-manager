@@ -940,6 +940,46 @@ const CATEGORY_RANK: Record<JiraStatusCategory, number> = { new: 0, indeterminat
 
 const byText = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true });
 
+/** One Board column: a status name (`''` for an issue with none), the label drawn, and the category of the first issue seen with it, `null` when none carries it. */
+export interface JiraBoardColumn {
+  name: string;
+  label: string;
+  category: JiraStatusCategory | null;
+}
+
+/**
+ * The Board's columns (status-columns spec, "Columns" and "Order"): every distinct status name among the loaded, unfiltered issues plus every saved name, so a
+ * column the user placed stays while empty. The saved names keep their order; each unsaved name, sorted by `CATEGORY_RANK` then `byText`, goes immediately
+ * after the last column already listed whose rank is lower or equal, or first when there is none. A saved name no issue carries has no category and no rank,
+ * so that search skips it. The first issue seen fixes a name's category, the same rule `boardFilterOptions` applies.
+ */
+export function boardColumns(issues: readonly JiraIssue[], saved: readonly string[]): JiraBoardColumn[] {
+  const seen = new Map<string, JiraStatusCategory>();
+  for (const i of issues) if (!seen.has(i.status.name)) seen.set(i.status.name, i.status.category);
+  const column = (name: string): JiraBoardColumn => ({ name, label: name === '' ? 'No status' : name, category: seen.get(name) ?? null });
+  const rankOf = (c: JiraBoardColumn): number | null => (c.category === null ? null : CATEGORY_RANK[c.category]);
+  const cols = saved.map(column);
+  const unsaved = [...seen.keys()]
+    .filter((n) => !saved.includes(n))
+    .map(column)
+    .sort((a, b) => CATEGORY_RANK[a.category!] - CATEGORY_RANK[b.category!] || byText(a.name, b.name));
+  for (const col of unsaved) {
+    const rank = CATEGORY_RANK[col.category!];
+    let at = 0;
+    cols.forEach((c, idx) => {
+      const r = rankOf(c);
+      if (r !== null && r <= rank) at = idx + 1;
+    });
+    cols.splice(at, 0, col);
+  }
+  return cols;
+}
+
+/** A column's dot tone: its category's, or the page's default grey (`todo`) for a saved name no loaded issue carries. */
+export function columnTone(col: JiraBoardColumn): JiraColumnSlug {
+  return col.category === null ? 'todo' : statusTone(col.category);
+}
+
 /**
  * The picks the panel offers, read off the LOADED list rather than off Jira's own catalogue: a type or a sprint no card on this board carries would be a
  * chip that empties the columns, and the browser has no other source anyway (it never talks to Jira). Sorted, with `Sprint 9` before `Sprint 10`.
