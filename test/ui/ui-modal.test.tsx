@@ -45,6 +45,50 @@ describe('Modal', () => {
     expect(dialog.querySelector('.ui-modal-body')).toContainElement(screen.getByText('the ticket'));
   });
 
+  it('draws a `foot` as a full-width band after the body, and no band without one', () => {
+    const { unmount } = render(
+      <Modal label="reply editor" head={<span>head</span>} facts={<span>write</span>} foot={<button type="button">Post reply</button>} onClose={() => {}}>
+        <span>preview</span>
+      </Modal>
+    );
+    const dialog = screen.getByRole('dialog', { name: 'reply editor' });
+    const foot = dialog.querySelector('.ui-modal-foot');
+    expect(foot).not.toBeNull();
+    expect(foot!.parentElement).toBe(dialog);
+    expect(foot).toContainElement(screen.getByRole('button', { name: 'Post reply' }));
+    // After the body: the last of the shell's slots, so it reads after both columns.
+    expect(dialog.lastElementChild).toBe(foot);
+    expect(dialog).toHaveClass('ui-modal-footed');
+    unmount();
+
+    render(
+      <Modal label="plain" facts={<span>f</span>} onClose={() => {}}>
+        <span>b</span>
+      </Modal>
+    );
+    expect(screen.getByRole('dialog', { name: 'plain' }).querySelector('.ui-modal-foot')).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'plain' })).not.toHaveClass('ui-modal-footed');
+  });
+
+  it('stacks over another modal with `over`: the scrim and the panel both carry ui-modal-over, and neither does without it', () => {
+    const { unmount } = render(
+      <Modal label="on top" over facts={<span>f</span>} onClose={() => {}}>
+        <span>b</span>
+      </Modal>
+    );
+    expect(screen.getByTestId('modal-scrim')).toHaveClass('ui-modal-over');
+    expect(screen.getByRole('dialog', { name: 'on top' })).toHaveClass('ui-modal-over');
+    unmount();
+
+    render(
+      <Modal label="below" facts={<span>f</span>} onClose={() => {}}>
+        <span>b</span>
+      </Modal>
+    );
+    expect(screen.getByTestId('modal-scrim')).not.toHaveClass('ui-modal-over');
+    expect(screen.getByRole('dialog', { name: 'below' })).not.toHaveClass('ui-modal-over');
+  });
+
   it('closes on the scrim, on its close control, and on Escape', async () => {
     const onClose = jest.fn();
     render(

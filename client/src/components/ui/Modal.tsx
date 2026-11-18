@@ -21,11 +21,12 @@ import { useNarrow } from '../../hooks/useNarrow';
  * always beside the list. That sheet, and not a modal, is also the only surface
  * able to hold `RunControls` at all — a Pause or a Resume has to have a
  * standing place for the length of a run, which a surface a reader opens and
- * closes does not offer. So `Modal` is composed by exactly three surfaces, the
+ * closes does not offer. So `Modal` is composed by exactly four surfaces, the
  * backlog item (`board/ItemModal.tsx`), since Jira phase 2 the Jira
  * issue (`jira/JiraDetail.tsx`, §8.9.2), which is the item modal's twin
- * and has no run to show either, and since Jira mentions the mention modal (`jira/JiraMentionModal.tsx`, §8.9.7) — a ticket's comment thread, with no run
- * either. A fourth composer is a design change, not a reuse.
+ * and has no run to show either, since Jira mentions the mention modal (`jira/JiraMentionModal.tsx`, §8.9.7) — a ticket's comment thread, with no run
+ * either — and since the Markdown reply the reply editor (`jira/JiraReplyEditor.tsx`, §8.9.7), Write and Preview side by side over the mention modal. A
+ * fifth composer is a design change, not a reuse.
  *
  * **It owns the scrim, the exit and the Escape key, and its composers own
  * none of them.** `useDialogEscape` is called HERE rather than by the item
@@ -53,12 +54,23 @@ import { useNarrow } from '../../hooks/useNarrow';
  * **`lead` weights the split toward the facts slot** (1.6 : 1 rather than Detail's 1.05 : 1), for the mention modal, whose facts slot is the comment thread
  * — the thing the reader opened it for — and whose body is a short ticket summary (`ModalA.dc.html`). A class on the shell, so the 700 px fold, which
  * comes later in the sheet at the same specificity, still collapses it to one column.
+ *
+ * **`foot` is a full-width band after the body**, for the reply editor (spec `2026-11-18-jira-reply-markdown-design.md`): its counter, Close and Post reply
+ * sit under BOTH columns, as one action row for the whole dialog, rather than inside whichever column happened to be last. Passing one adds a grid row
+ * (`.ui-modal-footed`) under the clamped content row, so the columns still scroll and the band never scrolls away; under 700 px the split shape's one
+ * panel scroll keeps the band stuck to the bottom of the screen.
+ *
+ * **`over` stacks this shell above another one** (`.ui-modal-over` on the scrim and the panel, z 62 / 63 over 60 / 61): the reply editor opens over the
+ * mention modal that launched it. Escape needs nothing new — `useDialogEscape`'s LIFO already closes the topmost dialog first. With neither prop the DOM
+ * is exactly what it was.
  */
 export function Modal({
   label,
   head,
   lead = false,
   facts,
+  foot,
+  over = false,
   children,
   onClose
 }: {
@@ -68,20 +80,34 @@ export function Modal({
   /** The split shape only: give the facts slot the wider column (see the header). */
   lead?: boolean;
   facts: ReactNode;
+  /** A full-width action band after the body (see the header); absent, no band and no extra row. */
+  foot?: ReactNode;
+  /** Stack above another open modal (see the header). */
+  over?: boolean;
   children: ReactNode;
   onClose: () => void;
 }) {
   const narrow = useNarrow();
   useDialogEscape(onClose);
   const split = head !== undefined;
-  const className = ['ui-modal', split ? 'ui-modal-split' : null, split && lead ? 'ui-modal-lead' : null, narrow ? 'ui-modal-narrow' : null].filter(Boolean).join(' ');
+  const footed = foot !== undefined;
+  const className = [
+    'ui-modal',
+    split ? 'ui-modal-split' : null,
+    split && lead ? 'ui-modal-lead' : null,
+    narrow ? 'ui-modal-narrow' : null,
+    footed ? 'ui-modal-footed' : null,
+    over ? 'ui-modal-over' : null
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <>
       {/* The scrim is the exit a pointer reaches for first; the close control
           below is the one a keyboard reaches. Both, because neither alone is
           "a real exit" (§6.1) for both kinds of reader. */}
-      <div className="ui-modal-scrim" data-testid="modal-scrim" onClick={onClose} />
+      <div className={over ? 'ui-modal-scrim ui-modal-over' : 'ui-modal-scrim'} data-testid="modal-scrim" onClick={onClose} />
       <div className={className} role="dialog" aria-modal="true" aria-label={label}>
         <button type="button" className="ui-modal-close" aria-label="close" onClick={onClose}>
           ✕
@@ -93,6 +119,7 @@ export function Modal({
         {split && <div className="ui-modal-head">{head}</div>}
         <div className="ui-modal-facts">{facts}</div>
         <div className="ui-modal-body">{children}</div>
+        {footed && <div className="ui-modal-foot">{foot}</div>}
       </div>
     </>
   );

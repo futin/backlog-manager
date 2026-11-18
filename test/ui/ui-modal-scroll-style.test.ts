@@ -51,6 +51,15 @@ describe('the sidecar modal bounds its grid row so the body can scroll', () => {
     expect(ruleBlock(css, '.ui-modal-narrow')).toMatch(/grid-template-rows:\s*minmax\(\s*0\s*,\s*auto\s*\)\s+minmax\(\s*0\s*,\s*1fr\s*\)/);
   });
 
+  it('keeps the clamped content row when a foot adds its band, in every shape', () => {
+    // The foot's row is ADDED after the clamped one, never instead of it: replacing it would bring back the unscrollable body this file guards.
+    expect(ruleBlock(css, '.ui-modal-footed')).toMatch(/grid-template-rows:\s*minmax\(\s*0\s*,\s*1fr\s*\)\s+auto/);
+    expect(ruleBlock(css, '.ui-modal-narrow.ui-modal-footed')).toMatch(/minmax\(\s*0\s*,\s*1fr\s*\)\s+auto/);
+    expect(ruleBlock(css, '.ui-modal-split.ui-modal-footed')).toMatch(/auto\s+minmax\(\s*0\s*,\s*1fr\s*\)\s+auto/);
+    // And each footed rule sits after the shape rule it extends, so it wins by order.
+    expect(css.indexOf('.ui-modal-footed {')).toBeGreaterThan(css.indexOf('.ui-modal-split.ui-modal-narrow {'));
+  });
+
   it('reads the stylesheet the rest of the suite reads', () => {
     expect(STYLES).toMatch(/client[\\/]src[\\/]styles\.css$/);
   });
