@@ -343,7 +343,9 @@ The plugin's own agents, one file each, discovered from this root-level director
 needed. Currently one: `backlog-reviewer.md`, the read-only reviewer `backlog-orchestrate` dispatches before every merge and `backlog-execute` before a
 `pr`-mode push, and `/backlog-review` on a person's own checkout. Each dispatch is one group of the manifest `review.mjs scope` wrote: the agent diffs
 the manifest's `from` and `to`, never `base` by name, lists every file of its group under `## Coverage`, quotes each finding's line in an `anchor:`, and marks
-any earlier finding it was handed `resolved` or `open` — the report grammar `review.mjs merge` parses. It is published only because
+any earlier finding it was handed `resolved` or `open` — the report grammar `review.mjs merge` parses. Prose-only drift keeps its severity only where an agent
+or tool acts on the stale text — an instruction file, a contract a reader runs, text a tool parses or a test asserts — and is otherwise a Minor tagged
+`drift: `, which `/backlog-retro` totals as `totals.driftMinors` and drafts a per-project sweep from (#559). It is published only because
 `PUBLISHED_PATHS` (`scripts/sync-plugin.mjs`) names it alongside `skills/`.
 
 ## Interfaces

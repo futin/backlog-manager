@@ -193,7 +193,7 @@ With no item at all, checks 1–3 judge the change on its own terms and check 4 
    red without the change. **A missing or half-present pair is an Important finding**, named as such, because those two checks are exactly the two finding
    classes that dominate this repo's fix loops and nothing else in a headless run can tell whether they ran. The lines are a claim and not proof: spot-check
    them against the diff the way you would any other claim, and where one is plainly false — a `none found` beside a renamed flag still spelled the old way in
-   `CLAUDE.md` — report the site itself, at its own severity, not the line.
+   `CLAUDE.md` — report the site itself, at its own severity, not the line. A prose site's severity is the prose-only drift rule's, under Severity.
 
    With `outcome: none` there is no `## Outcome` to carry the pair — a standalone review of a tracker issue, or of an item nobody has executed — so write
    `not checked: no Outcome` for check 4 under `## Checked and clean` and raise nothing for it. The Important finding above is for an Outcome that exists and
@@ -210,6 +210,18 @@ nothing.
 - **Important** — merging this is defensible but leaves a real defect: an unhandled edge case, a promise in `## Plan` that the diff does not keep, a missing
   test for behaviour the item exists to guarantee.
 - **Minor** — worth writing down, not worth a fix loop. Goes in the report only.
+
+**Prose-only drift** — the change behaves right and only text describing it is stale — keeps the severity above when the stale text is (a) an instruction or
+rule in a file a session loads as instructions (`CLAUDE.md` / `AGENTS.md` at any level, `.claude/rules/`, a skill's `SKILL.md` and its `references/`, an agent
+or command definition), or in a doc one of those files tells a session to read before acting (here `docs/subsystems/invariants.md`, `.claude/DESIGN.md`) —
+a list or count there that bounds what a session may do ("the only X are", "exactly one writer") is part of the rule; (b) a contract a reader relies on to run
+or change something, in any file: a command, flag, path, env var, route, config key, signature, file format, exit code, or a stated guarantee ("never",
+"must run before", "safe because"); or (c) text a tool parses or a test asserts. Any other prose-only drift is **Minor**, in any file, `CLAUDE.md` included:
+a stale narrative count or figure, an example list, incident history, a date, a justification whose conclusion still holds. A comment's wrong *why* splits the
+same way: a safety or ordering argument a later change relies on is (b); a wrong incident or number under a conclusion that holds is Minor. Two cases always
+keep their severity: text the item's own `## Plan` / `## Fix` promised to change (an unkept promise), and check 4's missing or half-present pair. Start every
+Minor this rule demotes with the literal tag `drift: `, after the location when there is one, so `/backlog-retro` can count it; no other Minor carries it.
+This classifies what the defect is — it is no discount for the fix loop's cost, and the not-softening rule below stands.
 
 **The verdict follows mechanically from that list — do not re-litigate it:** any Critical or Important finding, or an earlier finding you
 mark `open`, means `verdict: fix`. Nothing but Minor findings, or none at all, means `verdict: approve`. Do not soften a Critical into a Minor because the
@@ -247,7 +259,7 @@ verdict: approve|fix
 <same shape, anchor line included>
 
 ## Minor
-- <path>:<line> — <same shape; no anchor needed — these never change the verdict>
+- <path>:<line> — <[drift: ]same shape; no anchor needed — these never change the verdict>
 
 ## Earlier findings
 - <id> — resolved — <one line: what in to shows it fixed>

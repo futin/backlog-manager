@@ -69,7 +69,8 @@ Markdown, in this fixed section order so two reports diff cleanly:
 2. **Where the money went** — by actor (execute / fix / retry / driver), by token type, by project, bugs versus tasks.
 3. **Where the time went** — by stage, queue wait reported separately and never summed into pipeline time, then outcomes.
 4. **The fix loop** — verdict counts, your labels from §2, what a loop costs, the resume tax, and resumed versus fresh loops (`totals.fixLoops.byMode`: each
-   mode's loops, cost, median peak and the next review pass's verdicts — the evidence the 150k fresh-session threshold is tuned from, #226).
+   mode's loops, cost, median peak and the next review pass's verdicts — the evidence the 150k fresh-session threshold is tuned from, #226). Beside the
+   labels, `totals.driftMinors` — the prose-only drift reviewers demoted to Minor (`drift: `-tagged) instead of looping on it, in total and by project.
 5. **Defects and gaps found** — each with the evidence rows it rests on.
 6. **Decisions that are not defects** — things that look wrong and are not.
 7. **Method and caveats** — `caveats[]` verbatim.
@@ -86,6 +87,11 @@ Artifact tool is available, publish the same content as a page too — that is a
 Draft candidates from §3's defects and gaps. A finding earns a candidate only if it has **at least two occurrences**, or **one occurrence of a correctness or
 security class**. Drop any whose title `previous.candidates` already shows as `filed` or `declined` — the record exists so the same thing is not proposed every
 month.
+
+One more source: every project whose `totals.driftMinors.byProject` count is **2 or more** gets one candidate, kind `task`, titled along the lines of
+"Sweep the stale prose reviews left as Minor in <project>", its evidence that project's `reviews[].driftMinors` entries with their review `file`s. It is filed
+**in that project** — it is about the project's own text, not the pipeline — and the `previous.candidates` rule above drops it the same way. It is never a
+§2 label: the label set stays closed.
 
 Put them to the person in **one** multi-select `AskUserQuestion`, each option carrying its evidence and its expected effect. Then, for each picked candidate,
 follow `backlog-capture`'s procedure verbatim — `init`, then `new` → write, one item at a time — **in the target project's root**:

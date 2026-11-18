@@ -28,6 +28,11 @@ The point of a label is the _next_ sweep. "19 of 27 fix verdicts were drift or r
 task-28 landed", and that comparison is arithmetic over the recorded strings. A single `nit`, `Drift` or `red proof` silently becomes a fifth category that
 neither sweep counts and the difference reads as improvement. `other` exists so there is always a correct answer that is not a new word.
 
+`totals.driftMinors` (#559) is not a fifth label and does not reopen the set. The reviewer itself demotes prose-only drift that nothing acts on to a Minor and
+starts it with the literal tag `drift: `; `reviews.mjs` only finds that tag, the way it finds `verdict:`, so the tool still judges nothing. The count exists so
+the demoted drift reaches a backlog item through §4 instead of sitting unread in `reviews/*.md` — and so a later sweep can see the `drift` label's share of
+`fix` verdicts fall while this count carries what moved.
+
 ## Why the driver's spend is fitted rather than looked up
 
 Every dispatched `claude -p` session ends its transcript with a `result` event carrying `total_cost_usd` — the price the CLI actually applied. The orchestrating
