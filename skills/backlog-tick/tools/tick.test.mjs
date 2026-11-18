@@ -1451,3 +1451,174 @@ test('peek: a tracker project with the stack down is idle, exit 10', async (t) =
   assert.equal(r.v.verdict, 'idle');
   assert.equal(r.v.reason, 'stack down');
 });
+
+// --- the boot stamp in the lock, and `record … failed` → `released` ------------------------------------------------------------------------------------------
+// Fix 2 of docs/superpowers/specs/2026-11-14-tick-session-review-fixes-design.md. `decide` copies the health answer's `bootedAt` into the lock; `record … failed`
+// on a tracker project asks health again and, when the API is down or its boot stamp is not the lock's, writes `released` — never counted, never hashed.
+
+const BOOT_A = '2026-11-13T17:58:00.000Z';
+const BOOT_B = '2026-11-13T18:01:30.000Z';
+
+/** Tracker routes whose `/api/health` answers `body` (a string body is served as text/plain 200, a `{ status, body }` pair as given). */
+const withHealth = (fx, health, items = [apiItem(fx, 12)]) => ({ ...trackerRoutes(fx, items), '/api/health': health });
+
+/** Lock held for `id` by a tick whose health answer carried `bootedAt` (`null` → the key is not written, as an older tool would leave it; `undefined` would
+ *  take the default, so it cannot mean "absent"). */
+function takeLock(fx, id = '#12', bootedAt = BOOT_A) {
+  writeLockFile(fx, { host: 'h', verdict: { kind: 'execute', id }, base: 'main', at: ago(MIN), ...(bootedAt === null ? {} : { bootedAt }) });
+}
+
+/** `record #12 failed --kind execute --reason boom` against `routes` (or a dead port when `routes` is null). */
+function recordFailed(fx, routes, args = ['#12', 'failed', '--kind', 'execute', '--reason', 'boom']) {
+  if (routes === null) return tick(fx, ['record', ...args], { port: DEAD_PORT });
+  return withApi(routes, (port) => tick(fx, ['record', ...args], { port }));
+}
+
+test('L1: a tracker decide writes the health answer\'s bootedAt into the lock', async (t) => {
+  const fx = project(t, { tracker: true });
+  const v = await withApi(withHealth(fx, { body: { status: 'ok', bootedAt: BOOT_A } }), (port) => decide(fx, [], { port }));
+  assert.equal(v.verdict, 'execute');
+  assert.equal(readJson(fx.lockFile).bootedAt, BOOT_A);
+});
+
+test('L2: a health answer with no bootedAt leaves the key out of the lock', async (t) => {
+  const fx = project(t, { tracker: true });
+  const v = await withApi(withHealth(fx, { body: { status: 'ok' } }), (port) => decide(fx, [], { port }));
+  assert.equal(v.verdict, 'execute');
+  assert.equal('bootedAt' in readJson(fx.lockFile), false);
+});
+
+test('R1: failed with the API down is released — no hash, lock gone, exit 0', async (t) => {
+  const fx = project(t, { tracker: true });
+  takeLock(fx);
+  const r = await recordFailed(fx, null);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'recorded #12 released (execute); lock released\n');
+  assert.match(r.stderr, /^tick\.mjs: /m);
+  const rec = readJson(fx.stateFile).items['#12'];
+  assert.equal(rec.outcome, 'released');
+  assert.equal('hash' in rec, false);
+  assert.ok(rec.reason.startsWith('environment: api down — '), rec.reason);
+  assert.ok(rec.reason.endsWith('boom'), rec.reason);
+  assert.equal(readJson(fx.stateFile).recent.at(-1).outcome, 'released');
+  assert.equal(fs.existsSync(fx.lockFile), false);
+});
+
+test('R2: a different boot stamp is released, and the item is eligible at the next decide', async (t) => {
+  const fx = project(t, { tracker: true });
+  takeLock(fx);
+  const routes = withHealth(fx, { body: { status: 'ok', bootedAt: BOOT_B } });
+  const r = await recordFailed(fx, routes);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'recorded #12 released (execute); lock released\n');
+  const rec = readJson(fx.stateFile).items['#12'];
+  assert.equal(rec.outcome, 'released');
+  assert.equal('hash' in rec, false);
+  assert.ok(rec.reason.startsWith(`environment: api restarted at ${BOOT_B} — `), rec.reason);
+  // A `failed` here would carry a hash of the live body and be skipped; `released` offers the item again.
+  const v = await withApi(routes, (port) => decide(fx, ['--dry-run'], { port }));
+  assert.equal(v.verdict, 'execute');
+  assert.equal(v.id, '#12');
+});
+
+test('R3: the same boot stamp stays failed, with a hash and the reason as given', async (t) => {
+  const fx = project(t, { tracker: true });
+  takeLock(fx);
+  const r = await recordFailed(fx, withHealth(fx, { body: { status: 'ok', bootedAt: BOOT_A } }));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'recorded #12 failed (execute); lock released\n');
+  const rec = readJson(fx.stateFile).items['#12'];
+  assert.equal(rec.outcome, 'failed');
+  assert.equal(typeof rec.hash, 'string');
+  assert.equal(rec.reason, 'boom');
+});
+
+test('R4: a 500 from health is released as api down', async (t) => {
+  const fx = project(t, { tracker: true });
+  takeLock(fx);
+  const r = await recordFailed(fx, withHealth(fx, { status: 500, body: { error: 'x' } }));
+  assert.equal(r.status, 0, r.stderr);
+  const rec = readJson(fx.stateFile).items['#12'];
+  assert.equal(rec.outcome, 'released');
+  assert.ok(rec.reason.startsWith('environment: api down — '), rec.reason);
+});
+
+test('R5: a lock without bootedAt stays failed even when health has one', async (t) => {
+  const fx = project(t, { tracker: true });
+  takeLock(fx, '#12', null);
+  const r = await recordFailed(fx, withHealth(fx, { body: { status: 'ok', bootedAt: BOOT_B } }));
+  assert.equal(r.status, 0, r.stderr);
+  const rec = readJson(fx.stateFile).items['#12'];
+  assert.equal(rec.outcome, 'failed');
+  assert.equal(typeof rec.hash, 'string');
+});
+
+test('R6: a health answer without bootedAt stays failed even when the lock has one', async (t) => {
+  const fx = project(t, { tracker: true });
+  takeLock(fx);
+  const r = await recordFailed(fx, withHealth(fx, { body: { status: 'ok' } }));
+  assert.equal(r.status, 0, r.stderr);
+  const rec = readJson(fx.stateFile).items['#12'];
+  assert.equal(rec.outcome, 'failed');
+  assert.equal(typeof rec.hash, 'string');
+});
+
+test('R7: a second environment result in a row is failed, "environment twice"', async (t) => {
+  const fx = project(t, { tracker: true });
+  const routes = withHealth(fx, { body: { status: 'ok', bootedAt: BOOT_B } });
+  takeLock(fx);
+  assert.equal((await recordFailed(fx, routes)).status, 0);
+  assert.equal(readJson(fx.stateFile).items['#12'].outcome, 'released');
+  takeLock(fx);
+  const r = await recordFailed(fx, routes);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'recorded #12 failed (execute); lock released\n');
+  const rec = readJson(fx.stateFile).items['#12'];
+  assert.equal(rec.outcome, 'failed');
+  assert.equal(typeof rec.hash, 'string');
+  assert.ok(rec.reason.startsWith('environment twice: '), rec.reason);
+});
+
+test('R8: a 200 that is not JSON is released as api down, and the lock does not stay held', async (t) => {
+  const fx = project(t, { tracker: true });
+  takeLock(fx);
+  const r = await recordFailed(fx, withHealth(fx, { body: 'not json' }));
+  assert.equal(r.status, 0, r.stderr);
+  const rec = readJson(fx.stateFile).items['#12'];
+  assert.equal(rec.outcome, 'released');
+  assert.ok(rec.reason.startsWith('environment: api down — '), rec.reason);
+  assert.equal(fs.existsSync(fx.lockFile), false);
+});
+
+test('R9: a lock naming another id gets no environment check — failed, exit 3, lock left', async (t) => {
+  const fx = project(t, { tracker: true });
+  takeLock(fx, '#99');
+  const r = await recordFailed(fx, null);
+  assert.equal(r.status, 3);
+  assert.equal(readJson(fx.stateFile).items['#12'].outcome, 'failed');
+  assert.equal(fs.existsSync(fx.lockFile), true);
+});
+
+test('R10: record ok on a tracker project never calls health', async (t) => {
+  const fx = project(t, { tracker: true });
+  takeLock(fx);
+  let calls = 0;
+  const routes = withHealth(fx, () => {
+    calls += 1;
+    return { body: { status: 'ok', bootedAt: BOOT_B } };
+  });
+  const r = await recordFailed(fx, routes, ['#12', 'ok', '--kind', 'execute']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(calls, 0);
+  assert.equal(readJson(fx.stateFile).items['#12'].outcome, 'ok');
+});
+
+test('R11: a files project records failed with a hash and never asks the API', async (t) => {
+  const fx = project(t);
+  writeLockFile(fx, { host: 'h', verdict: { kind: 'execute', id: 'bug-1' }, base: 'main', at: ago(MIN) });
+  const r = await recordFailed(fx, null, ['bug-1', 'failed', '--kind', 'execute', '--reason', 'boom']);
+  assert.equal(r.status, 0, r.stderr);
+  const rec = readJson(fx.stateFile).items['bug-1'];
+  assert.equal(rec.outcome, 'failed');
+  assert.equal(typeof rec.hash, 'string');
+});

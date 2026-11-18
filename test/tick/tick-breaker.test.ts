@@ -25,6 +25,7 @@ describe('streakOf — the pinned table', () => {
     ['resetAt after everything', [f(1), f(2)], T(30), 0, null],
     ['an unparseable at stops the walk', [f(1), f(2, { at: 'garbage' }), f(3)], undefined, 1, T(3)],
     ['an outcome that is neither ok nor failed neither counts nor stops', [f(1), f(2, { outcome: 'skipped' }), f(3)], undefined, 2, T(1)],
+    ['a released outcome neither counts nor stops', [f(1), f(2, { outcome: 'released' }), f(3)], undefined, 2, T(1)],
     ['an unparseable at stops whatever the outcome', [f(1), { outcome: 'skipped', at: 'garbage' }, f(3)], undefined, 1, T(3)],
     ['groom and execute count together', [f(1, { kind: 'groom' }), f(2, { kind: 'execute' }), f(3, { kind: 'groom' })], undefined, 3, T(1)],
     ['an unparseable resetAt is absent', [f(1), f(2)], 'garbage', 2, T(1)]

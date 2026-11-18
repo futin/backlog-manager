@@ -7,13 +7,14 @@
 //   tick.mjs status [--json]
 //   tick.mjs forget <id>
 //
-// `decide` prints ONE JSON line and exits 0 for every verdict — `execute`, `groom`, `recover`, `busy`, `idle` — because a verdict is an answer, not a
-// failure: the `backlog-tick` skill reads it and acts. `--peek` is the scheduler's pre-spawn gate (the dashboard's routine `when:` key), never the session's:
-// it is a dry run that still records its caps, and it exits 10 for `idle` / `busy` so a shell can test it — the gate must carry the same decide flags as the
-// job's prompt, or it answers a question the session will not ask. Exit 1 is a usage error; exit 2 is the tool itself failing (an unreadable `state.json`, say), which
-// the skill must stop on rather than read as "nothing to do"; exit 3 is `record` finding the lock held under another id — the outcome written, the lock left
-// (see `cmdRecord`). An omitted `--max-prs` / `--max-plans` falls back to `tick.json`'s `maxPrs` / `maxPlans` (Settings › Shared › Backlog tick), then to 2 / 3:
-// a flag is a fact about one schedule, the setting the machine's default for every job that does not say (#378). The design is docs/superpowers/specs/2026-10-22-backlog-tick-design.md; this header keeps only what the code needs.
+// `decide` prints ONE JSON line and exits 0 for every verdict — `execute`, `groom`, `recover`, `busy`, `idle` — because a verdict is an answer, not a failure:
+// the `backlog-tick` skill reads it and acts. `--peek` is the scheduler's pre-spawn gate (the dashboard's routine `when:` key), never the session's: it is a
+// dry run that still records its caps, and it exits 10 for `idle` / `busy` so a shell can test it — the gate must carry the same decide flags as the job's
+// prompt, or it answers a question the session will not ask. Exit 1 is a usage error; exit 2 is the tool itself failing (an unreadable `state.json`, say),
+// which the skill must stop on rather than read as "nothing to do"; exit 3 is `record` finding the lock held under another id — the outcome written, the lock
+// left (see `cmdRecord`). An omitted `--max-prs` / `--max-plans` falls back to `tick.json`'s `maxPrs` / `maxPlans` (Settings › Shared › Backlog tick), then to
+// 2 / 3: a flag is a fact about one schedule, the setting the machine's default for every job that does not say (#378). The design is
+// docs/superpowers/specs/2026-10-22-backlog-tick-design.md; this header keeps only what the code needs.
 //
 // What this file never does, each for a reason worth keeping:
 //   - **It never writes git.** Every git call is a read (`rev-parse`, `show`, `ls-tree`, `show-ref`, `symbolic-ref`, `worktree list`). The tick's
@@ -248,6 +249,14 @@ async function apiGet(route, timeoutMs = API_TIMEOUT_MS) {
   }
 }
 
+function parseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 async function apiJson(route, timeoutMs) {
   const r = await apiGet(route, timeoutMs);
   if (!r.ok) return null;
@@ -376,7 +385,14 @@ async function cmdDecide(argv) {
   const ctx = { root, tracker, repo: tracker ? markerRepo(root) : null };
 
   // 2. Stack check, tracker only — before the lock and before anything else, because every read and every unit the tick would start needs the API.
-  if (tracker && !(await apiGet('/api/health', HEALTH_TIMEOUT_MS)).ok) return say('idle', 'stack down');
+  // The answer's `bootedAt` is kept for `act`, which writes it into the lock: `record … failed` compares it with a fresh answer to prove the API restarted
+  // under the tick (`environmentOf`). A body that is not JSON, or has no string `bootedAt` (an older server), simply leaves it unset.
+  if (tracker) {
+    const health = await apiGet('/api/health', HEALTH_TIMEOUT_MS);
+    if (!health.ok) return say('idle', 'stack down');
+    const stamp = parseJson(health.text)?.bootedAt;
+    if (typeof stamp === 'string') ctx.bootedAt = stamp;
+  }
 
   // 3. The lock.
   const dir = projectDir(tickHome(), root);
@@ -495,6 +511,8 @@ function act(dir, ctx, base, now, opts, caps, say, unit) {
     // The base COMMIT, not its name (tick-state.mjs's `Lock`): `record` and a recovery hash the blob at the commit `decide` read, so an item committed between
     // the two cannot make a failure look like one on the new text.
     const lock = { host: os.hostname(), verdict: { kind: unit.kind, id: unit.id }, base: commitOf(ctx.root, base) ?? base, at: new Date(now).toISOString() };
+    // The API's boot stamp as this tick saw it (tracker projects only, and only when the server sent one) — identity, never ordering: see `environmentOf`.
+    if (typeof ctx.bootedAt === 'string') lock.bootedAt = ctx.bootedAt;
     if (!writeLock(dir, lock)) return say('busy', 'another tick');
     recordCaps(dir, unit.kind, caps, now);
   }
@@ -728,16 +746,54 @@ function requireProject() {
   return { root: proj.root, tracker, repo: tracker ? markerRepo(proj.root) : null };
 }
 
+// Did the stack go away under the tick that holds `lock`? `null` = no proof (the outcome stays whatever the session said); otherwise the kind, as the
+// text after `environment: `. Called only for a tracker `failed` whose lock is ours — an `ok` and a files project never reach the API from `record`.
+//
+//   - health unreachable, non-2xx or not JSON → `api down`;
+//   - lock and answer both carry a string `bootedAt` and the two differ → `api restarted at <the answer's>`;
+//   - anything else (an older tool's lock, an older server's answer, equal stamps) → `null`.
+//
+// Identity of the stamp, not ordering of two clocks: `bootedAt` is the container's clock and `lock.at` the host's, and the repo already knows those two drift
+// (`server/src/tick/tick.service.ts`, `reset`). The tool decides this and the session's judgement plays no part — the skill records `failed` all the same.
+// One release per item in a row (`cmdRecord`): an execute can itself restart the API, and an unbounded `released` would re-run that item forever, unseen by
+// the breaker.
+async function environmentOf(lock) {
+  const health = await apiGet('/api/health', HEALTH_TIMEOUT_MS);
+  const body = health.ok ? parseJson(health.text) : null;
+  if (body === null || typeof body !== 'object') return 'api down';
+  if (typeof lock.bootedAt === 'string' && typeof body.bootedAt === 'string' && body.bootedAt !== lock.bootedAt) return `api restarted at ${body.bootedAt}`;
+  return null;
+}
+
 // Writes the outcome — with the hash, for `failed`, taken NOW — and releases the lock if it is this id's. The `<base>` a files execute is hashed at is the one
 // the lock recorded; with no lock for this id (another tick already recovered it), it is resolved as `decide` resolves it without `--base`, and stderr says so.
 async function cmdRecord(argv) {
   const parsed = parseRecord(argv);
   const ctx = requireProject();
-  const { outcome, kind, reason } = parsed;
+  let { outcome, reason } = parsed;
+  const { kind } = parsed;
   const id = stateKey(ctx, parsed.id);
   const dir = projectDir(tickHome(), ctx.root);
   const lock = lockSnapshot(dir, Date.now(), Number.POSITIVE_INFINITY).lock;
   const ours = Boolean(lock && lock.verdict && lock.verdict.id === id);
+
+  // The environment proof (Fix 2): a tracker `failed` under our own lock, with the API down or restarted, is not the item's fault. Written `released` — no
+  // hash, because `hashFor` may itself need the API — unless the item's current record is already `released`, in which case it is `failed` as usual with
+  // `environment twice: ` in front of the reason.
+  let environment = null;
+  if (outcome === 'failed' && ctx.tracker && ours) {
+    const found = await environmentOf(lock);
+    if (found !== null) {
+      const prior = readState(dir).items[id];
+      const text = reason === undefined || reason === '' ? '' : reason;
+      if (prior && prior.outcome === 'released') reason = `environment twice: ${text}`;
+      else {
+        environment = found;
+        outcome = 'released';
+        reason = `environment: ${found} — ${text}`;
+      }
+    }
+  }
 
   let hash;
   if (outcome === 'failed') {
@@ -752,6 +808,7 @@ async function cmdRecord(argv) {
 
   const released = releaseLock(dir, id);
   process.stdout.write(`recorded ${id} ${outcome} (${kind})${released ? '; lock released' : ''}\n`);
+  if (environment !== null) process.stderr.write(`tick.mjs: recorded ${id} released, not failed — ${environment}, so the item is not at fault and runs again\n`);
   // Exit 3 when the lock names ANOTHER id (I3 of the final review). The record above stands — it is the outcome the caller saw — and the lock stays, because
   // it may be a live tick's. But the usual way here is the skill recording the wrong id: a promote prints a new task id, and recording that one left the
   // refactor's lock held for the whole `--lock-ttl` with exit 0, so the skill's "non-zero means stop" rule never fired and nothing reached the run log. No lock

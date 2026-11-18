@@ -92,6 +92,8 @@ cd '<root>' && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" r
 
 A `failed` outcome skips that item until its content changes, so one bad item cannot take every night's slot. There is no `blocked` outcome: a failure that was
 the environment's fault — the stack down, `gh` signed out — is cleared with `tick.mjs forget '<id>'`, run by a person and never by this session.
+On a tracker project the tool may record a `failed` as `released` when the API was down or had restarted under the tick; record `failed` all the same and do not try to
+choose — the tool proves it, and a `released` item is simply offered again.
 A `failed` groom also keeps that item off the execute queue until its content changes, since its plan may be one nobody reviewed; once a person has reviewed
 it, `tick.mjs forget '<id>'` makes the item eligible again.
 A halted project is reset on the board (Runs › Ticks), not by `forget`, which only clears one item.

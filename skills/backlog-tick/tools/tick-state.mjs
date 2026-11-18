@@ -169,7 +169,7 @@ export function dropClaim(claimed) {
 
 // --- the outcome record --------------------------------------------------
 
-//   type ItemRecord = { outcome: 'ok' | 'failed', kind: 'execute' | 'groom', reason: string, at: string, hash?: string }
+//   type ItemRecord = { outcome: 'ok' | 'failed' | 'released', kind: 'execute' | 'groom', reason: string, at: string, hash?: string }
 //   type RecentEntry = { at, id, kind, outcome, reason }
 //
 // `hash` rides on `failed` only: it is the `contentHash` of the item as `decide` read it, and a failed item is skipped until that hash moves — a person editing
