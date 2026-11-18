@@ -54,13 +54,14 @@ const PLAN: AgentPlan = {
  * `GET /api/dashboards/offers` answers — home alone when absent, which is what every server without a remote configured says — or `'reject'` for a network
  * failure, or `'pending'` for an answer that never comes. `review` is what `GET /api/settings/review` answers (reviewer coverage task 11); absent, the
  * route falls through to the dispatch answer below, which is no config, so the sheet draws no Reviewer section — every case written before it is untouched.
+ * `'fail'` answers it 500, and a promise answers it only when that promise settles — the in-flight-across-a-flip case (#534) holds it open.
  */
 function stub(handlers: {
   plan?: unknown;
   dispatch?: { ok: boolean; body: unknown };
   branches?: string[] | 'reject';
   offers?: ProjectOffers | 'reject' | 'pending';
-  review?: ReviewSetting;
+  review?: ReviewSetting | 'fail' | Promise<ReviewSetting>;
 }) {
   const calls: { url: string; body: unknown }[] = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -76,7 +77,10 @@ function stub(handlers: {
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(handlers.offers ?? homeOnly()) } as Response);
     }
     if (url.endsWith('/api/settings/review') && handlers.review !== undefined) {
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(handlers.review) } as Response);
+      if (handlers.review === 'fail') {
+        return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) } as Response);
+      }
+      return Promise.resolve(handlers.review).then((review) => ({ ok: true, status: 200, json: () => Promise.resolve(review) }) as Response);
     }
     if (url.includes('/api/agents/branches')) {
       if (handlers.branches === 'reject') return Promise.reject(new Error('NetworkError'));
@@ -545,6 +549,89 @@ describe('LaunchSheet', () => {
       expect(calls.some((c) => c.url.endsWith('/api/settings/review'))).toBe(false);
       const body = await launchNow(calls);
       expect('review' in body).toBe(false);
+    });
+
+    /*
+     * #534: the sheet reads the reviewer setting at most once per open, however often Finish flips. Before, every flip back to PR re-issued the GET (the
+     * `useFetched` key carries whether the loader is null) and threw the answer away, because the pick had already taken its seed.
+     */
+    describe('the reviewer read, across Finish flips', () => {
+      const reviewGets = (calls: { url: string; body: unknown }[]): number =>
+        calls.filter((c) => c.url.endsWith('/api/settings/review') && c.body === undefined).length;
+      const flip = (to: 'pr' | 'in-place') => userEvent.selectOptions(screen.getByLabelText('Finish'), to);
+      const smallModel = (section: HTMLElement) =>
+        (within(section).getByRole('combobox', { name: 'Small groups — model' }) as HTMLSelectElement).value;
+
+      it('flips after the answer cost no further read', async () => {
+        localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr' }));
+        const calls = stub({ review: DEFAULT_REVIEW_CONFIG });
+        await openSheet();
+        await screen.findByRole('group', { name: 'Reviewer' });
+        await flip('in-place');
+        await flip('pr');
+        await flip('in-place');
+        await flip('pr');
+        expect(smallModel(await screen.findByRole('group', { name: 'Reviewer' }))).toBe('sonnet');
+        expect(reviewGets(calls)).toBe(1);
+      });
+
+      it('keeps a pick across a flip, reads once, and sends the pick', async () => {
+        localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr' }));
+        const calls = stub({ review: DEFAULT_REVIEW_CONFIG });
+        await openSheet();
+        const section = await screen.findByRole('group', { name: 'Reviewer' });
+        await userEvent.selectOptions(within(section).getByRole('combobox', { name: 'Small groups — model' }), 'haiku');
+        await flip('in-place');
+        await flip('pr');
+        expect(smallModel(await screen.findByRole('group', { name: 'Reviewer' }))).toBe('haiku');
+        expect(reviewGets(calls)).toBe(1);
+        const body = await launchNow(calls);
+        expect(body.review).toEqual({ ...DEFAULT_REVIEW_CONFIG, small: { model: 'haiku', effort: null } });
+      });
+
+      it('starting in place, reads nothing until the first PR finish, then once', async () => {
+        const calls = stub({ review: DEFAULT_REVIEW_CONFIG });
+        await openSheet();
+        expect(reviewGets(calls)).toBe(0);
+        await flip('pr');
+        await screen.findByRole('group', { name: 'Reviewer' });
+        expect(reviewGets(calls)).toBe(1);
+        await flip('in-place');
+        await flip('pr');
+        await screen.findByRole('group', { name: 'Reviewer' });
+        expect(reviewGets(calls)).toBe(1);
+      });
+
+      it('keeps a read still in flight across a flip, and draws it seeded on the next PR finish', async () => {
+        let release!: (r: ReviewSetting) => void;
+        const calls = stub({ review: new Promise<ReviewSetting>((r) => (release = r)) });
+        await openSheet();
+        await flip('pr');
+        expect(reviewGets(calls)).toBe(1);
+        await flip('in-place');
+        await act(async () => release(DEFAULT_REVIEW_CONFIG));
+        await flip('pr');
+        // Already seeded while hidden, so the section is there on the flip's own frame — no loading wait.
+        expect(smallModel(screen.getByRole('group', { name: 'Reviewer' }))).toBe('sonnet');
+        expect(reviewGets(calls)).toBe(1);
+      });
+
+      it('does not retry a failed read on a flip, and sends no review', async () => {
+        localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr' }));
+        const calls = stub({ review: 'fail' });
+        await openSheet();
+        await waitFor(() => expect(reviewGets(calls)).toBe(1));
+        await act(async () => {});
+        expect(screen.queryByRole('group', { name: 'Reviewer' })).toBeNull();
+        await flip('in-place');
+        await flip('pr');
+        await act(async () => {});
+        expect(screen.queryByRole('group', { name: 'Reviewer' })).toBeNull();
+        expect(reviewGets(calls)).toBe(1);
+        const body = await launchNow(calls);
+        expect(body.finish).toBe('pr');
+        expect('review' in body).toBe(false);
+      });
     });
 
     // Task 4: a groom on the home machine takes a finish too, seeded from its own Settings default — never from execute's.
