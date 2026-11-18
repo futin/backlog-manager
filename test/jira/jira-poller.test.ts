@@ -504,7 +504,7 @@ describe('one root', () => {
       expect(body.fields).toEqual(SWEEP_FIELDS);
       expect(body.maxResults).toBe(100);
     }
-    expect(poller.status().boards[0]).toEqual({ ...b, polledAt: iso(T0), count: 5, truncated: false, failures: [] });
+    expect(poller.status().boards[0]).toEqual({ ...b, columns: [], polledAt: iso(T0), count: 5, truncated: false, failures: [] });
   });
 });
 
