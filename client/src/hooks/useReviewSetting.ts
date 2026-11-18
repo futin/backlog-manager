@@ -40,8 +40,8 @@ export interface ReviewSettingState {
  *    newest save falls back to what the server really holds rather than to the first read. A superseded refusal says nothing: the newer save carried its
  *    change, and that one's answer is the one that speaks.
  * A refused newest save drops the optimistic copy, so the card goes back to the server's value — the limit field's draft included, since its value moves
- * (task-11 review, Minor 2: the field and the error row must not disagree). `enabled` false is no request at all, which is how the LaunchSheet reads it
- * only under an execute PR finish.
+ * (task-11 review, Minor 2: the field and the error row must not disagree). `enabled` false is no request at all. The LaunchSheet reaches this through
+ * `useReviewPick`'s latch, so its GET starts at the sheet's first execute PR finish and is not repeated by later Finish flips (#534).
  */
 export function useReviewSetting(enabled = true): ReviewSettingState {
   const fetched = useFetched(enabled ? fetchReviewSetting : null, []);
@@ -143,9 +143,22 @@ function stripFileError(setting: ReviewConfig & { fileError?: true }): ReviewCon
  * pick against, so an untouched sheet sends no `review` key. Both stay `null` until the read lands — and forever if it fails — and the sheets draw no section
  * while they are, so a pick can never be made that the request would then silently drop. The seed is never re-taken from a later read: board.md's rule for the
  * sheet's model and effort, seeded from Settings and never moved under the person.
+ *
+ * `enabled` means "start reading once this is first true", not "read while true" (#534). The hook latches it: the first render it is true sets `asked`, which
+ * never goes back, and `asked` — not `enabled` — is what reaches `useReviewSetting`. So the `useFetched` key changes exactly once, and a sheet makes at most
+ * ONE GET for its whole life, however often the execute sheet's Finish flips between PR and In place; a sheet is mounted per open, so that is one GET per open.
+ * Gating the loader on `enabled` re-issued the GET on every flip back to PR and threw the answer away, since the seed was already taken; gating it on
+ * `seed === null` instead would still re-issue it when a flip beat the first answer. Two consequences, both intended — do not "fix" either back:
+ *  - A GET still in flight when `enabled` drops is kept: it lands and seeds the pick while the caller draws nothing, and the next time `enabled` is true the
+ *    section is drawn already seeded, with no loading frame.
+ *  - A failed GET is not retried by toggling `enabled`. The pick stays `null` forever on a failure, as said above; before the latch a flip away and back
+ *    re-read by accident. Callers gate what they draw and send on their own condition (the LaunchSheet on `reviewerOffered`), never on this hook.
  */
 export function useReviewPick(enabled: boolean): { seed: ReviewConfig | null; pick: ReviewConfig | null; setPick: (c: ReviewConfig) => void } {
-  const { config } = useReviewSetting(enabled);
+  const [asked, setAsked] = useState(enabled);
+  // Set during render, like the seed below, so the first frame with `enabled` true already starts the read — no extra commit waiting on an effect.
+  if (enabled && !asked) setAsked(true);
+  const { config } = useReviewSetting(asked);
   const [seed, setSeed] = useState<ReviewConfig | null>(null);
   const [pick, setPick] = useState<ReviewConfig | null>(null);
   // Adjusted during render rather than in an effect (React's "storing information from previous renders"), so the first frame that has a config already
