@@ -685,15 +685,25 @@ describe('the lanes', () => {
       expect(cellSummaries('none', '')).toEqual(['Nameless']);
     });
 
-    it('every drawn lane has one cell per column, and the cards across all cells equal the header counts’ sum', async () => {
-      lists[ALPHA.id] = [...GROUP, ...five()];
+    it('for every drawn lane the cards across its cells equal the lane’s cards, with an empty-name card and a status missing from the saved order', async () => {
+      lists[ALPHA.id] = [...GROUP, ...five(), issue({ key: 'PAY-630', summary: 'Nameless', status: st('', 'new') })];
+      // Only `Done` is saved, so every other status (and the empty name) is placed by `boardColumns`' rule, not by the saved order.
+      statusAnswer = status({ boards: [{ ...ALPHA, columns: ['Done'] }, BETA] });
       renderPage();
-      await screen.findByText('Five todo');
-      // Every drawn card is in exactly one cell of one lane, and no cell cuts here (all under five), so the cells' cards are the header counts' sum.
-      for (const key of laneKeys()) expect(lane(key)!.querySelectorAll('.jira-lane-cell')).toHaveLength(colNames().length);
-      const total = colCounts().reduce((n, c) => n + Number(c), 0);
-      expect(total).toBe(five().length + GROUP.length - 2);
-      expect(document.querySelectorAll('.board-card')).toHaveLength(total);
+      await screen.findByText('Nameless');
+      // The cards each lane owns in this fixture: PAY-120 holds PAY-170, PAY-160 holds PAY-161 and PAY-162 (two columns), PAY-999 holds PAY-190, and
+      // `No parent` holds PAY-180, the five, and the nameless card. No cell reaches the cut of five, so every card is drawn.
+      const owned: Record<string, number> = { 'PAY-120': 1, 'PAY-160': 2, 'PAY-999': 1, none: 7 };
+      expect([...laneKeys()].sort()).toEqual(Object.keys(owned).sort());
+      for (const key of laneKeys()) {
+        const cells = Array.from(lane(key)!.querySelectorAll('.jira-lane-cell'));
+        expect(cells).toHaveLength(colNames().length);
+        expect(cells.reduce((n, c) => n + c.querySelectorAll('.board-card').length, 0)).toBe(owned[key]);
+      }
+      expect(cellSummaries('PAY-160', 'Done')).toHaveLength(1);
+      expect(cellSummaries('PAY-160', 'To Do')).toHaveLength(1);
+      expect(cellSummaries('none', '')).toEqual(['Nameless']);
+      expect(colCounts().reduce((n, c) => n + Number(c), 0)).toBe(Object.values(owned).reduce((n, c) => n + c, 0));
     });
 
     it('a lane header whose status no card shares still draws its column, with count 0', async () => {

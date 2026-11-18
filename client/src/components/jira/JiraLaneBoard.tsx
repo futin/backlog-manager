@@ -29,9 +29,9 @@ const NO_ENDED: readonly SessionLink[] = [];
  * lanes start folded still says how much is Done — and `columnTone`'s dot. Header issues are in no column and add nothing. The row is sticky, so it stays
  * above the lanes while they scroll under it. `--jira-cols` (`max(N, 1)`) is how many tracks both grids draw; with no column at all the row is empty.
  *
- * **A lane is its header, then one cell per column, then its nested lanes** (§3.2, §3.3). The lanes are drawn FLAT, each nested lane a sibling after its parent's
- * cells rather than a child element, so indentation is one `data-depth` read by CSS — `Math.min(depth, LANE_INDENT_CAP)`, the model's depth uncapped — and
- * never an indent that compounds through wrappers; a folded lane draws its header and skips its cells and every lane under it. Depth reaches CSS as an
+ * **A lane is its header, then one cell per column, then its nested lanes** (§3.2, §3.3). The lanes are drawn FLAT, each nested lane a sibling after its
+ * parent's cells rather than a child element, so indentation is one `data-depth` read by CSS — `Math.min(depth, LANE_INDENT_CAP)`, the model's depth
+ * uncapped — and never an indent that compounds through wrappers; a folded lane draws its header and skips its cells and every lane under it. Depth reaches CSS as an
  * attribute because the CSP allows no inline style.
  *
  * **A cell's cut is `laneCell`'s** — five cards, plus any card past them with a live session, never reordered — with `+ N more` / `show fewer` as the
@@ -42,8 +42,8 @@ const NO_ENDED: readonly SessionLink[] = [];
  * the List draws the same lanes with the same folds (§4.1): a fold made in either view is the other's, and the newest click on any off-board header, in
  * either view, is the only one that may open Detail.
  *
- * Empty: the column header stays with its zeros (none at all with nothing loaded and nothing saved) and one line under it — the List's words, `No issues` for an empty loaded list and `No issues match`
- * when the filters hide everything.
+ * Empty: the column header stays with its zeros (none at all with nothing loaded and nothing saved) and one line under it — the List's words,
+ * `No issues` for an empty loaded list and `No issues match` when the filters hide everything.
  */
 export function JiraLaneBoard({
   views,
@@ -124,7 +124,13 @@ export function JiraLaneBoard({
               const all = view.cards.filter((c) => c.status.name === col.name);
               const { shown, hidden } = laneCell(all, isLive, cellOpen);
               return (
-                <div key={col.name} className="jira-lane-cell" data-col={col.name} data-tone={columnTone(col)} data-testid={`cell-${lane.key}-${col.name}`}>
+                <div
+                  key={col.name}
+                  className="jira-lane-cell"
+                  data-col={col.name}
+                  data-tone={columnTone(col)}
+                  data-testid={`cell-${lane.key}-${col.name}`}
+                >
                   {shown.map((issue) => (
                     <JiraCard
                       key={issue.key}
