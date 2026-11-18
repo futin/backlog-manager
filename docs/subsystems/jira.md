@@ -338,9 +338,10 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   string `key` and `summary` is dropped rather than blanking the board. A CHANGE of `nudge` — a counter `JiraView` owns and bumps when the Detail dialog
   reports a landed write — asks at once through the same coalesced request, whatever the interval, `off` included (spec §6.1).
 - **`lib/jira.ts`** is the one home of every derivation the five surfaces print — the columns (`JIRA_COLUMNS`, `columnOf`, `sortForBoard`), the card's crumb
-  (`crumbOf`/`crumbText`), initials, age (`cardAgeStamp`), the fold (`foldBoard` — the one walk of the parent chain, into `tops`, `under` and the
-  `childrenOf` index — `sortTops`, `foldProgress`, `cardFold`, `foldMatches`, the modal's `modalTree`) and its sentences (`progressLine`, `childrenLine`,
-  `matchMarker`), the band line (`bandSub`, whose issue and card counts come from the fold once the list has loaded), a Setup row's sentence (`boardRowLine`), the
+  (`crumbOf`/`crumbText`), initials, age (`cardAgeStamp`), the lanes (`laneBoard` — the one walk of the parent chain, into the lanes in drawing order, the `childrenOf` index and each issue's kept parent,
+  `parentOf` — then `laneViews` for the filtered reading, `laneColumnCounts`, `laneCell` and `LANE_CELL_LIMIT`, `foldProgress` and the modal's `modalTree`), the
+  lane folds' storage (`JIRA_LANE_FOLDS_KEY`, `clampLaneFolds`, `setLaneFold`) and their sentences (`progressLine`, `laneCountText`), the band line (`bandSub`,
+  whose issue and `M parents` counts, `laneParents`, come from the lanes once the list has loaded), a Setup row's sentence (`boardRowLine`), the
   failure phrase, the chip's CALLS reading (`callsReading`, against `JIRA_SWEEP_CALL_CEILING` = 100, red inside `JIRA_429_RED_MS` = 15 min of the last 429),
   the Connection card's `sweepLine` and `accessPhrase`, the board pick (`JIRA_BOARD_KEY`, `pickBoard`, `boardsByName`), the filters, `JIRA_QUERY_PRESETS`,
   `unmappedProjects` and `displayPath`. Nothing in it reads a clock: `now` is a required parameter, and every poll or check age goes through `pollAge` (a card's age is `elapsedSince`'s own reading).
@@ -349,11 +350,18 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   list on every render, and `useJiraBoard` is handed only the id that resolution returns — a deleted or hand-edited pick falls to the first board by name and
   never becomes a request for `/boards/<that id>/issues`. Filters (type, status, assignee, sprint) are read off the loaded list and
   stored per browser — a stored pick the list does not offer reads as any; the summary search is per mount.
-  `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. The board draws the fold's tops only, each column sorted by
-  `sortTops` and counting cards, and a filter that matches only a folded issue still shows its top, ringed. A card click lands in `JiraView`'s open-issue
-  slot with the fold's `childrenOf` beside the issue. The band's `Board | List` switch (`JiraViewSwitch`, `hooks/useJiraView.ts`) picks the deck over the shelves or
-  `JiraIssueList`: one row per top, never a folded issue, in `sortTops`' order and uncut, with the deck's own session roll-up (`topSessionCell`, `issueCellWord`
-  in `lib/jira-deck.ts`) and `rolledUpdated` (`lib/jira.ts`) for the Updated cell; a row opens Detail through `rowOpens` (`lib/jira-list.ts`).
+  `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. The board draws one lane per parent (`JiraLaneBoard`, `JiraLaneHeader`; DESIGN.md §8.9.1): `laneBoard` reads the loaded list once and every
+  issue is drawn once — a header issue (the parent of something on the board) heads its own lane, every other issue is a card in its parent's lane, in
+  `No parent`, or in an off-board lane whose header is a stub built from the freshest card under it. A lane's cards sit in To Do, In Progress and Done cells under
+  one sticky column header, each cell cut at `LANE_CELL_LIMIT` (5) plus any card past it with a live session, and the nested lanes follow their parent's cells.
+  Matching is per issue — `matchesBoardFilters`, then `matchesDelivery` while a delivery filter is picked — and `laneViews` keeps a lane while anything in its
+  subtree matches. A lane folds from its chevron: settled lanes start closed, a person's toggle is stored per board as an override
+  (`JIRA_LANE_FOLDS_KEY`, one key holding a board id to overrides map, clamped on read by `clampLaneFolds`), and while the search box holds text every lane draws open.
+  `JiraBoardView` owns the folds (`useLaneFolds`) and the off-board parent read (`useOffBoardParent`, one `askParent` on a click — drawing requests nothing) and
+  hands both to the Board and the List, so a fold made in either view is the other's. A card click lands in `JiraView`'s open-issue
+  slot with the lanes' `childrenOf` beside the issue. The band's `Board | List` switch (`JiraViewSwitch`, `hooks/useJiraView.ts`) picks the deck over the lanes or
+  `JiraIssueList`: the same lanes as rows of one table, a header row per lane and one row per card, uncut, each row with its own issue's session cell
+  (`issueCellWord` in `lib/jira-deck.ts`) and its own `updated`; a row opens Detail through `rowOpens` (`lib/jira-list.ts`).
   Since the GitLab connection, while `useDeliveryIndex` answers an index: `MrChip` on each card (`components/jira/MrChip.tsx`), `GitlabBandLine` under
   `JiraBandSub`, the List's Delivery column after Status (`DeliveryTrack`'s compact shape), and a `Delivery` section in the Filters popover beside a
   List-only segmented control, stored with the board filters (`lib/jira.ts`'s `delivery`) — [gitlab.md](gitlab.md#the-client-half), DESIGN.md §8.9.6.
@@ -654,14 +662,14 @@ section (nine dialogs). The browser still never talks to Jira or the dashboard: 
   applies `Assign to me` and `Move to` BEFORE the spawn, so a Start refused after a write landed ends its sentence `— the assign stands` or `— the Jira writes
   stand`; the sheet reads that (`jiraWritesStand`) as `onWrote` — the same reload and nudge — and puts `Move to` back to `leave as is`, the refusal staying on
   screen. A refusal before any write changes nothing.
-- **The deck.** The Board page's live sessions are the agent deck above the status shelves (`JiraAgentDeck`, `JiraShelves`; DESIGN.md §8.9.1). The
-  sessions come from the one `useJiraSessionsContext()` provider — never a second poll — and `boardAgents` (`lib/jira-deck.ts`) turns the folded board plus
-  `GET /api/jira/sessions` into entries: every non-ended link whose key is a top or folded under one, plus a `starting` entry for each `status.live[key]`
-  that carries `starting`, because the sessions payload never does. `deckGroup` orders them (needs you, working, quiet, then starting and lost, newest first),
-  `boardShelves` cuts the shelves — a top with an agent on itself or on a folded child leaves them, decided from the unfiltered agents — and `SHELF_LIMIT`
-  (8, 8, 3) caps the rows. `foldMatches` applies to deck and shelves alike. A ticket's newest ended session is the shelf card's `ended` line. `status.live` is
-  still the shell's reservation source and still what the Run chip gates on; it no longer draws a strip on a card, so a `live` entry with no payload link yet
-  (before the first sessions answer) leaves its top on the shelf with no deck card until that answer lands. The deck, like Detail, clears on the next read of
+- **The deck.** The Board page's live sessions are the agent deck above the parent lanes (`JiraAgentDeck`; DESIGN.md §8.9.1). The
+  sessions come from the one `useJiraSessionsContext()` provider — never a second poll — and `boardAgents` (`lib/jira-deck.ts`) turns the loaded issues, the lanes'
+  `parentOf` and `GET /api/jira/sessions` into entries: every non-ended link whose key is on the loaded list, plus a `starting` entry for each `status.live[key]`
+  that carries `starting`, because the sessions payload never does. `deckGroup` orders them (needs you, working, quiet, then starting and lost, newest first).
+  Nothing leaves a lane for the deck: a card with a live session keeps its cell and wears the session's state line (`sessionCells`), so the deck and the lane are
+  two views of one session. An entry shows when the issue its session runs on passes the filters and search, the rule every card follows. A ticket's newest ended
+  session is the card's `ended` line. `status.live` is still the shell's reservation source and still what the Run chip gates on; a `live` entry with no payload
+  link yet (before the first sessions answer) draws no deck card and no state line until that answer lands. The deck, like Detail, clears on the next read of
   the sessions provider.
 - **The modal's session.** A `session` fact (`<name> · <repo> · <elapsed>`, `starting`, or `—`) and `Stop session`, a row of `SessionOpen`'s `Session actions` menu whose
   `Stop session` is replaced in place by `ui/Confirm` (focus returns to the split's chevron after `Keep running`, and to the session card — focusable, `tabIndex={-1}` — after an accepted Stop, whose write guard disables the chevron, #475), offered only while agents are enabled AND the
@@ -760,10 +768,9 @@ The Jira sessions work adds `jira-sessions-state` (`sessionState` and `needsYou`
 `agents-jira-live` (the quiet clock, re-attach, the pace), `agents-jira-stop` (`{ key, sessionId }`) and `jira-routes` (`GET /sessions`),
 and adds `agents-jira-link` (the link and unlink routes, supertest), the pure `jira-sessions-lib` (`lib/jira-sessions.ts`: the Open buttons, durations, the
 ticket's sessions) and the jsdom suites `jira-list` (the Sessions page's session table; the Board's issue List is in `jira-board`), `jira-view-store` (the Board and List switch's module store) and `jira-sessions-hook`
-(`useJiraSessions`), and widens `rail` (the Needs-you badge), `jira-board` (the agent deck and status shelves) and `jira-detail` (the live session cards and
+(`useJiraSessions`), and widens `rail` (the Needs-you badge), `jira-board` (the agent deck and the parent lanes) and `jira-detail` (the live session cards and
 history; it was `jira-modal` before the dialog was renamed);
-the Sessions-page work then widens `jira-list` (the Sessions page), `jira-board` (the issue List, the shared pick, the Board | List switch), `jira-lib` (`JIRA_PAGES`,
-`rolledUpdated`), `rail` (the badge opens Sessions) and `jira-sections` (the page store);
+the Sessions-page work then widens `jira-list` (the Sessions page), `jira-board` (the issue List, the shared pick, the Board | List switch), `jira-lib` (`JIRA_PAGES`), `rail` (the badge opens Sessions) and `jira-sections` (the page store);
 `test/helpers/jira-links-env.ts` gives every test its own `BM_JIRA_LINKS_FILE` in a temp directory, so none touches a developer's real one and no case inherits
 another's links.
 

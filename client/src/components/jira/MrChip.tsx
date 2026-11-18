@@ -2,7 +2,7 @@ import { deliveryLook, type TicketDelivery } from '../../lib/delivery';
 
 /**
  * MrChip — a ticket's lead merge request as one chip (GitLab connection spec §7.2, mock `Cards.dc.html`; DESIGN.md §8.9.1, the card's marker row and the
- * deck card). One component for both board surfaces that draw it — the shelf card's foot, after the worktree chip and before `Run ▾`, and the deck card's
+ * deck card). One component for both board surfaces that draw it — the lane card's foot, after the worktree chip and before `Run ▾`, and the deck card's
  * own line under the crumb — so the two can never word or tone one MR differently.
  *
  * It draws NOTHING unless the ticket has MRs (`kind: 'mrs'`): `hidden`, `unknown` and `none` all draw nothing on a card. An empty foot already says "no MR"

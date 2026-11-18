@@ -1,5 +1,7 @@
 # Jira board — children fold into their top ancestor (amends the Jira design)
 
+**Superseded** for the Board and the List by [2026-11-18-jira-parent-lanes-design.md](2026-11-18-jira-parent-lanes-design.md); this text is kept as the record.
+
 **Amends:** [2026-10-15-jira-integration-design.md](2026-10-15-jira-integration-design.md) §1 (board layout row), §6.2 (Jira › Board), §6.3 (issue
 modal). Where the two disagree, this document wins. Phase 2 shipped the flat layout; this lands as its own plan and PR, before phase 3.
 **Mocks:** https://claude.ai/artifact/JHdzBd5RCpWWSJwjKNFHZL (canvas, version 11), the row titled "Grouped board". Picked: `GroupTop.dc.html` (G-A),
