@@ -68,23 +68,26 @@ in your report instead of transcribing it.
   - `parseBoardWrite`: a body with no `columns` → `value.columns` is `undefined`; `columns: 'x'` → `{ ok: false, error: 'columns must be an array of
     status names' }`; `['To Do', '', 'a'.repeat(101), 'To Do', 'Done']` → `['To Do', 'Done']`; `[]` → `[]`.
   - `writeBoard`: an update with `columns: ['B', 'A']` stores and returns them; a later update without `columns` leaves the raw file's `columns` as
-    `['B', 'A']` and returns `columns: ['B', 'A']`; a create without `columns` returns `columns: []` and writes no `columns` key.
+    `['B', 'A']` and returns `columns: ['B', 'A']`; a create without `columns` returns and writes `columns: []`, so the file equals the answer.
   - Route (`POST /api/jira/boards`): an update that leaves `columns` out answers with the stored order.
-- [ ] **Step 2: Run them.** Run `pnpm exec jest test/jira/jira-config.test.ts test/jira/jira-config-write.test.ts test/jira/jira-write-routes.test.ts`.
-  Expect the new cases to FAIL.
+  - Migrate the existing assertions this breaks: `test/jira/jira-write-routes.test.ts:166` (the create answer gains `columns: []`; `:170`'s file-equals-answer
+    then holds as is) and `test/jira/jira-poller.test.ts:507` (the status board gains `columns: []`).
+- [ ] **Step 2: Run them.** Run `pnpm exec jest test/jira/jira-config.test.ts test/jira/jira-config-write.test.ts test/jira/jira-write-routes.test.ts
+  test/jira/jira-poller.test.ts`. Expect the new cases to FAIL.
 - [ ] **Step 3: Implement.** `readBoard` sets `columns: normaliseColumns(value.columns, …)`, using the file's existing `drop(file, where, why)` for the
-  warnings. `parseBoardWrite` gives a 400 on a present non-array, and otherwise normalises silently. `writeBoard` puts `columns` on the stored object only
-  when `input.columns !== undefined`. Build the merged object so that an omitted `columns` does not overwrite the raw key, and return the board as
-  `readBoard` would read it back.
-- [ ] **Step 4: Run them.** Run the same command. Expect PASS. Then run `pnpm run typecheck`. Expect it clean.
+  warnings. `parseBoardWrite` gives a 400 on a present non-array, and otherwise normalises silently. `writeBoard` writes `input.columns` when it is given.
+  On an update without it, the merged object carries no `columns` key, so the raw key survives. On a create without it, it writes `[]`. It returns the
+  board as `readBoard` would read it back.
+- [ ] **Step 4: Run them.** Run the same command. Expect PASS. Then run `pnpm run typecheck`, expecting it clean, and run every hit of
+  `grep -rl "readJiraConfig\|writeBoard\|status().boards" test`.
 - [ ] **Step 5: Commit.** `git add` the four source and test files by path, then
   `git commit -m "feat(jira): store a per-board status column order"`.
 
 ### Task 2: Client lib — derive the columns
 
 **Files:**
-- Modify: `client/src/lib/jira.ts`: add beside `laneColumnCounts` (around 525-536); change `laneColumnCounts`
-- Test: `test/jira/jira-lib.test.ts` (new `describe('boardColumns')`; update `laneColumnCounts` at 2443-2457)
+- Modify: `client/src/lib/jira.ts`: add beside `laneColumnCounts` (around 525-536), leaving `laneColumnCounts` itself to Task 3
+- Test: `test/jira/jira-lib.test.ts` (new `describe('boardColumns')`)
 
 **Interfaces:**
 - Consumes: `JiraBoard.columns` (Task 1).
@@ -92,7 +95,6 @@ in your report instead of transcribing it.
   for `''`).
 - Produces: `export function boardColumns(issues: readonly JiraIssue[], saved: readonly string[]): JiraBoardColumn[]`
 - Produces: `export function columnTone(col: JiraBoardColumn): JiraColumnSlug`: `statusTone(category)`, or `'todo'` when `category` is `null`.
-- Changes: `laneColumnCounts(views): ReadonlyMap<string, number>`, keyed by `status.name`. A name with no card is absent, and callers read `?? 0`.
 
 - [ ] **Step 1: Write failing tests**, with TIMIFY statuses To Do/new, In Progress/indeterminate, In Review/new, In Testing/new, Done/done. Expected
   `.map((c) => c.name)`:
@@ -108,10 +110,9 @@ in your report instead of transcribing it.
   - an issue with `status.name ''` → a column `{ name: '', label: 'No status' }`;
   - `X` as new on the first issue and as indeterminate on a later one → category `new`;
   - `[]` issues and `saved []` → `[]`.
-  - `laneColumnCounts`: keep the existing two cases, rewritten to the map (`get('To Do') === 2`, `get('Done') === 1`, `get('In Progress')` undefined).
 - [ ] **Step 2: Run them.** Run `pnpm exec jest test/jira/jira-lib.test.ts`. Expect FAIL.
-- [ ] **Step 3: Implement** `boardColumns`, `columnTone` and the new `laneColumnCounts`. Reuse `CATEGORY_RANK` and `byText`. Do not duplicate
-  `boardFilterOptions`' first-seen loop if it can be shared cleanly.
+- [ ] **Step 3: Implement** `boardColumns` and `columnTone`. Reuse `CATEGORY_RANK` and `byText`. Do not duplicate `boardFilterOptions`' first-seen loop
+  if it can be shared cleanly.
 - [ ] **Step 4: Run them.** Run the same command. Expect PASS.
 - [ ] **Step 5: Commit.** `feat(jira): derive the Board's columns from statuses and the saved order`
 
@@ -123,6 +124,9 @@ labels of the header columns and cells change: one per status (spec §Board, §W
 **Files:**
 - Modify: `client/src/components/jira/JiraLaneBoard.tsx` (header 155-165, cells 113-150, file header comment)
 - Modify: `client/src/components/jira/JiraBoardView.tsx:325-341`: pass `issues={list.issues}`
+- Modify: `client/src/lib/jira.ts` `laneColumnCounts` (525-536) → `ReadonlyMap<string, number>`, keyed by `status.name`; a name with no card is absent,
+  and the caller reads `?? 0`. Its suite is `test/jira/jira-lib.test.ts:2443-2457`: keep the two cases, rewritten to the map (`get('To Do') === 2`,
+  `get('Done') === 1`, `get('In Progress')` undefined).
 - Modify: `client/src/styles.css:1673-1676, 1721`: `repeat(var(--jira-cols, 3), minmax(0, 1fr))`. Keep the ≤ 700 px rule.
 - Modify: `.claude/DESIGN.md` §8.9.1 (the lanes and column-header text that says three columns, one per status category), `docs/subsystems/board.md`
 - Test: `test/jira/jira-board.test.tsx` (helpers at 327, 330, 622, 1936-1938; every `cell-<lane>-<slug>` / `lanes-col-<slug>` id)
@@ -140,7 +144,8 @@ labels of the header columns and cells change: one per status (spec §Board, §W
   - an empty-name card is in `cell-<lane>-` under a `No status` header (Review Focus 1);
   - for every drawn lane, the cards summed across its cells equal the lane's matching cards (Review Focus 1);
   - an empty list with nothing saved draws the header row with no columns and `No issues`;
-  - the header carries `--jira-cols` = number of columns (`max(N, 1)`) on its `style`.
+  - a parent lane header (on the board) whose status `In Review` no card shares → a `lanes-col-In Review` header with count `0`;
+  - `.jira-lanes` carries `--jira-cols` on its `style`: `5` with the five-status fixture, `1` with the empty list.
 - [ ] **Step 2: Run them.** Run `pnpm exec jest test/jira/jira-board.test.tsx`. Expect the new cases to FAIL.
 - [ ] **Step 3: Implement.** Derive `cols = useMemo(() => boardColumns(issues, board.columns ?? []), …)`. The header and each lane's cells map over `cols`.
   A cell's cards are `view.cards.filter((c) => c.status.name === col.name)`, the open-cell id is `${lane.key}:${col.name}`, `data-col={col.name}` and
@@ -168,12 +173,15 @@ labels of the header columns and cells change: one per status (spec §Board, §W
   - `Reset to default`, then save → `columns: []`;
   - typing `QA` + `Add` → a `QA` row at the end, with `Remove QA`; `To Do` (carried) has no `Remove` button; `Add` with a name already drawn does nothing;
   - the first row's `Move … up` and the last row's `Move … down` are disabled;
-  - a move made while the read is still pending survives the read landing (resolve the mocked fetch after the click);
+  - a move made while the read is still pending survives the read landing: saved `['To Do', 'Done']`, `Move Done up` while the mocked fetch is pending,
+    then resolve it with To Do, In Review and Done issues → rows `Done, To Do, In Review`, and save posts `columns: ['Done', 'To Do', 'In Review']`;
   - a new board (`board: null`) with nothing added shows `No columns yet — they appear once this board has issues.`;
   - an empty-name issue in the read produces no row.
 - [ ] **Step 2: Run them.** Run `pnpm exec jest test/jira/jira-setup.test.tsx`. Expect FAIL.
 - [ ] **Step 3: Implement.** Keep a working list (`string[] | null`, where `null` = untouched and the board's saved `columns` is used) and a `touched`
-  flag. The first edit materialises the drawn list (no `''`) and then applies the edit. Rows are `boardColumns(readIssues, working ?? saved)` minus `''`.
+  flag. Every edit (move, add, remove) first sets the working list to the rows as drawn, then applies the edit. Rows are
+  `boardColumns(readIssues, working ?? saved)` minus `''`. Save sends no `columns` while untouched; it sends `[]` when the last edit was a reset;
+  otherwise it sends the rows as drawn.
   The add field has `maxLength={100}`. Compose `components/ui/` primitives (`SettingsRow`, `Chip`, icon buttons) per `.claude/DESIGN.md`; do not add a
   new primitive.
 - [ ] **Step 4: Run them.** Run the same command, then `pnpm exec jest test/board/dialog-escape.test.tsx test/guards`. Expect PASS.
