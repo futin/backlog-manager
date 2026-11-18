@@ -31,8 +31,8 @@ const NO_ENDED: readonly SessionLink[] = [];
  *
  * **A lane is its header, then one cell per column, then its nested lanes** (§3.2, §3.3). The lanes are drawn FLAT, each nested lane a sibling after its
  * parent's cells rather than a child element, so indentation is one `data-depth` read by CSS — `Math.min(depth, LANE_INDENT_CAP)`, the model's depth
- * uncapped — and never an indent that compounds through wrappers; a folded lane draws its header and skips its cells and every lane under it. Depth reaches CSS as an
- * attribute because the CSP allows no inline style.
+ * uncapped — and never an indent that compounds through wrappers; a folded lane draws its header and skips its cells and every lane under it. Depth reaches
+ * CSS as an attribute because the CSP allows no inline style.
  *
  * **A cell's cut is `laneCell`'s** — five cards, plus any card past them with a live session, never reordered — with `+ N more` / `show fewer` as the
  * flat chip with `aria-expanded`. Which cells are open is this component's state, keyed `<lane key>:<status name>`, lost on reload as the shelves' was; a key
