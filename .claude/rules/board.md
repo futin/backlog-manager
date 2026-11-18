@@ -9,12 +9,13 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   refuses a starting project with the same `RUN_IN_PROGRESS_CODE`. `runHoldsItem` deliberately does NOT gain the parameter. Why:
   [invariants.md](docs/subsystems/invariants.md#a-starting-entry-blocks-what-a-run-file-blocks-bug-21)
 - **Escape has one owner, and the topmost dialog is the only one that closes.** `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-  listener; nine dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, since Jira phase 2 `JiraDetail` and `JiraBoardSheet`, since the
+  listener; ten dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, since Jira phase 2 `JiraDetail` and `JiraBoardSheet`, since the
   release chip `ReleasesDrawer`, since Jira phase 5 `JiraLaunchSheet`, since the Dashboards page's add/edit sheet `DashboardSheet`, and since Jira mentions
-  `JiraMentionModal` — and
+  `JiraMentionModal`, and since the reply editor `JiraReplyEditor` — and
   none binds its own (bug-23 — four until task-37 took the run drawer off the Board, whose content is the Runs page's inline detail sheet and never a dialog
   again; three from then until Jira phase 2). Since task-40 the hook is called by the overlay shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`), not by the
-  surfaces themselves: `Modal`'s composers are `ItemModal`, `JiraDetail` and `JiraMentionModal`, `FormSheet`'s are `LaunchSheet`, `OrchestrateSheet`,
+  surfaces themselves: `Modal`'s composers are `ItemModal`, `JiraDetail`, `JiraMentionModal` and `JiraReplyEditor`, `FormSheet`'s are `LaunchSheet`,
+  `OrchestrateSheet`,
   `JiraBoardSheet`, `JiraLaunchSheet` and `DashboardSheet`,
   so the four Jira surfaces and the Dashboards sheet joined by construction (`JiraLaunchSheet` is hosted once, in `JiraView`, and ranks above the issue modal
   because it MOUNTS later — it always opens while the modal is up — not because of its place in the JSX). `ReleasesDrawer` is the exception: its shell is
@@ -24,7 +25,7 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with ten composers — the tracker's (`components/TrackerChip.tsx`), the band's
   Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board picker (`components/jira/JiraBoardPicker.tsx`), the board sheet's roots
   search (`components/jira/JiraBoardSheet.tsx`) `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`) the Jira Detail's Move-to panel (`components/jira/JiraDetail.tsx`) and `SessionOpen`'s `Session actions` menu (`components/jira/SessionOpen.tsx`, on the deck card and in Detail) and `PrActions`' `Merge menu` (`components/github/PrActions.tsx`, beside every pull request); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
-  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still nine dialogs counted.
+  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still ten dialogs counted.
   Ranking is by mount order; entries are removed by identity, never popped.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)

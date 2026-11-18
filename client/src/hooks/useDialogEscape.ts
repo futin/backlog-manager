@@ -39,7 +39,10 @@ import { useEffect, useRef } from 'react';
  * Nine since Jira mentions: `JiraMentionModal` (`components/jira/JiraMentionModal.tsx`) composes `ui/Modal`, its third composer after the item modal and
  * `JiraDetail`, and joined by construction with nothing here changed. It is hosted by the Mentions page and opens over nothing but that page.
  *
- * One entry is not a dialog at all, and it is not one of the nine: bug-53's
+ * Ten since the reply editor: `JiraReplyEditor` (`components/jira/JiraReplyEditor.tsx`) composes `ui/Modal`, its fourth composer, portalled into `.shell`
+ * and mounted after the mention modal it opens from, so it ranks above it — joined by construction with nothing here changed.
+ *
+ * One entry is not a dialog at all, and it is not one of the ten: bug-53's
  * `ui/Confirm.tsx`, the inline confirmation the run's Stop opens (as do the claim release, the Jira board sheet's `Delete board`, the Skills card's `×` and the
  * Jira modal's `Stop session`). It paints no
  * scrim and floats over nothing, but it calls this hook while it is drawn,
