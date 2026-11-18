@@ -1378,6 +1378,17 @@ test('the merged ## Minor is kind-tagged, kind-ordered and holds no heading', ()
   assert.deepEqual(section.split('\n').slice(1).filter((l) => l.startsWith('#')), []);
 });
 
+test('an unrequested: Minor is an ordinary bug Minor to merge, its tag kept in the text', () => {
+  // #568 added the tag to the reviewer's prose only: no new kind, no parser change. This pins that the grammar it rides already carries it through.
+  const fx = oneGroup();
+  const r = merge(fx, ['--reports', reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), minor: ['- a.mjs:3 — [bug] unrequested: new --quiet flag'] })]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.summary.verdict, 'approve');
+  assert.equal(r.summary.minorByKind.bug, 1);
+  const lines = minorSection(fs.readFileSync(fx.out, 'utf8')).split('\n').filter((l) => l.startsWith('- '));
+  assert.deepEqual(lines, ['- a.mjs:3 — [bug] unrequested: new --quiet flag']);
+});
+
 test('no Minor of any kind, fresh or earlier and open, makes fix', () => {
   const fx = mergeFixture({ groups: [{ files: ['a.mjs'], earlier: [minorFinding('M1', 'a.mjs', 'bug')] }] });
   const minor = ['- a.mjs:1 — [bug] b', '- a.mjs:2 — [test] t', '- a.mjs:3 — [docs] d', '- a.mjs:4 — [trivial] v'];
