@@ -68,6 +68,14 @@ a plan bug becomes a branch bug). Disagree with the plan where the code says oth
   - Entities and escapes: `'a &amp; b &lt; &#169; &#x41; &hellip; \\*'` → text `a & b < © A &hellip; *`.
   - Fallbacks: `'- # h'` → list item's paragraph `h` with `strong`; `'> # h'` → blockquote paragraph `h` with `strong`; `'- [ ] todo'` → list item text
     `[ ] todo`; raw HTML `'<b>x</b>'` → its source text in a paragraph; an image `'![alt](/a.png)'` → its source text.
+  - Remaining table rows: `'__s__ *e*'` → `s`+strong, `e`+em; `'    code'` (indented) → `codeBlock` with no `language`; `'[m](mailto:a@b.io)'` → link
+    mark kept; `'[t](https://x.io "T")'` → link mark `{href:'https://x.io'}`, no title; `'&gt; &quot; &#39;'` → text `> " '`; `` '```\n```' `` →
+    `codeBlock` with no content.
+  - Containers: `'- a\n\n  ---'` → the list item holds `paragraph[a]`, `paragraph[---]`; `'> | a |\n> | - |\n> | b |'` → blockquote paragraphs `a`, `b`
+    (one per row, cells joined ` | `); `'- ```\n  x\n  ```'` → list item's first child an empty `paragraph`, then `codeBlock`.
+  - Prose that only looks like Markdown (Review Focus 2): `'snake_case_name and 2 * 3 * 4'` → one paragraph, one plain text node after the mention;
+    `'#123 is fixed'` → paragraph text `#123 is fixed`; `'1) first'` → `orderedList` (CommonMark marker — the preview renders the same list, which is
+    the contract: post what the preview shows).
   - No empty text node anywhere: walk every result above and assert no `text: ''`.
   - Round trip: a fixture opening with a paragraph, in canonical spelling (`**x**`, `_x_`, `-` bullets, `1.` list, heading, code block, quote, rule,
     inline code, `[t](https://x.io)`), no tables / autolinks / entities: `adfToMarkdown(replyDoc(MARA, md)).markdown` equals `'@Mara Ilić ' + md`.
@@ -91,8 +99,8 @@ a plan bug becomes a branch bug). Disagree with the plan where the code says oth
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Failing test.** In `the reply built-in`: the prompt contains `Markdown` and does not contain `plain paragraphs`; the existing `< 1_500`
-  length assertion stays.
+- [ ] **Step 1: Failing test.** In `the reply built-in`: the prompt contains `Markdown` and does not contain `Write the reply as plain paragraphs` (today's
+  wording, `server/src/jira/prompt.util.ts:194`; the new text still says "plain paragraphs when it does not"); the existing `< 1_500` assertion stays.
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/jira/jira-prompt.test.ts`. Expected: the new test FAILS.
 - [ ] **Step 3: Implement.** Reword per the spec's Prompt section: Markdown (headings, bold, lists, inline code, links, small tables) when the answer has
   structure, plain paragraphs when not; still no leading `@`-mention; still `jira.mjs draft` on stdin, never post. Update SKILL.md, jira.md and the old
@@ -151,7 +159,8 @@ a plan bug becomes a branch bug). Disagree with the plan where the code says oth
 - Create: `client/src/components/jira/JiraReplyEditor.tsx` (header comment cites DESIGN.md §8.9.7 and the spec)
 - Modify: `client/src/components/jira/JiraMentionModal.tsx` (`DraftReply`: `Open editor` chip first in `.jira-reply-acts`, an `open` state, a ref on the
   box's root for `closest('.shell')`, renders the editor through `createPortal`), `client/src/styles.css` (editor column and textarea fill rules)
-- Test: `test/jira/jira-mention-modal.test.tsx` (render the modal inside a `<div className="shell">` for these cases)
+- Test: `test/jira/jira-mention-modal.test.tsx` (render the modal inside a `<div className="shell">` for these cases); `test/ui/ui-modal.test.tsx:116-117`
+  (exactly three `Modal` composers → four, adding `jira/JiraReplyEditor.tsx`, with a comment why — Step 1)
 
 **Interfaces:**
 - Consumes: `Modal` `foot`/`over` (Task 4); `replyMarkdown`, `renderMarkdown(…, { breaks: true })` (Task 3); `chipMentions` (existing).
@@ -162,7 +171,9 @@ a plan bug becomes a branch bug). Disagree with the plan where the code says oth
 - [ ] **Step 1: Failing tests** (spec Testing, client bullets), each a separate `it`:
   - `Open editor` opens a dialog named `Reply editor for <KEY>` whose DOM is not inside the mention modal's `.ui-modal`, and is inside `.shell`.
   - Typing in `Edit reply to <name>` updates `Reply to <name>` (the box), and the reverse.
-  - `Close` closes the editor and the box keeps the edited text; Escape closes only the editor (the mention dialog is still there).
+  - `Close` closes the editor and the box keeps the edited text; Escape closes only the editor (the mention dialog is still there); a click on the
+    editor's scrim does the same — mention dialog still open, box text unchanged.
+  - Preview of `'snake_case_name and 2 * 3 * 4'` has no `<em>`/`<strong>`; of `'1) first'` has an `<ol>` (matches Task 1's ADF).
   - The preview shows `<h1>`/`<li>` for `'# H\n\n- a'`, the mention as its own paragraph before the heading, and `<br>` for `'a\nb'`.
   - Blank text previews `Nothing to preview yet.` and disables `Post reply`; text past 8000 disables it; `busy` disables it.
   - `Post reply` in the editor posts the shared text once and the editor closes on success; a refused post keeps it open with the alert line in its foot.
@@ -170,8 +181,10 @@ a plan bug becomes a branch bug). Disagree with the plan where the code says oth
   - Without `to`, the head has no `To @` line and the textarea is `Edit reply to <KEY>`.
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/jira/jira-mention-modal.test.tsx`. Expected: new cases FAIL.
 - [ ] **Step 3: Implement.** `Modal` with `head`, `lead` false, `over`, `foot`; Write column = newer-draft note + textarea filling the column height;
-  Preview column = `chipMentions(renderMarkdown(replyMarkdown(to, text), { breaks: true }), names)` styled with the thread comment's classes; the post
-  error the box already tracks is passed in as `error`.
+  Preview column = `chipMentions(renderMarkdown(replyMarkdown(to, text), { breaks: true }), to === null ? [] : [to])` styled with the thread comment's
+  classes (only the addressee is chipped: the thread's author list lives in `Thread`, `JiraMentionModal.tsx:489`, and the preview needs only the lead
+  mention tinted). `DraftReply` has no error state today: `JiraMentionModal`'s `refused` (`:152`, shown at `:358` behind the editor's scrim) is threaded
+  through a new `DraftReply` prop `refused: string | null` into the editor's `error`, so a refused Post reply from the editor is readable in its foot.
 - [ ] **Step 4: Run** the same suite, then `grep -l` in `test/` for `createPortal`, `DraftReply`, `JiraMentionModal`, `renderMarkdown`, `Modal` and run
   every hit. Expected: PASS. `pnpm run typecheck`.
 - [ ] **Step 5: Commit** `feat(board): open a mention reply in a Write/Preview editor`.
@@ -199,8 +212,9 @@ a plan bug becomes a branch bug). Disagree with the plan where the code says oth
 
 - [ ] **Step 1:** Run `/ui-verify` against the spec's sketch (`docs/superpowers/specs/2026-11-18-jira-reply-markdown-design.md`, Design › Draft box and
   Reply editor), light theme (`daylight`), with fixture data from `page.route` on `**/api/jira/mentions*` and `**/api/jira/thread*` carrying an open
-  mention with a ~2000-character Markdown draft. Shoot: the draft box (does the action bar wrap with four chips?), the editor at 1440 × 900 and at
-  699 × 900, the editor at `fontScale` 80 and 130. Assert `scrollWidth <= clientWidth` on the editor, both columns and the document.
+  mention with a ~7900-character Markdown draft (headings, lists, a table). Shoot: the draft box (does the action bar wrap with four chips?), the editor
+  at 1440 × 900 and at 699 × 900, the editor at `fontScale` 80 and 130. Assert `scrollWidth <= clientWidth` on the editor, both columns and the document;
+  at 1440 assert each column's `scrollHeight > clientHeight` (each scrolls on its own) and the foot's bounding box lies inside the viewport.
 - [ ] **Step 2:** Fix any defect, re-run the affected shots, commit.
 
 ---
@@ -210,4 +224,4 @@ a plan bug becomes a branch bug). Disagree with the plan where the code says oth
 - Spec coverage: converter (T1), prompt + skill + rules (T2), preview rendering + `mine` (T3), `Modal` slots (T4), editor + ownership + portal (T5), ten
   dialogs + DESIGN.md (T6), `/ui-verify` (T7). The spec's `plugin:sync` step is held for the person (autopilot), not a task.
 - Review Focus coverage: 1 → T1 heading/list cases + T3 `replyMarkdown`; 2 → GFM leaves intraword `_` and spaced `*` alone in both lexer and preview —
-  T1 adds `'snake_case_name and 2 * 3 * 4'` → one plain text node; 3 and 5 → T7 shots; 4 → T5 Escape case.
+  T1 and T5 pin `snake_case_name`, spaced `*`, `#123` and `1)`; 3 and 5 → T7 shots; 4 → T5 Escape and scrim cases.
