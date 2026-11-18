@@ -41,6 +41,8 @@ import {
   cardFold,
   childrenLine,
   foldBoard,
+  laneBoard,
+  NO_PARENT_LANE,
   foldMatches,
   foldProgress,
   matchMarker,
@@ -78,7 +80,7 @@ import {
   typeTone,
   statusTone
 } from '../../client/src/lib/jira';
-import type { JiraFold } from '../../client/src/lib/jira';
+import type { JiraFold, JiraLane, JiraLanes } from '../../client/src/lib/jira';
 import { DELIVERY_FILTER_LABELS, effectiveDeliveryFilter } from '../../client/src/lib/delivery';
 import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../../client/src/lib/jira';
 import { modelEffortFlags } from '../../client/src/lib/agents';
@@ -1129,6 +1131,287 @@ describe('the fold', () => {
       const text = bandSub(board({ truncated: true, polledAt: ago(now, 12 * SECOND) }), site, now, { issues: 17, cards: 5 }).text;
       expect(text).toContain(' · 5 cards · ');
       expect(text.endsWith(' · first 500 shown')).toBe(true);
+    });
+  });
+});
+
+describe('laneBoard', () => {
+  const now = Date.now();
+  const todo = { status: { name: 'To Do', category: 'new' as const } };
+  const doing = { status: { name: 'In Progress', category: 'indeterminate' as const } };
+  const done = { status: { name: 'Done', category: 'done' as const } };
+
+  /**
+   * An issue keyed `key` under `parent` (`null` for none), updated `ms` before `now`. The parent's summary is derived from its key, so two parents never
+   * share one, and every case gives each issue its own `ms` unless the case is about a tie.
+   */
+  const n = (key: string, parent: string | null, ms: number, over: Partial<JiraIssue> = {}): JiraIssue =>
+    issue({
+      key,
+      summary: `${key} summary`,
+      parent: parent === null ? null : { key: parent, summary: `${parent} summary`, type: null, status: null },
+      updated: ago(now, ms),
+      ...todo,
+      ...over
+    });
+  const keys = (list: readonly JiraIssue[] | undefined): string[] => (list ?? []).map((i) => i.key);
+  const laneKeys = (list: readonly JiraLane[]): string[] => list.map((l) => l.key);
+  const keySets = (m: ReadonlyMap<string, readonly JiraIssue[]>): Record<string, string[]> =>
+    Object.fromEntries([...m].map(([k, v]) => [k, keys(v).sort()]));
+
+  /**
+   * `laneBoard`, plus the two properties every fixture owes. Each input key is drawn exactly once across the whole tree, as an on-board header or as a
+   * card (§1.4: never twice, never dropped). And `childrenOf` is the fold's own index for the same input (§1.5) — Task 6 removes that line with `foldBoard`.
+   */
+  function lanes(input: JiraIssue[]): JiraLanes {
+    const l = laneBoard(input);
+    const drawn: string[] = [];
+    const visit = (lane: JiraLane): void => {
+      if (lane.header !== null) drawn.push(lane.header.key);
+      drawn.push(...keys(lane.cards));
+      lane.lanes.forEach(visit);
+    };
+    l.lanes.forEach(visit);
+    expect(drawn.sort()).toEqual(keys(input).sort());
+    expect(l.childrenOf).toEqual(foldBoard(input).childrenOf);
+    return l;
+  }
+
+  const epic = { name: 'Epic', level: 1, subtask: false };
+  /** Case 1's fixture: three cards under off-board `PAY-1`, the freshest (`PAY-12`) carrying a richer parent payload than the other two. */
+  const offBoardThree = (): JiraIssue[] => {
+    const plain = { key: 'PAY-1', summary: 'Checkout', type: null, status: null };
+    return [
+      n('PAY-11', null, 3 * HOUR, { parent: plain }),
+      n('PAY-12', null, 1 * HOUR, {
+        parent: { key: 'PAY-1', summary: 'Checkout v2', type: epic, status: { name: 'In Progress', category: 'indeterminate' } }
+      }),
+      n('PAY-13', null, 2 * HOUR, { parent: { ...plain } })
+    ];
+  };
+
+  it('draws one off-board lane whose stub is the freshest card’s parent', () => {
+    const input = offBoardThree();
+    const l = lanes(input);
+    expect(l.lanes).toHaveLength(1);
+    const [lane] = l.lanes;
+    expect(lane.key).toBe('PAY-1');
+    expect(lane.kind).toBe('off');
+    expect(lane.header).toBeNull();
+    expect(lane.stub).toEqual(input[1].parent);
+    expect(keys(lane.cards)).toEqual(['PAY-12', 'PAY-13', 'PAY-11']);
+    expect(lane.depth).toBe(0);
+    expect(lane.lanes).toEqual([]);
+  });
+
+  it('reads a tied stub from whichever card sortForBoard puts first, whatever the input order', () => {
+    const at = 2 * HOUR;
+    const a = n('PAY-21', null, at, { parent: { key: 'PAY-1', summary: 'Checkout', type: null, status: null } });
+    const b = n('PAY-22', null, at, { parent: { key: 'PAY-1', summary: 'Checkout v2', type: null, status: null } });
+    const first = sortForBoard([a, b])[0];
+    expect(lanes([a, b]).lanes[0].stub).toEqual(first.parent);
+    expect(lanes([b, a]).lanes[0].stub).toEqual(first.parent);
+    expect(lanes([b, a]).lanes[0].stub?.summary).toBe('Checkout');
+  });
+
+  it('adds a No parent lane, last, only when a card has no parent', () => {
+    const l = lanes([...offBoardThree(), n('PAY-20', null, 4 * HOUR)]);
+    expect(laneKeys(l.lanes)).toEqual(['PAY-1', NO_PARENT_LANE]);
+    expect(NO_PARENT_LANE).toBe('none');
+    expect(l.lanes[1].kind).toBe('none');
+    expect(keys(l.lanes[1].cards)).toEqual(['PAY-20']);
+    expect(lanes(offBoardThree()).lanes.some((x) => x.kind === 'none')).toBe(false);
+  });
+
+  it('makes an on-board parent the header of its lane and no card anywhere', () => {
+    const l = lanes([n('PAY-30', null, 5 * HOUR), n('PAY-31', 'PAY-30', 1 * HOUR), n('PAY-32', 'PAY-30', 2 * HOUR)]);
+    expect(l.lanes).toHaveLength(1);
+    expect(l.lanes[0].kind).toBe('board');
+    expect(l.lanes[0].header?.key).toBe('PAY-30');
+    expect(keys(l.lanes[0].cards)).toEqual(['PAY-31', 'PAY-32']);
+    expect(l.lanes.some((x) => x.kind === 'none')).toBe(false);
+  });
+
+  const nesting = (): JiraIssue[] => [
+    n('PAY-40', null, 6 * HOUR, { type: epic }),
+    n('PAY-41', 'PAY-40', 5 * HOUR),
+    n('PAY-42', 'PAY-41', 1 * HOUR),
+    n('PAY-43', 'PAY-41', 2 * HOUR),
+    n('PAY-44', 'PAY-40', 3 * HOUR)
+  ];
+
+  it('nests a header issue’s lane under its parent’s lane, one step in, with the subtree counting the nested header', () => {
+    const l = lanes(nesting());
+    expect(laneKeys(l.lanes)).toEqual(['PAY-40']);
+    const [root] = l.lanes;
+    expect(keys(root.cards)).toEqual(['PAY-44']);
+    expect(laneKeys(root.lanes)).toEqual(['PAY-41']);
+    expect(root.lanes[0].depth).toBe(1);
+    expect(root.lanes[0].cards).toHaveLength(2);
+    expect(keys(root.subtree).sort()).toEqual(['PAY-41', 'PAY-42', 'PAY-43', 'PAY-44']);
+    expect(keys(root.lanes[0].subtree).sort()).toEqual(['PAY-42', 'PAY-43']);
+  });
+
+  it('draws no lane for an off-board parent with no card under it, and the header names it through parentOf', () => {
+    const l = lanes([n('PAY-51', 'PAY-50', 2 * HOUR), n('PAY-52', 'PAY-51', 1 * HOUR)]);
+    expect(laneKeys(l.lanes)).toEqual(['PAY-51']);
+    expect(l.lanes[0].kind).toBe('board');
+    expect(l.lanes[0].depth).toBe(0);
+    expect(l.parentOf.get('PAY-51')?.key).toBe('PAY-50');
+  });
+
+  const offWithHeader = (s61: Partial<JiraIssue> = todo, s62: Partial<JiraIssue> = todo, s63: Partial<JiraIssue> = todo): JiraIssue[] => [
+    n('PAY-61', 'PAY-60', 3 * HOUR, s61),
+    n('PAY-62', 'PAY-60', 2 * HOUR, s62),
+    n('PAY-63', 'PAY-62', 1 * HOUR, s63)
+  ];
+
+  it('nests an on-board header under an off-board lane that has a card of its own', () => {
+    const l = lanes(offWithHeader());
+    expect(laneKeys(l.lanes)).toEqual(['PAY-60']);
+    expect(l.lanes[0].kind).toBe('off');
+    expect(keys(l.lanes[0].cards)).toEqual(['PAY-61']);
+    expect(laneKeys(l.lanes[0].lanes)).toEqual(['PAY-62']);
+    expect(l.lanes[0].lanes[0].depth).toBe(1);
+    expect(keys(l.lanes[0].lanes[0].cards)).toEqual(['PAY-63']);
+  });
+
+  describe('cycles (§1.4)', () => {
+    const twoCycle = (): JiraIssue[] => [n('PAY-71', 'PAY-72', 1 * HOUR), n('PAY-72', 'PAY-71', 2 * HOUR)];
+
+    it('draws a two-cycle as two parentless cards in one No parent lane', () => {
+      const l = lanes(twoCycle());
+      expect(l.lanes).toHaveLength(1);
+      expect(l.lanes[0].kind).toBe('none');
+      expect(keys(l.lanes[0].cards).sort()).toEqual(['PAY-71', 'PAY-72']);
+      expect(l.parentOf.get('PAY-71')).toBeNull();
+      expect(l.parentOf.get('PAY-72')).toBeNull();
+    });
+
+    it('draws a self-parent as one card in the No parent lane', () => {
+      const l = lanes([n('PAY-73', 'PAY-73', 1 * HOUR)]);
+      expect(l.lanes).toHaveLength(1);
+      expect(l.lanes[0].kind).toBe('none');
+      expect(keys(l.lanes[0].cards)).toEqual(['PAY-73']);
+      expect(l.parentOf.get('PAY-73')).toBeNull();
+    });
+
+    it('lets an issue hanging off a cycle keep its parent, which becomes a root lane', () => {
+      const l = lanes([...twoCycle(), n('PAY-74', 'PAY-71', 3 * HOUR)]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-71', NO_PARENT_LANE]);
+      expect(l.lanes[0].kind).toBe('board');
+      expect(keys(l.lanes[0].cards)).toEqual(['PAY-74']);
+      expect(keys(l.lanes[1].cards)).toEqual(['PAY-72']);
+      expect(l.parentOf.get('PAY-74')?.key).toBe('PAY-71');
+    });
+  });
+
+  describe('order (§3.5)', () => {
+    it('puts an open lane a week old before a settled lane updated a minute ago', () => {
+      const l = lanes([n('PAY-201', 'PAY-200', 7 * 24 * HOUR), n('PAY-211', 'PAY-210', MINUTE, done)]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-200', 'PAY-210']);
+    });
+
+    it('ranks open lanes by the newest updated across header and subtree, not the header’s own', () => {
+      const l = lanes([
+        n('PAY-81', null, 5 * 24 * HOUR),
+        n('PAY-82', 'PAY-81', 1 * HOUR),
+        n('PAY-85', null, 2 * HOUR),
+        n('PAY-86', 'PAY-85', 3 * HOUR)
+      ]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-81', 'PAY-85']);
+      expect(l.lanes[0].stamp).toBe(Date.parse(ago(now, 1 * HOUR)));
+      expect(l.lanes[1].stamp).toBe(Date.parse(ago(now, 2 * HOUR)));
+    });
+
+    it('breaks a stamp tie by lane key, whatever the input order', () => {
+      const a = n('PAY-94', 'PAY-91', 1 * HOUR);
+      const b = n('PAY-93', 'PAY-92', 1 * HOUR);
+      expect(laneKeys(lanes([b, a]).lanes)).toEqual(['PAY-91', 'PAY-92']);
+      expect(laneKeys(lanes([a, b]).lanes)).toEqual(['PAY-91', 'PAY-92']);
+    });
+
+    const openLane = (): JiraIssue => n('PAY-301', 'PAY-300', 5 * HOUR);
+    const settledLane = (): JiraIssue => n('PAY-311', 'PAY-310', 3 * HOUR, done);
+
+    it('keeps an open No parent lane last among the open lanes, before every settled lane, even holding the newest card', () => {
+      const l = lanes([openLane(), settledLane(), n('PAY-320', null, MINUTE)]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-300', NO_PARENT_LANE, 'PAY-310']);
+    });
+
+    it('puts a settled No parent lane last of all, even when it is the newest', () => {
+      const l = lanes([openLane(), settledLane(), n('PAY-321', null, MINUTE, done)]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-300', 'PAY-310', NO_PARENT_LANE]);
+      expect(l.lanes[2].settled).toBe(true);
+    });
+
+    it('sorts nested lanes among their siblings by the same rule, inside their parent', () => {
+      const l = lanes([
+        n('PAY-400', null, 9 * 24 * HOUR),
+        n('PAY-401', 'PAY-400', 6 * 24 * HOUR),
+        n('PAY-410', 'PAY-400', 7 * 24 * HOUR),
+        n('PAY-411', 'PAY-410', 8 * 24 * HOUR),
+        n('PAY-420', 'PAY-400', MINUTE, done),
+        n('PAY-421', 'PAY-420', 2 * MINUTE, done)
+      ]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-400']);
+      expect(laneKeys(l.lanes[0].lanes)).toEqual(['PAY-410', 'PAY-420']);
+      expect(l.lanes[0].lanes[1].settled).toBe(true);
+      expect(l.lanes[0].settled).toBe(false);
+    });
+  });
+
+  describe('settled (§3.5)', () => {
+    it('is false for an on-board header still in progress over Done cards', () => {
+      const l = lanes([n('PAY-500', null, 3 * HOUR, doing), n('PAY-501', 'PAY-500', 1 * HOUR, done), n('PAY-502', 'PAY-500', 2 * HOUR, done)]);
+      expect(l.lanes[0].settled).toBe(false);
+    });
+
+    it('is true for an off-board stub in progress over Done cards — its status is not this board’s', () => {
+      const p = { key: 'PAY-510', summary: 'PAY-510 summary', type: null, status: { name: 'In Progress', category: 'indeterminate' as const } };
+      const l = lanes([n('PAY-511', null, 1 * HOUR, { ...done, parent: p }), n('PAY-512', null, 2 * HOUR, { ...done, parent: { ...p } })]);
+      expect(l.lanes[0].kind).toBe('off');
+      expect(l.lanes[0].settled).toBe(true);
+    });
+
+    it('counts a nested header in its parent lane’s subtree', () => {
+      expect(lanes(offWithHeader(done, doing, done)).lanes[0].settled).toBe(false);
+      expect(lanes(offWithHeader(done, done, done)).lanes[0].settled).toBe(true);
+    });
+  });
+
+  it('nests six deep with no cap, each key drawn once', () => {
+    const chain = [n('PAY-101', null, 7 * HOUR)];
+    for (let k = 102; k <= 106; k += 1) chain.push(n(`PAY-${k}`, `PAY-${k - 1}`, (108 - k) * HOUR));
+    chain.push(n('PAY-107', 'PAY-106', 1 * HOUR));
+    const l = lanes(chain);
+    const depths: number[] = [];
+    let at: readonly JiraLane[] = l.lanes;
+    while (at.length > 0) {
+      depths.push(at[0].depth);
+      at = at[0].lanes;
+    }
+    expect(depths).toEqual([0, 1, 2, 3, 4, 5]);
+    // `lanes()` already holds every header and card to exactly once; this is the count the brief names.
+    let count = 0;
+    const visit = (lane: JiraLane): void => {
+      count += (lane.header === null ? 0 : 1) + lane.cards.length;
+      lane.lanes.forEach(visit);
+    };
+    l.lanes.forEach(visit);
+    expect(count).toBe(7);
+  });
+
+  describe('childrenOf (§1.5)', () => {
+    it('holds each on-board parent’s direct children', () => {
+      expect(keySets(lanes(nesting()).childrenOf)).toEqual({ 'PAY-40': ['PAY-41', 'PAY-44'], 'PAY-41': ['PAY-42', 'PAY-43'] });
+    });
+
+    it('holds no edge between cycle members, and keeps the edge off a cycle', () => {
+      expect(lanes([n('PAY-71', 'PAY-72', 1 * HOUR), n('PAY-72', 'PAY-71', 2 * HOUR)]).childrenOf.size).toBe(0);
+      expect(lanes([n('PAY-73', 'PAY-73', 1 * HOUR)]).childrenOf.size).toBe(0);
+      const c = lanes([n('PAY-71', 'PAY-72', 1 * HOUR), n('PAY-72', 'PAY-71', 2 * HOUR), n('PAY-74', 'PAY-71', 3 * HOUR)]);
+      expect(keySets(c.childrenOf)).toEqual({ 'PAY-71': ['PAY-74'] });
     });
   });
 });

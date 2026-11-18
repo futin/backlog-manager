@@ -144,14 +144,21 @@ export function sortForBoard(issues: readonly JiraIssue[]): JiraIssue[] {
   return [...issues].sort((a, b) => updatedMs(b) - updatedMs(a) || byKey(a, b));
 }
 
-/** An issue's `updated` as epoch ms, an unparseable stamp as 0 (the oldest) — shared by `sortForBoard` and `sortTops`, so the two cannot age a stamp twice. */
+/**
+ * An issue's `updated` as epoch ms, an unparseable stamp as 0 (the oldest) — shared by `sortForBoard`, `sortTops` and `laneBoard`'s lane stamp, so none
+ * of them can age a stamp a second way.
+ */
 const updatedMs = (i: JiraIssue): number => {
   const t = Date.parse(i.updated);
   return Number.isNaN(t) ? 0 : t;
 };
 
-/** The board's tie-break: plain string order on the key. */
-const byKey = (a: JiraIssue, b: JiraIssue): number => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+/**
+ * The board's tie-break: plain string order on the key. Split in two so `laneBoard` breaks a lane tie on the lane's KEY — which for an off-board lane or
+ * the `No parent` lane is not an issue's — with the very comparator a card tie uses, rather than a second spelling of it.
+ */
+const compareKeys = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+const byKey = (a: JiraIssue, b: JiraIssue): number => compareKeys(a.key, b.key);
 
 /**
  * The age on a card's foot: how long ago a DONE issue was resolved (that is the age that matters to someone reading the Done column), otherwise how long
@@ -237,9 +244,10 @@ export interface JiraFold {
 }
 
 /**
- * Every on-board descendant folds into its TOPMOST on-board ancestor (G-A, grouped-board spec §3). This is the ONE walk of the parent chain in the client —
- * the board, the band count, the filters and the modal tree all read its result, and none of them follows `parent.key` upward on its own (§8 anti-goal),
- * because two walks are two answers to "which card is this issue on" the first time they disagree about an edge case.
+ * Every on-board descendant folds into its TOPMOST on-board ancestor (G-A, grouped-board spec §3). The walk is `walkParents`, the ONE walk of the parent
+ * chain in the client, which `laneBoard` reads too — the board, the band count, the filters and the modal tree all read its result, and none of them
+ * follows `parent.key` upward on its own (§8 anti-goal), because two walks are two answers to "which card is this issue on" the first time they disagree
+ * about an edge case.
  *
  * `top(X)` is X when X has no parent, when its parent is not in this list (off the board: dropped by the 14-day Done window, cut by the 500 cap, or never
  * fetched — "on the board" means the loaded list, exactly), or when the walk up from X comes back to X; otherwise it is `top(parent(X))`. Jira has no
@@ -251,7 +259,44 @@ export interface JiraFold {
  * cache copy and is never mutated.
  */
 export function foldBoard(issues: readonly JiraIssue[]): JiraFold {
-  const byKey = new Map(issues.map((i) => [i.key, i] as const));
+  const { topOf, childrenOf } = walkParents(issues);
+  const tops: JiraIssue[] = [];
+  const under = new Map<string, JiraIssue[]>();
+  for (const i of issues) {
+    // Every key was resolved by the walk; the fallback only keeps an impossible miss from dropping a card.
+    const top = topOf.get(i.key) ?? i.key;
+    if (top === i.key) tops.push(i);
+    else pushTo(under, top, i);
+  }
+  return { tops, under: sortedLists(under), childrenOf };
+}
+
+/** Append `i` to `m`'s list at `k`, creating it — the sparse-map shape every index in this section has. */
+const pushTo = (m: Map<string, JiraIssue[]>, k: string, i: JiraIssue): void => {
+  const list = m.get(k);
+  if (list === undefined) m.set(k, [i]);
+  else list.push(i);
+};
+
+const sortedLists = (m: Map<string, JiraIssue[]>): Map<string, JiraIssue[]> => new Map([...m].map(([k, v]) => [k, sortForBoard(v)]));
+
+/**
+ * The ONE walk of the parent chain in the client, which `foldBoard` and `laneBoard` both read (parent-lanes spec §1.4, §1.5): two walks would be two
+ * answers to "is this issue in a cycle" the first time they disagreed about an edge case, and the fold and the lanes must hand Detail the same tree.
+ *
+ * `topOf` maps every key to its topmost on-board ancestor, as `foldBoard`'s doc comment states it. `parentOf` is the parent link the walk KEEPS for every
+ * key: the issue's own `parent` — on the board or off it — except for a cycle member, whose link is dropped (`null`, the same as no parent at all), so
+ * every reader that names a parent names one the lanes actually drew it under. `childrenOf` holds only the kept edges whose parent is on the board.
+ *
+ * A key is a cycle member exactly when its parent is on the board and the walk still made it its own top: an issue with an on-board parent is otherwise
+ * never its own top, because the walk only stops at a node with no on-board parent or at a loop.
+ */
+function walkParents(issues: readonly JiraIssue[]): {
+  topOf: ReadonlyMap<string, string>;
+  parentOf: ReadonlyMap<string, JiraParentRef | null>;
+  childrenOf: JiraChildrenIndex;
+} {
+  const onBoard = new Map(issues.map((i) => [i.key, i] as const));
   const topOf = new Map<string, string>();
 
   for (const start of issues) {
@@ -270,7 +315,7 @@ export function foldBoard(issues: readonly JiraIssue[]): JiraFold {
       }
       at.set(x.key, path.length);
       path.push(x.key);
-      const parent = x.parent === null ? undefined : byKey.get(x.parent.key);
+      const parent = x.parent === null ? undefined : onBoard.get(x.parent.key);
       if (parent === undefined) {
         top = x.key;
         break;
@@ -287,27 +332,16 @@ export function foldBoard(issues: readonly JiraIssue[]): JiraFold {
     for (const k of path) topOf.set(k, top);
   }
 
-  const tops: JiraIssue[] = [];
-  const under = new Map<string, JiraIssue[]>();
+  const parentOf = new Map<string, JiraParentRef | null>();
   const childrenOf = new Map<string, JiraIssue[]>();
-  const push = (m: Map<string, JiraIssue[]>, k: string, i: JiraIssue): void => {
-    const list = m.get(k);
-    if (list === undefined) m.set(k, [i]);
-    else list.push(i);
-  };
   for (const i of issues) {
-    // Every key was resolved by the loop above; the fallback only keeps an impossible miss from dropping a card.
-    const top = topOf.get(i.key) ?? i.key;
-    if (top === i.key) {
-      tops.push(i);
-      continue;
-    }
-    push(under, top, i);
-    // A non-top issue has an on-board parent by definition (a missing or off-board one would have made it a top).
-    if (i.parent !== null) push(childrenOf, i.parent.key, i);
+    const p = i.parent;
+    const cycle = p !== null && onBoard.has(p.key) && (topOf.get(i.key) ?? i.key) === i.key;
+    parentOf.set(i.key, cycle ? null : p);
+    // A non-top issue has an on-board parent by definition (a missing or off-board one would have made it a top), and is no cycle member.
+    if (p !== null && (topOf.get(i.key) ?? i.key) !== i.key) pushTo(childrenOf, p.key, i);
   }
-  const sorted = (m: Map<string, JiraIssue[]>): Map<string, JiraIssue[]> => new Map([...m].map(([k, v]) => [k, sortForBoard(v)]));
-  return { tops, under: sorted(under), childrenOf: sorted(childrenOf) };
+  return { topOf, parentOf, childrenOf: sortedLists(childrenOf) };
 }
 
 /**
@@ -426,6 +460,118 @@ export function modalTree(
   }
   return { rows, progress: foldProgress(rows.map((r) => r.issue)) };
 }
+
+// ── The lanes ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The `No parent` lane's key. Never a Jira key: a key always holds a `-`, so it cannot collide with a parent's. */
+export const NO_PARENT_LANE = 'none';
+
+/**
+ * One lane of the Board (parent-lanes spec §1). `kind` is where its header comes from: `board`, an on-board header issue (`header`); `off`, a parent that
+ * is not in the loaded list, drawn from the `stub` the freshest card under it carries; `none`, the one lane of parentless cards. `cards` are the lane's own,
+ * in `sortForBoard` order; `lanes` the lanes nested in it (§1.3), in §3.5 order. `depth` is uncapped — the draw caps the indent, not the model.
+ * `subtree` (§1.3) is every on-board issue under the header — its cards, its nested lanes' headers and their subtrees, in `sortForBoard` order — and is
+ * what `settled` and `stamp` (§3.5) read, so an In Progress story under an off-board epic keeps the epic's lane open.
+ */
+export interface JiraLane {
+  key: string;
+  kind: 'board' | 'off' | 'none';
+  header: JiraIssue | null;
+  stub: JiraParentRef | null;
+  cards: readonly JiraIssue[];
+  lanes: readonly JiraLane[];
+  depth: number;
+  subtree: readonly JiraIssue[];
+  settled: boolean;
+  /** The newest `updated` (epoch ms, unparseable as 0) across the on-board header and the subtree — the sort key, never drawn. */
+  stamp: number;
+}
+
+/**
+ * The lane model: the root lanes in drawing order, the fold's `childrenOf` index for the same input (§1.5 — Detail's tree, `modalTree` and
+ * `childSessions` read it), and every on-board key's KEPT parent (§1.4), which the crumb, the `↳` chip and the deck read instead of the raw field.
+ */
+export interface JiraLanes {
+  lanes: readonly JiraLane[];
+  childrenOf: JiraChildrenIndex;
+  parentOf: ReadonlyMap<string, JiraParentRef | null>;
+}
+
+/**
+ * The loaded list as lanes (parent-lanes spec §1, §3.5). Pure: no clock, no session — a live run never moves a lane (§3.5). The parent links read are the
+ * ones `walkParents` keeps, so a cycle costs an oddly placed issue and never a hang or a missing card, and every key is drawn exactly once: a header issue
+ * (the kept parent of something on the board — exactly `childrenOf`'s keys) heads its own lane and is a card nowhere, and every other issue is a card in
+ * its kept parent's lane, or in `No parent`.
+ *
+ * An off-board parent gets a lane only when a CARD names it (§1.2): one whose only on-board children are headers would be a header nobody can act on over
+ * nothing, so those headers stay root lanes and name their parent through `parentOf`. A header nests under its kept parent's lane whenever that lane
+ * exists (§1.3); an off-board lane is always a root, since nothing on the board says what is above it. The kept edges are acyclic, so the recursion ends.
+ */
+export function laneBoard(issues: readonly JiraIssue[]): JiraLanes {
+  const { parentOf, childrenOf } = walkParents(issues);
+  const onBoard = new Map(issues.map((i) => [i.key, i] as const));
+  const kept = (i: JiraIssue): JiraParentRef | null => parentOf.get(i.key) ?? null;
+
+  const cardsOf = new Map<string, JiraIssue[]>();
+  const offBoard = new Set<string>();
+  for (const i of issues) {
+    if (childrenOf.has(i.key)) continue;
+    const p = kept(i);
+    if (p !== null && !onBoard.has(p.key)) offBoard.add(p.key);
+    pushTo(cardsOf, p === null ? NO_PARENT_LANE : p.key, i);
+  }
+
+  const nestedIn = new Map<string, JiraIssue[]>();
+  const roots: string[] = [];
+  for (const key of childrenOf.keys()) {
+    const header = onBoard.get(key);
+    if (header === undefined) continue; // childrenOf's keys are on-board parents; this only satisfies the type
+    const p = kept(header);
+    if (p !== null && (childrenOf.has(p.key) || offBoard.has(p.key))) pushTo(nestedIn, p.key, header);
+    else roots.push(key);
+  }
+  roots.push(...offBoard);
+  if (cardsOf.has(NO_PARENT_LANE)) roots.push(NO_PARENT_LANE);
+
+  const isDone = (i: JiraIssue): boolean => columnOf(i) === 'done';
+  const build = (key: string, depth: number): JiraLane => {
+    const kind: JiraLane['kind'] = key === NO_PARENT_LANE ? 'none' : onBoard.has(key) ? 'board' : 'off';
+    const header = kind === 'board' ? (onBoard.get(key) ?? null) : null;
+    const cards = sortForBoard(cardsOf.get(key) ?? []);
+    const lanes = sortLanes((nestedIn.get(key) ?? []).map((h) => build(h.key, depth + 1)));
+    // Every off-board lane exists because a card names it, so `cards[0]` — the freshest, by `sortForBoard` — is there to read the stub from.
+    const stub = kind === 'off' && cards.length > 0 ? kept(cards[0]) : null;
+    const subtree = sortForBoard([...cards, ...lanes.flatMap((l) => (l.header === null ? l.subtree : [l.header, ...l.subtree]))]);
+    const counted = header === null ? subtree : [header, ...subtree];
+    return {
+      key,
+      kind,
+      header,
+      stub,
+      cards,
+      lanes,
+      depth,
+      subtree,
+      settled: counted.every(isDone),
+      stamp: counted.reduce((m, i) => Math.max(m, updatedMs(i)), 0)
+    };
+  };
+
+  return { lanes: sortLanes(roots.map((k) => build(k, 0))), childrenOf, parentOf };
+}
+
+/**
+ * §3.5's order, for root lanes and for siblings nested in one lane alike: open before settled; within a group the `No parent` lane last, then the newest
+ * `stamp` first, then the lane key by the comparator a card tie uses. Returns a new array.
+ */
+const sortLanes = (lanes: readonly JiraLane[]): JiraLane[] =>
+  [...lanes].sort(
+    (a, b) =>
+      Number(a.settled) - Number(b.settled) ||
+      Number(a.kind === 'none') - Number(b.kind === 'none') ||
+      b.stamp - a.stamp ||
+      compareKeys(a.key, b.key)
+  );
 
 // ── Sentences ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
