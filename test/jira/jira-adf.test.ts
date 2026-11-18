@@ -234,6 +234,23 @@ describe('adfToMarkdown — inline nodes', () => {
 });
 
 describe('adfToMarkdown — hardBreak through the client renderer (#572)', () => {
+  // Review fix: four spaces or a tab ahead of the backslash break would make that line an indented code block holding a literal `\`.
+  it.each([
+    ['four spaces', '    '],
+    ['a tab', '\t']
+  ])('drops a whitespace-only lead of %s before a break, so no code block and no stray backslash', (_name, lead) => {
+    const opening = para(text(lead), hardBreak, text('a'));
+    for (const adf of [
+      doc(para(text('x')), opening),
+      doc({ type: 'blockquote', content: [para(text('x')), opening] }),
+      doc({ type: 'bulletList', content: [{ type: 'listItem', content: [para(text('x')), opening] }] })
+    ]) {
+      const html = renderMarkdown(adfToMarkdown(adf).markdown);
+      expect(html).not.toContain('<pre');
+      expect(html).not.toContain('\\');
+      expect(html).toContain('<br>a');
+    }
+  });
   it.each([
     ['a paragraph', doc(para(text('a'), hardBreak, text('b'))), '<p>a<br>b</p>'],
     ['a blockquote', doc({ type: 'blockquote', content: [para(text('a'), hardBreak, text('b'))] }), '<blockquote>\n<p>a<br>b</p>'],

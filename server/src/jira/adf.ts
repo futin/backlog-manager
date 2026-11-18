@@ -101,8 +101,11 @@ function inline(nodes: AdfNode[], ctx: Ctx, depth: number): string {
       out += p.out;
       continue;
     }
-    const line = out.slice(out.lastIndexOf('\n') + 1);
-    out += line.trim() === '' ? '\\\n' : '  \n';
+    const lineStart = out.lastIndexOf('\n') + 1;
+    // On a whitespace-only line the whitespace itself is DROPPED before the backslash: four spaces or a tab ahead of it would make the line an indented
+    // code block holding a literal `\` (also inside a blockquote or a list item), and leading whitespace on a line carries nothing in Markdown anyway.
+    if (out.slice(lineStart).trim() === '') out = `${out.slice(0, lineStart)}\\\n`;
+    else out += '  \n';
   }
   return out;
 }
