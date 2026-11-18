@@ -296,4 +296,8 @@ describe('renderMarkdown breaks', () => {
     expect(renderMarkdown('a\nb')).not.toContain('<br');
     expect(renderMarkdown('a\nb', { breaks: true })).toContain('<br');
   });
+
+  it('renders the converter’s hard break (two trailing spaces) as a <br> with breaks off, as a thread comment read back from Jira is rendered (#572)', () => {
+    expect(renderMarkdown('a  \nb')).toContain('a<br>b');
+  });
 });

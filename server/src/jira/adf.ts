@@ -76,9 +76,35 @@ function placeholder(ctx: Ctx, line: string): string {
   return line;
 }
 
-/** Inline children, concatenated. */
+/**
+ * Inline children, concatenated — with a `hardBreak` written as a CommonMark HARD break, never a bare newline (#572). A bare newline inside a paragraph is a
+ * SOFT break, which `marked` renders as a space, so every Shift+Enter a person typed in Jira used to read back joined onto one line.
+ *
+ * Two spellings, picked by what the current output line already holds:
+ *
+ * - after content, two trailing spaces (`'  \n'`). Preferred because two trailing spaces at the end of a block are simply dropped, whereas a backslash break
+ *   that ends a block renders as a literal `\`;
+ * - on a line holding only whitespace — a break right after another break, or one that opens the run — a backslash (`'\\\n'`). Two trailing spaces there
+ *   would make the line BLANK, and a blank line ends the paragraph: `a  \n  \nb` is two paragraphs, `a  \n\\\nb` is `a<br><br>b`.
+ *
+ * Breaks (and whitespace-only pieces) at the END of the run are dropped first, so neither spelling can ever end a block: `doc(para(a, hardBreak), para(b))`
+ * stays `a\n\nb`, a paragraph of nothing but breaks renders nothing (and `blocks` drops it, so no triple newline), and no backslash break can end a block
+ * and leak a stray `\`. That trailing break is a Shift+Enter at the end of a line in Jira's editor, and it shows nothing visible there either.
+ */
 function inline(nodes: AdfNode[], ctx: Ctx, depth: number): string {
-  return nodes.map((n) => render(n, ctx, depth)).join('');
+  const parts = nodes.map((n) => ({ isBreak: n.type === 'hardBreak', out: render(n, ctx, depth) }));
+  while (parts.length > 0 && (parts[parts.length - 1].isBreak || parts[parts.length - 1].out.trim() === '')) parts.pop();
+  let out = '';
+  for (const p of parts) {
+    // A break past MAX_DEPTH rendered nothing, like every other node there.
+    if (!p.isBreak || p.out === '') {
+      out += p.out;
+      continue;
+    }
+    const line = out.slice(out.lastIndexOf('\n') + 1);
+    out += line.trim() === '' ? '\\\n' : '  \n';
+  }
+  return out;
 }
 
 /**
@@ -195,7 +221,11 @@ const RENDERERS: Record<string, Renderer> = {
   heading: (n, ctx, d) => {
     const level = attrsOf(n).level;
     const hashes = '#'.repeat(typeof level === 'number' && level >= 1 ? Math.min(6, Math.trunc(level)) : 1);
-    const body = inline(childrenOf(n), ctx, d).replace(/\n/g, ' ').trim();
+    // A heading is one line, so a hardBreak in it becomes a space BEFORE `inline` spells it as a hard break — flattening the spelled form afterwards would
+    // have to undo `  \n` and `\\\n` both, and a regex for the second can bite into an escaped backslash in the text. A literal newline in a text node still
+    // flattens below.
+    const kids = childrenOf(n).map((c) => (c.type === 'hardBreak' ? { type: 'text', text: ' ' } : c));
+    const body = inline(kids, ctx, d).replace(/\n/g, ' ').trim();
     return body === '' ? '' : `${hashes} ${body}`;
   },
   bulletList: list(false),
@@ -218,7 +248,8 @@ const RENDERERS: Record<string, Renderer> = {
       .join('\n'),
   rule: () => '---',
   text,
-  hardBreak: () => '\n',
+  // A hard break, not a bare (soft) newline — `inline` re-spells it as `\\\n` on an otherwise-empty line and drops a trailing one; see its comment.
+  hardBreak: () => '  \n',
   inlineCard: (n) => {
     const url = attrsOf(n).url;
     if (typeof url !== 'string' || url.trim() === '') return '';

@@ -204,7 +204,8 @@ marked.use({
  * so neither a literal nor an entity-hidden scheme survives to reach the browser's own HTML parser.
  *
  * `breaks: true` turns a single newline inside a paragraph into a `<br>` — what a Jira mention reply does, since `replyDoc` (server/src/jira/adf-write.ts)
- * posts that newline as a `hardBreak`. Only the reply's preview and the posted reply pass it; every other caller renders as CommonMark always did.
+ * posts that newline as a `hardBreak`. Only the reply's preview and the posted reply pass it; every other caller renders as CommonMark always did. A
+ * comment or description read back from Jira needs no flag: `adfToMarkdown` spells each `hardBreak` as a CommonMark hard break already (#572).
  */
 export function renderMarkdown(source: string, opts: { breaks?: boolean } = {}): string {
   return marked.parse(source, { async: false, breaks: opts.breaks === true }) as string;

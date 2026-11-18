@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks';
 
 import { ADF_MEDIA_NAME_MAX, ADF_PLACEHOLDER_RE, adfToMarkdown, adfToText, escapeMarkdown, replyDoc } from '../../server/src/jira/adf';
+import { renderMarkdown } from '../../client/src/lib/markdown';
 
 /**
  * Jira integration, spec §8 (ADF → Markdown) and §14 P10 (the node inventory seen on real descriptions). One minimal fixture per node kind; every fixture is
@@ -10,6 +11,7 @@ const doc = (...content: unknown[]) => ({ type: 'doc', version: 1, content });
 const text = (t: string, marks?: unknown[]) => (marks ? { type: 'text', text: t, marks } : { type: 'text', text: t });
 const para = (...content: unknown[]) => ({ type: 'paragraph', content });
 const md = (...content: unknown[]) => adfToMarkdown(doc(...content)).markdown;
+const hardBreak = { type: 'hardBreak' };
 
 describe('adfToMarkdown — not a document', () => {
   it.each([null, undefined, 'a string', 42, {}, [], { type: 'doc' }])('%j → nothing', (value) => {
@@ -200,8 +202,45 @@ describe('adfToMarkdown — inline nodes', () => {
     expect(md(para({ type: 'status', attrs: { text: 'DONE', color: 'green' } }))).toBe('DONE');
   });
 
-  it('renders a hardBreak as a newline', () => {
-    expect(md(para(text('a'), { type: 'hardBreak' }, text('b')))).toBe('a\nb');
+  // #572: a hardBreak is a CommonMark HARD break. A bare newline was a soft break, which `marked` renders as a space, so a Shift+Enter in a Jira comment
+  // read back joined onto one line.
+  it('renders a hardBreak as a hard break — two trailing spaces, not a bare newline', () => {
+    expect(md(para(text('a'), hardBreak, text('b')))).toBe('a  \nb');
+  });
+
+  it('flattens a hardBreak inside a heading to one space', () => {
+    expect(md({ type: 'heading', attrs: { level: 2 }, content: [text('a'), hardBreak, text('b')] })).toBe('## a b');
+  });
+
+  it('leaves nothing behind for a hardBreak that ends a paragraph', () => {
+    expect(md(para(text('a'), hardBreak), para(text('b')))).toBe('a\n\nb');
+    expect(md(para(text('a'), hardBreak, hardBreak, text(' ')), para(text('b')))).toBe('a\n\nb');
+  });
+
+  it('renders a paragraph of only hardBreaks as nothing', () => {
+    expect(md(para(hardBreak, hardBreak))).toBe('');
+    expect(md(para(text('a')), para(hardBreak), para(text('b')))).toBe('a\n\nb');
+  });
+
+  it('keeps two hardBreaks in a row inside one paragraph — two <br>, not a paragraph split', () => {
+    const out = md(para(text('a'), hardBreak, hardBreak, text('b')));
+    expect(renderMarkdown(out)).toContain('<p>a<br><br>b</p>');
+  });
+
+  it('keeps a hardBreak that opens a paragraph a break, and never ends a block on a backslash', () => {
+    const out = md(para(hardBreak, text('a')));
+    expect(renderMarkdown(out)).toBe('<p><br>a</p>\n');
+  });
+});
+
+describe('adfToMarkdown — hardBreak through the client renderer (#572)', () => {
+  it.each([
+    ['a paragraph', doc(para(text('a'), hardBreak, text('b'))), '<p>a<br>b</p>'],
+    ['a blockquote', doc({ type: 'blockquote', content: [para(text('a'), hardBreak, text('b'))] }), '<blockquote>\n<p>a<br>b</p>'],
+    ['a bullet item', doc({ type: 'bulletList', content: [{ type: 'listItem', content: [para(text('a'), hardBreak, text('b'))] }] }), '<li>a<br>b</li>'],
+    ['an ordered item', doc({ type: 'orderedList', content: [{ type: 'listItem', content: [para(text('a'), hardBreak, text('b'))] }] }), '<li>a<br>b</li>']
+  ])('renders the break inside %s as a <br> with breaks off', (_name, adf, html) => {
+    expect(renderMarkdown(adfToMarkdown(adf).markdown)).toContain(html);
   });
 });
 
@@ -219,7 +258,13 @@ describe('adfToMarkdown — blocks', () => {
   });
 
   it('quotes every line of a hardBreak inside a blockquote', () => {
-    expect(md({ type: 'blockquote', content: [para(text('a'), { type: 'hardBreak' }, text('b'))] })).toBe('> a\n> b');
+    expect(md({ type: 'blockquote', content: [para(text('a'), hardBreak, text('b'))] })).toBe('> a  \n> b');
+  });
+
+  it('hangs a hardBreak inside a list item under the item', () => {
+    const item = { type: 'listItem', content: [para(text('a'), hardBreak, text('b'))] };
+    expect(md({ type: 'bulletList', content: [item] })).toBe('- a  \n  b');
+    expect(md({ type: 'orderedList', content: [item] })).toBe('1. a  \n   b');
   });
 });
 
@@ -468,8 +513,11 @@ describe('replyDoc', () => {
     expect(replyDoc(anon, '  ').content).toEqual([{ type: 'paragraph', content: [] }]);
   });
 
+  // The single newline a reply posts as a hardBreak reads back as a HARD break (#572), so the thread shows the reply's two lines the way Jira does.
   it('round-trips through the read side as the person would see it', () => {
-    expect(adfToMarkdown(replyDoc(MARA, 'Hi there\nline two\n\nSecond')).markdown).toBe('@Mara Ilić Hi there\nline two\n\nSecond');
+    const markdown = adfToMarkdown(replyDoc(MARA, 'Hi there\nline two\n\nSecond')).markdown;
+    expect(markdown).toBe('@Mara Ilić Hi there  \nline two\n\nSecond');
+    expect(renderMarkdown(markdown)).toContain('Hi there<br>line two');
   });
 });
 
