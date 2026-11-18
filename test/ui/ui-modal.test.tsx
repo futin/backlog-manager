@@ -158,7 +158,9 @@ describe('the item modal and the two Jira modals are the only modals', () => {
   });
 
   // Three since Jira mentions: the mention modal (`jira/JiraMentionModal.tsx`) is a ticket's thread, with no run to show, so §8.7 was amended to admit it.
-  it('is composed by exactly three files — board/ItemModal.tsx, jira/JiraDetail.tsx and jira/JiraMentionModal.tsx', () => {
+  // Four since the reply editor (`jira/JiraReplyEditor.tsx`, spec 2026-11-18-jira-reply-markdown): a Write/Preview modal stacked over the mention modal,
+  // which is a design change §8.7 now names rather than a reuse.
+  it('is composed by exactly four files — board/ItemModal.tsx, jira/JiraDetail.tsx, jira/JiraMentionModal.tsx and jira/JiraReplyEditor.tsx', () => {
     const composers = files
       .filter((f) => !f.endsWith(join('ui', 'Modal.tsx')))
       .filter((f) => /from '[^']*ui\/Modal'/.test(readFileSync(f, 'utf8')))
@@ -166,7 +168,8 @@ describe('the item modal and the two Jira modals are the only modals', () => {
     expect(composers.sort()).toEqual([
       join('components', 'board', 'ItemModal.tsx'),
       join('components', 'jira', 'JiraDetail.tsx'),
-      join('components', 'jira', 'JiraMentionModal.tsx')
+      join('components', 'jira', 'JiraMentionModal.tsx'),
+      join('components', 'jira', 'JiraReplyEditor.tsx')
     ]);
   });
 });

@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { JiraMentionsView } from '../../client/src/components/jira/JiraMentionsView';
+import { JiraReplyEditor } from '../../client/src/components/jira/JiraReplyEditor';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
 import { TimeZoneContext } from '../../client/src/hooks/TimeZoneContext';
@@ -266,14 +267,17 @@ const tree = () => {
     reload: () => {}
   };
   const zone = { zone: 'UTC', stored: 'UTC', browser: 'UTC', save: () => Promise.resolve(), saveError: null };
+  // Inside a `.shell`, as `App.tsx` draws every page: the reply editor portals into it (spec 2026-11-18-jira-reply-markdown, "Where the editor's DOM goes").
   return (
-    <TimeZoneContext.Provider value={zone}>
-      <JiraContext.Provider value={status}>
-        <JiraSessionsContext.Provider value={{ data: sessions, reload: () => Promise.resolve() }}>
-          <JiraMentionsView onOpenJiraPage={() => {}} />
-        </JiraSessionsContext.Provider>
-      </JiraContext.Provider>
-    </TimeZoneContext.Provider>
+    <div className="shell">
+      <TimeZoneContext.Provider value={zone}>
+        <JiraContext.Provider value={status}>
+          <JiraSessionsContext.Provider value={{ data: sessions, reload: () => Promise.resolve() }}>
+            <JiraMentionsView onOpenJiraPage={() => {}} />
+          </JiraSessionsContext.Provider>
+        </JiraContext.Provider>
+      </TimeZoneContext.Provider>
+    </div>
   );
 };
 let view: ReturnType<typeof render>;
@@ -1024,6 +1028,188 @@ describe('the mention modal — Draft a reply (phase 2, Task 8; mock `ModalDraft
     await user.click(btn('Restore'));
     await settle();
     expect(btn('Draft a reply')).toBeEnabled();
+  });
+
+  describe('the reply editor (spec 2026-11-18-jira-reply-markdown, "Draft box and Reply editor")', () => {
+    /*
+      Open editor in the draft box's footer opens a Write/Preview modal over the mention modal. Two dialogs are mounted at once while it is open, so these
+      cases name each one: the mention modal is `SUP-208 mention`, the editor `Reply editor for SUP-208`.
+    */
+    const mentionDlg = (): HTMLElement => screen.getByRole('dialog', { name: 'SUP-208 mention' });
+    const editor = (): HTMLElement => screen.getByRole('dialog', { name: 'Reply editor for SUP-208' });
+    const queryEditor = (): HTMLElement | null => screen.queryByRole('dialog', { name: 'Reply editor for SUP-208' });
+    const area = (): HTMLTextAreaElement => within(editor()).getByRole('textbox', { name: 'Edit reply to Ivo Kranjc' }) as HTMLTextAreaElement;
+    const preview = (): HTMLElement => editor().querySelector<HTMLElement>('.ui-modal-body')!;
+    const ebtn = (name: string): HTMLElement => within(editor()).getByRole('button', { name });
+    async function openEditor(text: string, user: ReturnType<typeof userEvent.setup>): Promise<void> {
+      withSup({ draft: draft(text, 2) });
+      await openSup(user);
+      await user.click(within(mentionDlg()).getByRole('button', { name: 'Open editor' }));
+    }
+
+    it('Open editor sits first in the box’s action group and portals the editor into the shell, outside the mention panel', async () => {
+      const user = userEvent.setup();
+      withSup({ draft: draft('Stored per branch.', 2) });
+      await openSup(user);
+      const acts = mentionDlg().querySelector<HTMLElement>('.jira-reply-acts')!;
+      expect(Array.from(acts.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Open editor', 'Redraft', 'Discard', 'Post reply']);
+      await user.click(within(acts).getByRole('button', { name: 'Open editor' }));
+      expect(mentionDlg()).not.toContainElement(editor());
+      expect(editor().closest('.shell')).not.toBeNull();
+      expect(editor()).toHaveClass('ui-modal-split', 'ui-modal-footed', 'ui-modal-over');
+      expect(editor()).not.toHaveClass('ui-modal-lead');
+      expect(within(editor()).getByText('Reply to SUP-208')).toBeInTheDocument();
+      expect(within(editor()).getByText('To @Ivo Kranjc')).toBeInTheDocument();
+    });
+
+    it('the editor and the box edit one text, both ways', async () => {
+      const user = userEvent.setup();
+      await openEditor('Stored per branch.', user);
+      expect(area().value).toBe('Stored per branch.');
+      await user.type(area(), ' Ours.');
+      expect(within(mentionDlg()).getByRole('textbox', { name: 'Reply to Ivo Kranjc' })).toHaveValue('Stored per branch. Ours.');
+      fireEvent.change(within(mentionDlg()).getByRole('textbox', { name: 'Reply to Ivo Kranjc' }), { target: { value: 'From the box.' } });
+      expect(area().value).toBe('From the box.');
+      expect(within(editor()).getByText('13 / 8000')).toBeInTheDocument();
+    });
+
+    it('Close closes only the editor and the box keeps the text', async () => {
+      const user = userEvent.setup();
+      await openEditor('Stored per branch.', user);
+      await user.type(area(), ' Kept.');
+      await user.click(ebtn('Close'));
+      expect(queryEditor()).toBeNull();
+      expect(within(mentionDlg()).getByRole('textbox', { name: 'Reply to Ivo Kranjc' })).toHaveValue('Stored per branch. Kept.');
+    });
+
+    it('Escape closes only the editor, the mention modal stays', async () => {
+      const user = userEvent.setup();
+      await openEditor('Stored per branch.', user);
+      await user.keyboard('{Escape}');
+      expect(queryEditor()).toBeNull();
+      expect(mentionDlg()).toBeInTheDocument();
+    });
+
+    it('a click on the editor’s scrim closes only the editor', async () => {
+      const user = userEvent.setup();
+      await openEditor('Stored per branch.', user);
+      await user.click(document.querySelector<HTMLElement>('.ui-modal-scrim.ui-modal-over')!);
+      expect(queryEditor()).toBeNull();
+      expect(mentionDlg()).toBeInTheDocument();
+    });
+
+    it('the preview reads GFM: intraword underscores and spaced stars stay text, and `1)` is an ordered list', async () => {
+      const user = userEvent.setup();
+      await openEditor('snake_case_name and 2 * 3 * 4\n\n1) first', user);
+      expect(preview().querySelector('em, strong')).toBeNull();
+      expect(preview()).toHaveTextContent('snake_case_name and 2 * 3 * 4');
+      expect(preview().querySelector('ol li')).toHaveTextContent('first');
+    });
+
+    it('the preview puts the mention in its own paragraph before a heading, and a single newline is a line break', async () => {
+      const user = userEvent.setup();
+      await openEditor('# H\n\n- a', user);
+      const heading = within(preview()).getByRole('heading', { level: 1, name: 'H' });
+      expect(preview().querySelector('li')).toHaveTextContent('a');
+      const chip = preview().querySelector('.jira-mentions-at')!;
+      expect(chip).toHaveTextContent('@Ivo Kranjc');
+      expect(chip.closest('p')).not.toBeNull();
+      expect(chip.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      fireEvent.change(area(), { target: { value: 'a\nb' } });
+      expect(preview().querySelector('br')).not.toBeNull();
+    });
+
+    it('blank text previews as one muted line and Post is disabled; past 8 000 characters Post is disabled too', async () => {
+      const user = userEvent.setup();
+      await openEditor('x', user);
+      fireEvent.change(area(), { target: { value: '  \n ' } });
+      expect(within(editor()).getByText('Nothing to preview yet.')).toBeInTheDocument();
+      expect(ebtn('Post reply')).toBeDisabled();
+      fireEvent.change(area(), { target: { value: 'a'.repeat(8000) } });
+      expect(ebtn('Post reply')).toBeEnabled();
+      fireEvent.change(area(), { target: { value: 'a'.repeat(8001) } });
+      expect(ebtn('Post reply')).toBeDisabled();
+      expect(within(editor()).getByText('8001 / 8000')).toBeInTheDocument();
+    });
+
+    it('Post reply is disabled while the post is out', async () => {
+      const user = userEvent.setup();
+      await openEditor('Stored per branch.', user);
+      // Hold the reply route's answer: the post is out until the case releases it.
+      const held = hold();
+      const base = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+        url === '/api/jira/mentions/reply' ? held.promise.then(() => base(url, init)) : base(url, init)
+      );
+      expect(ebtn('Post reply')).toBeEnabled();
+      fireEvent.click(ebtn('Post reply'));
+      await settle();
+      expect(ebtn('Post reply')).toBeDisabled();
+      held.release();
+      await settle();
+      expect(posts('reply')).toHaveLength(1);
+    });
+
+    it('Post reply sends the text once and closes the editor on success', async () => {
+      const user = userEvent.setup();
+      await openEditor('Stored per branch.', user);
+      await user.type(area(), ' Ours.');
+      await user.click(ebtn('Post reply'));
+      await settle();
+      expect(posts('reply')).toEqual([{ key: 'SUP-208', text: 'Stored per branch. Ours.' }]);
+      expect(queryEditor()).toBeNull();
+    });
+
+    it('a refused post keeps the editor open with the server’s sentence in its foot', async () => {
+      replyRefusal = { status: 409, error: 'SUP-208 has no open mention — it was answered or dismissed' };
+      const user = userEvent.setup();
+      await openEditor('Stored per branch.', user);
+      await user.click(ebtn('Post reply'));
+      await settle();
+      const foot = editor().querySelector<HTMLElement>('.ui-modal-foot')!;
+      expect(within(foot).getByRole('alert')).toHaveTextContent('SUP-208 has no open mention — it was answered or dismissed');
+      expect(area().value).toBe('Stored per branch.');
+    });
+
+    it('a newer draft shows `A newer draft arrived · Use it` atop the Write column, and Use it swaps the text in both places', async () => {
+      const user = userEvent.setup();
+      await openEditor('First draft.', user);
+      await user.type(area(), ' Mine.');
+      withSup({ draft: draft('Second draft.', 0) });
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+      });
+      await settle();
+      const write = editor().querySelector<HTMLElement>('.ui-modal-facts')!;
+      expect(within(write).getByText(/A newer draft arrived/)).toBeInTheDocument();
+      await user.click(within(write).getByRole('button', { name: 'Use it' }));
+      expect(area().value).toBe('Second draft.');
+      expect(within(mentionDlg()).getByRole('textbox', { name: 'Reply to Ivo Kranjc' })).toHaveValue('Second draft.');
+      expect(within(editor()).queryByText(/A newer draft arrived/)).toBeNull();
+    });
+
+    it('with no author to address, the head has no To line and the textarea is named for the ticket', () => {
+      render(
+        <div className="shell">
+          <JiraReplyEditor
+            issueKey="SUP-208"
+            to={null}
+            text="Plain."
+            onText={() => {}}
+            busy={false}
+            newer={false}
+            onUseNewer={() => {}}
+            error={null}
+            onPost={() => {}}
+            onClose={() => {}}
+          />
+        </div>
+      );
+      expect(screen.queryByText(/^To @/)).toBeNull();
+      expect(within(editor()).getByRole('textbox', { name: 'Edit reply to SUP-208' })).toHaveValue('Plain.');
+      expect(preview().querySelector('.jira-mentions-at')).toBeNull();
+      expect(preview()).toHaveTextContent('Plain.');
+    });
   });
 });
 
