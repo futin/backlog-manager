@@ -549,7 +549,7 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
   });
 
   /**
-   * The parent-lanes ui-verify fixes (docs/superpowers/reviews/2026-11-18-jira-parent-lanes-ui-verify.md), pinned as rule text for the same reason: the on-board
+   * The Jira parent-lanes ui-verify fixes (2026-11-18, D1–D5), pinned as rule text for the same reason: the on-board
    * lane header's right-hand cluster is one wrapping row, not a column that put `Run ▾` on a second line (D1), and under the phone fold it takes its own line
    * so it cannot squeeze the title (D4); the column header's count sits beside its name (D2); a List header row's Summary line wraps with a floor under the
    * title, which 116 px of Summary squeezed to 0 (D3); an indented key cell gives its right padding to the indent so a twelve-character key stays whole (D5).
