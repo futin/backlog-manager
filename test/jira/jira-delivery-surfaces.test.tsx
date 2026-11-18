@@ -345,11 +345,12 @@ describe('the List’s Delivery column', () => {
   });
 });
 
-// jsdom never applies the stylesheet, so the band line's own-line rule is pinned in source: `Band` puts `sub` in one `<p>`, and without a block box the
-// GitLab span runs on from `JiraBandSub`'s span ("…polled 4s agoGitLab: …") instead of sitting on the second line spec §7.2 draws.
-describe('the band’s GitLab line', () => {
-  it('is a block box, so it sits on its own line under the Jira sub-line', () => {
+// jsdom never applies the stylesheet, so the band's one-row rule is pinned in source (mock A, 2026-11-18): `Band` puts `sub` in one `<p>`, and the GitLab
+// half sits on the Jira half's row, after a divider, only while both are inline flex boxes — a block box (spec §7.2's old second line) breaks the row.
+describe('the band’s GitLab half', () => {
+  it('is an inline flex row, so it sits beside the Jira half rather than under it', () => {
     const css = readFileSync(join(__dirname, '../../client/src/styles.css'), 'utf8');
-    expect(css).toMatch(/^\.jira-band-gitlab\s*\{[^}]*display:\s*block/m);
+    expect(css).toMatch(/^\.jira-band-row,\s*\.jira-band-gitlab\s*\{[^}]*display:\s*inline-flex/m);
+    expect(css).not.toMatch(/^\.jira-band-gitlab\s*\{[^}]*display:\s*block/m);
   });
 });

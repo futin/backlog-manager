@@ -1,4 +1,6 @@
 import { polledPhrase, repoBasename } from './jira';
+import type { StateTone } from './tones';
+import { pollAge } from './tracker';
 import { reviewState } from '../../../shared/review';
 import type { GitlabMr, GitlabReview, GitlabPayload, GitlabProjectView, JiraIssue } from '../../../shared/types';
 
@@ -262,8 +264,31 @@ function isFailing(mr: GitlabMr): boolean {
  *
  * The age is the OLDEST `polledAt` among the projects those issues map, so the line never claims fresher data than its stalest part; while any of them has
  * never been read the line reads `GitLab: not read yet` instead. `null` when no matching issue draws delivery — the band then has no GitLab line at all.
+ * The sentence is `bandDelivery`'s `text`, so the band's pills and this line cannot count two ways.
  */
 export function bandTotals(issues: readonly JiraIssue[], index: DeliveryIndex, now: number): string | null {
+  return bandDelivery(issues, index, now)?.text ?? null;
+}
+
+/** One count pill of the band's GitLab half: `2 open`, `1 failing`, `1 merged`. */
+export interface BandDeliveryPart {
+  n: number;
+  word: 'open' | 'failing' | 'merged';
+}
+
+/**
+ * `bandTotals` taken apart for the band's pills (mock A, 2026-11-18; DESIGN.md §8.9.1): `parts`, each NON-zero count in open · failing · merged order (empty
+ * when every lead is closed, which the band reads as `no merge requests`); `age` (`2m ago`, or `null` while a project was never read); `polled`, the age's
+ * whole phrase (`polled 2m ago` / `not read yet`) for the dot's title; `tone` for the dot; and `text`, `bandTotals`' sentence, the row's title.
+ *
+ * `tone` is grey while a project was never read, red when the last read of any of them failed (`GitlabProjectView.failed`), and green otherwise. There is
+ * no amber: a GitLab project view carries no interval of its own to be late against, and inventing one here would be a second meaning of "late".
+ */
+export function bandDelivery(
+  issues: readonly JiraIssue[],
+  index: DeliveryIndex,
+  now: number
+): { parts: BandDeliveryPart[]; age: string | null; polled: string; tone: StateTone; text: string } | null {
   const projects = new Map<string, GitlabProjectView>();
   const leads = new Map<string, GitlabMr>();
   for (const issue of issues) {
@@ -274,21 +299,28 @@ export function bandTotals(issues: readonly JiraIssue[], index: DeliveryIndex, n
   }
   if (projects.size === 0) return null;
 
-  let oldest: string | null = null;
-  for (const v of projects.values()) {
-    if (v.polledAt === null) return 'GitLab: not read yet';
-    if (oldest === null || Date.parse(v.polledAt) < Date.parse(oldest)) oldest = v.polledAt;
-  }
+  const views = [...projects.values()];
+  if (views.some((v) => v.polledAt === null)) return { parts: [], age: null, polled: 'not read yet', tone: 'grey', text: 'GitLab: not read yet' };
+  let oldest = views[0].polledAt as string;
+  for (const v of views) if (Date.parse(v.polledAt as string) < Date.parse(oldest)) oldest = v.polledAt as string;
 
   const all = [...leads.values()];
-  const parts = [
-    [all.filter((m) => m.state === 'opened').length, 'open'],
-    [all.filter(isFailing).length, 'failing'],
-    [all.filter((m) => m.state === 'merged').length, 'merged']
-  ] as const;
-  const counted = parts.filter(([n]) => n > 0).map(([n, word]) => `${n} ${word}`);
-  const body = counted.length > 0 ? counted.join(' · ') : 'no merge requests';
-  return `GitLab: ${body} · ${polledPhrase(oldest, now)}`;
+  const counts: BandDeliveryPart[] = [
+    { n: all.filter((m) => m.state === 'opened').length, word: 'open' },
+    { n: all.filter(isFailing).length, word: 'failing' },
+    { n: all.filter((m) => m.state === 'merged').length, word: 'merged' }
+  ];
+  const parts = counts.filter((p) => p.n > 0);
+  const polled = polledPhrase(oldest, now);
+  const body = parts.length > 0 ? parts.map((p) => `${p.n} ${p.word}`).join(' · ') : 'no merge requests';
+  const age = pollAge(oldest, now);
+  return {
+    parts,
+    age: age === null ? null : `${age} ago`,
+    polled,
+    tone: views.some((v) => v.failed) ? 'red' : 'green',
+    text: `GitLab: ${body} · ${polled}`
+  };
 }
 
 /** The quick filter's one value (spec §7.4), persisted with the panel filters. */

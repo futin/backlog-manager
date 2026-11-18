@@ -3,6 +3,8 @@ import type { Settings } from './settings';
 import { errorOf } from './http';
 import { elapsedSince, formatCreated } from './item-age';
 import { countdownReading, pollAge, pollProgress, type PollReading } from './tracker';
+import { serviceTone } from './service-status';
+import type { StateTone } from './tones';
 import { runBlockPhrase, runYields } from '../../../shared/jira-sessions';
 import { DEFAULT_NAME_PATTERN, branchCarriesKey, branchNameProblem, renderBranchPattern, shellQuote, slugOf } from '../../../shared/jira-branch';
 import { JIRA_PROMPT_MAX, SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
@@ -684,22 +686,43 @@ export function failurePhrase(failures: readonly JiraBoardFailure[]): string | n
  * one list — and an `M parents` part follows the sources whenever there is a parent to count (`1 parent` in the singular). `null` means the list has not
  * loaded, and reads today's line from `board.count`, with no parents part. Required, with no default, for `now`'s reason: a default is how the next call
  * site forgets it. The Board and the Sessions page both read it, so the two bands cannot count one board two ways.
+ *
+ * The band draws the line as pills (mock A, 2026-11-18; DESIGN.md §8.9.1), so the sentence also comes apart: `site`; `facts`, one pill each — the issue
+ * count, the parents, each non-zero source, and the cap last; `failure`, the same phrase, drawn as its own red pill so a failed sweep reddens one pill and
+ * not the counts beside it; `age` (`12 s ago`, or `null` before the first poll) beside a dot in `tone`; and `polled`, the age's whole phrase, for the
+ * dot's title and the screen reader. `text` stays the full sentence, the row's `title`, built from the same parts so the two cannot disagree.
+ *
+ * `tone` is the shell's Jira chip's (`serviceTone`) over this one board — green on time, amber past twice its own interval, grey before the first poll and
+ * for a board whose sync is off — except that a failed sweep is red whatever its age: a fresh poll that could not read a query is not on time.
  */
 export function bandSub(
   board: JiraBoardStatus,
   site: string,
   now: number,
   counts: { issues: number; parents: number } | null
-): { text: string; failing: boolean } {
-  const sources = [countOrNull(board.roots.length, 'root'), countOrNull(board.queries.length, 'query')].filter((s): s is string => s !== null);
-  const issues = counts === null ? board.count : counts.issues;
-  const parts = [site, `${count(issues, 'issue')}${sources.length > 0 ? ` from ${sources.join(' and ')}` : ''}`];
-  if (counts !== null && counts.parents > 0) parts.push(count(counts.parents, 'parent'));
-  parts.push(polledPhrase(board.polledAt, now));
+): { text: string; failing: boolean; site: string; facts: string[]; failure: string | null; age: string | null; polled: string; tone: StateTone } {
+  const sourceList = [countOrNull(board.roots.length, 'root'), countOrNull(board.queries.length, 'query')].filter((s): s is string => s !== null);
+  const issues = count(counts === null ? board.count : counts.issues, 'issue');
+  const parents = counts !== null && counts.parents > 0 ? count(counts.parents, 'parent') : null;
+  const polled = polledPhrase(board.polledAt, now);
   const failure = failurePhrase(board.failures);
-  if (failure !== null) parts.push(failure);
-  if (board.truncated) parts.push('first 500 shown');
-  return { text: parts.join(' · '), failing: failure !== null };
+  const cap = board.truncated ? 'first 500 shown' : null;
+
+  const sentence = [site, `${issues}${sourceList.length > 0 ? ` from ${sourceList.join(' and ')}` : ''}`, parents, polled, failure, cap];
+  const facts = [issues, parents, ...sourceList, cap].filter((s): s is string => s !== null);
+  const age = pollAge(board.polledAt, now);
+  const tone: StateTone =
+    failure !== null ? 'red' : serviceTone({ down: false, limited: false, rows: [{ polledAt: board.polledAt, interval: board.interval }] }, now);
+  return {
+    text: sentence.filter((s): s is string => s !== null).join(' · '),
+    failing: failure !== null,
+    site,
+    facts,
+    failure,
+    age: age === null ? null : `${age} ago`,
+    polled,
+    tone
+  };
 }
 
 /**

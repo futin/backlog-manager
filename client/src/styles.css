@@ -641,13 +641,22 @@ button.rail-count { cursor: pointer }
    family is only what a Jira issue has that a backlog item does not: the card's head row (type glyph, key, crumb), the initials disc in its foot, the band's
    red sub-line, and the board picker. Colours are existing tokens; nothing here is under 11 px (guard 3). */
 
-/* The sub-line's failing reading: red while the last sweep could not read a root or a query (`bandSub`'s `failing`). The class, never an inline colour, so
-   each theme's `--red` is the red. */
+/* The Sessions page's `· board unavailable` reading: red, by class rather than an inline colour, so each theme's `--red` is the red. The Jira band's own
+   failure is no longer a red line — since mock A (2026-11-18) it is one `.ui-pill-bad` and a red dot, the counts keeping their ink. */
 .jira-band-sub.failing { color: var(--red) }
-/* The band's GitLab line (GitLab connection spec §7.2, `GitlabBandLine`): a second line under the Jira sub-line, not a run-on of it. `Band` renders `sub` in one
-   `<p className="ui-band-sub">`, so the two are adjacent inline spans — a block box is what puts this one on its own line (a `<div>` inside the `<p>` would be
-   invalid markup). */
-.jira-band-gitlab { display: block }
+/* The band's one row (§8.9.1, mock A): site, fact pills, dot and age, then a divider and the GitLab half — glyph, pills, its own dot and age. `Band` renders
+   `sub` in one `<p className="ui-band-sub">`, so each half is an inline flex box (a `<div>` inside the `<p>` would be invalid markup) that wraps inside
+   itself on a narrow band, and the two halves wrap as two words would. `.jira-band-row` rather than `.jira-band-sub`, which the Sessions
+   and Mentions bands still use as a plain inline span around text and ` · ` separators that a flex gap would space apart. */
+.jira-band-row,
+.jira-band-gitlab { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; vertical-align: middle; min-width: 0 }
+.jira-band-gitlab { margin-left: 6px; color: var(--ink3) }
+.jira-band-site { color: var(--ink2); margin-right: 2px }
+.jira-band-sep { display: inline-block; width: 1px; height: 16px; background: var(--hairline2); margin-right: 4px }
+/* Jira's failure message can run to a sentence; the pill ellipsises it and its `title` carries it whole. The cap is on an inner span because guard 7 lets a
+   page lay a primitive out but never restyle it. */
+.jira-band-failure { display: inline-block; max-width: 360px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.jira-band-quiet { color: var(--ink3) }
 
 /* The picker is its Popover's positioning parent (the panel hangs `100% + 8px` under it, right edges together) and does not shrink in the band's wrapping
    right slot. The board's name ellipsises inside the chip, so a long name cannot push the search and the filter track off the line. */
@@ -4183,6 +4192,10 @@ button.rail-count { cursor: pointer }
 .ui-pill-warn { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
 .ui-pill-bad { color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--strip)) }
 .ui-pill-done { color: var(--green); background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)) }
+/* Pill's `raised`: a pill on the page's own ground (the Jira band, §8.9.1 mock A) rather than on a sheet. `--strip-hi` is within a few steps of `--board` in
+   daylight, so the neutral fill vanished there; `--strip` under a `--hairline` edge is the mock's white pill. The border costs no height (border-box, fixed
+   20 px). Declared after the tones and before `off`, so an off pill still drops its fill. */
+.ui-pill-raised { background: var(--strip); border: 1px solid var(--hairline) }
 /* A state on top of any tone (Pill's `off`), declared AFTER the tones so it wins at equal specificity: a fact that does not hold — a model a machine may not
    run. Three cues from existing tokens, so the state never rests on a hue alone: the fill is dropped, so the pill is an empty outline; the edge is
    dashed, the stroke `.jira-card-av.none` already uses for an absent assignee; and the word is struck through. `--ink3` is the muted ink
@@ -4407,6 +4420,15 @@ button.rail-count { cursor: pointer }
 .ui-status-dot[data-tone='red'] { background: var(--red) }
 .ui-status-dot[data-tone='grey'] { background: var(--hairline2) }
 .ui-status-age { font-weight: 500; color: var(--ink3) }
+
+/* PollAge — a source's freshness on the Jira band (§8.9.1, mock A): StatusPill's 7 px toned dot without its chip, then the age in the band's quiet ink. No
+   fill and no height of its own, so it sits on the band's pill row at the row's line height. */
+.ui-poll { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; color: var(--ink3) }
+.ui-poll-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--hairline2) }
+.ui-poll-dot[data-tone='green'] { background: var(--green-solid) }
+.ui-poll-dot[data-tone='amber'] { background: var(--amber-solid) }
+.ui-poll-dot[data-tone='red'] { background: var(--red) }
+.ui-poll-dot[data-tone='grey'] { background: var(--hairline2) }
 
 /* Switch — the family's pill member (§8.6): a recessed --steel track under a
    raised --strip option, so "on" is legible from the geometry before any

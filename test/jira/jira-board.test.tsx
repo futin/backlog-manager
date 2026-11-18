@@ -429,8 +429,21 @@ describe('the band', () => {
     await renderAlpha();
     const sub = bandSub(ALPHA, 'acme.atlassian.net', Date.now(), { issues: 4, parents: 1 });
     expect(sub.text).toBe('acme.atlassian.net · 4 issues from 1 root and 1 query · 1 parent · polled 10m ago');
-    expect(document.querySelector('.ui-band-sub')?.textContent).toBe(sub.text);
-    expect(document.querySelector('.jira-band-sub')).not.toHaveClass('failing');
+    expect(document.querySelector('.jira-band-sub')?.getAttribute('title')).toBe(sub.text);
+  });
+
+  // Mock A (2026-11-18): the site as a word, each count a neutral pill, then a toned dot and the age. ALPHA polled ten minutes ago on a `1m` interval, so
+  // its dot is the chip's amber "late"; the hidden words give a screen reader the state and the `polled` the visible age drops.
+  it('draws the site, one neutral pill per count, and the dot with the age', async () => {
+    await renderAlpha();
+    const row = document.querySelector('.jira-band-sub') as HTMLElement;
+    expect(row.querySelector('.jira-band-site')?.textContent).toBe('acme.atlassian.net');
+    expect([...row.querySelectorAll('.ui-pill-neutral')].map((p) => p.textContent)).toEqual(['4 issues', '1 parent', '1 root', '1 query']);
+    expect(row.querySelector('.ui-pill-bad')).toBeNull();
+    const poll = row.querySelector('.ui-poll') as HTMLElement;
+    expect(poll.querySelector('.ui-poll-dot')).toHaveAttribute('data-tone', 'amber');
+    expect(poll).toHaveAttribute('title', 'polled 10m ago');
+    expect(poll.textContent).toBe('late, polled 10m ago');
   });
 
   /*
@@ -485,12 +498,20 @@ describe('the band', () => {
     await screen.findByText(drawn);
   }
 
-  it('adds the GitLab line under the sub-line while GitLab is shown, counted over the matching issues', async () => {
+  it('adds the GitLab half beside the sub-line while GitLab is shown, counted over the matching issues', async () => {
     await renderWithGitlab(gitlab());
     const line = document.querySelector('.ui-band-sub .jira-band-gitlab');
-    expect(line?.textContent).toBe('GitLab: 1 open · 1 failing · 1 merged · polled 2m ago');
+    expect(line?.getAttribute('title')).toBe('GitLab: 1 open · 1 failing · 1 merged · polled 2m ago');
+    // Mock A: the same counts as pills after the Jira half, `failing` the red one, then GitLab's own dot and age.
+    expect([...(line?.querySelectorAll('.ui-pill') ?? [])].map((p) => `${p.className}|${p.textContent}`)).toEqual([
+      'ui-pill ui-pill-neutral ui-pill-raised|1 open',
+      'ui-pill ui-pill-bad|1 failing',
+      'ui-pill ui-pill-neutral ui-pill-raised|1 merged'
+    ]);
+    expect(line?.querySelector('.ui-poll-dot')).toHaveAttribute('data-tone', 'green');
+    expect(line?.textContent).toContain('GitLab');
     // The board's own sub-line is untouched beside it.
-    expect(document.querySelector('.jira-band-sub')?.textContent).toMatch(/^acme\.atlassian\.net · 4 issues/);
+    expect(document.querySelector('.jira-band-sub')?.getAttribute('title')).toMatch(/^acme\.atlassian\.net · 4 issues/);
   });
 
   // Spec §6.1: the line counts every matching issue, so an MR on a nested on-board child counts. Under the old fold model PAY-162 folded into its top,
@@ -498,7 +519,7 @@ describe('the band', () => {
   it('counts an MR that sits only on a nested on-board child', async () => {
     lists[ALPHA.id] = GROUP;
     await renderWithGitlab({ ...gitlab(), mrs: [gitlabMr({ title: 'PAY-162 | ledger rounding', pipeline: null, keys: ['PAY-162'] })] }, 'Ledger rounding fix');
-    expect(document.querySelector('.ui-band-sub .jira-band-gitlab')?.textContent).toBe('GitLab: 1 open · polled 2m ago');
+    expect(document.querySelector('.ui-band-sub .jira-band-gitlab')?.getAttribute('title')).toBe('GitLab: 1 open · polled 2m ago');
   });
 
   it('draws no GitLab text anywhere on the board while GitLab is unconfigured', async () => {
@@ -507,17 +528,22 @@ describe('the band', () => {
     expect(document.querySelector('.jira-mr-chip')).toBeNull();
   });
 
-  it('draws a failing board’s sub with the failing class and Jira’s message', async () => {
+  // Mock A: a failed sweep reddens one pill — Jira's message, titled with it whole since the pill ellipsises — and the dot, never the counts beside them.
+  it('draws a failing board’s message as one red pill and a red dot, the counts left neutral', async () => {
     statusAnswer = status({ boards: [BETA, { ...ALPHA, failures: [{ kind: 'query', id: 'q_00000001', message: "Field 'foo' does not exist" }] }] });
     await renderAlpha();
     const sub = document.querySelector('.jira-band-sub') as HTMLElement;
-    expect(sub).toHaveClass('failing');
-    expect(sub.textContent).toContain("Field 'foo' does not exist");
+    expect(sub).not.toHaveClass('failing');
+    const bad = sub.querySelector('.ui-pill-bad') as HTMLElement;
+    expect(bad.textContent).toBe("Field 'foo' does not exist");
+    expect(bad).toHaveAttribute('title', "Field 'foo' does not exist");
+    expect(sub.querySelectorAll('.ui-pill-neutral').length).toBeGreaterThan(0);
+    expect(sub.querySelector('.ui-poll-dot')).toHaveAttribute('data-tone', 'red');
   });
   // GROUP's parents: PAY-120 and the nested PAY-160 (on-board headers) and PAY-999 (off-board) — `No parent` is not one.
   it('the band counts the loaded list, not the status poll, and adds the parents part', async () => {
     await renderGroup();
-    expect(document.querySelector('.jira-band-sub')?.textContent).toBe('acme.atlassian.net · 7 issues from 1 root and 1 query · 3 parents · polled 10m ago');
+    expect(document.querySelector('.jira-band-sub')?.getAttribute('title')).toBe('acme.atlassian.net · 7 issues from 1 root and 1 query · 3 parents · polled 10m ago');
   });
 
   it('the band reads the status count, with no parents part, while the list has not loaded', async () => {
@@ -527,16 +553,16 @@ describe('the band', () => {
     ) as unknown as typeof fetch;
     renderPage();
     await screen.findByText('loading…');
-    await waitFor(() => expect(document.querySelector('.jira-band-sub')?.textContent).toBe(bandSub(ALPHA, 'acme.atlassian.net', Date.now(), null).text));
-    expect(document.querySelector('.jira-band-sub')?.textContent).toContain(' · 4 issues ');
-    expect(document.querySelector('.jira-band-sub')?.textContent).not.toContain('parent');
+    await waitFor(() => expect(document.querySelector('.jira-band-sub')?.getAttribute('title')).toBe(bandSub(ALPHA, 'acme.atlassian.net', Date.now(), null).text));
+    expect(document.querySelector('.jira-band-sub')?.getAttribute('title')).toContain(' · 4 issues ');
+    expect(document.querySelector('.jira-band-sub')?.getAttribute('title')).not.toContain('parent');
   });
 
   it('a board of parentless issues has no parents part', async () => {
     lists[ALPHA.id] = [PAY_120, PAY_140, PAY_151];
     renderPage();
     await screen.findByText('Refund flows');
-    expect(document.querySelector('.jira-band-sub')?.textContent).toBe('acme.atlassian.net · 3 issues from 1 root and 1 query · polled 10m ago');
+    expect(document.querySelector('.jira-band-sub')?.getAttribute('title')).toBe('acme.atlassian.net · 3 issues from 1 root and 1 query · polled 10m ago');
   });
 
   /*
@@ -569,19 +595,19 @@ describe('the band', () => {
     lists[ALPHA.id] = EIGHT;
     renderPage();
     await screen.findByText('Issue PAY-301');
-    const before = document.querySelector('.jira-band-sub')?.textContent;
+    const before = document.querySelector('.jira-band-sub')?.getAttribute('title');
     expect(before).toBe('acme.atlassian.net · 16 issues from 1 query · 8 parents · polled 10m ago');
     await pick('Type', 'Bug');
     expect(screen.queryByText('Issue PAY-301')).toBeNull();
-    expect(document.querySelector('.jira-band-sub')?.textContent).toBe(before);
+    expect(document.querySelector('.jira-band-sub')?.getAttribute('title')).toBe(before);
   });
 
   // Review Focus 5: the band counts the unfiltered list, whatever the filters hide.
   it('a filter never moves the band', async () => {
     await renderGroup();
-    const before = document.querySelector('.jira-band-sub')?.textContent;
+    const before = document.querySelector('.jira-band-sub')?.getAttribute('title');
     await pick('Type', 'Sub-task');
-    expect(document.querySelector('.jira-band-sub')?.textContent).toBe(before);
+    expect(document.querySelector('.jira-band-sub')?.getAttribute('title')).toBe(before);
     expect(before).toContain('7 issues from 1 root and 1 query · 3 parents');
   });
 });
