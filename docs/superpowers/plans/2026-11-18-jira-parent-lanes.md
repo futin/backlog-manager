@@ -71,7 +71,7 @@ Input classes the spec implies and no spec test case names. Each has its test in
 | `server/src/jira/map-issue.ts` | Modify — map the parent's type and status | 1 |
 | `client/src/lib/jira.ts` | Modify — parser null-normalises (1); lane model (2); views, cut, folds (3); `crumbOf` kept parent (4); `bandSub` parents, fold helpers deleted (6) | 1–4, 6 |
 | `client/src/lib/jira-list.ts` | Modify — `stubIssue` builds the wider parent | 1 |
-| `client/src/lib/jira-deck.ts` | Modify — `sessionCells`, `endedByKey`, shelves deleted (4); `DeckEntry.parent`, `boardAgents`, `deckCrumb`, `topSessionCell` deleted (6) | 4, 6 |
+| `client/src/lib/jira-deck.ts` | Modify — `sessionCells`, `endedByKey` added, shelves deleted (4); `DeckEntry.parent`, `boardAgents`, `deckCrumb` changed, `topSessionCell` deleted (6) | 4, 6 |
 | `client/src/hooks/useLaneFolds.ts` | Create — the per-board fold state | 4 |
 | `client/src/hooks/useOffBoardParent.ts` | Create — the click-to-read of an off-board parent | 4 |
 | `client/src/hooks/usePickedJiraBoard.ts` | Modify — returns `lanes` beside `fold` (4), then instead of it (6) | 4, 6 |
@@ -121,8 +121,9 @@ Input classes the spec implies and no spec test case names. Each has its test in
   parent field is `null` when its object is absent or has no string `name`. The parent's `priority` stays unmapped, with a comment saying D3 asks for
   type and status only. In `parseJiraBoardIssues` turn an absent or non-object
   `type` / `status` on a row's parent into `null`. In `stubIssue` add the two `null`s.
-- [ ] **Step 5: Fix the fixtures.** `pnpm run typecheck`, then add `type: null, status: null` to every hand-built `parent` literal it (or
-  `grep -rn "parent: { key" test/`) names. No assertion changes besides the two in Step 1.
+- [ ] **Step 5: Fix the fixtures.** `pnpm run typecheck`, then add `type: null, status: null` to every hand-built `JiraIssue` `parent` literal it
+  names — only those: a raw Jira payload (`parent: { key, fields }`, as in `jira-poller.test.ts` and `jira-map-issue.test.ts`) is the mapper's input
+  and stays as it is. No assertion changes besides the two in Step 1.
 - [ ] **Step 6: Run — expect PASS.** `pnpm run typecheck` and `pnpm exec jest` over the three suites of Step 3 plus every suite Step 5 edited.
 - [ ] **Step 7: Commit** — `feat(jira): map a parent's type and status`.
 
@@ -185,8 +186,8 @@ export function laneBoard(issues: readonly JiraIssue[]): JiraLanes;
      cards are all Done is the last lane of all, also when it is the newest. Nested lanes: under one open parent, a settled nested lane updated a minute
      ago sorts after an open sibling updated a week ago, and stays inside its parent.
   10. *Settled.* On-board header In Progress over two Done cards → `settled false`. Off-board stub whose status is In Progress over two Done cards →
-      `settled true`. Off-board lane with no card of its own… use case 7's shape with `PAY-62` In Progress and `PAY-61`, `PAY-63` Done → `settled false`
-      on `PAY-60`'s lane; flip `PAY-62` to Done → `true`.
+      `settled true`. A nested header counts: case 7's shape with `PAY-62` In Progress and `PAY-61`, `PAY-63` Done → `settled false` on
+      `PAY-60`'s lane; flip `PAY-62` to Done → `true`.
   11. *Six deep (Review Focus 5).* A chain `PAY-101` ← `PAY-102` ← … ← `PAY-106`, plus a card `PAY-107` under `PAY-106` → walking `lanes[0].lanes[0]…`
       gives depths 0, 1, 2, 3, 4, 5; counting every header and every card across the tree gives 7, each key once.
   12. *`childrenOf`.* For cases 5 and 8a–8c the index equals a hand-written map (case 5: `PAY-40 → {PAY-41, PAY-44}`, `PAY-41 → {PAY-42, PAY-43}`; 8a
@@ -252,13 +253,17 @@ export function setLaneFold(folds: JiraLaneFolds, boardId: string, board: JiraLa
   - `clampLaneFolds`: `null`, `'x'`, `42`, `[]`, `[{ 'PAY-1': 'closed' }]` → no board has overrides. `{ b1: { 'PAY-1': 'closed', 'PAY-2': 'junk' },
     b2: 'nope', b3: ['open'], b4: null }` → `laneOverrides(_, 'b1')` equals `{ 'PAY-1': 'closed' }`; `b2`, `b3`, `b4` read `{}`.
   - Prototype names (Review Focus 3): for folds parsed from `'{"b1":{"PAY-1":"closed"}}'`, `laneOverrides(folds, 'constructor')`,
-    `laneOverrides(folds, '__proto__')` and `laneOverrides(folds, 'toString')` are each `{}`; `setLaneFold(folds, 'constructor', board, 'PAY-1', false)`
-    then `laneOverrides(_, 'constructor')` equals `{ 'PAY-1': 'closed' }` and `b1` is unchanged.
+    `laneOverrides(folds, '__proto__')` and `laneOverrides(folds, 'toString')` are each `{}`. With `board` = the `setLaneFold` case's board below
+    (it holds lane `PAY-1`), for each of the ids `'constructor'` and `'__proto__'`: `setLaneFold(folds, id, board, 'PAY-1', false)` then
+    `laneOverrides(_, id)` equals `{ 'PAY-1': 'closed' }`, `b1` is unchanged, and `JSON.parse(JSON.stringify(result))` clamps back to the same two
+    board entries. `clampLaneFolds(JSON.parse('{"__proto__":{"PAY-1":"closed"},"b1":{"__proto__":"closed","PAY-1":"open"}}'))` → the `__proto__`
+    board reads `{ 'PAY-1': 'closed' }`, `b1` reads `{ 'PAY-1': 'open' }`, and `({})['PAY-1']` is still `undefined` (`Object.prototype` untouched).
   - `laneOpen`: a settled lane with `{}` → `false`; an open lane with `{}` → `true`; `{ [lane.key]: 'open' }` on a settled lane → `true`;
     `{ [lane.key]: 'closed' }` on an open lane → `false`.
-  - `setLaneFold`: from `{ b1: { 'PAY-9': 'closed', 'PAY-1': 'open' }, b2: { 'PAY-9': 'closed' } }` and a `board` whose lanes are `PAY-1` (with a
-    nested `PAY-2`) and `none`: `setLaneFold(folds, 'b1', board, 'none', false)` → `b1` equals `{ 'PAY-1': 'open', none: 'closed' }` (the stale
-    `PAY-9` pruned, the nested key would have survived), `b2` still `{ 'PAY-9': 'closed' }`. The input object is not mutated.
+  - `setLaneFold`: from `{ b1: { 'PAY-9': 'closed', 'PAY-1': 'open', 'PAY-2': 'closed' }, b2: { 'PAY-9': 'closed' } }` and a `board` whose lanes are
+    `PAY-1` (with a nested `PAY-2`) and `none`: `setLaneFold(folds, 'b1', board, 'none', false)` → `b1` equals
+    `{ 'PAY-1': 'open', 'PAY-2': 'closed', none: 'closed' }` (the stale `PAY-9` pruned, the nested lane's override kept), `b2` still
+    `{ 'PAY-9': 'closed' }`. The input object is not mutated.
 - [ ] **Step 2: Run — expect FAIL.** `pnpm exec jest test/jira/jira-lib.test.ts -t "lane views|laneCell|lane folds"`
 - [ ] **Step 3: Implement.** A lane is in the views when any issue of its `subtree` matches or its own on-board header does (§6.2). `clampLaneFolds`
   follows `clampJiraPanelFilters`' shape: never throws, drops a bad board entry alone and a bad lane value alone. `setLaneFold` prunes its board's entry
@@ -352,13 +357,15 @@ lanes and the `↳` chip). Read `00-mock-audit.md`'s Board table first: the on-b
   15. The column header reads the card counts — a board with one on-board header over 2 To Do cards and a folded settled lane of 3 Done cards reads
       `To Do 2`, `In Progress 0`, `Done 3` — and header issues add nothing. A lane header's count covers its subtree: Task 2's nesting shape reads
       `4 issues` on the root header and `2 issues` on the nested one, each beside a spread bar.
-  16. `showing` reads 3 of 16 when three of sixteen loaded issues match.
+  16. `showing` reads 3 of 16 when three of sixteen loaded issues match. The band cases that sit inside today's `the fold` describe (`3 cards`)
+      move to `the band` describe unchanged — the band still says `M cards` until Task 6 rewrites them.
   17. An empty loaded list draws the column header with zeros and `No issues`; filters that match nothing draw it with `No issues match`.
   18. *Review Focus 1.* Rerender with the parent of an open off-board lane now in the list → the header draws `Run ▾` and no tag; a stored override
       for that lane key still applies.
   19. *Review Focus 2.* Open a cell's `+ N more`, start a parent read on an off-board header, then rerender with a list that no longer holds that
       lane's cards → no error, the lane is gone, and the read's late answer does not call `onOpenIssue`.
-  20. *Review Focus 5.* A six-deep chain draws every issue once and no lane element carries a depth above `LANE_INDENT_CAP`.
+  20. *Review Focus 5.* A six-deep chain draws every issue once, and its six lane elements carry the depths 0, 1, 2, 3, 3, 3 in document order —
+      the attribute is there and stops at `LANE_INDENT_CAP`.
 - [ ] **Step 3: Run — expect FAIL.** `pnpm exec jest test/jira/jira-board.test.tsx test/jira/jira-lib.test.ts test/ui/ui-fold-mark.test.tsx`
 - [ ] **Step 4: Implement the lib and primitives** — `sessionCells`, `endedByKey`, `crumbOf`'s parameter, `FoldMark`'s `title` (rewrite its header
   comment: it names the direct parent, not "the top it folds under"), `usePickedJiraBoard`'s `lanes`. Delete `boardShelves`, `Shelf`, `ShelfCard`,
@@ -372,7 +379,11 @@ lanes and the `↳` chip). Read `00-mock-audit.md`'s Board table first: the on-b
   labels and tones, `laneColumnCounts`' numbers, sticky while the lanes scroll. Lane: header row, then three cells (`laneCell` per cell; which cells
   are open is `useState` keyed by lane key and column, not persisted), then nested lanes; a folded lane draws its header only. Depth reaches CSS as a
   `data-depth` of `Math.min(depth, LANE_INDENT_CAP)`. The on-board header is the issue's card laid out as a row and keeps every control §3.2 lists;
-  share those parts with `JiraCard` rather than copying them (extract what both draw into one module beside them). `JiraCard`: draw nothing for the
+  share those parts with `JiraCard` rather than copying them. `.claude/rules/board.md` puts a look more than one surface draws in
+  `client/src/components/ui/` (precedent: `JiraTypeIcon`, `FoldMark`): each piece of markup and class both the card and the header draw becomes a
+  presentational primitive there, taking plain props, with its own `test/ui/` case and its row in `docs/subsystems/board.md`'s primitives table; the
+  pieces that carry behaviour (`JiraRunMenu`, `MrChip`, `SessionOpen`, `OpenChip`) stay in `components/jira/` and both mount them. `JiraCard.tsx`
+  therefore still imports from `./SessionOpen` itself, and the source pin keeps reading that file. `JiraCard`: draw nothing for the
   `parent` crumb kind, drop the fold block, the match marker and the `jira-card-match` ring; with `session?.lead` set draw the state line, the
   leading-edge accent (class plus `data-state`) and `SessionOpen` as `DeckCard` mounts it, `+N` from `session.more`. `Run ▾` is untouched. Update the
   import pin in `jira-session-open.test.tsx` to the new `./SessionOpen` import line, keeping its intent — one home for `OpenChip`.
@@ -383,8 +394,9 @@ lanes and the `↳` chip). Read `00-mock-audit.md`'s Board table first: the on-b
   describes must still pass; change a List assertion in this task only where it reads `showing`. Delete `JiraShelves.tsx`.
 - [ ] **Step 8: Styles.** Lane, header, cell, live-card and nested-indent rules in `client/src/styles.css` from the tokens and primitives already there
   (the mocks' inline pixel values are not the source); remove `.jira-card-fold`, `.jira-card-match` and the shelf rules that lost their markup.
-- [ ] **Step 9: Run — expect PASS.** `pnpm run typecheck`; `pnpm exec jest` over the five test files above plus `test/guards/design-guards.test.ts` and
-  every suite `grep -l "FoldMark\|askParent\|usePersistedState\|SessionOpen\|JiraRunMenu\|SpreadBar\|JiraCard\|usePickedJiraBoard" -r test/` lists.
+- [ ] **Step 9: Run — expect PASS.** `pnpm run typecheck`; `pnpm exec jest` over the five test files above plus `test/guards/design-guards.test.ts`,
+  `test/guards/fixture-clock.test.ts` and every suite
+  `grep -l "FoldMark\|askParent\|usePersistedState\|SessionOpen\|JiraRunMenu\|SpreadBar\|JiraCard\|usePickedJiraBoard" -r test/` lists.
 - [ ] **Step 10: Commit** — `feat(jira): draw the Board as parent lanes`.
 
 ### Task 5: The List draws lanes (§4)
@@ -408,7 +420,7 @@ Mocks: `List.dc.html` (header rows on a tinted ground, indented child rows, an o
      in `sortForBoard` order — a To Do and a Done card of one lane are not split by status.
   2. The Sprint and Assignee columns are drawn, Assignee as disc and name.
   3. An off-board header row has the table's full cell count, its Key, Summary, Type and Status filled from the stub, the tag `not on this board` in
-     Summary, and empty Priority, Assignee, Sprint, Updated and Run cells; no cell carries `colSpan`.
+     Summary, and empty Session, Delivery (when that column is drawn), Priority, Assignee, Sprint, Updated and Run cells; no cell carries `colSpan`.
   4. The `No parent` header row carries `No parent`, a chevron and the count in Summary; every other cell is empty.
   5. An on-board header row fills every cell with its own values, draws `Run ▾`, and carries `↳ <KEY>` when it has a parent.
   6. A row's Session cell shows its own key's session — a live session on `PAY-42` gives `PAY-42`'s row the state and `PAY-41`'s row (its parent)
@@ -429,11 +441,13 @@ Mocks: `List.dc.html` (header rows on a tinted ground, indented child rows, an o
   The header comment of `JiraIssueList.tsx` is rewritten: it no longer draws "one row per top".
 - [ ] **Step 4: Rewire `JiraBoardView`'s List branch** onto `views`, the shared `folds` and `read`, and `sessionCells`; remove the memo's `rows`,
   `cellStates` and its `foldMatches` / `sortTops` / `topSessionCell` calls.
-- [ ] **Step 5: Run — expect PASS.** `pnpm run typecheck`; the two suites, `test/guards/design-guards.test.ts`, and every suite
-  `grep -l "JiraIssueList" -r test/` lists.
+- [ ] **Step 5: Run — expect PASS.** `pnpm run typecheck`; the two suites, `test/guards/design-guards.test.ts`, `test/guards/fixture-clock.test.ts`,
+  and every suite `grep -l "JiraIssueList" -r test/` lists.
 - [ ] **Step 6: Commit** — `feat(jira): draw the List as parent lanes`.
 
 ### Task 6: Deck, band and Sessions page on the lane model; the fold is deleted (§1.5, §5, §6.1)
+
+Mock: `Board.dc.html` — the band's `8 parents` and the deck card's `↳` mark. The deck card itself is drawn simplified there (`00-mock-audit.md`).
 
 **Files:**
 - Modify: `client/src/lib/jira-deck.ts`, `client/src/lib/jira.ts`, `client/src/hooks/usePickedJiraBoard.ts`,
@@ -458,8 +472,9 @@ Mocks: `List.dc.html` (header rows on a tinted ground, indented child rows, an o
   - `bandSub`: `{ issues: 16, parents: 8 }` → the text holds `16 issues from 1 query · 8 parents`; `{ issues: 3, parents: 1 }` → `1 parent`;
     `{ issues: 4, parents: 0 }` → no parents part; `null` → as today. Replace the `cards` cases.
   - `boardAgents`: a live link on `PAY-42` (kept parent `PAY-41`) → its entry's `parent.key` is `'PAY-41'`; a live link on cycle member `PAY-71` →
-    `parent null`; on a card under off-board `PAY-1` → `parent.key 'PAY-1'` and `parent.summary` that card's; a link on a key not in `issues` → no
-    entry; a `starting` reservation → an entry, as today.
+    `parent null`; on `PAY-11` under off-board `PAY-1`, whose own parent summary is `'Checkout'` while its sibling `PAY-12`'s (the lane's stub)
+    is `'Checkout v2'` → `parent.key 'PAY-1'` and `parent.summary 'Checkout'`, the card's own; a link on a key not in `issues` → no entry; a
+    `starting` reservation → an entry, as today.
   - `deckCrumb`: an entry with `parent.key 'PAY-41'` leads `↳ PAY-41`; with `{ lead: false }` it does not; with `parent: null` it does not.
   - Page, `band`: sixteen issues under eight parents read `… · 16 issues from 1 query · 8 parents · …`; the same text with a filter that hides half of
     them; one parent reads `1 parent`; a board of parentless issues has no parents part.
@@ -467,7 +482,7 @@ Mocks: `List.dc.html` (header rows on a tinted ground, indented child rows, an o
     parentless issue draws no mark.
   - Sessions page (`test/jira/jira-list.test.tsx`): its band reads the same `M parents` for the same list, and a row's Detail still gets its children
     (`childrenOf`).
-- [ ] **Step 2: Run — expect FAIL.**
+- [ ] **Step 2: Run — expect FAIL.** `pnpm exec jest test/jira/jira-lib.test.ts test/jira/jira-board.test.tsx test/jira/jira-list.test.tsx`
 - [ ] **Step 3: Implement** the deck, band, hook and Sessions-page changes above; `JiraBoardView` passes
   `counts={loaded ? { issues: list.issues.length, parents: laneParents(lanes) } : null}` and `lanes.childrenOf` wherever it passed `fold.childrenOf`;
   `JiraAgentDeck` draws `FoldMark` from `entry.parent` with its summary as `title` and rewrites the header comment lines that speak of tops.
@@ -490,16 +505,21 @@ grep -l "foldBoard\|boardShelves\|SHELF_LIMIT\|topSessionCell\|FoldMark\|askPare
 
 **Files:**
 - Modify: `docs/subsystems/jira.md` (~l.338–356 and ~l.657–661: the fold, `sortTops`, the shelves, `SHELF_LIMIT`, "one row per top"),
-  `.claude/DESIGN.md` §8.9.1 (~l.606–614: "The fold", the deck paragraph, the List's "one row per board card"), `docs/subsystems/board.md` and
-  `.claude/rules/board.md` wherever `grep -n` finds a symbol Task 4 or 6 deleted, the grouped-board spec of 2026-10-16 under `docs/superpowers/specs/`
+  `.claude/DESIGN.md` — all of §8.9.1 (~l.606–630: "The fold", the deck and view-switch paragraph, "The shelves", "Columns", the card's fold-block and
+  foot bullets, the List's "one row per board card") and the §8.9.6 sentence at ~l.845 ("a top is kept when a folded child's own MR matches"),
+  `docs/subsystems/board.md` (~l.129: `SpreadBar`'s "used by" cell names `JiraCard`'s fold block; plus any row Task 4 added or outdated) and
+  `.claude/rules/board.md` wherever `grep -n` finds a symbol or part Task 4 or 6 deleted, the grouped-board spec of 2026-10-16 under
+  `docs/superpowers/specs/`
   (`2026-10-16-jira-grouped-board-design.md` — one line at its top: superseded for the Board and List by this spec), and the header comments §10
   lists (`GitlabBandLine.tsx`, `useParentRead.ts`, `jira-deck.ts`) wherever they still describe tops, the fold or the shelves
 
 - [ ] **Step 1: Rewrite, never append.** Each passage describes the lanes as the page now works — lane model, header kinds, the cut of 5, fold storage
   and its clamp, per-issue matching, `M parents` — in the document's own register; a rule file keeps mechanism only and links its `Why:`. Do not
   reflow untouched paragraphs.
-- [ ] **Step 2: Check.** `grep -rn "foldBoard\|boardShelves\|SHELF_LIMIT\|topSessionCell\|sortTops\|cardFold\|foldMatches\|JiraShelves" docs/subsystems
-  .claude/DESIGN.md .claude/rules client/src` returns nothing; `pnpm exec jest test/guards` passes (the guards read the docs and rule files).
+- [ ] **Step 2: Check.** `grep -rni "foldBoard\|boardShelves\|SHELF_LIMIT\|topSessionCell\|sortTops\|cardFold\|foldMatches\|JiraShelves" docs/subsystems
+  .claude/DESIGN.md .claude/rules client/src` returns nothing; `grep -rni "fold block\|match marker\|shelves\|shelf" docs/subsystems/jira.md
+  docs/subsystems/board.md .claude/DESIGN.md .claude/rules/board.md` returns only lines about another page (name each survivor in the commit body);
+  `pnpm exec jest test/guards` passes (the guards read the docs and rule files).
 - [ ] **Step 3: Commit** — `docs(jira): describe parent lanes`.
 
 ### Task 8: `/ui-verify` — mock against the live page
