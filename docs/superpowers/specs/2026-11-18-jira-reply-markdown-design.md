@@ -76,7 +76,8 @@ Supported, with the ADF it maps to:
 | `>` quote                        | `blockquote`                                                           |
 | `---`                            | `rule`                                                                 |
 | GFM table                        | `table` → `tableRow` → `tableHeader` / `tableCell`, each holding a paragraph |
-| `\*` escapes, entities           | the literal character                                                  |
+| `\*` escapes                     | the literal character                                                  |
+| `&amp; &lt; &gt; &quot; &#39;`, numeric `&#NNN;` / `&#xHH;` | the literal character (the converter decodes this set itself: `marked`'s lexer leaves references undecoded in text tokens); any other named entity posts as its source text, while the preview (the browser) decodes it — accepted |
 
 Rules that keep the ADF valid (the anti-goal above):
 
@@ -122,6 +123,12 @@ and its setter down, so what is typed in either shows in the other and closing t
 whenever the box unmounts (the draft is posted, discarded or replaced by a Redraft run) — the same moments the box disappears today; Redraft and Discard
 are not in the editor, so only an outside change can do that while it is open.
 
+**Where the editor's DOM goes.** `Modal` draws its scrim and panel in place, and the mention panel (`.ui-modal`) has `transform` and `overflow: hidden`,
+so a `Modal` rendered inside `DraftReply` would be positioned against, and clipped to, the mention panel. The editor therefore renders through
+`createPortal` into the `.shell` element (`App.tsx`), found from the draft box's own DOM node (`closest('.shell')`), so it stays inside the zoomed shell —
+its sizes divide by `--font-scale` like every modal's — while escaping the mention panel. React state and events still flow through `DraftReply`. It
+stacks above the mention modal by a modifier class on the shell (`.ui-modal-over`: scrim z 62, panel z 63, over the mention modal's 60 / 61).
+
 The editor is a `Modal` opened over the mention modal — the shell's fourth composer, which `Modal.tsx`'s header and DESIGN.md §8.7 must now name (the header
 says a fourth composer "is a design change, not a reuse"; this spec is that change). It uses the split shape (`head`, `lead` false — an even split): the
 head reads `Reply to <KEY>` and, when the author is known, a second line `To @<name>` (omitted when `to` is null); the facts slot is **Write** (the
@@ -131,8 +138,8 @@ textarea, filling the column's height), the body is **Preview** (see Preview ren
 The dialog's `label` is `Reply editor for <KEY>`; its textarea's accessible name is `Edit reply to <name or KEY>`, distinct from the box's
 `Reply to <name or KEY>` so both can be mounted and queried apart.
 
-`Modal` gains one optional prop, `foot`, drawn as a full-width band under both columns in the split shape (and under the body in the sidecar; no existing
-composer passes it, so nothing else changes). The editor's foot carries the `n / 8000` counter, **Close** and **Post reply** (ink). Post reply has exactly
+`Modal` gains two optional props, neither passed by an existing composer, so nothing else changes: `foot`, drawn as a full-width band under both columns
+in the split shape (and under the body in the sidecar), and `over`, which adds `.ui-modal-over` to its scrim and panel (the stacking above). The editor's foot carries the `n / 8000` counter, **Close** and **Post reply** (ink). Post reply has exactly
 the box's enablement: disabled while `busy`, on blank text and past the cap. Post reply from the editor does exactly what the box's does and closes the
 editor on success; a refusal shows its alert line in the editor's foot and keeps it open. A newer draft arriving while the editor is open shows the box's
 `A newer draft arrived · Use it` note at the top of the Write column too, driven by the same state. Escape closes the editor only (`useDialogEscape`'s LIFO
@@ -182,8 +189,9 @@ Sketch the person picked:
 
 - `test/jira/jira-adf.test.ts`: the seven existing `replyDoc` cases stay and must keep passing (none uses Markdown syntax). New: one case per row of the
   table, each container's allowed children and the generic fallback, the mention-before-heading rule, link scheme filtering, no empty text node. A
-  **round trip** — for a fixture written in the read side's canonical spelling (`**x**`, `_x_`, `-` bullets) using every supported construct except
-  tables, `adfToMarkdown(replyDoc(to, md)).markdown` equals `@<name> ` + the source. Tables are asserted on their ADF directly, because the read side
+  **round trip** — for a fixture that opens with a paragraph, is written in the read side's canonical spelling (`**x**`, `_x_`, `-` bullets) and uses
+  every supported construct except tables, GFM autolinks and entities, `adfToMarkdown(replyDoc(to, md)).markdown` equals `@<name> ` + the source.
+  Autolinks (read back as `[url](url)`) and entities (read back decoded) are asserted on their ADF directly. Tables are too, because the read side
   renders a table as `[table omitted]` and this spec does not change the read side — so a posted table reads back on the board's thread view as that
   placeholder, accepted.
 - `test/jira/jira-mentions-routes.test.ts`: one Post reply with Markdown asserts the body Jira receives carries `heading`/`bulletList`/`strong`.
@@ -192,6 +200,7 @@ Sketch the person picked:
   reply opening with a heading previews the mention as its own paragraph; a single newline previews as `<br>`; `renderMarkdown` without options is
   unchanged (a single newline is no `<br>`).
 - `test/guards/dialog-count-docs.test.ts` moves to ten.
+- jsdom: the editor's dialog is not a descendant of the mention modal's `.ui-modal` (it is portalled into `.shell`).
 - `/ui-verify` last: the editor at 1440 px and at 699 px (the folded side of the 700 px boundary) against the sketch, light theme.
 
 ## Left to the builder
