@@ -16,7 +16,7 @@ import { useMountedRef } from '../../hooks/useMountedRef';
 import { useNarrow } from '../../hooks/useNarrow';
 import { elapsedSince } from '../../lib/item-age';
 import { fetchJiraDetail, initialsOf, repoBasename, statusTone, typeTone } from '../../lib/jira';
-import { askedAge, chipMentions, draftState, fetchJiraThread, mentionIssueType, replyTo, threadFold } from '../../lib/jira-mentions';
+import { askedAge, chipMentions, draftState, fetchJiraThread, mentionIssueType, replyMarkdown, replyTo, threadFold } from '../../lib/jira-mentions';
 import { openButtons } from '../../lib/jira-sessions';
 import { renderMarkdown } from '../../lib/markdown';
 import { Chevron } from '../ui/Chevron';
@@ -277,7 +277,7 @@ export function JiraMentionModal({
           id: posted.id,
           author: { accountId: '', name: me ?? 'You' },
           created: posted.at,
-          markdown: posted.to === null ? posted.text : `@${posted.to} ${posted.text}`,
+          markdown: replyMarkdown(posted.to, posted.text),
           mine: true,
           mentionsMe: false,
           open: false
@@ -508,7 +508,7 @@ function Thread({
         {shown.map((c) => (
           <Comment key={c.id} comment={c} focused={c.id === focus ? focused : null} asking={asking && c.open} names={names} now={now} />
         ))}
-        {posted !== null && <Comment comment={posted} focused={null} asking={false} names={names} now={now} />}
+        {posted !== null && <Comment comment={posted} focused={null} asking={false} names={names} now={now} breaks />}
       </div>
     </>
   );
@@ -519,13 +519,17 @@ function Comment({
   focused,
   asking,
   names,
-  now
+  now,
+  breaks = false
 }: {
   comment: JiraThreadComment;
   focused: RefObject<HTMLDivElement> | null;
   asking: boolean;
   names: readonly string[];
   now: number;
+  /** The reply this dialog just posted: a single newline in it was posted as a `hardBreak`, so it renders as one. A comment read from Jira renders as it
+   *  always has — the read side writes a `hardBreak` as a bare newline, which CommonMark renders soft; changing that is the read side's call, not this one. */
+  breaks?: boolean;
 }) {
   const age = askedAge(comment.created, now);
   const className = asking ? 'jira-mention-cm ask' : 'jira-mention-cm';
@@ -539,7 +543,7 @@ function Comment({
         <span>{comment.mine ? 'You' : comment.author.name}</span>
         {age !== null && <span className="jira-mention-when">{age}</span>}
       </div>
-      <div className="item-body jira-mention-txt" dangerouslySetInnerHTML={{ __html: chipMentions(renderMarkdown(comment.markdown), names) }} />
+      <div className="item-body jira-mention-txt" dangerouslySetInnerHTML={{ __html: chipMentions(renderMarkdown(comment.markdown, { breaks }), names) }} />
     </div>
   );
 }

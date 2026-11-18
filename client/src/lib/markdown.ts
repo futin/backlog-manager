@@ -202,7 +202,10 @@ marked.use({
  * emits raw HTML as markup — a comment span renders as nothing and the text around it as Markdown, any other tag as escaped text — and hand-builds every
  * link/image tag with its href/src escaped,
  * so neither a literal nor an entity-hidden scheme survives to reach the browser's own HTML parser.
+ *
+ * `breaks: true` turns a single newline inside a paragraph into a `<br>` — what a Jira mention reply does, since `replyDoc` (server/src/jira/adf-write.ts)
+ * posts that newline as a `hardBreak`. Only the reply's preview and the posted reply pass it; every other caller renders as CommonMark always did.
  */
-export function renderMarkdown(source: string): string {
-  return marked.parse(source, { async: false }) as string;
+export function renderMarkdown(source: string, opts: { breaks?: boolean } = {}): string {
+  return marked.parse(source, { async: false, breaks: opts.breaks === true }) as string;
 }

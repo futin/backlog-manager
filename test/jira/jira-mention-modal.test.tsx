@@ -934,6 +934,20 @@ describe('the mention modal — Draft a reply (phase 2, Task 8; mock `ModalDraft
     expect(crumbs()).toContain('PAY-131');
   });
 
+  it('Post reply 200 of a Markdown reply: the joined comment renders it, the mention in its own paragraph before the heading', async () => {
+    withSup({ draft: draft('# Done\n\nok', 2) });
+    const user = userEvent.setup();
+    await openSup(user);
+    await user.click(btn('Post reply'));
+    await settle();
+    const mine = dialog().querySelector<HTMLElement>('.jira-mention-cm[data-comment-id="999"]')!;
+    const heading = within(mine).getByRole('heading', { name: 'Done' });
+    const chip = mine.querySelector('.jira-mentions-at')!;
+    expect(chip).toHaveTextContent('@Ivo Kranjc');
+    expect(chip.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(mine).not.toHaveTextContent('# Done');
+  });
+
   it('the last mention’s posted line has no Next mention', async () => {
     answer = payload({ issues: [SUP, { ...PAY, draft: draft('Not from my change.', 2) }] });
     const user = userEvent.setup();
