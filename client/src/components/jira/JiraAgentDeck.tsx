@@ -28,13 +28,13 @@ import { SessionOpen } from './SessionOpen';
  * words for the state and how long THIS server has seen the session in it (no phase: none is served); the head — type glyph, the session's OWN key and, only
  * when the session's ticket has a parent, a `↳ <KEY>` pill naming that DIRECT parent, on the board or off it, titled with its summary (parent-lanes spec §5:
  * the lane the ticket's own card sits in, so the pill and the lane header say one key); the summary, a button that opens Detail on that ticket; the crumb
- * `run · repo · surface · model`; the MR chip on a line of its own (below); a 4 px context `Meter`; and `SessionOpen`, the split Open. The card is not a `role="button"` the way a lane card is: it has buttons of its own,
- * and a card that is itself one would nest them.
+ * `run · repo · surface · model`; the MR chip on a line of its own (below); a 4 px context `Meter`; and `SessionOpen`, the split Open. The card is not a
+ * `role="button"` the way a lane card is: it has buttons of its own, and a card that is itself one would nest them.
  *
  * **The MR chip** (GitLab connection spec §7.2, mock `Cards.dc.html`): a ticket with a live session is the one most likely to have an open MR, so the deck
  * card draws `MrChip` too. It has no foot, worktree chip or Run menu to sit beside, so the chip takes its own line between the crumb and the meter, and it is
- * the lead MR of the issue the CARD is about — the session's own ticket, which may be a child in its parent's lane — not the parent's: the session is the work, and
- * its MR is the work's. Nothing is drawn while that ticket has no MR or delivery is not shown at all.
+ * the lead MR of the issue the CARD is about — the session's own ticket, which may be a child in its parent's lane — not the parent's: the session is the
+ * work, and its MR is the work's. Nothing is drawn while that ticket has no MR or delivery is not shown at all.
  *
  * **Buttons are `openButtons`' (§7.5), the deck's narrow reading** (`wide: false`: `Desktop`, where Detail says `Open in Desktop`). They are drawn by `SessionOpen`, which reads `openTarget` as `OpenChip` does, so C2's Desktop rule (hidden on a phone, disabled with its title while a hand-over could fork a live transcript, the guarded `jira-open-desktop`
  * POST for a dashboard session at rest) lives in one place. That POST's refusal draws under the buttons in the card's own alert line. A Starting card has none:

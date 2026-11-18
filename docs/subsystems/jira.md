@@ -361,7 +361,7 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   hands both to the Board and the List, so a fold made in either view is the other's. A card click lands in `JiraView`'s open-issue
   slot with the lanes' `childrenOf` beside the issue. The band's `Board | List` switch (`JiraViewSwitch`, `hooks/useJiraView.ts`) picks the deck over the lanes or
   `JiraIssueList`: the same lanes as rows of one table, a header row per lane and one row per card, uncut, each row with its own issue's session cell
-  (`issueCellWord` in `lib/jira-deck.ts`) and its own `updated`; a row opens Detail through `rowOpens` (`lib/jira-list.ts`).
+  (`sessionCells` in `lib/jira-deck.ts`, keyed by the row's own issue key) and its own `updated`; a row opens Detail through `rowOpens` (`lib/jira-list.ts`).
   Since the GitLab connection, while `useDeliveryIndex` answers an index: `MrChip` on each card (`components/jira/MrChip.tsx`), `GitlabBandLine` under
   `JiraBandSub`, the List's Delivery column after Status (`DeliveryTrack`'s compact shape), and a `Delivery` section in the Filters popover beside a
   List-only segmented control, stored with the board filters (`lib/jira.ts`'s `delivery`) — [gitlab.md](gitlab.md#the-client-half), DESIGN.md §8.9.6.

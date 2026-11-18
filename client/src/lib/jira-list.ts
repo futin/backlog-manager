@@ -17,8 +17,8 @@ import { formatZonedClock, startOfZonedDay, zonedParts } from './time-zone';
  * a reservation has no link until the dashboard answers (`GET /api/jira/sessions` never carries one), so it is built from the status's `live[key]` entry,
  * exactly as the deck and Detail do, and its id is `starting:<KEY>`.
  *
- * **Scope is the board's keys, or every link.** By default a row belongs to the List when its ticket is on the picked board's LOADED list (a top or anything
- * folded under one — the issues the fold was made from); All tickets widens that to every link, and a ticket the board does not hold is drawn from the link's
+ * **Scope is the board's keys, or every link.** By default a row belongs to the List when its ticket is on the picked board's LOADED list (any issue the board
+ * holds, whatever its depth in the lanes); All tickets widens that to every link, and a ticket the board does not hold is drawn from the link's
  * `snapshot` (`stubIssue`), the ticket as it stood when the link was made — the one reason the store keeps it. **One more key is in scope by default: the
  * parent of a sub-task the board holds** (`via`). `Run on` (#499) starts a session on a sub-task's parent story — the team assigns the sub-task but the story
  * owns the branch — and links it to the PARENT's key; that story is usually on no board, so without this the person's own running session vanished from a

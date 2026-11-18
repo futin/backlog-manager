@@ -1445,7 +1445,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       expect(found).toHaveLength(1);
       return found;
     });
-    // The fold is a pill beside the key now, not the crumb's lead.
+    // The `↳ <key>` pill sits beside the key, not in the crumb's lead.
     expect(deck.querySelector('.ui-fold')).toHaveTextContent('↳ PAY-160');
     expect(deck.querySelector('.jira-card-crumb')).not.toHaveTextContent('↳');
     expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
@@ -1984,6 +1984,25 @@ describe('the agent deck and the lane cells', () => {
     expect(cellMore('none', 'done')).toHaveTextContent('+ 1 more');
     await userEvent.click(cellMore('none', 'todo') as HTMLElement);
     expect(cellRows('none', 'todo')).toBe(5);
+  });
+
+  // The `+ N more` state is the lane board's own and keyed `<lane>:<column>`, so a parent key that is a lane on two boards would carry an opened cell across a
+  // board switch without the `key={board.id}` on `JiraLaneBoard`.
+  it('a cell opened on one board is cut again after switching to a board with the same parent', async () => {
+    const parent = { key: 'PAY-500', summary: 'Checkout epic', type: null, status: null };
+    const epic = issue({ key: 'PAY-500', summary: 'Checkout epic', type: { name: 'Epic', level: 1, subtask: false } });
+    const under = (from: number): JiraIssue[] =>
+      Array.from({ length: 7 }, (_, i) => issue({ key: `PAY-${from + i}`, summary: `Epic todo ${from + i}`, updated: daysAgoStamp(i + 1), parent }));
+    lists[ALPHA.id] = [epic, ...under(510)];
+    lists[BETA.id] = [epic, ...under(610)];
+    await renderDeck('Epic todo 510');
+    await userEvent.click(cellMore('PAY-500', 'todo') as HTMLElement);
+    expect(cellRows('PAY-500', 'todo')).toBe(7);
+    await userEvent.click(screen.getByRole('button', { name: 'Pick a Jira board: Alpha board' }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Boards' })).getByRole('button', { name: 'Beta board' }));
+    await screen.findAllByText('Epic todo 610');
+    expect(cellRows('PAY-500', 'todo')).toBe(5);
+    expect(cellMore('PAY-500', 'todo')).toHaveTextContent('+ 2 more');
   });
 
   // Case 6: a live card past the cut is never hidden — the cut keeps it, in its place, and hides one fewer.

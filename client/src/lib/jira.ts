@@ -314,7 +314,8 @@ function walkParents(issues: readonly JiraIssue[]): {
     const p = i.parent;
     const cycle = p !== null && onBoard.has(p.key) && (topOf.get(i.key) ?? i.key) === i.key;
     parentOf.set(i.key, cycle ? null : p);
-    // A non-top issue has an on-board parent by definition (a missing or off-board one would have made it a top), and is no cycle member.
+    // An issue that is not its own top has an on-board parent by definition (a missing or off-board one would have made it its own top), and is no cycle
+    // member.
     if (p !== null && (topOf.get(i.key) ?? i.key) !== i.key) pushTo(childrenOf, p.key, i);
   }
   return { topOf, parentOf, childrenOf: sortedLists(childrenOf) };

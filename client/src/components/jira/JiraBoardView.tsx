@@ -51,7 +51,8 @@ const NO_LIVE: Readonly<Record<string, JiraLiveSession>> = {};
 const NO_TREES: readonly JiraWorktree[] = [];
 
 /**
- * Jira › Board — one tracked board's issues in three status-category columns (Jira phase 2, spec §6.2; DESIGN.md §8.9.1, which applies §8.3's Board).
+ * Jira › Board — one tracked board's issues in three status-category columns, grouped into parent lanes (parent-lanes spec §1, §3) (Jira phase 2, spec §6.2;
+ * DESIGN.md §8.9.1, which applies §8.3's Board).
  *
  * **Which board, and the one request that must never be made** (Review Focus 3). The browser remembers a board under `backlog-manager.jira-board`, but what
  * it remembers is only a preference: `pickBoard` resolves it against the status's live list on every render, and `useJiraBoard` is handed ONLY the id of the
@@ -63,7 +64,7 @@ const NO_TREES: readonly JiraWorktree[] = [];
  * is the NEWER of the two readings the page holds — the board list's own `polledAt` (read every `BOARD_TRACKER_POLL_MS`) over the status's, when the list
  * has one — and it ticks every second in its own small component, so the clock re-renders one line and not every card. The right slot holds the picker (a
  * `Chip` naming the board, opening a `Popover` of every board by name — pick only: `Edit` and `New` are Setup's, spec §1), the summary search, and the filter
- * track. Under the sub-line, while GitLab is shown, `GitlabBandLine` adds `GitLab: N open · N failing · N merged · polled <age>` over the shown tops
+ * track. Under the sub-line, while GitLab is shown, `GitlabBandLine` adds `GitLab: N open · N failing · N merged · polled <age>` over the matching issues
  * (GitLab connection spec §7.2) — unlike the sub-line's counts, AFTER the filters, because it answers "how is the work I am looking at doing".
  *
  * **The panel filters persist; the search is per mount**: type, status (multi-select, by name), assignee (`anyone` / `me` / `unassigned`; no `me` while
@@ -82,14 +83,14 @@ const NO_TREES: readonly JiraWorktree[] = [];
  *
  * **One lane per parent** (parent-lanes spec §3; DESIGN.md §8.9.1). `laneBoard` (through `usePickedJiraBoard`) is the one walk: every issue with an
  * on-board child is a lane header, every other issue a card in its parent's lane — an on-board header, an off-board stub, or `No parent`. This page only
- * filters it (`laneViews`) and hands the same views to `JiraLaneBoard` and to the List; it never walks a parent chain itself. The walk is memoised on the list, so the minute tick
- * re-renders the cards without re-walking up to 500 issues. The band's `M parents` counts the same lanes (`laneParents`).
+ * filters it (`laneViews`) and hands the same views to `JiraLaneBoard` and to the List; it never walks a parent chain itself. The walk is memoised on the
+ * list, so the minute tick re-renders the cards without re-walking up to 500 issues. The band's `M parents` counts the same lanes (`laneParents`).
  *
- * **The band's numbers are the LOADED list's**, unfiltered: its length and its parent lanes at every depth (`laneParents`, `No parent` not counted — parent-lanes
- * spec §6.1), so `16 issues · 8 parents` counts one list — not the status poll's `board.count`, a different poller one interval apart — and describes the
- * board, not the view, so a filter never moves it. They are passed only once the list has loaded, which is exactly the condition under which the lanes are
- * drawn (not loading, and not a failed first read with nothing in hand); before that the band reads today's line from `board.count`, so it can never claim
- * parents the lanes are not drawing.
+ * **The band's numbers are the LOADED list's**, unfiltered: its length and its parent lanes at every depth (`laneParents`, `No parent` not counted —
+ * parent-lanes spec §6.1), so `16 issues · 8 parents` counts one list — not the status poll's `board.count`, a different poller one interval apart — and
+ * describes the board, not the view, so a filter never moves it. They are passed only once the list has loaded, which is exactly the condition under which the
+ * lanes are drawn (not loading, and not a failed first read with nothing in hand); before that the band reads today's line from `board.count`, so it can never
+ * claim parents the lanes are not drawing.
  *
  * Clicking a card calls `onOpenIssue(issue, childrenOf)` — the slot the issue modal fills, plus the lanes' parent → children index as a snapshot, so the
  * modal's Children tree can reach the grandchildren the detail read does not return without a Jira call of its own (grouped-board spec §6).
@@ -105,8 +106,9 @@ const NO_TREES: readonly JiraWorktree[] = [];
  * rows are the same lanes — a header row per lane, its card rows under it. The two views share ONE fold state and ONE off-board read, both owned here
  * (`useLaneFolds`, `useOffBoardParent`) and handed to whichever view is drawn: the fold store is per instance (it reads storage on mount), so a hook inside
  * each view would let a fold made in one view go unseen by the other until a reload, and a read started in one could open Detail after a switch to the other
- * with no record of being the newest click. The session table the List used to hold is Jira › Sessions' (`JiraSessionsView`). `FilterBar` and the issue search are drawn in both views — type, assignee and sprint describe an issue, and the
- * List's rows are issues now. The band's sub stays the board's (`bandSub`) in either view.
+ * with no record of being the newest click. The session table the List used to hold is Jira › Sessions' (`JiraSessionsView`). `FilterBar` and the issue search
+ * are drawn in both views — type, assignee and sprint describe an issue, and the List's rows are issues now. The band's sub stays the board's (`bandSub`) in
+ * either view.
  *
  * **Worktree chips** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1). The page reads `GET /api/jira/worktrees` ONCE on mount and again only when the SET of
  * live keys changes — a Start or a Stop landing — compared as a sorted, joined key list, so a status reload that hands back a
@@ -164,7 +166,7 @@ export function JiraBoardView({
   const [view] = useJiraView();
   // Memoised on the lanes, the filters, the sessions answer and the minute's `now` — `now` only since the `Review open` filter, whose match
   // depends on the clock (a stuck review stops reading `reviewing`); the lane model is not rebuilt by it, and the filter pass over up to 500 issues is a map
-  // lookup each. ONE predicate answers for every surface (parent-lanes spec §3.5): the panel's filters and the search AND, while a delivery filter is picked
+  // lookup each. ONE predicate answers for every surface (parent-lanes spec §6.2): the panel's filters and the search AND, while a delivery filter is picked
   // and GitLab's index is loaded, the issue's OWN delivery. Filters match per issue — no fold, so no F1 ring: a lane is drawn when its subtree holds a match
   // or its own header matches (`laneViews`), and the deck keeps a live session whose own ticket matches.
   const { views, deck, matching, cells, ended } = useMemo(() => {
@@ -318,7 +320,10 @@ export function JiraBoardView({
         ) : (
           <>
             <JiraAgentDeck entries={deck} now={now} onOpenIssue={openWithTree} />
+            {/* Keyed by the board: `openCells` (the `+ N more` cut-open state, keyed `<lane>:<column>`) is local to the lane board, and a parent key can be a lane on
+                two boards — without the key a cell opened on one would arrive open on the other. */}
             <JiraLaneBoard
+              key={board.id}
               views={views}
               lanes={lanes}
               folds={folds}

@@ -10,10 +10,10 @@ import { pollAge } from './tracker';
  * and the components draw what they return, so no component holds a copy of "which session a card leads with" or "which card comes first".
  *
  * **The deck is the live sessions on this board, one card each.** A session counts for a board when its key is on that board's LOADED list — at any lane
- * depth, a parent's own card as much as a child's — so a ticket two boards both hold shows its card on each of them (the controller's ruling), and a session on a ticket off every loaded
- * list shows on no board (the Sessions page is where it lives). `starting` never comes from `GET /api/jira/sessions`: a reservation has no link until the dashboard
- * answers, so a Starting card is built from the status's `live[key]` entry (`JiraStartingCard`'s and Detail's approach); Lost contact IS in the payload, as the
- * state the server derived.
+ * depth, a parent's own card as much as a child's — so a ticket two boards both hold shows its card on each of them (the controller's ruling), and a session
+ * on a ticket off every loaded list shows on no board (the Sessions page is where it lives). `starting` never comes from `GET /api/jira/sessions`: a
+ * reservation has no link until the dashboard answers, so a Starting card is built from the status's `live[key]` entry (`JiraStartingCard`'s and Detail's
+ * approach); Lost contact IS in the payload, as the state the server derived.
  *
  * **A card with a live session stays in its lane** (parent-lanes spec §3.4). The status shelves this file used to cut — a top with a live session left
  * them for its deck card — are gone: the lane card keeps its place, says the session's state on its own state line, and the deck still lists it, so the
@@ -87,9 +87,9 @@ export function boardAgents(
 }
 
 /**
- * The one reading of "which sessions are live on these tickets", shared by the deck (`boardAgents`, over a board's loaded list) and Detail (`childSessions`, over a
- * ticket's Children tree), so the two can never disagree on what counts as live: a linked session that has not ended, or a `starting` reservation from the
- * status. `on` maps each ticket key to the issue and the parent its card names; a key not in it is not this caller's. Sorted in `deckOrder`.
+ * The one reading of "which sessions are live on these tickets", shared by the deck (`boardAgents`, over a board's loaded list) and Detail (`childSessions`,
+ * over a ticket's Children tree), so the two can never disagree on what counts as live: a linked session that has not ended, or a `starting` reservation from
+ * the status. `on` maps each ticket key to the issue and the parent its card names; a key not in it is not this caller's. Sorted in `deckOrder`.
  */
 function liveEntries(
   on: ReadonlyMap<string, { issue: JiraIssue; parent: JiraParentRef | null }>,
@@ -219,8 +219,9 @@ export function endedByKey(payload: JiraSessionsPayload | null): Map<string, Ses
 }
 
 /**
- * A card's extra line (§7.1): the newest ended session as `run ended <age> ago` (spec §7.1 — whatever the link's `how`, the row says `run`) with the session to Reopen, or `N sessions` when the ticket has been
- * worked more than once — the row does not pick one of several to reopen, Detail's history lists them all. `null` for a ticket that has never had one.
+ * A card's extra line (§7.1): the newest ended session as `run ended <age> ago` (spec §7.1 — whatever the link's `how`, the row says `run`) with the session
+ * to Reopen, or `N sessions` when the ticket has been worked more than once — the row does not pick one of several to reopen, Detail's history lists them all.
+ * `null` for a ticket that has never had one.
  */
 export function endedLine(ended: readonly SessionLink[], now: number): { text: string; reopen: SessionLink | null } | null {
   if (ended.length === 0) return null;

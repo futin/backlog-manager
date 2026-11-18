@@ -842,7 +842,7 @@ describe('sweepLine', () => {
   });
 });
 
-// ── The fold (grouped-board spec §3–§6) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── Fold progress, the modal tree and the band's lane counts (grouped-board spec §3–§6, kept by parent-lanes spec §1.5) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('foldProgress, modalTree and the band’s lane counts', () => {
   const now = Date.now();

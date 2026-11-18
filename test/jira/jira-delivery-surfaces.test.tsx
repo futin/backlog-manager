@@ -318,13 +318,13 @@ describe('the List’s Delivery column', () => {
   });
 
   it('leaves an off-board header row’s Delivery cell empty, even when the parent’s own key has an MR — the row is a stub, not a read issue', () => {
-    const parent = { key: 'TIMIFY-1', summary: 'Platform epic', type: null, status: null };
-    drawList([issue('TIMIFY-123', { parent })], payload([mr({ keys: ['TIMIFY-1'] })]));
-    const row = document.querySelector('tr[data-lane="TIMIFY-1"]') as HTMLElement;
+    const parent = { key: 'PAY-1', summary: 'Platform epic', type: null, status: null };
+    drawList([issue('PAY-123', { parent })], payload([mr({ keys: ['PAY-1'] })], { PAY: [MICRO] }));
+    const row = document.querySelector('tr[data-lane="PAY-1"]') as HTMLElement;
     const at = headers().indexOf('Delivery');
     expect(row.querySelectorAll('td')).toHaveLength(headers().length);
     expect(row.querySelectorAll('td')[at].textContent).toBe('');
-    expect(cell('TIMIFY-123').textContent).toBe('no MR');
+    expect(cell('PAY-123').textContent).toBe('no MR');
   });
 
   it('draws no Delivery column while GitLab is unconfigured', () => {

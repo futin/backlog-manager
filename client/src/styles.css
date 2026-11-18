@@ -1851,10 +1851,11 @@ button.rail-count { cursor: pointer }
   .jira-issues-scroll { overflow-x: auto }
 }
 .jira-issues-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
-.jira-issues-table thead th:nth-child(1) { width: 126px } /* Session: the word ellipsises (`Waiting on your answer` is longer); the dot and the age are the reading and never cut.
-   126 keeps `Working · 12m` whole. It was 140 for the second line's `↳ TIMIFY-26366` pill (a session on a folded ticket), which went with the fold
-   (parent-lanes spec §4.3); the 14 px it freed went to Key. */
-.jira-issues-table thead th:nth-child(2) { width: 122px } /* Key: a twelve-character key (TIMIFY-28086, 82 px at 13 px) whole at depth 0 and 1 of the lane indent. */
+.jira-issues-table thead th:nth-child(1) { width: 126px } /* Session: the word ellipsises (`Waiting on your answer` is longer); the dot and the age are
+   the reading and never cut. 126 keeps `Working · 12m` whole. It was 140 for the second line's `↳ PAY-10012345` pill (a session on a folded ticket), which went
+   with the fold (parent-lanes spec §4.3); the 14 px it freed went to Key. */
+.jira-issues-table thead th:nth-child(2) { width: 122px } /* Key: a twelve-character key (PAY-10012345, 82 px at 13 px) whole at depth 0 and 1 of the
+   lane indent. */
 .jira-issues-table thead th:nth-child(4) { width: 100px }
 .jira-issues-table thead th:nth-child(5) { width: 116px }
 .jira-issues-scroll[data-delivery] .jira-issues-table { min-width: 1376px }
@@ -1898,7 +1899,7 @@ button.rail-count { cursor: pointer }
 /* Indent is padding inside the Key cell, never a column (spec §4.1): `data-depth` is the lane depth capped at LANE_INDENT_CAP (3). The step is 14 px, not the
    Board's 24, because the Key column is a fixed 122 px and a twelve-character key must still mostly fit at the cap. An indented key gives up most of its
    right padding to the indent — the Summary cell's own 12 px still separates the two — so /ui-verify measured a twelve-character key whole at depth 1 and a
-   nine-character one (PAY-10018) whole at the cap, where 108 px with the full padding cut every child row's TIMIFY key. */
+   nine-character one (PAY-10018) whole at the cap, where 108 px with the full padding cut every child row's twelve-character key. */
 .jira-issues-row td.jira-issues-key[data-depth='1'], .jira-issues-row td.jira-issues-key[data-depth='2'], .jira-issues-row td.jira-issues-key[data-depth='3'] {
   padding-right: 4px
 }
@@ -4717,8 +4718,8 @@ tr.ui-stripe > :first-child { box-shadow: inset 3px 0 0 var(--stripe, transparen
 .ui-stripe-dot[data-tone='red'] { background: var(--red) }
 .ui-stripe-dot[data-tone='grey'] { background: var(--hairline2) }
 
-/* FoldMark — the `↳ <key>` pill (§8.9.1): the deck card names the top its ticket folds under, the List's Session cell the folded ticket its session runs on. It
-   may shrink and ellipsise inside a narrow cell (its `title` holds the whole key); where there is room it is its own width. */
+/* FoldMark — the `↳ <key>` pill (§8.9.1): the deck card names the parent its ticket hangs under, the List's Session cell the folded ticket its session runs on.
+   It may shrink and ellipsise inside a narrow cell (its `title` holds the whole key); where there is room it is its own width. */
 .ui-fold {
   display: inline-block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   padding: 1px 7px; border-radius: 8px; border: 1px solid var(--hairline2); font-size: 11px; font-weight: 500; color: var(--ink2); background: var(--strip)
