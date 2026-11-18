@@ -1251,8 +1251,9 @@ describe('laneBoard', () => {
     it('ranks a lane whose only stamp is unparseable last among the open lanes', () => {
       const under = (key: string, parent: string, ms: number, over: Partial<JiraIssue> = {}): JiraIssue =>
         n(key, null, ms, { parent: { key: parent, summary: `${parent} summary`, type: null, status: null }, ...over });
-      const l = lanes([under('PAY-81', 'PAY-8', 1 * HOUR), under('PAY-91', 'PAY-9', 1 * HOUR, { updated: 'not a date' }), under('PAY-71', 'PAY-7', 2 * HOUR)]);
-      expect(laneKeys(l.lanes)).toEqual(['PAY-8', 'PAY-7', 'PAY-9']);
+      const l = lanes([under('PAY-81', 'PAY-8', 1 * HOUR), under('PAY-61', 'PAY-6', 1 * HOUR, { updated: 'not a date' }), under('PAY-71', 'PAY-7', 2 * HOUR)]);
+      // PAY-6 holds the LOWEST key, so a NaN stamp falling through to key order would put it first and fail the case.
+      expect(laneKeys(l.lanes)).toEqual(['PAY-8', 'PAY-7', 'PAY-6']);
     });
   });
 });

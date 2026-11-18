@@ -1282,7 +1282,7 @@ describe('the lane folds', () => {
     const expand = await screen.findByRole('button', { name: 'Expand PAY-200' });
     await userEvent.click(expand);
     expect(Object.keys(stored() as object).sort()).toEqual([ALPHA.id, BETA.id].sort());
-    // Beta's write leaves Alpha's entry as it was — not replaced with `{}`, not pruned against Beta's lanes.
+    // Beta's write leaves Alpha's entry as it was, not replaced with `{}`.
     expect((stored() as Record<string, unknown>)[ALPHA.id]).toEqual({ 'PAY-200': 'open' });
   });
 
