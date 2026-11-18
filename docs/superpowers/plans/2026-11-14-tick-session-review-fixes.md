@@ -21,6 +21,9 @@ when the code says otherwise, and record the deviation in the task's report.
 ## Global Constraints
 
 - Branch `feat/tick-review-fixes`, worktree `.worktrees/tick-review-fixes`. Never commit on `main`.
+- Tracker item [#565](https://github.com/futin/backlog-manager/issues/565), claimed with `backlog.mjs start #565 --as execute`. A claim reads stale after 15 min
+  without a heartbeat, so run `backlog.mjs heartbeat #565` between tasks. The PR body says `Closes #565`. The branch's upstream is `origin/main` from its
+  creation, so push with `git push -u origin feat/tick-review-fixes`, never a bare `git push`.
 - `tick.mjs` stays self-contained, and `~/.backlog-manager/tick/` keeps exactly one writer, `tick.mjs`.
 - `--peek` is mutually exclusive with `--dry-run`: both → exit `1` (usage).
 - Exit codes: `0`, `1` usage, `2` runtime, `3` record-under-another-id are unchanged; `10` is new, and only `decide --peek` returns it, for `idle` and `busy`.
@@ -167,11 +170,11 @@ whatever the record would have stored as its reason today.
 
 **Files:**
 - Modify: `skills/backlog-tick/SKILL.md` — the decide-flags line (`:31`) and the "no `blocked` outcome" paragraph (`:93-94`).
-- Modify: `skills/backlog-execute/SKILL.md:70` region — first `references/` pointer.
+- Modify: `skills/backlog-execute/SKILL.md:69` region — first `references/` pointer (the "Am I inside a tick?" section).
 - Modify: `.claude/rules/skills.md` — the bullet headed **A tick does at most one unit of work…** (the tick mechanism's one rule-file home; `paths:` covers
   `skills/**`). `.claude/rules/tick.md` is about `settings/tick.json` and does not change.
-- Modify: `docs/subsystems/skills.md` (`:76` record usage; the `### backlog-tick` section at `:219`), `docs/subsystems/api.md:511` (health line),
-  `docs/subsystems/invariants.md:252` region (the lock paragraph that names `--dry-run`).
+- Modify: `docs/subsystems/skills.md` (`:93` record usage; the `backlog-tick` section heading at `:245`), `docs/subsystems/api.md:559` (health line),
+  `docs/subsystems/invariants.md:274` region (the lock paragraph that names `--dry-run`).
 
 - [ ] **Step 1: `backlog-tick/SKILL.md`.** Line 31 gains: the trigger never carries `--peek` — that flag is the scheduler's gate, never the session's.
   The `blocked` paragraph gains one sentence: on a tracker project the tool itself may store a `failed` as `released` when it can prove the API was down
@@ -186,7 +189,7 @@ whatever the record would have stored as its reason today.
   the lock's, at most once in a row (`environment twice: ` → `failed`). The breaker bullet already says "any other outcome neither counts nor stops" — no
   change there.
 - [ ] **Step 4: Docs.** `skills.md`: decide usage shows `--peek` and exit `10`; record usage stays `ok|failed` (the session's vocabulary) with one sentence
-  that the tool may store `released`, when, and that `released` neither counts toward nor resets the breaker. `api.md:511`: health is liveness plus a
+  that the tool may store `released`, when, and that `released` neither counts toward nor resets the breaker. `api.md:559`: health is liveness plus a
   `bootedAt` boot stamp that `tick.mjs` compares by identity. `invariants.md` lock paragraph: "every `--dry-run`" becomes "every `--dry-run` and `--peek`"
   (minimal edit, no reflow).
 - [ ] **Step 5: Prose guards.** `git grep -ln "backlog-tick/SKILL.md\|backlog-execute/SKILL.md" -- skills/*/tools/*.test.mjs test/` and run every hit;
