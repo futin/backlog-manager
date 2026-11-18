@@ -64,14 +64,14 @@ Supported, with the ADF it maps to:
 | Markdown                         | ADF                                                                    |
 | -------------------------------- | ---------------------------------------------------------------------- |
 | paragraph                        | `paragraph`                                                            |
-| single newline inside a paragraph | `hardBreak` (as today — `breaks: true` semantics, matching the preview) |
+| single newline inside a paragraph | `hardBreak` (as today); the client renders the reply with `breaks: true` to match — see Preview rendering |
 | `#`…`######` heading             | `heading` with `attrs.level`                                           |
 | `**x**` / `__x__`                | `strong` mark                                                          |
 | `*x*` / `_x_`                    | `em` mark                                                              |
 | `~~x~~`                          | `strike` mark                                                          |
 | `` `x` ``                        | `code` mark                                                            |
-| `[t](url)`, GFM autolink         | `link` mark, href `http`/`https`/`mailto` only; any other → plain text |
-| `-`/`*`/`+` list, `1.` list      | `bulletList` / `orderedList` (`attrs.order` from the list's start), nested |
+| `[t](url)`, GFM autolink         | `link` mark, href `http`/`https`/`mailto` only; any other href → the label as plain text, no mark; a link `title` is dropped |
+| `-`/`*`/`+` list, `1.` list      | `bulletList` / `orderedList` (`attrs.order` set only when the start is not 1), nested |
 | fenced or indented code          | `codeBlock` with `attrs.language` when given                          |
 | `>` quote                        | `blockquote`                                                           |
 | `---`                            | `rule`                                                                 |
@@ -82,39 +82,80 @@ Rules that keep the ADF valid (the anti-goal above):
 
 - Anything not in the table — raw HTML, images, reference definitions, a token type a later `marked` adds — becomes **its source text** in a paragraph (or
   inline text), never an error and never dropped silently.
-- A node ADF forbids at a position degrades there: a heading inside a list item or table cell becomes a paragraph with a `strong` mark; a list item's first
-  child is always a paragraph (an empty one if the item starts with something else); a table cell is never empty (one empty paragraph).
+- Each container accepts only the children ADF allows it, and the converter checks every block against its container:
+  - `doc`: paragraph, heading, bulletList, orderedList, codeBlock, blockquote, rule, table.
+  - `listItem`: paragraph, bulletList, orderedList, codeBlock — and its first child is always a paragraph (an empty one if the item starts with anything
+    else).
+  - `blockquote`: paragraph, bulletList, orderedList, codeBlock. A nested quote is flattened into the outer one's children.
+  - `tableHeader` / `tableCell`: one paragraph of the cell's inline content (GFM cells are inline only); an empty cell gets one empty paragraph.
+  - `codeBlock`: text only, no marks; an empty block has no content array entries.
+- **Generic fallback:** a block its container does not allow becomes paragraphs there — a heading becomes one paragraph whose text carries `strong`; a
+  rule becomes a paragraph `---`; a table becomes one paragraph per row, cells joined with ` | `. A GFM task-list item (`- [ ] x`) is a plain list item
+  whose text starts with `[ ] ` / `[x] `.
+- A text node is never empty (ADF rejects `text: ''`); an inline run that would be empty is left out.
 - Marks follow ADF's combination rules: `code` combines with `link` only, so `**`x`**` keeps `code` and drops `strong`.
 - When the first block is not a paragraph (the reply opens with a heading or a list), the mention gets a paragraph of its own before it.
-- Text that trims to nothing still yields the mention alone; the route still refuses blank text before this point.
+- Text that trims to nothing still yields the mention alone (`[{ type: 'paragraph', content: [] }]` for an author with no account id, as today); the route
+  still refuses blank text before this point.
 - The cap stays on the **Markdown source** (`JIRA_REPLY_MAX_CHARS`, 8000), checked by the route and the client as today.
 
 The narrow write types (`AdfDoc`, `AdfBlock`, `AdfInline`) grow to name exactly the nodes and marks above — still separate from the read side's loose
 `AdfNode`, per the file's header. The header's "One WRITE sits at the bottom" paragraph and `replyDoc`'s doc comment are rewritten to say Markdown.
 
+This is the server's first import of `marked`. `marked` 16 is ESM-only and the server compiles to CommonJS; it loads through `require(esm)` on the Node the
+repo pins (`package.json` `engines`, `Dockerfile`) and through the existing UMD mapping under jest (`jest.config.ts`). The builder confirms both with one
+run of each before writing the converter.
+
 ### Prompt (`server/src/jira/prompt.util.ts`)
 
 `replyText` drops "plain paragraphs" and says the reply is Markdown: headings, bold, lists, inline code, links and small tables render in Jira; use them when
 the answer has structure (numbered points, a list of decisions), plain paragraphs when it does not; still no leading `@`-mention, still hand over with
-`jira.mjs draft`. `skills/jira/SKILL.md`'s `draft` paragraph says the text is Markdown.
+`jira.mjs draft`. `skills/jira/SKILL.md`'s `draft` paragraph says the text is Markdown. The prompt stays under the 1500-character cap the existing
+reply-prompt tests pin (`test/jira/jira-prompt.test.ts`), and one new assertion pins that it names Markdown. The `SKILL.md` edit reaches running sessions
+only after commit, push and `pnpm run plugin:sync` (held for the person under autopilot).
 
 ### Draft box and Reply editor (`client/src/components/jira/JiraMentionModal.tsx`)
 
-The draft box keeps its textarea and footer. It gains one 28 px `Chip`, **Open editor**, in the footer's action group before Redraft. The textarea's text
-state is lifted so the box and the editor edit **one** text: what is typed in either shows in the other, and closing the editor keeps it.
+The draft box keeps its textarea and footer. It gains one 28 px `Chip`, **Open editor**, in the footer's action group before Redraft. The box and the editor
+edit **one** text: `DraftReply` keeps owning the text state (and its seed / "newer draft" logic) and renders the editor as its own child, passing the text
+and its setter down, so what is typed in either shows in the other and closing the editor keeps it. Because the editor is `DraftReply`'s child, it closes
+whenever the box unmounts (the draft is posted, discarded or replaced by a Redraft run) — the same moments the box disappears today; Redraft and Discard
+are not in the editor, so only an outside change can do that while it is open.
 
 The editor is a `Modal` opened over the mention modal — the shell's fourth composer, which `Modal.tsx`'s header and DESIGN.md §8.7 must now name (the header
-says a fourth composer "is a design change, not a reuse"; this spec is that change). It uses the split shape (`head`): the head reads `Reply to <KEY>` with the
-`To @<name>` line; the facts slot is **Write** (the textarea, filling the column's height), the body is **Preview** (the comment rendered with
-`renderMarkdown`, the leading `@<name>` drawn as a mention chip the way thread comments draw theirs via `chipMentions`, styled as a thread comment). A footer
-carries the `n / 8000` counter, **Close** and **Post reply** (ink), the same enablement as the box's Post reply (blank or over the cap disables it). Post
-reply from the editor does exactly what the box's does and closes the editor on success; a refusal shows its alert line in the editor and keeps it open.
-Escape closes the editor only (`useDialogEscape`'s LIFO stack). Under 700 px the shell folds as it does everywhere: Write above Preview.
+says a fourth composer "is a design change, not a reuse"; this spec is that change). It uses the split shape (`head`, `lead` false — an even split): the
+head reads `Reply to <KEY>` and, when the author is known, a second line `To @<name>` (omitted when `to` is null); the facts slot is **Write** (the
+textarea, filling the column's height), the body is **Preview** (see Preview rendering, styled as a thread comment). Blank text previews as one muted line,
+`Nothing to preview yet.`
+
+The dialog's `label` is `Reply editor for <KEY>`; its textarea's accessible name is `Edit reply to <name or KEY>`, distinct from the box's
+`Reply to <name or KEY>` so both can be mounted and queried apart.
+
+`Modal` gains one optional prop, `foot`, drawn as a full-width band under both columns in the split shape (and under the body in the sidecar; no existing
+composer passes it, so nothing else changes). The editor's foot carries the `n / 8000` counter, **Close** and **Post reply** (ink). Post reply has exactly
+the box's enablement: disabled while `busy`, on blank text and past the cap. Post reply from the editor does exactly what the box's does and closes the
+editor on success; a refusal shows its alert line in the editor's foot and keeps it open. A newer draft arriving while the editor is open shows the box's
+`A newer draft arrived · Use it` note at the top of the Write column too, driven by the same state. Escape closes the editor only (`useDialogEscape`'s LIFO
+stack). Under 700 px the shell folds as it does everywhere: Write above Preview. The editor component's header comment cites DESIGN.md §8.9.7.
+
+### Preview rendering
+
+The editor's preview and the posted `mine` comment (`JiraMentionModal.tsx`, today `@${posted.to} ${posted.text}`) go through one client helper that mirrors
+`replyDoc`'s two rules, so what is previewed is what posts:
+
+- **Mention placement:** when the text's first block is a paragraph, the source is `@<name> ` + text; otherwise (a heading, list, quote, code block,
+  table or rule first) it is `@<name>` + a blank line + text, so the mention is its own paragraph as in `replyDoc`. No mention when `to` is null.
+- **Line breaks:** rendered with `breaks: true`, so a single newline shows as the line break Jira will get. `renderMarkdown` gains an optional options
+  argument for this; its other callers pass none and render exactly as today.
+
+The leading `@<name>` is then chipped by `chipMentions`, as thread comments are.
 
 Sketch the person picked:
 
 ```
 ┌─ Reply to TIMIFY-27770 ─────────────────────────── ✕ ┐
+│ To @Boyan                                             │
+├───────────────────────────────────────────────────────┤
 │ Write                    │ Preview                    │
 │ ┌──────────────────────┐ │ @Boyan Thanks Boyan, that  │
 │ │### Answers           │ │ Answers                    │
@@ -129,19 +170,29 @@ Sketch the person picked:
 
 ### Docs
 
-- `.claude/DESIGN.md` §8.7 (four composers) and §8.9.7 (the draft box's Open editor, the editor itself).
+- `.claude/DESIGN.md` §8.7 (four composers, the `foot` slot) and §8.9.7 (the draft box's Open editor, the editor itself), and every place DESIGN.md says
+  the mentions work adds no new dialog.
+- The editor is a **tenth dialog** on the Escape stack, so every place that pins nine moves to ten and names the editor: `.claude/rules/board.md` (the
+  Escape bullet's count and `Modal`'s composer list), `docs/subsystems/invariants.md` (the Escape entry), `client/src/hooks/useDialogEscape.ts`'s comment,
+  and the guard `test/guards/dialog-count-docs.test.ts`.
 - `.claude/rules/jira.md`: the reply paragraph's description of `replyDoc`'s ADF.
 - `docs/superpowers/specs/2026-11-16-jira-mentions-design.md`: the non-goal line points here.
 
 ## Testing
 
-- `test/jira/jira-adf.test.ts`: the existing `replyDoc` cases that encode "no Markdown" (a literal `*`) are replaced; one case per row of the table, the
-  degrade rules, the mention-before-heading rule, link scheme filtering, and a **round trip** — for a fixture using every supported construct,
-  `adfToMarkdown(replyDoc(to, md))` matches the source modulo the leading mention and whitespace normalisation.
+- `test/jira/jira-adf.test.ts`: the seven existing `replyDoc` cases stay and must keep passing (none uses Markdown syntax). New: one case per row of the
+  table, each container's allowed children and the generic fallback, the mention-before-heading rule, link scheme filtering, no empty text node. A
+  **round trip** — for a fixture written in the read side's canonical spelling (`**x**`, `_x_`, `-` bullets) using every supported construct except
+  tables, `adfToMarkdown(replyDoc(to, md)).markdown` equals `@<name> ` + the source. Tables are asserted on their ADF directly, because the read side
+  renders a table as `[table omitted]` and this spec does not change the read side — so a posted table reads back on the board's thread view as that
+  placeholder, accepted.
 - `test/jira/jira-mentions-routes.test.ts`: one Post reply with Markdown asserts the body Jira receives carries `heading`/`bulletList`/`strong`.
 - Client (jsdom): Open editor opens the editor; typing in it updates the box; Close keeps the text; Escape closes only the editor; Post reply from the
-  editor posts the shared text; the preview renders a list and a heading.
-- `/ui-verify` last: the editor at 1440 px and at 700 px against the sketch, light theme.
+  editor posts the shared text; Post reply disabled while busy; the newer-draft note shows in the editor; the preview renders a list and a heading; a
+  reply opening with a heading previews the mention as its own paragraph; a single newline previews as `<br>`; `renderMarkdown` without options is
+  unchanged (a single newline is no `<br>`).
+- `test/guards/dialog-count-docs.test.ts` moves to ten.
+- `/ui-verify` last: the editor at 1440 px and at 699 px (the folded side of the 700 px boundary) against the sketch, light theme.
 
 ## Left to the builder
 
@@ -153,6 +204,8 @@ Sketch the person picked:
 
 - GFM tables are supported, because the comment that prompted this has one and `marked` lexes them for free.
 - A single newline stays a `hardBreak` (as today), not a soft wrap, so a reply edited in the textarea posts with the breaks the person typed.
-- The preview uses the client's `renderMarkdown`, not a server round trip; the two agree on the supported set by the round-trip test, and an unsupported
-  construct (an image, raw HTML) may preview differently from how it posts — accepted.
+- The preview uses the client's `renderMarkdown` (with `breaks: true` and the shared mention rule), not a server round trip. Both sides read the same GFM
+  dialect through `marked`, and the converter's tests pin the server side per construct; an unsupported construct (an image, raw HTML, a relative or
+  protocol-relative link, which the preview keeps as a link and the converter posts as text) may preview differently from how it posts — accepted.
+- `Modal` gains a `foot` slot rather than the editor drawing its own footer inside a column, so the counter and Post reply sit under both columns as sketched.
 - The editor is a fourth `Modal` composer rather than a new shell.
