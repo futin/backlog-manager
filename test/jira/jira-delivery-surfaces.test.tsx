@@ -101,7 +101,7 @@ function issue(key: string, over: Partial<JiraIssue> = {}): JiraIssue {
 }
 
 const sub = (key: string, parent: string, over: Partial<JiraIssue> = {}): JiraIssue =>
-  issue(key, { type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: parent, summary: `summary of ${parent}` }, ...over });
+  issue(key, { type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: parent, summary: `summary of ${parent}`, type: null, status: null }, ...over });
 const done = { status: { name: 'Done', category: 'done' as const } };
 
 function jiraStatus(): JiraStatusPayload {

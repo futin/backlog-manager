@@ -77,7 +77,7 @@ const PAY_131 = issue({
   status: { name: 'In Review', category: 'indeterminate' },
   priority: 'High',
   assignee: ADA,
-  parent: { key: 'PAY-99', summary: 'Payments platform' },
+  parent: { key: 'PAY-99', summary: 'Payments platform', type: null, status: null },
   subtasks: 2,
   sprint: 'Sprint 42',
   updated: daysAgoStamp(1)
@@ -759,14 +759,14 @@ describe('the fold', () => {
     key: 'PAY-160',
     type: { name: 'Story', level: 0, subtask: false },
     status: { name: 'In Progress', category: 'indeterminate' },
-    parent: { key: 'PAY-120', summary: 'Payments epic' },
+    parent: { key: 'PAY-120', summary: 'Payments epic', type: null, status: null },
     updated: daysAgoStamp(4)
   });
   const G_161 = issue({
     key: 'PAY-161',
     type: { name: 'Sub-task', level: -1, subtask: true },
     status: { name: 'Done', category: 'done' },
-    parent: { key: 'PAY-160', summary: 'Summary of PAY-160' },
+    parent: { key: 'PAY-160', summary: 'Summary of PAY-160', type: null, status: null },
     updated: daysAgoStamp(3),
     resolved: daysAgoStamp(3)
   });
@@ -774,14 +774,14 @@ describe('the fold', () => {
     key: 'PAY-162',
     summary: 'Ledger rounding fix',
     type: { name: 'Sub-task', level: -1, subtask: true },
-    parent: { key: 'PAY-160', summary: 'Summary of PAY-160' },
+    parent: { key: 'PAY-160', summary: 'Summary of PAY-160', type: null, status: null },
     updated: daysAgoStamp(0)
   });
   const G_170 = issue({
     key: 'PAY-170',
     type: { name: 'Story', level: 0, subtask: false },
     status: { name: 'Done', category: 'done' },
-    parent: { key: 'PAY-120', summary: 'Payments epic' },
+    parent: { key: 'PAY-120', summary: 'Payments epic', type: null, status: null },
     updated: daysAgoStamp(6),
     resolved: daysAgoStamp(6)
   });
@@ -790,7 +790,7 @@ describe('the fold', () => {
     key: 'PAY-190',
     summary: 'Payout retries',
     status: { name: 'In Progress', category: 'indeterminate' },
-    parent: { key: 'PAY-999', summary: 'Billing platform' },
+    parent: { key: 'PAY-999', summary: 'Billing platform', type: null, status: null },
     updated: daysAgoStamp(2)
   });
   const GROUP = [G_120, G_160, G_161, G_162, G_170, G_180, G_190];
@@ -888,8 +888,8 @@ describe('the fold', () => {
   // Review Focus 1: a cached list with a cycle renders, terminates and draws each member once.
   it('draws a two-cycle as two cards, and settles', async () => {
     lists[ALPHA.id] = [
-      issue({ key: 'PAY-1', summary: 'Cycle one', parent: { key: 'PAY-2', summary: 'Cycle two' } }),
-      issue({ key: 'PAY-2', summary: 'Cycle two', parent: { key: 'PAY-1', summary: 'Cycle one' } })
+      issue({ key: 'PAY-1', summary: 'Cycle one', parent: { key: 'PAY-2', summary: 'Cycle two', type: null, status: null } }),
+      issue({ key: 'PAY-2', summary: 'Cycle two', parent: { key: 'PAY-1', summary: 'Cycle one', type: null, status: null } })
     ];
     renderPage();
     await screen.findByText('Cycle one');
@@ -1050,7 +1050,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
   // names the top it hangs under in its crumb; the top leaves the shelves, and the folded issue is still no shelf row.
   it('a live issue folded under a top is a deck card on the folded key, naming the top in its crumb, and the top leaves the shelves', async () => {
     const top = issue({ key: 'PAY-160', summary: 'Top story', type: { name: 'Story', level: 0, subtask: false } });
-    const under = issue({ key: 'PAY-162', summary: 'Folded sub-task', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-160', summary: 'Top story' } });
+    const under = issue({ key: 'PAY-162', summary: 'Folded sub-task', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-160', summary: 'Top story', type: null, status: null } });
     lists[ALPHA.id] = [top, under];
     await renderRun({ live: { 'PAY-162': { sessionId: 's1', name: 'jira PAY-162', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } }, 'Folded sub-task');
     const [deck] = await waitFor(() => {
@@ -1299,8 +1299,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
   it('a Children row walks down, Back climbs one step at a time, and a fresh card click starts a new walk', async () => {
     await renderRun();
     const refund = (lists[ALPHA.id] ?? []).find((i) => i.key === 'PAY-131') as JiraIssue;
-    const child = { ...refund, key: 'PAY-200', summary: 'Child story', parent: { key: 'PAY-131', summary: refund.summary } };
-    const grandchild = { ...refund, key: 'PAY-201', summary: 'Grandchild task', parent: { key: 'PAY-200', summary: 'Child story' } };
+    const child = { ...refund, key: 'PAY-200', summary: 'Child story', parent: { key: 'PAY-131', summary: refund.summary, type: null, status: null } };
+    const grandchild = { ...refund, key: 'PAY-201', summary: 'Grandchild task', parent: { key: 'PAY-200', summary: 'Child story', type: null, status: null } };
     const kids: Record<string, JiraIssue[]> = { 'PAY-131': [child], 'PAY-200': [grandchild], 'PAY-201': [] };
     const byKey: Record<string, JiraIssue> = { 'PAY-131': refund, 'PAY-200': child, 'PAY-201': grandchild };
     const answered = global.fetch;
@@ -1557,7 +1557,7 @@ describe('the agent deck and the status shelves', () => {
   // F1 and the deck answer ONE filter: a hit inside a fold rings the top on its shelf, and a live ticket that does not match leaves the deck with it.
   it('a search hit inside a fold rings the top in the shelf, and a live card the search does not match leaves the deck', async () => {
     const epic = issue({ key: 'PAY-120', summary: 'Payments epic', type: { name: 'Epic', level: 1, subtask: false } });
-    const sub = issue({ key: 'PAY-162', summary: 'Ledger rounding fix', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-120', summary: 'Payments epic' } });
+    const sub = issue({ key: 'PAY-162', summary: 'Ledger rounding fix', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-120', summary: 'Payments epic', type: null, status: null } });
     const busy = issue({ key: 'PAY-180', summary: 'Standalone task' });
     lists[ALPHA.id] = [epic, sub, busy];
     sessionsAnswer = () => ({ links: [linkOn('PAY-180', 's180', 'working', 2)], reachable: true, rowsAt: null });
@@ -1624,13 +1624,13 @@ describe('the issue List', () => {
   const SUB = { name: 'Sub-task', level: -1, subtask: true };
   const DOING = { name: 'In Progress', category: 'indeterminate' as const };
   const G_120 = issue({ key: 'PAY-120', summary: 'Payments epic', type: EPIC, updated: daysAgoStamp(5) });
-  const G_160 = issue({ key: 'PAY-160', summary: 'Ledger story', type: STORY, status: DOING, parent: { key: 'PAY-120', summary: 'Payments epic' }, updated: daysAgoStamp(4) });
-  const G_162 = issue({ key: 'PAY-162', summary: 'Ledger rounding fix', type: SUB, parent: { key: 'PAY-160', summary: 'Ledger story' }, updated: daysAgoStamp(0) });
-  const G_170 = issue({ key: 'PAY-170', summary: 'Payout story', type: STORY, parent: { key: 'PAY-120', summary: 'Payments epic' }, updated: daysAgoStamp(6) });
+  const G_160 = issue({ key: 'PAY-160', summary: 'Ledger story', type: STORY, status: DOING, parent: { key: 'PAY-120', summary: 'Payments epic', type: null, status: null }, updated: daysAgoStamp(4) });
+  const G_162 = issue({ key: 'PAY-162', summary: 'Ledger rounding fix', type: SUB, parent: { key: 'PAY-160', summary: 'Ledger story', type: null, status: null }, updated: daysAgoStamp(0) });
+  const G_170 = issue({ key: 'PAY-170', summary: 'Payout story', type: STORY, parent: { key: 'PAY-120', summary: 'Payments epic', type: null, status: null }, updated: daysAgoStamp(6) });
   const G_180 = issue({ key: 'PAY-180', summary: 'Standalone task', updated: daysAgoStamp(1) });
-  const G_190 = issue({ key: 'PAY-190', summary: 'Payout retries', status: DOING, assignee: ADA, sprint: 'Sprint 44', parent: { key: 'PAY-999', summary: 'Billing platform' }, updated: daysAgoStamp(2) });
+  const G_190 = issue({ key: 'PAY-190', summary: 'Payout retries', status: DOING, assignee: ADA, sprint: 'Sprint 44', parent: { key: 'PAY-999', summary: 'Billing platform', type: null, status: null }, updated: daysAgoStamp(2) });
   const G_210 = issue({ key: 'PAY-210', summary: 'Chargeback upload', updated: daysAgoStamp(5) });
-  const G_211 = issue({ key: 'PAY-211', summary: 'Chargeback storage', type: SUB, parent: { key: 'PAY-210', summary: 'Chargeback upload' }, updated: daysAgoStamp(1.5) });
+  const G_211 = issue({ key: 'PAY-211', summary: 'Chargeback storage', type: SUB, parent: { key: 'PAY-210', summary: 'Chargeback upload', type: null, status: null }, updated: daysAgoStamp(1.5) });
   const GROUP = [G_120, G_160, G_162, G_170, G_180, G_190, G_210, G_211];
 
   async function renderList(issues: JiraIssue[] = GROUP): Promise<void> {
@@ -1816,7 +1816,7 @@ describe('Run on: a sub-task runs its parent from the card and the List cell', (
     key: 'PAY-175',
     summary: 'Prepare refund TODOs',
     type: { name: 'Sub-task', level: -1, subtask: true },
-    parent: { key: 'PAY-99', summary: 'Payments platform' },
+    parent: { key: 'PAY-99', summary: 'Payments platform', type: null, status: null },
     updated: daysAgoStamp(0)
   });
   const PARENT = issue({ key: 'PAY-99', summary: 'Payments platform', type: { name: 'Story', level: 0, subtask: false } });
@@ -1984,7 +1984,7 @@ describe('the Delivery quick filter', () => {
       key: 'PAY-61',
       summary: 'Child with a failing MR',
       type: { name: 'Sub-task', level: -1, subtask: true },
-      parent: { key: 'PAY-60', summary: 'Story without an MR' },
+      parent: { key: 'PAY-60', summary: 'Story without an MR', type: null, status: null },
       updated: daysAgoStamp(0)
     });
     lists[ALPHA.id] = [STORY, CHILD, PAY_140];

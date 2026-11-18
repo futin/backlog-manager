@@ -515,7 +515,7 @@ describe('the board sheet — edit, save, delete', () => {
   });
 
   it('an edited board’s roots read their summaries from the board’s cached list — one read of it, and no Jira search', async () => {
-    const pay7 = { ...issue('PAY-7', 'Ledger export'), parent: { key: 'PAY-120', summary: 'Refund flows' } };
+    const pay7 = { ...issue('PAY-7', 'Ledger export'), parent: { key: 'PAY-120', summary: 'Refund flows', type: null, status: null } };
     boardIssuesAnswer = (id) => answer(id === ALPHA.id ? { issues: [issue('PAY-120', 'Refund flows'), pay7], polledAt: null } : { issues: [], polledAt: null });
     await renderSetup();
     const dialog = await openEdit('Alpha board');

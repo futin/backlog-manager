@@ -21,6 +21,7 @@ import type {
   JiraIssueDetail,
   JiraLink,
   JiraLiveSession,
+  JiraParentRef,
   JiraProjectRef,
   JiraRefBranch,
   JiraRepoDefaults,
@@ -1013,7 +1014,14 @@ export function parseJiraBoardIssues(value: unknown): JiraBoardIssuesPayload | n
     const { key, summary } = row as Unchecked<JiraIssue>;
     return typeof key === 'string' && typeof summary === 'string';
   };
-  return { issues: issues.filter(isRow), polledAt: typeof polledAt === 'string' ? polledAt : null };
+  // A parent sent before the server carried a type and status (a stale poll, an older server) reads as `null` for each, never `undefined`.
+  const object = (v: unknown): v is object => typeof v === 'object' && v !== null;
+  const rows = issues.filter(isRow).map((row) => {
+    if (!object(row.parent)) return row;
+    const { type, status } = row.parent as Unchecked<JiraParentRef>;
+    return { ...row, parent: { ...row.parent, type: object(type) ? (type as JiraParentRef['type']) : null, status: object(status) ? (status as JiraParentRef['status']) : null } };
+  });
+  return { issues: rows, polledAt: typeof polledAt === 'string' ? polledAt : null };
 }
 
 // ── The wire (Jira phase 5 — the launch sheet and the modal read one issue the same way) ────────────────────────────────────────────────────────────

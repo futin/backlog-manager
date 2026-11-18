@@ -117,7 +117,7 @@ export function stubIssue(key: string, snapshot: { summary: string; type: string
     priority: null,
     assignee: null,
     reporter: null,
-    parent: snapshot.parentKey === null ? null : { key: snapshot.parentKey, summary: '' },
+    parent: snapshot.parentKey === null ? null : { key: snapshot.parentKey, summary: '', type: null, status: null },
     subtasks: 0,
     labels: [],
     sprint: null,

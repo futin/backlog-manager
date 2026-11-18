@@ -182,7 +182,7 @@ describe('DeliveryPane', () => {
   });
 
   it('marks a sub-task showing its parent’s MRs with `via <PARENT-KEY>` after the link', () => {
-    const sub = issue({ key: 'TIMIFY-144', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'TIMIFY-100', summary: 'the story' } });
+    const sub = issue({ key: 'TIMIFY-144', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'TIMIFY-100', summary: 'the story', type: null, status: null } });
     draw(payload([mr({ keys: ['TIMIFY-100'] })]), sub);
     const link = screen.getByRole('link', { name: '!412' });
     const via = screen.getByText('via TIMIFY-100');

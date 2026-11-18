@@ -44,7 +44,7 @@ function issue(key: string, over: Partial<JiraIssue> = {}): JiraIssue {
   };
 }
 const SUB_TYPE = { name: 'Sub-task', level: -1, subtask: true };
-const subtask = (key: string, parentKey: string): JiraIssue => issue(key, { type: SUB_TYPE, parent: { key: parentKey, summary: `Summary of ${parentKey}` } });
+const subtask = (key: string, parentKey: string): JiraIssue => issue(key, { type: SUB_TYPE, parent: { key: parentKey, summary: `Summary of ${parentKey}`, type: null, status: null } });
 const S_1 = subtask('S-1', 'P-1');
 
 function detail(key: string, over: Partial<JiraIssue> = {}): JiraIssueDetail {
@@ -153,7 +153,7 @@ const issueReads = (): string[] => reads.filter((u) => u.startsWith('/api/jira/i
 
 describe('Run on — when the toggle draws', () => {
   it('a story under an epic has no Run on control', async () => {
-    mount([issue('S-2', { parent: { key: 'E-1', summary: 'Epic' } })]);
+    mount([issue('S-2', { parent: { key: 'E-1', summary: 'Epic', type: null, status: null } })]);
     const menu = await openMenu('S-2');
     expect(within(menu).queryByRole('group', { name: 'Run on' })).toBeNull();
   });

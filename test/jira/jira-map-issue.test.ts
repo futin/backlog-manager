@@ -50,7 +50,7 @@ describe('mapJiraIssue — a full issue', () => {
       priority: 'High',
       assignee: { accountId: '622x', name: 'Ada Lovelace' },
       reporter: 'Cho M.',
-      parent: { key: 'PAY-120', summary: 'Refund flows' },
+      parent: { key: 'PAY-120', summary: 'Refund flows', type: null, status: null },
       subtasks: 2,
       labels: ['refunds', 'ledger'],
       sprint: 'Sprint 42',
@@ -139,7 +139,40 @@ describe('mapJiraIssue — absent and null fields', () => {
   });
 
   it('a parent without a summary keeps its key and an empty summary', () => {
-    expect(map({ parent: { key: 'PAY-120' } })?.parent).toEqual({ key: 'PAY-120', summary: '' });
+    expect(map({ parent: { key: 'PAY-120' } })?.parent).toEqual({ key: 'PAY-120', summary: '', type: null, status: null });
+  });
+
+  const withParent = (fields: Record<string, unknown>) => map({ parent: { key: 'PAY-120', fields: { summary: 'Checkout', ...fields } } })?.parent;
+
+  it("maps a parent's type and status through the same path as the issue's own", () => {
+    expect(
+      withParent({
+        issuetype: { name: 'Epic', hierarchyLevel: 1, subtask: false },
+        status: { name: 'In Progress', statusCategory: { key: 'indeterminate' } }
+      })
+    ).toEqual({
+      key: 'PAY-120',
+      summary: 'Checkout',
+      type: { name: 'Epic', level: 1, subtask: false },
+      status: { name: 'In Progress', category: 'indeterminate' }
+    });
+  });
+
+  it('a parent with only a summary has a null type and status', () => {
+    expect(withParent({})).toEqual({ key: 'PAY-120', summary: 'Checkout', type: null, status: null });
+  });
+
+  it("derives a parent's level the way an issue's own is: -1 for a sub-task, 0 otherwise", () => {
+    expect(withParent({ issuetype: { name: 'Sub-task', subtask: true } })?.type).toEqual({ name: 'Sub-task', level: -1, subtask: true });
+    expect(withParent({ issuetype: { name: 'Task' } })?.type).toEqual({ name: 'Task', level: 0, subtask: false });
+  });
+
+  it("reads a parent's unknown status category as new", () => {
+    expect(withParent({ status: { name: 'Odd', statusCategory: { key: 'mystery' } } })?.status).toEqual({ name: 'Odd', category: 'new' });
+  });
+
+  it('a parent type without a string name, or an empty status, is null', () => {
+    expect(withParent({ issuetype: { subtask: true }, status: {} })).toMatchObject({ type: null, status: null });
   });
 });
 

@@ -11,7 +11,7 @@ import { JiraProvider } from '../../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
 import { resetJiraListFilters, setJiraListFilters } from '../../client/src/hooks/useJiraListFilters';
-import { sessionsEmptyTitle } from '../../client/src/lib/jira-list';
+import { sessionsEmptyTitle, stubIssue } from '../../client/src/lib/jira-list';
 import { NoGitlab } from '../helpers/no-gitlab';
 import { daysAgoStamp } from '../helpers/dates';
 import type { JiraBoardStatus, JiraEndReason, JiraIssue, JiraLiveSession, JiraStatusPayload } from '../../shared/types';
@@ -310,8 +310,8 @@ describe('the Sessions page', () => {
     not (the `Run on` toggle's own condition: only a sub-task's parent owns its branch).
   */
   it('a session on the off-board parent of a sub-task on the board is in scope with All tickets off, marked via the sub-task', async () => {
-    const sub: JiraIssue = { ...issue('PAY-160', 'Refund sub-task'), type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-100', summary: 'Refunds story' } };
-    const story: JiraIssue = { ...issue('PAY-170', 'Story under an epic'), parent: { key: 'EP-1', summary: 'Payments epic' } };
+    const sub: JiraIssue = { ...issue('PAY-160', 'Refund sub-task'), type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-100', summary: 'Refunds story', type: null, status: null } };
+    const story: JiraIssue = { ...issue('PAY-170', 'Story under an epic'), parent: { key: 'EP-1', summary: 'Payments epic', type: null, status: null } };
     lists = { ...lists, [ALPHA.id]: [...Object.values(ISSUES), sub, story] };
     links = [
       link({ key: 'PAY-100', id: 'par1', state: 'working', startedAt: hoursAgo(1), summary: 'Refunds story' }),
@@ -624,6 +624,17 @@ describe('the Sessions page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Run PAY-131' }));
     expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Run menu' })).toBeNull();
+  });
+});
+
+describe('stubIssue', () => {
+  it("draws a parent with no summary, type or status — the snapshot knows only the parent's key", () => {
+    expect(stubIssue('PAY-9', { summary: 's', type: 'Sub-task', parentKey: 'PAY-1' }, 'acme.atlassian.net').parent).toEqual({
+      key: 'PAY-1',
+      summary: '',
+      type: null,
+      status: null
+    });
   });
 });
 

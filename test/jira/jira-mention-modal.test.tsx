@@ -168,7 +168,7 @@ function detail(issue: JiraMentionIssue, project: string, extra: Partial<JiraIss
 }
 
 const DETAILS: Record<string, JiraIssueDetail> = {
-  'SUP-208': detail(SUP, 'Support', { parent: { key: 'SUP-190', summary: 'Branch settings issues' } }),
+  'SUP-208': detail(SUP, 'Support', { parent: { key: 'SUP-190', summary: 'Branch settings issues', type: null, status: null } }),
   'PAY-131': detail(PAY, 'Payments', { boards: ['7'] }),
   'OPS-9': detail(OPS, 'Operations')
 };

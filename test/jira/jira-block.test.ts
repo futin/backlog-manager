@@ -38,7 +38,7 @@ const detail = (over: Partial<JiraIssueDetail> = {}): JiraIssueDetail => ({
     priority: 'High',
     assignee: { accountId: '622x', name: 'Ada Lovelace' },
     reporter: 'Cho M.',
-    parent: { key: 'PAY-120', summary: 'Refund flows' },
+    parent: { key: 'PAY-120', summary: 'Refund flows', type: null, status: null },
     labels: ['refunds', 'ledger'],
     sprint: 'Sprint 42',
     created: '2026-10-02T09:15:00.000Z',

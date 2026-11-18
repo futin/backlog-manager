@@ -256,11 +256,11 @@ describe('crumbOf', () => {
   const mine = { accountId: 'acc-1', name: 'Ada' };
 
   it('reads root before parent, even when the root has a parent', () => {
-    expect(crumbOf(issue({ key: 'PAY-1', parent: { key: 'PAY-0', summary: 'Epic' } }), b, me)).toEqual({ kind: 'root' });
+    expect(crumbOf(issue({ key: 'PAY-1', parent: { key: 'PAY-0', summary: 'Epic', type: null, status: null } }), b, me)).toEqual({ kind: 'root' });
   });
 
   it('reads parent before mine', () => {
-    expect(crumbOf(issue({ key: 'PAY-2', parent: { key: 'PAY-1', summary: 'Checkout' }, assignee: mine }), b, me)).toEqual({
+    expect(crumbOf(issue({ key: 'PAY-2', parent: { key: 'PAY-1', summary: 'Checkout', type: null, status: null }, assignee: mine }), b, me)).toEqual({
       kind: 'parent',
       key: 'PAY-1',
       summary: 'Checkout'
@@ -745,6 +745,22 @@ describe('parseJiraBoardIssues', () => {
     expect(parseJiraBoardIssues({ issues: [null, 3, {}, { key: 'A-1' }, { summary: 's' }, row] })?.issues).toEqual([row]);
   });
 
+  it('reads a parent without a type or status as null for each, keeps both when present, and leaves a null parent null', () => {
+    const bare = { ...row, parent: { key: 'PAY-1', summary: 'Checkout', type: null, status: null } };
+    expect(parseJiraBoardIssues({ issues: [bare] })?.issues[0].parent).toEqual({ key: 'PAY-1', summary: 'Checkout', type: null, status: null });
+    const full = {
+      ...row,
+      parent: {
+        key: 'PAY-1',
+        summary: 'Checkout',
+        type: { name: 'Epic', level: 1, subtask: false },
+        status: { name: 'In Progress', category: 'indeterminate' }
+      }
+    };
+    expect(parseJiraBoardIssues({ issues: [full] })?.issues).toEqual([full]);
+    expect(parseJiraBoardIssues({ issues: [{ ...row, parent: null }] })?.issues[0].parent).toBeNull();
+  });
+
   it('reads an empty board as an empty answer, not as no answer', () => {
     expect(parseJiraBoardIssues({ issues: [] })).toEqual({ issues: [], polledAt: null });
   });
@@ -827,7 +843,7 @@ describe('the fold', () => {
     issue({
       key,
       summary: `${key} summary`,
-      parent: parent === null ? null : { key: parent, summary: `${parent} summary` },
+      parent: parent === null ? null : { key: parent, summary: `${parent} summary`, type: null, status: null },
       updated: ago(now, h * HOUR),
       ...over
     });
@@ -1855,7 +1871,7 @@ describe('lib/jira-deck', () => {
   const reservation = (h: number): JiraLiveSession => ({ sessionId: null, name: 'jira PAY-5', startedAt: hoursAgo(h), repo: '/Users/ada/pay', starting: true });
 
   const top = issue({ key: 'PAY-1', summary: 'Top' });
-  const child = issue({ key: 'PAY-2', summary: 'Child', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-1', summary: 'Top' } });
+  const child = issue({ key: 'PAY-2', summary: 'Child', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-1', summary: 'Top', type: null, status: null } });
   const other = issue({ key: 'PAY-3', summary: 'Other' });
   const fold = foldBoard([top, child, other]);
 
@@ -1953,7 +1969,7 @@ describe('lib/jira-deck', () => {
   });
 
   describe('childSessions (Detail\u2019s Children rows and the Agent pane\u2019s on-a-child line)', () => {
-    const grand = issue({ key: 'PAY-4', summary: 'Grandchild', parent: { key: 'PAY-2', summary: 'Child' } });
+    const grand = issue({ key: 'PAY-4', summary: 'Grandchild', parent: { key: 'PAY-2', summary: 'Child', type: null, status: null } });
     const keys = (entries: ReturnType<typeof childSessions>): [string, string][] => entries.map((e) => [e.issue.key, e.state]);
 
     it('is empty with no live session on any of the issues', () => {
