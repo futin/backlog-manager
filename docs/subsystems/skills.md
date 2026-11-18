@@ -1,6 +1,6 @@
 # The skills
 
-Ten skills under `skills/` — eight backlog skills, `jira` and `pr-resolve` — one agent under `agents/`, and seven CLIs beneath the skills — two of which do all
+Ten skills under `skills/` — eight backlog skills, `jira` and `pr-resolve` — two agents under `agents/`, and seven CLIs beneath the skills — two of which do all
 the writing to items, the registry and the run file, a third that only reads them, `tick.mjs`, which owns the one directory a scheduled tick keeps its lock and
 its failure record in, and `jira.mjs`, which writes no file of its own and reaches Jira only through the local API, its one git command (`worktree`) aside,
 `review.mjs`, which scopes a change into reviewer groups and merges their reports, and `pr-resolve.mjs`, which owns the one directory a PR resolve keeps its
@@ -75,7 +75,8 @@ only when the skill runs, and the `Trigger: /x` trailer is gone — the `trigger
 and `backlog-capture` must stay model-invocable — the board's dispatch prompt names them in natural language (`server/src/agents/prompt.util.ts`) and
 `backlog-tick` step 2 invokes groom and execute through the Skill tool — and so must `jira`, whose Run prompts say `Use the backlog-manager:jira skill`
 (`server/src/jira/prompt.util.ts`). `backlog-orchestrate` and `pr-resolve` are started by the board through typed triggers but stay model-invocable: people
-ask to "drain the backlog". `backlog-reviewer` is dispatched by `subagent_type`, never chosen by its description, so its description is one sentence.
+ask to "drain the backlog". `backlog-reviewer` and `backlog-finding-checker` are dispatched by `subagent_type`, never chosen by their descriptions, so each
+description is one sentence.
 `test/guards/skill-descriptions.test.ts` pins all of it — the block-scalar form, no trailer, exactly those two typed-only, the four that must stay invocable,
 and a byte ratchet on the model-invocable total (4,911 B before #557, 2,398 B after), lowered when a trim lands and raised only with a reason in the PR.
 
@@ -349,19 +350,22 @@ step that classifies them, every time — the line between the two classes is th
 anything is pushed — read only when the prompt sends the session there.
 
 `skills/backlog-review/references/procedure.md` is the other way round: not a rare branch of one skill but the one description of how any change is reviewed —
-scope, dispatch every group in one message, merge, one coverage retry, and the `--previous` re-review a fix loop uses. `/backlog-review`, orchestrate's §7 and
+scope, dispatch every group in one message, merge, one coverage retry, a check of each new finding, and the `--previous` re-review a fix loop uses. `/backlog-review`, orchestrate's §7 and
 execute's `pr`-mode §7 each follow it with their own parameters, so the three reviews cannot drift apart.
 
 ### `agents/`
 
 The plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention — no `.claude-plugin/plugin.json` declaration
-needed. Currently one: `backlog-reviewer.md`, the read-only reviewer `backlog-orchestrate` dispatches before every merge and `backlog-execute` before a
+needed. Currently two. `backlog-reviewer.md` is the read-only reviewer `backlog-orchestrate` dispatches before every merge and `backlog-execute` before a
 `pr`-mode push, and `/backlog-review` on a person's own checkout. Each dispatch is one group of the manifest `review.mjs scope` wrote: the agent diffs
 the manifest's `from` and `to`, never `base` by name, lists every file of its group under `## Coverage`, quotes each finding's line in an `anchor:`, and marks
 any earlier finding it was handed `resolved` or `open` — the report grammar `review.mjs merge` parses. Prose-only drift keeps its severity only where an agent
 or tool acts on the stale text — an instruction file, a contract a reader runs, text a tool parses or a test asserts — and is otherwise a Minor tagged
-`drift: `, which `/backlog-retro` totals as `totals.driftMinors` and drafts a per-project sweep from (#559). It is published only because
-`PUBLISHED_PATHS` (`scripts/sync-plugin.mjs`) names it alongside `skills/`.
+`drift: `, which `/backlog-retro` totals as `totals.driftMinors` and drafts a per-project sweep from (#559). `backlog-finding-checker.md` (Sonnet, read-only)
+is the procedure's §4b: once `merge` says `fix`, one checker per new code-located Critical or Important finding reads that one claim against `to` and writes
+`check: confirmed` or `check: refuted` plus one line of evidence; a second `merge --checks` demotes every refuted finding to a Minor that keeps its record,
+drops it from the findings `--previous` hands on, and lets the verdict approve once nothing else holds it at `fix` (#558). A checker that wrote nothing
+readable leaves its finding confirmed. Both are published only because `PUBLISHED_PATHS` (`scripts/sync-plugin.mjs`) names `agents` alongside `skills/`.
 
 ## Interfaces
 

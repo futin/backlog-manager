@@ -76,10 +76,11 @@ tasks. Items that were decided against are not on the board at all: out-of-scope
 | `/backlog-review`      | Reviews this checkout's change against its base in file groups, incrementally once reviewed; never commits       | `review.mjs`         |
 | `/jira`                | Reads and moves one Jira ticket through this machine's API, and makes its worktree on a Jira Run                 | `jira.mjs`           |
 
-The plugin also ships one agent, `backlog-manager:backlog-reviewer`: the read-only reviewer `/backlog-orchestrate` dispatches before every merge, and
+The plugin also ships two agents. `backlog-manager:backlog-reviewer` is the read-only reviewer `/backlog-orchestrate` dispatches before every merge, and
 `/backlog-execute` before it pushes in `--finish pr` mode. Those two, `/backlog-review` and a Jira Execute Run's review gate all go through one procedure
 (`skills/backlog-review/references/procedure.md`), which dispatches one reviewer per file group with the model and effort Settings › Shared › Reviewer picks,
-unless the launch overrides it.
+unless the launch overrides it. When a review asks for a fix, the same procedure sends each new Critical or Important finding to
+`backlog-manager:backlog-finding-checker`, which confirms it or refutes it against the code; a refuted finding becomes a Minor and no longer drives the fix.
 
 ### Orchestrator runs
 

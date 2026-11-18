@@ -3335,6 +3335,9 @@ test('the review procedure dispatches every group in one message and retries cov
     ['outcome: none', 'an item without ## Outcome is dispatched with outcome: none'],
     ['--previous', 'the re-review branch scopes against the latest manifest'],
     ['--carried', "a re-review passes the other groups' reports as carried"],
+    ['backlog-finding-checker', 'each new finding is checked by its own agent'],
+    ['--checks', 'the second merge takes the check files'],
+    ['## 4b', 'the check step sits between the retry and the re-review without renumbering §5'],
   ]
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `procedure.md lost the rule: ${rule} (${needle})`)
@@ -3343,6 +3346,28 @@ test('the review procedure dispatches every group in one message and retries cov
     /`model` and `effort` as the Agent tool's own `model` and `effort` parameters/.test(text),
     "procedure.md no longer passes a group's model and effort as the Agent tool's own parameters",
   )
+})
+
+// The checker's half of the check pass (#558): `review.mjs merge --checks` parses its first two lines, so the grammar is as binding as the reviewer's.
+const FINDING_CHECKER_MD = fileURLToPath(new URL('../../../agents/backlog-finding-checker.md', import.meta.url))
+
+test('backlog-finding-checker confirms or refutes one finding and writes nothing else', () => {
+  const raw = fs.readFileSync(FINDING_CHECKER_MD, 'utf8')
+  const front = /^---\n([\s\S]*?)\n---\n/.exec(raw)?.[1] ?? ''
+  assert.match(front, /^name: backlog-finding-checker$/m, 'the agent is addressed as backlog-manager:backlog-finding-checker')
+  assert.match(front, /^model: sonnet$/m, 'the checker runs on Sonnet, fixed in its frontmatter')
+  const text = flat(FINDING_CHECKER_MD)
+  const RULES = [
+    ['check: confirmed', 'a confirmed finding is written as check: confirmed'],
+    ['check: refuted', 'a refuted finding is written as check: refuted'],
+    ['evidence:', 'the second line carries the evidence'],
+    ['never raise a new finding', 'the checker judges one claim and raises nothing new'],
+    ['"I cannot tell" is `confirmed`', 'doubt keeps the finding'],
+    ['Never write inside the worktree or the repo', 'the check file never lands in the diff under review'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(text.includes(needle), `backlog-finding-checker.md lost the rule: ${rule} (${needle})`)
+  }
 })
 
 test('backlog-review offers to fix and commits nothing', () => {

@@ -46,7 +46,7 @@ there, and the reasoning behind the rules below in [docs/subsystems/invariants.m
   `review.ts`.
 - `skills/` — the ten skills this repo publishes, one directory each, with their CLIs under `tools/`.
   → [docs/subsystems/skills.md](docs/subsystems/skills.md)
-- `agents/` — the plugin's own agents, one file each: `backlog-reviewer.md`.
+- `agents/` — the plugin's own agents, one file each: `backlog-reviewer.md` and `backlog-finding-checker.md`.
 - `.claude/rules/` — the path-scoped mechanism files, listed in the next section.
 - `backlog/` — this repo's own backlog, self-registered and tracker-backed: its items are GitHub issues.
 - `scripts/` — `sync-plugin.mjs`, `test-all.mjs`, `test-tmpdir.mjs`, `tailnet.mjs`, `ci-scope.mjs`. → [docs/workflows/](docs/workflows/development.md)

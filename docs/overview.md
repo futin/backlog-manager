@@ -151,7 +151,8 @@ unit of work per scheduled tick and is read-only against items, the run state an
 (`~/.backlog-manager/reviews/`), which scopes a change into reviewer groups and
 merges their reports; `pr-resolve.mjs`, the pr-resolve home's only writer (`~/.backlog-manager/pr-resolve/`), which holds one lock per PR and writes the
 outcome file the board reads), and one agent under `agents/` that the orchestrator dispatches, one per file group, to review an item's branch before it merges
-(and execute, before a `pr`-mode push; a Jira Execute Run, before its transition; and `/backlog-review`, on any checkout).
+(and execute, before a `pr`-mode push; a Jira Execute Run, before its transition; and `/backlog-review`, on any checkout), plus a second that checks each new
+Critical or Important finding of that review against the code before it can drive a fix loop.
 `backlog-orchestrate` is the only skill that merges into a base — it works one item per worktree and merges each into the run's base branch (`main` unless the
 run
 was given `--base`), or leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only — merges them onto a run branch of its own and
@@ -238,9 +239,10 @@ The mechanism lives in the subsystem docs linked below, the reasoning behind eve
   reviewer config from `settings/review.json`, scopes a change into reviewer groups and merges their reports, and owns `~/.backlog-manager/reviews/`.
   **Start orchestrator runs from the board, not by typing the trigger into a terminal.** →
   [docs/subsystems/skills.md](subsystems/skills.md)
-- `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
+- `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently two:
   `backlog-reviewer.md`, dispatched one per file group by `skills/backlog-review/references/procedure.md` — which `backlog-orchestrate` follows before every
-  merge, `backlog-execute` before a `pr`-mode push, a Jira Execute Run before its transition, and `/backlog-review` on any checkout.
+  merge, `backlog-execute` before a `pr`-mode push, a Jira Execute Run before its transition, and `/backlog-review` on any checkout — and
+  `backlog-finding-checker.md`, dispatched by the same procedure's §4b, one per new code-located Critical or Important finding, to confirm or refute it.
 - `.claude/rules/` — the path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
   mechanism text for the rules scoped to its paths; CLAUDE.md keeps the cross-cutting rules' headlines, `docs/subsystems/invariants.md` the reasoning. Guarded
   by `test/guards/claude-rules.test.ts`: bullets only, each anchored at most once, one home per linked rule, CLAUDE.md's headlines byte-equal with their rule-file

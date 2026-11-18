@@ -69,9 +69,10 @@ const byName = (name: string): Entry => {
 
 /**
  * A RATCHET, not a target: the measured post-trim total (2,398 B at #557) rounded up to the next 100. Lower it when a trim lands; raise it only with a
- * reason in the PR — a new skill's description is the usual one, and the cheaper move is a shorter description or a typed-only flag.
+ * reason in the PR — a new skill's description is the usual one, and the cheaper move is a shorter description or a typed-only flag. Raised to 2,600 by
+ * #558 for `backlog-finding-checker`'s one sentence: an agent has no typed-only flag, and the total it measured then was 2,514 B.
  */
-const MODEL_INVOCABLE_BUDGET = 2400;
+const MODEL_INVOCABLE_BUDGET = 2600;
 
 /** The skills something reaches without a typed slash command, and the caller that would break if one became typed-only. */
 const MUST_STAY_INVOCABLE: Record<string, string> = {
@@ -82,9 +83,9 @@ const MUST_STAY_INVOCABLE: Record<string, string> = {
 };
 
 describe('skill and agent descriptions', () => {
-  it('reads every skill and the one agent', () => {
+  it('reads every skill and both agents', () => {
     expect(FILES.filter((f) => f.startsWith('skills/')).length).toBe(10);
-    expect(FILES.filter((f) => f.startsWith('agents/'))).toEqual(['agents/backlog-reviewer.md']);
+    expect(FILES.filter((f) => f.startsWith('agents/')).sort()).toEqual(['agents/backlog-finding-checker.md', 'agents/backlog-reviewer.md']);
   });
 
   it.each(FILES)('%s has a non-empty > or >- block-scalar description', (file) => {
