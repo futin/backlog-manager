@@ -1232,6 +1232,29 @@ describe('laneBoard', () => {
       expect(keySets(c.childrenOf)).toEqual({ 'PAY-71': ['PAY-74'] });
     });
   });
+
+  /*
+    Two properties the deleted fold suite pinned (`foldBoard` never mutating its list; `sortTops` ranking an unparseable stamp) that the lane walk keeps —
+    `sortForBoard` copies its input and `updatedMs` reads NaN as 0 — and the `laneBoard` comment promises.
+  */
+  describe('input and stamps', () => {
+    const shape = (list: readonly JiraLane[]): unknown => list.map((l) => ({ key: l.key, cards: keys(l.cards), lanes: shape(l.lanes) }));
+
+    it('never mutates the list it is given, and a shuffled list draws the same lanes', () => {
+      const input = nesting();
+      const before = keys(input);
+      const out = lanes(input);
+      expect(keys(input)).toEqual(before);
+      expect(shape(lanes([...input].reverse()).lanes)).toEqual(shape(out.lanes));
+    });
+
+    it('ranks a lane whose only stamp is unparseable last among the open lanes', () => {
+      const under = (key: string, parent: string, ms: number, over: Partial<JiraIssue> = {}): JiraIssue =>
+        n(key, null, ms, { parent: { key: parent, summary: `${parent} summary`, type: null, status: null }, ...over });
+      const l = lanes([under('PAY-81', 'PAY-8', 1 * HOUR), under('PAY-91', 'PAY-9', 1 * HOUR, { updated: 'not a date' }), under('PAY-71', 'PAY-7', 2 * HOUR)]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-8', 'PAY-7', 'PAY-9']);
+    });
+  });
 });
 
 describe('resolveJiraAction and jiraSettingOf', () => {
@@ -2131,6 +2154,8 @@ describe('lib/jira-deck', () => {
       expect(sessionCells([], [one]).get('PAY-14')).toEqual({ state: 'ended', since: hoursAgo(7), more: 0, lead: null });
       const newer = link('PAY-14', 'b', 'ended', 6, { endedAt: hoursAgo(3) });
       expect(sessionCells([], [one, newer]).get('PAY-14')).toEqual({ state: 'ended', since: hoursAgo(3), more: 0, lead: null });
+      // Newest, not last: the same two links fed newest first still read the newer one.
+      expect(sessionCells([], [newer, one]).get('PAY-14')).toEqual({ state: 'ended', since: hoursAgo(3), more: 0, lead: null });
     });
 
     it('a live session wins over an ended one on the same key, and a key with neither has no entry', () => {

@@ -434,9 +434,9 @@ describe('the band', () => {
   });
 
   /*
-    The GitLab line (GitLab connection spec §7.2): `bandTotals` over the board's shown tops, under the board's own sub-line. The payload is handed in through
-    the raw context, as the shell's one answer would hand it over; PAY maps one GitLab project polled two minutes ago, PAY-131 leads with an open MR whose
-    pipeline failed and PAY-140 with a merged one.
+    The GitLab line (GitLab connection spec §7.2): `bandTotals` over the issues the page's filters match, under the board's own sub-line. The payload is
+    handed in through the raw context, as the shell's one answer would hand it over; PAY maps one GitLab project polled two minutes ago, PAY-131 leads
+    with an open MR whose pipeline failed and PAY-140 with a merged one.
   */
   const gitlabMr = (over: Partial<GitlabMr>): GitlabMr => ({
     project: 'payments/api',
@@ -474,7 +474,7 @@ describe('the band', () => {
     jiraProjects: { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false, repos: [] }] },
     mrs: [gitlabMr({}), gitlabMr({ iid: 398, state: 'merged', pipeline: null, keys: ['PAY-140'], mergedAt: new Date(Date.now() - 86_400_000).toISOString() })]
   });
-  async function renderWithGitlab(data: GitlabPayload): Promise<void> {
+  async function renderWithGitlab(data: GitlabPayload, drawn = 'Refund partial captures'): Promise<void> {
     render(
       <GitlabContext.Provider value={{ data, error: null, refresh: () => Promise.resolve(data) }}>
         <JiraProvider>
@@ -482,15 +482,23 @@ describe('the band', () => {
         </JiraProvider>
       </GitlabContext.Provider>
     );
-    await screen.findByText('Refund partial captures');
+    await screen.findByText(drawn);
   }
 
-  it('adds the GitLab line under the sub-line while GitLab is shown, counted over the tops', async () => {
+  it('adds the GitLab line under the sub-line while GitLab is shown, counted over the matching issues', async () => {
     await renderWithGitlab(gitlab());
     const line = document.querySelector('.ui-band-sub .jira-band-gitlab');
     expect(line?.textContent).toBe('GitLab: 1 open · 1 failing · 1 merged · polled 2m ago');
     // The board's own sub-line is untouched beside it.
     expect(document.querySelector('.jira-band-sub')?.textContent).toMatch(/^acme\.atlassian\.net · 4 issues/);
+  });
+
+  // Spec §6.1: the line counts every matching issue, so an MR on a nested on-board child counts. Under the old fold model PAY-162 folded into its top,
+  // PAY-120, and its MR went uncounted; ALPHA's default list has only tops, so the case above cannot tell the two wirings apart.
+  it('counts an MR that sits only on a nested on-board child', async () => {
+    lists[ALPHA.id] = GROUP;
+    await renderWithGitlab({ ...gitlab(), mrs: [gitlabMr({ title: 'PAY-162 | ledger rounding', pipeline: null, keys: ['PAY-162'] })] }, 'Ledger rounding fix');
+    expect(document.querySelector('.ui-band-sub .jira-band-gitlab')?.textContent).toBe('GitLab: 1 open · polled 2m ago');
   });
 
   it('draws no GitLab text anywhere on the board while GitLab is unconfigured', async () => {
@@ -1003,11 +1011,7 @@ it('draws no page switch inside main', async () => {
   });
 });
 
-/*
-  Grouped-board spec §3–§4: the board draws one card per TOP issue, and every on-board descendant folds into its topmost on-board ancestor. GROUP is the
-  shape the user's own board has — an epic root with stories under it and sub-tasks under those — plus a standalone task and a story whose parent is off
-  the board. Served for ALPHA's id, with ALPHA's status `count` left at 4, so the band case can tell the loaded list (7) from the status poll (4).
-*/
+// Parent-lanes spec §3.2–§3.4: what an on-board and an off-board lane header draw, over the lane fixtures declared near the top of this file.
 describe('the lane headers', () => {
   const stubbed = (over: Partial<JiraIssue['parent'] & object>): JiraIssue =>
     issue({ ...G_190, parent: { key: 'PAY-999', summary: 'Billing platform', type: null, status: null, ...over } });
@@ -1155,6 +1159,20 @@ describe('reading an off-board parent', () => {
     expect(within(headOf('PAY-998')).queryByRole('alert')).toBeNull();
   });
 
+  it('a failed read is cleared by the next click on a DIFFERENT off-board header', async () => {
+    answerReads({ 'PAY-998': () => Promise.reject(new Error('Jira timed out')), 'PAY-999': () => ok(detailOf(billing)) });
+    lists[ALPHA.id] = [...GROUP, second];
+    renderPage();
+    await screen.findByText('Ledger export');
+    await userEvent.click(within(headOf('PAY-998')).getByRole('button', { name: 'Ledger platform' }));
+    expect(await within(headOf('PAY-998')).findByRole('alert')).toHaveTextContent('Jira timed out');
+    await userEvent.click(within(headOf('PAY-999')).getByRole('button', { name: 'Billing platform' }));
+    await waitFor(() => expect(onOpenIssue).toHaveBeenCalledTimes(1));
+    expect((onOpenIssue.mock.calls[0] as [JiraIssue])[0].key).toBe('PAY-999');
+    expect(within(headOf('PAY-998')).queryByRole('alert')).toBeNull();
+    expect(within(headOf('PAY-999')).queryByRole('alert')).toBeNull();
+  });
+
   // Case 19: the lane leaves while its read is out — nothing throws, the lane is gone, and the late answer opens nothing.
   it('a sweep that drops the lane while its read is out: no error, the lane is gone, and the late answer opens nothing', async () => {
     const OFF = { ...ALPHA, interval: 'off' as const };
@@ -1264,6 +1282,8 @@ describe('the lane folds', () => {
     const expand = await screen.findByRole('button', { name: 'Expand PAY-200' });
     await userEvent.click(expand);
     expect(Object.keys(stored() as object).sort()).toEqual([ALPHA.id, BETA.id].sort());
+    // Beta's write leaves Alpha's entry as it was — not replaced with `{}`, not pruned against Beta's lanes.
+    expect((stored() as Record<string, unknown>)[ALPHA.id]).toEqual({ 'PAY-200': 'open' });
   });
 
   it('a search opens a folded lane holding a match and locks the chevrons; clearing it folds the lane again, and storage is untouched', async () => {

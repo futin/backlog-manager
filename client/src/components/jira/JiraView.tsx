@@ -44,7 +44,7 @@ import { JiraSetupView } from './JiraSetupView';
  * and is read by exactly one modal mount. The modal is drawn beside the Board and Sessions pages: Setup has no card or row to open one from, and the slot is cleared whenever `page`
  * changes, so a stale issue never survives a trip to Setup and back (JiraView itself does not unmount on a page switch).
  *
- * The slot holds the issue AND the board's fold index as it stood at the click (`childrenOf`, grouped-board spec §6), which the modal's Children tree hangs
+ * The slot holds the issue AND the board's lane index as it stood at the click (`childrenOf`, grouped-board spec §6), which the modal's Children tree hangs
  * grandchildren from. A tree-row click swaps the one modal's issue and carries the same snapshot forward — never a second modal — but it PUSHES onto the
  * walk rather than replacing the slot, so the modal's head can offer `← <the issue before>` and a reader who went three children deep can climb back out
  * without closing and reopening the card (DESIGN.md §8.9.2, Head). A page's open always starts a fresh walk: a card click is a new reading, not a step of

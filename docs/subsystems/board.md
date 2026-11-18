@@ -147,7 +147,8 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Chevron`              | `.chev`           | `dir?: down\|up\|right` (default `down`), `className?` — one 10×10 stroked path, the other two directions rotations of it | `TrackerChip`'s and `JiraChip`'s carets and the Jira board picker's (`up` while the popover is open), `DispatchButton`'s mark (`right`), `JiraRunMenu`'s `Run ▾` caret |
 | `Fact`                 | `.item-fact*`     | `label`, `children` — one label over its value; the call site decides whether it is drawn at all | `ItemModal`, `JiraDetail` (the facts column)                                 |
 | `SettingsRow`, `SettingsGroup` | `.set-row`, `.set-group` | `SettingsRow{name, hint?, children?}`; `SettingsGroup{title, scope, right?, children}` | every Settings card, the Jira Setup cards, `JiraBoardSheet`'s Name & sync rows |
-| `LiveStrip`            | `.board-card-live` | `tone`, `label`, `mark` (`null` draws no right-hand reading), `title?` — `stale` is the one tone the stylesheet reads, and it drops `.hatch` | `ItemCard` (a Jira lane card wears `.ui-stripe` and a state line instead) |
+| `FoldMark`             | `.ui-fold`        | `issueKey`, `title?` — the `↳ <key>` pill, ellipsised in a narrow cell with the whole key in its title | `JiraAgentDeck`'s card, `JiraLaneHeader` (an on-board header's own parent), `JiraIssueList`'s header row |
+| `LiveStrip`            | `.board-card-live` | `tone`, `label`, `mark` (`null` draws no right-hand reading), `title?` — `stale` is the one tone the stylesheet reads, and it drops `.hatch` | `ItemCard`, `JiraSessionCard` (the Sessions page's live and `starting` strips); a Jira lane card wears `.ui-stripe` and a state line instead |
 
 `label` and `title` are separate props on both overlay shells because a dialog's accessible name and its visible title are different strings on every surface
 that draws one, and `title` is a node — a name cannot be derived from it.
@@ -164,7 +165,8 @@ The last three rows are the exception to the table's opening rule, and on purpos
 page's cards — and a component only one directory can import is the drift the one-home rule exists to stop. Their CLASSES did not move: `.item-fact*` and
 `.set-*` were never `.ui-*` families, they sit outside the ui primitives block, and guard 7 does not pin them, because the hoist moved the components and
 left their CSS byte-for-byte where both surfaces already read it. `LiveStrip` followed for the same reason in Jira phase 5: it was `ItemCard`'s inline markup
-until the Jira card needed the same band for a live session, and the component owns the markup while `.board-card-live` stays the stylesheet's, declared once.
+until the Jira card needed the same band for a live session (the Jira board card has since traded it for `.ui-stripe` and a state line; the Sessions
+page's `JiraSessionCard` still draws it), and the component owns the markup while `.board-card-live` stays the stylesheet's, declared once.
 `DeliveryTrack` (the GitLab connection) sits in `ui/` without a row, for the same reason and with the same split: two surfaces draw it — the Detail's
 Delivery pane (full) and the List's Delivery cell (`compact`) — and its `.jira-dlv-*` classes are the Jira stylesheet's, outside the ui primitives block.
 Everything else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`,

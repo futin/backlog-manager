@@ -163,7 +163,7 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * band's label row, above the cards.
  *
  * **Children are a tree, and a row swaps THIS dialog's issue** (DESIGN.md §8.9.2; grouped-board spec §6). The detail's `children` are the direct children,
- * fresh; under each hang its descendants from `childrenOf`, the board's fold index as it stood when the card was clicked (`modalTree`). That snapshot is not
+ * fresh; under each hang its descendants from `childrenOf`, the board's lane index as it stood when the card was clicked (`modalTree`). That snapshot is not
  * refreshed by later board polls: the tree costs no Jira call beyond the one read this dialog already makes, and a row a poll moved is at worst one poll old
  * while the direct children never are. `null` (no board behind the dialog) draws the direct children only. The head row counts the DIRECT children in its
  * pill and says `N in all` only when the tree draws more rows than that; the spread bar counts the rows as drawn. No filter marking inside the tree — the

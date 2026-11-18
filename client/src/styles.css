@@ -4718,8 +4718,9 @@ tr.ui-stripe > :first-child { box-shadow: inset 3px 0 0 var(--stripe, transparen
 .ui-stripe-dot[data-tone='red'] { background: var(--red) }
 .ui-stripe-dot[data-tone='grey'] { background: var(--hairline2) }
 
-/* FoldMark — the `↳ <key>` pill (§8.9.1): the deck card names the parent its ticket hangs under, the List's Session cell the folded ticket its session runs on.
-   It may shrink and ellipsise inside a narrow cell (its `title` holds the whole key); where there is room it is its own width. */
+/* FoldMark — the `↳ <key>` pill (§8.9.1): the deck card names the parent its ticket hangs under, an on-board lane header and the List's
+   header row the header's own parent. It may shrink and ellipsise inside a narrow cell (its `title` holds the whole key); where there is room it is its
+   own width. */
 .ui-fold {
   display: inline-block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   padding: 1px 7px; border-radius: 8px; border: 1px solid var(--hairline2); font-size: 11px; font-weight: 500; color: var(--ink2); background: var(--strip)

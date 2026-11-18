@@ -15,6 +15,12 @@ describe('TreeMark', () => {
     expect(mark).toHaveAttribute('title', '/srv/wt/pay-12');
   });
 
+  it('draws a detached tree’s directory name when its one tree has no branch', () => {
+    const { container } = render(<TreeMark trees={[{ path: '/srv/wt/pay-12/', branch: null }]} />);
+    expect(container.firstElementChild).toHaveTextContent('pay-12');
+    expect(container.firstElementChild).toHaveAttribute('title', '/srv/wt/pay-12/');
+  });
+
   it('draws several trees as `N worktrees` with every path in the title', () => {
     const { container } = render(
       <TreeMark
