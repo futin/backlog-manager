@@ -629,7 +629,12 @@ describe('GET /api/jira/prompt', () => {
     ['a new branch that does not carry the key', { ...ok, branch: 'export' }, 'branch must carry PAY-131'],
     ['openMr that is neither true nor false', { ...ok, openMr: 'yes' }, 'openMr must be true or false'],
     ['an MR for context', { ...ok, action: 'context', openMr: 'true' }, 'openMr is only for execute with a branch'],
-    ['a target for a new branch', { ...ok, openMr: 'true', target: 'release/9' }, 'target is only for openMr with continue']
+    ['a target for a new branch', { ...ok, openMr: 'true', target: 'release/9' }, 'target is only for continue with openMr or review'],
+    [
+      'a target for a continued branch with neither switch',
+      { key: 'PAY-131', action: 'execute', repo: REPO, mode: 'continue', branch: 'pay-131-hand', target: 'release/9' },
+      'target is only for continue with openMr or review'
+    ]
   ])('400 for %s, before the configured check, the issue lookup and any git read', async (_label, params, error) => {
     const refs = jest.spyOn(refsUtil, 'readRepoRefs');
     const calls = fake.calls.length;
@@ -648,6 +653,14 @@ describe('GET /api/jira/prompt', () => {
     expect(res.text.startsWith(`Workspace: repository ${REPO}, mode continue, branch pay-131-hand, expected worktree /work/pay-hand-made. `)).toBe(true);
     expect(res.text).toContain('release/9');
     expect(refs.mock.calls.map((c) => [c[0], c[1], c[3]])).toEqual([[REPO, 'PAY-131', null]]);
+  });
+
+  it('a continued branch under review with the MR off takes a target, and the review sentence names it (#567)', async () => {
+    jest.spyOn(refsUtil, 'readRepoRefs').mockResolvedValue(refsOf([branch('develop', REPO), branch('pay-131-hand')]));
+    const params = { key: 'PAY-131', action: 'execute', repo: REPO, mode: 'continue', branch: 'pay-131-hand', review: 'true', target: 'release/9' };
+    const res = await get(q(params)).expect(200);
+    expect(res.text).toContain('against release/9');
+    expect(res.text).not.toContain('open one merge request');
   });
 
   it('409 <branch> exists — switch to Continue for a new branch whose name is listed', async () => {

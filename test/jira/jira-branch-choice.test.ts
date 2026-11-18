@@ -43,12 +43,30 @@ describe('parseBranchChoice — the refusals, each from a minimal failing input,
     ['a non-boolean review', { mode: 'continue', branch: 'x', review: 'yes' }, 'execute', 'review must be true or false'],
     ['review with context', { mode: 'continue', branch: 'x', review: true }, 'context', 'review is only for execute with a branch'],
     ['review with none', { mode: 'none', review: true }, 'context', 'review is only for execute with a branch'],
-    ['a target without openMr', { mode: 'continue', branch: 'x', target: 'develop' }, 'execute', 'target is only for openMr with continue'],
+    ['a target with neither switch', { mode: 'continue', branch: 'x', target: 'develop' }, 'execute', 'target is only for continue with openMr or review'],
+    [
+      'a target with both switches off',
+      { mode: 'continue', branch: 'x', review: false, openMr: false, target: 'develop' },
+      'execute',
+      'target is only for continue with openMr or review'
+    ],
     [
       'a target with a new branch',
       { mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: true, target: 'develop' },
       'execute',
-      'target is only for openMr with continue'
+      'target is only for continue with openMr or review'
+    ],
+    [
+      'a target with a new branch under review',
+      { mode: 'new', branch: 'timify-123-x', base: 'develop', review: true, target: 'develop' },
+      'execute',
+      'target is only for continue with openMr or review'
+    ],
+    [
+      'a target with a colon under review',
+      { mode: 'continue', branch: 'x', review: true, target: 'a:b' },
+      'execute',
+      'target may hold only A-Z a-z 0-9 . _ / -'
     ],
     ['a non-string target', { mode: 'continue', branch: 'x', openMr: true, target: 3 }, 'execute', 'target is required'],
     ['a target with a colon', { mode: 'continue', branch: 'x', openMr: true, target: 'a:b' }, 'execute', 'target may hold only A-Z a-z 0-9 . _ / -']
@@ -105,6 +123,20 @@ describe('parseBranchChoice — what is accepted', () => {
     expect(parse({ mode: 'continue', branch: 'x', openMr: 'false' })).toEqual({ ok: true, value: { mode: 'continue', branch: 'x', openMr: false, review: false, target: null } });
   });
 
+  it('continue with review and a target, with or without openMr: the target is the branch the work lands in, so it is the review base too (#567)', () => {
+    const value = { mode: 'continue', branch: 'x', openMr: false, review: true, target: 'develop' };
+    expect(parse({ mode: 'continue', branch: 'x', review: true, target: 'develop' })).toEqual({ ok: true, value });
+    expect(parse({ mode: 'continue', branch: 'x', review: 'true', target: 'develop' })).toEqual({ ok: true, value });
+    expect(parse({ mode: 'continue', branch: 'x', openMr: true, review: true, target: 'release/9' })).toEqual({
+      ok: true,
+      value: { mode: 'continue', branch: 'x', openMr: true, review: true, target: 'release/9' }
+    });
+    expect(parse({ mode: 'continue', branch: 'x', review: true })).toEqual({
+      ok: true,
+      value: { mode: 'continue', branch: 'x', openMr: false, review: true, target: null }
+    });
+  });
+
   it('review as the body and the query spell it; absent and null are false', () => {
     const value = (review?: unknown) => {
       const r = parse({ mode: 'continue', branch: 'x', ...(review === undefined ? {} : { review }) });
@@ -127,6 +159,15 @@ describe('parseBranchChoice — what is accepted', () => {
 });
 
 describe('resolveWorkspace', () => {
+  it('carries a review-only Continue target onto the workspace, with no base (#567)', () => {
+    const r = resolveWorkspace({ mode: 'continue', branch: 'x', openMr: false, review: true, target: 'develop' }, KEY, REPO, {
+      available: true,
+      branches: [],
+      mainBranch: 'main'
+    } as never);
+    expect(r).toMatchObject({ ok: true, workspace: { mode: 'continue', review: true, openMr: false, target: 'develop', base: null } });
+  });
+
   it('carries review through for both modes', () => {
     const r = (c: JiraBranchChoice) => resolveWorkspace(c, 'TIMIFY-123', REPO, { available: true, branches: [], mainBranch: 'main' } as never);
     expect(r({ mode: 'new', branch: 'timify-123-x', base: 'develop', openMr: false, review: true })).toMatchObject({ ok: true, workspace: { review: true } });

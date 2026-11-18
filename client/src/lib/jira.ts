@@ -1067,8 +1067,9 @@ export function transitionOptions(transitions: readonly JiraTransition[]): { val
  * is built by `URLSearchParams`, so the repository's slashes and a skill's colon are escaped exactly once, here.
  *
  * `branch` is the sheet's choice and `mode` always rides (the route 400s without it). The other four go out only with the modes they belong to — `base` with
- * `new`, `target` with `continue` and only when set, `openMr` and `review` only when true — because the server refuses a field that does not belong (`base is only for a new
- * branch`) rather than ignoring it, so a client that sent every field blank would be refused for the ones it did not mean.
+ * `new`, `target` with `continue` and only when set (the MR's target and the review's base), `openMr` and `review` only when true — because the server
+ * refuses a field that does not belong (`base is only for a new branch`) rather than ignoring it, so a client that sent every field blank would be refused
+ * for the ones it did not mean.
  */
 export async function fetchJiraPrompt(
   key: string,
@@ -1249,7 +1250,8 @@ export function branchRefusal(
 
 /**
  * What the launch sheet's Branch section holds while the person edits it: every mode's fields at once, so flipping New → Continue → New gives back the name
- * they typed rather than re-rendering the pattern over it. `target` is the MR target as the field shows it, `''` for "the repository's default branch".
+ * they typed rather than re-rendering the pattern over it. `target` is the branch Continue work lands in as the field shows it — the MR's target and the
+ * review's base (#567) — `''` for "the repository's default branch".
  * `branchChoiceOf` is what leaves the sheet; this never does.
  */
 export interface BranchDraft {
@@ -1304,9 +1306,9 @@ export function preferredBranchApplies(action: JiraAction, refs: JiraRepoRefs | 
 /**
  * The draft the sheet opens with (spec §5.3):`branchSheetDefaults` decides the mode, and the two modes it did not pick are filled anyway, as they would open
  * if picked — New from the pattern and the default base (the same call with the ticket's branches taken away, so one derivation names both), Continue on the
- * first ticket branch the mapped checkout does not hold, else nothing. The MR target opens on the repo's default base — the stored one when refs could not be
- * read — and the Open MR switch always opens off (spec §5.6) while Review before finishing opens ON — a review before the work is called done is the default, and
- * turning it off is the person's explicit choice.
+ * first ticket branch the mapped checkout does not hold, else nothing. The target (the MR's and the review's, #567) opens on the repo's default base — the
+ * stored one when refs could not be read — and the Open MR switch always opens off (spec §5.6) while Review before finishing opens ON — a review before the
+ * work is called done is the default, and turning it off is the person's explicit choice.
  *
  * `preferred` is the branch the ticket's last session used (#503), passed only when that session ran in the repository this draft is for. When
  * `preferredBranchApplies`, the draft opens on Continue on it — even if that session launched with New, since its branch exists now — and is otherwise
@@ -1341,14 +1343,17 @@ export function branchDraft(
 /**
  * The choice the draft stands for. `review` is `execute`'s alone too, and only with a branch — `mode: 'none'` carries none, and a skill's prompt has no finish
  * step to review before. `openMr` is `execute`'s alone (a skill's prompt is its template, with no commit rule to amend — spec §5.6), and `target`
- * rides only with Continue and the MR on, because the server refuses it anywhere else; a blank target is `null`, "the repository's default branch".
+ * rides only with Continue and the MR or the review on, because the server refuses it anywhere else; a blank target is `null`, "the repository's default
+ * branch". It rides with the review alone because it is the base the review diffs against (#567): without it a Continue branch cut from `develop` would be
+ * reviewed against `origin/HEAD`, with `develop`'s own commits in the diff. A CodeRabbit `review` action never reaches here with `review` on — it is not
+ * `execute`.
  */
 export function branchChoiceOf(draft: BranchDraft, action: JiraAction): JiraBranchChoice {
   const openMr = action === 'execute' && draft.openMr;
   const review = action === 'execute' && draft.review;
   if (draft.mode === 'none') return { mode: 'none' };
   if (draft.mode === 'new') return { mode: 'new', branch: draft.newBranch, base: draft.base, openMr, review };
-  return { mode: 'continue', branch: draft.continueBranch, openMr, review, target: openMr && draft.target !== '' ? draft.target : null };
+  return { mode: 'continue', branch: draft.continueBranch, openMr, review, target: (openMr || review) && draft.target !== '' ? draft.target : null };
 }
 
 /**
@@ -1362,7 +1367,7 @@ export function branchDispatchFields(choice: JiraBranchChoice): Pick<JiraDispatc
 }
 
 /**
- * The sheet's one refusal for a draft: `branchRefusal` on the mode's own branch (and, for New, its base), then a TYPED MR target — only the unavailable form
+ * The sheet's one refusal for a draft: `branchRefusal` on the mode's own branch (and, for New, its base), then a TYPED target — only the unavailable form
  * has a text field for it, the select offers listed names only — checked like any name (`target <problem>`), since the server would refuse it with that
  * sentence. A blank target is not a problem: it means the repository's default. Continue with nothing chosen says so in the select's own words (`choose…`)
  * rather than as Table A's `branch is empty`.

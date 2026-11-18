@@ -1110,6 +1110,77 @@ describe('JiraLaunchSheet — the branch', () => {
       remoteControl: true
     });
   });
+
+  // #567: Target is the branch Continue work lands in — the MR's target and the review's base — so it draws whenever Continue has either switch on.
+
+  it('Continue with review on and the MR off draws Target, seeded from the repo\'s default base, and the preview and Start carry it', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(reviewSwitch()).toBeChecked();
+    expect(mrSwitch()).not.toBeChecked();
+    expect(field('Target').value).toBe('develop');
+    await waitFor(() => expect(promptReads().at(-1)?.searchParams.get('target')).toBe('develop'));
+    const last = promptReads().at(-1) as URL;
+    expect(last.searchParams.get('review')).toBe('true');
+    expect(last.searchParams.has('openMr')).toBe(false);
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toMatchObject({ mode: 'continue', branch: 'pay-131-x', review: true, openMr: false, target: 'develop' });
+  });
+
+  it('Continue with both switches off draws no Target, and neither the preview nor Start carries one', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(reviewSwitch() as HTMLElement);
+    expect(within(dialog()).queryByLabelText('Target')).not.toBeInTheDocument();
+    await waitFor(() => expect(promptReads().at(-1)?.searchParams.has('review')).toBe(false));
+    expect(promptReads().at(-1)?.searchParams.has('target')).toBe(false);
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).not.toHaveProperty('target');
+  });
+
+  it('Continue with review on and Target set to the repository\'s default sends no target', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.selectOptions(field('Target'), '');
+    await waitFor(() => expect(promptReads().at(-1)?.searchParams.has('target')).toBe(false));
+    expect(promptReads().at(-1)?.searchParams.get('review')).toBe('true');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).not.toHaveProperty('target');
+  });
+
+  it('New draws no Target whatever the switches say', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(modeButton('New'));
+    expect(reviewSwitch()).toBeChecked();
+    expect(within(dialog()).queryByLabelText('Target')).not.toBeInTheDocument();
+    await userEvent.click(mrSwitch() as HTMLElement);
+    expect(within(dialog()).queryByLabelText('Target')).not.toBeInTheDocument();
+  });
+
+  it('unavailable refs, Continue with review on and the MR off: a typed bad Target is refused before Start', async () => {
+    server.refs = (repo) => ({ status: 200, body: { repo, available: false, reason: 'not mounted into the board' } });
+    await ready({ status: { repoDefaults: { '/Users/ada/pay': { base: 'develop' } } } });
+    expect(await within(dialog()).findByText('branches unavailable — ~/pay not mounted into the board')).toBeInTheDocument();
+    await userEvent.click(modeButton('Continue'));
+    fireEvent.change(field('Branch'), { target: { value: 'pay-131-x' } });
+    expect(mrSwitch()).not.toBeChecked();
+    expect(field('Target')).toHaveAttribute('type', 'text');
+    fireEvent.change(field('Target'), { target: { value: 'a:b' } });
+    expect(await within(dialog()).findByText('target may hold only A-Z a-z 0-9 . _ / -')).toBeInTheDocument();
+    expect(within(dialog()).getByText('target may hold only A-Z a-z 0-9 . _ / -')).toHaveClass('sheet-blocked');
+    await waitFor(() => expect(startButton()).toBeDisabled());
+  });
 });
 
 /*

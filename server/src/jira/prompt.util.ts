@@ -112,8 +112,9 @@ function closingTail(ws: JiraWorkspace | null): string {
  * With the review gate on (`ws.review`, docs/superpowers/specs/2026-11-13-jira-review-gate-design.md) the order changes, and only then: commit first (the
  * staging half of the rule), review that commit with the jira skill's `references/review.md`, and only on its `approve` the transition and the closing tail
  * (`Do not push.`, or the push and the MR). The transition moves after the review because a ticket must not read Done for a change that failed its review,
- * and the push and the MR move with it for the same reason. The base the review is told is the one the MR would go into — `target`, else `base` — and with
- * neither it says "the repository's default branch", the words `review.md` §3 resolves from `origin/HEAD`. The fail-closed sentence is for a server that
+ * and the push and the MR move with it for the same reason. The base the review is told is the branch the work lands in — a Continue's `target`, which
+ * the sheet sends whenever review or the MR is on, so it names the review base with the MR off too (#567); else a New branch's `base` — and with neither it
+ * says "the repository's default branch", the words `review.md` §3 resolves from `origin/HEAD`. The fail-closed sentence is for a server that
  * ships ahead of the plugin (`skills/` changes nothing until it is pushed and synced): a session whose jira skill has no review reference must stop rather
  * than read "review" as optional and finish unreviewed. Off — and always with no workspace — the text is what it was before the gate, byte for byte, which
  * `jira-prompt.test.ts` pins with literals composed before the change.
