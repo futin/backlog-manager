@@ -1,5 +1,6 @@
 import {
   DELIVERY_FILTER_LABELS,
+  bandDelivery,
   bandTotals,
   deliveryIndex,
   deliveryLook,
@@ -409,6 +410,50 @@ describe('bandTotals', () => {
   it('a sub-task top counts its inherited lead', () => {
     const idx = deliveryIndex(payload([mr({ iid: 500, keys: ['TIMIFY-100'], state: 'merged', pipeline: null })]));
     expect(bandTotals([subtaskOf('TIMIFY-101', 'TIMIFY-100')], idx, NOW)).toBe(`GitLab: 1 merged · ${polledPhrase(minutesAgo(1), NOW)}`);
+  });
+});
+
+// The band's GitLab half as pills (mock A): `bandTotals`' counts as parts, the oldest age, and a tone for its dot. `text` is `bandTotals`' sentence, which
+// the row keeps as its `title` — `bandTotals` itself is now `bandDelivery(...)?.text`, so the two cannot count differently.
+describe('bandDelivery', () => {
+  const top = (n: number): JiraIssue => issue({ key: `TIMIFY-${n}` });
+  const leading = (n: number, over: Partial<GitlabMr>): GitlabMr => mr({ keys: [`TIMIFY-${n}`], sourceBranch: `timify-${n}-x`, ...over });
+
+  it('names each non-zero count as a part, in open · failing · merged order, with the oldest age and a green dot', () => {
+    const idx = deliveryIndex(
+      payload([leading(1, { iid: 412, pipeline: 'success' }), leading(2, { iid: 415, pipeline: 'failed' }), leading(3, { iid: 398, state: 'merged', pipeline: null })])
+    );
+    const d = bandDelivery([top(1), top(2), top(3)], idx, NOW);
+    expect(d).toMatchObject({
+      parts: [
+        { n: 2, word: 'open' },
+        { n: 1, word: 'failing' },
+        { n: 1, word: 'merged' }
+      ],
+      polled: polledPhrase(minutesAgo(1), NOW),
+      tone: 'green'
+    });
+    expect(d?.age).toMatch(/ ago$/);
+    expect(d?.text).toBe(bandTotals([top(1), top(2), top(3)], idx, NOW));
+  });
+
+  it('has no parts when every lead is closed', () => {
+    const idx = deliveryIndex(payload([leading(1, { iid: 390, state: 'closed', pipeline: null })]));
+    expect(bandDelivery([top(1)], idx, NOW)?.parts).toEqual([]);
+  });
+
+  it('is grey with no age while a project was never read', () => {
+    const idx = deliveryIndex(payload([leading(1, { iid: 412 })], { TIMIFY: [view({ polledAt: null })] }));
+    expect(bandDelivery([top(1)], idx, NOW)).toMatchObject({ parts: [], age: null, polled: 'not read yet', tone: 'grey' });
+  });
+
+  it('is red when the last read of a project failed', () => {
+    const idx = deliveryIndex(payload([leading(1, { iid: 412 })], { TIMIFY: [view({ failed: true })] }));
+    expect(bandDelivery([top(1)], idx, NOW)?.tone).toBe('red');
+  });
+
+  it('is null when no issue draws delivery', () => {
+    expect(bandDelivery([issue({ key: 'PAY-1' })], deliveryIndex(payload([])), NOW)).toBeNull();
   });
 });
 

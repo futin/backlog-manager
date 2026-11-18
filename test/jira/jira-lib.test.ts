@@ -321,7 +321,7 @@ describe('bandSub', () => {
   it('names the count, the sources and the age of the poll', () => {
     const now = Date.now();
     const b = board({ count: 14, polledAt: ago(now, 12 * SECOND) });
-    expect(bandSub(b, site, now, null)).toEqual({ text: 'acme.atlassian.net · 14 issues from 2 roots and 1 query · polled 12 s ago', failing: false });
+    expect(bandSub(b, site, now, null)).toMatchObject({ text: 'acme.atlassian.net · 14 issues from 2 roots and 1 query · polled 12 s ago', failing: false });
   });
 
   it('omits a zero source and pluralises the other', () => {
@@ -951,6 +951,62 @@ describe('foldProgress, modalTree and the band’s lane counts', () => {
       expect(text).toContain(' · 5 parents · ');
       expect(text.endsWith(' · first 500 shown')).toBe(true);
     });
+  });
+});
+
+// The band draws `bandSub` as pills (mock A, 2026-11-18): the site, one pill per count, a red pill for the failure, then a toned dot and the age. `text`
+// stays the whole sentence — the row's `title`, so hovering it still reads the line the pills replaced.
+describe('bandSub parts', () => {
+  const site = 'acme.atlassian.net';
+  const now = Date.now();
+
+  it('splits the line into the site, the count pills, the age and the full polled phrase', () => {
+    const sub = bandSub(board({ count: 14, polledAt: ago(now, 12 * SECOND) }), site, now, { issues: 16, parents: 8 });
+    expect(sub.site).toBe(site);
+    expect(sub.facts).toEqual(['16 issues', '8 parents', '2 roots', '1 query']);
+    expect(sub.failure).toBeNull();
+    expect(sub.age).toBe('12 s ago');
+    expect(sub.polled).toBe('polled 12 s ago');
+  });
+
+  it('omits zero sources and the parents pill before the list loads, and puts the cap last', () => {
+    const sub = bandSub(board({ roots: [], truncated: true, polledAt: ago(now, 12 * SECOND) }), site, now, null);
+    expect(sub.facts).toEqual(['14 issues', '1 query', 'first 500 shown']);
+  });
+
+  it('has no age before the first poll, and says so in the polled phrase', () => {
+    const sub = bandSub(board({ polledAt: null }), site, now, null);
+    expect(sub.age).toBeNull();
+    expect(sub.polled).toBe('not polled yet');
+  });
+
+  it("carries Jira's failure apart from the facts", () => {
+    const sub = bandSub(
+      board({
+        polledAt: ago(now, 12 * SECOND),
+        failures: [
+          { kind: 'query', id: 'q_1', message: "Field 'sprint' does not exist" },
+          { kind: 'root', id: 'PAY-9', message: 'Issue does not exist' }
+        ]
+      }),
+      site,
+      now,
+      null
+    );
+    expect(sub.failure).toBe("Field 'sprint' does not exist +1 more");
+    expect(sub.facts.join(' ')).not.toContain('exist');
+  });
+
+  // The dot's tone is the shell's Jira chip's rule (`serviceTone`): late is twice the board's own interval, never polled is grey — and a failed sweep is red
+  // whatever the age, because a fresh poll that could not read a query is not on time.
+  it.each([
+    ['green while within twice the interval', { interval: '1m' as const, polledAt: ago(now, 90 * SECOND) }, 'green'],
+    ['amber past twice the interval', { interval: '1m' as const, polledAt: ago(now, 3 * MINUTE) }, 'amber'],
+    ['grey before the first poll', { polledAt: null }, 'grey'],
+    ['grey for a board whose sync is off', { interval: 'off' as const, polledAt: ago(now, 3 * MINUTE) }, 'grey'],
+    ['red on a failed sweep, however fresh', { polledAt: ago(now, 5 * SECOND), failures: [{ kind: 'root' as const, id: 'PAY-9', message: 'gone' }] }, 'red']
+  ])('the dot is %s', (_label, over, tone) => {
+    expect(bandSub(board(over), site, now, null).tone).toBe(tone);
   });
 });
 

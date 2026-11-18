@@ -345,6 +345,7 @@ describe('guard 7 — one home per primitive', () => {
     '.ui-split',
     '.ui-stripe',
     '.ui-status',
+    '.ui-poll',
     '.ui-glyph-tile',
     '.ui-fold',
     '.ui-issue-type',

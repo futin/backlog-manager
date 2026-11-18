@@ -542,7 +542,7 @@ describe('the Sessions page', () => {
   it('the band reads `M parents` over the loaded list, as the Board page does', async () => {
     lists[ALPHA.id] = withParents();
     await renderList();
-    await waitFor(() => expect(document.querySelectorAll('.jira-band-sub')[1]?.textContent).toMatch(/^acme\.atlassian\.net · 5 issues from 1 query · 3 parents · polled /));
+    await waitFor(() => expect(document.querySelectorAll('.jira-band-sub')[1]?.getAttribute('title')).toMatch(/^acme\.atlassian\.net · 5 issues from 1 query · 3 parents · polled /));
   });
 
   it('a row’s Detail still gets the lanes’ children: a grandchild on the board hangs under the child the read returned', async () => {
@@ -598,7 +598,8 @@ describe('the Sessions page', () => {
     statusAnswer = status({ boards: [{ ...ALPHA, failures: [{ kind: 'query', id: 'q_00000001', message: "Field 'foo' does not exist" }] }, BETA] });
     await renderList();
     const sub = await screen.findByText(/Field 'foo' does not exist/);
-    expect(sub).toHaveClass('failing');
+    expect(sub.closest('.ui-pill')).toHaveClass('ui-pill-bad');
+    expect(document.querySelector('.jira-band-row .ui-poll-dot')).toHaveAttribute('data-tone', 'red');
   });
 
   it('with All tickets off and the board list failing, the body reads `board unavailable` under the bar', async () => {

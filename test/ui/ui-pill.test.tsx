@@ -34,6 +34,15 @@ describe('Pill', () => {
     expect(screen.getByText('opus')).toHaveClass('ui-pill', 'ui-pill-neutral', 'ui-pill-off');
   });
 
+  // `raised` (the Jira band's fact pills, mock A): a state beside the tone like `off`, so the tone class stays and a palette swap still moves it.
+  it('adds ui-pill-raised beside the tone when raised, and only then', () => {
+    const { unmount } = render(<Pill raised>14 issues</Pill>);
+    expect(screen.getByText('14 issues')).toHaveClass('ui-pill', 'ui-pill-neutral', 'ui-pill-raised');
+    unmount();
+    render(<Pill>14 issues</Pill>);
+    expect(screen.getByText('14 issues')).not.toHaveClass('ui-pill-raised');
+  });
+
   it('is not off unless asked', () => {
     render(<Pill>opus</Pill>);
 

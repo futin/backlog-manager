@@ -117,8 +117,8 @@ click, so a review is decided on the age of the last read and the sheet's half i
 `deliveryShown` says no surface draws — unconfigured, unarmed, or a payload the browser could not fetch.
 
 `lib/delivery.ts` holds every derivation: `ticketDelivery` (`hidden`, `unknown`, `none` or `mrs`; a sub-task inherits its parent's MRs, one level),
-`leadMr`, `deliveryLook` (the chip text, the word, the tone and the track), `bandTotals`, and the `DeliveryFilter` values. The surfaces — the Sources row
-(`SourcesGroup.tsx`, `lib/service-status.ts`), `MrChip` on the cards, `GitlabBandLine` under the band, the List's Delivery column, `DeliveryPane` in Detail
+`leadMr`, `deliveryLook` (the chip text, the word, the tone and the track), `bandDelivery` (the band half's pills, dot and age) with `bandTotals` its sentence, and the `DeliveryFilter` values. The surfaces — the Sources row
+(`SourcesGroup.tsx`, `lib/service-status.ts`), `MrChip` on the cards, `GitlabBandLine` on the band's row, the List's Delivery column, `DeliveryPane` in Detail
 with `DeliveryTrack` (`components/ui/`), and the Delivery quick filter — are drawn as [`.claude/DESIGN.md` §8.9.6](../../.claude/DESIGN.md) specifies.
 
 ## Room for project 2

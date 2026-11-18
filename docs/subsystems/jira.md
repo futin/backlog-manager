@@ -362,8 +362,8 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   slot with the lanes' `childrenOf` beside the issue. The band's `Board | List` switch (`JiraViewSwitch`, `hooks/useJiraView.ts`) picks the deck over the lanes or
   `JiraIssueList`: the same lanes as rows of one table, a header row per lane and one row per card, uncut, each row with its own issue's session cell
   (`sessionCells` in `lib/jira-deck.ts`, keyed by the row's own issue key) and its own `updated`; a row opens Detail through `rowOpens` (`lib/jira-list.ts`).
-  Since the GitLab connection, while `useDeliveryIndex` answers an index: `MrChip` on each card (`components/jira/MrChip.tsx`), `GitlabBandLine` under
-  `JiraBandSub`, the List's Delivery column after Status (`DeliveryTrack`'s compact shape), and a `Delivery` section in the Filters popover beside a
+  Since the GitLab connection, while `useDeliveryIndex` answers an index: `MrChip` on each card (`components/jira/MrChip.tsx`), `GitlabBandLine` on
+  `JiraBandSub`'s row, the List's Delivery column after Status (`DeliveryTrack`'s compact shape), and a `Delivery` section in the Filters popover beside a
   List-only segmented control, stored with the board filters (`lib/jira.ts`'s `delivery`) — [gitlab.md](gitlab.md#the-client-half), DESIGN.md §8.9.6.
 - **Jira › Sessions** (`components/jira/JiraSessionsView.tsx`, `JiraBandSub.tsx`). The session table, `JiraSessionList`, on a page of its own: the shared board pick and
   load (`usePickedJiraBoard`), its own `Search sessions` text, no FilterBar and no view switch. The table's bar is drawn in every state and `All tickets` on is scoped

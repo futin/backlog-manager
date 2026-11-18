@@ -24,6 +24,10 @@ export type PillTone = 'neutral' | 'live' | 'warn' | 'bad' | 'done';
  * reading OF) and `ui-pill-off` rides beside it, so the look that says "not
  * allowed" never has to be restated per tone and a palette swap still moves it.
  *
+ * `raised` is a second state of the same kind, for a pill that sits straight on the page's ground rather than on a sheet: the Jira band's fact pills (§8.9.1,
+ * mock A, 2026-11-18). `--strip-hi` is a tint of paper, and in daylight it is within a few steps of `--board`, so a neutral pill on the band read as bare
+ * text; `ui-pill-raised` paints it `--strip` with a `--hairline` edge instead, the mock's white pill. The tone class stays, as with `off`.
+ *
  * `glyph` is an optional mark that leads the text (a failing check's ✕, a passing one's ✓), drawn at the default 14 px like the mock's pill icons and `aria-hidden`
  * as every `Glyph` is: the words carry the claim, the mark is only the cue the eye finds first. Nothing is drawn without it, so a count pill is still one text node.
  */
@@ -32,16 +36,18 @@ export function Pill({
   tone = 'neutral',
   title,
   off = false,
+  raised = false,
   glyph
 }: {
   children: ReactNode;
   tone?: PillTone;
   title?: string;
   off?: boolean;
+  raised?: boolean;
   glyph?: GlyphName;
 }) {
   return (
-    <span className={`ui-pill ui-pill-${tone}${off ? ' ui-pill-off' : ''}`} title={title}>
+    <span className={`ui-pill ui-pill-${tone}${raised ? ' ui-pill-raised' : ''}${off ? ' ui-pill-off' : ''}`} title={title}>
       {glyph !== undefined && <Glyph name={glyph} />}
       {children}
     </span>
