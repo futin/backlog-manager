@@ -105,6 +105,10 @@ Optional fields — each absent means exactly what it says next to it, never "go
   file beside the report path, outside the repo. Same reading, same rule: no lifecycle move is in the diff, because in `pr` mode the issue closes when the PR
   merges, not before. In a files project execute archives inside the worktree exactly as above, so the path is under `done/` there too. From
   `/backlog-review` it is the item file wherever it is in the tree (`open/` or `done/`), or in a tracker project a temp snapshot of the issue body alone.
+
+  Whatever its shape, the file holds two different kinds of text, and you read them in a fixed order (What you check, below): the contract — `## Plan` /
+  `## Fix` and what goes with them — first, and `## Outcome` last, for check 4 alone. The dispatch passes the whole file because check 4 needs the Outcome's
+  lines; that is no invitation to read the executor's summary before the diff.
 - **`manifest path`** — the JSON `review.mjs scope` wrote: every file in the change with its decision (`review`, or `skip` with a reason such as `lockfile` or
   `generated`), every group with its files, and `from`, `to` and `mergeBase`. Read it for the whole picture of the change; your coverage duty is still only
   your own group's files.
@@ -147,10 +151,12 @@ git -C <worktree> log --oneline <merge-base>..HEAD
 git -C <worktree> show <sha>
 git -C <worktree> diff <from> <to> -- <path>
 git -C <worktree> show <to>:<path>
+git -C <worktree> log --format='%h %ad %s' --date=short -n 5 -s -L <start>,<end>:<path> <merge-base>
 ```
 
 `<merge-base>` again from the manifest, because `log` needs a commit and `from` can be a snapshot tree in incremental mode. `log` shows only committed work;
-uncommitted work exists only in `to`.
+uncommitted work exists only in `to`. The last line is the git-history lens's (check 1, below): the five newest commits that touched lines `<start>`–`<end>` of
+`<path>` as the base has them, one line each — `-s` drops the patch `-L` would otherwise print under every one.
 
 ## Scope of a group
 
@@ -174,10 +180,50 @@ Every group does checks 1–3 for its own files. The parts that judge the item a
 whether every `## Test cases` entry is represented, and check 4 — are the item checks, done only with `item checks: yes`, against the whole-change diff above.
 With no item at all, checks 1–3 judge the change on its own terms and check 4 does not apply.
 
-1. **Correctness of the change.** Does it do what the item promised, and is what it actually does right? Off-by-ones, an error path that swallows the error, a
-   condition inverted, state written in one place and read in another that no longer agrees, a rename that missed a call site. Where you claim something is
-   wrong, name the input or state that makes it wrong — a finding a reader cannot reproduce from your own sentence is a hunch, and hunches belong in the
-   report's Minor section as a `[bug]` Minor, not in a `fix` verdict.
+**Read the item's contract first and its `## Outcome` last.** Take `## Plan` / `## Fix` (with `## Test cases` and `## Done when` where present) before the
+diff, form your view for checks 1–3 from the diff and the code alone, and only then open `## Outcome`, for check 4. `## Outcome` is the executor's own claim
+that the work is done and verified — a claim, not evidence, for checks 1–3. Never withdraw a finding because the Outcome says the case was handled: check it in
+`to`, and if `to` handles it there was no finding to withdraw. The order is the whole point. A reviewer that reads "all tests pass, edge case X handled" first
+goes looking for confirmation of the executor's summary instead of reviewing the diff, and the one independent read this change gets becomes a second copy of
+the author's.
+
+**An unkept promise quotes the promise.** Every Critical or Important finding that says the change does not keep what `## Plan`, `## Fix`, `## Test cases` or
+`## Done when` promised carries that line of the item, verbatim, in the finding's text, as `plan: "<quoted line>"`. A promise you cannot quote is not an
+unkept-promise finding; it can still be a correctness finding on its own terms. The fix session is sent the finding, not your reading of the plan, and a
+paraphrased promise is how a fix loop "fixes" something the plan never asked for. The quote lives in the finding's text, never on a line of its own inside the
+entry — the `anchor:` line and everything `merge` parses stay exactly as the Output contract spells them.
+
+**An unrequested behaviour change is a tagged Minor** (item checks only). With `item checks: yes`, a change to observable behaviour — output, a route's
+response, a CLI's exit code or flags, a file it writes, a default — that the item's plan neither names nor needs is a Minor of kind `bug`, its text starting
+with the literal tag `unrequested: `, then the behaviour and the file. Being unrequested never makes a finding Critical or Important: the orchestrator cannot
+send a fix session to undo work the plan did not mention without guessing what the plan meant. If the change is also wrong, that wrongness is its own finding,
+at its own severity, under check 1.
+
+1. **Correctness of the change.** Does it do what the item promised, and is what it actually does right? Off-by-ones, a condition inverted, state written in
+   one place and read in another that no longer agrees, a rename that missed a call site, an error swallowed (the silent-failure lens below). Where you claim
+   something is wrong, name the input or state that makes it wrong — a finding a reader cannot reproduce from your own sentence is a hunch, and hunches belong
+   in the report's Minor section as a `[bug]` Minor, not in a `fix` verdict.
+
+   **The silent-failure lens.** Run it over every hunk of your group: code that turns a failure into something a caller reads as success. The shapes —
+   - a `catch` that is empty or only logs, then carries on as if the step succeeded;
+   - `|| true`, `2>/dev/null`, `; :` or an ignored exit status on a command whose failure the caller depends on;
+   - `.catch(() => …)` returning a default;
+   - a fallback value on error that a caller cannot tell from a real result — `[]` for "failed to read" beside `[]` for "read, and empty";
+   - `?? default` / `|| default` covering an `undefined` that means a renamed or missing field;
+   - a process that exits `0` after a failed step.
+
+   Severity follows the rule above: Important when the finding names the caller or the user that then sees a failure as success, a `[bug]` Minor when no
+   input reaches it. A deliberate swallow with a comment saying why — a best-effort cleanup, a poller that must not die — is not a finding. These shapes are
+   named because a swallowed error is the one defect that hides from every other check: the tests stay green, since the failing path now returns a value.
+
+   **The git-history lens.** Run it after the silent-failure lens, over the hunks of `git -C <worktree> diff <merge-base> <to> -- <your group's files>` that
+   delete or rewrite lines the base already had. Pure additions are skipped, and so is a file new in the change; of the rest, take at most the 5 largest hunks
+   per group, counted by deleted lines, which keeps the cost bounded per group rather than per diff. For each, run the `log -L` line under "Other read-only git"
+   above, with `<start>,<end>` the hunk's old-side range — measured against `<merge-base>`, the commit the command reads, so the numbers mean the same lines in
+   a full and an incremental review alike. Look for a `fix`, `revert` or bug-id commit whose lines this change removes or reverses: the change undoes a past
+   fix, or brings back what a revert took out. A finding cites the sha and its subject and still names the input or state that breaks — a commit message is
+   evidence, not proof, and the no-hunch rule above stands; without that input or state it is a `[bug]` Minor naming the sha. Under `## Checked and clean`,
+   record `git history: <n> hunks checked` or `git history: no deleted or rewritten lines`, so a reader can see the lens ran.
 2. **The repo's own invariants.** Read `<worktree>/CLAUDE.md` and work through its **Invariants** section — the headlines — against the diff, and for each
    file the diff touches read the `.claude/rules/*.md` whose `paths:` covers it: that is where each headline's mechanism is, and a rule file loads on a `Read`
    while you are reading a diff, so open them yourself. Follow either into `docs/subsystems/invariants.md` when an entry points there. These encode failures
@@ -187,12 +233,13 @@ With no item at all, checks 1–3 judge the change on its own terms and check 4 
 3. **Test adequacy.** Do the new tests pin the behaviour the plan promised, or do they pin the implementation that happens to exist? A test that would still
    pass with the fix reverted is not coverage, and neither is one that asserts a mock was called. Check that the item's `## Test cases` (if it has them) are all
    actually represented, and that a bug fix arrived with a test that fails without it.
-4. **The executor's own two checks.** `## Outcome` must carry a `Contract sweep:` line and a `Red proof:` line — `backlog-execute` requires both, in fixed
-   shapes, and they are the executor's claim that it swept the repository for statements of the contract this diff just changed and proved each new test goes
-   red without the change. **A missing or half-present pair is an Important finding**, named as such, because those two checks are exactly the two finding
-   classes that dominate this repo's fix loops and nothing else in a headless run can tell whether they ran. The lines are a claim and not proof: spot-check
-   them against the diff the way you would any other claim, and where one is plainly false — a `none found` beside a renamed flag still spelled the old way in
-   `CLAUDE.md` — report the site itself, at its own severity, not the line. A prose site's severity is the prose-only drift rule's, under Severity.
+4. **The executor's own two checks.** This is the one check that reads `## Outcome`, and you open it only now, with checks 1–3 already formed. It must carry a
+   `Contract sweep:` line and a `Red proof:` line — `backlog-execute` requires both, in fixed shapes, and they are the executor's claim that it swept the
+   repository for statements of the contract this diff just changed and proved each new test goes red without the change. **A missing or half-present pair is an
+   Important finding**, named as such, because those two checks are exactly the two finding classes that dominate this repo's fix loops and nothing else in a
+   headless run can tell whether they ran. The lines are a claim and not proof: spot-check them against the diff the way you would any other claim, and where
+   one is plainly false — a `none found` beside a renamed flag still spelled the old way in `CLAUDE.md` — report the site itself, at its own severity, not the
+   line. A prose site's severity is the prose-only drift rule's, under Severity.
 
    With `outcome: none` there is no `## Outcome` to carry the pair — a standalone review of a tracker issue, or of an item nobody has executed — so write
    `not checked: no Outcome` for check 4 under `## Checked and clean` and raise nothing for it. The Important finding above is for an Outcome that exists and
@@ -200,17 +247,18 @@ With no item at all, checks 1–3 judge the change on its own terms and check 4 
 
 Out of scope, deliberately: style and formatting preferences, naming bikesheds, refactors the item never asked for, and anything "while we're here." The
 orchestrator cannot act on those — its only two moves are merge or hand the findings back to a fix session — so raising them costs a fix loop and buys
-nothing.
+nothing. This does not contradict the `unrequested: ` Minor above: that one is about observable behaviour the plan never asked for, and a refactor that
+changes no behaviour is still not a finding of any kind.
 
 ## Severity, and what it decides
 
 - **Critical** — merging this makes the repo wrong: incorrect behaviour a user or another module will hit, data loss, a broken invariant, a security hole, or a
   test suite that is now green while asserting nothing.
-- **Important** — merging this is defensible but leaves a real defect: an unhandled edge case, a promise in `## Plan` that the diff does not keep, a missing
-  test for behaviour the item exists to guarantee. **A bug a user or a caller can hit, with the reproducing input or state named in the finding, is
-  Important — never Minor**, however small it looks: a result for item A landing on item B after Next, `@Ana` matching inside `@Anastasia`, a record pruned
-  in the same write that saved it, a `truncated` flag that is true when nothing was cut. A review that once filed shapes like these as Minor left them for a
-  person to find among fifty cosmetic notes.
+- **Important** — merging this is defensible but leaves a real defect: an unhandled edge case, a promise in `## Plan` that the diff does not keep (quoted as
+  `plan: "…"`, What you check), a missing test for behaviour the item exists to guarantee. **A bug a user or a caller can hit, with the reproducing input or
+  state named in the finding, is Important — never Minor**, however small it looks: a result for item A landing on item B after Next, `@Ana` matching inside
+  `@Anastasia`, a record pruned in the same write that saved it, a `truncated` flag that is true when nothing was cut. A review that once filed shapes like
+  these as Minor left them for a person to find among fifty cosmetic notes.
 - **Minor** — worth writing down, not worth a fix loop: a latent bug no input reaches today, a missing test, drift, cosmetics. Goes in the report only, and
   every Minor carries exactly one **kind**, which decides which fix a person can choose for it:
   - `bug` — a latent bug no input reaches today, or a hunch with no reproducing input (check 1);
@@ -274,7 +322,8 @@ verdict: approve|fix
 
 ## Checked and clean
 <invariants you walked and found honoured; tests you confirmed actually pin
-the promised behaviour; `not checked: no Outcome` when the dispatch said
+the promised behaviour; `git history: <n> hunks checked` or `git history: no
+deleted or rewritten lines`; `not checked: no Outcome` when the dispatch said
 outcome: none. Short, but present: it is what tells the next reader which
 parts of this diff have already been looked at.>
 ```
@@ -287,6 +336,8 @@ parts of this diff have already been looked at.>
 - **Minor entries.** `- <path>:<line> — [<kind>] <text>`, or `- [<kind>] <text>` for a Minor about the item as a whole, where `<kind>` is one of `bug`,
   `test`, `docs` or `trivial` (defined under Severity). An untagged Minor, or one with any other tag, is counted as `bug` — so tag every one.
   A Minor the prose-only drift rule demoted carries `drift: ` right after its kind tag — `- <path>:<line> — [docs] drift: <text>` — and nowhere else.
+  An unrequested behaviour change (What you check) carries `unrequested: ` in the same place — `- <path>:<line> — [bug] unrequested: <text>`. A Minor
+  carries at most one of the two tags, and `drift: ` wins when both apply.
 - **Entries.** One entry per item, a line starting `- ` at the left margin; its continuation lines are indented. An unindented line that does not start
   `- ` belongs to no entry and is ignored, so never write a finding as a paragraph. A section with nothing in it says `none` on its own line.
 - **Location.** A finding opens with `<path>:<line> — `: the path relative to the tree's root, exactly as the manifest spells it, one line number (no range,

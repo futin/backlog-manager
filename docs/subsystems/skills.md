@@ -372,8 +372,12 @@ needed. Currently two. `backlog-reviewer.md` is the read-only reviewer `backlog-
 the manifest's `from` and `to`, never `base` by name, lists every file of its group under `## Coverage`, quotes each finding's line in an `anchor:`, and marks
 any earlier finding it was handed `resolved` or `open` — the report grammar `review.mjs merge` parses. Prose-only drift keeps its severity only where an agent
 or tool acts on the stale text — an instruction file, a contract a reader runs, text a tool parses or a test asserts — and is otherwise a Minor tagged
-`drift: `, which `/backlog-retro` totals as `totals.driftMinors` and drafts a per-project sweep from (#559). `backlog-finding-checker.md` (Sonnet, read-only)
-is the procedure's §4b: once `merge` says `fix`, one checker per new code-located Critical or Important finding reads that one claim against `to` and writes
+`drift: `, which `/backlog-retro` totals as `totals.driftMinors` and drafts a per-project sweep from (#559). It reads the item's `## Plan` / `## Fix` first
+and its `## Outcome` last, for the contract-sweep and red-proof check alone, so the executor's own verdict cannot anchor the review; quotes the plan line, as
+`plan: "…"`, in every unkept-promise finding; files an observable behaviour change the plan never asked for as a `[bug]` Minor tagged `unrequested: `, never
+Critical or Important on that ground; and runs two named lenses inside its correctness check — a silent-failure lens over every hunk, and a git-history lens
+(`git log -L` against the merge base, at most 5 hunks per group) over the lines the change deletes or rewrites, looking for an undone fix (#568).
+`backlog-finding-checker.md` (Sonnet, read-only) is the procedure's §4b: once `merge` says `fix`, one checker per new code-located Critical or Important finding reads that one claim against `to` and writes
 `check: confirmed` or `check: refuted` plus one line of evidence; a second `merge --checks` demotes every refuted finding to a Minor that keeps its record,
 drops it from the findings `--previous` hands on, and lets the verdict approve once nothing else holds it at `fix` (#558). A checker that wrote nothing
 readable leaves its finding confirmed. Both are published only because `PUBLISHED_PATHS` (`scripts/sync-plugin.mjs`) names `agents` alongside `skills/`.

@@ -3061,6 +3061,89 @@ test('backlog-reviewer demotes prose-only drift to a tagged Minor, except where 
   assert.ok(severity.includes('own `## Plan` / `## Fix` promised'), 'the Severity section no longer excepts a text edit the item’s own plan promised')
 })
 
+// --- #568: the reviewer's spec axis, reading order and two lenses -----------------------------------------------------------------------------------------
+// Four rules lifted from Relay's review skill into our one reviewer, without its eight parallel agents. Each case pins the rule where it decides something —
+// the check list, the Output contract — so a later trim fails naming the rule it lost. Sections are sliced on the raw file's line-start headings and only then
+// flattened, for the reason the drift case above gives. The Output contract quotes a whole report, headings and all, inside a fence, so that section is cut
+// at the heading named after it rather than at the next `## `.
+const reviewerSection = (heading, next = null) => {
+  const raw = fs.readFileSync(REVIEWER_MD, 'utf8')
+  const start = raw.indexOf(`\n${heading}\n`)
+  assert.ok(start !== -1, `backlog-reviewer.md lost its \`${heading}\` section`)
+  const end = next === null ? raw.indexOf('\n## ', start + 1) : raw.indexOf(`\n${next}\n`, start + 1)
+  return raw.slice(start, end === -1 ? undefined : end).replace(/\s+/g, ' ')
+}
+const CHECKS_HEADING = '## What you check, in this order'
+
+test('backlog-reviewer quotes the plan line an unkept-promise finding relies on', () => {
+  const text = flat(REVIEWER_MD)
+  assert.ok(text.includes('An unkept promise quotes the promise'), 'backlog-reviewer.md lost the rule that an unkept-promise finding quotes the item')
+  assert.ok(text.includes('as `plan: "<quoted line>"`'), 'backlog-reviewer.md no longer spells the literal plan: "…" quote form')
+  assert.ok(text.includes('A promise you cannot quote is not an unkept-promise finding'), 'backlog-reviewer.md lets a paraphrased promise stand as a finding')
+})
+
+test('backlog-reviewer files an unrequested behaviour change as a tagged bug Minor, never Critical/Important on that ground', () => {
+  const text = flat(REVIEWER_MD)
+  assert.ok(/a Minor of kind `bug`, its text starting with the literal tag `unrequested: `/.test(text), 'the unrequested change is no longer a `[bug]` Minor tagged `unrequested: `')
+  assert.ok(text.includes('Being unrequested never makes a finding Critical or Important'), 'being unrequested can now raise a finding to Critical/Important')
+  const contract = reviewerSection('## Output contract — the part that must not drift', '## Hard limits')
+  assert.ok(contract.includes('[bug] unrequested: <text>'), 'the Output contract’s Minor entries no longer name the `unrequested: ` tag beside `drift: `')
+  assert.ok(contract.includes('`drift: ` wins when both apply'), 'the Output contract no longer says which tag wins when drift and unrequested both apply')
+})
+
+test('backlog-reviewer still keeps behaviour-preserving refactors out of scope', () => {
+  const checks = reviewerSection(CHECKS_HEADING)
+  assert.ok(/Out of scope, deliberately: [^.]*refactors the item never asked for/.test(checks), 'the out-of-scope paragraph no longer excludes unasked refactors')
+  assert.ok(checks.includes('a refactor that changes no behaviour is still not a finding'), 'the unrequested Minor now reads as making every unasked refactor a finding')
+})
+
+test('backlog-reviewer reads the Outcome last, as a claim and not evidence', () => {
+  const checks = reviewerSection(CHECKS_HEADING)
+  const rule = checks.indexOf('Read the item\'s contract first and its `## Outcome` last')
+  assert.ok(rule !== -1, 'the check list no longer says to read `## Outcome` after checks 1–3')
+  const check4 = checks.indexOf('4. **The executor\'s own two checks.**')
+  assert.ok(check4 !== -1, 'the check list lost check 4')
+  assert.ok(rule < check4, 'the Outcome-last rule no longer comes before check 4, so it no longer governs how checks 1–3 are read')
+  assert.ok(checks.includes('a claim, not evidence, for checks 1–3'), 'the Outcome is no longer named a claim rather than evidence for checks 1–3')
+  assert.ok(checks.includes('Never withdraw a finding because the Outcome says the case was handled'), 'an Outcome sentence can now withdraw a finding')
+})
+
+test('backlog-reviewer runs a named silent-failure lens over every hunk', () => {
+  const checks = reviewerSection(CHECKS_HEADING)
+  const RULES = [
+    ['The silent-failure lens', 'the lens is named'],
+    ['a `catch` that is empty or only logs', 'the empty or log-only catch shape'],
+    ['`|| true`, `2>/dev/null`', 'the suppressed-exit shape'],
+    ['a fallback value on error that a caller cannot tell from a real result', 'the fallback-indistinguishable-from-a-result shape'],
+    ['A deliberate swallow with a comment saying why', 'the deliberate-swallow exemption'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(checks.includes(needle), `backlog-reviewer.md lost the silent-failure rule: ${rule} (${needle})`)
+  }
+})
+
+test('backlog-reviewer runs a bounded git-history lens over deleted or rewritten lines', () => {
+  const checks = reviewerSection(CHECKS_HEADING)
+  const RULES = [
+    ['The git-history lens', 'the lens is named'],
+    ['delete or rewrite lines the base already had', 'the lens is limited to deleted or rewritten lines'],
+    ['at most the 5 largest hunks per group', 'the cap of 5 hunks per group'],
+    ['the no-hunch rule above stands', 'the no-hunch rule holds for a commit-message finding'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(checks.includes(needle), `backlog-reviewer.md lost the git-history rule: ${rule} (${needle})`)
+  }
+  const text = flat(REVIEWER_MD)
+  assert.match(text, /git -C <worktree> log [^\n]*-L <start>,<end>:<path> <merge-base>/, 'backlog-reviewer.md lost the git log -L command the lens runs')
+  assert.ok(text.includes('`git history: <n> hunks checked`'), 'the `## Checked and clean` record of the git-history lens is gone')
+})
+
+test('backlog-reviewer gives itself no confidence score', () => {
+  // #568 decided against a 0–100 confidence axis: #563's finding checker already gives each fresh Critical/Important an independent second look, and a
+  // score the reviewer awards itself would be a weaker copy of that check. Bringing it back is a new decision, not a drift.
+  assert.ok(!flat(REVIEWER_MD).includes('confidence:'), 'backlog-reviewer.md introduces a confidence: field, which #568 dropped in favour of the finding checker')
+})
+
 // --- bug-47: losing the claim race ends this session's work on the item ------
 //
 // The clause was never missing. `## Mark it in progress` carried it as a
