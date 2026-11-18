@@ -619,6 +619,20 @@ describe('replyDoc — Markdown', () => {
     for (const s of inputs) expect(empties(replyDoc(MARA, s).content)).toBe(0);
   });
 
+  // ADF's schema gives `blockquote.content` a minimum of one block, so an empty quote makes Jira refuse the whole comment while the preview showed nothing
+  // wrong. A line holding only `>` lexes to a quote with no children.
+  it('never emits an empty blockquote', () => {
+    const emptyQuotes = (n: unknown): number => {
+      if (Array.isArray(n)) return n.reduce((s: number, c) => s + emptyQuotes(c), 0);
+      if (n === null || typeof n !== 'object') return 0;
+      const o = n as { type?: string; content?: unknown[] };
+      return (o.type === 'blockquote' && (o.content ?? []).length === 0 ? 1 : 0) + emptyQuotes(o.content);
+    };
+    for (const s of ['>', '> ', '>\n>', 'Before\n\n>\n\nAfter']) expect(emptyQuotes(replyDoc(MARA, s).content)).toBe(0);
+    // The text around an empty quote still posts.
+    expect(JSON.stringify(replyDoc(MARA, 'Before\n\n>\n\nAfter').content)).toContain('After');
+  });
+
   it('round-trips canonical Markdown through the read side unchanged', () => {
     const md = [
       'Thanks, **bold**, _em_ and `code`, see [t](https://x.io)',

@@ -213,7 +213,10 @@ function blocks(tokens: readonly Token[], container: Container): AdfBlock[] {
       case 'blockquote': {
         const children = blocks((tok as Tokens.Blockquote).tokens, container === 'listItem' ? 'listItem' : 'blockquote') as AdfNestable[];
         // Only the document holds a quote; a quote inside a quote is flattened into it, and inside a list item its children stand in the item.
-        if (container === 'doc') out.push({ type: 'blockquote', content: children });
+        // A quote with no children (a line holding only `>`) is dropped: ADF requires at least one block in it, and Jira refuses the whole comment.
+        if (container === 'doc') {
+          if (children.length > 0) out.push({ type: 'blockquote', content: children });
+        }
         else out.push(...children);
         break;
       }
