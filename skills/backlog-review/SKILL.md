@@ -93,7 +93,7 @@ From `merge`'s stdout and nothing else — never the report body:
 - the mode: `full` or `incremental`, and when a review fell back to full, why (`scope`'s `full review: <reason>` line);
 - the verdict;
 - the Critical and Important lines exactly as `merge` printed them, resolved to their `path:line`, plus how many were `unanchored` and how many Minor
-  findings the report holds;
+  findings the report holds, how many findings the check refuted (`refuted`), and `unchecked` when non-zero;
 - earlier findings: how many were handed out (the manifest's groups' `earlier`), how many came back resolved, and the still-open ones (`(earlier)` lines);
 - the merged report's path.
 

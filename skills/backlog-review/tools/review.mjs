@@ -17,7 +17,7 @@ const USAGE = [
   '       review.mjs scope --tree <dir> --base <ref> --out <manifest.json> [--item <path>] [--mode full|incremental] [--state <file>]',
   '                        [--previous <manifest.json>] [--review-config <json> | review flags]',
   '       review.mjs merge --manifest <manifest.json> --out <report.md> [--reports <g.md>…] [--carried <g.md>…] [--retry <r.md>]',
-  '                        [--fallback <n>:<model|effort>]… [--state <file>]',
+  '                        [--fallback <n>:<model|effort>]… [--checks <c.md>…] [--state <file>]',
 ].join('\n');
 
 // Closed lists. `null` (unset) means "the agent's own default" and is accepted everywhere a pair member is.
@@ -686,9 +686,13 @@ function scopeCommand(args) {
 // Reads the group reports the reviewers wrote and answers three questions the caller must not guess at: was every reviewable file covered, what is the
 // verdict, and what is still open. It writes the merged report, the findings file `scope --previous` reads, and — only when coverage is complete — the
 // branch's state. Exit 0 for every verdict; 1 only for bad arguments or an unreadable manifest.
+//
+// The check pass (#558): stdout's `check` lists this run's fresh code-located Critical/Important findings, the procedure dispatches one
+// `backlog-finding-checker` per id, and a second `merge` with the same arguments plus `--checks` demotes every finding a checker refuted to Minor — so one
+// wrong finding can no longer cost a fix loop, while the record of it survives in the report.
 
 const MERGE_OPTIONS = ['--manifest', '--out', '--state', '--retry'];
-const MERGE_LISTS = ['--reports', '--carried', '--fallback'];
+const MERGE_LISTS = ['--reports', '--carried', '--fallback', '--checks'];
 
 // `--reports a b c` takes every value up to the next `--flag` (a caller expands a glob there); `--fallback` repeats. Everything else is one value.
 function parseMergeArgs(args) {
@@ -738,6 +742,27 @@ function groupNumber(file) {
   const match = /\.g(\d+)\.md$/.exec(file);
   if (!match) throw new Error(`${file} is not a group report: expected a name ending in .g<n>.md`);
   return Number(match[1]);
+}
+
+// `<report>.check-F<n>.md` is the checker's verdict on finding F<n>. The suffix names the finding the way `.g<n>.md` names a group.
+function checkId(file) {
+  const match = /\.check-(F\d+)\.md$/.exec(file);
+  if (!match) throw new Error(`${file} is not a check file: expected a name ending in .check-F<n>.md`);
+  return match[1];
+}
+
+// What one checker decided: `{ result: 'confirmed' | 'refuted', evidence }`, or null when the file is missing or its first `check:` line says neither.
+// Null is read by the caller as confirmed-and-unchecked — a checker that died must never weaken a review.
+function parseCheck(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+  const result = /^check:\s*(\S+)/im.exec(text)?.[1].toLowerCase();
+  if (result !== 'confirmed' && result !== 'refuted') return null;
+  return { result, evidence: /^evidence:\s*(.+?)\s*$/im.exec(text)?.[1] ?? 'no evidence given' };
 }
 
 // Any heading level, keyed by its first word: reviewers write `### Critical` and `## Critical (Must Fix)` too, and a finding dropped for its heading would
@@ -940,7 +965,24 @@ function mergeCommand(args) {
   const found = [];
   for (const r of live) for (const f of [...r.critical, ...r.important]) found.push(f);
   for (const f of dedupe(resolveAnchors(manifest, found))) fresh.push({ id: `F${next++}`, ...f });
-  const minor = live.reduce((sum, r) => sum + r.minor.length, 0);
+  // Only fresh findings with a location are checked: an earlier one was checked the round it was raised, and an item-level one (path null) is judged
+  // against the item, not the code, which is the reviewer's group-1 lens and nothing a checker reading the tree can refute.
+  const check = fresh.filter((f) => f.path !== null).map((f) => f.id);
+  const checks = new Map();
+  for (const file of lists.get('--checks')) {
+    const id = checkId(file);
+    if (!check.includes(id)) throw new Error(`${file}: ${id} is not a finding this merge checks`);
+    if (checks.has(id)) throw new Error(`${file}: ${id} is checked twice`);
+    checks.set(id, parseCheck(file));
+  }
+  const checked = [...checks.values()].filter(Boolean).length;
+  const refutedIds = new Set([...checks].filter(([, c]) => c?.result === 'refuted').map(([id]) => id));
+  const survivors = fresh.filter((f) => !refutedIds.has(f.id));
+  const demoted = fresh
+    .filter((f) => refutedIds.has(f.id))
+    .map((f) => ({ ...f, severity: 'Minor', text: `refuted by check: ${f.text} — ${checks.get(f.id).evidence}`, evidence: checks.get(f.id).evidence }));
+  const minorEntries = [...live.flatMap((r) => r.minor), ...demoted];
+  const minor = minorEntries.length;
 
   // An earlier finding stays open unless a report marks it resolved; one report saying `open` beats another saying `resolved`, because a finding closed
   // by a reviewer who did not look at the right code is the costlier mistake.
@@ -951,11 +993,16 @@ function mergeCommand(args) {
   const marked = [...earlier.values()].map((f) => ({ finding: f, status: verdictOf(f.id) }));
   const stillOpen = marked.filter((m) => m.status === 'open').map((m) => m.finding);
 
+  // A group's own `verdict: fix` stops forcing `fix` once every fresh finding was refuted, or the check pass would save nothing. `emptyFix` (a fix with no
+  // finding the parser could read) keeps forcing it: nothing was checked there. Without `--checks` nothing is refuted, so this is the old rule exactly.
   const rerunSaysFix = live.some((r) => r.verdict === 'fix');
-  const verdict = uncovered.length ? 'incomplete' : rerunSaysFix || fresh.length || stillOpen.length ? 'fix' : 'approve';
+  const allRefuted = refutedIds.size > 0 && survivors.length === 0;
+  const saysFix = survivors.length || stillOpen.length || emptyFix.length || (rerunSaysFix && !allRefuted);
+  const verdict = uncovered.length ? 'incomplete' : saysFix ? 'fix' : 'approve';
 
-  const open = [...stillOpen, ...fresh];
-  const report = renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorEntries: live.flatMap((r) => r.minor), fallbacks, emptyFix });
+  const checkSummary = lists.get('--checks').length ? { checked, refuted: refutedIds.size, unchecked: check.length - checked, demoted } : null;
+  const open = [...stillOpen, ...survivors];
+  const report = renderReport({ manifest, verdict, uncovered, reviewFiles, fresh: survivors, marked, minorEntries, fallbacks, emptyFix, checkSummary });
   const out = path.resolve(options.get('--out'));
   writeAtomic(out, report);
   writeAtomic(findingsPath(manifestFile), `${JSON.stringify(open, null, 2)}\n`);
@@ -967,16 +1014,17 @@ function mergeCommand(args) {
     writeAtomic(stateFile, `${JSON.stringify(state, null, 2)}\n`);
   }
 
-  const unanchored = fresh.filter((f) => f.unanchored).length;
-  process.stdout.write(`${JSON.stringify({ verdict, mode: manifest.mode, uncovered, unanchored, stillOpen: stillOpen.length, minor })}\n`);
-  for (const f of fresh) process.stdout.write(`${oneLine(f)}\n`);
+  const unanchored = survivors.filter((f) => f.unanchored).length;
+  const counts = { checked, refuted: refutedIds.size, unchecked: checkSummary?.unchecked ?? 0 };
+  process.stdout.write(`${JSON.stringify({ verdict, mode: manifest.mode, uncovered, unanchored, stillOpen: stillOpen.length, minor, check, ...counts })}\n`);
+  for (const f of survivors) process.stdout.write(`${oneLine(f)}\n`);
   for (const f of stillOpen) process.stdout.write(`${oneLine(f)} (earlier)\n`);
   return 0;
 }
 
 // The merged report, in the shape retro and the agent file already agree on: a `verdict:` line, then `## Critical` / `## Important`. The `## Coverage`
 // section of this report is for the person reading it; it is never parsed back.
-function renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorEntries, fallbacks, emptyFix }) {
+function renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorEntries, fallbacks, emptyFix, checkSummary }) {
   const out = [`verdict: ${verdict}`, ''];
   out.push(`mode: ${manifest.mode} (from ${manifest.from ?? 'n/a'} to ${manifest.to})`);
   if (manifest.modeReason) out.push(`modeReason: ${manifest.modeReason}`);
@@ -995,6 +1043,10 @@ function renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked
   else out.push(`${uncovered.length} of ${reviewFiles.length} files not covered:`, ...uncovered.map((p) => `- ${p}`));
   const skipped = manifest.files.filter((f) => f.decision === 'skip');
   if (skipped.length) out.push('', 'skipped:', ...skipped.map((f) => `- ${f.path} — ${f.reason}`));
+  if (checkSummary) {
+    out.push('', '## Checks', '', `${checkSummary.checked} checked, ${checkSummary.refuted} refuted, ${checkSummary.unchecked} unchecked`);
+    for (const f of checkSummary.demoted) out.push(`- ${f.id} — refuted — ${f.evidence}`);
+  }
   const list = (severity) => {
     const mine = fresh.filter((f) => f.severity === severity);
     if (mine.length === 0) return ['none'];

@@ -1,6 +1,6 @@
 # The review procedure
 
-The one description of how a change is reviewed: scope → dispatch every group → merge → one coverage retry → result. `/backlog-review`,
+The one description of how a change is reviewed: scope → dispatch every group → merge → one coverage retry → check each new finding → result. `/backlog-review`,
 `backlog-orchestrate` §7 and `backlog-execute`'s `pr`-mode §7 all follow this file with their own parameters, and none of them describes dispatch itself —
 three copies of these steps would drift into three different reviews. Read it in full before the first review of a session.
 
@@ -85,11 +85,13 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-review/tools/review.mjs" merge --mani
 ```
 
 Its stdout is the only part of the review that enters this session's context: one JSON line,
-`{"verdict":…,"mode":…,"uncovered":[…],"unanchored":n,"stillOpen":n,"minor":n}`, then one line per Critical/Important finding as
-`<path>:<line> — <Severity>: <text>` (earlier findings still open end `(earlier)`). The verdict is `approve`, `fix` or `incomplete`; `merge` computed it,
-so never re-derive it from a report. Exit `1` (a bad argument, an unreadable manifest, a report not named `.g<n>.md`) is named on stderr: stop and hand
-it to the caller. Do not read the merged report or a group report into context — the one exception is the caller reading the merged
-report's `## Minor` section after a person chose to fix Minor findings.
+`{"verdict":…,"mode":…,"uncovered":[…],"unanchored":n,"stillOpen":n,"minor":n,"check":[…],"checked":n,"refuted":n,"unchecked":n}`,
+then one line per Critical/Important finding as `<path>:<line> — <Severity>: <text>` (earlier findings still open end `(earlier)`). The verdict is
+`approve`, `fix` or `incomplete`; `merge` computed it, so never re-derive it from a report. `check` lists the ids of this run's fresh Critical/Important
+findings that have a location — what §4b checks — and is `[]` when there are none; the three counts stay `0` until §4b's merge. Exit `1` (a bad
+argument, an unreadable manifest, a report not named `.g<n>.md`, a check file not named `.check-F<n>.md`) is named on stderr: stop and hand it to the caller.
+Do not read the merged report or a group report into context — the one exception is the caller reading the merged report's `## Minor` section after a
+person chose to fix Minor findings.
 
 ## 4. One coverage retry
 
@@ -99,6 +101,27 @@ When `uncovered` is non-empty, dispatch ONE `backlog-manager:backlog-reviewer` f
 stayed with their groups.
 Then run `merge` again with exactly the arguments of step 3 plus `--retry <report with .retry.md>`. Its stdout replaces the first one. Still `incomplete`
 after that is the result — there is no second retry; the caller says so with the uncovered files.
+
+## 4b. Check each new finding
+
+A reviewer judges its own findings, and one wrong Critical or Important costs a whole fix loop — or parks a correct item after two. So before the verdict
+stands, each new finding gets a second, cheaper look. Run this after the last `merge` of §3/§4 when its JSON says `"verdict":"fix"` and `check` is non-empty;
+skip it for `approve`, for `incomplete`, and for an empty `check`.
+
+Read the checked findings out of the findings file `merge` wrote beside the manifest — only those ids, never the report:
+
+```bash
+node -e 'const ids=new Set(process.argv[2].split(","));for(const f of JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")))if(ids.has(f.id))console.log(JSON.stringify(f))' <manifest path>.findings.json <check ids, comma-separated>
+```
+
+Dispatch one `backlog-manager:backlog-finding-checker` per id, **all of them in one message**, never in the background — the same rule as §2, and wait for
+every one inside this turn. Each dispatch carries `worktree` — `<tree>`; `from` and `to` — the manifest's; `finding id` — the id; `finding` — the finding as
+`<path>:<line> — <severity>: <text>`, exactly as `merge` printed it; `anchor` — its `anchor`, or `none`; and `check path` — `<report>` with `.md` replaced
+by `.check-<id>.md`. No `model` or `effort` parameters: the agent's own frontmatter fixes its model.
+
+Then run `merge` again with exactly the last merge's arguments plus `--checks <every check path>`. A refuted finding is demoted to Minor in the merged report
+and drops out of stdout, of the findings file `--previous` reads, and of the verdict; a checker that wrote nothing readable leaves its finding confirmed and
+counted `unchecked`. Its stdout replaces the previous one and is what §Result hands back. One check pass per review — there is no retry.
 
 ## 5. Re-review after a fix
 
@@ -115,7 +138,7 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-review/tools/review.mjs" scope --tree
 round's groups and each group's model and effort, puts any newly changed file in group 1, hands every finding the round left open to a group to re-check,
 and marks each group `rerun: true` (group 1, and every group a fix touched) or `false`. Then §2 for the `rerun` groups only, and §3 with the other groups'
 latest reports passed as `--carried <report>` — they count for coverage, while their findings come back through the re-run groups as earlier findings —
-and §4 if anything is uncovered.
+and §4 if anything is uncovered, and §4b.
 
 ## Result
 

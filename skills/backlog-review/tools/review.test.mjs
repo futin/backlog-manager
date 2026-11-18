@@ -923,7 +923,7 @@ test('coverage complete gives an empty uncovered list', () => {
   const g2 = reportFile(fx.dir, 'task-1-1.g2.md', { coverage: clean('c.mjs') });
   const r = merge(fx, ['--reports', g1, g2]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.summary, { verdict: 'approve', mode: 'full', uncovered: [], unanchored: 0, stillOpen: 0, minor: 0 });
+  assert.deepEqual(r.summary, { verdict: 'approve', mode: 'full', uncovered: [], unanchored: 0, stillOpen: 0, minor: 0, check: [], checked: 0, refuted: 0, unchecked: 0 });
   assert.match(fs.readFileSync(fx.out, 'utf8'), /all 3 files covered/);
 });
 
@@ -1169,6 +1169,152 @@ test('a re-run group saying fix with no findings is noted in the merged report',
   const r = merge(fx, ['--reports', g1, g2]);
   assert.equal(r.summary.verdict, 'fix');
   assert.match(fs.readFileSync(fx.out, 'utf8'), /group 2 said verdict: fix but its report has no Critical or Important finding/);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// The check pass (#558): `check` names what the procedure dispatches a `backlog-finding-checker` on, and `--checks` reads what each one decided.
+
+// A checker's file, beside the merged report: `<report>.check-F<n>.md`, first line the result, second the evidence.
+function checkFile(fx, id, verdict, evidence = 'see a.mjs:1') {
+  const file = fx.out.replace(/\.md$/, `.check-${id}.md`);
+  fs.writeFileSync(file, `check: ${verdict}\nevidence: ${evidence}\n`);
+  return file;
+}
+const checkPath = (fx, id) => fx.out.replace(/\.md$/, `.check-${id}.md`);
+const twoImportant = (fx, extra = {}) =>
+  reportFile(fx.dir, 'task-1-1.g1.md', { verdict: 'fix', coverage: ['a.mjs — findings'], important: [...importantEntry('a.mjs', 1, 'one'), ...importantEntry('a.mjs', 2, 'two')], ...extra });
+
+test('check lists fresh code-located findings only', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'], earlier: [finding('E1', 'a.mjs')] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', {
+    verdict: 'fix',
+    coverage: ['a.mjs — findings'],
+    critical: importantEntry('a.mjs', 1, 'boom'),
+    important: ['- the plan was not kept'],
+    earlier: ['E1 — open — still wrong'],
+  });
+  const r = merge(fx, ['--reports', g1]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.summary.check, ['F2']);
+  assert.deepEqual([r.summary.checked, r.summary.refuted, r.summary.unchecked], [0, 0, 0]);
+});
+
+test('approve has an empty check list', () => {
+  const fx = oneGroup();
+  const r = merge(fx, ['--reports', reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs') })]);
+  assert.deepEqual([r.summary.verdict, r.summary.check], ['approve', []]);
+});
+
+test('ids are stable across two merges', () => {
+  const fx = oneGroup();
+  const g1 = twoImportant(fx);
+  const first = merge(fx, ['--reports', g1]);
+  const bytes = fs.readFileSync(`${fx.manifestPath}.findings.json`, 'utf8');
+  const second = merge(fx, ['--reports', g1]);
+  assert.equal(fs.readFileSync(`${fx.manifestPath}.findings.json`, 'utf8'), bytes);
+  assert.deepEqual(second.summary.check, first.summary.check);
+  assert.deepEqual(first.summary.check, ['F1', 'F2']);
+});
+
+test('one refuted finding of two', () => {
+  const fx = oneGroup();
+  const g1 = twoImportant(fx);
+  const r = merge(fx, ['--reports', g1, '--checks', checkFile(fx, 'F1', 'refuted', 'guard at a.mjs:3'), checkFile(fx, 'F2', 'confirmed')]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.summary.verdict, 'fix');
+  assert.deepEqual(r.lines, ['a.mjs:2 — Important: two']);
+  assert.deepEqual([r.summary.checked, r.summary.refuted, r.summary.unchecked], [2, 1, 0]);
+  assert.deepEqual(openOf(fx).map((f) => f.id), ['F2']);
+  const text = fs.readFileSync(fx.out, 'utf8');
+  assert.match(text, /## Important\n\n- a\.mjs:2 — two\n/);
+  assert.doesNotMatch(text, /## Important\n\n[^#]*a\.mjs:1 — one/);
+  assert.match(text, /## Minor\n\n- a\.mjs:1 — refuted by check: one — guard at a\.mjs:3/);
+  assert.match(text, /## Checks\n\n2 checked, 1 refuted, 0 unchecked\n- F1 — refuted — guard at a\.mjs:3/);
+});
+
+test('all refuted turns fix into approve', () => {
+  const fx = oneGroup();
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { verdict: 'fix', coverage: ['a.mjs — findings'], important: importantEntry('a.mjs', 1, 'one') });
+  const r = merge(fx, ['--reports', g1, '--checks', checkFile(fx, 'F1', 'refuted')]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.summary.verdict, r.lines, r.summary.minor], ['approve', [], 1]);
+  assert.deepEqual(openOf(fx), []);
+});
+
+test('all refuted but an earlier finding still open stays fix', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'], earlier: [finding('E1', 'a.mjs')] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', {
+    verdict: 'fix',
+    coverage: ['a.mjs — findings'],
+    important: importantEntry('a.mjs', 1, 'one'),
+    earlier: ['E1 — open — still wrong'],
+  });
+  const r = merge(fx, ['--reports', g1, '--checks', checkFile(fx, 'F2', 'refuted')]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.summary.verdict, r.lines], ['fix', ['a.mjs:1 — Important: finding E1 (earlier)']]);
+});
+
+test('emptyFix still forces fix when every finding is refuted', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'] }, { files: ['b.mjs'] }] });
+  const g1 = reportFile(fx.dir, 'task-1-1.g1.md', { verdict: 'fix', coverage: clean('a.mjs') });
+  const g2 = reportFile(fx.dir, 'task-1-1.g2.md', { verdict: 'fix', coverage: ['b.mjs — findings'], important: importantEntry('b.mjs', 4, 'four') });
+  const r = merge(fx, ['--reports', g1, g2, '--checks', checkFile(fx, 'F1', 'refuted')]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.summary.verdict, r.summary.refuted, r.lines], ['fix', 1, []]);
+  assert.match(fs.readFileSync(fx.out, 'utf8'), /group 1 said verdict: fix but its report has no Critical or Important finding/);
+});
+
+test('a missing or garbled check file confirms its finding', () => {
+  const fx = oneGroup();
+  const g1 = twoImportant(fx);
+  const r = merge(fx, ['--reports', g1, '--checks', checkPath(fx, 'F1'), checkFile(fx, 'F2', 'maybe')]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.summary.verdict, 'fix');
+  assert.deepEqual(r.lines, ['a.mjs:1 — Important: one', 'a.mjs:2 — Important: two']);
+  assert.deepEqual([r.summary.checked, r.summary.refuted, r.summary.unchecked], [0, 0, 2]);
+  assert.match(fs.readFileSync(fx.out, 'utf8'), /## Checks\n\n0 checked, 0 refuted, 2 unchecked\n/);
+});
+
+test('a badly named check file is exit 1 and writes nothing', () => {
+  const fx = oneGroup();
+  const g1 = twoImportant(fx);
+  assert.equal(merge(fx, ['--reports', g1]).status, 0);
+  const before = [fx.out, `${fx.manifestPath}.findings.json`, fx.state].map((f) => [fs.readFileSync(f, 'utf8'), fs.statSync(f).mtimeMs]);
+  for (const bad of [path.join(fx.dir, 'x.md'), path.join(fx.dir, 'r.check-F99.md')]) {
+    fs.writeFileSync(bad, 'check: refuted\nevidence: nothing\n');
+    const r = merge(fx, ['--reports', g1, '--checks', bad]);
+    assert.equal(r.status, 1, bad);
+    assert.ok(r.stderr.includes(bad), r.stderr);
+  }
+  const after = [fx.out, `${fx.manifestPath}.findings.json`, fx.state].map((f) => [fs.readFileSync(f, 'utf8'), fs.statSync(f).mtimeMs]);
+  assert.deepEqual(after, before);
+});
+
+test('no --checks leaves the report as it was and the counts at zero', () => {
+  const fx = oneGroup();
+  const r = merge(fx, ['--reports', twoImportant(fx)]);
+  assert.deepEqual([r.summary.verdict, r.summary.check, r.summary.checked, r.summary.refuted, r.summary.unchecked], ['fix', ['F1', 'F2'], 0, 0, 0]);
+  assert.deepEqual(r.lines, ['a.mjs:1 — Important: one', 'a.mjs:2 — Important: two']);
+  const text = fs.readFileSync(fx.out, 'utf8');
+  assert.doesNotMatch(text, /## Checks|refuted by check/);
+  assert.match(text, /## Minor\n\nnone\n/);
+});
+
+test('--previous hands on only the findings the check left standing', () => {
+  const numbered = Array.from({ length: 10 }, (_, i) => `const x = ${i + 1};`).join('\n');
+  const repo = repoWith({}, { 'a.mjs': `${numbered}\n` });
+  const s = scope(repo, ['--mode', 'full']);
+  assert.equal(s.status, 0, s.stderr);
+  const dir = path.dirname(s.out);
+  const fx = { dir, manifestPath: s.out, out: path.join(dir, 'task-1-1.md'), state: path.join(dir, 'state', 'branch.json') };
+  const g1 = twoImportant(fx);
+  const r = merge(fx, ['--reports', g1, '--checks', checkFile(fx, 'F1', 'refuted'), checkFile(fx, 'F2', 'confirmed')]);
+  assert.equal(r.status, 0, r.stderr);
+  write(repo, 'a.mjs', `${numbered}\nconst y = 1;\n`);
+  commitAll(repo, 'fix');
+  const next = scope(repo, ['--previous', s.out]);
+  assert.equal(next.status, 0, next.stderr);
+  assert.deepEqual(earlierIds(next.manifest), [['F2']]);
 });
 
 // Twin parity: the closed lists, the range and the defaults here must equal `shared/agent.ts`, which the board validates against. Read as TEXT — a skill's
