@@ -7,6 +7,10 @@
 // Critical and Important sections verbatim. Deciding whether an Important
 // finding was prose drift, a test that could not fail, or a real defect is
 // the session's job (spec 3.2), and no regex here should ever try.
+//
+// The one thing it lifts out of `## Minor` is the entries the reviewer itself tagged `drift: ` (#559): prose-only drift its severity rule demoted to Minor so
+// it would not force a fix loop. That is still extraction, not judgement — the reviewer made the call and wrote the literal tag; this module only finds it, so
+// `/backlog-retro` can count the demoted drift and propose a sweep instead of leaving it unread in `reviews/*.md`.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -43,6 +47,22 @@ function section(text, name) {
   return EMPTY_SECTION.test(body) ? '' : body;
 }
 
+// A top-level `## Minor` entry the reviewer tagged as demoted drift: `- `, an optional `<path>:<line> — ` location, then the literal `drift:`. Case-sensitive
+// on purpose — the tag is a token the reviewer's contract spells one way, and a `Drift:` is prose that happens to start with the word, not the tag. The
+// location is one whitespace-free token because the reviewer's grammar makes it `<path>:<line>`, so a later `drift:` deep in an untagged finding never matches.
+const DRIFT_ENTRY = /^- ((?:\S+ — )?drift:.*)$/;
+
+// The tagged entries' first lines, `- ` stripped. Only left-margin entries count: an indented line is the previous entry's continuation (the reviewer's
+// entry grammar), and an empty or `None.` section is `''` from section() already, so it yields `[]` like a missing heading does.
+function driftMinors(text) {
+  const out = [];
+  for (const line of section(text, 'Minor').split('\n')) {
+    const m = DRIFT_ENTRY.exec(line.trimEnd());
+    if (m) out.push(m[1]);
+  }
+  return out;
+}
+
 // Every review under one project's run state, live and archived alike
 // (task-31 moves a finished run's `reviews/` beside its run file).
 export function readReviews(projectDirPath, project) {
@@ -76,6 +96,9 @@ export function readReviews(projectDirPath, project) {
       review.critical = section(text, 'Critical');
       review.important = section(text, 'Important');
     }
+    // Unlike the excerpts, an approving review carries these too: a review that demoted every finding to drift approves, and that is exactly the review
+    // whose drift would otherwise go unread. A review with no verdict carries none, for the reason it carries no excerpts — it is not a finished review.
+    if (review.verdict === 'approve' || review.verdict === 'fix') review.driftMinors = driftMinors(text);
     reviews.push(review);
   }
   return reviews;

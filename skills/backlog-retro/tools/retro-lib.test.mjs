@@ -354,6 +354,84 @@ test('readReviews reads a tracker item’s review, named by its bare number', as
   assert.equal(reviews[0].verdict, 'pass');
 });
 
+test('readReviews lifts the drift-tagged Minor entries out of an approving review, and nothing else', async (t) => {
+  // #559: the reviewer demotes prose-only drift to Minor with a literal `drift: ` tag, and a review whose only findings were demoted approves — so the
+  // approving review is where most of them live.
+  const { readReviews } = await import('./lib/reviews.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-retro-rev-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, 'reviews'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'reviews', 'bug-30-1.md'),
+    [
+      '# Review — bug-30 (group 1 of 1)',
+      '',
+      'verdict: approve',
+      '',
+      '## Critical',
+      'none',
+      '',
+      '## Minor',
+      '- README.md:3 — drift: says nine skills, there are ten',
+      '- server/x.ts:9 — unused import',
+      '- drift: PLAN.md figure is stale',
+      '  more text',
+      '- docs/a.md:1 — Drift: capitalised',
+      '',
+      '## Checked and clean',
+      '- drift: not a Minor at all',
+      ''
+    ].join('\n')
+  );
+  const [review] = readReviews(dir, '/P');
+  // Case-sensitive tag, continuation line ignored, untagged entry dropped, and the section ends at the next heading.
+  assert.deepEqual(review.driftMinors, ['README.md:3 — drift: says nine skills, there are ten', 'drift: PLAN.md figure is stale']);
+});
+
+test('readReviews lifts drift-tagged Minors from a fix review and still extracts its excerpts', async (t) => {
+  const { readReviews } = await import('./lib/reviews.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-retro-rev-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, 'reviews'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'reviews', 'bug-31-1.md'),
+    [
+      '# Review',
+      '',
+      'verdict: fix',
+      '',
+      '## Critical',
+      '- a.ts:1 — inverted',
+      '',
+      '## Important',
+      '- b.ts:2 — missing test',
+      '',
+      '## Minor',
+      '- c.md:4 — drift: stale date',
+      ''
+    ].join('\n')
+  );
+  const [review] = readReviews(dir, '/P');
+  assert.deepEqual(review.driftMinors, ['c.md:4 — drift: stale date']);
+  assert.equal(review.critical, '- a.ts:1 — inverted');
+  assert.equal(review.important, '- b.ts:2 — missing test');
+});
+
+test('readReviews reads an empty or missing Minor section as no drift, and gives an unfinished review no key', async (t) => {
+  const { readReviews } = await import('./lib/reviews.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-retro-rev-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, 'reviews'), { recursive: true });
+  const write = (name, lines) => fs.writeFileSync(path.join(dir, 'reviews', name), lines.join('\n'));
+  write('bug-40-1.md', ['verdict: approve', '', '## Minor', '', 'None.', '']);
+  write('bug-41-1.md', ['verdict: approve', '', '## Critical', 'none', '']);
+  write('bug-42-1.md', ['# Review', '', '## Minor', '- drift: x', '']);
+  const byId = Object.fromEntries(readReviews(dir, '/P').map((r) => [r.itemId, r]));
+  assert.deepEqual(byId['bug-40'].driftMinors, []);
+  assert.deepEqual(byId['bug-41'].driftMinors, []);
+  assert.ok(!('driftMinors' in byId['bug-42']));
+});
+
 test('readVerifyStatus reads the exit code the run recorded, or null', async (t) => {
   const { readVerifyStatus } = await import('./lib/reviews.mjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-retro-ver-'));
@@ -759,6 +837,15 @@ function modeReview(itemId, pass, verdict, root = 'P') {
 }
 
 const EMPTY_MODE = { loops: 0, costUsd: 0, peakMedian: null, nextPass: { approve: 0, fix: 0 } };
+
+test('computeTotals totals the drift-tagged Minors, keyed only by projects that have any', async () => {
+  // #559: the retro drafts a sweep for a project whose count reaches two, so a zero row would be noise, never a reading.
+  const { computeTotals } = await import('./lib/totals.mjs');
+  const review = (project, n) => ({ file: `${project}/reviews/bug-1-1.md`, project, itemId: 'bug-1', pass: 1, verdict: 'approve', driftMinors: Array(n).fill('drift: x') });
+  const totals = computeTotals(modeSweep([], [review('/P', 2), review('/P', 1), review('/Q', 0)]));
+  assert.deepEqual(totals.driftMinors, { total: 3, byProject: { '/P': 3 } });
+  assert.deepEqual(computeTotals(modeSweep([], [])).driftMinors, { total: 0, byProject: {} });
+});
 
 test('a fix loop that kept its execute session id is resumed, and its next pass is credited to that mode', async () => {
   const { computeTotals } = await import('./lib/totals.mjs');

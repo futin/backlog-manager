@@ -220,6 +220,17 @@ export function computeTotals(sweep) {
     }
   }
 
+  // The prose-only drift reviewers demoted to Minor (#559), per project, so the retro can draft a sweep where it piles up. Only projects with a count
+  // above zero are keyed: the candidate rule reads `byProject` for its threshold and a zero row would just be noise in the record.
+  const driftByProject = {};
+  let driftTotal = 0;
+  for (const review of reviews) {
+    const n = review.driftMinors?.length ?? 0;
+    if (n === 0) continue;
+    driftTotal += n;
+    driftByProject[review.project] = (driftByProject[review.project] ?? 0) + n;
+  }
+
   const walls = items.map(itemWallMin).filter((v) => Number.isFinite(v));
   const wallsWithFix = items
     .filter((i) => i.fixLoops > 0)
@@ -259,6 +270,7 @@ export function computeTotals(sweep) {
     },
     fixLoops,
     verdicts,
+    driftMinors: { total: driftTotal, byProject: driftByProject },
     context: { byProject },
     firstVerifyFailures,
     itemWallMin: {

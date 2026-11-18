@@ -3041,6 +3041,26 @@ test('backlog-reviewer reads both lines and calls a missing pair Important', () 
   )
 })
 
+test('backlog-reviewer demotes prose-only drift to a tagged Minor, except where something acts on the text', () => {
+  // #559: 23 of 62 measured fix loops were forced only by stale prose nothing acts on. The rule is scoped to the Severity section, because that is the
+  // section the verdict is derived from — the same words anywhere else in the file would not decide a severity.
+  // Sliced on the raw file's line-start headings and only then flattened: the section itself quotes `## Plan`, which a slice of the flattened text would
+  // read as the next heading.
+  const raw = fs.readFileSync(REVIEWER_MD, 'utf8')
+  const start = raw.indexOf('\n## Severity, and what it decides\n')
+  assert.ok(start !== -1, 'backlog-reviewer.md lost its `## Severity, and what it decides` section')
+  const end = raw.indexOf('\n## ', start + 1)
+  const severity = raw.slice(start, end === -1 ? undefined : end).replace(/\s+/g, ' ')
+  assert.ok(severity.includes('Prose-only drift') || severity.includes('prose-only drift'), 'the Severity section no longer defines prose-only drift')
+  assert.ok(/prose-only drift is \*\*Minor\*\*/.test(severity), 'the Severity section no longer makes other prose-only drift Minor')
+  assert.ok(severity.includes('`drift: `'), 'the Severity section no longer names the literal `drift: ` tag /backlog-retro counts')
+  for (const place of ['CLAUDE.md', '.claude/rules/', 'SKILL.md']) {
+    assert.ok(severity.includes(place), `the Severity section no longer keeps severity for drift in \`${place}\`, a file a session acts on`)
+  }
+  assert.ok(severity.includes('tells a session to read'), 'the Severity section no longer keeps severity for a doc an instruction file sends a session to')
+  assert.ok(severity.includes('own `## Plan` / `## Fix` promised'), 'the Severity section no longer excepts a text edit the item’s own plan promised')
+})
+
 // --- bug-47: losing the claim race ends this session's work on the item ------
 //
 // The clause was never missing. `## Mark it in progress` carried it as a
