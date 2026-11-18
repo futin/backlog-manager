@@ -30,12 +30,13 @@ separates is the parent and the second is the status.
 
 ## Goals
 
-- Every issue on the Board is drawn under its direct parent, and the parent is a visible header, whether or not the parent is itself on the board.
+- Every issue on the Board is drawn under its direct parent, and the parent is a visible header, whether or not the parent is itself on the board. One
+  narrow exception (§1.2): an off-board parent whose only children here are themselves lane headers is named in their chip, not drawn as an empty lane.
 - Each parent's children read as their own small board: three status cells under one shared column header.
 - The List shows the same grouping in the same order: a header row per parent, its children under it.
 - Each loaded issue is drawn exactly once per view (plus, for a live session, once in the agent deck).
-- Nothing a card, a list row or the deck does today is lost, except what this spec removes by name: three things on the card (§3.4), the List's two
-  roll-ups (§4.2, §4.3) and the deck's filtering by top (§5).
+- Nothing a card, a list row or the deck does today is lost, except what this spec removes by name: three things on the card (§3.4), the List's `N under it`
+  and its two roll-ups (§4.2, §4.3), and the deck's filtering by top (§5).
 - No new Jira request to draw the page.
 
 ## Non-goals
@@ -51,7 +52,8 @@ separates is the parent and the second is the status.
 
 - **A lane that hides work.** A collapsed lane, a cut cell and a filtered lane each say how many issues they hold. An issue that silently is not on the page
   is the failure this page exists to prevent.
-- **A page that jumps.** Starting or ending a session does not reorder lanes or move a card to another place.
+- **A page that jumps.** A session being live, or ending, does not by itself reorder lanes or move a card. What a Run writes to Jira on the way — an
+  assignee, a status — moves the card and re-sorts its lane like any other update to the issue: that is the board telling the truth, not a jump.
 - **A second hierarchy rule.** One function decides which lane an issue is in; Board, List, deck mark and band count all read it. Two walks of the parent
   chain that can disagree is how the grouped board's first draft broke.
 - **A request per lane.** A board with forty parents must not make forty calls to draw.
@@ -143,8 +145,8 @@ issue whose walk up its parent chain comes back to itself is a cycle member, and
 it is an issue with no parent. So `A` under `B` under `A` is two parentless issues, an issue that is its own parent is one, and an issue that merely
 hangs off a cycle keeps its real parent. A parentless cycle member then falls where §1.1–§1.2 put any parentless issue: a root lane when something on the
 board is under it, a card in `No parent` when nothing is. The loaded list is a cache the server filled from someone else's data; a cycle in it must cost
-an oddly placed issue, never a hung tab or a missing one. The `↳` chip and the deck's mark read the parent the lane model kept, not the raw field, so a
-cycle member is not drawn pointing at a lane it is not in.
+an oddly placed issue, never a hung tab or a missing one. The crumb, the `↳` chip and the deck's mark all read the parent the lane model kept — which it
+hands out per issue — not the raw field, so a cycle member is not drawn pointing at a lane it is not in and reads `Assigned to me` when it is.
 
 ### 1.5 What the old fold still serves
 
@@ -175,9 +177,10 @@ subtask, hierarchyLevel } } }`.
 - `status: { name, category } | null` — mapped exactly as the issue's own `status` is, through `categoryOf`. `null` when `parent.fields.status` is absent
   or has no string `name`.
 
-Each is nullable on its own, because Jira omits a field the token cannot see. The client treats `null` — and a field absent altogether, as from an API
-one version behind the client — as "not known" and draws nothing in that place
-(§3.2). The parent's priority is in the payload and is deliberately not mapped: D3 asks for type and status.
+Each is nullable on its own, because Jira omits a field the token cannot see. In `shared/types.ts` both are required and nullable — the server always sends them
+— and the client's list parser turns a field that is absent altogether into `null` at the boundary, so nothing past it meets `undefined`. The client treats
+`null` — and a field absent altogether, as from an API one version behind the client — as "not known" and draws nothing in that place (§3.2). The parent's
+priority is in the payload and is deliberately not mapped: D3 asks for type and status.
 
 No route, no request field and no cache changes; the fields ride the issue the sweep already stores. The issue cache is memory-only, so nothing mapped the
 old way outlives the restart that ships this. Every place that builds a `parent` by hand gains the two fields — `stubIssue` in
@@ -238,11 +241,12 @@ Under the header, three cells aligned to the three columns. A cell holds the lan
 (anti-goals).
 
 A cell shows its first 5 cards, **plus any card past the fifth that has a live session (my call)** — inside an open lane the cut may hide finished and waiting
-work, never running work, and exempting a card from the cut moves nothing. Past that it draws the existing flat chip — `+ N more`, `aria-expanded`, `N` being
-the cards actually hidden — which opens that one cell; open, the chip reads `show fewer`. Which cells are open is page state, lost on reload, as the shelves' is
-today. One constant replaces `SHELF_LIMIT`'s three.
+work, never running work, and exempting a card from the cut reorders nothing. Past that it draws the existing flat chip — `+ N more`, `aria-expanded`, `N` being
+the matching cards actually hidden, and no chip when none is — which opens that one cell; open, the chip reads `show fewer`. Which cells are open is page state,
+lost on reload, as the shelves' is today. One constant replaces `SHELF_LIMIT`'s three.
 
-An empty cell is empty: no placeholder card, no text.
+An empty cell is empty: no placeholder card, no text. A board with no lane to draw keeps the column header, its counts at zero, and one line under it —
+the List's words: `No issues` for an empty loaded list, `No issues match` when the filters hide everything **(my call)**.
 
 ### 3.4 Card
 
@@ -258,10 +262,10 @@ A card is today's `JiraCard` minus three things:
 Everything else stays where it is: type tile, key, priority pill, title, assignee disc and name, status, age, `↗`, mapped-repo chip, worktree chip,
 `MrChip`, `Run ▾`, the ended line with reopen.
 
-**A card whose key has a live session stays in its cell (D7).** It gains a state line — the deck card's `STATE_LABEL[state] · age` — an accent on its
-leading edge in that state's tone, and the session's open control (`SessionOpen`, the deck's). `Run ▾` stays on it and draws what `runChipState` says, which
-for a live key is the disabled chip with its reason. A key with several live sessions shows the lead one (`deckOrder`'s first) and `+N` **(my call)**. A
-`starting` reservation counts as live, as it does in the deck.
+**A card whose key has a live session stays in its cell (D7).** It gains a state line — the deck card's `STATE_LABEL[state] · age` — an accent on its leading
+edge in that state's tone, and the session's open control (`SessionOpen`, the deck's). `Run ▾` stays on it and draws what `runChipState` says: the disabled chip
+with its reason for a `starting` reservation or a live Run that does not yield, an enabled one for every other live session. A key with several live sessions
+shows the lead one (`deckOrder`'s first) and `+N` **(my call)**. A `starting` reservation counts as live, as it does in the deck.
 
 ### 3.5 Lane order
 
@@ -305,7 +309,7 @@ count already says what it holds.
 ### 4.1 Rows
 
 The List draws the same lanes in the same order (§3.5), as rows of one table: a **header row** per lane, then one row per card in the lane, then the lane's
-nested lanes. Child rows are indented under their header by one step in the Key cell, nested header rows by their depth, with §3.2's cap. Within a lane,
+nested lanes. Nested header rows are indented by their depth in the Key cell and a card row by its header's depth plus one, with §3.2's cap. Within a lane,
 card rows sort by `sortForBoard` across all statuses — the Status column says the status, so the List does not split a lane in three.
 
 There is no cut in the List **(my call)**: a row is one line, and a list that hides rows cannot be scanned or searched by eye. Folding is §3.6's, shared with
@@ -358,14 +362,16 @@ The Delivery quick filter above the table, `rowOpens`' click rule, the Key link 
 
 ### 6.1 Band
 
-`bandSub`'s `M cards` becomes `M parents` — the number of lanes that have a parent header, the `No parent` lane not counted. Today the part draws while
-there are fewer cards than issues; it now draws while the count is above zero. Its other parts are unchanged. `bandSub` is one function, so the Sessions
-page's band reads `M parents` too (§1.5). `FilterBar`'s `showing` and `GitlabBandLine` take the matching **issues** where they took shown tops —
-`GitlabBandLine` keys an MR by project and MR number, so a sub-task that falls back to its parent's MR is not counted twice.
+`bandSub`'s `M cards` becomes `M parents` (`1 parent`) — the number of lanes that have a parent header, the `No parent` lane not counted, over the whole loaded
+list whatever the filters hide: the band describes the board, not the view. Today the part draws while there are fewer cards than issues; it now draws while the
+count is above zero. Its other parts are unchanged. `bandSub` is one function, so the Sessions page's band reads `M parents` too (§1.5). `FilterBar`'s `showing`
+reads matching issues of loaded issues (`shown` and `total`, where it read kept tops of all tops), and `GitlabBandLine` takes the matching **issues** where it
+took shown tops — `GitlabBandLine` keys an MR by project and MR number, so a sub-task that falls back to its parent's MR is not counted twice.
 
 ### 6.2 Filters and search
 
-Matching is per issue: `matchesBoardFilters` on each loaded issue, nothing rolled up. `foldMatches` is deleted.
+Matching is per issue and nothing is rolled up: an issue matches when `matchesBoardFilters` passes it and, while a delivery filter is picked and the
+delivery index is loaded, `matchesDelivery` does too — the same two predicates the Board ANDs today, minus the fold. `foldMatches` is deleted.
 
 - A card that does not match is not drawn.
 - **A lane is drawn when any issue in its subtree matches, or its own on-board header issue does (my call).** The subtree includes nested lanes' headers
@@ -378,7 +384,7 @@ Matching is per issue: `matchesBoardFilters` on each loaded issue, nothing rolle
 
 ## 7 What does not change
 
-Detail and everything in it; the board picker, the view switch and its stored pick; the filter panel's four filters, their storage key and the search
+Detail and everything in it; the board picker, the view switch and its stored pick; the filter panel's five filters, their storage key and the search
 box; `JiraRunMenu`, `runChipState` and the launch sheet; the delivery index and `ticketDelivery` (its `via` is per issue and never read the fold); the
 Sessions page's rows, filters and layout (only where its band count and its `childrenOf` come from moves, §1.5); polling, the status payload and every
 route; the empty and error states of the page (`loading…`, `board unavailable`, `No boards yet`, the
@@ -388,6 +394,8 @@ unreadable-config line).
 
 - **An off-board parent's own parent is unknown.** Jira sends one level of `parent`. An off-board story whose epic is on the board therefore draws as a
   root lane, not nested under that epic. Fixing it needs a call per off-board parent — approach 3's cost — and is left out.
+- **A session on an off-board parent is not on this page.** The deck lists sessions on loaded issues, as today, so a Run started on a parent that is
+  not on the board shows on the Sessions page and in that parent's Detail, not in its lane header.
 - **A lane's header can be staler than Jira.** An off-board header's status is as fresh as its freshest child's last sweep. It is a label, not a control;
   Detail reads the truth on click.
 - **The 500 cap and the Done window cut lanes too.** A parent whose children fell outside the loaded list shows fewer cards than Jira does. The band's
@@ -413,7 +421,7 @@ Behaviour, not markup. The suites that pin today's fold are rewritten to pin the
 - Settled: an on-board header that is In Progress over all-Done cards is open; an off-board header that is In Progress over all-Done cards is settled; an
   off-board header over a nested lane whose header is In Progress and whose cards are all Done is open.
 - A lane with one card and a nested lane of two cards has a subtree count of 4: three cards and the nested header.
-- `childrenOf` is the same index `foldBoard` returned for the same input, the cycle cases included.
+- `childrenOf` for the nesting case and for each cycle case equals a hand-written map — the edges `foldBoard` returns for that input today.
 
 **Mapper (`test/jira/jira-map-issue.test.ts`)**
 
@@ -446,7 +454,9 @@ Behaviour, not markup. The suites that pin today's fold are rewritten to pin the
 - A filter that matches only a nested lane's header draws its parent lane's header above it, with empty cells, and the nested header under it.
 - A deck entry shows when its own issue matches and hides when only its parent does.
 - The column header counts cards, not header issues, and counts a card inside a folded lane.
-- The band reads `… · 16 issues from 1 query · 8 parents · …` for sixteen issues under eight parents.
+- The band reads `… · 16 issues from 1 query · 8 parents · …` for sixteen issues under eight parents, the same with a filter that hides half of them, and
+  `1 parent` for one. `showing` reads 3 of 16 when three issues match.
+- A loaded list with no issues draws the column header with zero counts and `No issues`; filters that match nothing draw it with `No issues match`.
 
 **List (`test/jira/jira-board.test.tsx`)**
 
@@ -458,12 +468,17 @@ Behaviour, not markup. The suites that pin today's fold are rewritten to pin the
 - A settled off-board lane and a folded `No parent` lane each open from the chevron on their own List header row.
 - A header row's count carries `.jira-issues-under`.
 
+**A source pin to keep true.** `test/jira/jira-session-open.test.tsx` reads `JiraCard.tsx` and requires the exact line
+`import { OpenChip } from './SessionOpen'`. The live card adds `SessionOpen` to that import; the assertion is updated to the new line, its intent — one
+home for `OpenChip` — kept.
+
 **Also rewritten.** `test/jira/jira-delivery-surfaces.test.tsx` builds a fold (`foldBoard`, `cardFold`) and renders `JiraCard` and `JiraIssueList` with
 today's props; `test/ui/ui-fold-mark.test.tsx` pins `FoldMark`; the `bandSub` cases in `test/jira/jira-lib.test.ts` and the band assertions in
 `jira-board.test.tsx` read the band's `M cards`. Each moves to the lane model's shapes with its intent kept.
 
 **Guards.** `test/guards/design-guards.test.ts` passes unchanged. Before pushing, grep `test/` for every symbol this change deletes or adds a caller of
-(`foldBoard`, `boardShelves`, `SHELF_LIMIT`, `topSessionCell`, `FoldMark`, `askParent`, `usePickedJiraBoard`, `usePersistedState`) and add each hit to the
+(`foldBoard`, `boardShelves`, `SHELF_LIMIT`, `topSessionCell`, `FoldMark`, `askParent`, `usePickedJiraBoard`, `usePersistedState`, `SessionOpen`,
+`JiraRunMenu`, `SpreadBar`, `JiraCard`) and add each hit to the
 scoped run (`CLAUDE.md`, "Touched includes the source guards").
 
 ## 10 Docs that move with the code

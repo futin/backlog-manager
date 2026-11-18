@@ -60,6 +60,7 @@ nothing today's surfaces do is dropped unless the spec says so by name.** Sectio
 - **`–` in an off-board header row's unknown cells.** Built as empty cells.
 - **The live session.** One ticket was given a mocked `Working · 12m` session at 38 % context to show a live card in a lane and in the deck at once. It
   is sample state, not a state the page invents.
+- **The spread bar's label.** The mocks name it `0 of 1 done`; the built bar is `SpreadBar`, which names itself in `progressLine`'s words (`1 to do`).
 - **Pixel values.** Every size, colour and radius in the mocks is hand-written inline style. The built surfaces compose the tokens and primitives in
   `client/src/styles.css` and `components/ui/`; where a mock value breaks a design guard (`test/guards/design-guards.test.ts`: the 11 px floor, the one
   uppercase rule, the `.jira-issues-*` geometry), the guard wins.
