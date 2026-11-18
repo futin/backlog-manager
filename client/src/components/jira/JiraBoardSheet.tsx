@@ -352,10 +352,7 @@ export function JiraBoardSheet({
 
       <section className="jira-sheet-sec" aria-label="Columns">
         <h4 className="jira-sheet-sec-title">Columns</h4>
-        <p className="jira-sheet-why">
-          The Board draws one column per status, in this order. A status the board&apos;s issues do not carry yet can be added by name; one a loaded issue
-          carries stays until its issues move on.
-        </p>
+        <p className="jira-sheet-why">the Board&apos;s columns, left to right</p>
         {columnRows.length === 0 ? (
           <p className="jira-sheet-empty">No columns yet — they appear once this board has issues.</p>
         ) : (
@@ -391,7 +388,7 @@ export function JiraBoardSheet({
             className="set-text jira-sheet-search-field"
             type="text"
             aria-label="Add a column"
-            placeholder="a status name"
+            placeholder="Add a status by name"
             maxLength={100}
             value={columnText}
             onChange={(e) => setColumnText(e.target.value)}

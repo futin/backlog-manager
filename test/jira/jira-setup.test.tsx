@@ -663,12 +663,26 @@ describe('the board sheet — Columns', () => {
     expect(savedBody().columns).toEqual([]);
   });
 
+  it('a move after Reset posts the rows as drawn, not []', async () => {
+    await renderSetup();
+    const dialog = await openEdit('Alpha board');
+    await waitFor(() => expect(colRows(dialog)).toHaveLength(3));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Reset to default' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Move In Review up' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(posts('/api/jira/boards')).toHaveLength(1));
+    expect(savedBody().columns).toEqual(colRows(dialog));
+    expect(savedBody().columns).toEqual(['In Review', 'To Do', 'Done']);
+  });
+
   it('Add appends a typed name with a Remove; a carried status has none; a name already drawn adds nothing', async () => {
     await renderSetup();
     const dialog = await openEdit('Alpha board');
     await waitFor(() => expect(colRows(dialog)).toHaveLength(3));
     const field = within(dialog).getByRole('textbox', { name: 'Add a column' });
     expect(field).toHaveAttribute('maxlength', '100');
+    expect(field).toHaveAttribute('placeholder', 'Add a status by name');
+    expect(within(dialog).getByText("the Board's columns, left to right")).toBeInTheDocument();
     await userEvent.type(field, 'QA');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
     expect(colRows(dialog)).toEqual(['To Do', 'In Review', 'Done', 'QA']);

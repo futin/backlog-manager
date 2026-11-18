@@ -2318,13 +2318,13 @@ button.rail-count { cursor: pointer }
 .jira-sheet-match-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .jira-sheet-match-meta { flex: none; margin-left: auto; font-size: 12px; color: var(--ink3) }
 
-/* The four query chips wrap as one line of chips; the project `Select` takes the third chip's place while open. */
 /* Columns: a status per row — dot and name from the Board's own header classes, the ↑/↓ pair the Skills card's, and a × only for a name no issue carries. */
 .jira-sheet-col { display: flex; align-items: center; gap: 8px; min-height: 36px; border-bottom: 1px solid var(--hairline) }
 .jira-sheet-col .jira-lanes-col { flex: 1; font-weight: 500 }
 .jira-sheet-col-x { margin-left: 0 }
 .jira-sheet-col-add { display: flex; align-items: center; gap: 8px }
 .jira-sheet-col-add .jira-sheet-search-field { flex: 1; width: auto; min-width: 0 }
+/* The four query chips wrap as one line of chips; the project `Select` takes the third chip's place while open. */
 .jira-sheet-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px }
 /* A query row: label and ×, the JQL box under them, the check line under that — the mock's `.qrow`. */
 .jira-sheet-query { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--hairline) }
