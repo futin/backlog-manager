@@ -2022,6 +2022,26 @@ button.rail-count { cursor: pointer }
 .jira-reply-repo-lbl { color: var(--ink2) }
 .jira-reply-repo-name { font-weight: 600 }
 .jira-reply-session-note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink2) }
+/* The reply editor (§8.9.7, `JiraReplyEditor`) — the draft box opened large over the mention modal: `Modal`'s split shape, evenly weighted, Write as the
+   facts slot and Preview as the body. Each column is a label over one surface that fills the column's height, so the textarea is as tall as the panel
+   allows rather than six rows; folded under 700 px the column's height is its content's (the panel scrolls as one) and the textarea keeps its 240 px
+   floor. The preview is the thread card (`.jira-mention-thread`) holding a comment body, so a reply reads here as it will in the thread once posted. */
+.jira-editor-head { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
+.jira-editor-title { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.3; color: var(--ink) }
+.jira-editor-to { font-size: 12.5px; font-weight: 500; color: var(--cyan) }
+.jira-editor-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; height: 100% }
+.jira-editor-col > .jira-reply-note { margin: 0 }
+.jira-editor-text {
+  display: block; flex: 1 1 auto; width: 100%; min-height: 240px; padding: 12px 14px; border: 1px solid var(--hairline2); border-radius: 12px; resize: none;
+  font: inherit; font-size: 13.5px; line-height: 1.5; color: var(--ink); background: var(--strip)
+}
+.jira-editor-text:focus { outline: none; border-color: var(--cyan) }
+.jira-editor-preview { flex: 1 1 auto; padding: 14px 16px }
+.jira-editor-preview > .jira-mention-txt { grid-column: auto }
+.jira-editor-empty { font-size: 13px; color: var(--ink2) }
+/* The foot: a refusal takes the free space on the left, the counter and the two actions sit right, as the box's own bar orders them. */
+.jira-editor-error { flex: 1 1 240px; min-width: 0 }
+.jira-editor-count { margin-left: 0; font-size: 12px; color: var(--ink2) }
 
 /* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
    what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px
@@ -4431,6 +4451,24 @@ button.rail-count { cursor: pointer }
 .ui-modal-split.ui-modal-narrow .ui-modal-facts { max-height: none; overflow: visible; border-bottom: none; padding: 16px 16px 0 }
 .ui-modal-split.ui-modal-narrow .ui-modal-body { overflow: visible; padding: 16px }
 .ui-modal-split.ui-modal-narrow .ui-modal-head { padding: 16px 52px 16px 16px }
+/* `foot` (Modal's header): a full-width band under both columns. It adds an `auto` ROW after the clamped `minmax(0, 1fr)` content row rather than
+   replacing it — the content row keeps the clamp the `.ui-modal` comment explains, so the columns still scroll and the band stays in view below them.
+   One rule per shape, after every shape's own row template, so each wins by order at equal specificity; the folded split has no row template (one
+   panel scroll), so there the band is sticky to the panel's bottom edge instead. */
+.ui-modal-footed { grid-template-rows: minmax(0, 1fr) auto }
+.ui-modal-narrow.ui-modal-footed { grid-template-rows: minmax(0, auto) minmax(0, 1fr) auto }
+.ui-modal-split.ui-modal-footed { grid-template-rows: auto minmax(0, 1fr) auto }
+.ui-modal-split.ui-modal-narrow.ui-modal-footed { grid-template-rows: none }
+.ui-modal-foot {
+  grid-column: 1 / -1; min-width: 0;
+  display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px;
+  padding: 12px 24px;
+  background: var(--strip); border-top: 1px solid var(--hairline);
+}
+.ui-modal-split.ui-modal-narrow .ui-modal-foot { position: sticky; bottom: 0; padding: 12px 16px }
+/* `over` (Modal's header): one step above the 60 / 61 pair, still under FormSheet's 70 / 71. */
+.ui-modal-scrim.ui-modal-over { z-index: 62 }
+.ui-modal.ui-modal-over { z-index: 63 }
 
 /* FormSheet — the sheet (§8.7). 620 px of air, the same one shell lift the
    modal carries, and a footer pinned under a scrolling body so no sheet can

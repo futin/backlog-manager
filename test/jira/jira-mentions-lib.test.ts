@@ -14,9 +14,11 @@ import {
   mentionsBand,
   mentionsCheckGate,
   postJiraReply,
+  replyMarkdown,
   replyTo,
   type JiraMentionsFailure
 } from '../../client/src/lib/jira-mentions';
+import { renderMarkdown } from '../../client/src/lib/markdown';
 import { JIRA_MENTIONS_ISSUE_CAP, type JiraMentionDraft, type JiraMentionReplySession, type JiraMention, type JiraMentionIssue, type JiraMentionsConfigured } from '../../shared/types';
 
 /*
@@ -266,5 +268,32 @@ describe('postJiraReply', () => {
   it('rejects a 200 without a posted comment as malformed', async () => {
     fetchMock.mockReturnValueOnce(res(data()));
     await expect(postJiraReply('SUP-1', 'x')).rejects.toMatchObject({ status: 0 });
+  });
+});
+
+/**
+ * The Markdown the board shows for a reply: the same mention placement `replyDoc` (server/src/jira/adf-write.ts) applies to the ADF it posts — the mention
+ * opens the first paragraph, or stands in a paragraph of its own before a reply that opens with a heading, a list or code — so the preview and the posted
+ * comment are drawn from what Jira will hold.
+ */
+describe('replyMarkdown', () => {
+  it('puts the mention inside a reply that opens with a paragraph', () => {
+    expect(replyMarkdown('Boyan', 'Thanks')).toBe('@Boyan Thanks');
+  });
+
+  it('gives the mention a paragraph of its own before a heading or a list', () => {
+    expect(replyMarkdown('Boyan', '# H')).toBe('@Boyan\n\n# H');
+    expect(replyMarkdown('Boyan', '- a')).toBe('@Boyan\n\n- a');
+  });
+
+  it('is the text alone when the reply mentions nobody', () => {
+    expect(replyMarkdown(null, '# H')).toBe('# H');
+  });
+});
+
+describe('renderMarkdown breaks', () => {
+  it('keeps a single newline soft by default and makes it a <br> only when asked, as a reply posts it', () => {
+    expect(renderMarkdown('a\nb')).not.toContain('<br');
+    expect(renderMarkdown('a\nb', { breaks: true })).toContain('<br');
   });
 });

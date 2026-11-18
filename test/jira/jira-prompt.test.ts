@@ -630,6 +630,12 @@ describe('the reply built-in', () => {
     expect(prompt).not.toContain(COMMIT_RULE);
   });
 
+  it('asks for Markdown when the answer has structure, since Post reply now turns it into formatted ADF', () => {
+    const prompt = reply();
+    expect(prompt).toContain('Markdown');
+    expect(prompt).not.toContain('Write the reply as plain paragraphs');
+  });
+
   it('is deterministic — the same text for any ticket state — and far under the cap', () => {
     const moved = detail({ status: { name: 'Done', category: 'done' }, description: 'x'.repeat(10_000) });
     expect(reply(moved)).toBe(reply());

@@ -1,4 +1,5 @@
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   JIRA_REPLY_MAX_CHARS,
@@ -16,7 +17,7 @@ import { useMountedRef } from '../../hooks/useMountedRef';
 import { useNarrow } from '../../hooks/useNarrow';
 import { elapsedSince } from '../../lib/item-age';
 import { fetchJiraDetail, initialsOf, repoBasename, statusTone, typeTone } from '../../lib/jira';
-import { askedAge, chipMentions, draftState, fetchJiraThread, mentionIssueType, replyTo, threadFold } from '../../lib/jira-mentions';
+import { askedAge, chipMentions, draftState, fetchJiraThread, mentionIssueType, replyMarkdown, replyTo, threadFold } from '../../lib/jira-mentions';
 import { openButtons } from '../../lib/jira-sessions';
 import { renderMarkdown } from '../../lib/markdown';
 import { Chevron } from '../ui/Chevron';
@@ -26,6 +27,7 @@ import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
 import { Select } from '../ui/Select';
+import { JiraReplyEditor } from './JiraReplyEditor';
 import { OpenChip } from './SessionOpen';
 
 /** Where the opened ticket stands in the page's latest answer: still waiting, dismissed, or gone from both (answered, or aged out of the window). */
@@ -260,6 +262,7 @@ export function JiraMentionModal({
         if (repo !== null) write(() => onDraft(repo));
       }}
       canRedraft={repo !== null}
+      refused={refused}
       onDiscard={() => write(onDiscard)}
       onPost={(text) =>
         write(() => onPost(text), {
@@ -277,7 +280,7 @@ export function JiraMentionModal({
           id: posted.id,
           author: { accountId: '', name: me ?? 'You' },
           created: posted.at,
-          markdown: posted.to === null ? posted.text : `@${posted.to} ${posted.text}`,
+          markdown: replyMarkdown(posted.to, posted.text),
           mine: true,
           mentionsMe: false,
           open: false
@@ -508,7 +511,7 @@ function Thread({
         {shown.map((c) => (
           <Comment key={c.id} comment={c} focused={c.id === focus ? focused : null} asking={asking && c.open} names={names} now={now} />
         ))}
-        {posted !== null && <Comment comment={posted} focused={null} asking={false} names={names} now={now} />}
+        {posted !== null && <Comment comment={posted} focused={null} asking={false} names={names} now={now} breaks />}
       </div>
     </>
   );
@@ -519,13 +522,17 @@ function Comment({
   focused,
   asking,
   names,
-  now
+  now,
+  breaks = false
 }: {
   comment: JiraThreadComment;
   focused: RefObject<HTMLDivElement> | null;
   asking: boolean;
   names: readonly string[];
   now: number;
+  /** The reply this dialog just posted: a single newline in it was posted as a `hardBreak`, so it renders as one. A comment read from Jira renders as it
+   *  always has — the read side writes a `hardBreak` as a bare newline, which CommonMark renders soft; changing that is the read side's call, not this one. */
+  breaks?: boolean;
 }) {
   const age = askedAge(comment.created, now);
   const className = asking ? 'jira-mention-cm ask' : 'jira-mention-cm';
@@ -539,7 +546,7 @@ function Comment({
         <span>{comment.mine ? 'You' : comment.author.name}</span>
         {age !== null && <span className="jira-mention-when">{age}</span>}
       </div>
-      <div className="item-body jira-mention-txt" dangerouslySetInnerHTML={{ __html: chipMentions(renderMarkdown(comment.markdown), names) }} />
+      <div className="item-body jira-mention-txt" dangerouslySetInnerHTML={{ __html: chipMentions(renderMarkdown(comment.markdown, { breaks }), names) }} />
     </div>
   );
 }
@@ -574,6 +581,12 @@ function SessionChip({
  * once they have, their words stay and `A newer draft arrived · Use it` offers the swap. Keyed on the ticket by its caller, so a step to another ticket
  * starts from that ticket's draft. Post is refused for a blank text and past `JIRA_REPLY_MAX_CHARS` (the server's own cap, which it re-checks), and a refused
  * post keeps the text — the box stays mounted because the draft does.
+ *
+ * `Open editor` opens the same text large in `JiraReplyEditor` (spec 2026-11-18-jira-reply-markdown). The editor is this box's child and owns nothing: the
+ * text, the newer-draft offer and the busy flag stay here, so both edit one text and the editor goes whenever the box does. Its DOM is portalled into the
+ * `.shell` (`App.tsx`) the click came from — the mention panel is `transform`ed and `overflow: hidden`, so drawn in place it would be positioned against
+ * and clipped to that panel — while its React events still bubble through this box. `refused` is the modal's refusal sentence, threaded in only so the
+ * editor can show it in its own foot: the modal's alert line sits behind the editor's scrim.
  */
 function DraftReply({
   issueKey,
@@ -585,6 +598,7 @@ function DraftReply({
   headActs,
   redraftBlocked,
   canRedraft,
+  refused,
   onRedraft,
   onDiscard,
   onPost
@@ -598,6 +612,7 @@ function DraftReply({
   headActs: ReactNode;
   redraftBlocked: boolean;
   canRedraft: boolean;
+  refused: string | null;
   onRedraft: () => void;
   onDiscard: () => void;
   onPost: (text: string) => void;
@@ -610,10 +625,18 @@ function DraftReply({
     setText(draft.text);
   }
   const newer = draft.at !== seed.at;
+  const useNewer = () => {
+    setSeed({ at: draft.at, text: draft.text });
+    setText(draft.text);
+  };
+  // Where the open editor is portalled: the `.shell` holding the box, read from the box's root on the click (never during render). `document.body` only
+  // when the box is drawn outside a shell, which the app never does — the editor then loses the shell's zoom, never its function. Null while closed.
+  const root = useRef<HTMLDivElement>(null);
+  const [editorHost, setEditorHost] = useState<Element | null>(null);
   const over = text.length > JIRA_REPLY_MAX_CHARS;
   const age = askedAge(draft.at, now);
   return (
-    <div className="jira-reply">
+    <div className="jira-reply" ref={root}>
       <div className="jira-reply-head">
         <span className="jira-reply-what">
           <span className="jira-reply-title">Your reply</span>
@@ -628,10 +651,7 @@ function DraftReply({
           <button
             type="button"
             className="jira-mention-more"
-            onClick={() => {
-              setSeed({ at: draft.at, text: draft.text });
-              setText(draft.text);
-            }}
+            onClick={useNewer}
           >
             Use it
           </button>
@@ -644,6 +664,9 @@ function DraftReply({
         <span>{`Posts to ${issueKey} as you and clears this mention.`}</span>
         <span className="jira-reply-count" data-over={over ? '' : undefined}>{`${text.length} / ${JIRA_REPLY_MAX_CHARS}`}</span>
         <span className="jira-reply-acts">
+          <Chip size={28} onClick={() => setEditorHost(root.current?.closest('.shell') ?? document.body)}>
+            Open editor
+          </Chip>
           <Chip
             size={28}
             disabled={busy || redraftBlocked || !canRedraft}
@@ -660,6 +683,22 @@ function DraftReply({
           </Chip>
         </span>
       </div>
+      {editorHost !== null &&
+        createPortal(
+          <JiraReplyEditor
+            issueKey={issueKey}
+            to={to}
+            text={text}
+            onText={setText}
+            busy={busy}
+            newer={newer}
+            onUseNewer={useNewer}
+            error={refused}
+            onPost={onPost}
+            onClose={() => setEditorHost(null)}
+          />,
+          editorHost
+        )}
     </div>
   );
 }

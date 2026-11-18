@@ -449,7 +449,7 @@ describe('replyDoc', () => {
   });
 
   it('targets the given account id with exactly one @, even for a name that already carries one', () => {
-    const first = (d: ReturnType<typeof replyDoc>) => d.content[0].content[0];
+    const first = (d: ReturnType<typeof replyDoc>) => (d.content[0] as { content: unknown[] }).content[0];
     expect(first(replyDoc(MARA, 'x'))).toEqual(mention);
     expect(first(replyDoc({ accountId: 'acc-m', name: '@Mara Ilić' }, 'x'))).toEqual(mention);
   });
@@ -470,5 +470,180 @@ describe('replyDoc', () => {
 
   it('round-trips through the read side as the person would see it', () => {
     expect(adfToMarkdown(replyDoc(MARA, 'Hi there\nline two\n\nSecond')).markdown).toBe('@Mara Ilić Hi there\nline two\n\nSecond');
+  });
+});
+
+/**
+ * The WRITE side reads Markdown (spec 2026-11-18-jira-reply-markdown, "Converter"): the reply is GFM, lexed by `marked` and mapped onto a narrow, validated
+ * ADF subset, so a draft with headings, lists and bold posts to Jira looking as it did in the board's preview. Every case asserts the exact ADF, because
+ * Jira refuses a whole comment over one node it does not allow — "close enough" is a 400.
+ */
+describe('replyDoc — Markdown', () => {
+  const MARA = { accountId: 'acc-m', name: 'Mara Ilić' };
+  const mention = { type: 'mention', attrs: { id: 'acc-m', text: '@Mara Ilić' } };
+  const t = (s: string, ...marks: unknown[]) => (marks.length === 0 ? { type: 'text', text: s } : { type: 'text', text: s, marks });
+  const p = (...content: unknown[]) => ({ type: 'paragraph', content });
+  const li = (...content: unknown[]) => ({ type: 'listItem', content });
+  const bullets = (...content: unknown[]) => ({ type: 'bulletList', content });
+  const strong = { type: 'strong' };
+  const em = { type: 'em' };
+  const code = { type: 'code' };
+  const link = (href: string) => ({ type: 'link', attrs: { href } });
+  const blocks = (s: string) => replyDoc(MARA, s).content as unknown[];
+
+  it('maps strong, em, strike and code marks inside the first paragraph, the mention leading', () => {
+    expect(blocks('Hi **bold** _em_ ~~gone~~ `code`')).toEqual([
+      p(mention, t(' Hi '), t('bold', strong), t(' '), t('em', em), t(' '), t('gone', { type: 'strike' }), t(' '), t('code', code))
+    ]);
+  });
+
+  it('reads the other spellings of strong and em', () => {
+    expect(blocks('__s__ *e*')).toEqual([p(mention, t(' '), t('s', strong), t(' '), t('e', em))]);
+  });
+
+  it('gives the mention a paragraph of its own when the reply opens with a heading', () => {
+    expect(blocks('# Title\n\nBody')).toEqual([p(mention), { type: 'heading', attrs: { level: 1 }, content: [t('Title')] }, p(t('Body'))]);
+  });
+
+  it('maps a bullet list, nested', () => {
+    expect(blocks('- a\n- b\n  - c')).toEqual([p(mention), bullets(li(p(t('a'))), li(p(t('b')), bullets(li(p(t('c'))))))]);
+  });
+
+  it('sets orderedList attrs.order only when the list does not start at 1', () => {
+    expect(blocks('3. x\n4. y')[1]).toEqual({ type: 'orderedList', attrs: { order: 3 }, content: [li(p(t('x'))), li(p(t('y')))] });
+    const one = blocks('1. x')[1];
+    expect(one).toEqual({ type: 'orderedList', content: [li(p(t('x')))] });
+    expect(one).not.toHaveProperty('attrs');
+  });
+
+  it('maps a fenced code block with its language, text only', () => {
+    expect(blocks('```ts\nconst a = 1\n```')).toEqual([p(mention), { type: 'codeBlock', attrs: { language: 'ts' }, content: [t('const a = 1')] }]);
+  });
+
+  it('maps an indented code block with no language, and an empty fence to a codeBlock with no content', () => {
+    const indented = blocks('a\n\n    code');
+    expect(indented).toEqual([p(mention, t(' a')), { type: 'codeBlock', content: [t('code')] }]);
+    expect(indented[1]).not.toHaveProperty('attrs');
+    expect(blocks('```\n```')).toEqual([p(mention), { type: 'codeBlock', content: [] }]);
+  });
+
+  it('maps a quote, and flattens a nested quote into the outer one', () => {
+    expect(blocks('> q')).toEqual([p(mention), { type: 'blockquote', content: [p(t('q'))] }]);
+    expect(blocks('> > q')).toEqual([p(mention), { type: 'blockquote', content: [p(t('q'))] }]);
+  });
+
+  it('maps a thematic break to a rule', () => {
+    expect(blocks('a\n\n---\n\nb')).toEqual([p(mention, t(' a')), { type: 'rule' }, p(t('b'))]);
+  });
+
+  it('maps a GFM table to header and cell nodes, each one paragraph, an empty cell an empty paragraph', () => {
+    const row = (...content: unknown[]) => ({ type: 'tableRow', content });
+    const th = (...content: unknown[]) => ({ type: 'tableHeader', content });
+    const td = (...content: unknown[]) => ({ type: 'tableCell', content });
+    expect(blocks('| h1 | h2 |\n| - | - |\n| a |  |')).toEqual([
+      p(mention),
+      { type: 'table', content: [row(th(p(t('h1'))), th(p(t('h2')))), row(td(p(t('a'))), td(p()))] }
+    ]);
+  });
+
+  it('keeps an http(s) or mailto link, drops its title, and posts any other scheme as the bare label', () => {
+    expect(blocks('[t](https://x.io)')).toEqual([p(mention, t(' '), t('t', link('https://x.io')))]);
+    expect(blocks('[t](https://x.io "T")')).toEqual([p(mention, t(' '), t('t', link('https://x.io')))]);
+    expect(blocks('[m](mailto:a@b.io)')).toEqual([p(mention, t(' '), t('m', link('mailto:a@b.io')))]);
+    expect(blocks('[t](javascript:alert(1))')).toEqual([p(mention, t(' t'))]);
+  });
+
+  it('marks a GFM autolink as a link', () => {
+    expect(blocks('see https://x.io')).toEqual([p(mention, t(' see '), t('https://x.io', link('https://x.io')))]);
+  });
+
+  it('lets code combine with nothing but link, so bold code is just code', () => {
+    expect(blocks('**`x`**')).toEqual([p(mention, t(' '), t('x', code))]);
+  });
+
+  it('decodes the five named entities, numeric references and backslash escapes, and leaves any other entity as written', () => {
+    expect(blocks('a &amp; b &lt; &#169; &#x41; &hellip; \\*')).toEqual([p(mention, t(' a & b < © A &hellip; *'))]);
+    expect(blocks('&gt; &quot; &#39;')).toEqual([p(mention, t(' > " \''))]);
+  });
+
+  it('turns a heading inside a list item or a quote into a strong paragraph', () => {
+    expect(blocks('- # h')).toEqual([p(mention), bullets(li(p(t('h', strong))))]);
+    expect(blocks('> # h')).toEqual([p(mention), { type: 'blockquote', content: [p(t('h', strong))] }]);
+  });
+
+  it('turns a rule inside a list item into a paragraph ---, and a table inside a quote into one paragraph per row', () => {
+    expect(blocks('- a\n\n  ---')).toEqual([p(mention), bullets(li(p(t('a')), p(t('---'))))]);
+    expect(blocks('> | a | b |\n> | - | - |\n> | c | d |')).toEqual([p(mention), { type: 'blockquote', content: [p(t('a | b')), p(t('c | d'))] }]);
+  });
+
+  it('opens a list item that starts with code with an empty paragraph', () => {
+    expect(blocks('- ```\n  x\n  ```')).toEqual([p(mention), bullets(li(p(), { type: 'codeBlock', content: [t('x')] }))]);
+  });
+
+  it('posts a task item as a plain item whose text starts with its box', () => {
+    expect(blocks('- [ ] todo\n- [x] done')).toEqual([p(mention), bullets(li(p(t('[ ] todo'))), li(p(t('[x] done'))))]);
+  });
+
+  it('posts raw HTML and an image as their source text', () => {
+    expect(blocks('<b>x</b>')).toEqual([p(mention, t(' <b>x</b>'))]);
+    expect(blocks('![alt](/a.png)')).toEqual([p(mention, t(' ![alt](/a.png)'))]);
+  });
+
+  it('leaves prose that only looks like Markdown alone, and maps a 1) list as the preview shows it', () => {
+    expect(blocks('snake_case_name and 2 * 3 * 4')).toEqual([p(mention, t(' snake_case_name and 2 * 3 * 4'))]);
+    expect(blocks('#123 is fixed')).toEqual([p(mention, t(' #123 is fixed'))]);
+    expect(blocks('1) first')).toEqual([p(mention), { type: 'orderedList', content: [li(p(t('first')))] }]);
+  });
+
+  it('never emits an empty text node', () => {
+    const inputs = [
+      'Hi **bold** _em_ ~~gone~~ `code`',
+      '# Title\n\nBody',
+      '- a\n- b\n  - c',
+      '```\n```',
+      '| h1 | h2 |\n| - | - |\n| a |  |',
+      '[t](https://x.io)',
+      '**`x`**',
+      '- # h',
+      '- ```\n  x\n  ```',
+      '> | a | b |\n> | - | - |\n> | c | d |',
+      'a  \nb',
+      '**a** \n_b_'
+    ];
+    const empties = (n: unknown): number => {
+      if (Array.isArray(n)) return n.reduce((s: number, c) => s + empties(c), 0);
+      if (n === null || typeof n !== 'object') return 0;
+      const o = n as { type?: string; text?: string; content?: unknown };
+      return (o.type === 'text' && o.text === '' ? 1 : 0) + empties(o.content);
+    };
+    for (const s of inputs) expect(empties(replyDoc(MARA, s).content)).toBe(0);
+  });
+
+  // ADF's schema gives `blockquote.content` a minimum of one block, so an empty quote makes Jira refuse the whole comment while the preview showed nothing
+  // wrong. A line holding only `>` lexes to a quote with no children.
+  it('never emits an empty blockquote', () => {
+    const emptyQuotes = (n: unknown): number => {
+      if (Array.isArray(n)) return n.reduce((s: number, c) => s + emptyQuotes(c), 0);
+      if (n === null || typeof n !== 'object') return 0;
+      const o = n as { type?: string; content?: unknown[] };
+      return (o.type === 'blockquote' && (o.content ?? []).length === 0 ? 1 : 0) + emptyQuotes(o.content);
+    };
+    for (const s of ['>', '> ', '>\n>', 'Before\n\n>\n\nAfter']) expect(emptyQuotes(replyDoc(MARA, s).content)).toBe(0);
+    // The text around an empty quote still posts.
+    expect(JSON.stringify(replyDoc(MARA, 'Before\n\n>\n\nAfter').content)).toContain('After');
+  });
+
+  it('round-trips canonical Markdown through the read side unchanged', () => {
+    const md = [
+      'Thanks, **bold**, _em_ and `code`, see [t](https://x.io)',
+      '## Heading',
+      '- one\n- two',
+      '1. first\n2. second',
+      '```ts\nconst a = 1\n```',
+      '> quoted',
+      '---',
+      'End'
+    ].join('\n\n');
+    expect(adfToMarkdown(replyDoc(MARA, md)).markdown).toBe(`@Mara Ilić ${md}`);
   });
 });

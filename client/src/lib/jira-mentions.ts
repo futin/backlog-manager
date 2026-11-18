@@ -9,6 +9,8 @@
  * and Show-dismissed keys with their guards, the List's rows and search, the excerpt split around the user's own `@`, and the band's sub-line. Since Task 10
  * it holds the mention modal's too: the thread read, the walk over the view's order, the fold and the `@Name` chips.
  */
+import { marked } from 'marked';
+
 import { errorOf, postJson } from './http';
 import { elapsedSince } from './item-age';
 import { accessPhrase } from './jira';
@@ -485,6 +487,19 @@ export function chipMentions(html: string, names: readonly string[]): string {
       return inCode > 0 ? part : part.replace(re, (m) => `<span class="jira-mentions-at">${m}</span>`);
     })
     .join('');
+}
+
+/**
+ * The Markdown a reply becomes once Jira holds it: `@<to>` before the text, placed by the rule `replyDoc` (server/src/jira/adf-write.ts) applies to the ADF
+ * it posts — opening the first paragraph, followed by a space, when the reply opens with a paragraph; in a paragraph of its own, a blank line before the
+ * text, when it opens with a heading, a list, code, a quote, a rule or a table (a mention inside a heading would make the name a heading). The first block
+ * is decided by `marked`'s lexer, the one the server uses, so the editor's preview and the posted comment place it where Jira will. `to` null — a mention
+ * Jira sent without an author — is the text alone, as the server posts no mention node then.
+ */
+export function replyMarkdown(to: string | null, text: string): string {
+  if (to === null) return text;
+  const first = marked.lexer(text, { gfm: true }).find((t) => t.type !== 'space');
+  return first === undefined || first.type === 'paragraph' ? `@${to} ${text}` : `@${to}\n\n${text}`;
 }
 
 // ── Draft a reply ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
