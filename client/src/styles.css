@@ -4218,9 +4218,6 @@ button.rail-count { cursor: pointer }
    it — and no rule of its own beyond the colour, because a marker is a weight
    and an ink and nothing else (§8.3). */
 .ui-marker-untyped { color: var(--amber-ink) }
-/* The Jira card's F1 marker (grouped-board spec §5). `--amber-text`, the amber word set on paper: the card's 2 px `--amber-solid` ring beside it
-   already carries the hue, and bare `--amber` fails daylight contrast as type (test/guards/daylight-contrast.test.ts). */
-.ui-marker-match { color: var(--amber-text) }
 /* Multi-dashboard task 10: `running on <machine>` / `Starting on <machine>`. A place, not a warning — `--ink3`, the same ink as `kind` (§8.3). */
 .ui-marker-machine { color: var(--ink3) }
 
