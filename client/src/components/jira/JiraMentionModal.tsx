@@ -530,8 +530,8 @@ function Comment({
   asking: boolean;
   names: readonly string[];
   now: number;
-  /** The reply this dialog just posted: a single newline in it was posted as a `hardBreak`, so it renders as one. A comment read from Jira renders as it
-   *  always has — the read side writes a `hardBreak` as a bare newline, which CommonMark renders soft; changing that is the read side's call, not this one. */
+  /** The reply this dialog just posted: a single newline in it was posted as a `hardBreak`, so it renders as one. A comment read from Jira needs no flag —
+   *  the read side (`adfToMarkdown`) already spells a `hardBreak` as a CommonMark hard break (#572), so it renders as a `<br>` with `breaks` off. */
   breaks?: boolean;
 }) {
   const age = askedAge(comment.created, now);
