@@ -1670,7 +1670,7 @@ button.rail-count { cursor: pointer }
 .jira-lanes-col[data-tone='doing'] .jira-lanes-dot { background: var(--amber-solid) }
 .jira-lanes-col[data-tone='done'] .jira-lanes-dot { background: var(--green-solid) }
 .jira-lanes-count {
-  margin-left: auto; display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--strip); font-size: 11px; font-weight: 500; color: var(--ink2)
+  display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--strip); font-size: 11px; font-weight: 500; color: var(--ink2)
 }
 .jira-lane { display: flex; flex-direction: column; gap: 10px; min-width: 0; background: var(--steel); border-radius: 16px; padding: 12px; --card-hover: var(--card-hover-steel) }
 .jira-lane[data-depth='1'] { margin-left: 24px }
@@ -1696,7 +1696,13 @@ button.rail-count { cursor: pointer }
 /* `not on this board`: why an off-board header has no Run ▾, assignee or priority. Dashed, the stroke an absent value already uses. */
 .jira-lane-tag { flex: none; padding: 1px 7px; border-radius: 8px; border: 1px dashed var(--hairline2); font-size: 11px; font-weight: 500; color: var(--ink3); white-space: nowrap }
 .jira-lane-label { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; line-height: 28px; color: var(--ink) }
-.jira-lane-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; max-width: 45%; min-width: 0; padding-top: 4px }
+/* The on-board header's right-hand cluster: spread, count and the card's marks (repo, worktree, MR, `Run ▾`) on ONE line, as the mocks draw it. It wraps
+   inside its 45% only once the main side's title has truncated as far as it goes (spec §3.2: the title gives way first); /ui-verify found it a column, which
+   put `Run ▾` on a second line at every width. */
+.jira-lane-side {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px; flex: none; max-width: 45%; min-width: 0; padding-top: 4px
+}
+.jira-lane-side > .jira-lane-tally { padding-top: 0 }
 /* Spread bar and count. The bar is `SpreadBar`'s; `.jira-lane-bar` is the page-owned span that gives it a width, since its own class is a ui-* family. */
 .jira-lane-tally { display: flex; align-items: center; gap: 8px; flex: none; padding-top: 4px }
 .jira-lane-bar { display: block; flex: none; width: 96px }
@@ -1711,7 +1717,9 @@ button.rail-count { cursor: pointer }
   .jira-lanes-head, .jira-lane-cells { grid-template-columns: 1fr }
   .jira-lane[data-depth] { margin-left: 0 }
   .jira-lane-head { flex-wrap: wrap }
-  .jira-lane-side { max-width: 100%; align-items: flex-start }
+  /* The cluster takes its own line under the title (spec §3.2), indented past the chevron: as a row beside a `flex: 1 1 0%` main it would fit on the title's
+     line and squeeze the title to nothing, which /ui-verify measured at 9 px. */
+  .jira-lane-side { flex: 1 1 100%; max-width: 100%; justify-content: flex-start; padding-left: 36px }
 }
 /* A live card's (or header's) state line: the deck card's words with the stripe's dot, `+N` for the key's other live sessions a step quieter. */
 .jira-card-live { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; font-weight: 500; color: var(--ink2) }
@@ -1843,10 +1851,10 @@ button.rail-count { cursor: pointer }
   .jira-issues-scroll { overflow-x: auto }
 }
 .jira-issues-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
-.jira-issues-table thead th:nth-child(1) { width: 140px } /* Session: the word ellipsises (`Waiting on your answer` is longer); the dot and the age are the reading and never cut. 140, not 110: the
-   second line's `↳ TIMIFY-26366` pill (a session on a folded ticket) is 96 px and `+1` beside it another 18, which 132 cut to `TIMIFY-26…` in /ui-verify.
-   Summary pays. */
-.jira-issues-table thead th:nth-child(2) { width: 108px } /* Key: fits a twelve-character key (TIMIFY-28086) at 13 px. */
+.jira-issues-table thead th:nth-child(1) { width: 126px } /* Session: the word ellipsises (`Waiting on your answer` is longer); the dot and the age are the reading and never cut.
+   126 keeps `Working · 12m` whole. It was 140 for the second line's `↳ TIMIFY-26366` pill (a session on a folded ticket), which went with the fold
+   (parent-lanes spec §4.3); the 14 px it freed went to Key. */
+.jira-issues-table thead th:nth-child(2) { width: 122px } /* Key: a twelve-character key (TIMIFY-28086, 82 px at 13 px) whole at depth 0 and 1 of the lane indent. */
 .jira-issues-table thead th:nth-child(4) { width: 100px }
 .jira-issues-table thead th:nth-child(5) { width: 116px }
 .jira-issues-scroll[data-delivery] .jira-issues-table { min-width: 1376px }
@@ -1877,8 +1885,23 @@ button.rail-count { cursor: pointer }
 /* The lane chevron is 28 px in a 44 px row; it pulls left into the cell's padding so the title lines up near where a card row's starts. */
 .jira-issues-summary .jira-lane-chev { margin-left: -6px }
 .jira-issues-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600 }
+/* A header row's Summary line (chevron, title, `↳` chip, tag, count) wraps rather than squeeze the title. Summary is the column that pays for every fixed one,
+   down to 116 px at 1440 with Delivery shown, and there /ui-verify measured every header title at 0–11 px beside the never-cut count. The title keeps a floor
+   of what is left after the chevron (28 px less its 6 px pull, plus the 8 px gap) up to 12em, so the chip, the tag and the count drop to a second line first;
+   where Summary is wide the line stays one and the title grows, pushing the count to the cell's right edge as the mock draws it. The tag ellipsises here, as
+   it never needs to in a Board header. */
+.jira-issues-lane .jira-issues-summary .jira-issues-flex { flex-wrap: wrap; row-gap: 2px }
+.jira-issues-lane .jira-issues-summary .jira-issues-title, .jira-issues-lane .jira-issues-summary .jira-issues-label {
+  flex: 1 1 0; min-width: min(12em, calc(100% - 30px))
+}
+.jira-issues-summary .jira-lane-tag { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis }
 /* Indent is padding inside the Key cell, never a column (spec §4.1): `data-depth` is the lane depth capped at LANE_INDENT_CAP (3). The step is 14 px, not the
-   Board's 24, because the Key column is a fixed 108 px and a twelve-character key must still mostly fit at the cap. */
+   Board's 24, because the Key column is a fixed 122 px and a twelve-character key must still mostly fit at the cap. An indented key gives up most of its
+   right padding to the indent — the Summary cell's own 12 px still separates the two — so /ui-verify measured a twelve-character key whole at depth 1 and a
+   nine-character one (PAY-10018) whole at the cap, where 108 px with the full padding cut every child row's TIMIFY key. */
+.jira-issues-row td.jira-issues-key[data-depth='1'], .jira-issues-row td.jira-issues-key[data-depth='2'], .jira-issues-row td.jira-issues-key[data-depth='3'] {
+  padding-right: 4px
+}
 .jira-issues-row td.jira-issues-key[data-depth='1'] { padding-left: 26px }
 .jira-issues-row td.jira-issues-key[data-depth='2'] { padding-left: 40px }
 .jira-issues-row td.jira-issues-key[data-depth='3'] { padding-left: 54px }
