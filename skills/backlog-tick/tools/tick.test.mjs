@@ -1367,3 +1367,87 @@ test('caps: status reports the machine caps and where they came from', async (t)
   assert.equal(s.status, 0);
   assert.deepEqual(s.v.caps, { maxPlans: 3, maxPrs: 2, source: 'unreadable' });
 });
+
+// --- decide --peek -------------------------------------------------------
+// The scheduler's pre-spawn gate: the verdict of a dry run, but `idle`/`busy` exit 10 so a shell can skip the spawn, and a final idle still records its caps.
+
+/** A peek that must print one verdict line; the exit code is the caller's to assert, since 10 is the point. */
+async function peek(fx, args = [], opts = {}) {
+  const r = await tick(fx, ['decide', '--peek', ...args], opts);
+  assert.ok(r.v, `not JSON: ${r.stdout} ${r.stderr}`);
+  return r;
+}
+
+test('peek: nothing to do exits 10 and still records the caps it printed', async (t) => {
+  const fx = project(t);
+  const r = await peek(fx);
+  assert.equal(r.status, 10);
+  assert.equal(r.v.verdict, 'idle');
+  assert.equal(r.v.peek, true);
+  assert.equal(r.v.dryRun, true);
+  assert.equal(fs.existsSync(fx.lockFile), false);
+  const last = readJson(path.join(fx.lockDir, 'last-decide.json'));
+  assert.equal(last.verdict, 'idle');
+  assert.deepEqual(last.caps, r.v.caps);
+});
+
+test('peek: a ready task exits 0, takes no lock and records nothing', async (t) => {
+  const fx = project(t);
+  item(fx, 'task-4', TASK_READY);
+  commitAll(fx.root);
+  const r = await peek(fx);
+  assert.equal(r.status, 0);
+  assert.equal(r.v.verdict, 'execute');
+  assert.equal(r.v.id, 'task-4');
+  assert.equal(fs.existsSync(fx.lockFile), false);
+  assert.equal(fs.existsSync(path.join(fx.lockDir, 'last-decide.json')), false);
+});
+
+test('peek: a stale lock is a recover verdict, exit 0, and nothing on disk moves', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-3', BUG_RAW, { started: '2026-10-22T10:00:00Z', phase: 'groom' });
+  writeLockFile(fx, staleLock('groom', 'bug-3'));
+  const lockBefore = fs.readFileSync(fx.lockFile);
+  const r = await peek(fx);
+  assert.equal(r.status, 0);
+  assert.equal(r.v.verdict, 'recover');
+  assert.deepEqual(fs.readFileSync(fx.lockFile), lockBefore);
+  assert.equal(fs.existsSync(fx.stateFile), false);
+});
+
+test('peek: a fresh lock held for another id is busy, exit 10', async (t) => {
+  const fx = project(t);
+  writeLockFile(fx, staleLock('groom', 'bug-3', ago(1 * MIN)));
+  const r = await peek(fx);
+  assert.equal(r.status, 10);
+  assert.equal(r.v.verdict, 'busy');
+});
+
+test('peek and dry-run together are a usage error naming both, in either order', async (t) => {
+  const fx = project(t);
+  for (const args of [['--peek', '--dry-run'], ['--dry-run', '--peek']]) {
+    const r = await tick(fx, ['decide', ...args]);
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, '');
+    const first = r.stderr.split('\n')[0];
+    assert.match(first, /--peek/);
+    assert.match(first, /--dry-run/);
+    assert.doesNotMatch(first, /unknown argument/);
+  }
+});
+
+test('plain decide with nothing to do still exits 0', async (t) => {
+  const fx = project(t);
+  const r = await tick(fx, ['decide']);
+  assert.equal(r.status, 0);
+  assert.equal(r.v.verdict, 'idle');
+  assert.equal('peek' in r.v, false);
+});
+
+test('peek: a tracker project with the stack down is idle, exit 10', async (t) => {
+  const fx = project(t, { tracker: true });
+  const r = await peek(fx, [], { port: DEAD_PORT });
+  assert.equal(r.status, 10);
+  assert.equal(r.v.verdict, 'idle');
+  assert.equal(r.v.reason, 'stack down');
+});

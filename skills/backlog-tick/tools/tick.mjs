@@ -2,13 +2,15 @@
 // tick: pick at most ONE unit of backlog work per scheduled tick — an execute of a ready bug or task, or a groom of an ungroomed bug or a refactor —
 // when nothing else is in this project's pipeline, and remember what each tick did so a failure is not retried until the item changes.
 //
-//   tick.mjs decide [--max-prs M] [--max-plans N] [--base <ref>] [--lock-ttl <minutes>] [--dry-run]
+//   tick.mjs decide [--max-prs M] [--max-plans N] [--base <ref>] [--lock-ttl <minutes>] [--dry-run | --peek]
 //   tick.mjs record <id> ok|failed --kind groom|execute [--reason <text>]
 //   tick.mjs status [--json]
 //   tick.mjs forget <id>
 //
 // `decide` prints ONE JSON line and exits 0 for every verdict — `execute`, `groom`, `recover`, `busy`, `idle` — because a verdict is an answer, not a
-// failure: the `backlog-tick` skill reads it and acts. Exit 1 is a usage error; exit 2 is the tool itself failing (an unreadable `state.json`, say), which
+// failure: the `backlog-tick` skill reads it and acts. `--peek` is the scheduler's pre-spawn gate (the dashboard's routine `when:` key), never the session's:
+// it is a dry run that still records its caps, and it exits 10 for `idle` / `busy` so a shell can test it — the gate must carry the same decide flags as the
+// job's prompt, or it answers a question the session will not ask. Exit 1 is a usage error; exit 2 is the tool itself failing (an unreadable `state.json`, say), which
 // the skill must stop on rather than read as "nothing to do"; exit 3 is `record` finding the lock held under another id — the outcome written, the lock left
 // (see `cmdRecord`). An omitted `--max-prs` / `--max-plans` falls back to `tick.json`'s `maxPrs` / `maxPlans` (Settings › Shared › Backlog tick), then to 2 / 3:
 // a flag is a fact about one schedule, the setting the machine's default for every job that does not say (#378). The design is docs/superpowers/specs/2026-10-22-backlog-tick-design.md; this header keeps only what the code needs.
@@ -47,7 +49,7 @@ import {
 } from './tick-state.mjs';
 
 const USAGE = `usage:
-  tick.mjs decide [--max-prs M] [--max-plans N] [--base <ref>] [--lock-ttl <minutes>] [--dry-run]
+  tick.mjs decide [--max-prs M] [--max-plans N] [--base <ref>] [--lock-ttl <minutes>] [--dry-run | --peek]
   tick.mjs record <id> ok|failed --kind groom|execute [--reason <text>]
   tick.mjs status [--json]
   tick.mjs forget <id>
@@ -326,10 +328,11 @@ function intFlag(name, value, min) {
 
 // An unflagged cap is `null`, not a default: the default is `tick.json`'s, and that file is read only at step 3b, once the lock is settled (`cmdDecide`).
 function parseDecide(argv) {
-  const opts = { maxPrs: null, maxPlans: null, base: null, lockTtl: DEFAULT_LOCK_TTL_MIN, dryRun: false };
+  const opts = { maxPrs: null, maxPlans: null, base: null, lockTtl: DEFAULT_LOCK_TTL_MIN, dryRun: false, peek: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') opts.dryRun = true;
+    else if (a === '--peek') opts.peek = true;
     else if (a === '--max-prs') opts.maxPrs = intFlag(a, argv[++i], 0);
     else if (a === '--max-plans') opts.maxPlans = intFlag(a, argv[++i], 0);
     else if (a === '--lock-ttl') opts.lockTtl = intFlag(a, argv[++i], 1);
@@ -339,6 +342,10 @@ function parseDecide(argv) {
       opts.base = v;
     } else throw new UsageError(`decide: unknown argument ${JSON.stringify(a)}`);
   }
+  // A peek IS a dry run that also records its caps, so the two flags together say nothing a person could have meant; refuse rather than pick one.
+  if (opts.peek && opts.dryRun) throw new UsageError('decide: --peek and --dry-run are mutually exclusive (a peek is already a dry run that records its caps)');
+  // Every reader below that tests `dryRun` to mean "write nothing" is right for a peek; only step 7's `recordCaps` tells them apart, through `peek`.
+  if (opts.peek) opts.dryRun = true;
   return opts;
 }
 
@@ -356,8 +363,9 @@ async function cmdDecide(argv) {
   // cwd can be undone from without the session reasoning about git.
   let root = null;
   const say = (verdict, reason, extra = {}) => {
-    process.stdout.write(`${JSON.stringify({ verdict, reason, ...extra, root, caps, dryRun: opts.dryRun })}\n`);
-    return 0;
+    process.stdout.write(`${JSON.stringify({ verdict, reason, ...extra, root, caps, dryRun: opts.dryRun, ...(opts.peek ? { peek: true } : {}) })}\n`);
+    // 10 is the peek's "do not spawn": a shell can `tick.mjs decide --peek` as a `when:` test without parsing the line.
+    return opts.peek && (verdict === 'idle' || verdict === 'busy') ? 10 : 0;
   };
 
   // 1. Not a project.
@@ -465,7 +473,7 @@ async function cmdDecide(argv) {
   }
 
   // 7. Nothing.
-  if (!opts.dryRun) recordCaps(dir, 'idle', caps, now);
+  if (!opts.dryRun || opts.peek) recordCaps(dir, 'idle', caps, now);
   return say('idle', `nothing to do: ${executeWhy}; ${groomWhy}`);
 }
 
