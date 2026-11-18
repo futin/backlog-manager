@@ -34,7 +34,8 @@ separates is the parent and the second is the status.
 - Each parent's children read as their own small board: three status cells under one shared column header.
 - The List shows the same grouping in the same order: a header row per parent, its children under it.
 - Each loaded issue is drawn exactly once per view (plus, for a live session, once in the agent deck).
-- Nothing a card, a list row or the deck does today is lost, except the three things §3.4 names.
+- Nothing a card, a list row or the deck does today is lost, except what this spec removes by name: three things on the card (§3.4), the List's two
+  roll-ups (§4.2, §4.3) and the deck's filtering by top (§5).
 - No new Jira request to draw the page.
 
 ## Non-goals
@@ -115,8 +116,8 @@ loaded list and returns the lanes in drawing order. Names are the builder's; the
 
 - One **on-board lane** per header issue. Its header is the issue itself.
 - One **off-board lane** per key that is the `parent.key` of at least one *card* and is not on the board. Its header is a stub built from that card's
-  `parent` (§2). When several cards name the same off-board parent, the stub is read from the most recently updated one — its payload is the freshest
-  **(my call)**.
+  `parent` (§2). When several cards name the same off-board parent, the stub is read from the most recently updated one, the first in `sortForBoard`'s
+  order — its payload is the freshest **(my call)**.
 - One **`No parent` lane** when at least one card has no parent.
 
 A card's lane is its parent's lane, or `No parent`. A header issue is never a card, in any lane.
@@ -142,17 +143,20 @@ issue whose walk up its parent chain comes back to itself is a cycle member, and
 it is an issue with no parent. So `A` under `B` under `A` is two parentless issues, an issue that is its own parent is one, and an issue that merely
 hangs off a cycle keeps its real parent. A parentless cycle member then falls where §1.1–§1.2 put any parentless issue: a root lane when something on the
 board is under it, a card in `No parent` when nothing is. The loaded list is a cache the server filled from someone else's data; a cycle in it must cost
-an oddly placed issue, never a hung tab or a missing one.
+an oddly placed issue, never a hung tab or a missing one. The `↳` chip and the deck's mark read the parent the lane model kept, not the raw field, so a
+cycle member is not drawn pointing at a lane it is not in.
 
 ### 1.5 What the old fold still serves
 
 `childrenOf` — the on-board parent → direct-children index, in which a cycle member is nobody's child — is what Detail's Children tree, `modalTree` and
 `childSessions` read. It stays, built in the same pass, and holds exactly the edges §1.4 keeps, so it is the same index for the same input as today.
 
-Everything else fold-shaped loses its last caller: `foldBoard`'s `tops` and `under`, `sortTops`, `rolledUpdated`, `cardFold`, `foldProgress`,
+Everything else fold-shaped loses its last caller: `foldBoard`'s `tops` and `under`, `sortTops`, `rolledUpdated`, `cardFold`,
 `foldMatches`, `matchMarker`, `childrenLine`, `boardShelves` with `Shelf` and `ShelfCard`, `SHELF_LIMIT`, `topSessionCell` with `TopSessionCell`
 (§4.3 replaces the roll-up), and `DeckEntry.top` (§5). `boardAgents` takes the loaded issues, not a fold. Each is deleted unless something outside the
-Board and Sessions pages still calls it — the builder greps, and a function with a remaining caller stays untouched.
+Board and Sessions pages still calls it — the builder greps, and a function with a remaining caller stays untouched. Two that do stay: `foldProgress`
+and `JiraProgress`, which `modalTree` calls and a lane's spread bar reads for the same three-way split. `childSessions` builds deck entries as well, so
+its entries lose `top` with the deck's.
 
 **The Sessions page reads the fold too** — `fold.tops.length` for its band and `fold.childrenOf` for the Detail it hosts
 (`JiraSessionsView`). It moves to the lane model with the Board **(my call)**: its `childrenOf` comes from the same function and its band reads the same
@@ -171,7 +175,8 @@ subtask, hierarchyLevel } } }`.
 - `status: { name, category } | null` — mapped exactly as the issue's own `status` is, through `categoryOf`. `null` when `parent.fields.status` is absent
   or has no string `name`.
 
-Each is nullable on its own, because Jira omits a field the token cannot see. The client treats `null` as "not known" and draws nothing in that place
+Each is nullable on its own, because Jira omits a field the token cannot see. The client treats `null` — and a field absent altogether, as from an API
+one version behind the client — as "not known" and draws nothing in that place
 (§3.2). The parent's priority is in the payload and is deliberately not mapped: D3 asks for type and status.
 
 No route, no request field and no cache changes; the fields ride the issue the sweep already stores. The issue cache is memory-only, so nothing mapped the
@@ -189,8 +194,9 @@ band counts issues, the columns count cards. The row stays visible while the lan
 
 ### 3.2 Lane header
 
-A full-width row above the lane's three cells. Left to right: a chevron that folds the lane (§3.6), then the parent, then on the right the lane's spread bar
-and count, then the parent's actions.
+A full-width row above the lane's three cells. Left to right: a chevron button that folds the lane (§3.6) — `aria-expanded`, and an `aria-label` of `Collapse
+<KEY>` or `Expand <KEY>`, `Collapse No parent` or `Expand No parent` for that lane, the same words on the List's header rows — then the parent, then on the
+right the lane's spread bar and count, then the parent's actions.
 
 **The count and the spread bar cover the lane's subtree** **(my call)** — every on-board issue under this header at any depth, nested lanes' headers
 included (§1.3), split by status category in `SpreadBar`'s existing three tones — so a folded lane still says how much it holds. The count reads
@@ -209,9 +215,12 @@ under the title at narrow widths rather than drop a control.
 when `status` is `null`), the tag `not on this board`, the spread bar and count, and the `↗` link to Jira (`https://<site>/browse/<key>`, composed the way
 `stubIssue` already does from the status payload's site; no link while the site is unknown). It has no `Run ▾`, no assignee, no priority, no parent chip: none
 of that is known without a call, and a control that works on some headers and is absent on others must be absent for a visible reason — the tag is that reason.
+A stub's summary can be empty — Jira sent none — and the summary button then reads the key, so the header always has its way into Detail.
 Clicking its summary reads the parent once — `GET /api/jira/issue/:key`, through the shared parent read in `lib/jira-parent.ts` (`askParent`) — and opens Detail
-on what lands, the summary inert while the read is out and the failure sentence shown on that header alone **(my call)**. That is a request on a click, not a
-request to draw. `Run ▾` on that parent is then one step away, in Detail.
+on what lands, the summary inert while the read is out and the failure sentence shown on that header alone **(my call)**. An answer is acted on only while
+the header that asked is still drawn and no other off-board header has been clicked since: the newest click wins, and a read that lands for a header that
+has gone, or been overtaken, opens nothing. The failure sentence sits under that header's summary and is cleared by the next click on any off-board
+header. That is a request on a click, not a request to draw. `Run ▾` on that parent is then one step away, in Detail.
 
 **The header must not mount `useParentRead`.** That hook retains its key for as long as it is mounted, and the shared store answers every later ask from
 the copy it holds while any holder is up — which is why the Run menu mounts it only inside its open panel. On a header that is always drawn it would pin
@@ -228,10 +237,10 @@ Under the header, three cells aligned to the three columns. A cell holds the lan
 (`columnOf`), sorted by `sortForBoard` — newest update first, key as tie-break. A live session does not change a card's place: the page must not jump
 (anti-goals).
 
-A cell shows its first 5 cards, **plus any card past the fifth that has a live session (my call)** — the cut may hide finished and waiting work, never running
-work, and exempting a card from the cut moves nothing. Past that it draws the existing flat chip — `+ N more`, `aria-expanded`, `N` being the cards actually
-hidden — which opens that one cell; open, the chip reads `show fewer`. Which cells are open is page state, lost on reload, as the shelves' is today. One
-constant replaces `SHELF_LIMIT`'s three.
+A cell shows its first 5 cards, **plus any card past the fifth that has a live session (my call)** — inside an open lane the cut may hide finished and waiting
+work, never running work, and exempting a card from the cut moves nothing. Past that it draws the existing flat chip — `+ N more`, `aria-expanded`, `N` being
+the cards actually hidden — which opens that one cell; open, the chip reads `show fewer`. Which cells are open is page state, lost on reload, as the shelves' is
+today. One constant replaces `SHELF_LIMIT`'s three.
 
 An empty cell is empty: no placeholder card, no text.
 
@@ -260,6 +269,9 @@ for a live key is the disabled chip with its reason. A key with several live ses
 Done too; otherwise it is **open**. An off-board header's own status does not count: it is not on the board, and a lane whose only work left is someone
 else's is finished as far as this board goes.
 
+Settled, the sort stamp and the fold default (§3.6) read the whole subtree, never the filtered one **(my call)**: a filter hides cards, it does not
+reorder lanes or fold and unfold them. The count and the spread bar read the matching issues (§6.2), so the bar and the number beside it always agree.
+
 Root lanes draw open first, then settled. Within each group they sort by the newest `updated` across the header issue (when on the board) and every issue in the
 subtree, newest first, lane key as tie-break — the rule `sortTops` applies to a top and everything under it today. The `No parent` lane is the last lane of
 whichever group it falls in. Nested lanes sort among their siblings by the same rule and are not split from their parent: a settled nested lane stays under its
@@ -279,6 +291,10 @@ not a key per board: `usePersistedState` reads storage once on mount and never a
 page, so a per-board key would write board A's folds under board B's name. An override for a lane no longer on the board is dropped when its board's
 entry is next written — judged against the unfiltered lanes of a loaded list, never against a filtered view or a list still loading, either of which
 would wipe overrides for lanes that are merely not shown.
+
+**The stored value is clamped on read**, as the panel filters are (`clampJiraPanelFilters`): anything but an object of board entries, each an object whose
+values are `open` or `closed`, reads as no overrides — a bad board entry drops alone, a bad lane value drops alone. `usePersistedState` hands back a
+stored `null`, string or array exactly as it found it, and indexing one by board id would take the page down.
 
 **While the search box holds text, folding is ignored**: every shown lane draws open and the chevron is disabled **(my call)**. A match hidden inside a
 folded lane reads as no match. Panel filters do not do this — they survive a reload and would pin every lane open for good; under a filter a folded lane's
@@ -300,13 +316,15 @@ the Board — one stored state per board, so a lane folded in one view is folded
 Today's, all of them, in today's order: Session, Key, Summary, Type, Status, Delivery (only while the delivery index is non-null), Priority, Assignee (disc
 and name), Sprint, Updated, Run. The mock's `Who` and its missing Sprint column are shorthand, not a change.
 
+- **Every header row, of all three kinds, carries the chevron (§3.6) and the lane's count in its Summary cell.** Folds are shared with the Board (§4.1) and
+  settled lanes start folded, so a header row without a chevron would be a lane nobody can open from the List. The count takes the place of today's
+  `N under it` and its class: `.jira-issues-under` stays as the count's class, because a design guard pins its `flex: none` rule.
 - **A header row for an on-board parent** fills every cell with that issue's own values, exactly as a row does, and draws `Run ▾`. Its Summary cell also
-  carries the chevron, the parent chip (`↳ <KEY>`) when it has a parent, and the lane's count, in place of today's `N under it` and in its class:
-  `.jira-issues-under` stays as the count's class, because a design guard pins its `flex: none` rule.
+  carries the parent chip (`↳ <KEY>`) when it has a parent.
 - **A header row for an off-board parent** fills Key, Summary, Type and Status from the stub and leaves the other cells empty **(my call — the mock draws
-  `–`)**: an empty cell says "not known", a dash reads as "none". Its Summary cell carries the `not on this board` tag; its Run cell is empty; its key links
-  to Jira and its summary opens Detail as on the Board.
-- **The `No parent` header row** carries the label and the count only.
+  `–`)**: an empty cell says "not known", a dash reads as "none". Its Summary cell also carries the `not on this board` tag; its Run cell is empty; its key
+  links to Jira by the Board header's rule (no link while the site is unknown) and its summary opens Detail as on the Board (§3.2).
+- **The `No parent` header row** carries the label `No parent` in its Summary cell, beside the chevron and the count; every other cell is empty.
 
 Header rows sit on a tinted ground so the eye finds the groups before it reads a cell. The `.jira-issues-*` classes and their geometry rules are kept; the
 indent is padding inside the Key cell, not a change to the table's columns. Every header row keeps the table's full cell count — an unknown value is an
@@ -316,8 +334,8 @@ empty `td`, never a `colSpan` — because the table is `table-layout: fixed` and
 
 Each row stands for one issue, so two roll-ups go:
 
-- **Session** shows the row's own key: the lead live session's state and age, else the newest ended one, `+N` when the key has more. The `FoldMark` that
-  said "this is running on a child" goes with the fold.
+- **Session** shows the row's own key: the lead live session's state and age, else the newest ended one, `+N` when the key has more live sessions, as
+  today. The `FoldMark` that said "this is running on a child" goes with the fold.
 - **Updated** shows the row's own `updated`. The newest-across-the-subtree stamp survives only inside the lane sort.
 
 ### 4.4 What stays
@@ -342,8 +360,8 @@ The Delivery quick filter above the table, `rowOpens`' click rule, the Key link 
 
 `bandSub`'s `M cards` becomes `M parents` — the number of lanes that have a parent header, the `No parent` lane not counted. Today the part draws while
 there are fewer cards than issues; it now draws while the count is above zero. Its other parts are unchanged. `bandSub` is one function, so the Sessions
-page's band reads `M parents` too (§1.5). `FilterBar`'s `showing` and `GitlabBandLine` take shown **issues** where they took shown tops —
-`GitlabBandLine` keys an MR by project and id, so a sub-task that falls back to its parent's MR is not counted twice.
+page's band reads `M parents` too (§1.5). `FilterBar`'s `showing` and `GitlabBandLine` take the matching **issues** where they took shown tops —
+`GitlabBandLine` keys an MR by project and MR number, so a sub-task that falls back to its parent's MR is not counted twice.
 
 ### 6.2 Filters and search
 
@@ -352,7 +370,8 @@ Matching is per issue: `matchesBoardFilters` on each loaded issue, nothing rolle
 - A card that does not match is not drawn.
 - **A lane is drawn when any issue in its subtree matches, or its own on-board header issue does (my call).** The subtree includes nested lanes' headers
   (§1.3), so a nested lane that is drawn always has its ancestors drawn above it: a filter never lifts a nested lane out to the root.
-- A lane drawn only because its header issue matches draws as a header with empty cells: the header is an issue on this board that the filter asked for.
+- A lane drawn only because its header issue matches draws as a header with empty cells and neither count nor spread bar: the header is an issue on this
+  board that the filter asked for, and there is nothing under it to count.
 - A lane that is drawn draws its header even when the header issue does not itself match: it is what says whose children these are. A header issue shown
   only for that reason is not counted in `showing`.
 - Counts on a lane header and in the column header are of matching issues.
@@ -402,8 +421,8 @@ Behaviour, not markup. The suites that pin today's fold are rewritten to pin the
   'indeterminate' } }` → `type { name: 'Epic', level: 1, subtask: false }`, `status { name: 'In Progress', category: 'indeterminate' }`.
 - A parent with only a summary → `type: null`, `status: null`, key and summary kept. The suite's existing parent assertions (the full-issue case and the
   parent-without-a-summary case) compare whole objects and are updated to carry the two fields.
-- A parent whose `issuetype` has no `hierarchyLevel` and `subtask: true` → `level: -1`.
-- A parent whose `status` has a name and an unknown category key → whatever `categoryOf` answers for the issue's own status in that case.
+- A parent whose `issuetype` has a name, no `hierarchyLevel` and `subtask: true` → `level: -1`.
+- A parent whose `status` has a name and an unknown category key → category `new`, `categoryOf`'s answer for the issue's own status in that case.
 
 **Board (`test/jira/jira-board.test.tsx`)**
 
@@ -415,9 +434,13 @@ Behaviour, not markup. The suites that pin today's fold are rewritten to pin the
 - A card with a live session is in its cell, at its `sortForBoard` place, with the state line and an open control, and its issue is in the deck too.
 - A cell with 7 cards whose 7th has a live session draws 6 and `+ 1 more`, the live one after the first five.
 - Clicking an off-board header's summary makes one request for that key and opens Detail on the answer; drawing the board makes none.
+- Two off-board headers clicked in turn, the first read landing last → Detail opens on the second parent only. A failed read shows its sentence under
+  that header and the next header click clears it.
+- An off-board header whose stub summary is `''` draws the key as its summary button, and the click opens Detail.
 - A settled lane starts folded and an open one open; a toggle is stored for that board and read back on remount; switching to a second board without a
   remount shows that board's own folds, and toggling there leaves the first board's stored.
 - With search text, a folded lane holding a match draws open and its chevron is disabled.
+- Stored folds of `null`, a string, an array, and a map whose one board entry holds a junk lane value each draw the page with default folds.
 - A filter that matches one card of a three-card lane draws the lane with one card and a count of 1; a filter that matches none of a lane's cards hides the
   lane; a filter that matches only an on-board header draws that header with empty cells.
 - A filter that matches only a nested lane's header draws its parent lane's header above it, with empty cells, and the nested header under it.
@@ -432,10 +455,11 @@ Behaviour, not markup. The suites that pin today's fold are rewritten to pin the
 - An off-board header row has empty Priority, Assignee, Sprint, Updated and Run cells.
 - A row's Session cell shows its own key's session and never a `FoldMark`; a row's Updated is its own stamp.
 - Folding a lane in the List folds it on the Board.
+- A settled off-board lane and a folded `No parent` lane each open from the chevron on their own List header row.
 - A header row's count carries `.jira-issues-under`.
 
 **Also rewritten.** `test/jira/jira-delivery-surfaces.test.tsx` builds a fold (`foldBoard`, `cardFold`) and renders `JiraCard` and `JiraIssueList` with
-today's props; `test/ui/ui-fold-mark.test.tsx` pins `FoldMark`; `test/jira/jira-session-open.test.tsx` and the `bandSub` assertions in
+today's props; `test/ui/ui-fold-mark.test.tsx` pins `FoldMark`; the `bandSub` cases in `test/jira/jira-lib.test.ts` and the band assertions in
 `jira-board.test.tsx` read the band's `M cards`. Each moves to the lane model's shapes with its intent kept.
 
 **Guards.** `test/guards/design-guards.test.ts` passes unchanged. Before pushing, grep `test/` for every symbol this change deletes or adds a caller of
@@ -450,6 +474,7 @@ scoped run (`CLAUDE.md`, "Touched includes the source guards").
   `GitlabBandLine` ("over the tops"), `useParentRead` (a third asker that does not hold).
 - `docs/subsystems/board.md` and `.claude/rules/board.md` where either names a deleted symbol.
 - The grouped-board spec gets a one-line note at its top pointing here; its text is a record and is not rewritten.
+- Each new lane component cites its `.claude/DESIGN.md` subsection in its header comment, as `.claude/rules/board.md` asks of every component.
 
 ## Left to the builder
 
