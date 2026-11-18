@@ -41,8 +41,8 @@ you find, say so in the task's commit body and use what is right. No size budget
   `lastCommit`, `started` in any `*.test.tsx` (`test/guards/fixture-clock.test.ts`). Jest suites stay one level down in `test/<feature>/`.
 - **Fixtures discriminate.** Every field a test asserts gets its own value (two parents never share a summary, two cards never share an `updated`), and
   per-key logic (per board, per lane) is exercised with at least two keys.
-- **`test/guards/design-guards.test.ts` passes unchanged**: the 11 px floor, the one uppercase rule, the `.jira-issues-*` geometry, `.jira-issues-under`'s
-  `flex: none`.
+- **`test/guards/design-guards.test.ts` passes, and the one edit allowed to it is a new `.ui-*` family name in its `FAMILIES` list**: the 11 px floor,
+  the one uppercase rule, the `.jira-issues-*` geometry, `.jira-issues-under`'s `flex: none`.
 - **New text wraps at 160 columns** (tables and code exempt); commit bodies at 72. Commits end with
   `Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>` (or the executing model's own line). Stage by path, never `git add -A`. Nothing is pushed.
 
@@ -82,6 +82,7 @@ Input classes the spec implies and no spec test case names. Each has its test in
 | `client/src/components/jira/JiraBoardView.tsx` | Modify — Board branch (4), List branch (5), band and deck (6) | 4–6 |
 | `client/src/components/jira/GitlabBandLine.tsx` | Modify — prop `tops` → `issues` | 4 |
 | `client/src/components/ui/FoldMark.tsx` | Modify — optional `title` | 4 |
+| `client/src/components/ui/<new primitives>.tsx`, `test/ui/ui-<name>.test.tsx` | Create — the looks the card and the lane header share | 4 |
 | `client/src/components/jira/JiraIssueList.tsx` | Modify — lane header rows and indented card rows | 5 |
 | `client/src/components/jira/JiraAgentDeck.tsx`, `JiraBandSub.tsx`, `JiraSessionsView.tsx` | Modify — direct parent mark; `M parents`; lane model | 6 |
 | `client/src/styles.css` | Modify — lane, live-card and List header-row rules; the fold's and shelves' rules removed | 4–6 |
@@ -256,7 +257,7 @@ export function setLaneFold(folds: JiraLaneFolds, boardId: string, board: JiraLa
     `laneOverrides(folds, '__proto__')` and `laneOverrides(folds, 'toString')` are each `{}`. With `board` = the `setLaneFold` case's board below
     (it holds lane `PAY-1`), for each of the ids `'constructor'` and `'__proto__'`: `setLaneFold(folds, id, board, 'PAY-1', false)` then
     `laneOverrides(_, id)` equals `{ 'PAY-1': 'closed' }`, `b1` is unchanged, and `JSON.parse(JSON.stringify(result))` clamps back to the same two
-    board entries. `clampLaneFolds(JSON.parse('{"__proto__":{"PAY-1":"closed"},"b1":{"__proto__":"closed","PAY-1":"open"}}'))` → the `__proto__`
+    board entries. `clampLaneFolds(JSON.parse('{"__proto__":{"PAY-1":"closed"},"b1":{"PAY-1":"open"}}'))` → the `__proto__`
     board reads `{ 'PAY-1': 'closed' }`, `b1` reads `{ 'PAY-1': 'open' }`, and `({})['PAY-1']` is still `undefined` (`Object.prototype` untouched).
   - `laneOpen`: a settled lane with `{}` → `false`; an open lane with `{}` → `true`; `{ [lane.key]: 'open' }` on a settled lane → `true`;
     `{ [lane.key]: 'closed' }` on an open lane → `false`.
@@ -283,6 +284,10 @@ lanes and the `↳` chip). Read `00-mock-audit.md`'s Board table first: the on-b
 - Modify: `client/src/components/jira/JiraCard.tsx`, `client/src/components/jira/JiraBoardView.tsx`, `client/src/components/jira/GitlabBandLine.tsx`,
   `client/src/components/ui/FoldMark.tsx`, `client/src/hooks/usePickedJiraBoard.ts`, `client/src/lib/jira.ts` (`crumbOf`), `client/src/lib/jira-deck.ts`,
   `client/src/styles.css`
+- Create: one file in `client/src/components/ui/` per look the card and the lane header both draw (Step 6; names are the implementer's), each with
+  its own `test/ui/ui-<name>.test.tsx`
+- Modify: `docs/subsystems/board.md` (a row per new primitive in its primitives table, ~l.129), `test/guards/design-guards.test.ts` (only a new
+  `.ui-*` family name in guard 7's `FAMILIES`, ~l.324)
 - Delete: `client/src/components/jira/JiraShelves.tsx`
 - Test: `test/jira/jira-board.test.tsx` (the Board describes), `test/jira/jira-lib.test.ts` (`describe('lib/jira-deck')`, `describe('crumbOf')`),
   `test/ui/ui-fold-mark.test.tsx`, `test/jira/jira-delivery-surfaces.test.tsx` (its `JiraCard` renders), `test/jira/jira-session-open.test.tsx` (the
@@ -322,7 +327,8 @@ lanes and the `↳` chip). Read `00-mock-audit.md`'s Board table first: the on-b
   one → `'ended'`, `since` its `endedAt`; with two ended links → the newer `endedAt`. A session on a child does not give its parent's key an entry.
   `endedByKey`: two ended links on one key come newest first; a live link is not in it. `crumbOf` with a fourth argument of `null` on an issue that has
   a raw parent and is assigned to me → the `mine` kind; with no fourth argument → `parent` kind, as today. `FoldMark` with `title="Checkout v2"` →
-  that `title`; without → the key. Remove the `boardShelves` / `SHELF_LIMIT` cases.
+  that `title`; without → the key. Remove the `boardShelves` / `SHELF_LIMIT` cases. Each new `components/ui/` primitive (Step 6) gets a `test/ui/`
+  case written before it: given its props it draws their text under its `.ui-*` class, and draws nothing where a prop says there is nothing to draw.
 - [ ] **Step 2: Write the failing page tests** in `test/jira/jira-board.test.tsx`, replacing the describes that pin columns of tops, the fold block, the
   match ring and the shelves (`the columns`, `the card`, `filters and search`, `the fold`, `the agent deck and the status shelves`; keep every
   `Run ▾`, worktree-chip and deck case of those and of `Run ▾ on the card, and the deck card for a live key`, re-anchored to lanes). Build fixtures
@@ -393,9 +399,11 @@ lanes and the `↳` chip). Read `00-mock-audit.md`'s Board table first: the on-b
   when `matchesBoardFilters` would treat `search` as non-empty. The List branch keeps its old `rows`, `fold` and `cellStates` until Task 5, so its
   describes must still pass; change a List assertion in this task only where it reads `showing`. Delete `JiraShelves.tsx`.
 - [ ] **Step 8: Styles.** Lane, header, cell, live-card and nested-indent rules in `client/src/styles.css` from the tokens and primitives already there
-  (the mocks' inline pixel values are not the source); remove `.jira-card-fold`, `.jira-card-match` and the shelf rules that lost their markup.
-- [ ] **Step 9: Run — expect PASS.** `pnpm run typecheck`; `pnpm exec jest` over the five test files above plus `test/guards/design-guards.test.ts`,
-  `test/guards/fixture-clock.test.ts` and every suite
+  (the mocks' inline pixel values are not the source); remove `.jira-card-fold`, `.jira-card-match` and the shelf rules that lost their markup. Each
+  new primitive's `.ui-*` family goes in the stylesheet's ui primitives block and its name in guard 7's `FAMILIES` list
+  (`test/guards/design-guards.test.ts`), as every existing family is.
+- [ ] **Step 9: Run — expect PASS.** `pnpm run typecheck`; `pnpm exec jest` over the test files above (the new `test/ui/` ones included) plus
+  `test/guards/design-guards.test.ts`, `test/guards/fixture-clock.test.ts` and every suite
   `grep -l "FoldMark\|askParent\|usePersistedState\|SessionOpen\|JiraRunMenu\|SpreadBar\|JiraCard\|usePickedJiraBoard" -r test/` lists.
 - [ ] **Step 10: Commit** — `feat(jira): draw the Board as parent lanes`.
 
@@ -447,7 +455,8 @@ Mocks: `List.dc.html` (header rows on a tinted ground, indented child rows, an o
 
 ### Task 6: Deck, band and Sessions page on the lane model; the fold is deleted (§1.5, §5, §6.1)
 
-Mock: `Board.dc.html` — the band's `8 parents` and the deck card's `↳` mark. The deck card itself is drawn simplified there (`00-mock-audit.md`).
+Mocks: `Board.dc.html` — the band's `8 parents`; `BoardDeep.dc.html` — the agent deck and its card's `↳` mark. The deck card is drawn simplified there
+(`00-mock-audit.md`).
 
 **Files:**
 - Modify: `client/src/lib/jira-deck.ts`, `client/src/lib/jira.ts`, `client/src/hooks/usePickedJiraBoard.ts`,
