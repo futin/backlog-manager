@@ -66,7 +66,8 @@ The token `[backlog-tick]` anywhere after the id means `backlog-tick` dispatched
 the worktree, the branch or the push, so execute owns its git exactly as `--finish pr` says, typed as given and never overridden. Never ask the user anything,
 and run nothing in the background (the foreground-only rule above holds in full, its dev-server exception included). Every stop — a refusal at the gate, a
 lost claim race, a failed verification, a push or PR that did not happen — ends the final message with one line starting `failed:` and the reason; success
-ends it with the PR URL on its own line. Why, and the stops, are in `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/backlog-tick.md`.
+ends it with the PR URL on its own line. Why, and the stops, are in `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/backlog-tick.md`. Read every `references/*.md` file with the Read tool, never
+`cat`-chained in Bash — a `=====` separator is zsh `=cmd` expansion and aborts the line after the first file.
 
 ## Finish mode: `in-place` or `pr`
 

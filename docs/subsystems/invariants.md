@@ -271,7 +271,7 @@ because most schedules say nothing, and changing a machine-wide limit by editing
 0 — "never groom" is a schedule that should not exist, not a cap — while the flag still accepts 0 for the one job that wants it. The open-PR count is the one read that can fail
 quietly, so every failure is a cap: no `gh`, a non-zero exit, output that does not parse, or a result that reaches the `--limit 500` ceiling (which may have
 been cut) reads `cannot count open PRs` and execute is skipped, never assumed zero. The lock is the other half: `decide` writes it only on `execute` or `groom`,
-so an `idle` or `busy` tick — and every `--dry-run` — leaves nothing behind that could block the next one, and `record` releases it. It closes the window
+so an `idle` or `busy` tick — and every `--dry-run` and `--peek` — leaves nothing behind that could block the next one, and `record` releases it. It closes the window
 between a tick choosing an item and the skill writing its `started:` marker or claim.
 
 **Only when idle.** Anything already happening to this project's pipeline is `busy`, and the tick exits: a `running` or `paused` orchestrator run; a

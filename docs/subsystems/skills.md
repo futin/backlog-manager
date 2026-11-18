@@ -89,8 +89,8 @@ and a byte ratchet on the model-invocable total (4,911 B before #557, 2,398 B af
 - `skills/backlog-orchestrate/tools/orchestrate.mjs` — `backlog-orchestrate`'s own CLI, and the run file's only writer. Since task-47 it has two modes of its
   own, chosen by the same committed marker `backlog.mjs` reads (see below).
 - `skills/backlog-tick/tools/tick.mjs` — `backlog-tick`'s own CLI, and the tick home's only writer (through `tick-state.mjs`, the one file that writes). Four
-  subcommands: `decide` (reads the project and prints ONE JSON verdict — `execute`, `groom`, `recover`, `busy` or `idle` — taking the lock only for the first
-  two), `record <id> ok|failed --kind groom|execute`, `status` and `forget <id>`. See [`backlog-tick`](#backlog-tick) below.
+  subcommands: `decide [--dry-run | --peek]` (`--peek` is the scheduler's pre-spawn gate and exits `10` for `idle`/`busy`; reads the project and prints ONE JSON verdict — `execute`, `groom`, `recover`, `busy` or `idle` — taking the lock only for the first
+  two), `record <id> ok|failed --kind groom|execute` (the session's vocabulary stays `ok|failed`; on a tracker project the tool may store a `failed` as `released` — no hash — when the API was down or its `bootedAt` differs from the lock's, at most once in a row, and `released` neither counts toward nor resets the breaker), `status` and `forget <id>`. See [`backlog-tick`](#backlog-tick) below.
 - `skills/pr-resolve/tools/pr-resolve.mjs` — `pr-resolve`'s own CLI, and the pr-resolve home's only writer. `parse <owner/repo#N> [--reclaim <id>]` prints
   the target's worktree, lock and outcome paths; `lock take|release` holds one resolve per PR (exit `3` refused); `outcome` writes the record the board reads.
   See [`pr-resolve`](#pr-resolve) below.
