@@ -600,7 +600,7 @@ button.rail-count { cursor: pointer }
   display: flex; flex-direction: column; gap: var(--card-inner-gap);
   padding: var(--card-pad-t) var(--card-pad-x) var(--card-pad-b);
 }
-.board-card-title { font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--ink) }
+.board-card-title { font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere }
 /* The foot: project dot + name left, `id · date` pushed right. No wrapping —
    the row's two halves have fixed jobs and a second line would put the date
    under the project name, where it reads as a second fact about it. What gives
