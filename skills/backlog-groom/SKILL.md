@@ -1,10 +1,8 @@
 ---
 name: backlog-groom
-description: >
-  Turn an open bug, idea, refactor or task into something executable: promote an idea or refactor into a planned task, fill in a bug's cause and fix, or close
-  it as decided against. Use it to groom the backlog, plan idea 3, plan ref 2, reject task 5, say this is out of scope, or make this executable. Never files new
-  items (backlog-capture) or does the work (backlog-execute); a groom lands on disk only, uncommitted, unless the trigger says `--finish pr`.
-  Trigger: /backlog-groom
+description: >-
+  Groom one open backlog item into something executable: promote an idea or refactor into a planned task, fill in a bug's cause and fix, or reject it as out of
+  scope. Use to groom the backlog, plan idea 3, plan ref 2, reject task 5, or make this executable. Not for doing the work — that is /backlog-execute.
 trigger: /backlog-groom
 ---
 

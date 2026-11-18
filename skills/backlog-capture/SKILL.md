@@ -1,9 +1,8 @@
 ---
 name: backlog-capture
-description: >
-  File a new item into the backlog — a bug, an idea, a task, a refactor, or something already decided against — as its own file under backlog/, creating the
-  store itself if this repo doesn't have one yet. Use to log a bug, note this idea, flag code that should be cleaned up, add to the backlog, capture that, or
-  remember this for later. Never moves or reclassifies an existing item — filing only, nothing else. Trigger: /backlog-capture
+description: >-
+  File a new backlog item — a bug, idea, task, refactor or out-of-scope — creating the backlog/ store if missing. Use to capture that, log a bug, note this
+  idea, flag code to clean up, or add to the backlog. Not for changing an existing item — that is /backlog-groom.
 trigger: /backlog-capture
 ---
 

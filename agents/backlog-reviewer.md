@@ -1,10 +1,7 @@
 ---
 name: backlog-reviewer
-description: >
-  Review one file group of a change — an item branch before it merges or is pushed, or a checkout against its base: correctness first, then the repo's CLAUDE.md
-  invariants, test adequacy, and the executor's contract-sweep and red-proof lines. Dispatched per group, all groups in one message, by
-  skills/backlog-review/references/procedure.md. Writes its full report to the given path and returns only the verdict plus Critical/Important findings.
-  Read-only.
+description: >-
+  Reviews one file group of a change against its base for backlog-review's procedure, read-only, writing its report to the path it is given.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

@@ -1,9 +1,8 @@
 ---
 name: backlog-execute
-description: >
-  Do the actual work on a groomed bug or task — debug and fix, or build out its plan — then archive it once verification proves it worked; refuses anything
-  ungroomed. Use it to execute task 12, fix bug 7, work the backlog, or do the next thing. Never touches ideas or rejected items, and never commits unless the
-  trigger says `--finish pr`, which ends in a PR it never merges. Trigger: /backlog-execute
+description: >-
+  Execute a groomed bug or task — debug and fix it, or build out its plan — then archive it once verification proves it; refuses anything ungroomed. Use to
+  execute task 12, fix bug 7, work the backlog, or do the next thing. Not for planning — that is /backlog-groom.
 trigger: /backlog-execute
 ---
 
