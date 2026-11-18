@@ -473,6 +473,27 @@ function assignEarlier(groups, findings, config, owns = () => true) {
   return out;
 }
 
+// The earlier rounds' open Minors (#531), split by what this increment did to their file. A Minor on a `review` file goes to the group holding that file,
+// to be marked resolved or open like any earlier finding; everything else is carried open without a reviewer (`carriedMinor`) — and, unlike
+// `assignEarlier`, never to group 1 and never into a group 1 created for it: a Minor cannot change the verdict, so dispatching a reviewer only to re-read one
+// would buy nothing. A rename moves the Minor with its file (same line — the best guess there is); a deletion drops it, because the code it named is gone,
+// and `merge` counts those (`droppedMinor`) as resolved. Mutates `groups`' `earlier`; returns { carriedMinor, droppedMinor }.
+function splitCarriedMinor(groups, files, minor) {
+  const renamed = new Map(files.filter((f) => f.status === 'R' && f.oldPath !== null).map((f) => [f.oldPath, f.path]));
+  const byFile = new Map(files.map((f) => [f.path, f]));
+  const carriedMinor = [];
+  const droppedMinor = [];
+  for (const original of minor) {
+    const m = original.path !== null && renamed.has(original.path) ? { ...original, path: renamed.get(original.path) } : original;
+    const file = m.path === null ? undefined : byFile.get(m.path);
+    const owner = file?.decision === 'review' ? groups.find((grp) => grp.files.includes(m.path)) : undefined;
+    if (file?.decision === 'skip' && file.reason === 'deleted') droppedMinor.push(m);
+    else if (owner) owner.earlier.push(m);
+    else carriedMinor.push(m);
+  }
+  return { carriedMinor, droppedMinor };
+}
+
 // realpath for a path that may not exist (an item moved or deleted in the work tree): the nearest existing ancestor is resolved and the rest re-joined, so
 // a symlinked prefix — macOS's /var → /private/var above all — never makes an in-tree path look like an outside one.
 function realpathLoose(p) {
@@ -541,6 +562,10 @@ function readState(file) {
   if (!isObject(state) || typeof state.base !== 'string' || typeof state.report !== 'string' || typeof state.verdict !== 'string') return null;
   if (![state.head, state.mergeBase, state.to].every((oid) => typeof oid === 'string' && HEX_OID.test(oid))) return null;
   if (!Array.isArray(state.open) || !state.open.every(isFinding)) return null;
+  // `minor` (#531) is younger than the rest: a state written before it has none and still reviews incrementally, carrying nothing. One that is present but
+  // not a list of findings is damaged like any other field, and costs a full review.
+  if (!Object.hasOwn(state, 'minor')) return { ...state, minor: [] };
+  if (!Array.isArray(state.minor) || !state.minor.every(isFinding)) return null;
   return state;
 }
 
@@ -661,21 +686,29 @@ function scopeCommand(args) {
   if (modeReason !== null) process.stderr.write(`full review: ${modeReason}\n`);
   if (mode === 'incremental' && from === to) {
     // Printed here, not by the three callers, so the sentence cannot be worded three ways.
-    writeManifest(out, { tree: top, base, mode, modeReason, from, to, mergeBase, head, item, config, statePath: stateFile, files: [], groups: [] });
+    writeManifest(out, {
+      tree: top, base, mode, modeReason, from, to, mergeBase, head, item, config, statePath: stateFile, files: [], groups: [], carriedMinor: [], droppedMinor: [],
+    });
     process.stderr.write(`no changes since the last review (${state.report}) — its verdict stands: ${state.verdict}\n`);
     process.stdout.write(`${JSON.stringify({ ...summary([], []), noChange: true })}\n`);
     return 0;
   }
   const files = listFiles(top, from, to, item);
   let groups;
+  // Only an incremental review carries Minors: a full one re-reads every file, so an earlier Minor is re-found fresh or not at all, and a `--previous` fix
+  // loop's gate never offers a Minor fix. Both lists are always present, `[]` when nothing is carried.
+  let carry = { carriedMinor: [], droppedMinor: [] };
   if (previous !== null) {
     groups = previousGroups(top, previous.manifest, to, files, item !== null, config);
     groups = assignEarlier(groups, previous.findings, config, (grp) => grp.rerun);
   } else {
     groups = groupFiles(files, item !== null, config);
-    if (mode === 'incremental') groups = assignEarlier(groups, state.open, config);
+    if (mode === 'incremental') {
+      groups = assignEarlier(groups, state.open, config);
+      carry = splitCarriedMinor(groups, files, state.minor);
+    }
   }
-  writeManifest(out, { tree: top, base, mode, modeReason, from, to, mergeBase, head, item, config, statePath: stateFile, files, groups });
+  writeManifest(out, { tree: top, base, mode, modeReason, from, to, mergeBase, head, item, config, statePath: stateFile, files, groups, ...carry });
   process.stdout.write(`${JSON.stringify(summary(files, groups))}\n`);
   return 0;
 }
@@ -798,6 +831,11 @@ const unquote = (s) => s.replace(/^`+|`+$/g, '');
 const SEPARATOR = String.raw`\s[—–]\s|\s-\s`;
 const CLAIM = new RegExp(`^(\`?[^\\s\`]+?\`?):(\\d+)(?:${SEPARATOR})(.*)$`, 's');
 
+// A Minor's kind (#531), written by the reviewer as a leading `[kind]` tag. Untagged or an unknown tag counts as `bug` — the safe side, since `bug` is in
+// every tier a person can choose to fix — and an unknown tag stays in the text, so nothing the reviewer wrote is lost.
+const MINOR_KINDS = ['bug', 'test', 'docs', 'trivial'];
+const KIND_TAG = new RegExp(`^\\[(${MINOR_KINDS.join('|')})\\]\\s*`, 'i');
+
 // One Critical/Important/Minor entry. `path:line — text` leads when the reviewer claimed a location; an `anchor: <path> | <code>` line follows. The anchor
 // is kept as written — resolving it against the tree is a later step; here a finding keeps its claimed location, and falls back to the anchor's path with no
 // line when it claimed none. No claim and no anchor is an item-level finding (path null).
@@ -814,7 +852,9 @@ function parseFinding(lines, severity) {
   const claim = CLAIM.exec(first);
   let [p, line, text] = claim ? [unquote(claim[1]), Number(claim[2]), claim[3].trim()] : [null, null, first];
   if (p === null && anchor !== null && anchor.includes('|')) p = unquote(anchor.slice(0, anchor.indexOf('|')).trim()) || null;
-  return { severity, path: p, line, text, anchor };
+  if (severity !== 'Minor') return { severity, path: p, line, text, anchor };
+  const tag = KIND_TAG.exec(text);
+  return { severity, path: p, line, kind: tag ? tag[1].toLowerCase() : 'bug', text: tag ? text.slice(tag[0].length) : text, anchor };
 }
 
 // What one report says. `covered` is every path its `## Coverage` lists as clean or findings (an honest `not reviewed` is NOT coverage).
@@ -843,7 +883,11 @@ function parseReport(file) {
 }
 
 const where = (f) => (f.path === null ? '' : f.line === null ? f.path : `${f.path}:${f.line}`);
-const oneLine = (f) => `${where(f) || '(no location)'} — ${f.severity}: ${f.text}`;
+const oneLine = (f) => `${where(f) || '(no location)'} — ${f.severity}${f.severity === 'Minor' ? ` [${f.kind ?? 'bug'}]` : ''}: ${f.text}`;
+// A Minor as the merged report's `## Minor` lists it — the grammar the reviewer writes, so the fix step matches the same `[kind]` tag either way.
+const minorLine = (f) => `- ${where(f) ? `${where(f)} — ` : ''}[${f.kind}] ${f.text}${f.earlier ? ' (earlier)' : ''}`;
+const byKind = (a, b) => MINOR_KINDS.indexOf(a.kind) - MINOR_KINDS.indexOf(b.kind);
+const idNumber = (id) => Number(/(\d+)$/.exec(id ?? '')?.[1] ?? 0);
 
 // Temp file + rename in the target's own directory, so a reader never sees half a file.
 function writeAtomic(target, text) {
@@ -960,7 +1004,9 @@ function mergeCommand(args) {
   const emptyFix = liveNamed.filter(([, r]) => r.verdict === 'fix' && r.critical.length + r.important.length === 0).map(([name]) => name);
   const earlier = new Map();
   for (const grp of manifest.groups) for (const f of grp.earlier ?? []) earlier.set(f.id, f);
-  let next = Math.max(0, ...[...earlier.keys()].map((id) => Number(/(\d+)$/.exec(id)?.[1] ?? 0))) + 1;
+  const isMinor = (f) => f.severity === 'Minor';
+  // Two id sequences: `F<n>` for Critical/Important, `M<n>` for Minors (#531), each continuing past the highest id of its own kind this round knows of.
+  let next = Math.max(0, ...[...earlier.values()].filter((f) => !isMinor(f)).map((f) => idNumber(f.id))) + 1;
   const fresh = [];
   const found = [];
   for (const r of live) for (const f of [...r.critical, ...r.important]) found.push(f);
@@ -981,17 +1027,34 @@ function mergeCommand(args) {
   const demoted = fresh
     .filter((f) => refutedIds.has(f.id))
     .map((f) => ({ ...f, severity: 'Minor', text: `refuted by check: ${f.text} — ${checks.get(f.id).evidence}`, evidence: checks.get(f.id).evidence }));
-  const minorEntries = [...live.flatMap((r) => r.minor), ...demoted];
-  const minor = minorEntries.length;
 
-  // An earlier finding stays open unless a report marks it resolved; one report saying `open` beats another saying `resolved`, because a finding closed
-  // by a reviewer who did not look at the right code is the costlier mistake.
-  const verdictOf = (id) => {
-    const says = live.map((r) => r.marks.get(id)).filter(Boolean);
+  // An earlier Critical/Important stays open unless a report marks it resolved; one report saying `open` beats another saying `resolved`, because a
+  // finding closed by a reviewer who did not look at the right code is the costlier mistake. An earlier Minor is the other way round — any `resolved`
+  // drops it — because it never touches the verdict, so the costlier mistake there is a list that only ever grows.
+  const verdictOf = (f) => {
+    const says = live.map((r) => r.marks.get(f.id)).filter(Boolean);
+    if (isMinor(f)) return says.includes('resolved') ? 'resolved' : 'open';
     return says.includes('open') || says.length === 0 ? 'open' : 'resolved';
   };
-  const marked = [...earlier.values()].map((f) => ({ finding: f, status: verdictOf(f.id) }));
-  const stillOpen = marked.filter((m) => m.status === 'open').map((m) => m.finding);
+  const marked = [...earlier.values()].map((f) => ({ finding: f, status: verdictOf(f) }));
+  const stillOpen = marked.filter((m) => m.status === 'open' && !isMinor(m.finding)).map((m) => m.finding);
+
+  // Every open Minor: the earlier ones a reviewer re-checked and left open, the ones carried without a reviewer, and this round's fresh ones. Ordered by
+  // kind, stable within a kind, so the state, the report and the counts all read one list.
+  const carriedMinor = Array.isArray(manifest.carriedMinor) ? manifest.carriedMinor : [];
+  const droppedMinor = Array.isArray(manifest.droppedMinor) ? manifest.droppedMinor : [];
+  const earlierMinor = marked.filter((m) => isMinor(m.finding));
+  const openEarlierMinor = earlierMinor.filter((m) => m.status === 'open').map((m) => m.finding);
+  let nextMinor = Math.max(0, ...[...earlierMinor.map((m) => m.finding), ...carriedMinor, ...droppedMinor].map((f) => idNumber(f.id))) + 1;
+  // A Critical/Important the check refuted joins this round's fresh Minors as a `bug` — the safe side, as for an untagged Minor — and takes an `M` id like
+  // every other Minor, so it carries and resolves the same way; the `## Checks` section still names it by the `F` id it was checked under.
+  const refutedMinor = demoted.map(({ evidence, ...f }) => ({ ...f, kind: 'bug' }));
+  const freshMinor = [...live.flatMap((r) => r.minor), ...refutedMinor].sort(byKind).map(({ anchor, id: _, ...f }) => ({ id: `M${nextMinor++}`, ...f }));
+  const minorOpen = [...openEarlierMinor, ...carriedMinor].map((f) => ({ ...f, kind: MINOR_KINDS.includes(f.kind) ? f.kind : 'bug', earlier: true }));
+  minorOpen.push(...freshMinor);
+  minorOpen.sort(byKind);
+  const minorByKind = Object.fromEntries(MINOR_KINDS.map((kind) => [kind, minorOpen.filter((f) => f.kind === kind).length]));
+  const minorResolved = earlierMinor.length - openEarlierMinor.length + droppedMinor.length;
 
   // A group's own `verdict: fix` stops forcing `fix` once every fresh finding was refuted, or the check pass would save nothing. `emptyFix` (a fix with no
   // finding the parser could read) keeps forcing it: nothing was checked there. Without `--checks` nothing is refuted, so this is the old rule exactly.
@@ -1002,7 +1065,7 @@ function mergeCommand(args) {
 
   const checkSummary = lists.get('--checks').length ? { checked, refuted: refutedIds.size, unchecked: check.length - checked, demoted } : null;
   const open = [...stillOpen, ...survivors];
-  const report = renderReport({ manifest, verdict, uncovered, reviewFiles, fresh: survivors, marked, minorEntries, fallbacks, emptyFix, checkSummary });
+  const report = renderReport({ manifest, verdict, uncovered, reviewFiles, fresh: survivors, marked, minorOpen, fallbacks, emptyFix, checkSummary });
   const out = path.resolve(options.get('--out'));
   writeAtomic(out, report);
   writeAtomic(findingsPath(manifestFile), `${JSON.stringify(open, null, 2)}\n`);
@@ -1010,13 +1073,22 @@ function mergeCommand(args) {
   // The state only ever records a COMPLETE review: after an incomplete one the files nobody read must still be in the next increment.
   const stateFile = options.has('--state') ? path.resolve(options.get('--state')) : manifest.statePath ?? null;
   if (uncovered.length === 0 && stateFile !== null) {
-    const state = { base: manifest.base, head: manifest.head, mergeBase: manifest.mergeBase, to: manifest.to, report: out, at: new Date().toISOString(), verdict, open };
+    const minor = minorOpen.map(({ earlier: _, ...f }) => f);
+    const state = { base: manifest.base, head: manifest.head, mergeBase: manifest.mergeBase, to: manifest.to, report: out, at: new Date().toISOString(), verdict, open, minor };
     writeAtomic(stateFile, `${JSON.stringify(state, null, 2)}\n`);
   }
 
   const unanchored = survivors.filter((f) => f.unanchored).length;
+  // Minors are counted here, never printed — not even a carried one as an `(earlier)` line: they live in the merged report's `## Minor`.
+  const minorCounts = {
+    minor: minorOpen.length,
+    minorByKind,
+    minorCarried: minorOpen.length - freshMinor.length,
+    minorUntouched: carriedMinor.length,
+    minorResolved,
+  };
   const counts = { checked, refuted: refutedIds.size, unchecked: checkSummary?.unchecked ?? 0 };
-  process.stdout.write(`${JSON.stringify({ verdict, mode: manifest.mode, uncovered, unanchored, stillOpen: stillOpen.length, minor, check, ...counts })}\n`);
+  process.stdout.write(`${JSON.stringify({ verdict, mode: manifest.mode, uncovered, unanchored, stillOpen: stillOpen.length, ...minorCounts, check, ...counts })}\n`);
   for (const f of survivors) process.stdout.write(`${oneLine(f)}\n`);
   for (const f of stillOpen) process.stdout.write(`${oneLine(f)} (earlier)\n`);
   return 0;
@@ -1024,7 +1096,7 @@ function mergeCommand(args) {
 
 // The merged report, in the shape retro and the agent file already agree on: a `verdict:` line, then `## Critical` / `## Important`. The `## Coverage`
 // section of this report is for the person reading it; it is never parsed back.
-function renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorEntries, fallbacks, emptyFix, checkSummary }) {
+function renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked, minorOpen, fallbacks, emptyFix, checkSummary }) {
   const out = [`verdict: ${verdict}`, ''];
   out.push(`mode: ${manifest.mode} (from ${manifest.from ?? 'n/a'} to ${manifest.to})`);
   if (manifest.modeReason) out.push(`modeReason: ${manifest.modeReason}`);
@@ -1053,7 +1125,8 @@ function renderReport({ manifest, verdict, uncovered, reviewFiles, fresh, marked
     return mine.flatMap((f) => [`- ${where(f) ? `${where(f)} — ` : ''}${f.text}`, ...(f.anchor ? [`  anchor: ${f.anchor}`] : [])]);
   };
   out.push('', '## Critical', '', ...list('Critical'), '', '## Important', '', ...list('Important'));
-  out.push('', '## Minor', '', ...(minorEntries.length ? minorEntries.map((f) => `- ${where(f) ? `${where(f)} — ` : ''}${f.text}`) : ['none']));
+  // One flat entry per Minor and NO heading inside the section: `sections()` here and retro's parser both end a section at any `#` line.
+  out.push('', '## Minor', '', ...(minorOpen.length ? minorOpen.map(minorLine) : ['none']));
   out.push('', '## Earlier findings', '');
   if (marked.length === 0) out.push('none');
   for (const { finding: f, status } of marked) out.push(`- ${f.id} — ${status} — ${oneLine(f)}`);

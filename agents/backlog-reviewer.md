@@ -114,7 +114,9 @@ Optional fields — each absent means exactly what it says next to it, never "go
   correctness, invariants and test adequacy for its own files and leaves the item's promise to group 1.
 - **`earlier findings`** — still-open Critical/Important findings from an earlier review of this branch, or from the previous round of a fix loop, each with
   its id (`F3`), location, severity, text and anchor. Each one is yours to re-check against `to` and mark in `## Earlier findings`, wherever its fix landed —
-  a fix often lands in a different file from the finding (a new test, a caller).
+  a fix often lands in a different file from the finding (a new test, a caller). On an incremental review the field can also carry earlier **Minor**
+  findings in a file of your group (`M4`, severity `Minor [<kind>]`, no anchor). Mark them like any earlier finding; **an earlier Minor marked `open` does
+  not change the verdict.** Do not re-raise any earlier finding as a new entry of your own — mark it instead, or it is counted twice.
 - **`outcome: none`** — the item has no `## Outcome` to read (a standalone review of a tracker issue, or of an item never executed). Check 4 is then recorded
   as `not checked: no Outcome` under `## Checked and clean` and is **not** a finding.
 
@@ -175,7 +177,7 @@ With no item at all, checks 1–3 judge the change on its own terms and check 4 
 1. **Correctness of the change.** Does it do what the item promised, and is what it actually does right? Off-by-ones, an error path that swallows the error, a
    condition inverted, state written in one place and read in another that no longer agrees, a rename that missed a call site. Where you claim something is
    wrong, name the input or state that makes it wrong — a finding a reader cannot reproduce from your own sentence is a hunch, and hunches belong in the
-   report's Minor section, not in a `fix` verdict.
+   report's Minor section as a `[bug]` Minor, not in a `fix` verdict.
 2. **The repo's own invariants.** Read `<worktree>/CLAUDE.md` and work through its **Invariants** section — the headlines — against the diff, and for each
    file the diff touches read the `.claude/rules/*.md` whose `paths:` covers it: that is where each headline's mechanism is, and a rule file loads on a `Read`
    while you are reading a diff, so open them yourself. Follow either into `docs/subsystems/invariants.md` when an entry points there. These encode failures
@@ -205,8 +207,16 @@ nothing.
 - **Critical** — merging this makes the repo wrong: incorrect behaviour a user or another module will hit, data loss, a broken invariant, a security hole, or a
   test suite that is now green while asserting nothing.
 - **Important** — merging this is defensible but leaves a real defect: an unhandled edge case, a promise in `## Plan` that the diff does not keep, a missing
-  test for behaviour the item exists to guarantee.
-- **Minor** — worth writing down, not worth a fix loop. Goes in the report only.
+  test for behaviour the item exists to guarantee. **A bug a user or a caller can hit, with the reproducing input or state named in the finding, is
+  Important — never Minor**, however small it looks: a result for item A landing on item B after Next, `@Ana` matching inside `@Anastasia`, a record pruned
+  in the same write that saved it, a `truncated` flag that is true when nothing was cut. A review that once filed shapes like these as Minor left them for a
+  person to find among fifty cosmetic notes.
+- **Minor** — worth writing down, not worth a fix loop: a latent bug no input reaches today, a missing test, drift, cosmetics. Goes in the report only, and
+  every Minor carries exactly one **kind**, which decides which fix a person can choose for it:
+  - `bug` — a latent bug no input reaches today, or a hunch with no reproducing input (check 1);
+  - `test` — a promised behaviour no test pins;
+  - `docs` — doc, rule-file, mock or comment drift an agent or a person would act on;
+  - `trivial` — wording, wrap, dead setup, stale plan references: nothing a reader would act on differently.
 
 **Prose-only drift** — the change behaves right and only text describing it is stale — keeps the severity above when the stale text is (a) an instruction or
 rule in a file a session loads as instructions (`CLAUDE.md` / `AGENTS.md` at any level, `.claude/rules/`, a skill's `SKILL.md` and its `references/`, an agent
@@ -217,11 +227,11 @@ or change something, in any file: a command, flag, path, env var, route, config 
 a stale narrative count or figure, an example list, incident history, a date, a justification whose conclusion still holds. A comment's wrong *why* splits the
 same way: a safety or ordering argument a later change relies on is (b); a wrong incident or number under a conclusion that holds is Minor. Two cases always
 keep their severity: text the item's own `## Plan` / `## Fix` promised to change (an unkept promise), and check 4's missing or half-present pair. Start every
-Minor this rule demotes with the literal tag `drift: `, after the location when there is one, so `/backlog-retro` can count it; no other Minor carries it.
+Minor this rule demotes with the literal tag `drift: `, after the location and its `[<kind>]` tag, so `/backlog-retro` can count it; no other Minor carries it.
 This classifies what the defect is — it is no discount for the fix loop's cost, and the not-softening rule below stands.
 
-**The verdict follows mechanically from that list — do not re-litigate it:** any Critical or Important finding, or an earlier finding you
-mark `open`, means `verdict: fix`. Nothing but Minor findings, or none at all, means `verdict: approve`. Do not soften a Critical into a Minor because the
+**The verdict follows mechanically from that list — do not re-litigate it:** any Critical or Important finding, or an earlier Critical or Important
+finding you mark `open`, means `verdict: fix`. Nothing but Minor findings, or none at all, means `verdict: approve`. Do not soften a Critical into a Minor because the
 fix loop is expensive, and do not invent an Important to look thorough; the orchestrator allows at most two fix loops per item before it parks the item and
 pings a human, so a padded verdict burns one of two chances at a real problem.
 
@@ -256,7 +266,7 @@ verdict: approve|fix
 <same shape, anchor line included>
 
 ## Minor
-- <path>:<line> — <[drift: ]same shape; no anchor needed — these never change the verdict>
+- <path>:<line> — [<kind>] <[drift: ]same shape; no anchor needed — these never change the verdict>
 
 ## Earlier findings
 - <id> — resolved — <one line: what in to shows it fixed>
@@ -274,6 +284,9 @@ parts of this diff have already been looked at.>
 - **Headings.** `## Coverage`, `## Critical`, `## Important`, `## Minor` and `## Earlier findings`, spelled so — `merge` keys a section on its heading's
   first word, at any heading level. Put no other heading inside one of them: any `#` line ends the section above it, and the entries after it are read as
   belonging to whatever that heading's first word names.
+- **Minor entries.** `- <path>:<line> — [<kind>] <text>`, or `- [<kind>] <text>` for a Minor about the item as a whole, where `<kind>` is one of `bug`,
+  `test`, `docs` or `trivial` (defined under Severity). An untagged Minor, or one with any other tag, is counted as `bug` — so tag every one.
+  A Minor the prose-only drift rule demoted carries `drift: ` right after its kind tag — `- <path>:<line> — [docs] drift: <text>` — and nowhere else.
 - **Entries.** One entry per item, a line starting `- ` at the left margin; its continuation lines are indented. An unindented line that does not start
   `- ` belongs to no entry and is ignored, so never write a finding as a paragraph. A section with nothing in it says `none` on its own line.
 - **Location.** A finding opens with `<path>:<line> — `: the path relative to the tree's root, exactly as the manifest spells it, one line number (no range,
@@ -289,7 +302,8 @@ parts of this diff have already been looked at.>
   `clean` and `findings` count as covered. `not reviewed` is honest and allowed — the file is then re-dispatched once, and if it is still uncovered the
   whole review ends `incomplete` rather than approving code nobody read — so never write `clean` for a file you did not read.
 - **`## Earlier findings`** — one entry per earlier finding you were handed, `- <id> — resolved — <why>` or `- <id> — open — <why>`, the id exactly as
-  given. A finding you leave unmarked stays open, and one you mark `open` keeps the verdict at `fix` whatever you found new.
+  given. A finding you leave unmarked stays open, and an earlier Critical or Important you mark `open` keeps the verdict at `fix` whatever you found new;
+  an earlier Minor marked `open` stays a Minor and does not change the verdict.
 - **`verdict:`** — the line `verdict: approve` or `verdict: fix`, the first line of the file to start `verdict:`. Write no other line starting so.
 
 You have no `Write` tool, so write the file with a Bash heredoc — this is the one and only write you are permitted to make:

@@ -67,7 +67,8 @@ for every one inside this turn. Each dispatch carries:
 - `item file path` — `<item>`, when the caller has an item;
 - `item checks: yes` — group 1 only, and only when there is an item;
 - `earlier findings` — this group's `earlier` entries, each as `<id> — <path>:<line> — <severity>: <text>` (no location for an item-level
-  one) with its `anchor:` line, or `none`;
+  one) with its `anchor:` line, or `none`. An earlier Minor (an incremental review carries open Minors forward) is
+  `<id> — <path>:<line> — Minor [<kind>]: <text>` with no `anchor:` line;
 - `outcome: none` — when `outcome` is `none` and there is an item.
 
 Pass the group's `model` and `effort` as the Agent tool's own `model` and `effort` parameters — never as prompt text, where nothing would act on them. A
@@ -85,13 +86,17 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-review/tools/review.mjs" merge --mani
 ```
 
 Its stdout is the only part of the review that enters this session's context: one JSON line,
-`{"verdict":…,"mode":…,"uncovered":[…],"unanchored":n,"stillOpen":n,"minor":n,"check":[…],"checked":n,"refuted":n,"unchecked":n}`,
-then one line per Critical/Important finding as `<path>:<line> — <Severity>: <text>` (earlier findings still open end `(earlier)`). The verdict is
-`approve`, `fix` or `incomplete`; `merge` computed it, so never re-derive it from a report. `check` lists the ids of this run's fresh Critical/Important
-findings that have a location — what §4b checks — and is `[]` when there are none; the three counts stay `0` until §4b's merge. Exit `1` (a bad
-argument, an unreadable manifest, a report not named `.g<n>.md`, a check file not named `.check-F<n>.md`) is named on stderr: stop and hand it to the caller.
-Do not read the merged report or a group report into context — the one exception is the caller reading the merged report's `## Minor` section after a
-person chose to fix Minor findings.
+`{"verdict":…,"mode":…,"uncovered":[…],"unanchored":n,"stillOpen":n,"minor":n,"minorByKind":{"bug":n,"test":n,"docs":n,"trivial":n},`
+`"minorCarried":n,"minorUntouched":n,"minorResolved":n,"check":[…],"checked":n,"refuted":n,"unchecked":n}`, then one line per Critical/Important finding as
+`<path>:<line> — <Severity>: <text>` (earlier findings still open end `(earlier)`). `stillOpen` counts earlier Critical/Important findings only. `minor` is
+every open Minor in the merged report, fresh and carried, a finding the check refuted included (as a `bug`); `minorByKind` splits it by kind;
+`minorCarried` is how many of those came from earlier rounds, `minorUntouched` the part of that carried without a reviewer (their file was not re-reviewed
+this round), and `minorResolved` how many earlier Minors a reviewer marked resolved or whose file this increment deleted. Minors never print a line of
+their own. The verdict is `approve`, `fix` or `incomplete`; `merge` computed it, so never re-derive it from a report. `check` lists the ids of this run's
+fresh Critical/Important findings that have a location — what §4b checks — and is `[]` when there are none; the three counts stay `0` until §4b's merge.
+Exit `1` (a bad argument, an unreadable manifest, a report not named `.g<n>.md`, a check file not named `.check-F<n>.md`) is named on stderr: stop and hand
+it to the caller. Do not read the merged report or a group report into context — the one exception is the caller reading the `## Minor` entries of the
+kinds a person chose to fix (each entry carries its `[<kind>]` tag) from the merged report.
 
 ## 4. One coverage retry
 
@@ -119,7 +124,7 @@ every one inside this turn. Each dispatch carries `worktree` — `<tree>`; `from
 `<path>:<line> — <severity>: <text>`, exactly as `merge` printed it; `anchor` — its `anchor`, or `none`; and `check path` — `<report>` with `.md` replaced
 by `.check-<id>.md`. No `model` or `effort` parameters: the agent's own frontmatter fixes its model.
 
-Then run `merge` again with exactly the last merge's arguments plus `--checks <every check path>`. A refuted finding is demoted to Minor in the merged report
+Then run `merge` again with exactly the last merge's arguments plus `--checks <every check path>`. A refuted finding is demoted to a `bug` Minor in the merged report
 and drops out of stdout, of the findings file `--previous` reads, and of the verdict; a checker that wrote nothing readable leaves its finding confirmed and
 counted `unchecked`. Its stdout replaces the previous one and is what §Result hands back. One check pass per review — there is no retry.
 

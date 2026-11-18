@@ -92,9 +92,15 @@ From `merge`'s stdout and nothing else — never the report body:
 
 - the mode: `full` or `incremental`, and when a review fell back to full, why (`scope`'s `full review: <reason>` line);
 - the verdict;
-- the Critical and Important lines exactly as `merge` printed them, resolved to their `path:line`, plus how many were `unanchored` and how many Minor
-  findings the report holds, how many findings the check refuted (`refuted`), and `unchecked` when non-zero;
-- earlier findings: how many were handed out (the manifest's groups' `earlier`), how many came back resolved, and the still-open ones (`(earlier)` lines);
+- the Critical and Important lines exactly as `merge` printed them, resolved to their `path:line`, plus how many were `unanchored`, how many findings the
+  check refuted (`refuted`), and `unchecked` when non-zero;
+- the Minor line, from stdout only: `Minor: <minor> open (bug <a>, test <b>, docs <c>, trivial <d>)` from `minorByKind`, and when `minorCarried` is above
+  zero, `— <minorCarried> carried from earlier rounds (<minorUntouched> in files this round did not touch, so not re-reviewed; none dropped),
+  <minorResolved> resolved`. The wording may differ; the numbers, and that an untouched Minor was not re-reviewed rather than dropped, may not. A finding
+  the check refuted is one of these Minors, counted as a `bug`;
+- earlier findings: how many Critical/Important were handed out (the manifest's groups' `earlier` entries whose severity is not `Minor`), how many came
+  back resolved (that count less `stillOpen`), and the still-open ones (`(earlier)` lines). Earlier Minors are reported by the Minor line above and
+  nowhere else, so an earlier Minor left open is never counted as resolved;
 - the merged report's path.
 
 **`incomplete`** is a coverage failure, said plainly: these files were never reviewed (the `uncovered` list), here are the report paths, and there is no
@@ -102,24 +108,35 @@ verdict — nothing is approved and no fix is offered.
 
 ## 5. Offer to fix
 
-When the verdict is `fix`, or `merge`'s `minor` count is above zero, offer with AskUserQuestion, options in this order:
+When the verdict is `fix`, or `merge`'s `minor` count is above zero, offer with AskUserQuestion, options in this order, each shown only when it would fix
+something the option before it does not:
 
-1. `Fix Critical and Important (Recommended)`
-2. `Fix all, including Minor`
-3. `Don't fix`
+1. `Fix Critical and Important` — only when there is a Critical or Important finding, fresh or earlier and still open.
+2. `Fix Critical/Important + Minor bug, test, docs` — only when `minorByKind.bug + test + docs` is above zero.
+3. `Fix all, including trivial Minor` — only when `minorByKind.trivial` is above zero.
+4. `Don't fix` — always.
+
+Exactly one fix option carries ` (Recommended)`, and which one is this session's judgment, not a field of `merge`'s output: **state the reason in that
+option's description.** Weigh at least: whether the branch is unpushed or has no upstream (fixing now is cheapest — no second push, no re-review on a
+PR); whether the Minors sit in files this branch changed (they are this change's own debt, not drive-by cleanup); and how many `bug` and `test` Minors
+there are. When nothing argues otherwise, recommend option 2 if it is shown, else option 1, else option 3. A Minor is not a reason to skip a fix:
+`bug`, `test` and `docs` are each something a person or an agent will act on.
 
 Only a session that can ask makes the offer. A headless `claude -p` session gets no offer and makes no fix: it shows the result and stops. When the
 AskUserQuestion call is denied by an autopilot gate, take the Recommended option and log it with `autopilot decide "<what>" "<why>" "<cost if wrong>"`.
 
 On a fix choice, **this session** fixes — never the reviewer, which is read-only — exactly the findings named: the Critical and Important lines (earlier
-still-open ones included), each read at its resolved `path:line`; for `Fix all`, also the merged report's `## Minor` section, the one part of a report
-read into context and only then. Then run the verification the repo's `CLAUDE.md` names (its tests, its typecheck) and show their real output.
+still-open ones included), each read at its resolved `path:line`; for option 2, also the merged report's `## Minor` entries tagged `[bug]`, `[test]` or
+`[docs]`, and for option 3 every `## Minor` entry — carried `(earlier)` entries included either way. That section is the one part of a report read into
+context, and only then. Then run the verification the repo's `CLAUDE.md` names (its tests, its typecheck) and show their real output.
 
 The fix **commits nothing**: no `git add`, no commit, no stash — the same as an `in-place` execute. Staging is the person's call.
 
 Then offer a re-review of the fix (`Re-review the fix (Recommended)` / `Stop here`, the same autopilot rule). It is an **incremental** review: §2 for a new
 `<prefix>`, then §3 with `mode` absent even when the first review was `full` — the review just merged wrote this branch's state, so `scope` diffs only from
-that review's snapshot to the fixed tree and hands every finding it left open back to a reviewer to mark `resolved` or `open`. This is deliberately not
+that review's snapshot to the fixed tree and hands every finding it left open back to a reviewer to mark `resolved` or `open`. Open Minors are carried
+forward too: one in a file the fix touched goes back to a reviewer to re-check, one in a file it did not touch is carried as it was — so a Minor left
+unfixed is still on the next report's list instead of silently gone. This is deliberately not
 the procedure's §5 (`scope --previous`), which re-reads every touched group's whole files and is the gates' re-review: a standalone review is often
 incremental, and `--previous` would put every file of the branch outside that increment into group 1. A detached HEAD has no state, so its re-review is
 simply full.
@@ -130,4 +147,5 @@ A fix is offered at most two times per invocation — two fix rounds. After the 
 
 - Never commit, stage, stash, push or switch branch, in the review or in a fix.
 - Never write a report, a manifest or a snapshot inside the repo.
-- Never read a group report or the merged report into context, save the `## Minor` section after `Fix all, including Minor`.
+- Never read a group report or the merged report into context, save the `## Minor` entries of the kinds a person chose to fix
+  (`Fix Critical/Important + Minor bug, test, docs` or `Fix all, including trivial Minor`).

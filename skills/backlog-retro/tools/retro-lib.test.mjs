@@ -377,6 +377,9 @@ test('readReviews lifts the drift-tagged Minor entries out of an approving revie
       '- drift: PLAN.md figure is stale',
       '  more text',
       '- docs/a.md:1 — Drift: capitalised',
+      '- docs/b.md:2 — [docs] drift: a kind-tagged entry (#531)',
+      '- [docs] drift: an item-level kind-tagged entry',
+      '- docs/c.md:3 — [docs] stale but untagged as drift',
       '',
       '## Checked and clean',
       '- drift: not a Minor at all',
@@ -384,8 +387,13 @@ test('readReviews lifts the drift-tagged Minor entries out of an approving revie
     ].join('\n')
   );
   const [review] = readReviews(dir, '/P');
-  // Case-sensitive tag, continuation line ignored, untagged entry dropped, and the section ends at the next heading.
-  assert.deepEqual(review.driftMinors, ['README.md:3 — drift: says nine skills, there are ten', 'drift: PLAN.md figure is stale']);
+  // Case-sensitive tag, continuation line ignored, untagged entry dropped, a `[<kind>] ` ahead of the tag allowed, and the section ends at the next heading.
+  assert.deepEqual(review.driftMinors, [
+    'README.md:3 — drift: says nine skills, there are ten',
+    'drift: PLAN.md figure is stale',
+    'docs/b.md:2 — [docs] drift: a kind-tagged entry (#531)',
+    '[docs] drift: an item-level kind-tagged entry',
+  ]);
 });
 
 test('readReviews lifts drift-tagged Minors from a fix review and still extracts its excerpts', async (t) => {

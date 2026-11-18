@@ -923,7 +923,11 @@ test('coverage complete gives an empty uncovered list', () => {
   const g2 = reportFile(fx.dir, 'task-1-1.g2.md', { coverage: clean('c.mjs') });
   const r = merge(fx, ['--reports', g1, g2]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.summary, { verdict: 'approve', mode: 'full', uncovered: [], unanchored: 0, stillOpen: 0, minor: 0, check: [], checked: 0, refuted: 0, unchecked: 0 });
+  assert.deepEqual(r.summary, {
+    verdict: 'approve', mode: 'full', uncovered: [], unanchored: 0, stillOpen: 0, minor: 0,
+    minorByKind: { bug: 0, test: 0, docs: 0, trivial: 0 }, minorCarried: 0, minorUntouched: 0, minorResolved: 0,
+    check: [], checked: 0, refuted: 0, unchecked: 0,
+  });
   assert.match(fs.readFileSync(fx.out, 'utf8'), /all 3 files covered/);
 });
 
@@ -1073,7 +1077,7 @@ test('minor is counted, never printed', () => {
   const r = merge(fx, ['--reports', g1]);
   assert.deepEqual([r.summary.minor, r.summary.verdict, r.lines], [2, 'approve', []]);
   assert.doesNotMatch(r.stdout, /zebra|giraffe/);
-  assert.match(fs.readFileSync(fx.out, 'utf8'), /## Minor\n\n- a\.mjs:2 — rename zebra/);
+  assert.match(fs.readFileSync(fx.out, 'utf8'), /## Minor\n\n- a\.mjs:2 — \[bug\] rename zebra/);
 });
 
 test('merged report keeps the retro shape', () => {
@@ -1228,7 +1232,8 @@ test('one refuted finding of two', () => {
   const text = fs.readFileSync(fx.out, 'utf8');
   assert.match(text, /## Important\n\n- a\.mjs:2 — two\n/);
   assert.doesNotMatch(text, /## Important\n\n[^#]*a\.mjs:1 — one/);
-  assert.match(text, /## Minor\n\n- a\.mjs:1 — refuted by check: one — guard at a\.mjs:3/);
+  // A refuted finding joins the Minors as a `bug` (#531's safe-side kind for a Minor nobody tagged).
+  assert.match(text, /## Minor\n\n- a\.mjs:1 — \[bug\] refuted by check: one — guard at a\.mjs:3/);
   assert.match(text, /## Checks\n\n2 checked, 1 refuted, 0 unchecked\n- F1 — refuted — guard at a\.mjs:3/);
 });
 
@@ -1315,6 +1320,190 @@ test('--previous hands on only the findings the check left standing', () => {
   const next = scope(repo, ['--previous', s.out]);
   assert.equal(next.status, 0, next.stderr);
   assert.deepEqual(earlierIds(next.manifest), [['F2']]);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// Minor kinds and the carry (#531). A Minor carries a kind — bug, test, docs, trivial — that `merge` counts and renders per kind, and an incremental review
+// carries earlier rounds' open Minors forward through the state instead of dropping them.
+
+const ZERO_CARRY = { minorCarried: 0, minorUntouched: 0, minorResolved: 0 };
+// What a merge run without `--checks` adds to the summary after the Minor counts (#558).
+const NO_CHECKS = { check: [], checked: 0, refuted: 0, unchecked: 0 };
+const minorOf = (fx) => JSON.parse(fs.readFileSync(fx.state, 'utf8')).minor;
+const minorSection = (text) => text.slice(text.indexOf('## Minor\n'), text.indexOf('## Earlier findings'));
+const minorFinding = (id, p, kind, extra = {}) => ({ id, severity: 'Minor', path: p, line: p === null ? null : 1, kind, text: `minor ${id}`, ...extra });
+
+test('a Minor tag sets its kind; untagged and unknown tags count as bug', () => {
+  const fx = oneGroup();
+  const minor = ['- a.mjs:1 — [bug] one', '- a.mjs:2 — [TEST] two', '- a.mjs:3 — [docs] three', '- a.mjs:4 — [trivial] four', '- a.mjs:5 — five',
+    '- a.mjs:6 — [style] x', '- [docs] y'];
+  const r = merge(fx, ['--reports', reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), minor })]);
+  assert.equal(r.status, 0, r.stderr);
+  const byText = Object.fromEntries(minorOf(fx).map((m) => [m.text, [m.kind, m.path, m.line]]));
+  assert.deepEqual(byText, {
+    one: ['bug', 'a.mjs', 1],
+    two: ['test', 'a.mjs', 2],
+    three: ['docs', 'a.mjs', 3],
+    four: ['trivial', 'a.mjs', 4],
+    five: ['bug', 'a.mjs', 5],
+    '[style] x': ['bug', 'a.mjs', 6],
+    y: ['docs', null, null],
+  });
+});
+
+test('merge counts Minors per kind on stdout and prints none of them', () => {
+  const fx = oneGroup();
+  const minor = ['- a.mjs:1 — [bug] b1', '- a.mjs:2 — b2', '- a.mjs:3 — [bug] b3', '- a.mjs:4 — [test] t1', '- a.mjs:5 — [test] t2', '- a.mjs:6 — [docs] d1',
+    '- a.mjs:7 — [trivial] v1', '- a.mjs:8 — [trivial] v2', '- a.mjs:9 — [trivial] v3', '- a.mjs:10 — [trivial] v4'];
+  const r = merge(fx, ['--reports', reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), minor })]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(
+    r.stdout,
+    `${JSON.stringify({ verdict: 'approve', mode: 'full', uncovered: [], unanchored: 0, stillOpen: 0, minor: 10, minorByKind: { bug: 3, test: 2, docs: 1, trivial: 4 }, ...ZERO_CARRY, ...NO_CHECKS })}\n`,
+  );
+});
+
+test('the merged ## Minor is kind-tagged, kind-ordered and holds no heading', () => {
+  const fx = oneGroup();
+  const minor = ['- a.mjs:1 — [trivial] v', '- a.mjs:2 — [docs] d', '- a.mjs:3 — [test] t', '- a.mjs:4 — b', '- [docs] item level'];
+  merge(fx, ['--reports', reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), minor })]);
+  const section = minorSection(fs.readFileSync(fx.out, 'utf8'));
+  assert.deepEqual(section.split('\n').filter((l) => l.startsWith('- ')), [
+    '- a.mjs:4 — [bug] b',
+    '- a.mjs:3 — [test] t',
+    '- a.mjs:2 — [docs] d',
+    '- [docs] item level',
+    '- a.mjs:1 — [trivial] v',
+  ]);
+  assert.deepEqual(section.split('\n').slice(1).filter((l) => l.startsWith('#')), []);
+});
+
+test('no Minor of any kind, fresh or earlier and open, makes fix', () => {
+  const fx = mergeFixture({ groups: [{ files: ['a.mjs'], earlier: [minorFinding('M1', 'a.mjs', 'bug')] }] });
+  const minor = ['- a.mjs:1 — [bug] b', '- a.mjs:2 — [test] t', '- a.mjs:3 — [docs] d', '- a.mjs:4 — [trivial] v'];
+  const r = merge(fx, ['--reports', reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), minor, earlier: ['M1 — open — still there'] })]);
+  assert.deepEqual([r.summary.verdict, r.summary.stillOpen, r.summary.minor, r.lines], ['approve', 0, 5, []]);
+  assert.deepEqual(openOf(fx), []);
+});
+
+test('merge writes open Minors to the state with M ids in render order; Critical/Important stay in open', () => {
+  const fx = oneGroup();
+  const minor = ['- a.mjs:1 — [trivial] v', '- a.mjs:2 — [docs] d', '- a.mjs:3 — b'];
+  merge(fx, ['--reports', reportFile(fx.dir, 'task-1-1.g1.md', { coverage: clean('a.mjs'), important: importantEntry('a.mjs', 9, 'imp'), minor })]);
+  const state = JSON.parse(fs.readFileSync(fx.state, 'utf8'));
+  assert.deepEqual(state.minor.map((m) => [m.id, m.severity, m.kind, m.text]), [
+    ['M1', 'Minor', 'bug', 'b'],
+    ['M2', 'Minor', 'docs', 'd'],
+    ['M3', 'Minor', 'trivial', 'v'],
+  ]);
+  assert.deepEqual(state.open.map((f) => f.severity), ['Important']);
+});
+
+test('a state without minor is incremental with nothing carried; a damaged minor is full', () => {
+  const { repo, state, first } = reviewed();
+  write(repo, 'y.mjs', 'y\n');
+  commitAll(repo, 'second');
+  const old = scope(repo, ['--state', state]);
+  assert.equal(old.status, 0, old.stderr);
+  assert.deepEqual([old.manifest.mode, old.manifest.carriedMinor, old.manifest.droppedMinor], ['incremental', [], []]);
+  writeJson(state, stateFrom(first.manifest, { minor: 'x' }));
+  const bad = scope(repo, ['--state', state]);
+  assert.equal(bad.status, 0, bad.stderr);
+  assert.equal(bad.manifest.mode, 'full');
+  assert.equal(bad.stderr, FULL_REASON('no earlier review'));
+});
+
+test('scope hands a carried Minor to the group owning its changed file, and carries the rest', () => {
+  const item = 'backlog/open/task-1.md';
+  const { repo, state, first } = reviewed({ 'x.mjs': 'x\n', 'gone.mjs': 'gone\n', 'ren.mjs': lines(20, 'ren'), 'c/f01.mjs': 'old\n', [item]: '# item\n' });
+  const minor = [
+    minorFinding('M1', 'c/f01.mjs', 'test'),
+    minorFinding('M2', 'x.mjs', 'docs'),
+    minorFinding('M3', null, 'bug'),
+    minorFinding('M4', 'ren.mjs', 'trivial', { line: 7 }),
+    minorFinding('M5', 'gone.mjs', 'bug'),
+  ];
+  writeJson(state, stateFrom(first.manifest, { minor }));
+  for (const [rel, content] of Object.entries({ ...many('a', 6, 1), 'b/one.mjs': 'one\n', ...many('c', 6, 1), [item]: '# item, edited\n' })) {
+    write(repo, rel, content);
+  }
+  fs.rmSync(path.join(repo, 'gone.mjs'));
+  fs.renameSync(path.join(repo, 'ren.mjs'), path.join(repo, 'c/ren.mjs'));
+  commitAll(repo, 'second');
+  const r = scope(repo, ['--state', state, '--item', item]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.manifest.mode, 'incremental');
+  assert.deepEqual(r.manifest.groups.map((grp) => grp.label), ['a/', 'c/']);
+  assert.deepEqual(earlierIds(r.manifest), [[], ['M1', 'M4']]);
+  assert.deepEqual(r.manifest.groups[1].earlier[0], minor[0]);
+  assert.deepEqual(r.manifest.groups[1].earlier[1], { ...minor[3], path: 'c/ren.mjs' });
+  assert.deepEqual(r.manifest.carriedMinor.map((m) => m.id), ['M2', 'M3']);
+  assert.deepEqual(r.manifest.droppedMinor.map((m) => m.id), ['M5']);
+  assert.equal(r.stdout, `${JSON.stringify({ mode: 'incremental', files: r.manifest.files.length, review: 14, skip: 2, groups: 2 })}\n`);
+
+  // Only a lockfile changed, no item, nothing Critical/Important open: a carried Minor creates no group 1.
+  const lock = reviewed({ 'x.mjs': 'x\n' });
+  writeJson(lock.state, stateFrom(lock.first.manifest, { minor: [minorFinding('M1', 'x.mjs', 'bug')] }));
+  write(lock.repo, 'pnpm-lock.yaml', 'lock\n');
+  commitAll(lock.repo, 'lock');
+  const only = scope(lock.repo, ['--state', lock.state]);
+  assert.equal(only.status, 0, only.stderr);
+  assert.deepEqual([only.manifest.groups, only.manifest.carriedMinor.map((m) => m.id)], [[], ['M1']]);
+  assert.equal(only.stdout, `${JSON.stringify({ mode: 'incremental', files: 1, review: 0, skip: 1, groups: 0 })}\n`);
+});
+
+test('a full review, a fallback to full and --previous carry no Minors', () => {
+  const { repo, state, first } = reviewed({ 'x.mjs': 'x\n', 'y.mjs': 'y\n' });
+  writeJson(state, stateFrom(first.manifest, { minor: [minorFinding('M1', 'x.mjs', 'bug'), minorFinding('M2', 'y.mjs', 'docs')] }));
+  write(repo, 'x.mjs', 'x changed\n');
+  commitAll(repo, 'second');
+  const noMinor = (m) => m.groups.flatMap((grp) => grp.earlier).filter((f) => f.severity === 'Minor');
+  const full = scope(repo, ['--state', state, '--mode', 'full']);
+  assert.deepEqual([full.manifest.mode, full.manifest.carriedMinor, full.manifest.droppedMinor, noMinor(full.manifest)], ['full', [], [], []]);
+  writeJson(state, stateFrom(first.manifest, { base: 'develop', minor: [minorFinding('M1', 'x.mjs', 'bug'), minorFinding('M2', 'y.mjs', 'docs')] }));
+  const fallback = scope(repo, ['--state', state]);
+  assert.deepEqual([fallback.manifest.mode, fallback.manifest.carriedMinor, noMinor(fallback.manifest)], ['full', [], []]);
+  writeJson(`${first.out}.findings.json`, []);
+  const previous = scope(repo, ['--state', state, '--previous', first.out]);
+  assert.equal(previous.status, 0, previous.stderr);
+  assert.deepEqual([previous.manifest.carriedMinor, noMinor(previous.manifest)], [[], []]);
+});
+
+test('merge folds carried and re-checked earlier Minors in with the fresh ones', () => {
+  const carriedMinor = [minorFinding('M2', 'b.mjs', 'bug'), minorFinding('M5', 'b.mjs', 'docs'), minorFinding('M9', null, 'bug')];
+  const earlier = [minorFinding('M3', 'a.mjs', 'test'), minorFinding('M4', 'a.mjs', 'bug'), minorFinding('M6', 'a.mjs', 'test')];
+  const run = (extra) => {
+    const fx = mergeFixture({ groups: [{ files: ['a.mjs'], earlier }], extra: { carriedMinor, droppedMinor: [], ...extra } });
+    const g1 = reportFile(fx.dir, 'task-1-1.g1.md', {
+      coverage: clean('a.mjs'),
+      minor: ['- a.mjs:5 — [bug] fresh bug', '- a.mjs:6 — [docs] fresh docs'],
+      earlier: ['M3 — resolved — tested now', 'M4 — open — still latent'],
+    });
+    return { fx, ...merge(fx, ['--reports', g1]) };
+  };
+  const r = run({});
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.summary, {
+    verdict: 'approve', mode: 'full', uncovered: [], unanchored: 0, stillOpen: 0, minor: 7,
+    minorByKind: { bug: 4, test: 1, docs: 2, trivial: 0 }, minorCarried: 5, minorUntouched: 3, minorResolved: 1, ...NO_CHECKS,
+  });
+  assert.deepEqual(r.lines, []);
+  const text = fs.readFileSync(r.fx.out, 'utf8');
+  const entries = minorSection(text).split('\n').filter((l) => l.startsWith('- '));
+  assert.equal(entries.length, 7);
+  assert.equal(entries.filter((l) => l.endsWith(' (earlier)')).length, 5);
+  const ids = minorOf(r.fx).map((m) => m.id);
+  assert.deepEqual([ids.length, ids.includes('M3'), ids.filter((id) => !['M2', 'M4', 'M5', 'M6', 'M9'].includes(id)).sort()], [7, false, ['M10', 'M11']]);
+  const earlierSection = text.slice(text.indexOf('## Earlier findings'));
+  assert.match(earlierSection, /^- M3 — resolved — /m);
+  assert.match(earlierSection, /^- M4 — open — /m);
+  assert.match(earlierSection, /^- M6 — open — /m);
+  assert.doesNotMatch(earlierSection, /M2|M5|M9/);
+
+  const dropped = run({ droppedMinor: [minorFinding('M7', 'gone.mjs', 'bug'), minorFinding('M8', 'gone.mjs', 'test')] });
+  assert.deepEqual([dropped.summary.minor, dropped.summary.minorCarried, dropped.summary.minorResolved], [7, 5, 3]);
+  const droppedIds = minorOf(dropped.fx).map((m) => m.id);
+  assert.deepEqual([droppedIds.includes('M7'), droppedIds.includes('M8'), droppedIds.filter((id) => /^M1\d$/.test(id)).sort()], [false, false, ['M10', 'M11']]);
 });
 
 // Twin parity: the closed lists, the range and the defaults here must equal `shared/agent.ts`, which the board validates against. Read as TEXT — a skill's
