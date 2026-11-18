@@ -29,7 +29,9 @@ which, and keeps the lock and the memory of what failed; this session only carri
 ## 1. Decide
 
 Pass the trigger's flags through unchanged — `--max-prs M`, `--max-plans N`, `--base <ref>`, `--lock-ttl <minutes>`, `--dry-run` — and none it did not carry
-(an omitted cap is the board's Settings › Shared › Backlog tick value, else 2 PRs and 3 plans — never invent one):
+(the trigger never carries `--peek`: that flag is the scheduler's gate, never the session's, and a scheduler's gate must repeat every `decide` flag the job's
+prompt carries, in the same values, or it would skip or cap a tick differently from the session; an omitted cap is the board's Settings › Shared › Backlog tick
+value, else 2 PRs and 3 plans — never invent one):
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" decide <the trigger's flags>
@@ -92,6 +94,8 @@ cd '<root>' && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" r
 
 A `failed` outcome skips that item until its content changes, so one bad item cannot take every night's slot. There is no `blocked` outcome: a failure that was
 the environment's fault — the stack down, `gh` signed out — is cleared with `tick.mjs forget '<id>'`, run by a person and never by this session.
+On a tracker project the tool may record a `failed` as `released` when the API was down or had restarted under the tick; record `failed` all the same and do not try to
+choose — the tool proves it, and a `released` item is simply offered again; `forget` is still how a person clears any other environment failure.
 A `failed` groom also keeps that item off the execute queue until its content changes, since its plan may be one nobody reviewed; once a person has reviewed
 it, `tick.mjs forget '<id>'` makes the item eligible again.
 A halted project is reset on the board (Runs › Ticks), not by `forget`, which only clears one item.

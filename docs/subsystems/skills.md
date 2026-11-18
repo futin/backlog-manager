@@ -89,8 +89,11 @@ and a byte ratchet on the model-invocable total (4,911 B before #557, 2,398 B af
 - `skills/backlog-orchestrate/tools/orchestrate.mjs` — `backlog-orchestrate`'s own CLI, and the run file's only writer. Since task-47 it has two modes of its
   own, chosen by the same committed marker `backlog.mjs` reads (see below).
 - `skills/backlog-tick/tools/tick.mjs` — `backlog-tick`'s own CLI, and the tick home's only writer (through `tick-state.mjs`, the one file that writes). Four
-  subcommands: `decide` (reads the project and prints ONE JSON verdict — `execute`, `groom`, `recover`, `busy` or `idle` — taking the lock only for the first
-  two), `record <id> ok|failed --kind groom|execute`, `status` and `forget <id>`. See [`backlog-tick`](#backlog-tick) below.
+  subcommands: `decide [--dry-run | --peek]` (`--peek` is the scheduler's pre-spawn gate and exits `10` for `idle`/`busy`; reads the project and prints ONE
+  JSON verdict — `execute`, `groom`, `recover`, `busy` or `idle` — taking the lock only for the first two), `record <id> ok|failed --kind groom|execute` (the
+  session's vocabulary stays `ok|failed`; on a tracker project the tool may store a `failed` as `released` — no hash — when the API was down or its `bootedAt`
+  differs from the lock's, at most once in a row, and `released` neither counts toward nor resets the breaker), `status` and `forget <id>`. See
+  [`backlog-tick`](#backlog-tick) below.
 - `skills/pr-resolve/tools/pr-resolve.mjs` — `pr-resolve`'s own CLI, and the pr-resolve home's only writer. `parse <owner/repo#N> [--reclaim <id>]` prints
   the target's worktree, lock and outcome paths; `lock take|release` holds one resolve per PR (exit `3` refused); `outcome` writes the record the board reads.
   See [`pr-resolve`](#pr-resolve) below.
@@ -263,13 +266,15 @@ project whose stack is down — or whose tracker cache the tool cannot trust yet
 this project is `idle: tracker cache holds no items for <repo> (polled <polledAt>)`. All three come before the busy check, lock nothing and record nothing; the
 next tick is the retry. `trackerPolledAt` in `orchestrate.mjs` is the precedent, not a twin — the orchestrator re-reads on the stamp, the tick never waits.
 The server's half is one log line per repo per process, `tracker <repo>: cold sync <status> — <n> issues cached, <pages> page(s)`, at the end of its first
-successful sync, so an empty cache can be told from one that filled and was emptied. `--dry-run` writes nothing, not even the lock. Defaults: 2 open PRs, 3 plans awaiting review, a
-180-minute lock.
+successful sync, so an empty cache can be told from one that filled and was emptied. `--dry-run` writes nothing, not even the lock, and `--peek` is the same
+read as a scheduler's gate: no lock, no stale-lock claim, no `state.json`, `last-decide.json` only on the final `idle`, and exit `10` for `idle`/`busy` so the
+scheduler skips the spawn (the gate must repeat every `decide` flag the job's prompt carries, in the same values). Defaults: 2 open PRs, 3 plans awaiting
+review, a 180-minute lock.
 
 **The breaker is `decide`'s step 3b.** After the lock step (`busy` for a held lock, `recover` for a stale one) and before any API read, `decide` derives a
 streak from `state.json`'s `recent` and answers `idle`, reason `halted: N failures in a row (halt after M) — reset on the board, Runs › Ticks`, once the streak
 reaches `haltAfter` (`~/.backlog-manager/settings/tick.json`, `$BM_TICK_FILE`; an integer 1–10, default 3). The walk is newest first: an unparseable `at` or one
-at or before the project's `resetAt` stops it, `ok` stops it, `failed` counts. A halt is never stored — lowering `haltAfter` below a streak halts at the next
+at or before the project's `resetAt` stops it, `ok` stops it, `failed` counts, and `released` (below) does neither. A halt is never stored — lowering `haltAfter` below a streak halts at the next
 `decide`, raising it un-halts — and only a person's Reset clears it: the board stamps `resetAt` into `tick.json`, and the tool never writes that file. A halted
 project costs one call and no API traffic, a stale lock is still recovered while halted, and `forget <id>` leaves the streak alone. An unreadable `tick.json` is
 `idle` too, reason `<path> unreadable — fix or remove it by hand`, never a default. The streak rule is `tools/tick-breaker.mjs`;
@@ -279,6 +284,11 @@ reading as one line — `breaker: N of M failures in a row` or `breaker: HALTED 
 appended when a Reset is on file — and `status --json` carries it as `breaker: { streak, haltAfter, halted, resetAt, settings }`. A second line,
 `caps: plans N, PRs M (tick.json|default|unreadable)`, is what a flagless `decide` would apply, and `status --json` carries it as
 `caps: { maxPlans, maxPrs, source }`.
+
+**`released` is an environment failure, proved by the boot stamp.** On a tracker project a tick's lock records the `bootedAt` that `GET /api/health` answered;
+when `record … failed` runs under its own lock and health is now down or answers a different `bootedAt`, the API restarted under the tick and the item is not
+at fault, so the tool stores `released` (no hash, so the item is offered again) instead of `failed`. It happens at most once in a row — a second environment
+result is a `failed` with `environment twice: ` in its reason — and it neither counts toward the breaker streak nor resets it.
 
 **Unattended means a gate.** A groom a tick runs lands the plan in the same write as the `plan-review` mark (a label, or a `plan-review: true` frontmatter
 line), and every gate that could execute the item refuses it with `this plan awaits review` until a person removes the mark — `backlog.mjs plan-review <id>

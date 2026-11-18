@@ -556,7 +556,8 @@ reads nor writes. Not an outbound-calling module.
 
 ### `health/`, `static.ts`, `security.ts`, `allowed-hosts.ts`
 
-`GET /api/health` is a plain liveness check. `static.ts` serves `client/dist` only when it has been built — registering the static module against a missing
+`GET /api/health` is liveness plus a `bootedAt` boot stamp, which `tick.mjs` compares by identity to tell a restarted API from a live one. `static.ts` serves
+`client/dist` only when it has been built — registering the static module against a missing
 bundle would install a catch-all with nothing behind it. `security.ts` is the one applier of both pieces of request-and-response middleware this app has
 (`applySecurityMiddleware`): the Host gate first, then the CSP whose `script-src` pins the pre-paint theme script by hash. It is configured on the root module
 so every app built from `AppModule` carries both, the tests' included, and ahead of the static module so both reach the served `index.html`.

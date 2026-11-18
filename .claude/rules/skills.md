@@ -46,7 +46,10 @@ paths: ["skills/**", "agents/**", "server/src/tick/tick.service.ts", "server/src
   moment exists where an approved-looking plan has no mark, and every gate refuses it with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
   `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and the execute skill): the board's Run, the server's `plan`/`dispatch` ladder
   (`planReviewBlock`, always after `inReviewBlock`), the orchestrator's queue and `backlog-execute`'s own refusal. An outsider-filed tracker item carries a rung between those two, `unvettedBlock` (`UNVETTED_REASON`, #341), lifted only by a groom's pinned `body` write. A tick never merges, never commits a groom,
-  never promotes an idea, never rejects, never asks and never leaves anything running. Why:
+  never promotes an idea, never rejects, never asks and never leaves anything running. `decide --peek` runs the same ladder with dry-run's lock semantics (no
+  lock, no stale-lock claim, no `state.json`), writes `last-decide.json` only on the final `idle`, and exits `10` for `idle`/`busy`; a tracker lock carries
+  the health answer's `bootedAt`, and `record … failed` on a tracker project under its own lock stores `released` (no hash) when health is down or its
+  `bootedAt` differs from the lock's, at most once in a row (`environment twice: ` → `failed`). Why:
   [invariants.md](docs/subsystems/invariants.md#a-tick-does-one-unit-only-when-idle-and-never-executes-a-plan-that-awaits-review)
 - **The only `started:` marker a tick clears is the one a killed tick left, identified by the verdict in its own stale lock.** A lock older than `--lock-ttl`
   (default 180 minutes) is a tick the dashboard killed; `decide` claims it (`claimStaleLock` renames it aside and owns it only if the bytes are the ones judged
