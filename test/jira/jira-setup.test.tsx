@@ -616,6 +616,112 @@ describe('the board sheet — edit, save, delete', () => {
   });
 });
 
+/* The sheet's Columns section: the Board's status columns, in the order a person set. A status is drawn from the board's cached list (the sheet's one read),
+   so a case seeds that read with issues in the statuses it wants rows for. */
+const inStatus = (key: string, name: string, category: 'new' | 'indeterminate' | 'done'): JiraIssue => ({ ...issue(key, key), status: { name, category } });
+const SEEDED = [inStatus('PAY-1', 'To Do', 'new'), inStatus('PAY-2', 'In Review', 'indeterminate'), inStatus('PAY-3', 'Done', 'done')];
+const ALPHA_COLS = board({ ...ALPHA, columns: ['To Do', 'Done'] });
+const colRows = (dialog: HTMLElement): string[] =>
+  Array.from(dialog.querySelectorAll('.jira-sheet-col .jira-lanes-name')).map((n) => n.textContent ?? '');
+const savedBody = (): Record<string, unknown> => JSON.parse(String(posts('/api/jira/boards')[0].init?.body));
+
+describe('the board sheet — Columns', () => {
+  beforeEach(() => {
+    statusAnswer = status({ boards: [ALPHA_COLS] });
+    boardIssuesAnswer = () => answer({ issues: SEEDED, polledAt: null });
+  });
+
+  it('draws the saved order with an unsaved status placed by the Order rule', async () => {
+    await renderSetup();
+    const dialog = await openEdit('Alpha board');
+    await waitFor(() => expect(colRows(dialog)).toEqual(['To Do', 'In Review', 'Done']));
+  });
+
+  it('a move saves the whole order as drawn; untouched saves no columns key; Reset saves []', async () => {
+    await renderSetup();
+    let dialog = await openEdit('Alpha board');
+    await waitFor(() => expect(colRows(dialog)).toHaveLength(3));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Move In Review up' }));
+    expect(colRows(dialog)).toEqual(['In Review', 'To Do', 'Done']);
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(posts('/api/jira/boards')).toHaveLength(1));
+    expect(savedBody().columns).toEqual(['In Review', 'To Do', 'Done']);
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Edit board/ })).toBeNull());
+    sent = [];
+    dialog = await openEdit('Alpha board');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(posts('/api/jira/boards')).toHaveLength(1));
+    expect('columns' in savedBody()).toBe(false);
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Edit board/ })).toBeNull());
+    sent = [];
+    dialog = await openEdit('Alpha board');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Reset to default' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(posts('/api/jira/boards')).toHaveLength(1));
+    expect(savedBody().columns).toEqual([]);
+  });
+
+  it('Add appends a typed name with a Remove; a carried status has none; a name already drawn adds nothing', async () => {
+    await renderSetup();
+    const dialog = await openEdit('Alpha board');
+    await waitFor(() => expect(colRows(dialog)).toHaveLength(3));
+    const field = within(dialog).getByRole('textbox', { name: 'Add a column' });
+    expect(field).toHaveAttribute('maxlength', '100');
+    await userEvent.type(field, 'QA');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
+    expect(colRows(dialog)).toEqual(['To Do', 'In Review', 'Done', 'QA']);
+    expect(within(dialog).getByRole('button', { name: 'Remove QA' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Remove To Do' })).toBeNull();
+
+    await userEvent.type(field, 'Done');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
+    expect(colRows(dialog)).toEqual(['To Do', 'In Review', 'Done', 'QA']);
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove QA' }));
+    expect(colRows(dialog)).toEqual(['To Do', 'In Review', 'Done']);
+  });
+
+  it('disables the first row’s up and the last row’s down', async () => {
+    await renderSetup();
+    const dialog = await openEdit('Alpha board');
+    await waitFor(() => expect(colRows(dialog)).toHaveLength(3));
+    expect(within(dialog).getByRole('button', { name: 'Move To Do up' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Move Done down' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Move To Do down' })).toBeEnabled();
+  });
+
+  it('a move made while the read is pending survives the read landing', async () => {
+    let land: (r: Response) => void = () => undefined;
+    boardIssuesAnswer = () => new Promise<Response>((resolve) => (land = resolve));
+    await renderSetup();
+    const dialog = await openEdit('Alpha board');
+    expect(colRows(dialog)).toEqual(['To Do', 'Done']);
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Move Done up' }));
+    await act(async () => {
+      land(await answer({ issues: SEEDED, polledAt: null }));
+    });
+    await waitFor(() => expect(colRows(dialog)).toEqual(['Done', 'To Do', 'In Review']));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(posts('/api/jira/boards')).toHaveLength(1));
+    expect(savedBody().columns).toEqual(['Done', 'To Do', 'In Review']);
+  });
+
+  it('a new board with nothing added says columns appear once it has issues', async () => {
+    await renderSetup();
+    const dialog = await openNew();
+    expect(within(dialog).getByText('No columns yet — they appear once this board has issues.')).toBeInTheDocument();
+  });
+
+  it('an issue with no status name produces no row', async () => {
+    boardIssuesAnswer = () => answer({ issues: [...SEEDED, inStatus('PAY-4', '', 'new')], polledAt: null });
+    await renderSetup();
+    const dialog = await openEdit('Alpha board');
+    await waitFor(() => expect(colRows(dialog)).toEqual(['To Do', 'In Review', 'Done']));
+  });
+});
+
 describe('Escape', () => {
   it('with the sheet open, closes the sheet only — the page stays on Setup', async () => {
     await renderSetup();

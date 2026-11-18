@@ -144,7 +144,7 @@ a save while the credential is rejected or the site `unsupported` touches only `
 
 | route                           | body                                    | answers                                                                                           |
 | ------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `POST /api/jira/boards`         | `{ id?, name, interval, roots, queries }` | the board as stored, ids server-minted; waits for `boardSaved` (below); 404 for an `id` the file does not hold |
+| `POST /api/jira/boards`         | `{ id?, name, interval, roots, queries, columns? }` | the board as stored, ids server-minted; waits for `boardSaved` (below); 404 for an `id` the file does not hold |
 | `POST /api/jira/boards/delete`  | `{ id }`                                | `{ ok: true }`; drops the board's cache at once (`boardDeleted`) and re-`arm()`s; 404 for an unknown id, a second delete included |
 | `POST /api/jira/sweep`          | none read                               | the `GET /api/jira` payload, `live` filled; the popover head's site-wide `Sync now`: forces every non-`off` board and sweeps once, joins a sweep in flight, answers `done` with no call inside `SWEEP_FLOOR_MS` (5 s) of the last one; 409 `{ message: 'Jira is not being polled' }` when nothing is armed, 429 `{ message: 'rate limited', retryAt }` inside a stored window (the only Jira sweep that refuses there); a 401/5xx is a 200 carrying `access` |
 | `POST /api/jira/boards/sweep`   | `{ id }`                                | `{ ok: true }`; writes NOTHING — the chip's per-board `now`: awaits `boardSaved(id)`, a save's own sweep, so a 429 window or an unanswered boot leaves the board owed rather than refusing; 409 for an unreadable file, 404 `unknown board` |
@@ -157,7 +157,7 @@ a save while the credential is rejected or the site `unsupported` touches only `
 `parseBoardWrite` holds spec §5's bounds: a trimmed `name` of 1–80; an `interval` in `SYNC_INTERVALS`; at most 20 roots, each passing `isJiraKey`,
 deduplicated; at most 10 queries, each a trimmed `label` of 1–80 and a `jql` of 1–`JIRA_JQL_MAX_CHARS`; at least one root or query. A non-string, non-null
 board `id` is a 400 naming `id`; `null` or absent is a create, whose client ids are ignored. On an update a query keeps its id only when the stored board
-holds it, and every other query is minted a fresh `q_` id — a query's identity is never inferred from its label or JQL. `parseReposWrite` takes a
+holds it, and every other query is minted a fresh `q_` id — a query's identity is never inferred from its label or JQL. `columns` is optional: omitted keeps the stored order, `[]` clears it, and entries are trimmed, 1–100 characters, deduplicated and capped at the first 50; the board sheet's Columns section sends it only after an edit (DESIGN.md §8.9.3). `parseReposWrite` takes a
 `JIRA_PROJECT_KEY_RE` key and at most 10 paths after `normaliseRepoPath`: trimmed, `~` and a leading `~/` expanded to `homedir()`, `~user/…` refused,
 absolute with no empty, `.` or `..` segment (400 `path must be absolute and normalised: <path>`), one trailing `/` dropped, duplicates removed after
 normalising — the dashboard compares paths as raw strings, so the server stores exactly one spelling.
