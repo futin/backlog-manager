@@ -100,7 +100,8 @@ export function readTickSettings(file = tickSettingsFile()) {
 //   2. an `at` at or before `resetAt` stops it — a Reset clears everything it covered, including a failure stamped the very same millisecond;
 //   3. `ok` stops it;
 //   4. `failed` counts;
-//   5. any other outcome neither counts nor stops — none is written today, and a future one must not silently reset a streak.
+//   5. any other outcome neither counts nor stops — `released` is the one written today (an environment failure, not the item's) and must
+//      not reset a streak, and a future one must not either.
 // `since` is the `at` of the OLDEST counted entry (what the `status` line and the board print), `null` when nothing counted. An unparseable `resetAt` is absent.
 // Anything malformed — `recent` not an array, an entry that is not an object — reads as an unparseable `at`, so this never throws.
 export function streakOf(recent, resetAt) {

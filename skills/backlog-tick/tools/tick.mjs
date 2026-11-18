@@ -260,11 +260,7 @@ function parseJson(text) {
 async function apiJson(route, timeoutMs) {
   const r = await apiGet(route, timeoutMs);
   if (!r.ok) return null;
-  try {
-    return JSON.parse(r.text);
-  } catch {
-    return null;
-  }
+  return parseJson(r.text);
 }
 
 // Twin: the tracker URN `gh:<owner/repo>#<n>` the server's GithubSource gives a tracker item's `path`, and that `orchestrate.mjs`'s `writeSnapshot` builds the
@@ -785,7 +781,7 @@ async function cmdRecord(argv) {
     const found = await environmentOf(lock);
     if (found !== null) {
       const prior = readState(dir).items[id];
-      const text = reason === undefined || reason === '' ? '' : reason;
+      const text = reason;
       if (prior && prior.outcome === 'released') reason = `environment twice: ${text}`;
       else {
         environment = found;
@@ -859,7 +855,7 @@ function cmdStatus(argv) {
   );
   lines.push(`caps: plans ${maxPlans}, PRs ${maxPrs} (${capsSource === 'file' ? 'tick.json' : capsSource})`);
   if (recent.length === 0) lines.push('no outcomes recorded');
-  for (const e of recent) lines.push(`${e.at}  ${e.outcome.padEnd(6)}  ${e.kind.padEnd(7)}  ${e.id}${e.reason ? `  ${e.reason}` : ''}`);
+  for (const e of recent) lines.push(`${e.at}  ${e.outcome.padEnd(8)}  ${e.kind.padEnd(7)}  ${e.id}${e.reason ? `  ${e.reason}` : ''}`);
   process.stdout.write(`${lines.join('\n')}\n`);
   return 0;
 }

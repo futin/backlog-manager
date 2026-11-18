@@ -29,7 +29,9 @@ which, and keeps the lock and the memory of what failed; this session only carri
 ## 1. Decide
 
 Pass the trigger's flags through unchanged — `--max-prs M`, `--max-plans N`, `--base <ref>`, `--lock-ttl <minutes>`, `--dry-run` — and none it did not carry
-(the trigger never carries `--peek`: that flag is the scheduler's gate, never the session's; an omitted cap is the board's Settings › Shared › Backlog tick value, else 2 PRs and 3 plans — never invent one):
+(the trigger never carries `--peek`: that flag is the scheduler's gate, never the session's, and a scheduler's gate must repeat every `decide` flag the job's
+prompt carries, in the same values, or it would skip or cap a tick differently from the session; an omitted cap is the board's Settings › Shared › Backlog tick
+value, else 2 PRs and 3 plans — never invent one):
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" decide <the trigger's flags>

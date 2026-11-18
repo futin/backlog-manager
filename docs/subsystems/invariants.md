@@ -274,6 +274,12 @@ been cut) reads `cannot count open PRs` and execute is skipped, never assumed ze
 so an `idle` or `busy` tick — and every `--dry-run` and `--peek` — leaves nothing behind that could block the next one, and `record` releases it. It closes the window
 between a tick choosing an item and the skill writing its `started:` marker or claim.
 
+**Why `released` exists.** An API restart in the middle of a tick (a deploy, a crash) must not burn the item: the session's `record … failed` is the stack's
+fault, and a `failed` would skip the item until its content changes. The tool therefore proves it from the boot stamp, by identity — the lock's `bootedAt`
+against the live one, never a clock comparison and never the session's own judgement — and stores `released`, which unlike `failed` does not make the next
+tick skip the item. It is bounded to one release in a row because an execute can itself restart the API, and an item that does so every time must reach
+`failed`. Spec: [2026-11-14-tick-session-review-fixes-design.md](../superpowers/specs/2026-11-14-tick-session-review-fixes-design.md).
+
 **Only when idle.** Anything already happening to this project's pipeline is `busy`, and the tick exits: a `running` or `paused` orchestrator run; a
 board-started run that has no run file yet (server memory, so readable only while the stack is up — with it down there is no board to have started one, and the
 check is skipped); a `started:` marker on any open item in the main checkout or a linked worktree, since an in-place groom or execute in a linked worktree
@@ -379,8 +385,9 @@ item and fails the same way. After N failures in a row a project's ticks stop (`
 **Nothing stores the halt.** The streak is derived from `state.json`'s `recent` on every read — groomed-ness and Board-versus-Archive are derived the same way,
 for the same reason: a stored flag is a second fact that drifts from the first. Walk `recent` newest first and, in this order: an `at` that does not parse stops
 the walk, checked FIRST whatever the outcome, so a corrupt record is "older than everything" and can neither extend a streak nor hide behind an `ok` it does not
-have; an `at` at or before the project's `resetAt` stops it; `ok` stops it; `failed` counts; any other outcome neither counts nor stops, because none is written
-today and a future one must not silently reset a streak. Halted is `streak >= haltAfter`. Consequences, each intended: lowering N below a streak halts the
+have; an `at` at or before the project's `resetAt` stops it; `ok` stops it; `failed` counts; any other outcome neither counts nor stops, because `released`
+(an environment failure, written today) must not reset a streak and a future outcome must not either. Halted is `streak >= haltAfter`. Consequences, each
+intended: lowering N below a streak halts the
 project at the next `decide` and raising it un-halts, with nothing written either way; groom and execute failures count together, since the breaker is about the
 project's environment and not the unit; `recover`'s `killed at timeout` is a `failed` record and counts; and `forget <id>` does not touch the streak, because it
 drops `items[id]` and leaves `recent` alone — `forget` is the per-item retry, Reset the per-project one. With 50 entries kept and N at most 10 the window can

@@ -58,7 +58,8 @@ function atMs(v: unknown): number {
  *   2. an `at` at or before `resetAt` stops it — a Reset clears everything it covered, including a failure stamped the very same millisecond;
  *   3. `ok` stops it;
  *   4. `failed` counts;
- *   5. any other outcome neither counts nor stops — none is written today, and a future one must not silently reset a streak.
+ *   5. any other outcome neither counts nor stops — `released` is the one written today (an environment failure, not the item's) and must
+ *      not reset a streak, and a future one must not either.
  * `since` is the `at` of the OLDEST counted entry, `null` when nothing counted. An unparseable `resetAt` is absent. `recent` is `unknown`-tolerant on purpose:
  * it comes off a file, so a non-array or a non-object entry reads as an unparseable `at` and this never throws.
  */
