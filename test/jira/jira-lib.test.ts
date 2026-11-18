@@ -38,16 +38,20 @@ import {
   transitionOptions,
   JIRA_SWEEP_CALL_CEILING,
   bandSub,
-  cardFold,
-  childrenLine,
-  foldBoard,
-  foldMatches,
+  laneBoard,
+  NO_PARENT_LANE,
+  laneViews,
+  laneColumnCounts,
+  laneParents,
+  laneCell,
+  LANE_CELL_LIMIT,
+  clampLaneFolds,
+  laneOverrides,
+  laneOpen,
+  setLaneFold,
   foldProgress,
-  matchMarker,
   modalTree,
   progressLine,
-  sortTops,
-  rolledUpdated,
   boardRowLine,
   boardsForSetup,
   callsReading,
@@ -78,12 +82,12 @@ import {
   typeTone,
   statusTone
 } from '../../client/src/lib/jira';
-import type { JiraFold } from '../../client/src/lib/jira';
+import type { JiraLane, JiraLanes, JiraLaneFolds, JiraLaneView } from '../../client/src/lib/jira';
 import { DELIVERY_FILTER_LABELS, effectiveDeliveryFilter } from '../../client/src/lib/delivery';
 import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../../client/src/lib/jira';
 import { modelEffortFlags } from '../../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../../client/src/lib/jira-page';
-import { SHELF_LIMIT, boardAgents, boardShelves, childSessions, deckCrumb, deckGroup, deckTally, endedLine, topSessionCell } from '../../client/src/lib/jira-deck';
+import { boardAgents, childSessions, deckCrumb, deckGroup, deckTally, endedByKey, endedLine, sessionCells } from '../../client/src/lib/jira-deck';
 import { elapsedSince, formatCreated } from '../../client/src/lib/item-age';
 import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraRepoRefs, JiraSessionsPayload, JiraSkill, JiraStatusPayload } from '../../shared/types';
 import { daysAgoStamp } from '../helpers/dates';
@@ -256,11 +260,11 @@ describe('crumbOf', () => {
   const mine = { accountId: 'acc-1', name: 'Ada' };
 
   it('reads root before parent, even when the root has a parent', () => {
-    expect(crumbOf(issue({ key: 'PAY-1', parent: { key: 'PAY-0', summary: 'Epic' } }), b, me)).toEqual({ kind: 'root' });
+    expect(crumbOf(issue({ key: 'PAY-1', parent: { key: 'PAY-0', summary: 'Epic', type: null, status: null } }), b, me)).toEqual({ kind: 'root' });
   });
 
   it('reads parent before mine', () => {
-    expect(crumbOf(issue({ key: 'PAY-2', parent: { key: 'PAY-1', summary: 'Checkout' }, assignee: mine }), b, me)).toEqual({
+    expect(crumbOf(issue({ key: 'PAY-2', parent: { key: 'PAY-1', summary: 'Checkout', type: null, status: null }, assignee: mine }), b, me)).toEqual({
       kind: 'parent',
       key: 'PAY-1',
       summary: 'Checkout'
@@ -273,6 +277,13 @@ describe('crumbOf', () => {
 
   it('reads nothing for an issue that is none of those', () => {
     expect(crumbOf(issue({ key: 'PAY-4' }), b, me)).toBeNull();
+  });
+
+  // Parent-lanes spec §1.4: the crumb reads the parent the lane model KEPT. A cycle member's raw parent is ignored, so it reads `mine` when it is mine.
+  it('reads mine when the kept parent handed in is null, whatever the raw field says', () => {
+    const raw = issue({ key: 'PAY-5', parent: { key: 'PAY-6', summary: 'Cycle', type: null, status: null }, assignee: mine });
+    expect(crumbOf(raw, b, me, null)).toEqual({ kind: 'mine' });
+    expect(crumbOf(raw, b, me)).toEqual({ kind: 'parent', key: 'PAY-6', summary: 'Cycle' });
   });
 
   it('never reads mine while me is unknown', () => {
@@ -745,6 +756,23 @@ describe('parseJiraBoardIssues', () => {
     expect(parseJiraBoardIssues({ issues: [null, 3, {}, { key: 'A-1' }, { summary: 's' }, row] })?.issues).toEqual([row]);
   });
 
+  it('reads a parent without a type or status as null for each, keeps both when present, and leaves a null parent null', () => {
+    // The wire shape of an older server: the parent has no type or status key at all.
+    const bare = { ...row, parent: { key: 'PAY-1', summary: 'Checkout' } };
+    expect(parseJiraBoardIssues({ issues: [bare] })?.issues[0].parent).toEqual({ key: 'PAY-1', summary: 'Checkout', type: null, status: null });
+    const full = {
+      ...row,
+      parent: {
+        key: 'PAY-1',
+        summary: 'Checkout',
+        type: { name: 'Epic', level: 1, subtask: false },
+        status: { name: 'In Progress', category: 'indeterminate' }
+      }
+    };
+    expect(parseJiraBoardIssues({ issues: [full] })?.issues).toEqual([full]);
+    expect(parseJiraBoardIssues({ issues: [{ ...row, parent: null }] })?.issues[0].parent).toBeNull();
+  });
+
   it('reads an empty board as an empty answer, not as no answer', () => {
     expect(parseJiraBoardIssues({ issues: [] })).toEqual({ issues: [], polledAt: null });
   });
@@ -814,146 +842,26 @@ describe('sweepLine', () => {
   });
 });
 
-// ── The fold (grouped-board spec §3–§6) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── Fold progress, the modal tree and the band's lane counts (grouped-board spec §3–§6, kept by parent-lanes spec §1.5) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-describe('the fold', () => {
+describe('foldProgress, modalTree and the band’s lane counts', () => {
   const now = Date.now();
 
   /**
    * An issue keyed `key` under `parent` (`null` for none), updated `h` hours before `now`. Every case gives each issue a distinct `h`, so the
-   * `sortForBoard` order every `under` and `childrenOf` list is held in is a fact of the case rather than an accident of insertion order.
+   * `sortForBoard` order a `childrenOf` list is held in is a fact of the case rather than an accident of insertion order.
    */
   const n = (key: string, parent: string | null, h: number, over: Partial<JiraIssue> = {}): JiraIssue =>
     issue({
       key,
       summary: `${key} summary`,
-      parent: parent === null ? null : { key: parent, summary: `${parent} summary` },
+      parent: parent === null ? null : { key: parent, summary: `${parent} summary`, type: null, status: null },
       updated: ago(now, h * HOUR),
       ...over
     });
-  const keys = (list: readonly JiraIssue[] | undefined): string[] => (list ?? []).map((i) => i.key);
-  const asObject = (m: ReadonlyMap<string, readonly JiraIssue[]>): Record<string, string[]> => Object.fromEntries([...m].map(([k, v]) => [k, keys(v)]));
   const todo = { status: { name: 'To Do', category: 'new' as const } };
   const doing = { status: { name: 'In Progress', category: 'indeterminate' as const } };
   const done = { status: { name: 'Done', category: 'done' as const } };
-
-  /** `foldBoard`, plus the one property every case owes: each input key lands exactly once, as a top or in exactly one `under` list. */
-  function fold(input: JiraIssue[]): JiraFold {
-    const f = foldBoard(input);
-    const landed = [...keys(f.tops), ...[...f.under.values()].flatMap((l) => keys(l))].sort();
-    expect(landed).toEqual(keys(input).sort());
-    return f;
-  }
-
-  describe('foldBoard', () => {
-    it('folds a depth-1 child under its parent', () => {
-      const f = fold([n('E1', null, 5), n('S1', 'E1', 3)]);
-      expect(keys(f.tops)).toEqual(['E1']);
-      expect(asObject(f.under)).toEqual({ E1: ['S1'] });
-      expect(asObject(f.childrenOf)).toEqual({ E1: ['S1'] });
-      expect(f.childrenOf.has('S1')).toBe(false);
-    });
-
-    it('folds depth 2 and 3 into the topmost ancestor, in sortForBoard order, with one childrenOf edge per level', () => {
-      const f = fold([n('E1', null, 5), n('S1', 'E1', 3), n('T1', 'S1', 4), n('U1', 'T1', 1)]);
-      expect(keys(f.tops)).toEqual(['E1']);
-      expect(asObject(f.under)).toEqual({ E1: ['U1', 'S1', 'T1'] });
-      expect(asObject(f.childrenOf)).toEqual({ E1: ['S1'], S1: ['T1'], T1: ['U1'] });
-    });
-
-    it('makes an issue whose parent is off the board a top, and its crumb still names that parent', () => {
-      const s2 = n('S2', 'X-9', 2);
-      const f = fold([n('E1', null, 5), s2]);
-      expect(keys(f.tops)).toEqual(['E1', 'S2']);
-      expect(f.under.size).toBe(0);
-      expect(crumbText(crumbOf(s2, board({ roots: [] }), null))).toBe('↳ X-9 X-9 summary');
-    });
-
-    it('lifts the open children of a parent dropped by the Done window (absent from the list)', () => {
-      const f = fold([n('S1', 'E1', 3), n('T1', 'S1', 4)]);
-      expect(keys(f.tops)).toEqual(['S1']);
-      expect(asObject(f.under)).toEqual({ S1: ['T1'] });
-    });
-
-    it('folds a query hit that is also a descendant of a root like any other descendant', () => {
-      const f = fold([n('E1', null, 5), n('S1', 'E1', 3), n('Q1', 'S1', 2)]);
-      expect(keys(f.tops)).toEqual(['E1']);
-      expect(keys(f.under.get('E1'))).toContain('Q1');
-      expect(asObject(f.childrenOf)).toEqual({ E1: ['S1'], S1: ['Q1'] });
-    });
-
-    it('terminates on a self-parent, which is its own top', () => {
-      const f = fold([n('A', 'A', 1)]);
-      expect(keys(f.tops)).toEqual(['A']);
-      expect(f.under.size).toBe(0);
-      expect(f.childrenOf.size).toBe(0);
-    });
-
-    it('draws a two-cycle as both members side by side, in input order, with no edge between them', () => {
-      const f = fold([n('A', 'B', 1), n('B', 'A', 2)]);
-      expect(keys(f.tops)).toEqual(['A', 'B']);
-      expect(f.under.size).toBe(0);
-      expect(f.childrenOf.size).toBe(0);
-    });
-
-    it('folds a child of a cycle member under that member, and nothing between the members', () => {
-      const f = fold([n('A', 'B', 1), n('B', 'A', 2), n('C', 'A', 3)]);
-      expect(keys(f.tops)).toEqual(['A', 'B']);
-      expect(asObject(f.under)).toEqual({ A: ['C'] });
-      expect(asObject(f.childrenOf)).toEqual({ A: ['C'] });
-    });
-
-    it('never mutates the list it is given', () => {
-      const input = [n('T1', 'S1', 4), n('E1', null, 5), n('U1', 'T1', 1), n('S1', 'E1', 3)];
-      const before = [...input];
-      fold(input);
-      expect(input).toHaveLength(before.length);
-      input.forEach((x, i) => expect(x).toBe(before[i]));
-    });
-  });
-
-  describe('sortTops', () => {
-    it('ranks a top by the newest updated across it and everything folded under it', () => {
-      const p = n('P', null, 5 * 24);
-      const q = n('Q', null, 24);
-      const f = fold([q, p, n('P1', 'P', 0)]);
-      expect(keys(sortTops(f.tops, f.under))).toEqual(['P', 'Q']);
-    });
-
-    it('breaks a tie on the newest stamp by key in plain string order', () => {
-      const f = fold([n('B-2', null, 3), n('A-1', null, 3)]);
-      expect(keys(sortTops(f.tops, f.under))).toEqual(['A-1', 'B-2']);
-    });
-
-    it('sorts an unparseable stamp last, and returns a new array', () => {
-      const tops = [n('X', null, 0, { updated: 'not a date' }), n('Y', null, 30 * 24)];
-      const sorted = sortTops(tops, new Map());
-      expect(keys(sorted)).toEqual(['Y', 'X']);
-      expect(sorted).not.toBe(tops);
-      expect(keys(tops)).toEqual(['X', 'Y']);
-    });
-  });
-
-  describe('rolledUpdated', () => {
-    it('is the newest folded issue\u2019s stamp, as given, when a child is newer than the top', () => {
-      const p = n('P', null, 5 * 24);
-      const c = n('P1', 'P', 24);
-      const f = fold([p, c]);
-      expect(rolledUpdated(f.tops[0], f.under)).toBe(c.updated);
-    });
-
-    it('is the top\u2019s own stamp with nothing folded under it', () => {
-      const p = n('P', null, 3);
-      expect(rolledUpdated(p, new Map())).toBe(p.updated);
-    });
-
-    it('skips an unparseable top stamp for a parseable child, and is null when nothing parses', () => {
-      const bad = n('P', null, 0, { updated: 'not a date' });
-      const c = n('P1', 'P', 2);
-      expect(rolledUpdated(bad, new Map([['P', [c]]]))).toBe(c.updated);
-      expect(rolledUpdated(bad, new Map([['P', [n('P2', 'P', 0, { updated: '' })]]]))).toBeNull();
-    });
-  });
 
   describe('foldProgress and progressLine', () => {
     const many = (count: number, over: Partial<JiraIssue>, tag: string): JiraIssue[] => Array.from({ length: count }, (_, i) => n(`${tag}${i}`, null, i, over));
@@ -972,74 +880,6 @@ describe('the fold', () => {
     it('is null when there is nothing to count', () => {
       expect(foldProgress([])).toEqual({ done: 0, doing: 0, todo: 0 });
       expect(progressLine({ done: 0, doing: 0, todo: 0 })).toBeNull();
-    });
-  });
-
-  describe('childrenLine', () => {
-    it.each([
-      [0, 0, null],
-      [1, 0, '1 child'],
-      [3, 0, '3 children'],
-      [1, 1, '1 child · 1 below them'],
-      [2, 7, '2 children · 7 below them']
-    ])('(%i, %i) → %p', (direct, deeper, line) => {
-      expect(childrenLine(direct, deeper)).toBe(line);
-    });
-  });
-
-  describe('cardFold', () => {
-    const f = foldBoard([n('E1', null, 5), n('S1', 'E1', 3, doing), n('T1', 'S1', 4, done), n('U1', 'T1', 1, todo), n('R', null, 6)]);
-
-    it('reads the top’s direct children, everything deeper, and the spread', () => {
-      expect(cardFold('E1', f)).toEqual({
-        line: '1 child · 2 below them',
-        progress: { done: 1, doing: 1, todo: 1 },
-        caption: '1 done · 1 in progress · 1 to do'
-      });
-    });
-
-    it('is null for a top with nothing folded', () => {
-      expect(cardFold('R', f)).toBeNull();
-    });
-  });
-
-  describe('foldMatches (F1)', () => {
-    const f = foldBoard([n('E1', null, 5), n('S1', 'E1', 3), n('T1', 'S1', 4), n('R', null, 6)]);
-    const only = (...ks: string[]) => (i: JiraIssue): boolean => ks.includes(i.key);
-
-    it('keeps every top that matches on its own, with no ring keys', () => {
-      expect(Object.fromEntries(foldMatches(f, () => true))).toEqual({ E1: [], R: [] });
-    });
-
-    it('keeps a top for a folded match alone, naming that match', () => {
-      expect(Object.fromEntries(foldMatches(f, only('T1')))).toEqual({ E1: ['T1'] });
-    });
-
-    it('draws no ring keys on a top that matches itself, even when folded issues match too', () => {
-      expect(Object.fromEntries(foldMatches(f, only('E1', 'T1')))).toEqual({ E1: [] });
-    });
-
-    it('hides everything when nothing matches', () => {
-      expect(foldMatches(f, () => false).size).toBe(0);
-    });
-
-    it('keeps a matching cycle member on its own', () => {
-      const cycle = foldBoard([n('A', 'B', 1), n('B', 'A', 2)]);
-      expect(Object.fromEntries(foldMatches(cycle, only('B')))).toEqual({ B: [] });
-    });
-  });
-
-  describe('matchMarker', () => {
-    it('is null for no match', () => {
-      expect(matchMarker([])).toBeNull();
-    });
-
-    it('names a single match in the word itself', () => {
-      expect(matchMarker(['PAY-162'])).toEqual({ word: '1 match: PAY-162', title: undefined });
-    });
-
-    it('counts several and puts their keys in the title', () => {
-      expect(matchMarker(['PAY-162', 'PAY-161'])).toEqual({ word: '2 matches', title: 'PAY-162, PAY-161' });
     });
   });
 
@@ -1084,34 +924,336 @@ describe('the fold', () => {
     });
   });
 
-  describe('bandSub with a fold', () => {
+  describe('bandSub with the lane counts', () => {
     const site = 'acme.atlassian.net';
-    const b = board({ count: 14, polledAt: ago(now, 12 * SECOND) });
+    const b = board({ count: 14, roots: [], polledAt: ago(now, 12 * SECOND) });
 
-    it('counts the loaded list and adds the cards part after the sources', () => {
-      expect(bandSub(b, site, now, { issues: 17, cards: 5 }).text).toBe(
-        'acme.atlassian.net · 17 issues from 2 roots and 1 query · 5 cards · polled 12 s ago'
-      );
+    it('counts the loaded list and adds the parents part after the sources', () => {
+      expect(bandSub(b, site, now, { issues: 16, parents: 8 }).text).toBe('acme.atlassian.net · 16 issues from 1 query · 8 parents · polled 12 s ago');
     });
 
-    it('reads today’s line exactly when nothing folds', () => {
-      expect(bandSub(b, site, now, { issues: 14, cards: 14 }).text).toBe(bandSub(b, site, now, null).text);
+    it('says 1 parent in the singular', () => {
+      expect(bandSub(b, site, now, { issues: 3, parents: 1 }).text).toContain(' · 3 issues from 1 query · 1 parent · ');
     });
 
-    it('says 1 card in the singular', () => {
-      expect(bandSub(b, site, now, { issues: 3, cards: 1 }).text).toContain(' · 1 card · ');
+    it('draws no parents part when no lane has a parent, and reads the loaded count rather than the status poll’s', () => {
+      const text = bandSub(b, site, now, { issues: 4, parents: 0 }).text;
+      expect(text).toBe('acme.atlassian.net · 4 issues from 1 query · polled 12 s ago');
+      expect(text).not.toContain('parent');
     });
 
-    it('draws no cards part on an empty list', () => {
-      const text = bandSub(b, site, now, { issues: 0, cards: 0 }).text;
-      expect(text).toContain('0 issues');
-      expect(text).not.toContain('card');
+    it('reads today’s line from the status count while the list has not loaded', () => {
+      expect(bandSub(b, site, now, null).text).toBe('acme.atlassian.net · 14 issues from 1 query · polled 12 s ago');
     });
 
     it('still ends on the cap', () => {
-      const text = bandSub(board({ truncated: true, polledAt: ago(now, 12 * SECOND) }), site, now, { issues: 17, cards: 5 }).text;
-      expect(text).toContain(' · 5 cards · ');
+      const text = bandSub(board({ truncated: true, polledAt: ago(now, 12 * SECOND) }), site, now, { issues: 17, parents: 5 }).text;
+      expect(text).toContain(' · 5 parents · ');
       expect(text.endsWith(' · first 500 shown')).toBe(true);
+    });
+  });
+});
+
+describe('laneBoard', () => {
+  const now = Date.now();
+  const todo = { status: { name: 'To Do', category: 'new' as const } };
+  const doing = { status: { name: 'In Progress', category: 'indeterminate' as const } };
+  const done = { status: { name: 'Done', category: 'done' as const } };
+
+  /**
+   * An issue keyed `key` under `parent` (`null` for none), updated `ms` before `now`. The parent's summary is derived from its key, so two parents never
+   * share one, and every case gives each issue its own `ms` unless the case is about a tie.
+   */
+  const n = (key: string, parent: string | null, ms: number, over: Partial<JiraIssue> = {}): JiraIssue =>
+    issue({
+      key,
+      summary: `${key} summary`,
+      parent: parent === null ? null : { key: parent, summary: `${parent} summary`, type: null, status: null },
+      updated: ago(now, ms),
+      ...todo,
+      ...over
+    });
+  const keys = (list: readonly JiraIssue[] | undefined): string[] => (list ?? []).map((i) => i.key);
+  const laneKeys = (list: readonly JiraLane[]): string[] => list.map((l) => l.key);
+  const keySets = (m: ReadonlyMap<string, readonly JiraIssue[]>): Record<string, string[]> =>
+    Object.fromEntries([...m].map(([k, v]) => [k, keys(v).sort()]));
+
+  /**
+   * `laneBoard`, plus the property every fixture owes: each input key is drawn exactly once across the whole tree, as an on-board header or as a card
+   * (§1.4: never twice, never dropped). What `childrenOf` holds is pinned by its own cases below (§1.5).
+   */
+  function lanes(input: JiraIssue[]): JiraLanes {
+    const l = laneBoard(input);
+    const drawn: string[] = [];
+    const visit = (lane: JiraLane): void => {
+      if (lane.header !== null) drawn.push(lane.header.key);
+      drawn.push(...keys(lane.cards));
+      lane.lanes.forEach(visit);
+    };
+    l.lanes.forEach(visit);
+    expect(drawn.sort()).toEqual(keys(input).sort());
+    return l;
+  }
+
+  const epic = { name: 'Epic', level: 1, subtask: false };
+  /** Case 1's fixture: three cards under off-board `PAY-1`, the freshest (`PAY-12`) carrying a richer parent payload than the other two. */
+  const offBoardThree = (): JiraIssue[] => {
+    const plain = { key: 'PAY-1', summary: 'Checkout', type: null, status: null };
+    return [
+      n('PAY-11', null, 3 * HOUR, { parent: plain }),
+      n('PAY-12', null, 1 * HOUR, {
+        parent: { key: 'PAY-1', summary: 'Checkout v2', type: epic, status: { name: 'In Progress', category: 'indeterminate' } }
+      }),
+      n('PAY-13', null, 2 * HOUR, { parent: { ...plain } })
+    ];
+  };
+
+  it('draws one off-board lane whose stub is the freshest card’s parent', () => {
+    const input = offBoardThree();
+    const l = lanes(input);
+    expect(l.lanes).toHaveLength(1);
+    const [lane] = l.lanes;
+    expect(lane.key).toBe('PAY-1');
+    expect(lane.kind).toBe('off');
+    expect(lane.header).toBeNull();
+    expect(lane.stub).toEqual(input[1].parent);
+    expect(keys(lane.cards)).toEqual(['PAY-12', 'PAY-13', 'PAY-11']);
+    expect(lane.depth).toBe(0);
+    expect(lane.lanes).toEqual([]);
+  });
+
+  it('reads a tied stub from whichever card sortForBoard puts first, whatever the input order', () => {
+    const at = 2 * HOUR;
+    const a = n('PAY-21', null, at, { parent: { key: 'PAY-1', summary: 'Checkout', type: null, status: null } });
+    const b = n('PAY-22', null, at, { parent: { key: 'PAY-1', summary: 'Checkout v2', type: null, status: null } });
+    const first = sortForBoard([a, b])[0];
+    expect(lanes([a, b]).lanes[0].stub).toEqual(first.parent);
+    expect(lanes([b, a]).lanes[0].stub).toEqual(first.parent);
+    expect(lanes([b, a]).lanes[0].stub?.summary).toBe('Checkout');
+  });
+
+  it('adds a No parent lane, last, only when a card has no parent', () => {
+    const l = lanes([...offBoardThree(), n('PAY-20', null, 4 * HOUR)]);
+    expect(laneKeys(l.lanes)).toEqual(['PAY-1', NO_PARENT_LANE]);
+    expect(NO_PARENT_LANE).toBe('none');
+    expect(l.lanes[1].kind).toBe('none');
+    expect(keys(l.lanes[1].cards)).toEqual(['PAY-20']);
+    expect(lanes(offBoardThree()).lanes.some((x) => x.kind === 'none')).toBe(false);
+  });
+
+  it('makes an on-board parent the header of its lane and no card anywhere', () => {
+    const l = lanes([n('PAY-30', null, 5 * HOUR), n('PAY-31', 'PAY-30', 1 * HOUR), n('PAY-32', 'PAY-30', 2 * HOUR)]);
+    expect(l.lanes).toHaveLength(1);
+    expect(l.lanes[0].kind).toBe('board');
+    expect(l.lanes[0].header?.key).toBe('PAY-30');
+    expect(keys(l.lanes[0].cards)).toEqual(['PAY-31', 'PAY-32']);
+    expect(l.lanes.some((x) => x.kind === 'none')).toBe(false);
+  });
+
+  const nesting = (): JiraIssue[] => [
+    n('PAY-40', null, 6 * HOUR, { type: epic }),
+    n('PAY-41', 'PAY-40', 5 * HOUR),
+    n('PAY-42', 'PAY-41', 1 * HOUR),
+    n('PAY-43', 'PAY-41', 2 * HOUR),
+    n('PAY-44', 'PAY-40', 3 * HOUR)
+  ];
+
+  it('nests a header issue’s lane under its parent’s lane, one step in, with the subtree counting the nested header', () => {
+    const l = lanes(nesting());
+    expect(laneKeys(l.lanes)).toEqual(['PAY-40']);
+    const [root] = l.lanes;
+    expect(keys(root.cards)).toEqual(['PAY-44']);
+    expect(laneKeys(root.lanes)).toEqual(['PAY-41']);
+    expect(root.lanes[0].depth).toBe(1);
+    expect(root.lanes[0].cards).toHaveLength(2);
+    expect(keys(root.subtree).sort()).toEqual(['PAY-41', 'PAY-42', 'PAY-43', 'PAY-44']);
+    expect(keys(root.lanes[0].subtree).sort()).toEqual(['PAY-42', 'PAY-43']);
+  });
+
+  it('draws no lane for an off-board parent with no card under it, and the header names it through parentOf', () => {
+    const l = lanes([n('PAY-51', 'PAY-50', 2 * HOUR), n('PAY-52', 'PAY-51', 1 * HOUR)]);
+    expect(laneKeys(l.lanes)).toEqual(['PAY-51']);
+    expect(l.lanes[0].kind).toBe('board');
+    expect(l.lanes[0].depth).toBe(0);
+    expect(l.parentOf.get('PAY-51')?.key).toBe('PAY-50');
+  });
+
+  const offWithHeader = (s61: Partial<JiraIssue> = todo, s62: Partial<JiraIssue> = todo, s63: Partial<JiraIssue> = todo): JiraIssue[] => [
+    n('PAY-61', 'PAY-60', 3 * HOUR, s61),
+    n('PAY-62', 'PAY-60', 2 * HOUR, s62),
+    n('PAY-63', 'PAY-62', 1 * HOUR, s63)
+  ];
+
+  it('nests an on-board header under an off-board lane that has a card of its own', () => {
+    const l = lanes(offWithHeader());
+    expect(laneKeys(l.lanes)).toEqual(['PAY-60']);
+    expect(l.lanes[0].kind).toBe('off');
+    expect(keys(l.lanes[0].cards)).toEqual(['PAY-61']);
+    expect(laneKeys(l.lanes[0].lanes)).toEqual(['PAY-62']);
+    expect(l.lanes[0].lanes[0].depth).toBe(1);
+    expect(keys(l.lanes[0].lanes[0].cards)).toEqual(['PAY-63']);
+  });
+
+  describe('cycles (§1.4)', () => {
+    const twoCycle = (): JiraIssue[] => [n('PAY-71', 'PAY-72', 1 * HOUR), n('PAY-72', 'PAY-71', 2 * HOUR)];
+
+    it('draws a two-cycle as two parentless cards in one No parent lane', () => {
+      const l = lanes(twoCycle());
+      expect(l.lanes).toHaveLength(1);
+      expect(l.lanes[0].kind).toBe('none');
+      expect(keys(l.lanes[0].cards).sort()).toEqual(['PAY-71', 'PAY-72']);
+      expect(l.parentOf.get('PAY-71')).toBeNull();
+      expect(l.parentOf.get('PAY-72')).toBeNull();
+    });
+
+    it('draws a self-parent as one card in the No parent lane', () => {
+      const l = lanes([n('PAY-73', 'PAY-73', 1 * HOUR)]);
+      expect(l.lanes).toHaveLength(1);
+      expect(l.lanes[0].kind).toBe('none');
+      expect(keys(l.lanes[0].cards)).toEqual(['PAY-73']);
+      expect(l.parentOf.get('PAY-73')).toBeNull();
+    });
+
+    it('lets an issue hanging off a cycle keep its parent, which becomes a root lane', () => {
+      const l = lanes([...twoCycle(), n('PAY-74', 'PAY-71', 3 * HOUR)]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-71', NO_PARENT_LANE]);
+      expect(l.lanes[0].kind).toBe('board');
+      expect(keys(l.lanes[0].cards)).toEqual(['PAY-74']);
+      expect(keys(l.lanes[1].cards)).toEqual(['PAY-72']);
+      expect(l.parentOf.get('PAY-74')?.key).toBe('PAY-71');
+    });
+  });
+
+  describe('order (§3.5)', () => {
+    it('puts an open lane a week old before a settled lane updated a minute ago', () => {
+      const l = lanes([n('PAY-201', 'PAY-200', 7 * 24 * HOUR), n('PAY-211', 'PAY-210', MINUTE, done)]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-200', 'PAY-210']);
+    });
+
+    it('ranks open lanes by the newest updated across header and subtree, not the header’s own', () => {
+      const l = lanes([
+        n('PAY-81', null, 5 * 24 * HOUR),
+        n('PAY-82', 'PAY-81', 1 * HOUR),
+        n('PAY-85', null, 2 * HOUR),
+        n('PAY-86', 'PAY-85', 3 * HOUR)
+      ]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-81', 'PAY-85']);
+      expect(l.lanes[0].stamp).toBe(Date.parse(ago(now, 1 * HOUR)));
+      expect(l.lanes[1].stamp).toBe(Date.parse(ago(now, 2 * HOUR)));
+    });
+
+    it('breaks a stamp tie by lane key, whatever the input order', () => {
+      const a = n('PAY-94', 'PAY-91', 1 * HOUR);
+      const b = n('PAY-93', 'PAY-92', 1 * HOUR);
+      expect(laneKeys(lanes([b, a]).lanes)).toEqual(['PAY-91', 'PAY-92']);
+      expect(laneKeys(lanes([a, b]).lanes)).toEqual(['PAY-91', 'PAY-92']);
+    });
+
+    const openLane = (): JiraIssue => n('PAY-301', 'PAY-300', 5 * HOUR);
+    const settledLane = (): JiraIssue => n('PAY-311', 'PAY-310', 3 * HOUR, done);
+
+    it('keeps an open No parent lane last among the open lanes, before every settled lane, even holding the newest card', () => {
+      const l = lanes([openLane(), settledLane(), n('PAY-320', null, MINUTE)]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-300', NO_PARENT_LANE, 'PAY-310']);
+    });
+
+    it('puts a settled No parent lane last of all, even when it is the newest', () => {
+      const l = lanes([openLane(), settledLane(), n('PAY-321', null, MINUTE, done)]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-300', 'PAY-310', NO_PARENT_LANE]);
+      expect(l.lanes[2].settled).toBe(true);
+    });
+
+    it('sorts nested lanes among their siblings by the same rule, inside their parent', () => {
+      const l = lanes([
+        n('PAY-400', null, 9 * 24 * HOUR),
+        n('PAY-401', 'PAY-400', 6 * 24 * HOUR),
+        n('PAY-410', 'PAY-400', 7 * 24 * HOUR),
+        n('PAY-411', 'PAY-410', 8 * 24 * HOUR),
+        n('PAY-420', 'PAY-400', MINUTE, done),
+        n('PAY-421', 'PAY-420', 2 * MINUTE, done)
+      ]);
+      expect(laneKeys(l.lanes)).toEqual(['PAY-400']);
+      expect(laneKeys(l.lanes[0].lanes)).toEqual(['PAY-410', 'PAY-420']);
+      expect(l.lanes[0].lanes[1].settled).toBe(true);
+      expect(l.lanes[0].settled).toBe(false);
+    });
+  });
+
+  describe('settled (§3.5)', () => {
+    it('is false for an on-board header still in progress over Done cards', () => {
+      const l = lanes([n('PAY-500', null, 3 * HOUR, doing), n('PAY-501', 'PAY-500', 1 * HOUR, done), n('PAY-502', 'PAY-500', 2 * HOUR, done)]);
+      expect(l.lanes[0].settled).toBe(false);
+    });
+
+    it('is true for an off-board stub in progress over Done cards — its status is not this board’s', () => {
+      const p = { key: 'PAY-510', summary: 'PAY-510 summary', type: null, status: { name: 'In Progress', category: 'indeterminate' as const } };
+      const l = lanes([n('PAY-511', null, 1 * HOUR, { ...done, parent: p }), n('PAY-512', null, 2 * HOUR, { ...done, parent: { ...p } })]);
+      expect(l.lanes[0].kind).toBe('off');
+      expect(l.lanes[0].settled).toBe(true);
+    });
+
+    it('counts a nested header in its parent lane’s subtree', () => {
+      expect(lanes(offWithHeader(done, doing, done)).lanes[0].settled).toBe(false);
+      expect(lanes(offWithHeader(done, done, done)).lanes[0].settled).toBe(true);
+    });
+  });
+
+  it('nests six deep with no cap, each key drawn once', () => {
+    const chain = [n('PAY-101', null, 7 * HOUR)];
+    for (let k = 102; k <= 106; k += 1) chain.push(n(`PAY-${k}`, `PAY-${k - 1}`, (108 - k) * HOUR));
+    chain.push(n('PAY-107', 'PAY-106', 1 * HOUR));
+    const l = lanes(chain);
+    const depths: number[] = [];
+    let at: readonly JiraLane[] = l.lanes;
+    while (at.length > 0) {
+      depths.push(at[0].depth);
+      at = at[0].lanes;
+    }
+    expect(depths).toEqual([0, 1, 2, 3, 4, 5]);
+    // `lanes()` already holds every header and card to exactly once; this is the count the brief names.
+    let count = 0;
+    const visit = (lane: JiraLane): void => {
+      count += (lane.header === null ? 0 : 1) + lane.cards.length;
+      lane.lanes.forEach(visit);
+    };
+    l.lanes.forEach(visit);
+    expect(count).toBe(7);
+  });
+
+  describe('childrenOf (§1.5)', () => {
+    it('holds each on-board parent’s direct children', () => {
+      expect(keySets(lanes(nesting()).childrenOf)).toEqual({ 'PAY-40': ['PAY-41', 'PAY-44'], 'PAY-41': ['PAY-42', 'PAY-43'] });
+    });
+
+    it('holds no edge between cycle members, and keeps the edge off a cycle', () => {
+      expect(lanes([n('PAY-71', 'PAY-72', 1 * HOUR), n('PAY-72', 'PAY-71', 2 * HOUR)]).childrenOf.size).toBe(0);
+      expect(lanes([n('PAY-73', 'PAY-73', 1 * HOUR)]).childrenOf.size).toBe(0);
+      const c = lanes([n('PAY-71', 'PAY-72', 1 * HOUR), n('PAY-72', 'PAY-71', 2 * HOUR), n('PAY-74', 'PAY-71', 3 * HOUR)]);
+      expect(keySets(c.childrenOf)).toEqual({ 'PAY-71': ['PAY-74'] });
+    });
+  });
+
+  /*
+    Two properties the deleted fold suite pinned (`foldBoard` never mutating its list; `sortTops` ranking an unparseable stamp) that the lane walk keeps —
+    `sortForBoard` copies its input and `updatedMs` reads NaN as 0 — and the `laneBoard` comment promises.
+  */
+  describe('input and stamps', () => {
+    const shape = (list: readonly JiraLane[]): unknown => list.map((l) => ({ key: l.key, cards: keys(l.cards), lanes: shape(l.lanes) }));
+
+    it('never mutates the list it is given, and a shuffled list draws the same lanes', () => {
+      const input = nesting();
+      const before = keys(input);
+      const out = lanes(input);
+      expect(keys(input)).toEqual(before);
+      expect(shape(lanes([...input].reverse()).lanes)).toEqual(shape(out.lanes));
+    });
+
+    it('ranks a lane whose only stamp is unparseable last among the open lanes', () => {
+      const under = (key: string, parent: string, ms: number, over: Partial<JiraIssue> = {}): JiraIssue =>
+        n(key, null, ms, { parent: { key: parent, summary: `${parent} summary`, type: null, status: null }, ...over });
+      const l = lanes([under('PAY-81', 'PAY-8', 1 * HOUR), under('PAY-61', 'PAY-6', 1 * HOUR, { updated: 'not a date' }), under('PAY-71', 'PAY-7', 2 * HOUR)]);
+      // PAY-6 holds the LOWEST key, so a NaN stamp falling through to key order would put it first and fail the case.
+      expect(laneKeys(l.lanes)).toEqual(['PAY-8', 'PAY-7', 'PAY-6']);
     });
   });
 });
@@ -1855,13 +1997,16 @@ describe('lib/jira-deck', () => {
   const reservation = (h: number): JiraLiveSession => ({ sessionId: null, name: 'jira PAY-5', startedAt: hoursAgo(h), repo: '/Users/ada/pay', starting: true });
 
   const top = issue({ key: 'PAY-1', summary: 'Top' });
-  const child = issue({ key: 'PAY-2', summary: 'Child', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-1', summary: 'Top' } });
+  const child = issue({ key: 'PAY-2', summary: 'Child', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-1', summary: 'Top', type: null, status: null } });
   const other = issue({ key: 'PAY-3', summary: 'Other' });
-  const fold = foldBoard([top, child, other]);
+  /** `boardAgents` over `issues` as the page calls it: the loaded list and the kept parents `laneBoard` read off that same list. */
+  const agentsOn = (issues: JiraIssue[], payload: JiraSessionsPayload | null, live: Record<string, JiraLiveSession> = {}) =>
+    boardAgents(issues, laneBoard(issues).parentOf, payload, live);
+  const loaded = [top, child, other];
 
   it('boardAgents gives one session linked to two on-board tickets two entries with distinct ids', () => {
-    const entries = boardAgents(fold, answer([link('PAY-1', 's1', 'working', 3), link('PAY-3', 's1', 'working', 3)]), {});
-    expect(entries.map((e) => e.top.key).sort()).toEqual(['PAY-1', 'PAY-3']);
+    const entries = agentsOn(loaded, answer([link('PAY-1', 's1', 'working', 3), link('PAY-3', 's1', 'working', 3)]));
+    expect(entries.map((e) => e.issue.key).sort()).toEqual(['PAY-1', 'PAY-3']);
     expect(new Set(entries.map((e) => e.id)).size).toBe(2);
   });
 
@@ -1873,8 +2018,8 @@ describe('lib/jira-deck', () => {
   });
 
   it('boardAgents orders by group, then newest start, and draws a reservation from `live` and never an ended link', () => {
-    const entries = boardAgents(
-      fold,
+    const entries = agentsOn(
+      loaded,
       answer([
         link('PAY-1', 'a', 'quiet', 5),
         link('PAY-3', 'b', 'working', 4),
@@ -1889,71 +2034,71 @@ describe('lib/jira-deck', () => {
   });
 
   it('boardAgents ignores a live entry that is not starting, and every payload when none has loaded', () => {
-    expect(boardAgents(fold, null, { 'PAY-1': { ...reservation(1), starting: false, sessionId: 's' } })).toEqual([]);
+    expect(agentsOn(loaded, null, { 'PAY-1': { ...reservation(1), starting: false, sessionId: 's' } })).toEqual([]);
   });
 
-  it('a session on a folded child belongs to the top, and its crumb names the top', () => {
-    const [entry] = boardAgents(fold, answer([link('PAY-2', 'c', 'working', 2)]), {});
-    expect(entry.issue.key).toBe('PAY-2');
-    expect(entry.top.key).toBe('PAY-1');
-    expect(deckCrumb(entry, [])).toMatch(/^↳ PAY-1 · /);
-    expect(deckCrumb(entry, [])).toContain('pay');
-    const [own] = boardAgents(fold, answer([link('PAY-1', 'a', 'working', 2)]), {});
-    expect(deckCrumb(own, [])).not.toContain('↳');
-  });
+  /*
+    The deck on the lane model (parent-lanes spec §5): an entry names the parent the lanes KEPT for its own issue — `↳ <KEY>` on the card and the crumb's
+    lead — whichever kind of lane that is. PAY-42 sits under on-board PAY-41; PAY-71 and PAY-72 name each other, so the walk drops both links (§1.4);
+    PAY-11 and PAY-12 sit under off-board PAY-1, each carrying its own copy of the parent, and PAY-12 — the fresher — is the one the lane's stub is read from.
+  */
+  describe('boardAgents and deckCrumb on the lane model', () => {
+    const p41 = issue({ key: 'PAY-41', summary: 'Ledger epic', updated: hoursAgo(9) });
+    const p42 = issue({ key: 'PAY-42', summary: 'Ledger story', parent: { key: 'PAY-41', summary: 'Ledger epic', type: null, status: null }, updated: hoursAgo(8) });
+    const p71 = issue({ key: 'PAY-71', summary: 'Loop one', parent: { key: 'PAY-72', summary: 'Loop two', type: null, status: null }, updated: hoursAgo(7) });
+    const p72 = issue({ key: 'PAY-72', summary: 'Loop two', parent: { key: 'PAY-71', summary: 'Loop one', type: null, status: null }, updated: hoursAgo(6) });
+    const p11 = issue({ key: 'PAY-11', summary: 'Card form', parent: { key: 'PAY-1', summary: 'Checkout', type: null, status: null }, updated: hoursAgo(5) });
+    const p12 = issue({ key: 'PAY-12', summary: 'Wallet form', parent: { key: 'PAY-1', summary: 'Checkout v2', type: null, status: null }, updated: hoursAgo(2) });
+    const deep = [p41, p42, p71, p72, p11, p12];
+    const only = (key: string, live: Record<string, JiraLiveSession> = {}) => {
+      const entries = agentsOn(deep, answer([link(key, 'w', 'working', 1)]), live).filter((e) => e.issue.key === key);
+      expect(entries).toHaveLength(1);
+      return entries[0];
+    };
 
-  describe('topSessionCell (the List\u2019s Session cell)', () => {
-    const tree = foldBoard([top, child, other]);
-    const cellOf = (links: Link[], live: Record<string, JiraLiveSession> = {}) => topSessionCell(boardAgents(tree, answer(links), live), links, tree);
-
-    it('names the deck\u2019s lead session per top with its own `since`: needs you on a child beats working on the top', () => {
-      expect(cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-2', 'b', 'plan', 2)]).get('PAY-1')).toEqual({ state: 'plan', since: hoursAgo(2), on: 'PAY-2', more: 1 });
+    it('names the on-board parent the lanes kept', () => {
+      expect(only('PAY-42').parent?.key).toBe('PAY-41');
     });
 
-    it('a live plan on the top gives { plan, since }', () => {
-      const links = [link('PAY-1', 'a', 'plan', 4)];
-      expect(cellOf(links).get('PAY-1')).toEqual({ state: 'plan', since: links[0].stateSince, on: null, more: 0 });
+    it('names no parent for a cycle member, whose link the walk dropped', () => {
+      expect(only('PAY-71').parent).toBeNull();
     });
 
-    it('lets the newest start lead inside one group: a reservation on a child outranks an older lost session on the top', () => {
-      expect(cellOf([link('PAY-1', 'a', 'lost', 2)], { 'PAY-2': { ...reservation(1), starting: true } }).get('PAY-1')?.state).toBe('starting');
+    it('names an off-board parent with the card’s OWN copy of it, not the lane stub’s', () => {
+      // The stub is the fresher sibling's copy — the case only discriminates while the two differ.
+      const offLane = laneBoard(deep).lanes.find((l) => l.key === 'PAY-1');
+      expect(offLane?.stub?.summary).toBe('Checkout v2');
+      const entry = only('PAY-11');
+      expect(entry.parent?.key).toBe('PAY-1');
+      expect(entry.parent?.summary).toBe('Checkout');
     });
 
-    it('prefers a live child over an older ended top', () => {
-      const cell = cellOf([link('PAY-2', 'b', 'working', 2), link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) })]);
-      expect(cell.get('PAY-1')?.state).toBe('working');
+    it('draws no entry for a session on a key that is not in the loaded list', () => {
+      expect(agentsOn(deep, answer([link('PAY-99', 'x', 'working', 1)]))).toEqual([]);
     });
 
-    it('reads an ended session on a folded child as { ended, since: endedAt }', () => {
-      const cell = cellOf([link('PAY-2', 'b', 'ended', 5, { endedAt: hoursAgo(2) })]);
-      expect(cell.get('PAY-1')).toEqual({ state: 'ended', since: hoursAgo(2), on: 'PAY-2', more: 0 });
+    it('draws a starting reservation from `live` as today, with its parent', () => {
+      const [entry] = agentsOn(deep, answer([]), { 'PAY-42': reservation(1) });
+      expect(entry.state).toBe('starting');
+      expect(entry.issue.key).toBe('PAY-42');
+      expect(entry.parent?.key).toBe('PAY-41');
     });
 
-    it('takes the newer of two ended links', () => {
-      const cell = cellOf([link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) }), link('PAY-2', 'b', 'ended', 6, { endedAt: hoursAgo(3) })]);
-      expect(cell.get('PAY-1')?.since).toBe(hoursAgo(3));
-    });
-
-    it('names the child the lead runs on (`on`), and `null` when the lead runs on the top itself', () => {
-      expect(cellOf([link('PAY-2', 'b', 'working', 1)]).get('PAY-1')).toMatchObject({ on: 'PAY-2', more: 0 });
-      // The top's own session leads (newer start in the same group), so the cell is the top's and the child's is only counted.
-      expect(cellOf([link('PAY-1', 'a', 'working', 1), link('PAY-2', 'b', 'working', 4)]).get('PAY-1')).toMatchObject({ on: null, more: 1 });
-    });
-
-    it('names the top for an ended session on the top itself, so an ended cell says where it ran too', () => {
-      const cell = cellOf([link('PAY-1', 'a', 'ended', 9, { endedAt: hoursAgo(8) }), link('PAY-2', 'b', 'ended', 9, { endedAt: hoursAgo(9) })]);
-      expect(cell.get('PAY-1')).toMatchObject({ state: 'ended', on: null, more: 0 });
-    });
-
-    it('has no key with nothing live or ended, and keeps two tops apart', () => {
-      expect(cellOf([]).size).toBe(0);
-      const both = cellOf([link('PAY-1', 'a', 'working', 3), link('PAY-3', 'b', 'quiet', 2)]);
-      expect([...both].map(([k, v]) => [k, v.state])).toEqual([['PAY-1', 'working'], ['PAY-3', 'quiet']]);
+    it('deckCrumb leads with `↳ <parent>` unless told not to, and never without a parent', () => {
+      const withParent = only('PAY-42');
+      expect(deckCrumb(withParent, [])).toMatch(/^↳ PAY-41 · /);
+      expect(deckCrumb(withParent, [])).toContain('pay');
+      expect(deckCrumb(withParent, [], { lead: false })).not.toContain('↳');
+      expect(deckCrumb(only('PAY-71'), [])).not.toContain('↳');
+      // A parentless issue on the first fixture reads the run's own words alone.
+      const [own] = agentsOn(loaded, answer([link('PAY-1', 'a', 'working', 2)]));
+      expect(own.parent).toBeNull();
+      expect(deckCrumb(own, [])).not.toContain('↳');
     });
   });
 
   describe('childSessions (Detail\u2019s Children rows and the Agent pane\u2019s on-a-child line)', () => {
-    const grand = issue({ key: 'PAY-4', summary: 'Grandchild', parent: { key: 'PAY-2', summary: 'Child' } });
+    const grand = issue({ key: 'PAY-4', summary: 'Grandchild', parent: { key: 'PAY-2', summary: 'Child', type: null, status: null } });
     const keys = (entries: ReturnType<typeof childSessions>): [string, string][] => entries.map((e) => [e.issue.key, e.state]);
 
     it('is empty with no live session on any of the issues', () => {
@@ -1972,7 +2117,8 @@ describe('lib/jira-deck', () => {
       expect(keys(childSessions([child, grand], payload, {}))).toEqual([['PAY-2', 'plan'], ['PAY-4', 'working']]);
       const [first] = childSessions([child, grand], payload, {});
       expect(first.issue).toBe(child);
-      expect(first.top).toBe(child);
+      // A Children row is not a lane: it draws no `↳`, so the entry names no parent.
+      expect(first.parent).toBeNull();
       expect(first.since).toBe(payload.links[1].stateSince);
     });
 
@@ -1985,37 +2131,58 @@ describe('lib/jira-deck', () => {
     });
   });
 
-  it('boardShelves takes a top with a live session on itself or a folded child off its shelf, and leaves the others', () => {
-    const agents = boardAgents(fold, answer([link('PAY-2', 'c', 'working', 2)]), {});
-    const shown = foldMatches(fold, () => true);
-    const shelves = boardShelves(fold, shown, agents, null);
-    expect(shelves.map((s) => s.slug)).toEqual(['todo', 'doing', 'done']);
-    expect(shelves[0].cards.map((c) => c.issue.key)).toEqual(['PAY-3']);
+  /*
+    The lane card's session cell (parent-lanes spec §3.4): keyed by the session's OWN issue — a card is one issue now, and nothing rolls up to a top. PAY-12 has
+    two live entries, the needs-you one first in `deckOrder`; PAY-13 one; PAY-14 only ended links; PAY-2 is a child whose session must not reach PAY-1.
+  */
+  describe('sessionCells', () => {
+    const lanesOf = [top, child, other, issue({ key: 'PAY-12' }), issue({ key: 'PAY-13' }), issue({ key: 'PAY-14' }), issue({ key: 'PAY-15' })];
+
+    it('leads a key with its first live entry in deckOrder, counts the rest as `more`, and gives each key its own entry', () => {
+      const agents = agentsOn(lanesOf, answer([link('PAY-12', 'w', 'working', 2), link('PAY-12', 'p', 'plan', 4), link('PAY-13', 'q', 'quiet', 1)]), {});
+      const cells = sessionCells(agents, []);
+      const twelve = cells.get('PAY-12');
+      expect(twelve?.state).toBe('plan');
+      expect(twelve?.since).toBe(hoursAgo(4));
+      expect(twelve?.more).toBe(1);
+      expect(twelve?.lead).toBe(agents[0]);
+      expect(twelve?.lead?.id).toBe('PAY-12:p');
+      expect(cells.get('PAY-13')).toEqual({ state: 'quiet', since: hoursAgo(1), more: 0, lead: agents.find((e) => e.id === 'PAY-13:q') });
+    });
+
+    it('reads `ended` with the newest endedAt for a key with ended links and none live', () => {
+      const one = link('PAY-14', 'a', 'ended', 9, { endedAt: hoursAgo(7) });
+      expect(sessionCells([], [one]).get('PAY-14')).toEqual({ state: 'ended', since: hoursAgo(7), more: 0, lead: null });
+      const newer = link('PAY-14', 'b', 'ended', 6, { endedAt: hoursAgo(3) });
+      expect(sessionCells([], [one, newer]).get('PAY-14')).toEqual({ state: 'ended', since: hoursAgo(3), more: 0, lead: null });
+      // Newest, not last: the same two links fed newest first still read the newer one.
+      expect(sessionCells([], [newer, one]).get('PAY-14')).toEqual({ state: 'ended', since: hoursAgo(3), more: 0, lead: null });
+    });
+
+    it('a live session wins over an ended one on the same key, and a key with neither has no entry', () => {
+      const agents = agentsOn(lanesOf, answer([link('PAY-13', 'q', 'quiet', 1)]), {});
+      const cells = sessionCells(agents, [link('PAY-13', 'z', 'ended', 9, { endedAt: hoursAgo(5) })]);
+      expect(cells.get('PAY-13')?.state).toBe('quiet');
+      expect(cells.has('PAY-15')).toBe(false);
+    });
+
+    it('a session on a child gives its parent’s key no entry', () => {
+      const agents = agentsOn(lanesOf, answer([link('PAY-2', 'c', 'working', 2)]), {});
+      const cells = sessionCells(agents, [link('PAY-2', 'd', 'ended', 9, { endedAt: hoursAgo(5) })]);
+      expect(cells.get('PAY-2')?.state).toBe('working');
+      expect(cells.has('PAY-1')).toBe(false);
+    });
   });
 
-  it('boardShelves applies the filter to the shelves while the deck exclusion stays independent of it', () => {
-    const agents = boardAgents(fold, answer([link('PAY-3', 'x', 'working', 1)]), {});
-    // A filter that keeps nothing: the live top is not resurrected, and the others are gone by the filter.
-    const none = boardShelves(fold, foldMatches(fold, () => false), agents, null);
-    expect(none.every((s) => s.cards.length === 0)).toBe(true);
-    // A filter that keeps only the live top: it stays off the shelves.
-    const onlyLive = boardShelves(fold, foldMatches(fold, (i) => i.key === 'PAY-3'), agents, null);
-    expect(onlyLive.every((s) => s.cards.length === 0)).toBe(true);
-  });
-
-  it('boardShelves hangs each top’s own ended sessions on its row, newest end first', () => {
-    const payload = answer([
-      link('PAY-3', 'o', 'ended', 9, { endedAt: hoursAgo(8) }),
-      link('PAY-3', 'n', 'ended', 5, { endedAt: hoursAgo(2) }),
-      link('PAY-2', 'f', 'ended', 5, { endedAt: hoursAgo(1) })
-    ]);
-    const shelves = boardShelves(fold, foldMatches(fold, () => true), [], payload);
-    const rows = Object.fromEntries(shelves[0].cards.map((c) => [c.issue.key, c.ended.map((l) => l.sessionId)]));
-    expect(rows).toEqual({ 'PAY-3': ['n', 'o'], 'PAY-1': [] });
-  });
-
-  it('SHELF_LIMIT is 8, 8 and 3', () => {
-    expect(SHELF_LIMIT).toEqual({ todo: 8, doing: 8, done: 3 });
+  it('endedByKey lists each key’s ended links newest end first, and leaves a live link out', () => {
+    const old = link('PAY-3', 'o', 'ended', 9, { endedAt: hoursAgo(8) });
+    const fresh = link('PAY-3', 'n', 'ended', 5, { endedAt: hoursAgo(2) });
+    const other = link('PAY-2', 'f', 'ended', 5, { endedAt: hoursAgo(1) });
+    const running = link('PAY-3', 'r', 'working', 1);
+    const byKey = endedByKey(answer([old, fresh, other, running]));
+    expect(byKey.get('PAY-3')?.map((l) => l.sessionId)).toEqual(['n', 'o']);
+    expect(byKey.get('PAY-2')?.map((l) => l.sessionId)).toEqual(['f']);
+    expect(endedByKey(null).size).toBe(0);
   });
 
   it('endedLine: nothing for none, a Reopen for one, `N sessions` for several', () => {
@@ -2133,5 +2300,203 @@ describe('dispatchReply', () => {
       permissionMode: 'acceptEdits',
       remoteControl: true
     });
+  });
+});
+
+describe('lane views', () => {
+  const now = Date.now();
+  const todo = { status: { name: 'To Do', category: 'new' as const } };
+  const doing = { status: { name: 'In Progress', category: 'indeterminate' as const } };
+  const done = { status: { name: 'Done', category: 'done' as const } };
+  const n = (key: string, parent: string | null, ms: number, over: Partial<JiraIssue> = {}): JiraIssue =>
+    issue({
+      key,
+      summary: `${key} summary`,
+      parent: parent === null ? null : { key: parent, summary: `${parent} summary`, type: null, status: null },
+      updated: ago(now, ms),
+      ...todo,
+      ...over
+    });
+  const only = (...ks: string[]) => (i: JiraIssue): boolean => ks.includes(i.key);
+  const sum = (p: { done: number; doing: number; todo: number }): number => p.done + p.doing + p.todo;
+  const nesting = (): JiraIssue[] => [
+    n('PAY-40', null, 6 * HOUR),
+    n('PAY-41', 'PAY-40', 5 * HOUR),
+    n('PAY-42', 'PAY-41', 1 * HOUR),
+    n('PAY-43', 'PAY-41', 2 * HOUR),
+    n('PAY-44', 'PAY-40', 3 * HOUR)
+  ];
+  const off = (): JiraIssue[] => [n('PAY-11', 'PAY-1', 3 * HOUR), n('PAY-12', 'PAY-1', 1 * HOUR), n('PAY-13', 'PAY-1', 2 * HOUR), n('PAY-20', null, 4 * HOUR)];
+
+  it('keeps only the matching cards of a lane and counts them', () => {
+    const v = laneViews(laneBoard(off()), only('PAY-13'));
+    const lane = v.find((x) => x.lane.key === 'PAY-1')!;
+    expect(lane.cards.map((i) => i.key)).toEqual(['PAY-13']);
+    expect(lane.count).toBe(1);
+    expect(sum(lane.progress)).toBe(1);
+    expect(lane.headerMatches).toBe(false);
+  });
+
+  it('draws no view for a lane nothing in matches', () => {
+    expect(laneViews(laneBoard(off()), () => false)).toEqual([]);
+    expect(laneViews(laneBoard(off()), only('PAY-20')).map((x) => x.lane.key)).toEqual([NO_PARENT_LANE]);
+  });
+
+  it('draws a lane for a matching on-board header alone, with empty cells and count 0', () => {
+    const board = laneBoard([n('PAY-30', null, 5 * HOUR), n('PAY-31', 'PAY-30', 1 * HOUR), n('PAY-32', 'PAY-30', 2 * HOUR)]);
+    const v = laneViews(board, only('PAY-30'));
+    expect(v).toHaveLength(1);
+    expect(v[0].headerMatches).toBe(true);
+    expect(v[0].cards).toEqual([]);
+    expect(v[0].count).toBe(0);
+  });
+
+  it('keeps the ancestors of a nested lane drawn when only the nested header matches', () => {
+    const v = laneViews(laneBoard(nesting()), only('PAY-41'));
+    expect(v).toHaveLength(1);
+    expect(v[0].lane.key).toBe('PAY-40');
+    expect(v[0].headerMatches).toBe(false);
+    expect(v[0].cards).toEqual([]);
+    expect(v[0].count).toBe(1);
+    expect(v[0].lanes).toHaveLength(1);
+    expect(v[0].lanes[0].lane.key).toBe('PAY-41');
+    expect(v[0].lanes[0].headerMatches).toBe(true);
+    expect(v[0].lanes[0].count).toBe(0);
+  });
+
+  it('counts nested headers in the parent lane, and the own header in neither', () => {
+    const v = laneViews(laneBoard(nesting()), () => true);
+    expect(v[0].count).toBe(4);
+    expect(v[0].lanes[0].count).toBe(2);
+    expect(sum(v[0].progress)).toBe(4);
+    expect(sum(v[0].lanes[0].progress)).toBe(2);
+  });
+
+  it('keeps the lanes’ own order', () => {
+    const board = laneBoard(off());
+    expect(laneViews(board, () => true).map((x) => x.lane.key)).toEqual(board.lanes.map((l) => l.key));
+  });
+
+  it('never mutates a lane or its stub', () => {
+    const board = laneBoard(off());
+    const before = JSON.stringify(board.lanes);
+    laneViews(board, only('PAY-13'));
+    expect(JSON.stringify(board.lanes)).toBe(before);
+  });
+
+  describe('laneColumnCounts', () => {
+    const issues = (): JiraIssue[] => [
+      n('PAY-40', null, 6 * HOUR, doing),
+      n('PAY-41', 'PAY-40', 5 * HOUR, doing),
+      n('PAY-42', 'PAY-41', 1 * HOUR, done),
+      n('PAY-43', 'PAY-41', 2 * HOUR),
+      n('PAY-44', 'PAY-40', 3 * HOUR)
+    ];
+    it('counts matching cards per column at every depth, headers in none', () => {
+      expect(laneColumnCounts(laneViews(laneBoard(issues()), () => true))).toEqual({ todo: 2, doing: 0, done: 1 });
+    });
+    it('follows the predicate', () => {
+      expect(laneColumnCounts(laneViews(laneBoard(issues()), (i) => i.key !== 'PAY-43'))).toEqual({ todo: 1, doing: 0, done: 1 });
+    });
+  });
+
+  describe('laneParents', () => {
+    it('counts lanes that are not No parent, every depth', () => {
+      expect(laneParents(laneBoard(nesting()))).toBe(2);
+      expect(laneParents(laneBoard(off()))).toBe(1);
+      expect(laneParents(laneBoard([n('PAY-71', 'PAY-72', HOUR), n('PAY-72', 'PAY-71', 2 * HOUR)]))).toBe(0);
+    });
+  });
+});
+
+describe('laneCell', () => {
+  const cards = (k: number): JiraIssue[] => Array.from({ length: k }, (_, i) => issue({ key: `PAY-${i + 1}` }));
+  const keysOf = (l: JiraIssue[]): string[] => l.map((i) => i.key);
+  const live = (...ks: string[]) => (k: string): boolean => ks.includes(k);
+
+  it('cuts at five when closed', () => {
+    expect(LANE_CELL_LIMIT).toBe(5);
+    const r = laneCell(cards(7), live(), false);
+    expect(keysOf(r.shown)).toEqual(['PAY-1', 'PAY-2', 'PAY-3', 'PAY-4', 'PAY-5']);
+    expect(r.hidden).toBe(2);
+  });
+  it('keeps a live card past the fifth, in order', () => {
+    const r = laneCell(cards(7), live('PAY-7'), false);
+    expect(keysOf(r.shown)).toEqual(['PAY-1', 'PAY-2', 'PAY-3', 'PAY-4', 'PAY-5', 'PAY-7']);
+    expect(r.hidden).toBe(1);
+  });
+  it('shows everything when open', () => {
+    const r = laneCell(cards(7), live(), true);
+    expect(r.shown).toHaveLength(7);
+    expect(r.hidden).toBe(0);
+  });
+  it('hides nothing at five, or at six with the sixth live', () => {
+    expect(laneCell(cards(5), live(), false).hidden).toBe(0);
+    const r = laneCell(cards(6), live('PAY-6'), false);
+    expect(r.shown).toHaveLength(6);
+    expect(r.hidden).toBe(0);
+  });
+});
+
+describe('lane folds', () => {
+  const none = (v: unknown, id: string): boolean => Object.keys(laneOverrides(clampLaneFolds(v), id)).length === 0;
+  const lane = (key: string, lanes: JiraLane[] = []): JiraLane =>
+    ({ key, kind: key === 'none' ? 'none' : 'off', header: null, stub: null, cards: [], lanes, depth: 0, subtree: [], settled: false, stamp: 0 }) as JiraLane;
+  const boardOf = (lanes: JiraLane[]): JiraLanes => ({ lanes, childrenOf: new Map(), parentOf: new Map() });
+
+  it('clamps a value that is not an object of board entries to no overrides', () => {
+    for (const v of [null, 'x', 42, [], [{ 'PAY-1': 'closed' }]]) expect(none(v, 'b1')).toBe(true);
+  });
+  it('drops a bad board entry and a bad lane value alone', () => {
+    const f = clampLaneFolds({ b1: { 'PAY-1': 'closed', 'PAY-2': 'junk' }, b2: 'nope', b3: ['open'], b4: null });
+    expect(laneOverrides(f, 'b1')).toEqual({ 'PAY-1': 'closed' });
+    for (const id of ['b2', 'b3', 'b4']) expect(laneOverrides(f, id)).toEqual({});
+  });
+
+  it('reads prototype names as absent', () => {
+    const f = clampLaneFolds(JSON.parse('{"b1":{"PAY-1":"closed"}}'));
+    for (const id of ['constructor', '__proto__', 'toString']) expect(laneOverrides(f, id)).toEqual({});
+  });
+  it('stores a board named like a prototype member and survives a JSON round trip', () => {
+    const board = boardOf([lane('PAY-1')]);
+    for (const id of ['constructor', '__proto__']) {
+      const start = clampLaneFolds(JSON.parse('{"b1":{"PAY-1":"open"}}'));
+      const r = setLaneFold(start, id, board, 'PAY-1', false);
+      expect(laneOverrides(r, id)).toEqual({ 'PAY-1': 'closed' });
+      expect(laneOverrides(r, 'b1')).toEqual({ 'PAY-1': 'open' });
+      const back = clampLaneFolds(JSON.parse(JSON.stringify(r)));
+      expect(Object.keys(back).sort()).toEqual([id, 'b1'].sort());
+      expect(laneOverrides(back, id)).toEqual({ 'PAY-1': 'closed' });
+    }
+  });
+  it('reads a __proto__ board from storage without touching Object.prototype', () => {
+    const f = clampLaneFolds(JSON.parse('{"__proto__":{"PAY-1":"closed"},"b1":{"PAY-1":"open"}}'));
+    expect(laneOverrides(f, '__proto__')).toEqual({ 'PAY-1': 'closed' });
+    expect(laneOverrides(f, 'b1')).toEqual({ 'PAY-1': 'open' });
+    expect((({}) as Record<string, unknown>)['PAY-1']).toBeUndefined();
+  });
+
+  it('opens a lane by override, else by whether it is settled', () => {
+    const settled = { ...lane('PAY-1'), settled: true };
+    const open = lane('PAY-2');
+    expect(laneOpen(settled, {})).toBe(false);
+    expect(laneOpen(open, {})).toBe(true);
+    expect(laneOpen(settled, { 'PAY-1': 'open' })).toBe(true);
+    expect(laneOpen(open, { 'PAY-2': 'closed' })).toBe(false);
+    expect(laneOpen(open, JSON.parse('{"constructor":"closed"}'))).toBe(true);
+  });
+
+  it('writes a toggle, prunes stale lanes at any depth, leaves other boards and the input alone', () => {
+    const folds: JiraLaneFolds = { b1: { 'PAY-9': 'closed', 'PAY-1': 'open', 'PAY-2': 'closed' }, b2: { 'PAY-9': 'closed' } };
+    const snapshot = JSON.stringify(folds);
+    const board = boardOf([lane('PAY-1', [lane('PAY-2')]), lane('none')]);
+    const r = setLaneFold(folds, 'b1', board, 'none', false);
+    expect(laneOverrides(r, 'b1')).toEqual({ 'PAY-1': 'open', 'PAY-2': 'closed', none: 'closed' });
+    expect(laneOverrides(r, 'b2')).toEqual({ 'PAY-9': 'closed' });
+    expect(JSON.stringify(folds)).toBe(snapshot);
+  });
+  it('stores a toggle equal to the default', () => {
+    const r = setLaneFold({}, 'b1', boardOf([lane('PAY-1')]), 'PAY-1', true);
+    expect(laneOverrides(r, 'b1')).toEqual({ 'PAY-1': 'open' });
   });
 });

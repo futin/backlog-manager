@@ -3,7 +3,7 @@ import type { GitlabPayload } from '../../../shared/types';
 import { useGitlabContext } from './GitlabContext';
 
 /**
- * One index per payload, however many surfaces ask. The board draws a chip per shelf card, a line per deck card and a cell per List row, and each reads the
+ * One index per payload, however many surfaces ask. The board draws a chip per lane card, a line per deck card and a cell per List row, and each reads the
  * shell's one GitLab answer itself (so a card can be rendered alone, under a provided context); a `useMemo` per component would build the index once PER
  * CARD — a scan of every MR the server holds, hundreds of times per poll. Keyed weakly on the payload object, so a new poll's answer is a new key and the old
  * index goes with the old payload: nothing here can serve a stale index, and nothing is held after the shell drops the answer.

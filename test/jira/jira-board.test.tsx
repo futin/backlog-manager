@@ -13,11 +13,12 @@ import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
 import { setJiraView } from '../../client/src/hooks/useJiraView';
 import { elapsedSince } from '../../client/src/lib/item-age';
-import { JIRA_BOARD_KEY, JIRA_FILTERS_KEY, bandSub } from '../../client/src/lib/jira';
+import { JIRA_BOARD_KEY, JIRA_FILTERS_KEY, JIRA_LANE_FOLDS_KEY, LANE_INDENT_CAP, bandSub } from '../../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../../client/src/lib/jira-page';
 import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { NoGitlab } from '../helpers/no-gitlab';
 import { daysAgoStamp } from '../helpers/dates';
+import { readStyles, ruleBlock } from '../helpers/css-rule';
 import {
   JIRA_BUILTIN_LABELS,
   type AgentsStatus,
@@ -77,7 +78,7 @@ const PAY_131 = issue({
   status: { name: 'In Review', category: 'indeterminate' },
   priority: 'High',
   assignee: ADA,
-  parent: { key: 'PAY-99', summary: 'Payments platform' },
+  parent: { key: 'PAY-99', summary: 'Payments platform', type: null, status: null },
   subtasks: 2,
   sprint: 'Sprint 42',
   updated: daysAgoStamp(1)
@@ -245,17 +246,14 @@ function renderPage(): void {
 
 async function renderAlpha(): Promise<void> {
   renderPage();
-  await screen.findByText('Refund partial captures');
+  await screen.findAllByText('Refund partial captures');
 }
 
+/** The lane card holding `summary` — a live ticket's summary is on its deck card too, and an on-board header's is a row, never a card. */
 function card(summary: string): HTMLElement {
-  return screen.getByText(summary).closest('.board-card') as HTMLElement;
+  return screen.getAllByText(summary).map((n) => n.closest<HTMLElement>('.board-card')).find((c) => c !== null) as HTMLElement;
 }
 
-const column = (label: string): HTMLElement =>
-  screen.getAllByTestId('board-col').find((c) => within(c).getByTestId('col-name').textContent === label) as HTMLElement;
-const summariesIn = (label: string): string[] =>
-  Array.from(column(label).querySelectorAll('.board-card-title')).map((t) => t.textContent ?? '');
 const visibleSummaries = (): string[] => Array.from(document.querySelectorAll('.board-card-title')).map((t) => t.textContent ?? '');
 
 async function openFilters(): Promise<HTMLElement> {
@@ -269,6 +267,91 @@ async function pick(group: 'Type' | 'Status' | 'Assignee' | 'Sprint', name: stri
   const dialog = await openFilters();
   await userEvent.click(within(within(dialog).getByRole('group', { name: group })).getByRole('button', { name }));
 }
+
+/* The lane fixture (parent-lanes spec §3; mocks `Board.dc.html`, `BoardDeep.dc.html`). PAY-120, the followed Epic, is an on-board header with one card
+   (PAY-170, Done) and one nested lane — PAY-160, whose children are PAY-161 (Done) and PAY-162 (To Do, touched today). PAY-180 has no parent; PAY-190's
+   parent PAY-999 is off the board, so its lane's header is the child's stub. Headers sit in no column, so the columns count five cards: 2 · 1 · 2. */
+const G_120 = issue({ key: 'PAY-120', summary: 'Payments epic', type: { name: 'Epic', level: 1, subtask: false }, updated: daysAgoStamp(5) });
+const G_160 = issue({
+  key: 'PAY-160',
+  type: { name: 'Story', level: 0, subtask: false },
+  status: { name: 'In Progress', category: 'indeterminate' },
+  parent: { key: 'PAY-120', summary: 'Payments epic', type: null, status: null },
+  updated: daysAgoStamp(4)
+});
+const G_161 = issue({
+  key: 'PAY-161',
+  type: { name: 'Sub-task', level: -1, subtask: true },
+  status: { name: 'Done', category: 'done' },
+  parent: { key: 'PAY-160', summary: 'Summary of PAY-160', type: null, status: null },
+  updated: daysAgoStamp(3),
+  resolved: daysAgoStamp(3)
+});
+const G_162 = issue({
+  key: 'PAY-162',
+  summary: 'Ledger rounding fix',
+  type: { name: 'Sub-task', level: -1, subtask: true },
+  parent: { key: 'PAY-160', summary: 'Summary of PAY-160', type: null, status: null },
+  updated: daysAgoStamp(0)
+});
+const G_170 = issue({
+  key: 'PAY-170',
+  type: { name: 'Story', level: 0, subtask: false },
+  status: { name: 'Done', category: 'done' },
+  parent: { key: 'PAY-120', summary: 'Payments epic', type: null, status: null },
+  updated: daysAgoStamp(6),
+  resolved: daysAgoStamp(6)
+});
+const G_180 = issue({ key: 'PAY-180', summary: 'Standalone task', updated: daysAgoStamp(1) });
+const G_190 = issue({
+  key: 'PAY-190',
+  summary: 'Payout retries',
+  status: { name: 'In Progress', category: 'indeterminate' },
+  parent: { key: 'PAY-999', summary: 'Billing platform', type: null, status: null },
+  updated: daysAgoStamp(2)
+});
+const GROUP = [G_120, G_160, G_161, G_162, G_170, G_180, G_190];
+
+async function renderGroup(): Promise<void> {
+  lists[ALPHA.id] = GROUP;
+  renderPage();
+  await screen.findByText('Standalone task');
+}
+
+/** A lane's `<section>` by its key (`none` for `No parent`), or null when the lane is not drawn. */
+const lane = (key: string): HTMLElement | null => document.querySelector<HTMLElement>(`section.jira-lane[data-lane="${key}"]`);
+const headOf = (key: string): HTMLElement => lane(key)?.querySelector('.jira-lane-head') as HTMLElement;
+/** Every drawn lane's key, in document order — the lanes are drawn flat, a nested lane right after its parent's cells. */
+const laneKeys = (): string[] => Array.from(document.querySelectorAll('section.jira-lane')).map((s) => s.getAttribute('data-lane') ?? '');
+const cellSummaries = (laneKey: string, slug: 'todo' | 'doing' | 'done'): string[] =>
+  Array.from(screen.getByTestId(`cell-${laneKey}-${slug}`).querySelectorAll('.board-card-title')).map((t) => t.textContent ?? '');
+/** The shared column header's three counts, To Do · In Progress · Done. */
+const colCounts = (): string[] =>
+  (['todo', 'doing', 'done'] as const).map((s) => screen.getByTestId(`lanes-col-${s}`).querySelector('.jira-lanes-count')?.textContent ?? '');
+/** What `GET /api/jira/issue/<KEY>` answers for an off-board parent's read. */
+const detailOf = (i: JiraIssue) => ({ ...i, description: '', children: [], transitions: [], boards: [], session: null });
+function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void } {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+/** Answers `/api/jira/issue/<KEY>` from `reads`, every other URL as `beforeEach` does, and records the issue reads. */
+function answerReads(reads: Record<string, () => Promise<Response>>): void {
+  const answered = global.fetch;
+  global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const m = /^\/api\/jira\/issue\/([^/?]+)$/.exec(String(input));
+    if (m !== null && reads[decodeURIComponent(m[1])] !== undefined) {
+      requested.push(String(input));
+      return reads[decodeURIComponent(m[1])]();
+    }
+    return (answered as jest.Mock)(input, init);
+  }) as unknown as typeof fetch;
+}
+const issueReads = (): string[] => requested.filter((u) => u.startsWith('/api/jira/issue/'));
 
 describe('which board the page draws', () => {
   it('fetches the stored board, and only that board', async () => {
@@ -341,18 +424,19 @@ describe('a newer sweep in the status (the chip’s `now`)', () => {
 });
 
 describe('the band', () => {
-  it('reads bandSub’s text for the board under the title', async () => {
+  // ALPHA's list has one parent behind it: PAY-131's off-board PAY-99 (the other three sit in `No parent`, which is not one).
+  it('reads bandSub’s text for the board under the title, `1 parent` in the singular', async () => {
     await renderAlpha();
-    const sub = bandSub(ALPHA, 'acme.atlassian.net', Date.now(), { issues: 4, cards: 4 });
-    expect(sub.text).toBe('acme.atlassian.net · 4 issues from 1 root and 1 query · polled 10m ago');
+    const sub = bandSub(ALPHA, 'acme.atlassian.net', Date.now(), { issues: 4, parents: 1 });
+    expect(sub.text).toBe('acme.atlassian.net · 4 issues from 1 root and 1 query · 1 parent · polled 10m ago');
     expect(document.querySelector('.ui-band-sub')?.textContent).toBe(sub.text);
     expect(document.querySelector('.jira-band-sub')).not.toHaveClass('failing');
   });
 
   /*
-    The GitLab line (GitLab connection spec §7.2): `bandTotals` over the board's shown tops, under the board's own sub-line. The payload is handed in through
-    the raw context, as the shell's one answer would hand it over; PAY maps one GitLab project polled two minutes ago, PAY-131 leads with an open MR whose
-    pipeline failed and PAY-140 with a merged one.
+    The GitLab line (GitLab connection spec §7.2): `bandTotals` over the issues the page's filters match, under the board's own sub-line. The payload is
+    handed in through the raw context, as the shell's one answer would hand it over; PAY maps one GitLab project polled two minutes ago, PAY-131 leads
+    with an open MR whose pipeline failed and PAY-140 with a merged one.
   */
   const gitlabMr = (over: Partial<GitlabMr>): GitlabMr => ({
     project: 'payments/api',
@@ -390,7 +474,7 @@ describe('the band', () => {
     jiraProjects: { PAY: [{ path: 'payments/api', repo: 'api', polledAt: new Date(Date.now() - 120_000).toISOString(), capped: false, failed: false, repos: [] }] },
     mrs: [gitlabMr({}), gitlabMr({ iid: 398, state: 'merged', pipeline: null, keys: ['PAY-140'], mergedAt: new Date(Date.now() - 86_400_000).toISOString() })]
   });
-  async function renderWithGitlab(data: GitlabPayload): Promise<void> {
+  async function renderWithGitlab(data: GitlabPayload, drawn = 'Refund partial captures'): Promise<void> {
     render(
       <GitlabContext.Provider value={{ data, error: null, refresh: () => Promise.resolve(data) }}>
         <JiraProvider>
@@ -398,15 +482,23 @@ describe('the band', () => {
         </JiraProvider>
       </GitlabContext.Provider>
     );
-    await screen.findByText('Refund partial captures');
+    await screen.findByText(drawn);
   }
 
-  it('adds the GitLab line under the sub-line while GitLab is shown, counted over the tops', async () => {
+  it('adds the GitLab line under the sub-line while GitLab is shown, counted over the matching issues', async () => {
     await renderWithGitlab(gitlab());
     const line = document.querySelector('.ui-band-sub .jira-band-gitlab');
     expect(line?.textContent).toBe('GitLab: 1 open · 1 failing · 1 merged · polled 2m ago');
     // The board's own sub-line is untouched beside it.
     expect(document.querySelector('.jira-band-sub')?.textContent).toMatch(/^acme\.atlassian\.net · 4 issues/);
+  });
+
+  // Spec §6.1: the line counts every matching issue, so an MR on a nested on-board child counts. Under the old fold model PAY-162 folded into its top,
+  // PAY-120, and its MR went uncounted; ALPHA's default list has only tops, so the case above cannot tell the two wirings apart.
+  it('counts an MR that sits only on a nested on-board child', async () => {
+    lists[ALPHA.id] = GROUP;
+    await renderWithGitlab({ ...gitlab(), mrs: [gitlabMr({ title: 'PAY-162 | ledger rounding', pipeline: null, keys: ['PAY-162'] })] }, 'Ledger rounding fix');
+    expect(document.querySelector('.ui-band-sub .jira-band-gitlab')?.textContent).toBe('GitLab: 1 open · polled 2m ago');
   });
 
   it('draws no GitLab text anywhere on the board while GitLab is unconfigured', async () => {
@@ -422,49 +514,195 @@ describe('the band', () => {
     expect(sub).toHaveClass('failing');
     expect(sub.textContent).toContain("Field 'foo' does not exist");
   });
+  // GROUP's parents: PAY-120 and the nested PAY-160 (on-board headers) and PAY-999 (off-board) — `No parent` is not one.
+  it('the band counts the loaded list, not the status poll, and adds the parents part', async () => {
+    await renderGroup();
+    expect(document.querySelector('.jira-band-sub')?.textContent).toBe('acme.atlassian.net · 7 issues from 1 root and 1 query · 3 parents · polled 10m ago');
+  });
+
+  it('the band reads the status count, with no parents part, while the list has not loaded', async () => {
+    const answered = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL) =>
+      /\/issues$/.test(String(input)) ? new Promise<Response>(() => {}) : answered(input)
+    ) as unknown as typeof fetch;
+    renderPage();
+    await screen.findByText('loading…');
+    await waitFor(() => expect(document.querySelector('.jira-band-sub')?.textContent).toBe(bandSub(ALPHA, 'acme.atlassian.net', Date.now(), null).text));
+    expect(document.querySelector('.jira-band-sub')?.textContent).toContain(' · 4 issues ');
+    expect(document.querySelector('.jira-band-sub')?.textContent).not.toContain('parent');
+  });
+
+  it('a board of parentless issues has no parents part', async () => {
+    lists[ALPHA.id] = [PAY_120, PAY_140, PAY_151];
+    renderPage();
+    await screen.findByText('Refund flows');
+    expect(document.querySelector('.jira-band-sub')?.textContent).toBe('acme.atlassian.net · 3 issues from 1 root and 1 query · polled 10m ago');
+  });
+
+  /*
+    Sixteen issues under eight parents (parent-lanes spec §6.1), on a query-only board: four on-board headers PAY-201..204 with one card each, and four
+    off-board parents PAY-901..904 with two cards each. Half the issues are Bugs, so a Type filter hides half of them — and the band, which describes the
+    board and not the view, does not move.
+  */
+  const EIGHT = (() => {
+    const out: JiraIssue[] = [];
+    const typeOf = (n: number): JiraIssue['type'] => (n % 2 === 0 ? { name: 'Bug', level: 0, subtask: false } : { name: 'Story', level: 0, subtask: false });
+    let n = 0;
+    const next = (key: string, parent: JiraIssue['parent']): void => {
+      out.push(issue({ key, summary: `Issue ${key}`, type: typeOf(n), parent, updated: daysAgoStamp(n) }));
+      n += 1;
+    };
+    for (const h of [201, 202, 203, 204]) {
+      next(`PAY-${h}`, null);
+      next(`PAY-${h + 100}`, { key: `PAY-${h}`, summary: `Header ${h}`, type: null, status: null });
+    }
+    for (const p of [901, 902, 903, 904]) {
+      next(`PAY-${p + 10}`, { key: `PAY-${p}`, summary: `Off-board ${p}`, type: null, status: null });
+      next(`PAY-${p + 20}`, { key: `PAY-${p}`, summary: `Off-board ${p}`, type: null, status: null });
+    }
+    return out;
+  })();
+  const QUERY_ONLY = { ...ALPHA, roots: [] as string[] };
+
+  it('sixteen issues under eight parents read `16 issues from 1 query · 8 parents`, and a filter that hides half of them moves nothing', async () => {
+    statusAnswer = status({ boards: [BETA, QUERY_ONLY] });
+    lists[ALPHA.id] = EIGHT;
+    renderPage();
+    await screen.findByText('Issue PAY-301');
+    const before = document.querySelector('.jira-band-sub')?.textContent;
+    expect(before).toBe('acme.atlassian.net · 16 issues from 1 query · 8 parents · polled 10m ago');
+    await pick('Type', 'Bug');
+    expect(screen.queryByText('Issue PAY-301')).toBeNull();
+    expect(document.querySelector('.jira-band-sub')?.textContent).toBe(before);
+  });
+
+  // Review Focus 5: the band counts the unfiltered list, whatever the filters hide.
+  it('a filter never moves the band', async () => {
+    await renderGroup();
+    const before = document.querySelector('.jira-band-sub')?.textContent;
+    await pick('Type', 'Sub-task');
+    expect(document.querySelector('.jira-band-sub')?.textContent).toBe(before);
+    expect(before).toContain('7 issues from 1 root and 1 query · 3 parents');
+  });
 });
 
-describe('the columns', () => {
-  it('gives each shelf a tone, a page-local dot and a page-local count in place of the Dot and Pill', async () => {
+/*
+  The lanes (parent-lanes spec §3; DESIGN.md §8.9.1): one sticky column header for the page, then one lane per parent — an on-board header, an off-board
+  stub, or `No parent` — each with its three cells. ALPHA's list makes two: PAY-131 under the off-board PAY-99, and the other three under `No parent`.
+*/
+describe('the lanes', () => {
+  it('draws one column header: To Do, In Progress and Done in tone order, each with a page-local dot and the count of the cards under it', async () => {
     await renderAlpha();
-    const cols = screen.getAllByTestId('board-col');
+    const cols = (['todo', 'doing', 'done'] as const).map((s) => screen.getByTestId(`lanes-col-${s}`));
     expect(cols.map((c) => c.getAttribute('data-tone'))).toEqual(['todo', 'doing', 'done']);
-    for (const c of cols) {
-      expect(c.querySelectorAll('.board-col-head .board-col-dot')).toHaveLength(1);
-      expect(c.querySelector('.board-col-head .ui-dot')).toBeNull();
-      expect(c.querySelector('.board-col-head .ui-pill')).toBeNull();
-    }
-    expect(cols.map((c) => c.querySelector('.board-col-count')?.textContent)).toEqual(['2', '1', '1']);
+    expect(cols.map((c) => c.querySelector('.jira-lanes-name')?.textContent)).toEqual(['To Do', 'In Progress', 'Done']);
+    for (const c of cols) expect(c.querySelectorAll('.jira-lanes-dot')).toHaveLength(1);
+    expect(colCounts()).toEqual(['2', '1', '1']);
+    expect(document.querySelectorAll('.jira-lanes-head')).toHaveLength(1);
   });
 
-  it('draws To Do, In Progress and Done with their counts, Done holding the done issue, newest first', async () => {
+  it('puts PAY-131 in its off-board parent’s lane and the rest under `No parent`, each cell newest first', async () => {
     await renderAlpha();
-    expect(screen.getAllByTestId('col-name').map((n) => n.textContent)).toEqual(['To Do', 'In Progress', 'Done']);
-    expect(screen.getAllByTestId('col-count').map((n) => n.textContent)).toEqual(['2', '1', '1']);
-    expect(summariesIn('Done')).toEqual(['Currency symbol missing on receipts']);
+    expect([...laneKeys()].sort()).toEqual(['PAY-99', 'none']);
+    expect(cellSummaries('PAY-99', 'doing')).toEqual(['Refund partial captures']);
     // PAY-151 was updated today and PAY-120 two days ago — the list order (PAY-120 first) must not survive.
-    expect(summariesIn('To Do')).toEqual(['Rounding wrong on invoices over 1,000', 'Refund flows']);
+    expect(cellSummaries('none', 'todo')).toEqual(['Rounding wrong on invoices over 1,000', 'Refund flows']);
+    expect(cellSummaries('none', 'done')).toEqual(['Currency symbol missing on receipts']);
+    expect(within(headOf('none')).getByText('No parent')).toBeInTheDocument();
   });
 
-  it('a board with no issues draws its three columns, empty', async () => {
+  it('a board with no issues draws the column header with zeros and `No issues`', async () => {
     lists[ALPHA.id] = [];
     renderPage();
-    await waitFor(() => expect(screen.getAllByTestId('col-count').map((n) => n.textContent)).toEqual(['0', '0', '0']));
+    await waitFor(() => expect(colCounts()).toEqual(['0', '0', '0']));
+    expect(screen.getByText('No issues')).toBeInTheDocument();
+    expect(laneKeys()).toEqual([]);
     expect(screen.queryByText('No boards yet')).toBeNull();
+  });
+
+  it('filters that match nothing keep the zeros and read `No issues match`', async () => {
+    await renderAlpha();
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'zzz-nothing');
+    expect(colCounts()).toEqual(['0', '0', '0']);
+    expect(screen.getByText('No issues match')).toBeInTheDocument();
+    expect(laneKeys()).toEqual([]);
+  });
+
+  // §3.1: header issues are in no column. GROUP's cards are PAY-162 and PAY-180 (To Do), PAY-190 (In Progress), PAY-161 and PAY-170 (Done); PAY-120 and
+  // PAY-160 are headers. A lane's count is its subtree's matching issues, nested headers included.
+  it('counts cards, never headers, and a lane counts its subtree: `4 issues` on PAY-120, `2 issues` on the nested PAY-160', async () => {
+    await renderGroup();
+    expect(colCounts()).toEqual(['2', '1', '2']);
+    expect(headOf('PAY-120').querySelector('.jira-lane-count')).toHaveTextContent('4 issues');
+    expect(headOf('PAY-160').querySelector('.jira-lane-count')).toHaveTextContent('2 issues');
+    expect(headOf('PAY-120').querySelectorAll('.ui-spread-seg').length).toBeGreaterThan(0);
+  });
+
+  it('nests PAY-160 after PAY-120’s cells at depth 1, and draws every issue exactly once', async () => {
+    await renderGroup();
+    expect(laneKeys().indexOf('PAY-160')).toBe(laneKeys().indexOf('PAY-120') + 1);
+    expect(lane('PAY-120')).toHaveAttribute('data-depth', '0');
+    expect(lane('PAY-160')).toHaveAttribute('data-depth', '1');
+    expect(cellSummaries('PAY-120', 'done')).toEqual(['Summary of PAY-170']);
+    expect(cellSummaries('PAY-160', 'todo')).toEqual(['Ledger rounding fix']);
+    for (const i of GROUP) expect(screen.getAllByText(i.key)).toHaveLength(1);
+  });
+
+  // Case 20: depth is the model's, the indent is capped at LANE_INDENT_CAP (3) — an attribute, because the CSP allows no inline style.
+  it('a six-deep chain draws every issue once, with depths 0, 1, 2, 3, 3, 3', async () => {
+    const chain = Array.from({ length: 7 }, (_, i) =>
+      issue({
+        key: `PAY-${i + 1}`,
+        summary: `Chain ${i + 1}`,
+        parent: i === 0 ? null : { key: `PAY-${i}`, summary: `Chain ${i}`, type: null, status: null },
+        updated: daysAgoStamp(i + 1)
+      })
+    );
+    lists[ALPHA.id] = chain;
+    renderPage();
+    await screen.findByText('Chain 7');
+    expect(laneKeys()).toEqual(['PAY-1', 'PAY-2', 'PAY-3', 'PAY-4', 'PAY-5', 'PAY-6']);
+    expect(laneKeys().map((k) => lane(k)?.getAttribute('data-depth'))).toEqual(['0', '1', '2', '3', '3', '3']);
+    for (const i of chain) expect(screen.getAllByText(i.summary)).toHaveLength(1);
+    expect(cellSummaries('PAY-6', 'todo')).toEqual(['Chain 7']);
+  });
+
+  // Review Focus 1: a cached list with a cycle renders, terminates and draws each member once.
+  it('draws a two-cycle with each member once, and settles', async () => {
+    lists[ALPHA.id] = [
+      issue({ key: 'PAY-1', summary: 'Cycle one', parent: { key: 'PAY-2', summary: 'Cycle two', type: null, status: null } }),
+      issue({ key: 'PAY-2', summary: 'Cycle two', parent: { key: 'PAY-1', summary: 'Cycle one', type: null, status: null } })
+    ];
+    renderPage();
+    await screen.findByText('Cycle one');
+    expect(screen.getAllByText('Cycle one')).toHaveLength(1);
+    expect(screen.getAllByText('Cycle two')).toHaveLength(1);
+  });
+
+  // Spec §6, "Where the board's list comes from": opening an issue hands the modal the lanes' `childrenOf`, so its tree can reach the grandchildren.
+  it('a header’s title opens its issue with the lanes’ childrenOf', async () => {
+    await renderGroup();
+    await userEvent.click(within(headOf('PAY-120')).getByRole('button', { name: 'Payments epic' }));
+    expect(onOpenIssue).toHaveBeenCalledTimes(1);
+    const [opened, index] = onOpenIssue.mock.calls[0] as [JiraIssue, ReadonlyMap<string, readonly JiraIssue[]>];
+    expect(opened).toBe(G_120);
+    expect(index.get('PAY-120')?.map((i) => i.key).sort()).toEqual(['PAY-160', 'PAY-170']);
+    expect(index.get('PAY-160')?.map((i) => i.key).sort()).toEqual(['PAY-161', 'PAY-162']);
   });
 });
 
-describe('the card', () => {
-  it('draws the key, crumb, summary, person, raw status and priority', async () => {
+describe('the lane card', () => {
+  it('draws the key, summary, person, raw status and priority — and no crumb under a parent, though PAY-131 is mine', async () => {
     await renderAlpha();
     const c = card('Refund partial captures');
     expect(within(c).getByText('PAY-131')).toBeInTheDocument();
-    expect(within(c).getByText('↳ PAY-99 Payments platform')).toBeInTheDocument();
     expect(within(c).getByText('AL')).toBeInTheDocument();
     expect(within(c).getByText('Ada Lovelace')).toBeInTheDocument();
     expect(within(c).getByText('In Review')).toBeInTheDocument();
     expect(within(c).getByText('High')).toBeInTheDocument();
     expect(within(c).getByTitle('Story')).toBeInTheDocument();
+    expect(c.querySelector('.jira-card-crumb')).toBeNull();
+    expect(c.querySelector('.ui-fold')).toBeNull();
   });
 
   it('the priority pill: tone and glyph by name, grey and glyphless for a custom name, nothing for null', async () => {
@@ -481,13 +719,25 @@ describe('the card', () => {
       renderPage();
       await screen.findByText('Pill case');
       const pill = name === null ? null : within(card('Pill case')).getByTitle(`priority ${name}`);
-      if (tone === null) expect(card('Pill case').querySelector('[title^="priority "]')).toBeNull();
-      else {
+      if (tone === null) {
+        expect(card('Pill case').querySelector('[title^="priority "]')).toBeNull();
+        // No pill, no slot: an empty slot would be the head's last child, and the key would not move anyway — but nothing stands in for a priority.
+        expect(card('Pill case').querySelector('.jira-card-prio-slot')).toBeNull();
+      } else {
+        expect(pill).toHaveClass('ui-prio');
         expect(pill).toHaveAttribute('data-tone', tone);
         expect(pill?.querySelector('svg') !== null).toBe(glyph);
+        // The page lays the primitive out through its own span (guard 7), which is what the push right hangs on.
+        expect(pill?.parentElement).toHaveClass('jira-card-prio-slot');
       }
       cleanup();
     }
+    // The push right is the slot's alone: no structural selector reaches past it into the head's last child, so a card with no priority keeps its key left.
+    const css = readStyles();
+    expect(ruleBlock(css, '.jira-card-prio-slot') as string).toMatch(/margin-left:\s*auto/);
+    expect(css).not.toMatch(/\.jira-card-head\s*>\s*:last-child/);
+    expect(css).not.toMatch(/\.jira-lane-tally\s*>\s*:first-child/);
+    expect(ruleBlock(css, '.jira-lane-bar') as string).toMatch(/width:\s*96px/);
   });
 
   it('the status is the raw name beside a tone dot, and the type tile carries a tone per type', async () => {
@@ -495,39 +745,52 @@ describe('the card', () => {
     const c = card('Refund partial captures');
     expect(within(c).getByText('In Review')).toBeInTheDocument();
     expect(c.textContent).not.toMatch(/in progress/);
-    expect(c.querySelector('.jira-status-dot')).toHaveAttribute('data-tone', 'doing');
+    expect(c.querySelector('.ui-issue-status-dot')).toHaveAttribute('data-tone', 'doing');
     expect(within(c).getByTitle('Story')).toHaveAttribute('data-tone', 'story');
     expect(within(card('Currency symbol missing on receipts')).getByTitle('Bug')).toHaveAttribute('data-tone', 'bug');
     expect(within(card('Refund flows')).getByTitle('Epic')).toHaveAttribute('data-tone', 'neutral');
   });
 
-  it('the foot names the one mapped repository by basename, `N repos` for several with every path in the title, and nothing for none', async () => {
+  it('the marker row names the one mapped repository by basename with a 14 px glyph, `N repos` for several with every path in the title, nothing for none', async () => {
     statusAnswer = status({ repos: { PAY: ['/x/microservice'] } });
     await renderAlpha();
     expect(within(card('Refund flows')).getByText('microservice')).toBeInTheDocument();
+    expect(card('Refund flows').querySelector('.ui-repo svg')).toHaveAttribute('width', '14');
     cleanup();
     statusAnswer = status({ repos: { PAY: ['/x/microservice', '/y/other'] } });
     await renderAlpha();
-    const many = within(card('Refund flows')).getByText('2 repos').closest('.jira-card-repo') as HTMLElement;
+    const many = within(card('Refund flows')).getByText('2 repos').closest('.ui-repo') as HTMLElement;
     expect(many.getAttribute('title')).toBe('/x/microservice\n/y/other');
     cleanup();
     statusAnswer = status();
     await renderAlpha();
-    expect(card('Refund flows').querySelector('.jira-card-repo')).toBeNull();
+    expect(card('Refund flows').querySelector('.ui-repo')).toBeNull();
   });
 
-  it('reads `root` for a root, `Assigned to me` for my own, and `unassigned`', async () => {
+  // §3.4: the crumb never names the parent — the lane says it — but the precedence is unchanged, so a followed root still reads `root`.
+  it('reads `root` for a root, `Assigned to me` for my own parentless card, and `unassigned`', async () => {
     await renderAlpha();
     expect(within(card('Refund flows')).getByText('root')).toBeInTheDocument();
     expect(within(card('Refund flows')).getByText('unassigned')).toBeInTheDocument();
     expect(within(card('Rounding wrong on invoices over 1,000')).getByText('Assigned to me')).toBeInTheDocument();
   });
 
-  // Grouped-board spec §4: the `N subtasks` marker is gone. `JiraIssue.subtasks` counts Jira subtasks on the board or not, which is not this board's
-  // business — what sits under a card is the fold block's to say. PAY-131 and PAY-120 both carry a non-zero `subtasks`, so this is not vacuous.
+  it('a followed root under an on-board parent still reads `root`, and the card carries no parent chip', async () => {
+    lists[ALPHA.id] = [
+      issue({ key: 'PAY-110', summary: 'Platform epic', type: { name: 'Epic', level: 1, subtask: false } }),
+      issue({ key: 'PAY-120', summary: 'Followed root', assignee: ADA, parent: { key: 'PAY-110', summary: 'Platform epic', type: null, status: null } })
+    ];
+    renderPage();
+    await screen.findByText('Followed root');
+    expect(within(card('Followed root')).getByText('root')).toBeInTheDocument();
+    expect(card('Followed root').querySelector('.ui-fold')).toBeNull();
+    expect(cellSummaries('PAY-110', 'todo')).toEqual(['Followed root']);
+  });
+
+  // Grouped-board spec §4: no `N subtasks` marker. PAY-131 and PAY-120 both carry a non-zero `subtasks`, so this is not vacuous.
   it('draws no subtask count anywhere', async () => {
     await renderAlpha();
-    expect(document.querySelector('.board-columns')?.textContent).not.toMatch(/subtask/);
+    expect(document.querySelector('.jira-lanes')?.textContent).not.toMatch(/subtask/);
   });
 
   // The browser never talks to Jira: initials, never an avatar image; the link out is the server's own `url`, opened in a new tab with no referrer.
@@ -748,216 +1011,358 @@ it('draws no page switch inside main', async () => {
   });
 });
 
-/*
-  Grouped-board spec §3–§4: the board draws one card per TOP issue, and every on-board descendant folds into its topmost on-board ancestor. GROUP is the
-  shape the user's own board has — an epic root with stories under it and sub-tasks under those — plus a standalone task and a story whose parent is off
-  the board. Served for ALPHA's id, with ALPHA's status `count` left at 4, so the band case can tell the loaded list (7) from the status poll (4).
-*/
-describe('the fold', () => {
-  const G_120 = issue({ key: 'PAY-120', summary: 'Payments epic', type: { name: 'Epic', level: 1, subtask: false }, updated: daysAgoStamp(5) });
-  const G_160 = issue({
-    key: 'PAY-160',
-    type: { name: 'Story', level: 0, subtask: false },
-    status: { name: 'In Progress', category: 'indeterminate' },
-    parent: { key: 'PAY-120', summary: 'Payments epic' },
-    updated: daysAgoStamp(4)
-  });
-  const G_161 = issue({
-    key: 'PAY-161',
-    type: { name: 'Sub-task', level: -1, subtask: true },
-    status: { name: 'Done', category: 'done' },
-    parent: { key: 'PAY-160', summary: 'Summary of PAY-160' },
-    updated: daysAgoStamp(3),
-    resolved: daysAgoStamp(3)
-  });
-  const G_162 = issue({
-    key: 'PAY-162',
-    summary: 'Ledger rounding fix',
-    type: { name: 'Sub-task', level: -1, subtask: true },
-    parent: { key: 'PAY-160', summary: 'Summary of PAY-160' },
-    updated: daysAgoStamp(0)
-  });
-  const G_170 = issue({
-    key: 'PAY-170',
-    type: { name: 'Story', level: 0, subtask: false },
-    status: { name: 'Done', category: 'done' },
-    parent: { key: 'PAY-120', summary: 'Payments epic' },
-    updated: daysAgoStamp(6),
-    resolved: daysAgoStamp(6)
-  });
-  const G_180 = issue({ key: 'PAY-180', summary: 'Standalone task', updated: daysAgoStamp(1) });
-  const G_190 = issue({
-    key: 'PAY-190',
-    summary: 'Payout retries',
-    status: { name: 'In Progress', category: 'indeterminate' },
-    parent: { key: 'PAY-999', summary: 'Billing platform' },
-    updated: daysAgoStamp(2)
-  });
-  const GROUP = [G_120, G_160, G_161, G_162, G_170, G_180, G_190];
+// Parent-lanes spec §3.2–§3.4: what an on-board and an off-board lane header draw, over the lane fixtures declared near the top of this file.
+describe('the lane headers', () => {
+  const stubbed = (over: Partial<JiraIssue['parent'] & object>): JiraIssue =>
+    issue({ ...G_190, parent: { key: 'PAY-999', summary: 'Billing platform', type: null, status: null, ...over } });
 
-  async function renderGroup(): Promise<void> {
-    lists[ALPHA.id] = GROUP;
+  it('an off-board header: key, the stub’s summary, `not on this board`, the count, a link composed from the site — and no Run ▾, tile or pill Jira did not send', async () => {
+    await renderGroup();
+    const h = headOf('PAY-999');
+    expect(h).toHaveAttribute('data-kind', 'off');
+    expect(within(h).getByText('PAY-999')).toBeInTheDocument();
+    expect(within(h).getByRole('button', { name: 'Billing platform' })).toBeEnabled();
+    expect(within(h).getByText('not on this board')).toBeInTheDocument();
+    expect(within(h).getByText('1 issue')).toBeInTheDocument();
+    expect(within(h).queryByRole('button', { name: /^Run / })).toBeNull();
+    expect(h.querySelector('.ui-issue-type')).toBeNull();
+    expect(h.querySelector('.ui-issue-status')).toBeNull();
+    expect(h.querySelector('.ui-prio')).toBeNull();
+    expect(h.querySelector('.ui-person')).toBeNull();
+    expect(within(h).getByRole('link', { name: /open PAY-999 in Jira/ })).toHaveAttribute('href', 'https://acme.atlassian.net/browse/PAY-999');
+  });
+
+  it('an off-board header draws the type tile and the status pill when the stub carries them', async () => {
+    lists[ALPHA.id] = [stubbed({ type: { name: 'Epic', level: 1, subtask: false }, status: { name: 'In Progress', category: 'indeterminate' } })];
+    renderPage();
+    await screen.findByText('Payout retries');
+    const h = headOf('PAY-999');
+    expect(within(h).getByTitle('Epic')).toHaveClass('ui-issue-type');
+    expect(within(h).getByText('In Progress').closest('.ui-issue-status')).not.toBeNull();
+  });
+
+  it('an off-board header has no link out while the site is unknown', async () => {
+    statusAnswer = status({ site: '' });
+    await renderGroup();
+    expect(within(headOf('PAY-999')).queryByRole('link')).toBeNull();
+  });
+
+  // Case 9: Jira sent the parent's key and no summary — the title reads the key, and it still reads the parent.
+  it('an empty stub summary draws the key as the title, and the click still reads the parent', async () => {
+    lists[ALPHA.id] = [stubbed({ summary: '' })];
+    const parent = issue({ key: 'PAY-999', summary: 'Billing platform' });
+    answerReads({ 'PAY-999': () => ok(detailOf(parent)) });
+    renderPage();
+    await screen.findByText('Payout retries');
+    await userEvent.click(within(headOf('PAY-999')).getByRole('button', { name: 'PAY-999' }));
+    await waitFor(() => expect(onOpenIssue).toHaveBeenCalledTimes(1));
+    expect((onOpenIssue.mock.calls[0] as [JiraIssue])[0].key).toBe('PAY-999');
+  });
+
+  it('an on-board header: the issue’s row with Run ▾, and no parent chip without a parent', async () => {
+    statusAnswer = status({ repos: { PAY: ['/x/pay'] } });
+    await renderGroup();
+    const h = headOf('PAY-120');
+    expect(h).toHaveAttribute('data-kind', 'board');
+    expect(within(h).getByRole('button', { name: /^Run PAY-120/ })).toBeEnabled();
+    expect(within(h).getByTitle('Epic')).toHaveClass('ui-issue-type');
+    expect(within(h).getByText('root')).toBeInTheDocument();
+    expect(within(h).queryByText('not on this board')).toBeNull();
+    expect(h.querySelector('.ui-fold')).toBeNull();
+    expect(within(h).getByText('pay')).toBeInTheDocument();
+  });
+
+  it('a nested header names its parent as `↳ <key>`, the parent’s summary in its title', async () => {
+    await renderGroup();
+    const fold = headOf('PAY-160').querySelector('.ui-fold');
+    expect(fold).toHaveTextContent('↳ PAY-120');
+    expect(fold).toHaveAttribute('title', 'Payments epic');
+    expect(headOf('PAY-160').querySelector('.jira-card-crumb')).toBeNull();
+  });
+
+  // Case 18: the parent arrives on the board — the header becomes the issue's own row; the fold the reader set on the stub still holds.
+  it('a sweep that brings the off-board parent onto the board turns its header into an on-board one, and the stored fold still applies', async () => {
+    const OFF = { ...ALPHA, interval: 'off' as const };
+    statusAnswer = status({ boards: [OFF, BETA], repos: { PAY: ['/x/pay'] } });
+    await renderGroup();
+    await userEvent.click(within(headOf('PAY-999')).getByRole('button', { name: 'Collapse PAY-999' }));
+    expect(screen.queryByText('Payout retries')).toBeNull();
+    statusAnswer = status({ boards: [{ ...OFF, polledAt: new Date().toISOString() }, BETA], repos: { PAY: ['/x/pay'] } });
+    lists = { ...lists, [ALPHA.id]: [...GROUP, issue({ key: 'PAY-999', summary: 'Billing platform', type: { name: 'Epic', level: 1, subtask: false } })] };
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(headOf('PAY-999')).toHaveAttribute('data-kind', 'board'));
+    const h = headOf('PAY-999');
+    expect(within(h).getByRole('button', { name: /^Run PAY-999/ })).toBeInTheDocument();
+    expect(within(h).queryByText('not on this board')).toBeNull();
+    expect(within(h).getByRole('button', { name: 'Expand PAY-999' })).toBeInTheDocument();
+    expect(screen.queryByText('Payout retries')).toBeNull();
+  });
+});
+
+/*
+  An off-board parent is read on a click, never on draw (§3.2): one `GET /api/jira/issue/<KEY>`, the summary disabled while it is out, Detail on the answer.
+  The newest click across every header is the only one that may open Detail, and a failure's sentence sits under its own header alone.
+*/
+describe('reading an off-board parent', () => {
+  const second = issue({ key: 'PAY-191', summary: 'Ledger export', parent: { key: 'PAY-998', summary: 'Ledger platform', type: null, status: null } });
+  const billing = issue({ key: 'PAY-999', summary: 'Billing platform' });
+  const ledger = issue({ key: 'PAY-998', summary: 'Ledger platform' });
+
+  it('requests nothing on draw; a click asks once, disables the summary while it is out, and opens the answer', async () => {
+    const read = deferred<Response>();
+    answerReads({ 'PAY-999': () => read.promise });
+    await renderGroup();
+    expect(issueReads()).toEqual([]);
+    const title = within(headOf('PAY-999')).getByRole('button', { name: 'Billing platform' });
+    await userEvent.click(title);
+    expect(issueReads()).toEqual(['/api/jira/issue/PAY-999']);
+    expect(title).toBeDisabled();
+    expect(onOpenIssue).not.toHaveBeenCalled();
+    await act(async () => read.resolve(await ok(detailOf(billing))));
+    await waitFor(() => expect(onOpenIssue).toHaveBeenCalledTimes(1));
+    expect((onOpenIssue.mock.calls[0] as [JiraIssue])[0].key).toBe('PAY-999');
+    expect(title).toBeEnabled();
+  });
+
+  it('two clicks, the first answered last: Detail opens once, on the second', async () => {
+    const first = deferred<Response>();
+    const later = deferred<Response>();
+    answerReads({ 'PAY-999': () => first.promise, 'PAY-998': () => later.promise });
+    lists[ALPHA.id] = [...GROUP, second];
+    renderPage();
+    await screen.findByText('Ledger export');
+    await userEvent.click(within(headOf('PAY-999')).getByRole('button', { name: 'Billing platform' }));
+    await userEvent.click(within(headOf('PAY-998')).getByRole('button', { name: 'Ledger platform' }));
+    await act(async () => later.resolve(await ok(detailOf(ledger))));
+    await act(async () => first.resolve(await ok(detailOf(billing))));
+    await waitFor(() => expect(onOpenIssue).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(onOpenIssue).toHaveBeenCalledTimes(1);
+    expect((onOpenIssue.mock.calls[0] as [JiraIssue])[0].key).toBe('PAY-998');
+  });
+
+  it('a failed read says so under that header only, and the next click clears it', async () => {
+    let fail = true;
+    answerReads({ 'PAY-998': () => (fail ? Promise.reject(new Error('Jira timed out')) : ok(detailOf(ledger))) });
+    lists[ALPHA.id] = [...GROUP, second];
+    renderPage();
+    await screen.findByText('Ledger export');
+    await userEvent.click(within(headOf('PAY-998')).getByRole('button', { name: 'Ledger platform' }));
+    expect(await within(headOf('PAY-998')).findByRole('alert')).toHaveTextContent('Jira timed out');
+    expect(within(headOf('PAY-999')).queryByRole('alert')).toBeNull();
+    expect(onOpenIssue).not.toHaveBeenCalled();
+    fail = false;
+    await userEvent.click(within(headOf('PAY-998')).getByRole('button', { name: 'Ledger platform' }));
+    await waitFor(() => expect(onOpenIssue).toHaveBeenCalledTimes(1));
+    expect(within(headOf('PAY-998')).queryByRole('alert')).toBeNull();
+  });
+
+  it('a failed read is cleared by the next click on a DIFFERENT off-board header', async () => {
+    answerReads({ 'PAY-998': () => Promise.reject(new Error('Jira timed out')), 'PAY-999': () => ok(detailOf(billing)) });
+    lists[ALPHA.id] = [...GROUP, second];
+    renderPage();
+    await screen.findByText('Ledger export');
+    await userEvent.click(within(headOf('PAY-998')).getByRole('button', { name: 'Ledger platform' }));
+    expect(await within(headOf('PAY-998')).findByRole('alert')).toHaveTextContent('Jira timed out');
+    await userEvent.click(within(headOf('PAY-999')).getByRole('button', { name: 'Billing platform' }));
+    await waitFor(() => expect(onOpenIssue).toHaveBeenCalledTimes(1));
+    expect((onOpenIssue.mock.calls[0] as [JiraIssue])[0].key).toBe('PAY-999');
+    expect(within(headOf('PAY-998')).queryByRole('alert')).toBeNull();
+    expect(within(headOf('PAY-999')).queryByRole('alert')).toBeNull();
+  });
+
+  // Case 19: the lane leaves while its read is out — nothing throws, the lane is gone, and the late answer opens nothing.
+  it('a sweep that drops the lane while its read is out: no error, the lane is gone, and the late answer opens nothing', async () => {
+    const OFF = { ...ALPHA, interval: 'off' as const };
+    const read = deferred<Response>();
+    answerReads({ 'PAY-998': () => read.promise });
+    statusAnswer = status({ boards: [OFF, BETA] });
+    lists[ALPHA.id] = [...GROUP, second, ...Array.from({ length: 6 }, (_, i) => issue({ key: `PAY-${700 + i}`, summary: `Loose ${i}`, updated: daysAgoStamp(i + 2) }))];
+    renderPage();
+    await screen.findByText('Ledger export');
+    await userEvent.click(within(screen.getByTestId('cell-none-todo')).getByRole('button', { name: '+ 2 more' }));
+    await userEvent.click(within(headOf('PAY-998')).getByRole('button', { name: 'Ledger platform' }));
+    statusAnswer = status({ boards: [{ ...OFF, polledAt: new Date().toISOString() }, BETA] });
+    lists = { ...lists, [ALPHA.id]: GROUP };
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(lane('PAY-998')).toBeNull());
+    await act(async () => read.resolve(await ok(detailOf(ledger))));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(onOpenIssue).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+/*
+  Folds (§3.6): a lane starts open unless everything it counts is done; a press is stored per board under JIRA_LANE_FOLDS_KEY and outlives a remount; a
+  typed search opens every lane holding a match and locks the chevrons, writing nothing.
+*/
+describe('the lane folds', () => {
+  const SETTLED = [
+    issue({ key: 'PAY-200', summary: 'Shipped epic', type: { name: 'Epic', level: 1, subtask: false }, status: { name: 'Done', category: 'done' }, resolved: daysAgoStamp(2) }),
+    issue({
+      key: 'PAY-201',
+      summary: 'Shipped story',
+      status: { name: 'Done', category: 'done' },
+      parent: { key: 'PAY-200', summary: 'Shipped epic', type: null, status: null },
+      resolved: daysAgoStamp(2)
+    })
+  ];
+  const stored = (): unknown => JSON.parse(localStorage.getItem(JIRA_LANE_FOLDS_KEY) ?? 'null');
+
+  async function renderFolds(): Promise<void> {
+    lists[ALPHA.id] = [...GROUP, ...SETTLED];
     renderPage();
     await screen.findByText('Standalone task');
   }
 
-  it('the marker row reads repo, match, worktree (spec §4.2), and the repo glyph is 14 px', async () => {
-    statusAnswer = status({ repos: { PAY: ['/x/microservice'] } });
-    await renderGroup();
-    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'ledger');
-    const row = within(card('Payments epic')).getByTestId('marker-row');
-    const repo = row.querySelector('.jira-card-repo') as HTMLElement;
-    const match = within(row).getByText('1 match: PAY-162');
-    expect(repo).not.toBeNull();
-    // Document order: the repo precedes the match marker.
-    expect(repo.compareDocumentPosition(match) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(repo.querySelector('svg')).toHaveAttribute('width', '14');
+  it('an open lane reads `Collapse <KEY>`, a settled one starts folded with `Expand <KEY>` and no cells, and `No parent` names itself', async () => {
+    await renderFolds();
+    expect(screen.getByRole('button', { name: 'Collapse PAY-120' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Collapse No parent' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand PAY-200' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('cell-PAY-200-done')).toBeNull();
+    expect(screen.queryByText('Shipped story')).toBeNull();
+    expect(headOf('PAY-200').querySelector('.jira-lane-count')).toHaveTextContent('1 issue');
   });
 
-  it('draws tops only: column counts count cards, and no folded issue is drawn anywhere', async () => {
-    await renderGroup();
-    expect(screen.getAllByTestId('col-count').map((n) => n.textContent)).toEqual(['2', '1', '0']);
-    for (const folded of ['Summary of PAY-160', 'Summary of PAY-161', 'Ledger rounding fix', 'Summary of PAY-170']) {
-      expect(screen.queryByText(folded)).toBeNull();
-    }
-  });
-
-  // Review Focus 3: PAY-161 and PAY-170 are done, but they are folded under a To Do epic, which stays in its OWN column; the Done column gains nothing.
-  it('keeps a top in its own column whatever its folded issues’ columns are', async () => {
-    await renderGroup();
-    expect(summariesIn('Done')).toEqual([]);
-    expect(summariesIn('In Progress')).toEqual(['Payout retries']);
-  });
-
-  // Sort (§3): PAY-120's own `updated` (5 d) is older than PAY-180's (1 d), but PAY-162 under it was touched today, so the epic rises above the task.
-  it('sorts tops by the newest updated across each top and everything folded under it', async () => {
-    await renderGroup();
-    expect(summariesIn('To Do')).toEqual(['Payments epic', 'Standalone task']);
-  });
-
-  it('draws the fold block on a top with folded issues: the children line, a three-segment bar and its caption', async () => {
-    await renderGroup();
-    const c = card('Payments epic');
-    expect(within(c).getByText('2 children · 2 below them')).toBeInTheDocument();
-    expect(within(c).getByText('2 done · 1 in progress · 1 to do')).toBeInTheDocument();
-    expect(c.querySelectorAll('.ui-spread-seg')).toHaveLength(3);
-    // The age is the top's own (§3: the sort key is never drawn) — 5 d, not PAY-162's `now`.
-    expect(c.querySelector('.board-card-meta')?.textContent).toBe('5d');
-  });
-
-  it('draws no fold block on a top with nothing folded, and an off-board parent still reads as the crumb', async () => {
-    await renderGroup();
-    expect(card('Standalone task').querySelector('.jira-card-fold')).toBeNull();
-    expect(card('Payout retries').querySelector('.jira-card-fold')).toBeNull();
-    expect(within(card('Payout retries')).getByText('↳ PAY-999 Billing platform')).toBeInTheDocument();
-  });
-
-  // Spec §6, "Where the board's list comes from": a card click hands the modal the fold's `childrenOf`, so its tree can reach the grandchildren.
-  it('a card click passes the fold’s childrenOf with the issue', async () => {
-    await renderGroup();
-    await userEvent.click(card('Payments epic'));
-    expect(onOpenIssue).toHaveBeenCalledTimes(1);
-    const [opened, index] = onOpenIssue.mock.calls[0] as [JiraIssue, ReadonlyMap<string, readonly JiraIssue[]>];
-    expect(opened).toBe(G_120);
-    expect(index.get('PAY-120')?.map((i) => i.key)).toEqual(['PAY-160', 'PAY-170']);
-    expect(index.get('PAY-160')?.map((i) => i.key)).toEqual(['PAY-162', 'PAY-161']);
-  });
-
-  it('the band counts the loaded list, not the status poll, and adds the cards part', async () => {
-    await renderGroup();
-    expect(document.querySelector('.jira-band-sub')?.textContent).toBe('acme.atlassian.net · 7 issues from 1 root and 1 query · 3 cards · polled 10m ago');
-  });
-
-  it('the band reads the status count, with no cards part, while the list has not loaded', async () => {
-    const answered = global.fetch;
-    global.fetch = jest.fn((input: RequestInfo | URL) =>
-      /\/issues$/.test(String(input)) ? new Promise<Response>(() => {}) : answered(input)
-    ) as unknown as typeof fetch;
-    renderPage();
-    await screen.findByText('loading…');
-    await waitFor(() => expect(document.querySelector('.jira-band-sub')?.textContent).toBe(bandSub(ALPHA, 'acme.atlassian.net', Date.now(), null).text));
-    expect(document.querySelector('.jira-band-sub')?.textContent).toContain(' · 4 issues ');
-    expect(document.querySelector('.jira-band-sub')?.textContent).not.toContain('card');
-  });
-
-  it('on a list where nothing folds the band has no cards part', async () => {
-    await renderAlpha();
-    expect(document.querySelector('.jira-band-sub')?.textContent).not.toContain('card');
-  });
-
-  // Review Focus 1: a cached list with a cycle renders, terminates and draws each member once.
-  it('draws a two-cycle as two cards, and settles', async () => {
+  // Case 15's page half: a folded lane draws no cells, but its cards still count in the column heads — the heads count the board, not what is unfolded.
+  it('a folded settled lane still counts in the column heads', async () => {
+    const parentOf = (key: string, summary: string) => ({ key, summary, type: null, status: null });
     lists[ALPHA.id] = [
-      issue({ key: 'PAY-1', summary: 'Cycle one', parent: { key: 'PAY-2', summary: 'Cycle two' } }),
-      issue({ key: 'PAY-2', summary: 'Cycle two', parent: { key: 'PAY-1', summary: 'Cycle one' } })
+      issue({ key: 'PAY-210', summary: 'Open epic', type: { name: 'Epic', level: 1, subtask: false } }),
+      issue({ key: 'PAY-211', summary: 'Open story one', parent: parentOf('PAY-210', 'Open epic') }),
+      issue({ key: 'PAY-212', summary: 'Open story two', parent: parentOf('PAY-210', 'Open epic') }),
+      issue({
+        key: 'PAY-220',
+        summary: 'Closed epic',
+        type: { name: 'Epic', level: 1, subtask: false },
+        status: { name: 'Done', category: 'done' },
+        resolved: daysAgoStamp(2)
+      }),
+      ...[1, 2, 3].map((n) =>
+        issue({
+          key: `PAY-22${n}`,
+          summary: `Closed story ${n}`,
+          status: { name: 'Done', category: 'done' },
+          parent: parentOf('PAY-220', 'Closed epic'),
+          resolved: daysAgoStamp(2)
+        })
+      )
     ];
     renderPage();
-    await screen.findByText('Cycle one');
-    expect(visibleSummaries().sort()).toEqual(['Cycle one', 'Cycle two']);
+    await screen.findByText('Open story one');
+    expect(screen.getByRole('button', { name: 'Expand PAY-220' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Closed story 1')).toBeNull();
+    expect(colCounts()).toEqual(['2', '0', '3']);
   });
 
-  /*
-    F1 (grouped-board spec §5): a top card shows when it matches, or when any issue folded under it matches. Shown only for a folded match, it carries a
-    2 px amber ring and a `match` marker naming the match — the answer to "why is this here". A top that matches on its own draws neither.
-  */
-  describe('filters find folded issues (F1)', () => {
-    const search = async (text: string): Promise<void> => {
-      await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), text);
-    };
-    const ringed = (): Element[] => Array.from(document.querySelectorAll('.jira-card-match'));
+  it('folding a lane hides its cells and every lane under it', async () => {
+    await renderFolds();
+    await userEvent.click(screen.getByRole('button', { name: 'Collapse PAY-120' }));
+    expect(lane('PAY-160')).toBeNull();
+    expect(screen.queryByTestId('cell-PAY-120-done')).toBeNull();
+    expect(lane('PAY-120')).toHaveAttribute('data-open', 'false');
+  });
 
-    // PAY-162 is a GRANDCHILD (epic → story → sub-task): its depth-0 top shows, not the intermediate story (Review Focus 2).
-    it('a search matching only a folded grandchild shows its top, ringed, naming the match', async () => {
-      await renderGroup();
-      await search('ledger');
-      expect(visibleSummaries()).toEqual(['Payments epic']);
-      expect(card('Payments epic')).toHaveClass('jira-card-match');
-      expect(within(card('Payments epic')).getByText('1 match: PAY-162')).toHaveClass('ui-marker', 'ui-marker-match');
-      expect(screen.getAllByTestId('col-count').map((n) => n.textContent)).toEqual(['1', '0', '0']);
-    });
+  it('a toggle survives a remount; a second board gets its own defaults; both boards land in storage', async () => {
+    lists[BETA.id] = SETTLED;
+    await renderFolds();
+    await userEvent.click(screen.getByRole('button', { name: 'Expand PAY-200' }));
+    expect(screen.getByText('Shipped story')).toBeInTheDocument();
+    cleanup();
+    await renderFolds();
+    expect(screen.getByRole('button', { name: 'Collapse PAY-200' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /^Pick a Jira board/ }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Boards' })).getByRole('button', { name: 'Beta board' }));
+    const expand = await screen.findByRole('button', { name: 'Expand PAY-200' });
+    await userEvent.click(expand);
+    expect(Object.keys(stored() as object).sort()).toEqual([ALPHA.id, BETA.id].sort());
+    // Beta's write leaves Alpha's entry as it was, not replaced with `{}`.
+    expect((stored() as Record<string, unknown>)[ALPHA.id]).toEqual({ 'PAY-200': 'open' });
+  });
 
-    it('a search every top matches on its own rings nothing', async () => {
-      await renderGroup();
-      await search('PAY-1');
-      expect(visibleSummaries().sort()).toEqual(['Payments epic', 'Payout retries', 'Standalone task']);
-      expect(ringed()).toHaveLength(0);
-      expect(document.querySelector('.ui-marker-match')).toBeNull();
-    });
+  it('a search opens a folded lane holding a match and locks the chevrons; clearing it folds the lane again, and storage is untouched', async () => {
+    await renderFolds();
+    const before = localStorage.getItem(JIRA_LANE_FOLDS_KEY);
+    const box = screen.getByRole('searchbox', { name: 'Search issues' });
+    await userEvent.type(box, 'shipped story');
+    expect(screen.getByText('Shipped story')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse PAY-200' })).toBeDisabled();
+    await userEvent.clear(box);
+    expect(screen.getByRole('button', { name: 'Expand PAY-200' })).toBeEnabled();
+    expect(screen.queryByText('Shipped story')).toBeNull();
+    expect(localStorage.getItem(JIRA_LANE_FOLDS_KEY)).toBe(before);
+  });
 
-    // `boardFilterOptions` reads every loaded issue, folded or not: a type only sub-tasks carry must still be pickable, though no card is one.
-    it('the Type filter offers a type only folded issues carry, and picking it rings their top with the count and the keys', async () => {
-      await renderGroup();
-      const dialog = await openFilters();
-      expect(within(within(dialog).getByRole('group', { name: 'Type' })).getByRole('button', { name: 'Sub-task' })).toBeInTheDocument();
-      await pick('Type', 'Sub-task');
-      expect(visibleSummaries()).toEqual(['Payments epic']);
-      expect(card('Payments epic')).toHaveClass('jira-card-match');
-      const marker = within(card('Payments epic')).getByText('2 matches');
-      expect(marker).toHaveClass('ui-marker-match');
-      expect(marker).toHaveAttribute('title', 'PAY-162, PAY-161');
-    });
+  it('junk in storage reads as the defaults', async () => {
+    for (const junk of [null, 'x', [], { [ALPHA.id]: { 'PAY-200': 'junk', 'PAY-120': 7 } }]) {
+      localStorage.setItem(JIRA_LANE_FOLDS_KEY, JSON.stringify(junk));
+      await renderFolds();
+      expect(screen.getByRole('button', { name: 'Expand PAY-200' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Collapse PAY-120' })).toBeInTheDocument();
+      cleanup();
+    }
+  });
+});
 
-    // Review Focus 5: the band counts the unfiltered list, whatever the filters hide.
-    it('a filter never moves the band', async () => {
-      await renderGroup();
-      const before = document.querySelector('.jira-band-sub')?.textContent;
-      await pick('Type', 'Sub-task');
-      expect(document.querySelector('.jira-band-sub')?.textContent).toBe(before);
-      expect(before).toContain('7 issues from 1 root and 1 query · 3 cards');
-    });
+/* Filters match per issue (§6.2): a card shows when it matches, a header when it or anything under it does, and a lane with nothing left is gone. */
+describe('filters over lanes', () => {
+  const THREE = ['Alpha card', 'Beta card', 'Gamma card'].map((summary, i) =>
+    issue({ key: `PAY-${51 + i}`, summary, parent: { key: 'PAY-50', summary: 'Card platform', type: null, status: null }, updated: daysAgoStamp(i + 1) })
+  );
+  const search = async (text: string): Promise<void> => {
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), text);
+  };
 
-    it('rings nothing with no filter and no search', async () => {
-      await renderGroup();
-      expect(ringed()).toHaveLength(0);
-    });
+  async function renderFilters(): Promise<void> {
+    lists[ALPHA.id] = [...GROUP, ...THREE];
+    renderPage();
+    await screen.findByText('Gamma card');
+  }
 
-    it('a top that matches on its own is not ringed', async () => {
-      await renderGroup();
-      await search('standalone');
-      expect(visibleSummaries()).toEqual(['Standalone task']);
-      expect(card('Standalone task')).not.toHaveClass('jira-card-match');
-      expect(within(card('Standalone task')).queryByText(/match/)).toBeNull();
-    });
+  it('one matching card in a three-card lane: that card alone, `1 issue`, and every lane with no match is gone', async () => {
+    await renderFilters();
+    await search('gamma');
+    expect(laneKeys()).toEqual(['PAY-50']);
+    expect(cellSummaries('PAY-50', 'todo')).toEqual(['Gamma card']);
+    expect(headOf('PAY-50').querySelector('.jira-lane-count')).toHaveTextContent('1 issue');
+    expect(colCounts()).toEqual(['1', '0', '0']);
+  });
+
+  it('a header that matches on its own draws with empty cells and no count or bar', async () => {
+    await renderFilters();
+    await search('payments epic');
+    expect(laneKeys()).toEqual(['PAY-120']);
+    expect(lane('PAY-120')?.querySelectorAll('.board-card')).toHaveLength(0);
+    expect(headOf('PAY-120').querySelector('.jira-lane-tally')).toBeNull();
+  });
+
+  it('a nested header that matches draws its parent’s header above it', async () => {
+    await renderFilters();
+    await search('summary of pay-160');
+    expect(laneKeys()).toEqual(['PAY-120', 'PAY-160']);
+    expect(lane('PAY-120')?.querySelectorAll('.board-card')).toHaveLength(0);
+  });
+
+  it('the Type filter offers a type only nested cards carry, and picking it keeps their lanes', async () => {
+    await renderFilters();
+    const dialog = await openFilters();
+    expect(within(within(dialog).getByRole('group', { name: 'Type' })).getByRole('button', { name: 'Sub-task' })).toBeInTheDocument();
+    await pick('Type', 'Sub-task');
+    expect(laneKeys()).toEqual(['PAY-120', 'PAY-160']);
+    expect(visibleSummaries().sort()).toEqual(['Ledger rounding fix', 'Summary of PAY-161']);
+  });
+
+  it('the Filters panel’s `Showing` counts the matching issues of the loaded list', async () => {
+    await renderFilters();
+    await search('PAY-16');
+    const dialog = await openFilters();
+    expect(within(dialog).getByText(/^Showing 3 of 10/)).toBeInTheDocument();
   });
 });
 
@@ -984,15 +1389,15 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       </SettingsProvider>,
       { wrapper: NoGitlab }
     );
-    await screen.findByText(firstCard);
+    await screen.findAllByText(firstCard);
   }
 
   const runChip = (summary: string): HTMLElement => within(card(summary)).getByRole('button', { name: /^Run PAY-/ });
   /** The chevron half: the one that opens the menu. The left half starts the default action and never opens it. */
   const runMore = (summary: string): HTMLElement => within(card(summary)).getByRole('button', { name: /^Run options for PAY-/ });
-  /** A live top has no shelf row any more (spec §7.1); its session is a deck card, found by the session's own key. */
+  /** A live key's session is a deck card, found by the session's own key; its lane card stays in its cell (parent-lanes D7). */
   const deckCards = (key: string): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>(`.jira-deck-card[data-key="${key}"]`));
-  const onShelves = (summary: string): boolean => screen.queryAllByText(summary).some((n) => n.closest('.board-card') !== null);
+  const inCell = (summary: string): boolean => screen.queryAllByText(summary).some((n) => n.closest('.board-card') !== null);
 
   it('an unmapped project draws a dashed chip whose title names Setup, and a click opens no menu and no modal', async () => {
     await renderRun({ repos: {} });
@@ -1007,13 +1412,13 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('draws the chip on a card with no priority and no match — the marker row is no longer conditional', async () => {
+  it('draws the chip on a card with no priority — the marker row is unconditional', async () => {
     await renderRun();
     expect(within(card('Refund flows')).getByTestId('marker-row')).toBeInTheDocument();
     expect(runChip('Refund flows')).toBeEnabled();
   });
 
-  it('a live key takes its card off the shelves and draws a deck card: strip, key, crumb naming the repo basename, and the elapsed reading', async () => {
+  it('a live key draws a deck card — strip, key, crumb naming the repo basename, and the elapsed reading — and its card stays in its cell', async () => {
     await renderRun({ live: { 'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } });
     const [deck] = await waitFor(() => {
       const found = deckCards('PAY-131');
@@ -1026,13 +1431,14 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     expect(deck.querySelector('.ui-stripe-dot')).toHaveAttribute('data-tone', 'green');
     expect(deck.querySelector('.jira-deck-state')).toHaveTextContent('Working · 3h');
     expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
-    expect(onShelves('Refund partial captures')).toBe(false);
+    expect(inCell('Refund partial captures')).toBe(true);
+    expect(within(card('Refund partial captures')).getByRole('button', { name: /^Run PAY-131/ })).toBeInTheDocument();
     // Another card is not the one with a session.
-    expect(onShelves('Refund flows')).toBe(true);
+    expect(card('Refund flows')).not.toHaveClass('ui-stripe');
     expect(within(card('Refund flows')).getByRole('button', { name: /^Run PAY-/ })).toBeEnabled();
   });
 
-  it('a starting entry is a deck card reading `Starting…` with no buttons, and its top is off the shelves just the same', async () => {
+  it('a starting entry is a deck card reading `Starting…` with no buttons, and its card stays in its cell reading the same', async () => {
     await renderRun({ live: { 'PAY-131': { sessionId: null, name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: true } } });
     const [deck] = await waitFor(() => {
       const found = deckCards('PAY-131');
@@ -1043,14 +1449,15 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     expect(deck).toHaveAttribute('data-tone', 'green');
     expect(deck.querySelector('.jira-deck-state')).toHaveTextContent('Starting…');
     expect(within(deck).queryByRole('link')).toBeNull();
-    expect(onShelves('Refund partial captures')).toBe(false);
+    expect(inCell('Refund partial captures')).toBe(true);
+    expect(within(card('Refund partial captures')).getByTestId('session-line')).toHaveTextContent('Starting…');
   });
 
-  // Grouped-board ruling: a folded issue is not a card, so the session on it would be invisible without this. The deck card shows the session's OWN key and
-  // names the top it hangs under in its crumb; the top leaves the shelves, and the folded issue is still no shelf row.
-  it('a live issue folded under a top is a deck card on the folded key, naming the top in its crumb, and the top leaves the shelves', async () => {
+  // The deck card shows the session's OWN key and names the parent it hangs under; the parent is a lane header now, and the live issue is a card in its
+  // cell, so the session shows in both places (parent-lanes D7).
+  it('a live issue under an on-board parent is a deck card on its own key, naming the parent, and stays a card in the parent’s lane', async () => {
     const top = issue({ key: 'PAY-160', summary: 'Top story', type: { name: 'Story', level: 0, subtask: false } });
-    const under = issue({ key: 'PAY-162', summary: 'Folded sub-task', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-160', summary: 'Top story' } });
+    const under = issue({ key: 'PAY-162', summary: 'Folded sub-task', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-160', summary: 'Top story', type: null, status: null } });
     lists[ALPHA.id] = [top, under];
     await renderRun({ live: { 'PAY-162': { sessionId: 's1', name: 'jira PAY-162', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } }, 'Folded sub-task');
     const [deck] = await waitFor(() => {
@@ -1058,11 +1465,35 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
       expect(found).toHaveLength(1);
       return found;
     });
-    // The fold is a pill beside the key now, not the crumb's lead.
+    // The `↳ <key>` pill sits beside the key, not in the crumb's lead.
     expect(deck.querySelector('.ui-fold')).toHaveTextContent('↳ PAY-160');
     expect(deck.querySelector('.jira-card-crumb')).not.toHaveTextContent('↳');
     expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
-    expect(onShelves('Top story')).toBe(false);
+    expect(within(screen.getByTestId('cell-PAY-160-todo')).getByText('Folded sub-task')).toBeInTheDocument();
+    expect(headOf('PAY-160')).toHaveAttribute('data-kind', 'board');
+  });
+
+  // Parent-lanes spec §5: the mark names the issue's direct parent on the board or off it — the lane to look in — with the parent's summary as its title.
+  it('a deck card on an issue with an off-board parent draws `↳ <parent>` titled with the parent’s summary', async () => {
+    await renderRun({ live: { 'PAY-131': { sessionId: 's1', name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } });
+    const [deck] = await waitFor(() => {
+      const found = deckCards('PAY-131');
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    const mark = deck.querySelector('.ui-fold');
+    expect(mark).toHaveTextContent('↳ PAY-99');
+    expect(mark).toHaveAttribute('title', 'Payments platform');
+  });
+
+  it('a deck card on a parentless issue draws no mark', async () => {
+    await renderRun({ live: { 'PAY-151': { sessionId: 's1', name: 'jira PAY-151', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } });
+    const [deck] = await waitFor(() => {
+      const found = deckCards('PAY-151');
+      expect(found).toHaveLength(1);
+      return found;
+    });
+    expect(deck.querySelector('.ui-fold')).toBeNull();
   });
 
   it('a deck card shows the session\'s context as a 4 px meter reading `context 42%`', async () => {
@@ -1288,7 +1719,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     await waitFor(() => expect(statusReads()).toBe(statusBefore + 1));
     await waitFor(() => expect(boardRequests().length).toBe(boardBefore + 1));
     await waitFor(() => expect(deckCards('PAY-131')).toHaveLength(0));
-    expect(onShelves('Refund partial captures')).toBe(true);
+    expect(inCell('Refund partial captures')).toBe(true);
     await new Promise((r) => setTimeout(r, 50));
     expect(statusReads()).toBe(statusBefore + 1);
     expect(boardRequests().length).toBe(boardBefore + 1);
@@ -1299,8 +1730,8 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
   it('a Children row walks down, Back climbs one step at a time, and a fresh card click starts a new walk', async () => {
     await renderRun();
     const refund = (lists[ALPHA.id] ?? []).find((i) => i.key === 'PAY-131') as JiraIssue;
-    const child = { ...refund, key: 'PAY-200', summary: 'Child story', parent: { key: 'PAY-131', summary: refund.summary } };
-    const grandchild = { ...refund, key: 'PAY-201', summary: 'Grandchild task', parent: { key: 'PAY-200', summary: 'Child story' } };
+    const child = { ...refund, key: 'PAY-200', summary: 'Child story', parent: { key: 'PAY-131', summary: refund.summary, type: null, status: null } };
+    const grandchild = { ...refund, key: 'PAY-201', summary: 'Grandchild task', parent: { key: 'PAY-200', summary: 'Child story', type: null, status: null } };
     const kids: Record<string, JiraIssue[]> = { 'PAY-131': [child], 'PAY-200': [grandchild], 'PAY-201': [] };
     const byKey: Record<string, JiraIssue> = { 'PAY-131': refund, 'PAY-200': child, 'PAY-201': grandchild };
     const answered = global.fetch;
@@ -1364,7 +1795,7 @@ describe('worktree chips on the card', () => {
     ...over
   });
   const worktreeReads = (): number => requested.filter((u) => u === '/api/jira/worktrees').length;
-  const chipOf = (summary: string): HTMLElement | null => card(summary).querySelector<HTMLElement>('.jira-card-tree');
+  const chipOf = (summary: string): HTMLElement | null => card(summary).querySelector<HTMLElement>('.ui-tree');
   const live = (key: string) => ({ [key]: { sessionId: 's1', name: `jira ${key}`, startedAt: new Date().toISOString(), repo: '/home/ada/pay', starting: false } });
 
   async function renderBoard(over: Partial<JiraStatusPayload> = {}): Promise<void> {
@@ -1380,7 +1811,7 @@ describe('worktree chips on the card', () => {
       </SettingsProvider>,
       { wrapper: NoGitlab }
     );
-    await screen.findByText('Refund partial captures');
+    await screen.findAllByText('Refund partial captures');
   }
 
   it('shows the branch name on a card whose key has one tree, and nothing on a card with none or only the main tree', async () => {
@@ -1440,7 +1871,7 @@ describe('worktree chips on the card', () => {
     worktreesAnswer = () => Promise.resolve({ ok: false, status: 502, json: () => Promise.resolve({ error: 'git down' }) } as Response);
     await renderBoard();
     await waitFor(() => expect(worktreeReads()).toBe(1));
-    expect(document.querySelectorAll('.jira-card-tree')).toHaveLength(0);
+    expect(document.querySelectorAll('.ui-tree')).toHaveLength(0);
     expect(screen.queryByText('git down')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
   });
@@ -1451,7 +1882,7 @@ describe('worktree chips on the card', () => {
   section's one sessions provider the deck reads. Sessions are links handed to the sessions answer with a state of their own; a `starting` one is not a link at
   all but a status `live` reservation (it has no session id yet), as the server hands it out.
 */
-describe('the agent deck and the status shelves', () => {
+describe('the agent deck and the lane cells', () => {
   const hoursAgo = (h: number): string => new Date(Date.now() - h * 3_600_000).toISOString();
   const reservation = (h: number, starting = false): JiraLiveSession => ({ sessionId: starting ? null : 's', name: 'jira run', startedAt: hoursAgo(h), repo: '/Users/ada/pay', starting });
   const linkOn = (key: string, id: string, state: string, h: number) => ({
@@ -1471,12 +1902,14 @@ describe('the agent deck and the status shelves', () => {
       </SettingsProvider>,
       { wrapper: NoGitlab }
     );
-    await screen.findByText(firstText);
+    await screen.findAllByText(firstText);
   }
 
   const deckStates = (): string[] =>
     Array.from(document.querySelectorAll('.jira-deck-card')).map((c) => `${c.getAttribute('data-key')}:${c.getAttribute('data-state')}`);
-  const shelfRows = (label: string): number => column(label).querySelectorAll('.board-card').length;
+  const cellRows = (laneKey: string, slug: 'todo' | 'doing' | 'done'): number => screen.getByTestId(`cell-${laneKey}-${slug}`).querySelectorAll('.board-card').length;
+  const cellMore = (laneKey: string, slug: 'todo' | 'doing' | 'done'): HTMLElement | null =>
+    screen.getByTestId(`cell-${laneKey}-${slug}`).querySelector<HTMLElement>('.jira-lane-more button');
   const todos = (n: number): JiraIssue[] =>
     Array.from({ length: n }, (_, i) => issue({ key: `PAY-${300 + i}`, summary: `Todo ${i}`, updated: daysAgoStamp(i + 1) }));
   const dones = (n: number): JiraIssue[] =>
@@ -1535,38 +1968,104 @@ describe('the agent deck and the status shelves', () => {
     await userEvent.click(within(group).getByRole('button', { name: 'Board' }));
   });
 
-  it('cuts To Do at 8 rows with `+ 3 more` for 11 tops, the count pill saying 11, and opens the rest on a click', async () => {
-    lists[ALPHA.id] = todos(11);
+  // Case 4: a cell cuts at five; `+ N more` opens that cell alone, and reads `show fewer` while it is open. Two lanes each hold a 7-card To Do cell, so
+  // "alone" is pinned against the same column of another lane — an open-cell set keyed by the column only would open both — and against another column
+  // of the same lane.
+  it('a cell of 7 shows 5 and `+ 2 more`; the click opens only that cell', async () => {
+    const epic = issue({ key: 'PAY-500', summary: 'Checkout epic', type: { name: 'Epic', level: 1, subtask: false } });
+    const under = Array.from({ length: 7 }, (_, i) =>
+      issue({
+        key: `PAY-${510 + i}`,
+        summary: `Epic todo ${i}`,
+        updated: daysAgoStamp(i + 1),
+        parent: { key: 'PAY-500', summary: 'Checkout epic', type: null, status: null }
+      })
+    );
+    lists[ALPHA.id] = [...todos(7), ...dones(6), epic, ...under];
     await renderDeck('Todo 0');
-    expect(shelfRows('To Do')).toBe(8);
-    expect(within(column('To Do')).getByTestId('col-count')).toHaveTextContent('11');
-    await userEvent.click(within(column('To Do')).getByRole('button', { name: '+ 3 more' }));
-    expect(shelfRows('To Do')).toBe(11);
-    await userEvent.click(within(column('To Do')).getByRole('button', { name: 'show fewer' }));
-    expect(shelfRows('To Do')).toBe(8);
+    expect(cellRows('none', 'todo')).toBe(5);
+    expect(cellRows('none', 'done')).toBe(5);
+    expect(cellRows('PAY-500', 'todo')).toBe(5);
+    const more = cellMore('none', 'todo') as HTMLElement;
+    expect(more).toHaveTextContent('+ 2 more');
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    // The column counts every card in it, across both lanes; the epic is a header and counts nothing.
+    expect(screen.getByTestId('lanes-col-todo').querySelector('.jira-lanes-count')).toHaveTextContent('14');
+    await userEvent.click(more);
+    expect(cellRows('none', 'todo')).toBe(7);
+    expect(cellMore('none', 'todo')).toHaveTextContent('show fewer');
+    expect(cellMore('none', 'todo')).toHaveAttribute('aria-expanded', 'true');
+    // The other lane's cell in the SAME column stays cut.
+    expect(cellRows('PAY-500', 'todo')).toBe(5);
+    expect(cellMore('PAY-500', 'todo')).toHaveTextContent('+ 2 more');
+    expect(cellMore('PAY-500', 'todo')).toHaveAttribute('aria-expanded', 'false');
+    // And another column of the same lane does too.
+    expect(cellRows('none', 'done')).toBe(5);
+    expect(cellMore('none', 'done')).toHaveTextContent('+ 1 more');
+    await userEvent.click(cellMore('none', 'todo') as HTMLElement);
+    expect(cellRows('none', 'todo')).toBe(5);
   });
 
-  it('collapses Done to its 3 newest of 5', async () => {
-    lists[ALPHA.id] = dones(5);
-    await renderDeck('Done 0');
-    expect(shelfRows('Done')).toBe(3);
-    expect(summariesIn('Done')).toEqual(['Done 0', 'Done 1', 'Done 2']);
-    expect(within(column('Done')).getByRole('button', { name: '+ 2 more' })).toBeInTheDocument();
+  // The `+ N more` state is the lane board's own and keyed `<lane>:<column>`, so a parent key that is a lane on two boards would carry an opened cell across a
+  // board switch without the `key={board.id}` on `JiraLaneBoard`.
+  it('a cell opened on one board is cut again after switching to a board with the same parent', async () => {
+    const parent = { key: 'PAY-500', summary: 'Checkout epic', type: null, status: null };
+    const epic = issue({ key: 'PAY-500', summary: 'Checkout epic', type: { name: 'Epic', level: 1, subtask: false } });
+    const under = (from: number): JiraIssue[] =>
+      Array.from({ length: 7 }, (_, i) => issue({ key: `PAY-${from + i}`, summary: `Epic todo ${from + i}`, updated: daysAgoStamp(i + 1), parent }));
+    lists[ALPHA.id] = [epic, ...under(510)];
+    lists[BETA.id] = [epic, ...under(610)];
+    await renderDeck('Epic todo 510');
+    await userEvent.click(cellMore('PAY-500', 'todo') as HTMLElement);
+    expect(cellRows('PAY-500', 'todo')).toBe(7);
+    await userEvent.click(screen.getByRole('button', { name: 'Pick a Jira board: Alpha board' }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Boards' })).getByRole('button', { name: 'Beta board' }));
+    await screen.findAllByText('Epic todo 610');
+    expect(cellRows('PAY-500', 'todo')).toBe(5);
+    expect(cellMore('PAY-500', 'todo')).toHaveTextContent('+ 2 more');
   });
 
-  // F1 and the deck answer ONE filter: a hit inside a fold rings the top on its shelf, and a live ticket that does not match leaves the deck with it.
-  it('a search hit inside a fold rings the top in the shelf, and a live card the search does not match leaves the deck', async () => {
+  // Case 6: a live card past the cut is never hidden — the cut keeps it, in its place, and hides one fewer.
+  it('7 cards with the 7th live: 6 shown and `+ 1 more`', async () => {
+    lists[ALPHA.id] = todos(7);
+    sessionsAnswer = () => ({ links: [linkOn('PAY-306', 's306', 'working', 1)], reachable: true, rowsAt: null });
+    await renderDeck('Todo 0');
+    await waitFor(() => expect(cellRows('none', 'todo')).toBe(6));
+    expect(cellMore('none', 'todo')).toHaveTextContent('+ 1 more');
+    expect(cellSummaries('none', 'todo')).toEqual(['Todo 0', 'Todo 1', 'Todo 2', 'Todo 3', 'Todo 4', 'Todo 6']);
+  });
+
+  // Case 5 (D7): a live card stays in its cell, as a stripe with the deck card's words and the open control, Run ▾ still on it, and the deck has it too.
+  it('a live card stays in its cell with the state line, the open control and Run ▾, and the deck shows it as well', async () => {
+    statusAnswer = status({ repos: { PAY: ['/Users/ada/pay'] } });
+    sessionsAnswer = () => ({ links: [linkOn('PAY-131', 's131', 'working', 3)], reachable: true, rowsAt: null });
+    await renderDeck('Refund partial captures');
+    await waitFor(() => expect(deckStates()).toEqual(['PAY-131:working']));
+    const c = within(screen.getByTestId('cell-PAY-99-doing')).getByText('Refund partial captures').closest('.board-card') as HTMLElement;
+    await waitFor(() => expect(c).toHaveClass('ui-stripe'));
+    expect(c).toHaveAttribute('data-tone', 'green');
+    expect(within(c).getByTestId('session-line')).toHaveTextContent('Working · 3h');
+    expect(c.querySelector('.jira-card-open')).not.toBeNull();
+    expect(within(c).getByRole('button', { name: /^Run PAY-131/ })).toBeInTheDocument();
+    expect(card('Refund flows')).not.toHaveClass('ui-stripe');
+    expect(within(card('Refund flows')).queryByTestId('session-line')).toBeNull();
+  });
+
+  // Case 14: the deck and the lanes answer ONE filter, per issue — a session stays while its own ticket matches, not while only its parent does.
+  it('the deck keeps a session whose own issue matches, and drops it when only its parent does', async () => {
     const epic = issue({ key: 'PAY-120', summary: 'Payments epic', type: { name: 'Epic', level: 1, subtask: false } });
-    const sub = issue({ key: 'PAY-162', summary: 'Ledger rounding fix', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-120', summary: 'Payments epic' } });
-    const busy = issue({ key: 'PAY-180', summary: 'Standalone task' });
-    lists[ALPHA.id] = [epic, sub, busy];
-    sessionsAnswer = () => ({ links: [linkOn('PAY-180', 's180', 'working', 2)], reachable: true, rowsAt: null });
+    const sub = issue({ key: 'PAY-162', summary: 'Ledger rounding fix', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-120', summary: 'Payments epic', type: null, status: null } });
+    lists[ALPHA.id] = [epic, sub];
+    sessionsAnswer = () => ({ links: [linkOn('PAY-162', 's162', 'working', 2)], reachable: true, rowsAt: null });
     await renderDeck('Payments epic');
-    await waitFor(() => expect(deckStates()).toEqual(['PAY-180:working']));
-    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'ledger');
-    expect(card('Payments epic')).toHaveClass('jira-card-match');
-    expect(within(card('Payments epic')).getByText('1 match: PAY-162')).toBeInTheDocument();
+    await waitFor(() => expect(deckStates()).toEqual(['PAY-162:working']));
+    const box = screen.getByRole('searchbox', { name: 'Search issues' });
+    await userEvent.type(box, 'ledger');
+    expect(deckStates()).toEqual(['PAY-162:working']);
+    await userEvent.clear(box);
+    await userEvent.type(box, 'payments');
     expect(deckStates()).toEqual([]);
+    expect(laneKeys()).toEqual(['PAY-120']);
   });
 
   it('a session on a key two boards both hold shows its deck card on each of them', async () => {
@@ -1582,7 +2081,7 @@ describe('the agent deck and the status shelves', () => {
     await waitFor(() => expect(deckStates()).toEqual(['PAY-20:working']));
   });
 
-  describe('the shelf row’s extra line', () => {
+  describe('the lane card’s extra line', () => {
     const ended = (id: string, endedHoursAgo: number) => ({ ...linkOn('PAY-131', id, 'ended', 5), endedAt: hoursAgo(endedHoursAgo), endReason: 'finished' });
 
     it('one ended session reads `run ended <age> ago` with a Reopen link', async () => {
@@ -1609,9 +2108,11 @@ describe('the agent deck and the status shelves', () => {
 });
 
 /*
-  Jira › Board › List is an issue table (Jira › Sessions plan, Task 4; spec "Jira › Board" D2–D4, mock `Main.dc.html`): one row per board card — a fold top,
-  never a folded issue — in `sortTops` order, with a Session cell that rolls the live sessions up the way the deck does. Same fold shape as `the fold` above,
-  with a second small fold (PAY-210 over PAY-211) so a top with exactly one folded issue is on the list too.
+  The issue List draws the Board's lanes as rows (parent-lanes spec §4; mocks `List.dc.html`, `ListDeep.dc.html`): a header row per lane on a tinted ground,
+  the lane's cards under it in `sortForBoard` order across every status, then its nested lanes — the same lanes, the same order and the same folds as the
+  Board. NESTING is the lane model's own nesting shape (`jira-lib.test.ts`, case 5): epic PAY-40 holds the card PAY-44 and the nested story PAY-41, whose
+  cards are PAY-42 (Done, touched today) and PAY-43 (To Do, a day old). PAY-190 hangs under PAY-999, which is not on the board and whose stub carries a type
+  and a status of its own; PAY-180 has no parent. Every value a case asserts is distinct per issue.
 */
 describe('the issue List', () => {
   const hoursAgo = (h: number): string => new Date(Date.now() - h * 3_600_000).toISOString();
@@ -1623,17 +2124,43 @@ describe('the issue List', () => {
   const STORY = { name: 'Story', level: 0, subtask: false };
   const SUB = { name: 'Sub-task', level: -1, subtask: true };
   const DOING = { name: 'In Progress', category: 'indeterminate' as const };
-  const G_120 = issue({ key: 'PAY-120', summary: 'Payments epic', type: EPIC, updated: daysAgoStamp(5) });
-  const G_160 = issue({ key: 'PAY-160', summary: 'Ledger story', type: STORY, status: DOING, parent: { key: 'PAY-120', summary: 'Payments epic' }, updated: daysAgoStamp(4) });
-  const G_162 = issue({ key: 'PAY-162', summary: 'Ledger rounding fix', type: SUB, parent: { key: 'PAY-160', summary: 'Ledger story' }, updated: daysAgoStamp(0) });
-  const G_170 = issue({ key: 'PAY-170', summary: 'Payout story', type: STORY, parent: { key: 'PAY-120', summary: 'Payments epic' }, updated: daysAgoStamp(6) });
-  const G_180 = issue({ key: 'PAY-180', summary: 'Standalone task', updated: daysAgoStamp(1) });
-  const G_190 = issue({ key: 'PAY-190', summary: 'Payout retries', status: DOING, assignee: ADA, sprint: 'Sprint 44', parent: { key: 'PAY-999', summary: 'Billing platform' }, updated: daysAgoStamp(2) });
-  const G_210 = issue({ key: 'PAY-210', summary: 'Chargeback upload', updated: daysAgoStamp(5) });
-  const G_211 = issue({ key: 'PAY-211', summary: 'Chargeback storage', type: SUB, parent: { key: 'PAY-210', summary: 'Chargeback upload' }, updated: daysAgoStamp(1.5) });
-  const GROUP = [G_120, G_160, G_162, G_170, G_180, G_190, G_210, G_211];
+  const DONE = { name: 'Done', category: 'done' as const };
+  const under = (key: string, summary: string) => ({ key, summary, type: null, status: null });
+  const N_40 = issue({ key: 'PAY-40', summary: 'Checkout epic', type: EPIC, status: DOING, updated: daysAgoStamp(9) });
+  const N_41 = issue({
+    key: 'PAY-41',
+    summary: 'Address story',
+    type: STORY,
+    status: DOING,
+    priority: 'High',
+    assignee: GRACE,
+    sprint: 'Sprint 43',
+    parent: under('PAY-40', 'Checkout epic'),
+    updated: daysAgoStamp(2)
+  });
+  const N_42 = issue({
+    key: 'PAY-42',
+    summary: 'Address validation',
+    type: SUB,
+    status: DONE,
+    parent: under('PAY-41', 'Address story'),
+    updated: daysAgoStamp(0.01),
+    resolved: daysAgoStamp(0.01)
+  });
+  const N_43 = issue({ key: 'PAY-43', summary: 'Postcode lookup', type: SUB, assignee: ADA, sprint: 'Sprint 44', parent: under('PAY-41', 'Address story'), updated: daysAgoStamp(1) });
+  const N_44 = issue({ key: 'PAY-44', summary: 'Checkout copy', parent: under('PAY-40', 'Checkout epic'), updated: daysAgoStamp(3) });
+  const NESTING = [N_40, N_41, N_42, N_43, N_44];
+  const N_190 = issue({
+    key: 'PAY-190',
+    summary: 'Payout retries',
+    status: DOING,
+    parent: { key: 'PAY-999', summary: 'Billing platform', type: EPIC, status: { name: 'In Review', category: 'indeterminate' } },
+    updated: daysAgoStamp(4)
+  });
+  const N_180 = issue({ key: 'PAY-180', summary: 'Standalone task', updated: daysAgoStamp(5) });
+  const ALL = [...NESTING, N_190, N_180];
 
-  async function renderList(issues: JiraIssue[] = GROUP): Promise<void> {
+  async function renderList(issues: JiraIssue[] = ALL): Promise<void> {
     lists[ALPHA.id] = issues;
     setJiraView('list');
     setJiraPage('board');
@@ -1650,38 +2177,219 @@ describe('the issue List', () => {
     );
     await screen.findByRole('table');
   }
-  afterEach(() => setJiraView('board'));
+  afterEach(() => act(() => setJiraView('board')));
 
+  /** Every row that stands for one issue — card rows and the on- and off-board header rows — in document order. */
   const rowKeys = (): string[] => Array.from(document.querySelectorAll('tr[data-key]')).map((r) => r.getAttribute('data-key') ?? '');
-  const row = (key: string): HTMLElement => document.querySelector(`tr[data-key="${key}"]`) as HTMLElement;
+  const row = (key: string): HTMLTableRowElement => document.querySelector(`tr[data-key="${key}"]`) as HTMLTableRowElement;
+  /** A lane's header row by its lane key (`none` for `No parent`). */
+  const headRow = (laneKey: string): HTMLTableRowElement => document.querySelector(`tr[data-lane="${laneKey}"]`) as HTMLTableRowElement;
+  const headers = (): string[] => screen.getAllByRole('columnheader').map((h) => h.textContent || h.getAttribute('aria-label') || '');
+  /** `r`'s cell under the column named `name`, found by the head's own index so a cell is never read from the wrong column. */
+  const cellOf = (r: HTMLTableRowElement, name: string): HTMLTableCellElement => r.cells[headers().indexOf(name)];
   const sessionCell = (key: string): string => row(key).querySelector('.jira-issues-session')?.textContent ?? '';
+  const depthOf = (r: HTMLTableRowElement): string | null => r.querySelector('td.jira-issues-key')?.getAttribute('data-depth') ?? null;
 
-  it('draws one row per top and no folded issue, in sortTops order', async () => {
-    await renderList();
-    // PAY-120 rises on PAY-162's stamp, PAY-210 on PAY-211's; PAY-190 (2 d) sinks below them. Input order is 120, 180, 190, 210.
-    expect(rowKeys()).toEqual(['PAY-120', 'PAY-180', 'PAY-210', 'PAY-190']);
-    for (const folded of ['PAY-160', 'PAY-162', 'PAY-170', 'PAY-211']) expect(row(folded)).toBeNull();
-    expect(screen.queryByText('Ledger rounding fix')).toBeNull();
+  it('draws the lanes in order: a header row, its cards in sortForBoard order across statuses, then its nested lane', async () => {
+    await renderList(NESTING);
+    // PAY-42 (Done, today) before PAY-43 (To Do, a day old): newest first, never split by status — the Status column says the status.
+    expect(rowKeys()).toEqual(['PAY-40', 'PAY-44', 'PAY-41', 'PAY-42', 'PAY-43']);
+    expect(headRow('PAY-40')).toBe(row('PAY-40'));
+    expect(headRow('PAY-41')).toBe(row('PAY-41'));
+    for (const key of ['PAY-40', 'PAY-41']) expect(row(key)).toHaveClass('jira-issues-lane');
+    for (const key of ['PAY-42', 'PAY-43', 'PAY-44']) expect(row(key)).not.toHaveClass('jira-issues-lane');
   });
 
-  it('puts a newer top first even when the served list ends with it', async () => {
-    await renderList([...GROUP, issue({ key: 'PAY-100', summary: 'Fresh work', status: DOING, updated: daysAgoStamp(0) })]);
-    expect(rowKeys()[0]).toBe('PAY-100');
+  it('lists every root lane — on-board, off-board, then `No parent` — with the issues each holds', async () => {
+    await renderList();
+    expect(rowKeys()).toEqual(['PAY-40', 'PAY-44', 'PAY-41', 'PAY-42', 'PAY-43', 'PAY-999', 'PAY-190', 'PAY-180']);
+    expect(headRow('none')).not.toBeNull();
+    expect(headRow('none').hasAttribute('data-key')).toBe(false);
   });
 
-  it('draws the columns of the mock: key, summary, type, raw status, assignee, sprint and the rolled-up age', async () => {
+  it('draws today’s columns, Sprint and Assignee (disc and name) included', async () => {
     await renderList();
-    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Priority', 'Assignee', 'Sprint', 'Updated', '']);
-    const r = row('PAY-190');
-    expect(within(r).getByText('PAY-190')).toBeInTheDocument();
-    expect(within(r).getByText('Payout retries')).toBeInTheDocument();
-    expect(within(r).getByText('Task')).toBeInTheDocument();
-    expect(within(r).getByText('In Progress')).toBeInTheDocument();
-    expect(within(r).getByText('Ada Lovelace')).toBeInTheDocument();
-    expect(within(r).getByText('Sprint 44')).toBeInTheDocument();
-    expect(within(row('PAY-180')).getByText('unassigned')).toBeInTheDocument();
-    // The Sprint cell is the 8th; the Session cell reads `—` too when nothing ran, so the lookup is scoped.
-    expect(within((row('PAY-180') as HTMLTableRowElement).cells[7]).getByText('—')).toBeInTheDocument();
+    expect(headers()).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Priority', 'Assignee', 'Sprint', 'Updated', 'Run']);
+    const r = row('PAY-43');
+    expect(within(cellOf(r, 'Assignee')).getByText('Ada Lovelace')).toBeInTheDocument();
+    expect(cellOf(r, 'Assignee').querySelector('.jira-card-av')).toHaveTextContent('AL');
+    expect(cellOf(r, 'Sprint')).toHaveTextContent('Sprint 44');
+    expect(within(cellOf(row('PAY-44'), 'Assignee')).getByText('unassigned')).toBeInTheDocument();
+    expect(cellOf(row('PAY-44'), 'Sprint')).toHaveTextContent('—');
+  });
+
+  it('an off-board header row: Key, Summary, Type and Status from the stub, the tag and the count, every other cell empty, and no colSpan', async () => {
+    await renderList();
+    const r = headRow('PAY-999');
+    expect(r).toHaveAttribute('data-kind', 'off');
+    expect(r.cells).toHaveLength(headers().length);
+    expect(within(cellOf(r, 'Key')).getByRole('link', { name: /open PAY-999 in Jira/ })).toHaveTextContent('PAY-999');
+    const summary = cellOf(r, 'Summary');
+    expect(within(summary).getByRole('button', { name: 'Billing platform' })).toBeEnabled();
+    expect(within(summary).getByText('not on this board')).toBeInTheDocument();
+    expect(within(summary).getByText('1 issue')).toBeInTheDocument();
+    expect(cellOf(r, 'Type')).toHaveTextContent('Epic');
+    expect(cellOf(r, 'Status')).toHaveTextContent('In Review');
+    for (const name of ['Session', 'Priority', 'Assignee', 'Sprint', 'Updated', 'Run']) {
+      expect(cellOf(r, name).textContent).toBe('');
+      expect(cellOf(r, name).childElementCount).toBe(0);
+    }
+    expect(document.querySelectorAll('td[colspan], th[colspan]')).toHaveLength(0);
+  });
+
+  it('the `No parent` header row: the label, a chevron and the count in Summary, and nothing anywhere else', async () => {
+    await renderList();
+    const r = headRow('none');
+    expect(r).toHaveAttribute('data-kind', 'none');
+    expect(r.cells).toHaveLength(headers().length);
+    const summary = cellOf(r, 'Summary');
+    expect(within(summary).getByText('No parent')).toBeInTheDocument();
+    expect(within(summary).getByRole('button', { name: 'Collapse No parent' })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(summary).getByText('1 issue')).toBeInTheDocument();
+    for (const name of headers().filter((h) => h !== 'Summary')) expect(cellOf(r, name).textContent).toBe('');
+  });
+
+  it('an on-board header row fills every cell with its own values, draws Run ▾, and names its parent as `↳ <KEY>`', async () => {
+    await renderList();
+    const r = headRow('PAY-41');
+    expect(r).toHaveAttribute('data-kind', 'board');
+    expect(cellOf(r, 'Session')).toHaveTextContent('—');
+    expect(within(cellOf(r, 'Key')).getByRole('link', { name: /open PAY-41 in Jira/ })).toHaveAttribute('href', N_41.url);
+    const summary = cellOf(r, 'Summary');
+    expect(within(summary).getByRole('button', { name: 'Address story' })).toBeInTheDocument();
+    expect(within(summary).getByRole('button', { name: 'Collapse PAY-41' })).toBeInTheDocument();
+    expect(summary.querySelector('.ui-fold')).toHaveTextContent('↳ PAY-40');
+    expect(summary.querySelector('.ui-fold')).toHaveAttribute('title', 'Checkout epic');
+    expect(cellOf(r, 'Type')).toHaveTextContent('Story');
+    expect(cellOf(r, 'Status')).toHaveTextContent('In Progress');
+    expect(cellOf(r, 'Priority')).toHaveTextContent('High');
+    expect(cellOf(r, 'Assignee')).toHaveTextContent('Grace Hopper');
+    expect(cellOf(r, 'Sprint')).toHaveTextContent('Sprint 43');
+    expect(cellOf(r, 'Updated')).toHaveTextContent(elapsedSince(N_41.updated) as string);
+    expect(within(cellOf(r, 'Run')).getAllByRole('button', { name: 'Run PAY-41' })).toHaveLength(1);
+    // The root header has no parent, so no chip.
+    expect(cellOf(headRow('PAY-40'), 'Summary').querySelector('.ui-fold')).toBeNull();
+  });
+
+  it('a row’s Session cell is its own key’s: a child’s session marks the child alone, no FoldMark anywhere, `+1` for a second live one', async () => {
+    sessionsAnswer = () => ({
+      links: [linkOn('PAY-42', 's1', 'working', 2.05), linkOn('PAY-44', 's2', 'working', 3), linkOn('PAY-44', 's3', 'answer', 1)],
+      reachable: true,
+      rowsAt: null
+    });
+    await renderList();
+    await waitFor(() => expect(sessionCell('PAY-42')).toContain('Working · 2h'));
+    expect(sessionCell('PAY-41')).toBe('—');
+    expect(sessionCell('PAY-40')).toBe('—');
+    // The deck leads PAY-44 with its `answer` session, and so does the row; the second live one is `+1`.
+    expect(sessionCell('PAY-44')).toContain('Waiting on your answer');
+    expect(row('PAY-44').querySelector('.jira-issues-more')).toHaveTextContent('+1');
+    expect(row('PAY-42').querySelector('.jira-issues-more')).toBeNull();
+    expect(document.querySelectorAll('.jira-issues-session .ui-fold')).toHaveLength(0);
+  });
+
+  it('reads `Ended · 2h` on the row whose own session ended, and nothing on its parent’s', async () => {
+    sessionsAnswer = () => ({
+      links: [{ ...linkOn('PAY-43', 'e', 'ended', 5), endedAt: hoursAgo(2.05) /* a margin: the row's `now` is read at mount, before this stamp is minted */, endReason: 'finished' }],
+      reachable: true,
+      rowsAt: null
+    });
+    await renderList();
+    await waitFor(() => expect(sessionCell('PAY-43')).toContain('Ended · 2h'));
+    expect(sessionCell('PAY-41')).toBe('—');
+  });
+
+  it('the Summary cell is a flex row (title ellipsises, count never cut) and the Session cell keeps its age out of the ellipsis (ui-verify D3, D4)', async () => {
+    sessionsAnswer = () => ({ links: [linkOn('PAY-41', 's1', 'plan', 3)], reachable: true, rowsAt: null });
+    await renderList();
+    await waitFor(() => expect(sessionCell('PAY-41')).toContain('Waiting for plan approval'));
+    const flex = cellOf(headRow('PAY-41'), 'Summary').querySelector('.jira-issues-flex') as HTMLElement;
+    expect(flex.querySelector('.jira-issues-title')).not.toBeNull();
+    expect(flex.querySelector('.jira-issues-under')?.textContent).toBe('2 issues');
+    const session = row('PAY-41').querySelector('.jira-issues-session') as HTMLElement;
+    expect(session.querySelector('.jira-issues-cut')?.textContent).toBe('Waiting for plan approval');
+    expect(session.querySelector('.jira-issues-age')?.textContent).toMatch(/^ · \d/);
+  });
+
+  it('a row’s Updated is its own stamp: the header’s 9 days, not its newest card’s today', async () => {
+    await renderList();
+    expect(row('PAY-40').querySelector('.jira-issues-updated')?.textContent).toBe(elapsedSince(N_40.updated));
+    expect(row('PAY-40').querySelector('.jira-issues-updated')?.textContent).toBe('9d');
+    expect(row('PAY-42').querySelector('.jira-issues-updated')?.textContent).toBe(elapsedSince(N_42.updated));
+  });
+
+  it('every header row’s count is `.jira-issues-under`, reading `n issues` or `1 issue` over the lane’s subtree', async () => {
+    await renderList();
+    const count = (laneKey: string): Element | null => headRow(laneKey).querySelector('.jira-issues-under');
+    expect(count('PAY-40')).toHaveTextContent('4 issues');
+    expect(count('PAY-41')).toHaveTextContent('2 issues');
+    expect(count('PAY-999')).toHaveTextContent('1 issue');
+    expect(count('none')).toHaveTextContent('1 issue');
+    expect(document.querySelectorAll('.jira-issues-under')).toHaveLength(4);
+  });
+
+  it('indents in the Key cell: a nested header at depth 1, its cards at 2, and a depth-5 lane’s rows at LANE_INDENT_CAP', async () => {
+    await renderList();
+    expect(depthOf(row('PAY-40'))).toBe('0');
+    expect(depthOf(row('PAY-44'))).toBe('1');
+    expect(depthOf(row('PAY-41'))).toBe('1');
+    for (const key of ['PAY-42', 'PAY-43']) expect(depthOf(row(key))).toBe('2');
+    cleanup();
+
+    const chain = [issue({ key: 'PAY-80', summary: 'Chain 0' })];
+    for (let n = 1; n <= 6; n++) chain.push(issue({ key: `PAY-8${n}`, summary: `Chain ${n}`, parent: under(`PAY-8${n - 1}`, `Chain ${n - 1}`) }));
+    await renderList(chain);
+    // PAY-85 is the depth-5 lane's header and PAY-86 its card: both sit at the cap, as do PAY-83 and PAY-84 above them.
+    expect(['PAY-80', 'PAY-81', 'PAY-82', 'PAY-83', 'PAY-84', 'PAY-85', 'PAY-86'].map((k) => depthOf(row(k)))).toEqual(['0', '1', '2', '3', '3', '3', '3']);
+    expect(depthOf(row('PAY-86'))).toBe(String(LANE_INDENT_CAP));
+  });
+
+  it('a lane folded from its List chevron is folded on the Board, and one opened on the Board is open in the List', async () => {
+    await renderList();
+    await userEvent.click(within(headRow('PAY-41')).getByRole('button', { name: 'Collapse PAY-41' }));
+    expect(row('PAY-42')).toBeNull();
+    expect(row('PAY-43')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Board' }));
+    expect(await screen.findByRole('button', { name: 'Expand PAY-41' })).toHaveAttribute('aria-expanded', 'false');
+    expect(lane('PAY-41')).toHaveAttribute('data-open', 'false');
+    await userEvent.click(screen.getByRole('button', { name: 'Expand PAY-41' }));
+    await userEvent.click(screen.getByRole('button', { name: 'List' }));
+    await screen.findByRole('table');
+    expect(within(headRow('PAY-41')).getByRole('button', { name: 'Collapse PAY-41' })).toBeInTheDocument();
+    expect(row('PAY-42')).not.toBeNull();
+  });
+
+  it('a settled off-board lane and a settled `No parent` lane start folded, and each opens from its own header row', async () => {
+    const SETTLED = [
+      issue({ key: 'PAY-195', summary: 'Ledger export', status: DONE, parent: under('PAY-998', 'Ledger platform'), updated: daysAgoStamp(6), resolved: daysAgoStamp(6) }),
+      issue({ key: 'PAY-185', summary: 'Old cleanup', status: DONE, updated: daysAgoStamp(7), resolved: daysAgoStamp(7) })
+    ];
+    await renderList([...NESTING, ...SETTLED]);
+    expect(row('PAY-195')).toBeNull();
+    expect(row('PAY-185')).toBeNull();
+    await userEvent.click(within(headRow('PAY-998')).getByRole('button', { name: 'Expand PAY-998' }));
+    expect(row('PAY-195')).not.toBeNull();
+    await userEvent.click(within(headRow('none')).getByRole('button', { name: 'Expand No parent' }));
+    expect(row('PAY-185')).not.toBeNull();
+  });
+
+  it('an off-board header row’s summary reads the parent once and opens Detail; drawing it asked nothing', async () => {
+    answerReads({ 'PAY-999': () => ok(detailOf(issue({ key: 'PAY-999', summary: 'Billing platform' }))) });
+    await renderList();
+    expect(issueReads()).toEqual([]);
+    await userEvent.click(within(headRow('PAY-999')).getByRole('button', { name: 'Billing platform' }));
+    await waitFor(() => expect(onOpenIssue).toHaveBeenCalledTimes(1));
+    expect(issueReads()).toEqual(['/api/jira/issue/PAY-999']);
+    expect((onOpenIssue.mock.calls[0] as [JiraIssue])[0].key).toBe('PAY-999');
+    expect(within(cellOf(headRow('PAY-999'), 'Key')).getByRole('link')).toHaveAttribute('href', 'https://acme.atlassian.net/browse/PAY-999');
+  });
+
+  it('an off-board header row’s key is plain text while the site is unknown', async () => {
+    statusAnswer = status({ site: '' });
+    await renderList();
+    const key = cellOf(headRow('PAY-999'), 'Key');
+    expect(key).toHaveTextContent('PAY-999');
+    expect(within(key).queryByRole('link')).toBeNull();
   });
 
   it('draws a priority pill per row, `Not prioritised` for null, a Run split per row, and the full summary as the cell title', async () => {
@@ -1692,93 +2400,33 @@ describe('the issue List', () => {
     expect(row('PAY-1').querySelector('.jira-issues-summary')).toHaveAttribute('title', 'A very long summary that the cell will cut');
   });
 
-  it('the Summary cell is a flex row (title ellipsises, count never cut) and the Session cell keeps its age out of the ellipsis (ui-verify D3, D4)', async () => {
-    sessionsAnswer = () => ({ links: [linkOn('PAY-120', 's1', 'plan', 3)], reachable: true, rowsAt: null });
+  it('opens the modal with the lanes’ childrenOf on a row click — a header row’s as a card row’s — and not from the Jira link', async () => {
     await renderList();
-    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Waiting for plan approval'));
-    const summary = row('PAY-120').querySelector('.jira-issues-summary') as HTMLElement;
-    const flex = summary.querySelector('.jira-issues-flex') as HTMLElement;
-    expect(flex.querySelector('.jira-issues-title')).not.toBeNull();
-    expect(flex.querySelector('.jira-issues-under')?.textContent).toBe('3 under it');
-    const session = row('PAY-120').querySelector('.jira-issues-session') as HTMLElement;
-    expect(session.querySelector('.jira-issues-cut')?.textContent).toBe('Waiting for plan approval');
-    expect(session.querySelector('.jira-issues-age')?.textContent).toMatch(/^ · \d/);
-  });
-
-  it('names the folded ticket a session runs on under the Session cell\u2019s state, and counts the card\u2019s other live sessions', async () => {
-    sessionsAnswer = () => ({ links: [linkOn('PAY-162', 's1', 'working', 1), linkOn('PAY-170', 's2', 'working', 3), linkOn('PAY-180', 's3', 'working', 2)], reachable: true, rowsAt: null });
-    await renderList();
-    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Working'));
-    const on = row('PAY-120').querySelector('.jira-issues-on') as HTMLElement;
-    expect(on.querySelector('.ui-fold')).toHaveTextContent('↳ PAY-162');
-    expect(on.querySelector('.jira-issues-more')).toHaveTextContent('+1');
-    // A session on the top itself needs no mark: the row already is its ticket.
-    expect(sessionCell('PAY-180')).toContain('Working');
-    expect(row('PAY-180').querySelector('.jira-issues-on')).toBeNull();
-  });
-
-  it('names how many issues fold under a top: the whole fold, one for a single, nothing for none', async () => {
-    await renderList();
-    // PAY-120 has two direct children but three folded issues (160, 162 under it, 170); the count is the fold's, not the children's.
-    expect(row('PAY-120').textContent).toContain('3 under it');
-    expect(row('PAY-210').textContent).toContain('1 under it');
-    expect(row('PAY-180').textContent).not.toContain('under it');
-  });
-
-  it('marks a top for a session live only on a folded child, and never draws the child', async () => {
-    // 2.05, not 2: the same race the ended-row case below names — the row's `now` is read at mount, before `sessionsAnswer` mints this stamp, so an exact
-    // 2 h reads `1h` by a few ms. It went red in CI on PR #480 (a CSS-only change), so it is the fixture's flake, not the row's.
-    sessionsAnswer = () => ({ links: [linkOn('PAY-162', 's162', 'working', 2.05)], reachable: true, rowsAt: null });
-    await renderList();
-    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Working · 2h'));
-    expect(sessionCell('PAY-180')).toBe('—');
-    expect(row('PAY-162')).toBeNull();
-  });
-
-  it('names the deck’s lead session on a card with two: needs you beats working, and the deck leads with the same one', async () => {
-    sessionsAnswer = () => ({ links: [linkOn('PAY-120', 'a', 'working', 3), linkOn('PAY-162', 'b', 'answer', 2)], reachable: true, rowsAt: null });
-    await renderList();
-    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Waiting on your answer'));
-    await userEvent.click(screen.getByRole('button', { name: 'Board' }));
-    const first = document.querySelector('.jira-deck-card');
-    expect(first?.getAttribute('data-state')).toBe('answer');
-    expect(first?.getAttribute('data-key')).toBe('PAY-162');
-  });
-
-  it('reads `Ended · 2h` for a top whose only session ended on a folded child', async () => {
-    sessionsAnswer = () => ({ links: [{ ...linkOn('PAY-162', 'e', 'ended', 5), endedAt: hoursAgo(2.05) /* a margin: the row's `now` is read at mount, before this stamp is minted, and exactly 2 h reads `1h` by a few ms */, endReason: 'finished' }], reachable: true, rowsAt: null });
-    await renderList();
-    await waitFor(() => expect(sessionCell('PAY-120')).toContain('Ended · 2h'));
-  });
-
-  it('keeps a top whose folded issue matches the search', async () => {
-    await renderList();
-    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'ledger rounding');
-    expect(rowKeys()).toEqual(['PAY-120']);
-  });
-
-  it('the FilterBar filters the rows: assignee me leaves only my tops', async () => {
-    await renderList();
-    await pick('Assignee', 'me');
-    expect(rowKeys()).toEqual(['PAY-190']);
-  });
-
-  it('reads the rolled-up time in Updated: a child’s 1.5 d, not the top’s 5 d', async () => {
-    await renderList();
-    expect(row('PAY-210').querySelector('.jira-issues-updated')?.textContent).toBe(elapsedSince(G_211.updated));
-    expect(row('PAY-210').querySelector('.jira-issues-updated')?.textContent).toBe('1d');
-  });
-
-  it('opens the modal with the fold on a row click, and not from the Jira link', async () => {
-    await renderList();
-    await userEvent.click(within(row('PAY-120')).getByRole('link', { name: /open PAY-120 in Jira/ }));
+    await userEvent.click(within(row('PAY-41')).getByRole('link', { name: /open PAY-41 in Jira/ }));
     expect(onOpenIssue).not.toHaveBeenCalled();
     // The Type cell is plain text: only the row's own handler can open the modal from it (the summary button has its own).
-    await userEvent.click(within(row('PAY-120')).getByText('Epic'));
+    await userEvent.click(within(cellOf(row('PAY-41'), 'Type')).getByText('Story'));
     expect(onOpenIssue).toHaveBeenCalledTimes(1);
     const [opened, index] = onOpenIssue.mock.calls[0] as [JiraIssue, ReadonlyMap<string, readonly JiraIssue[]>];
-    expect(opened).toBe(G_120);
-    expect(index.get('PAY-160')?.map((i) => i.key)).toEqual(['PAY-162']);
+    expect(opened.key).toBe('PAY-41');
+    expect(index.get('PAY-41')?.map((i) => i.key).sort()).toEqual(['PAY-42', 'PAY-43']);
+    await userEvent.click(within(cellOf(row('PAY-43'), 'Type')).getByText('Sub-task'));
+    expect((onOpenIssue.mock.calls[1] as [JiraIssue])[0].key).toBe('PAY-43');
+    // The chevron folds; it opens nothing.
+    await userEvent.click(within(headRow('PAY-41')).getByRole('button', { name: 'Collapse PAY-41' }));
+    expect(onOpenIssue).toHaveBeenCalledTimes(2);
+  });
+
+  it('a search keeps the matching issue and the headers above it, per issue', async () => {
+    await renderList();
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'address validation');
+    expect(rowKeys()).toEqual(['PAY-40', 'PAY-41', 'PAY-42']);
+  });
+
+  it('the FilterBar filters per issue: assignee me leaves my card under its headers', async () => {
+    await renderList();
+    await pick('Assignee', 'me');
+    expect(rowKeys()).toEqual(['PAY-40', 'PAY-41', 'PAY-43']);
   });
 
   it('says `No issues match` when a search cuts every row', async () => {
@@ -1816,7 +2464,7 @@ describe('Run on: a sub-task runs its parent from the card and the List cell', (
     key: 'PAY-175',
     summary: 'Prepare refund TODOs',
     type: { name: 'Sub-task', level: -1, subtask: true },
-    parent: { key: 'PAY-99', summary: 'Payments platform' },
+    parent: { key: 'PAY-99', summary: 'Payments platform', type: null, status: null },
     updated: daysAgoStamp(0)
   });
   const PARENT = issue({ key: 'PAY-99', summary: 'Payments platform', type: { name: 'Story', level: 0, subtask: false } });
@@ -1934,7 +2582,9 @@ describe('the Delivery quick filter', () => {
   afterEach(() => act(() => setJiraView('board')));
 
   const seg = (): HTMLElement => screen.getByRole('group', { name: 'Delivery' });
-  const rowSummaries = (): string[] => Array.from(document.querySelectorAll('.jira-issues-table tbody tr')).map((r) => r.querySelector('td:nth-child(3)')?.textContent ?? '');
+  /** The card rows' summaries — a lane's header row is the lane's heading, not one of the rows the filter is about. */
+  const rowSummaries = (): string[] =>
+    Array.from(document.querySelectorAll('.jira-issues-table tbody tr.jira-issues-row:not(.jira-issues-lane)')).map((r) => r.querySelector('td:nth-child(3)')?.textContent ?? '');
 
   it('picks Pipeline failing in the panel: only the failing top stays, and the List control shows the same value', async () => {
     mount(payload(), 'list');
@@ -1977,21 +2627,25 @@ describe('the Delivery quick filter', () => {
     expect(rowSummaries()).toHaveLength(2);
   });
 
-  // F1 (grouped-board spec §5): the top is kept when anything folded under it matches, so a story with no MR stays while its sub-task's own MR fails.
-  it('keeps a top with no MR when a folded child’s own MR fails', async () => {
+  // Per issue (parent-lanes spec §6.2): the child whose own MR fails is the row that stays, under its parent's header row — the story with no MR is a
+  // heading there, not a match, and nothing is ringed.
+  it('narrows per issue: a child whose own MR fails stays as a card row under its parent’s header row', async () => {
     const STORY = issue({ key: 'PAY-60', summary: 'Story without an MR', type: { name: 'Story', level: 0, subtask: false }, subtasks: 1, updated: daysAgoStamp(0) });
     const CHILD = issue({
       key: 'PAY-61',
       summary: 'Child with a failing MR',
       type: { name: 'Sub-task', level: -1, subtask: true },
-      parent: { key: 'PAY-60', summary: 'Story without an MR' },
+      parent: { key: 'PAY-60', summary: 'Story without an MR', type: null, status: null },
       updated: daysAgoStamp(0)
     });
     lists[ALPHA.id] = [STORY, CHILD, PAY_140];
     mount(payload('connected', [MR({ iid: 500, keys: ['PAY-61'], title: 'PAY-61 | child' })]), 'list');
-    await screen.findByText('Currency symbol missing on receipts');
+    // PAY-140 alone is the `No parent` lane, and a lane of only Done work starts folded (spec §3.6), so its row is not there to wait on.
+    await screen.findByText('Child with a failing MR');
     await userEvent.click(within(seg()).getByRole('button', { name: 'Pipeline failing' }));
-    expect(rowSummaries()).toEqual([expect.stringContaining('Story without an MR')]);
+    expect(rowSummaries()).toEqual(['Child with a failing MR']);
+    expect(Array.from(document.querySelectorAll('tr[data-key]')).map((r) => r.getAttribute('data-key'))).toEqual(['PAY-60', 'PAY-61']);
+    expect(document.querySelector('tr[data-key="PAY-60"]')).toHaveClass('jira-issues-lane');
   });
 
   // Review Focus 5: a stored filter for a GitLab that is no longer shown is not a filter — nothing hides, nothing counts, and nothing offers it.

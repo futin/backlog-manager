@@ -13,6 +13,8 @@ const IDLE: ParentRead = { state: 'idle' };
  * line). The READ is shared module-wide, one per parent key (`lib/jira-parent.ts` says why, and why a failure is never cached); what is per surface is the
  * `read` this hook returns, so a failure shows only where it was asked for (spec §4.2: the menu's note never pre-fills from the Detail's failed link, and
  * the Detail's alert line never shows a menu's failure).
+ * `useOffBoardParent` (an off-board lane header's click) is a third `askParent` caller that never retains: it reads once and opens Detail on the answer, so it
+ * holds no key and has no `read` of its own to show.
  *
  * - **Nothing on mount.** Mounting only RETAINS the key, which keeps a landed parent held while this surface is up; `ask()` is the only thing that reads, so a
  *   board of sub-task cards fans out no requests (spec §4.2). That is why the menu's hook lives in its open panel, not in the always-drawn chip: closing the

@@ -917,6 +917,9 @@ export interface JiraProjectRef {
   name: string;
 }
 
+export type JiraIssueType = { name: string; level: number; subtask: boolean };
+export type JiraIssueStatus = { name: string; category: JiraStatusCategory };
+
 /** One issue as the board draws it. Filled by exactly the sweep's field list (§4), so a board render costs no per-issue call. */
 export interface JiraIssue {
   key: string;
@@ -926,13 +929,17 @@ export interface JiraIssue {
   summary: string;
   project: JiraProjectRef;
   /** `level` is Jira's hierarchy level (-1 subtask, 0 standard, 1 epic, …); `subtask` is the flag Jira carries beside it. */
-  type: { name: string; level: number; subtask: boolean };
-  status: { name: string; category: JiraStatusCategory };
+  type: JiraIssueType;
+  status: JiraIssueStatus;
   priority: string | null;
   assignee: { accountId: string; name: string } | null;
   /** The reporter's display name only — nothing acts on a reporter, so no accountId is carried. */
   reporter: string | null;
-  parent: { key: string; summary: string } | null;
+  /**
+   * The parent's type and status as Jira sends them nested in the child's `parent.fields`; `null` when Jira left one out. The priority is not carried — D3 asks
+   * for type and status only.
+   */
+  parent: { key: string; summary: string; type: JiraIssueType | null; status: JiraIssueStatus | null } | null;
   /** A count, not the issues: the detail route fetches the children itself. */
   subtasks: number;
   labels: string[];
@@ -943,6 +950,9 @@ export interface JiraIssue {
   updated: string;
   resolved: string | null;
 }
+
+/** A parent as an issue carries it: key, summary and, when Jira sent them, its type and status. */
+export type JiraParentRef = NonNullable<JiraIssue['parent']>;
 
 /** A saved JQL a board shows alongside its roots. A person's JQL, passed to Jira verbatim. */
 export interface JiraQuery {

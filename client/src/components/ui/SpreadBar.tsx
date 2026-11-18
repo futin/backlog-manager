@@ -3,8 +3,8 @@ import { progressLine } from '../../lib/jira';
 /**
  * SpreadBar — the card-scale spread bar (.claude/DESIGN.md §3's spread-bar line, §8.9.1; grouped-board spec §4 and §6).
  *
- * How far along the issues folded under a Jira card are: a 4 px track of up to three segments — done in `--fill-progress`, in progress in `--fill-live`,
- * to do in `--ink3` — with 2 px gaps, and an optional 12 px `--ink3` caption under it (`progressLine`'s words). The card's fold block and the issue modal's
+ * How far along the issues under a Jira parent are: a 4 px track of up to three segments — done in `--fill-progress`, in progress in `--fill-live`,
+ * to do in `--ink3` — with 2 px gaps, and an optional 12 px `--ink3` caption under it (`progressLine`'s words). The lane header and the issue modal's
  * Children head both draw it, which is why it lives here and not in either (CLAUDE.md: a look two surfaces draw has one home in `components/ui/`).
  *
  * **Why not `ProgressRow`.** That is §7's progress row — ONE fill over a `--steel` track at 10 px, a quantity against a budget. This is three quantities

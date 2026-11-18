@@ -140,41 +140,19 @@ describe('BoardColumn', () => {
     ]);
   });
 
-  /** Jira phase 2 widened `BoardColumnSlug` with the tracker's three status categories. A `todo` column is a column like any other — its label, its count
-   *  and its `.board-col-todo` hook — but it is off the ramp, so its dot is the plain toneless base and no `ui-dot-ramp-*` class appears anywhere in it. */
-  it.each(['todo', 'doing', 'done'] as const)('draws a %s column with its label and count and no ramp dot', (slug) => {
-    render(
-      <BoardColumn slug={slug} label={`Label ${slug}`} count={3}>
-        <div>card</div>
-      </BoardColumn>
-    );
-    const col = screen.getByTestId('board-col');
-    expect(col).toHaveClass(`board-col-${slug}`);
-    expect(screen.getByTestId('col-name')).toHaveTextContent(`Label ${slug}`);
-    expect(screen.getByTestId('col-count')).toHaveTextContent('3');
-    expect(col.querySelectorAll('.board-col-head .ui-dot')).toHaveLength(1);
-    expect(col.innerHTML).not.toContain('ui-dot-ramp-');
-  });
-
-  it('writes data-tone and swaps Dot/Pill for the page-local spans only when a tone is passed', () => {
-    const { container, rerender } = render(
-      <BoardColumn slug="todo" label="Plain" count={4}>
-        <i />
-      </BoardColumn>,
-    );
-    expect(container.querySelector('[data-tone]')).toBeNull();
-    expect(container.querySelector('.ui-dot')).not.toBeNull();
-    expect(container.querySelector('.ui-pill')).not.toBeNull();
-    rerender(
-      <BoardColumn slug="doing" tone="doing" label="Toned" count={4}>
-        <i />
-      </BoardColumn>,
-    );
-    const col = container.querySelector('.board-col') as HTMLElement;
-    expect(col).toHaveAttribute('data-tone', 'doing');
-    expect(col.querySelector('.board-col-dot')).not.toBeNull();
-    expect(col.querySelector('.ui-dot, .ui-pill')).toBeNull();
-    expect(col.querySelector('[data-testid="col-count"].board-col-pill .board-col-count')?.textContent).toBe('4');
+  /** The Jira shelves' toned header left with the shelves (parent lanes): the `tone` prop, its `data-tone` hook, the page-local `.board-col-dot` and
+   *  `.board-col-count` spans and the `todo`/`doing`/`done` slugs are gone. Asserted on the markup and on the sheet together — a rule left standing with no
+   *  reader is how a redrawn surface comes to be restyled back by accident. */
+  it('draws no toned header, and the stylesheet carries none', async () => {
+    await renderBoard();
+    for (const col of screen.getAllByTestId('board-col')) {
+      expect(col).not.toHaveAttribute('data-tone');
+      expect(col.querySelector('.board-col-dot, .board-col-count')).toBeNull();
+    }
+    const css = readStyles();
+    expect(css).not.toMatch(/\.board-col\[data-tone/);
+    expect(ruleBlock(css, '.board-col-dot')).toBeNull();
+    expect(ruleBlock(css, '.board-col-count')).toBeNull();
   });
 
   /** The count is a `Pill` — the primitive — inside the span that lays it out.
@@ -218,31 +196,19 @@ describe('BoardColumn', () => {
   });
 
   /**
-   * The `--steel` ground is opt-in (`ground`), implied neither by the slug nor by `tone`: the GitHub Board and the Jira shelves pass it, Archive does not,
-   * because Archive's sticky `.archive-month` paints `--board` and would read as a white band across a steel column. The ground is one rule on
-   * `[data-ground]`; `data-tone` keeps only the dot's colour. Asserted on the attribute and on the sheet together — jsdom loads no stylesheet, so an
-   * attribute alone would stay green with the rule deleted.
+   * The `--steel` ground is opt-in (`ground`), not implied by the slug: the GitHub Board passes it, Archive does not, because Archive's sticky
+   * `.archive-month` paints `--board` and would read as a white band across a steel column. The ground is one rule on `[data-ground]`. Asserted on the
+   * attribute and on the sheet together — jsdom loads no stylesheet, so an attribute alone would stay green with the rule deleted.
    */
-  it('draws the ground on the GitHub Board column and on a toned one, never on an Archive column', async () => {
+  it('draws the ground on the GitHub Board column, never on an Archive column', async () => {
     await renderBoard();
     for (const col of screen.getAllByTestId('board-col')) {
       expect(col).toHaveAttribute('data-ground');
-      // The Board's column keeps its ramp Dot: only the ground is shared with the Jira shelves.
+      // The Board's column keeps its ramp Dot under the ground.
       expect(col.querySelector('.board-col-head .ui-dot')).not.toBeNull();
-      expect(col).not.toHaveAttribute('data-tone');
     }
 
-    const { container } = render(
-      <BoardColumn slug="doing" tone="doing" ground label="Toned" count={1}>
-        <i />
-      </BoardColumn>,
-    );
-    const toned = container.querySelector('.board-col') as HTMLElement;
-    expect(toned).toHaveAttribute('data-ground');
-    expect(toned).toHaveAttribute('data-tone', 'doing');
-    expect(toned.querySelector('.board-col-dot')).not.toBeNull();
-
-    // Archive passes neither, and its columns stay exactly as they were.
+    // Archive does not pass it, and its columns stay exactly as they were.
     const archive = render(
       <BoardColumn slug="bugs" label="Archived" count={1}>
         <i />
@@ -255,8 +221,6 @@ describe('BoardColumn', () => {
     expect(ground).toMatch(/background:\s*var\(--steel\)/);
     expect(ground).toMatch(/border-radius:\s*16px/);
     expect(ground).toMatch(/padding:\s*12px/);
-    // The ground no longer hangs off the tone hook; `data-tone` keeps the dot's colour alone.
-    expect(css).not.toMatch(/\.board-col\[data-tone\]\s*\{[^}]*background:\s*var\(--steel\)/);
   });
 
   /**

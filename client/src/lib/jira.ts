@@ -21,6 +21,7 @@ import type {
   JiraIssueDetail,
   JiraLink,
   JiraLiveSession,
+  JiraParentRef,
   JiraProjectRef,
   JiraRefBranch,
   JiraRepoDefaults,
@@ -143,14 +144,21 @@ export function sortForBoard(issues: readonly JiraIssue[]): JiraIssue[] {
   return [...issues].sort((a, b) => updatedMs(b) - updatedMs(a) || byKey(a, b));
 }
 
-/** An issue's `updated` as epoch ms, an unparseable stamp as 0 (the oldest) — shared by `sortForBoard` and `sortTops`, so the two cannot age a stamp twice. */
+/**
+ * An issue's `updated` as epoch ms, an unparseable stamp as 0 (the oldest) — shared by `sortForBoard` and `laneBoard`'s lane stamp, so neither can age a
+ * stamp a second way.
+ */
 const updatedMs = (i: JiraIssue): number => {
   const t = Date.parse(i.updated);
   return Number.isNaN(t) ? 0 : t;
 };
 
-/** The board's tie-break: plain string order on the key. */
-const byKey = (a: JiraIssue, b: JiraIssue): number => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+/**
+ * The board's tie-break: plain string order on the key. Split in two so `laneBoard` breaks a lane tie on the lane's KEY — which for an off-board lane or
+ * the `No parent` lane is not an issue's — with the very comparator a card tie uses, rather than a second spelling of it.
+ */
+const compareKeys = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+const byKey = (a: JiraIssue, b: JiraIssue): number => compareKeys(a.key, b.key);
 
 /**
  * The age on a card's foot: how long ago a DONE issue was resolved (that is the age that matters to someone reading the Done column), otherwise how long
@@ -184,10 +192,18 @@ export type JiraCrumb = { kind: 'root' } | { kind: 'parent'; key: string; summar
  * Why an issue is on this board, as the card's one crumb. Precedence is the reading order of "how did this get here": it IS a followed root, else it is
  * under something (the parent is the more specific fact), else it is simply assigned to me — the case a saved `assignee = currentUser()` query produces.
  * `me: null` (identity not known yet) never reads `mine`: an unknown person is nobody's assignee.
+ *
+ * `parent` is the parent to read, defaulting to the raw field. The Board passes the parent the lane model KEPT (`JiraLanes.parentOf`, parent-lanes spec
+ * §1.4): a link `walkParents` dropped to break a cycle is no parent there, so the card falls through to `mine` rather than naming a lane it is not in.
  */
-export function crumbOf(issue: JiraIssue, board: JiraBoard, me: { accountId: string } | null): JiraCrumb {
+export function crumbOf(
+  issue: JiraIssue,
+  board: JiraBoard,
+  me: { accountId: string } | null,
+  parent: JiraParentRef | null = issue.parent
+): JiraCrumb {
   if (board.roots.includes(issue.key)) return { kind: 'root' };
-  if (issue.parent !== null) return { kind: 'parent', key: issue.parent.key, summary: issue.parent.summary };
+  if (parent !== null) return { kind: 'parent', key: parent.key, summary: parent.summary };
   if (me !== null && issue.assignee !== null && issue.assignee.accountId === me.accountId) return { kind: 'mine' };
   return null;
 }
@@ -216,41 +232,47 @@ export function initialsOf(name: string): string {
   return letters.length === 0 ? '?' : letters.join('');
 }
 
-// ── The fold ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── The parent walk ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The on-board parent → direct-children index the fold builds (grouped-board spec §3), read by the issue modal's tree for whichever issue it shows.
- * `ReadonlyMap` where the spec writes `Map`: no reader may write the fold, and the type says so.
+ * The on-board parent → direct-children index the parent walk builds (parent-lanes spec §1.5), read by the issue modal's tree for whichever issue it shows
+ * and by Detail's `childSessions`. `ReadonlyMap` where the spec writes `Map`: no reader may write it, and the type says so.
  */
 export type JiraChildrenIndex = ReadonlyMap<string, readonly JiraIssue[]>;
 
-/**
- * The board as cards (grouped-board spec §3): `tops` are the issues drawn as cards, in the input list's order (`sortTops` orders them, per column);
- * `under` holds, per top key, every issue folded under it at any depth; `childrenOf` is the fold's own parent → direct-children edges. Both maps are SPARSE
- * — a key with nothing under it has no entry, and readers use `?? []` — and every list in them is in `sortForBoard` order.
- */
-export interface JiraFold {
-  tops: JiraIssue[];
-  under: ReadonlyMap<string, readonly JiraIssue[]>;
-  childrenOf: JiraChildrenIndex;
-}
+/** Append `i` to `m`'s list at `k`, creating it — the sparse-map shape every index in this section has. */
+const pushTo = (m: Map<string, JiraIssue[]>, k: string, i: JiraIssue): void => {
+  const list = m.get(k);
+  if (list === undefined) m.set(k, [i]);
+  else list.push(i);
+};
+
+const sortedLists = (m: Map<string, JiraIssue[]>): Map<string, JiraIssue[]> => new Map([...m].map(([k, v]) => [k, sortForBoard(v)]));
 
 /**
- * Every on-board descendant folds into its TOPMOST on-board ancestor (G-A, grouped-board spec §3). This is the ONE walk of the parent chain in the client —
- * the board, the band count, the filters and the modal tree all read its result, and none of them follows `parent.key` upward on its own (§8 anti-goal),
- * because two walks are two answers to "which card is this issue on" the first time they disagree about an edge case.
+ * The ONE walk of the parent chain in the client, which `laneBoard` reads (parent-lanes spec §1.4, §1.5) — the lanes, the band count, the filters, the deck
+ * and the modal tree all read its result, and none of them follows `parent.key` upward on its own, because two walks are two answers to "is this issue in
+ * a cycle" the first time they disagree about an edge case.
  *
- * `top(X)` is X when X has no parent, when its parent is not in this list (off the board: dropped by the 14-day Done window, cut by the 500 cap, or never
- * fetched — "on the board" means the loaded list, exactly), or when the walk up from X comes back to X; otherwise it is `top(parent(X))`. Jira has no
- * cycles, but this list is our own cache, and a malformed one must not hang the page: a cycle's members are each their own top, drawn side by side, and
- * anything hanging off a cycle folds under the first cycle member its walk meets. Memoised per key, so the whole list costs one pass.
+ * `topOf` maps every key to its topmost on-board ancestor: X itself when X has no parent, when its parent is not in this list (off the board: dropped by the
+ * 14-day Done window, cut by the 500 cap, or never fetched — "on the board" means the loaded list, exactly), or when the walk up from X comes back to X;
+ * otherwise `topOf(parent(X))`. Jira has no cycles, but this list is our own cache, and a malformed one must not hang the page: a cycle's members are each
+ * their own top, and anything hanging off a cycle reaches the first cycle member its walk meets. Memoised per key, so the whole list costs one pass.
  *
- * `childrenOf` holds only FOLD edges — a non-top issue under the parent it folded through — so a top is nobody's child and the index is acyclic by
- * construction; the modal's tree recurses it with no guard of its own beyond the "each key once" set it keeps for reparents. The input is the poller's
- * cache copy and is never mutated.
+ * `parentOf` is the parent link the walk KEEPS for every key: the issue's own `parent` — on the board or off it — except for a cycle member, whose link is
+ * dropped (`null`, the same as no parent at all), so every reader that names a parent names one the lanes actually drew it under. `childrenOf` holds only
+ * the kept edges whose parent is on the board, so it is acyclic by construction and the modal's tree recurses it with no guard of its own beyond the "each
+ * key once" set it keeps for reparents. The input is the poller's cache copy and is never mutated.
+ *
+ * A key is a cycle member exactly when its parent is on the board and the walk still made it its own top: an issue with an on-board parent is otherwise
+ * never its own top, because the walk only stops at a node with no on-board parent or at a loop.
  */
-export function foldBoard(issues: readonly JiraIssue[]): JiraFold {
-  const byKey = new Map(issues.map((i) => [i.key, i] as const));
+function walkParents(issues: readonly JiraIssue[]): {
+  topOf: ReadonlyMap<string, string>;
+  parentOf: ReadonlyMap<string, JiraParentRef | null>;
+  childrenOf: JiraChildrenIndex;
+} {
+  const onBoard = new Map(issues.map((i) => [i.key, i] as const));
   const topOf = new Map<string, string>();
 
   for (const start of issues) {
@@ -269,7 +291,7 @@ export function foldBoard(issues: readonly JiraIssue[]): JiraFold {
       }
       at.set(x.key, path.length);
       path.push(x.key);
-      const parent = x.parent === null ? undefined : byKey.get(x.parent.key);
+      const parent = x.parent === null ? undefined : onBoard.get(x.parent.key);
       if (parent === undefined) {
         top = x.key;
         break;
@@ -286,58 +308,17 @@ export function foldBoard(issues: readonly JiraIssue[]): JiraFold {
     for (const k of path) topOf.set(k, top);
   }
 
-  const tops: JiraIssue[] = [];
-  const under = new Map<string, JiraIssue[]>();
+  const parentOf = new Map<string, JiraParentRef | null>();
   const childrenOf = new Map<string, JiraIssue[]>();
-  const push = (m: Map<string, JiraIssue[]>, k: string, i: JiraIssue): void => {
-    const list = m.get(k);
-    if (list === undefined) m.set(k, [i]);
-    else list.push(i);
-  };
   for (const i of issues) {
-    // Every key was resolved by the loop above; the fallback only keeps an impossible miss from dropping a card.
-    const top = topOf.get(i.key) ?? i.key;
-    if (top === i.key) {
-      tops.push(i);
-      continue;
-    }
-    push(under, top, i);
-    // A non-top issue has an on-board parent by definition (a missing or off-board one would have made it a top).
-    if (i.parent !== null) push(childrenOf, i.parent.key, i);
+    const p = i.parent;
+    const cycle = p !== null && onBoard.has(p.key) && (topOf.get(i.key) ?? i.key) === i.key;
+    parentOf.set(i.key, cycle ? null : p);
+    // An issue that is not its own top has an on-board parent by definition (a missing or off-board one would have made it its own top), and is no cycle
+    // member.
+    if (p !== null && (topOf.get(i.key) ?? i.key) !== i.key) pushTo(childrenOf, p.key, i);
   }
-  const sorted = (m: Map<string, JiraIssue[]>): Map<string, JiraIssue[]> => new Map([...m].map(([k, v]) => [k, sortForBoard(v)]));
-  return { tops, under: sorted(under), childrenOf: sorted(childrenOf) };
-}
-
-/**
- * The tops' order within a column (grouped-board spec §3, Sort): the newest `updated` across the top AND everything folded under it, descending, with
- * `sortForBoard`'s key tie-break. Activity on a child therefore lifts its parent — the flat board sorted by the issue's own stamp, and a parent whose
- * subtasks are being worked would otherwise sink. The sort key is never drawn: the card's age stays the top's own (`cardAgeStamp`). Returns a new array.
- */
-export function sortTops(tops: readonly JiraIssue[], under: JiraFold['under']): JiraIssue[] {
-  const newest = new Map(tops.map((t) => [t.key, stampMs(rolledUpdated(t, under))] as const));
-  const at = (t: JiraIssue): number => newest.get(t.key) ?? updatedMs(t);
-  return [...tops].sort((a, b) => at(b) - at(a) || byKey(a, b));
-}
-
-const stampMs = (iso: string | null): number => (iso === null ? 0 : Date.parse(iso));
-
-/**
- * The newest parseable `updated` across a top and everything folded under it (`under.get(top.key)`), as the ISO string the issue carried — the value
- * `sortTops` ranks by, exported so the List's Updated column prints the very stamp the row was sorted on (a column that read the top's own `updated` would
- * show `5d` on a row the sort lifted for work done today). `null` when no stamp parses: the sort treats that as the oldest and the cell draws nothing.
- */
-export function rolledUpdated(top: JiraIssue, under: JiraFold['under']): string | null {
-  let best: string | null = null;
-  let bestMs = 0;
-  for (const i of [top, ...(under.get(top.key) ?? [])]) {
-    const t = Date.parse(i.updated);
-    if (!Number.isNaN(t) && (best === null || t > bestMs)) {
-      best = i.updated;
-      bestMs = t;
-    }
-  }
-  return best;
+  return { topOf, parentOf, childrenOf: sortedLists(childrenOf) };
 }
 
 /** How far along the issues under a card are, by column — `columnOf`'s three buckets, so the bar can never disagree with the columns. */
@@ -351,41 +332,6 @@ export function foldProgress(issues: readonly JiraIssue[]): JiraProgress {
   const p: JiraProgress = { done: 0, doing: 0, todo: 0 };
   for (const i of issues) p[columnOf(i)] += 1;
   return p;
-}
-
-/**
- * Everything a card's fold block draws (grouped-board spec §4): the `C children · D below them` line, the spread and its caption. `null` for a top with
- * nothing folded under it, which draws no block at all — its Jira subtask count is not this board's business.
- */
-export function cardFold(topKey: string, fold: JiraFold): { line: string; progress: JiraProgress; caption: string } | null {
-  const all = fold.under.get(topKey);
-  if (all === undefined || all.length === 0) return null;
-  const direct = (fold.childrenOf.get(topKey) ?? []).length;
-  const progress = foldProgress(all);
-  const line = childrenLine(direct, all.length - direct);
-  const caption = progressLine(progress);
-  // An issue under the top means a chain that ends in a direct child of it (so `direct > 0`), and every issue lands in a bucket (so the sum is not
-  // zero): both are non-null here. The guard is that reasoning made checkable, not a case that can happen.
-  if (line === null || caption === null) return null;
-  return { line, progress, caption };
-}
-
-/**
- * The tops a filter shows (F1, grouped-board spec §5): a top is shown when IT matches — with no ring keys, because a card that matches needs no "why is this
- * here" — or, failing that, when any issue folded under it matches, carrying those keys in `under`'s order for the ring's marker. A top with neither is
- * absent. `keep` is the board's `matchesBoardFilters` per issue, unchanged, so a filter means the same thing folded or not.
- */
-export function foldMatches(fold: JiraFold, keep: (issue: JiraIssue) => boolean): Map<string, string[]> {
-  const shown = new Map<string, string[]>();
-  for (const top of fold.tops) {
-    if (keep(top)) {
-      shown.set(top.key, []);
-      continue;
-    }
-    const hits = (fold.under.get(top.key) ?? []).filter(keep).map((i) => i.key);
-    if (hits.length > 0) shown.set(top.key, hits);
-  }
-  return shown;
 }
 
 /** One row of the issue modal's Children tree: the issue, and how deep it sits (0 for a direct child). */
@@ -426,10 +372,257 @@ export function modalTree(
   return { rows, progress: foldProgress(rows.map((r) => r.issue)) };
 }
 
+// ── The lanes ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The `No parent` lane's key. Never a Jira key: a key always holds a `-`, so it cannot collide with a parent's. */
+export const NO_PARENT_LANE = 'none';
+
+/**
+ * One lane of the Board (parent-lanes spec §1). `kind` is where its header comes from: `board`, an on-board header issue (`header`); `off`, a parent that
+ * is not in the loaded list, drawn from the `stub` the freshest card under it carries; `none`, the one lane of parentless cards. `cards` are the lane's own,
+ * in `sortForBoard` order; `lanes` the lanes nested in it (§1.3), in §3.5 order. `depth` is uncapped — the draw caps the indent, not the model.
+ * `subtree` (§1.3) is every on-board issue under the header — its cards, its nested lanes' headers and their subtrees, in `sortForBoard` order — and is
+ * what `settled` and `stamp` (§3.5) read, so an In Progress story under an off-board epic keeps the epic's lane open.
+ */
+export interface JiraLane {
+  key: string;
+  kind: 'board' | 'off' | 'none';
+  header: JiraIssue | null;
+  stub: JiraParentRef | null;
+  cards: readonly JiraIssue[];
+  lanes: readonly JiraLane[];
+  depth: number;
+  subtree: readonly JiraIssue[];
+  settled: boolean;
+  /** The newest `updated` (epoch ms, unparseable as 0) across the on-board header and the subtree — the sort key, never drawn. */
+  stamp: number;
+}
+
+/**
+ * The lane model: the root lanes in drawing order, the walk's `childrenOf` index for the same input (§1.5 — Detail's tree, `modalTree` and
+ * `childSessions` read it), and every on-board key's KEPT parent (§1.4), which the crumb, the `↳` chip and the deck read instead of the raw field.
+ */
+export interface JiraLanes {
+  lanes: readonly JiraLane[];
+  childrenOf: JiraChildrenIndex;
+  parentOf: ReadonlyMap<string, JiraParentRef | null>;
+}
+
+/**
+ * The loaded list as lanes (parent-lanes spec §1, §3.5). Pure: no clock, no session — a live run never moves a lane (§3.5). The parent links read are the
+ * ones `walkParents` keeps, so a cycle costs an oddly placed issue and never a hang or a missing card, and every key is drawn exactly once: a header issue
+ * (the kept parent of something on the board — exactly `childrenOf`'s keys) heads its own lane and is a card nowhere, and every other issue is a card in
+ * its kept parent's lane, or in `No parent`.
+ *
+ * An off-board parent gets a lane only when a CARD names it (§1.2): one whose only on-board children are headers would be a header nobody can act on over
+ * nothing, so those headers stay root lanes and name their parent through `parentOf`. A header nests under its kept parent's lane whenever that lane
+ * exists (§1.3); an off-board lane is always a root, since nothing on the board says what is above it. The kept edges are acyclic, so the recursion ends.
+ */
+export function laneBoard(issues: readonly JiraIssue[]): JiraLanes {
+  const { parentOf, childrenOf } = walkParents(issues);
+  const onBoard = new Map(issues.map((i) => [i.key, i] as const));
+  const kept = (i: JiraIssue): JiraParentRef | null => parentOf.get(i.key) ?? null;
+
+  const cardsOf = new Map<string, JiraIssue[]>();
+  const offBoard = new Set<string>();
+  for (const i of issues) {
+    if (childrenOf.has(i.key)) continue;
+    const p = kept(i);
+    if (p !== null && !onBoard.has(p.key)) offBoard.add(p.key);
+    pushTo(cardsOf, p === null ? NO_PARENT_LANE : p.key, i);
+  }
+
+  const nestedIn = new Map<string, JiraIssue[]>();
+  const roots: string[] = [];
+  for (const key of childrenOf.keys()) {
+    const header = onBoard.get(key);
+    if (header === undefined) continue; // childrenOf's keys are on-board parents; this only satisfies the type
+    const p = kept(header);
+    if (p !== null && (childrenOf.has(p.key) || offBoard.has(p.key))) pushTo(nestedIn, p.key, header);
+    else roots.push(key);
+  }
+  roots.push(...offBoard);
+  if (cardsOf.has(NO_PARENT_LANE)) roots.push(NO_PARENT_LANE);
+
+  const isDone = (i: JiraIssue): boolean => columnOf(i) === 'done';
+  const build = (key: string, depth: number): JiraLane => {
+    const kind: JiraLane['kind'] = key === NO_PARENT_LANE ? 'none' : onBoard.has(key) ? 'board' : 'off';
+    const header = kind === 'board' ? (onBoard.get(key) ?? null) : null;
+    const cards = sortForBoard(cardsOf.get(key) ?? []);
+    const lanes = sortLanes((nestedIn.get(key) ?? []).map((h) => build(h.key, depth + 1)));
+    // Every off-board lane exists because a card names it, so `cards[0]` — the freshest, by `sortForBoard` — is there to read the stub from.
+    const stub = kind === 'off' && cards.length > 0 ? kept(cards[0]) : null;
+    const subtree = sortForBoard([...cards, ...lanes.flatMap((l) => (l.header === null ? l.subtree : [l.header, ...l.subtree]))]);
+    const counted = header === null ? subtree : [header, ...subtree];
+    return {
+      key,
+      kind,
+      header,
+      stub,
+      cards,
+      lanes,
+      depth,
+      subtree,
+      settled: counted.every(isDone),
+      stamp: counted.reduce((m, i) => Math.max(m, updatedMs(i)), 0)
+    };
+  };
+
+  return { lanes: sortLanes(roots.map((k) => build(k, 0))), childrenOf, parentOf };
+}
+
+/**
+ * §3.5's order, for root lanes and for siblings nested in one lane alike: open before settled; within a group the `No parent` lane last, then the newest
+ * `stamp` first, then the lane key by the comparator a card tie uses. Returns a new array.
+ */
+const sortLanes = (lanes: readonly JiraLane[]): JiraLane[] =>
+  [...lanes].sort(
+    (a, b) =>
+      Number(a.settled) - Number(b.settled) ||
+      Number(a.kind === 'none') - Number(b.kind === 'none') ||
+      b.stamp - a.stamp ||
+      compareKeys(a.key, b.key)
+  );
+
+// ── Lane views, cells and folds ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One lane as drawn under the filters (parent-lanes spec §6.2). Matching is per issue and nothing rolls up: `cards` are the lane's own cards that match,
+ * `count` and `progress` are read off the matching issues of the lane's `subtree` — nested headers included, this lane's own header not, since the header is
+ * what the lane is about and not something under it — so the number and the bar beside it always agree. `headerMatches` is false for an off-board and a
+ * `No parent` lane, which have no header issue.
+ */
+export interface JiraLaneView {
+  lane: JiraLane;
+  headerMatches: boolean;
+  cards: readonly JiraIssue[];
+  lanes: readonly JiraLaneView[];
+  count: number;
+  progress: JiraProgress;
+}
+
+/**
+ * The lanes a filter leaves (§6.2): a lane is drawn when any issue in its subtree matches or its own on-board header does. A nested header sits in its
+ * parent lane's subtree, so a drawn nested lane always has its ancestors drawn above it. Pure, never mutates a lane, and keeps the lanes' own order.
+ */
+export function laneViews(board: JiraLanes, matches: (issue: JiraIssue) => boolean): JiraLaneView[] {
+  const view = (lane: JiraLane): JiraLaneView | null => {
+    const headerMatches = lane.header !== null && matches(lane.header);
+    const hits = lane.subtree.filter(matches);
+    if (hits.length === 0 && !headerMatches) return null;
+    return {
+      lane,
+      headerMatches,
+      cards: lane.cards.filter(matches),
+      lanes: lane.lanes.map(view).filter((v): v is JiraLaneView => v !== null),
+      count: hits.length,
+      progress: foldProgress(hits)
+    };
+  };
+  return board.lanes.map(view).filter((v): v is JiraLaneView => v !== null);
+}
+
+/** Matching cards per column across every drawn lane at every depth — a header is a lane's heading, in no column (§3.1). */
+export function laneColumnCounts(views: readonly JiraLaneView[]): Record<JiraColumnSlug, number> {
+  const counts: Record<JiraColumnSlug, number> = { todo: 0, doing: 0, done: 0 };
+  const walk = (vs: readonly JiraLaneView[]): void => {
+    for (const v of vs) {
+      for (const c of v.cards) counts[columnOf(c)] += 1;
+      walk(v.lanes);
+    }
+  };
+  walk(views);
+  return counts;
+}
+
+/** Lanes with a parent behind them — every kind but `No parent`, at every depth, unfiltered (the `M parents` count, §3.1). */
+export function laneParents(board: JiraLanes): number {
+  const walk = (lanes: readonly JiraLane[]): number => lanes.reduce((n, l) => n + (l.kind === 'none' ? 0 : 1) + walk(l.lanes), 0);
+  return walk(board.lanes);
+}
+
+/** A cell shows this many cards before its `+ N more` chip (§3.3); one constant where the shelves had three. */
+export const LANE_CELL_LIMIT = 5;
+
+/** How many nesting steps the draw indents; the model's `depth` is uncapped (§1.3). */
+export const LANE_INDENT_CAP = 3;
+
+/**
+ * A cell's cut (§3.3): the first `LANE_CELL_LIMIT` cards, plus any card past them with a live session — the cut may hide finished and waiting work, never
+ * running work, and exempting a card reorders nothing. `open` shows all. `hidden` is the cards actually left out, so no chip when it is 0.
+ */
+export function laneCell(cards: readonly JiraIssue[], isLive: (key: string) => boolean, open: boolean): { shown: JiraIssue[]; hidden: number } {
+  if (open) return { shown: [...cards], hidden: 0 };
+  const shown = cards.filter((c, i) => i < LANE_CELL_LIMIT || isLive(c.key));
+  return { shown, hidden: cards.length - shown.length };
+}
+
+/** The per-browser key holding every board's lane folds — ONE key, since `usePersistedState` reads storage once on mount (§3.6). */
+export const JIRA_LANE_FOLDS_KEY = 'backlog-manager.jira-lane-folds';
+
+export type LaneFold = 'open' | 'closed';
+/** Lane key → the person's override; a lane absent here follows its default (`!settled`). */
+export type LaneOverrides = Readonly<Record<string, LaneFold>>;
+/** Board id → that board's overrides. */
+export type JiraLaneFolds = Readonly<Record<string, LaneOverrides>>;
+
+const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+
+/**
+ * A stored value as lane folds. Takes `unknown` like `clampJiraPanelFilters`: anything but an object of board entries reads as none, a bad board entry
+ * drops alone and a bad lane value drops alone. Both levels are keyed by ids a person or Jira chose, so the maps are prototype-less: a board named
+ * `__proto__` or `constructor` is then an ordinary own entry that survives a JSON round trip, and `Object.prototype` is never written.
+ */
+export function clampLaneFolds(v: unknown): JiraLaneFolds {
+  const out: Record<string, LaneOverrides> = Object.create(null);
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return out;
+  for (const [id, entry] of Object.entries(v)) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const lanes: Record<string, LaneFold> = Object.create(null);
+    for (const [key, fold] of Object.entries(entry)) if (fold === 'open' || fold === 'closed') lanes[key] = fold;
+    out[id] = lanes;
+  }
+  return out;
+}
+
+/** One board's overrides — an own-property read, so `constructor` or `toString` is never mistaken for a stored board. `{}` when absent. */
+export function laneOverrides(folds: JiraLaneFolds, boardId: string): LaneOverrides {
+  return hasOwn(folds, boardId) ? folds[boardId] : {};
+}
+
+/** Whether a lane is open: the person's override when it has one, else the default — open lanes start open, settled lanes folded (§3.6). */
+export function laneOpen(lane: JiraLane, overrides: LaneOverrides): boolean {
+  return hasOwn(overrides, lane.key) ? overrides[lane.key] === 'open' : !lane.settled;
+}
+
+/**
+ * The folds with one lane toggled. The board's entry is pruned against every lane key in `board` at any depth — the caller hands the UNFILTERED lanes of a
+ * loaded list, since a filtered view or a list still loading would wipe overrides for lanes that are merely not shown (§3.6). A toggle is stored even when
+ * it equals the default: the lane was touched. Other boards and the input are left alone.
+ */
+export function setLaneFold(folds: JiraLaneFolds, boardId: string, board: JiraLanes, laneKey: string, open: boolean): JiraLaneFolds {
+  const live = new Set<string>();
+  const collect = (lanes: readonly JiraLane[]): void => {
+    for (const l of lanes) {
+      live.add(l.key);
+      collect(l.lanes);
+    }
+  };
+  collect(board.lanes);
+  const prior = laneOverrides(folds, boardId);
+  const next: Record<string, LaneFold> = Object.create(null);
+  for (const k of Object.keys(prior)) if (live.has(k)) next[k] = prior[k];
+  next[laneKey] = open ? 'open' : 'closed';
+  const out: Record<string, LaneOverrides> = Object.create(null);
+  for (const id of Object.keys(folds)) out[id] = folds[id];
+  out[boardId] = next;
+  return out;
+}
+
 // ── Sentences ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** `1 root`, `2 roots`; `queries` is the one plural that is not the noun plus `s`. */
-const count = (n: number, noun: 'root' | 'query' | 'issue' | 'card'): string => `${n} ${n === 1 ? noun : noun === 'query' ? 'queries' : `${noun}s`}`;
+const count = (n: number, noun: 'root' | 'query' | 'issue' | 'parent'): string => `${n} ${n === 1 ? noun : noun === 'query' ? 'queries' : `${noun}s`}`;
 
 /** The same, or `null` for zero, which every sentence below omits rather than print. */
 const countOrNull = (n: number, noun: 'root' | 'query' | 'issue'): string | null => (n > 0 ? count(n, noun) : null);
@@ -444,24 +637,17 @@ export function progressLine(p: JiraProgress): string | null {
   return said.length > 0 ? said.join(' · ') : null;
 }
 
-/**
- * The fold block's first line (grouped-board spec §4, the mock's wording): `C children · D below them`, where C is the direct children on the board and D
- * everything deeper; `C children` (`1 child`) when nothing is deeper. `null` with no direct child, which draws no block.
- */
-export function childrenLine(direct: number, deeper: number): string | null {
-  if (direct === 0) return null;
-  const head = `${direct} ${direct === 1 ? 'child' : 'children'}`;
-  return deeper > 0 ? `${head} · ${deeper} below them` : head;
+/** A lane header's count (parent-lanes spec §3.2): the matching issues of its subtree, `1 issue` / `n issues`. */
+export function laneCountText(n: number): string {
+  return count(n, 'issue');
 }
 
 /**
- * The F1 ring's marker (grouped-board spec §5): `1 match: PAY-162` names the one folded match in the word itself; past one the word is `N matches` and the
- * keys go to the marker's `title`, since a card cannot hold a list. `null` for no match — a top that matches on its own draws no marker.
+ * An off-board parent's `↗` (parent-lanes spec §3.2): `https://<site>/browse/<KEY>`, composed as `stubIssue` composes a stub's url — or `null` while the
+ * status has not said the site, which draws no link rather than a relative one.
  */
-export function matchMarker(keys: readonly string[]): { word: string; title: string | undefined } | null {
-  if (keys.length === 0) return null;
-  if (keys.length === 1) return { word: `1 match: ${keys[0]}`, title: undefined };
-  return { word: `${keys.length} matches`, title: keys.join(', ') };
+export function browseUrl(site: string, key: string): string | null {
+  return site === '' ? null : `https://${site}/browse/${key}`;
 }
 
 /**
@@ -492,22 +678,23 @@ export function failurePhrase(failures: readonly JiraBoardFailure[]): string | n
  * when there are several) — a partial list must never read as a whole one, and Jira's sentence ("Field 'foo' does not exist") is the one a person can act
  * on. A truncated list ends on the cap, always last, so it is never mistaken for the whole of the board either.
  *
- * `fold` is the loaded list's two numbers (grouped-board spec §4): its length and its tops, both UNFILTERED. With it, the issue count is the list's own
- * rather than the status poll's `board.count` — a different poller that can disagree with the list for one interval, and a line that says "17 issues · 5
- * cards" has to count one list — and an `M cards` part follows the sources whenever something folds (`1 card` in the singular). `null` means the list has
- * not loaded, and reads today's line from `board.count`, with no cards part. Required, with no default, for `now`'s reason: a default is how the next call
- * site forgets it.
+ * `counts` is the loaded list's two numbers (parent-lanes spec §6.1): its length and `laneParents` — the lanes with a parent behind them, `No parent` not
+ * counted — both UNFILTERED, since the band describes the board and not the view. With it, the issue count is the list's own rather than the status
+ * poll's `board.count` — a different poller that can disagree with the list for one interval, and a line that says "16 issues · 8 parents" has to count
+ * one list — and an `M parents` part follows the sources whenever there is a parent to count (`1 parent` in the singular). `null` means the list has not
+ * loaded, and reads today's line from `board.count`, with no parents part. Required, with no default, for `now`'s reason: a default is how the next call
+ * site forgets it. The Board and the Sessions page both read it, so the two bands cannot count one board two ways.
  */
 export function bandSub(
   board: JiraBoardStatus,
   site: string,
   now: number,
-  fold: { issues: number; cards: number } | null
+  counts: { issues: number; parents: number } | null
 ): { text: string; failing: boolean } {
   const sources = [countOrNull(board.roots.length, 'root'), countOrNull(board.queries.length, 'query')].filter((s): s is string => s !== null);
-  const issues = fold === null ? board.count : fold.issues;
+  const issues = counts === null ? board.count : counts.issues;
   const parts = [site, `${count(issues, 'issue')}${sources.length > 0 ? ` from ${sources.join(' and ')}` : ''}`];
-  if (fold !== null && fold.cards < fold.issues) parts.push(count(fold.cards, 'card'));
+  if (counts !== null && counts.parents > 0) parts.push(count(counts.parents, 'parent'));
   parts.push(polledPhrase(board.polledAt, now));
   const failure = failurePhrase(board.failures);
   if (failure !== null) parts.push(failure);
@@ -1013,7 +1200,19 @@ export function parseJiraBoardIssues(value: unknown): JiraBoardIssuesPayload | n
     const { key, summary } = row as Unchecked<JiraIssue>;
     return typeof key === 'string' && typeof summary === 'string';
   };
-  return { issues: issues.filter(isRow), polledAt: typeof polledAt === 'string' ? polledAt : null };
+  // A parent sent before the server carried a type and status (a stale poll, an older server) reads as `null` for each, never `undefined`.
+  const object = (v: unknown): v is object => typeof v === 'object' && v !== null;
+  const rows = issues.filter(isRow).map((row) => {
+    if (!object(row.parent)) return row;
+    const { type, status } = row.parent as Unchecked<JiraParentRef>;
+    const parent: JiraParentRef = {
+      ...row.parent,
+      type: object(type) ? (type as JiraParentRef['type']) : null,
+      status: object(status) ? (status as JiraParentRef['status']) : null
+    };
+    return { ...row, parent };
+  });
+  return { issues: rows, polledAt: typeof polledAt === 'string' ? polledAt : null };
 }
 
 // ── The wire (Jira phase 5 — the launch sheet and the modal read one issue the same way) ────────────────────────────────────────────────────────────

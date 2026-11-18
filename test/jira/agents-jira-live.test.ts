@@ -136,7 +136,7 @@ function issueFor(key: string): JiraIssue {
     priority: null,
     assignee: null,
     reporter: null,
-    parent: { key: 'PAY-1', summary: 'Epic' },
+    parent: { key: 'PAY-1', summary: 'Epic', type: null, status: null },
     subtasks: 0,
     labels: [],
     sprint: null,

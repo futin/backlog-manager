@@ -47,7 +47,7 @@ const CARD: JiraIssue = {
   priority: 'High',
   assignee: ADA,
   reporter: 'Grace Hopper',
-  parent: { key: 'PAY-120', summary: 'Refund flows' },
+  parent: { key: 'PAY-120', summary: 'Refund flows', type: null, status: null },
   subtasks: 2,
   labels: ['payments', 'refunds'],
   sprint: 'Sprint 42',
@@ -201,7 +201,7 @@ const kid = (key: string, summary: string, category: JiraIssue['status']['catego
   key,
   summary,
   status: { name: name ?? { new: 'To Do', indeterminate: 'In Progress', done: 'Done' }[category], category },
-  parent: { key: parent, summary: 'parent' }
+  parent: { key: parent, summary: 'parent', type: null, status: null }
 });
 
 /** The tree's rows, as `KEY/depth`, in document order. */
@@ -1327,7 +1327,7 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     days: number
   ): JiraIssue => ({
     ...kid(key, summary, category, parent ?? 'none'),
-    parent: parent === null ? null : { key: parent, summary: 'parent' },
+    parent: parent === null ? null : { key: parent, summary: 'parent', type: null, status: null },
     type,
     updated: daysAgoStamp(days)
   });
@@ -1583,7 +1583,7 @@ describe('JiraDetail — a sub-task\'s parent: the link, its read and the parent
     key: 'PAY-175',
     summary: 'Prepare refund TODOs',
     type: { name: 'Sub-task', level: -1, subtask: true },
-    parent: { key: 'P-1', summary: 'S' },
+    parent: { key: 'P-1', summary: 'S', type: null, status: null },
     assignee: null,
     subtasks: 0
   };

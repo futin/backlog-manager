@@ -244,7 +244,7 @@ function link(over: Partial<SessionLink> = {}): SessionLink {
 const payload = (...links: SessionLink[]): JiraSessionsPayload => ({ links, reachable: true, rowsAt: new Date().toISOString() });
 
 describe('parentLiveLine / parentLineText — the sub-task band line', () => {
-  const SUB = issue('S-1', { type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'P-1', summary: 'S' } });
+  const SUB = issue('S-1', { type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'P-1', summary: 'S', type: null, status: null } });
   // Two live links on P-1 ten:00-ish and ten:05-ish (relative: 30 and 25 minutes ago) and one ended one.
   const older = link({ sessionId: 'older', state: 'quiet', startedAt: minutesAgo(30) });
   const newer = link({ sessionId: 'newer', state: 'working', startedAt: minutesAgo(25) });
@@ -257,7 +257,7 @@ describe('parentLiveLine / parentLineText — the sub-task band line', () => {
   });
 
   it('draws nothing for a story under an epic, even when the epic is live', () => {
-    const story = issue('S-2', { parent: { key: 'P-1', summary: 'Epic' } });
+    const story = issue('S-2', { parent: { key: 'P-1', summary: 'Epic', type: null, status: null } });
     expect(parentLiveLine(story, payload(older, newer))).toBeNull();
   });
 

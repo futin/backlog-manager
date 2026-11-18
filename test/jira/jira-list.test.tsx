@@ -11,7 +11,7 @@ import { JiraProvider } from '../../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
 import { resetJiraListFilters, setJiraListFilters } from '../../client/src/hooks/useJiraListFilters';
-import { sessionsEmptyTitle } from '../../client/src/lib/jira-list';
+import { sessionsEmptyTitle, stubIssue } from '../../client/src/lib/jira-list';
 import { NoGitlab } from '../helpers/no-gitlab';
 import { daysAgoStamp } from '../helpers/dates';
 import type { JiraBoardStatus, JiraEndReason, JiraIssue, JiraLiveSession, JiraStatusPayload } from '../../shared/types';
@@ -310,8 +310,8 @@ describe('the Sessions page', () => {
     not (the `Run on` toggle's own condition: only a sub-task's parent owns its branch).
   */
   it('a session on the off-board parent of a sub-task on the board is in scope with All tickets off, marked via the sub-task', async () => {
-    const sub: JiraIssue = { ...issue('PAY-160', 'Refund sub-task'), type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-100', summary: 'Refunds story' } };
-    const story: JiraIssue = { ...issue('PAY-170', 'Story under an epic'), parent: { key: 'EP-1', summary: 'Payments epic' } };
+    const sub: JiraIssue = { ...issue('PAY-160', 'Refund sub-task'), type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-100', summary: 'Refunds story', type: null, status: null } };
+    const story: JiraIssue = { ...issue('PAY-170', 'Story under an epic'), parent: { key: 'EP-1', summary: 'Payments epic', type: null, status: null } };
     lists = { ...lists, [ALPHA.id]: [...Object.values(ISSUES), sub, story] };
     links = [
       link({ key: 'PAY-100', id: 'par1', state: 'working', startedAt: hoursAgo(1), summary: 'Refunds story' }),
@@ -526,6 +526,43 @@ describe('the Sessions page', () => {
     expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
   });
 
+  /*
+    The band's `M parents` is `bandSub`'s, one function for both pages (parent-lanes spec §1.5, §6.1): PAY-140 sits under on-board PAY-120 and PAY-131
+    under off-board PAY-99 — two lanes with a parent behind them — and PAY-141 under PAY-140 makes PAY-140 a nested header, a third. Detail opened from a
+    row gets the lanes' `childrenOf`, so its Children tree hangs PAY-141 under the PAY-140 the fresh read returned.
+  */
+  const withParents = (): JiraIssue[] => [
+    ISSUES['PAY-120'],
+    { ...ISSUES['PAY-140'], parent: { key: 'PAY-120', summary: 'Refund flows', type: null, status: null } },
+    { ...issue('PAY-141', 'Receipt font fallback'), parent: { key: 'PAY-140', summary: 'Currency symbol missing on receipts', type: null, status: null } },
+    { ...ISSUES['PAY-131'], parent: { key: 'PAY-99', summary: 'Payments platform', type: null, status: null } },
+    ISSUES['PAY-151']
+  ];
+
+  it('the band reads `M parents` over the loaded list, as the Board page does', async () => {
+    lists[ALPHA.id] = withParents();
+    await renderList();
+    await waitFor(() => expect(document.querySelectorAll('.jira-band-sub')[1]?.textContent).toMatch(/^acme\.atlassian\.net · 5 issues from 1 query · 3 parents · polled /));
+  });
+
+  it('a row’s Detail still gets the lanes’ children: a grandchild on the board hangs under the child the read returned', async () => {
+    lists[ALPHA.id] = withParents();
+    links = [link({ key: 'PAY-120', id: 'w1', state: 'working', startedAt: hoursAgo(1) })];
+    const base = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === '/api/jira/issue/PAY-120'
+        ? ok({ ...ISSUES['PAY-120'], description: '', children: [withParents()[1]], transitions: [], boards: [], session: null })
+        : base(input, init)
+    ) as unknown as typeof fetch;
+    await renderList();
+    await waitFor(() => expect(rowTags()).toEqual(['PAY-120:working']));
+    await userEvent.click(within(screen.getByRole('row', { name: 'Session on PAY-120' })).getByRole('button', { name: 'Refund flows' }));
+    const dialog = await screen.findByRole('dialog', { name: /^PAY-120 / });
+    await within(dialog).findByRole('heading', { name: 'Children' });
+    const tree = Array.from(dialog.querySelectorAll<HTMLElement>('.jira-tree > li')).map((li) => `${li.querySelector('.jira-tree-key')?.textContent}/${li.dataset.depth}`);
+    expect(tree).toEqual(['PAY-140/0', 'PAY-141/1']);
+  });
+
   it('with All tickets off and no boards, draws the bar and `No boards yet` with an Open Setup chip — and All tickets on draws the off-board rows', async () => {
     statusAnswer = status({ boards: [] });
     links = [link({ key: 'OFFBOARD-9', id: 'o1', state: 'working', startedAt: hoursAgo(1), summary: 'Off board thing' })];
@@ -624,6 +661,17 @@ describe('the Sessions page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Run PAY-131' }));
     expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Run menu' })).toBeNull();
+  });
+});
+
+describe('stubIssue', () => {
+  it("draws a parent with no summary, type or status — the snapshot knows only the parent's key", () => {
+    expect(stubIssue('PAY-9', { summary: 's', type: 'Sub-task', parentKey: 'PAY-1' }, 'acme.atlassian.net').parent).toEqual({
+      key: 'PAY-1',
+      summary: '',
+      type: null,
+      status: null
+    });
   });
 });
 

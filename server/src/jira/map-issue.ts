@@ -67,6 +67,22 @@ export function categoryOf(key: unknown): JiraStatusCategory {
   return key === 'indeterminate' || key === 'done' ? key : 'new';
 }
 
+/** An issue type from a raw `issuetype`; an issue's own and its parent's go through this one path. A missing name reads as empty. */
+function mapType(raw: unknown): JiraIssue['type'] {
+  const t = isObj(raw) ? raw : {};
+  const subtask = t.subtask === true;
+  return { name: str(t.name), level: typeof t.hierarchyLevel === 'number' ? t.hierarchyLevel : subtask ? -1 : 0, subtask };
+}
+
+/** A status from a raw `status`; an issue's own and its parent's go through this one path. A missing name reads as empty. */
+function mapStatus(raw: unknown): JiraIssue['status'] {
+  const s = isObj(raw) ? raw : {};
+  return { name: str(s.name), category: categoryOf(isObj(s.statusCategory) ? s.statusCategory.key : undefined) };
+}
+
+/** A parent's type or status is `null` when Jira sent no object, or one without a string `name` — absent, not an empty-named one. */
+const orNull = <T>(raw: unknown, map: (r: unknown) => T): T | null => (isObj(raw) && typeof raw.name === 'string' ? map(raw) : null);
+
 /**
  * The numeric tail of `customfield_10020`; a non-conforming id sorts last rather than throwing. Scanned from the end by hand, not `/(\d+)$/`: that regex
  * retries from every digit of a long run that does not end the string, O(n²) on an id a hostile site could send (~1.3 s for 30 000 digits).
@@ -112,18 +128,22 @@ export function mapJiraIssue(raw: unknown, ctx: MapContext): JiraIssue | null {
   const key = raw.key;
   const f = raw.fields;
 
-  const status = isObj(f.status) ? f.status : {};
-  const category = categoryOf(isObj(status.statusCategory) ? status.statusCategory.key : undefined);
-  if (expired(category === 'done', f.resolutiondate, f.updated, ctx.now)) return null;
+  const status = mapStatus(f.status);
+  if (expired(status.category === 'done', f.resolutiondate, f.updated, ctx.now)) return null;
 
-  const type = isObj(f.issuetype) ? f.issuetype : {};
-  const subtask = type.subtask === true;
-  const level = typeof type.hierarchyLevel === 'number' ? type.hierarchyLevel : subtask ? -1 : 0;
-
+  const type = mapType(f.issuetype);
   const prefix = key.split('-')[0];
   const project = isObj(f.project) ? f.project : {};
+  // The parent's priority stays unmapped: D3 asks for its type and status only.
   const parent =
-    isObj(f.parent) && typeof f.parent.key === 'string' ? { key: f.parent.key, summary: str(isObj(f.parent.fields) ? f.parent.fields.summary : '') } : null;
+    isObj(f.parent) && typeof f.parent.key === 'string'
+      ? {
+          key: f.parent.key,
+          summary: str(isObj(f.parent.fields) ? f.parent.fields.summary : ''),
+          type: orNull(isObj(f.parent.fields) ? f.parent.fields.issuetype : undefined, mapType),
+          status: orNull(isObj(f.parent.fields) ? f.parent.fields.status : undefined, mapStatus)
+        }
+      : null;
   const assignee =
     isObj(f.assignee) && typeof f.assignee.accountId === 'string' ? { accountId: f.assignee.accountId, name: str(f.assignee.displayName) } : null;
 
@@ -133,8 +153,8 @@ export function mapJiraIssue(raw: unknown, ctx: MapContext): JiraIssue | null {
     url: `https://${ctx.site}/browse/${key}`,
     summary: str(f.summary),
     project: { key: str(project.key) || prefix, name: str(project.name) || str(project.key) || prefix },
-    type: { name: str(type.name), level, subtask },
-    status: { name: str(status.name), category },
+    type,
+    status,
     priority: isObj(f.priority) ? strOrNull(f.priority.name) : null,
     assignee,
     reporter: isObj(f.reporter) ? strOrNull(f.reporter.displayName) : null,

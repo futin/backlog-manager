@@ -95,7 +95,7 @@ function issue(over: Partial<JiraIssue> = {}): JiraIssue {
 }
 
 const subtaskOf = (key: string, parent: string, over: Partial<JiraIssue> = {}): JiraIssue =>
-  issue({ key, type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: parent, summary: `summary of ${parent}` }, ...over });
+  issue({ key, type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: parent, summary: `summary of ${parent}`, type: null, status: null }, ...over });
 
 const marks = (track: TrackStep[]): string[] => track.map((t) => `${t.step} ${t.mark}`);
 
@@ -258,7 +258,7 @@ describe('ticketDelivery', () => {
 
   it('a story under an epic inherits nothing — it is `none`, not the epic’s', () => {
     const epics = mr({ iid: 600, keys: ['TIMIFY-1'], sourceBranch: 'timify-1-epic' });
-    const story = issue({ key: 'TIMIFY-50', parent: { key: 'TIMIFY-1', summary: 'the epic' } });
+    const story = issue({ key: 'TIMIFY-50', parent: { key: 'TIMIFY-1', summary: 'the epic', type: null, status: null } });
     expect(ticketDelivery(story, deliveryIndex(payload([epics])))).toEqual({ kind: 'none', repos: ['microservice'] });
   });
 

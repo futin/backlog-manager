@@ -14,7 +14,7 @@ import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { JiraContext } from '../../client/src/hooks/JiraContext';
 import { JiraSessionsContext } from '../../client/src/hooks/JiraSessionsContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
-import { cardFold, foldBoard } from '../../client/src/lib/jira';
+import { laneBoard, laneViews } from '../../client/src/lib/jira';
 import type { DeckEntry } from '../../client/src/lib/jira-deck';
 import type { GitlabMr, GitlabReview, GitlabPayload, GitlabProjectView, GitlabStatus, JiraBoard, JiraIssue, JiraStatusPayload } from '../../shared/types';
 import { daysAgoStamp } from '../helpers/dates';
@@ -101,7 +101,7 @@ function issue(key: string, over: Partial<JiraIssue> = {}): JiraIssue {
 }
 
 const sub = (key: string, parent: string, over: Partial<JiraIssue> = {}): JiraIssue =>
-  issue(key, { type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: parent, summary: `summary of ${parent}` }, ...over });
+  issue(key, { type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: parent, summary: `summary of ${parent}`, type: null, status: null }, ...over });
 const done = { status: { name: 'Done', category: 'done' as const } };
 
 function jiraStatus(): JiraStatusPayload {
@@ -153,12 +153,11 @@ const OPEN_REVIEW: GitlabReview = {
 
 const BOARD: JiraBoard = { id: 'b1', name: 'Timify', roots: [], queries: [], interval: '5m' };
 
-/** One shelf card for `top`, folded over `board` (the whole board's issues) as the Board page folds it. */
-function drawCard(top: JiraIssue, data: GitlabPayload | null, board: JiraIssue[] = [top]) {
-  const fold = foldBoard(board);
+/** One lane card for `top` — no parent, no session, as a card in the `No parent` lane draws. */
+function drawCard(top: JiraIssue, data: GitlabPayload | null) {
   return shell(
     data,
-    <JiraCard issue={top} board={BOARD} me={null} now={now} fold={cardFold(top.key, fold)} matches={[]} ended={[]} trees={[]} onOpen={jest.fn()} onRun={jest.fn()} />
+    <JiraCard issue={top} board={BOARD} me={null} now={now} parent={null} session={null} ended={[]} trees={[]} onOpen={jest.fn()} onRun={jest.fn()} />
   );
 }
 
@@ -167,7 +166,7 @@ const chips = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElem
 
 afterEach(cleanup);
 
-describe('the shelf card’s MR chip', () => {
+describe('the lane card’s MR chip', () => {
   it('draws the lead MR in the marker row, before Run ▾', () => {
     drawCard(issue('TIMIFY-123'), payload([mr({ iid: 415, pipeline: 'failed' })]));
     const chip = within(markers()).getByText('!415 · ✕ pipeline failed');
@@ -196,10 +195,9 @@ describe('the shelf card’s MR chip', () => {
     expect(screen.queryByText(/no MR/)).toBeNull();
   });
 
-  it('draws nothing on a folded top whose child has an MR and the top none — the card is the top’s own', () => {
+  it('draws nothing on a parent whose child has an MR and the parent none — the chip is the issue’s own', () => {
     const top = issue('TIMIFY-100');
-    const child = sub('TIMIFY-131', 'TIMIFY-100');
-    drawCard(top, payload([mr({ iid: 415, keys: ['TIMIFY-131'] })]), [top, child]);
+    drawCard(top, payload([mr({ iid: 415, keys: ['TIMIFY-131'] })]));
     expect(chips()).toEqual([]);
   });
 
@@ -221,15 +219,14 @@ describe('the review chip (CodeRabbit spec §5.3, variant X)', () => {
 });
 
 describe('the deck card’s MR chip', () => {
-  it('reads the session’s own ticket — a folded child’s MR, not its top’s', () => {
-    const top = issue('TIMIFY-100');
+  it('reads the session’s own ticket — a child’s MR, not its parent’s', () => {
     const child = sub('TIMIFY-131', 'TIMIFY-100');
     const entry: DeckEntry = {
       id: 'TIMIFY-131',
       state: 'starting',
       group: 'other',
       issue: child,
-      top,
+      parent: child.parent,
       link: null,
       starting: { name: 'timify-131', sessionId: null, startedAt: ago(1), repo: '/r/timify', starting: true },
       startedAt: ago(1),
@@ -246,10 +243,24 @@ describe('the deck card’s MR chip', () => {
 });
 
 describe('the List’s Delivery column', () => {
-  function drawList(tops: JiraIssue[], data: GitlabPayload | null) {
+  /* The List as the page draws it — the loaded issues as lanes, nothing filtered, every lane open — without the page around it: the folds and the off-board
+     read are the page's hooks, so they are stood in for here; the Delivery cell reads neither. */
+  function drawList(issues: JiraIssue[], data: GitlabPayload | null) {
+    const lanes = laneBoard(issues);
     return shell(
       data,
-      <JiraIssueList tops={tops} fold={foldBoard(tops)} sessions={new Map()} now={now} filtered={false} onOpenIssue={jest.fn()} onRun={jest.fn()} />
+      <JiraIssueList
+        views={laneViews(lanes, () => true)}
+        folds={{ isOpen: () => true, toggle: () => {}, locked: false }}
+        sessions={new Map()}
+        parentOf={lanes.parentOf}
+        site="acme.atlassian.net"
+        read={{ reading: null, failed: null, ask: jest.fn() }}
+        now={now}
+        filtered={false}
+        onOpenIssue={jest.fn()}
+        onRun={jest.fn()}
+      />
     );
   }
   const headers = (): string[] => screen.getAllByRole('columnheader').map((h) => h.textContent || h.getAttribute('aria-label') || '');
@@ -306,6 +317,16 @@ describe('the List’s Delivery column', () => {
     expect(cell('PAY-120').textContent).toBe('');
   });
 
+  it('leaves an off-board header row’s Delivery cell empty, even when the parent’s own key has an MR — the row is a stub, not a read issue', () => {
+    const parent = { key: 'PAY-1', summary: 'Platform epic', type: null, status: null };
+    drawList([issue('PAY-123', { parent })], payload([mr({ keys: ['PAY-1'] })], { PAY: [MICRO] }));
+    const row = document.querySelector('tr[data-lane="PAY-1"]') as HTMLElement;
+    const at = headers().indexOf('Delivery');
+    expect(row.querySelectorAll('td')).toHaveLength(headers().length);
+    expect(row.querySelectorAll('td')[at].textContent).toBe('');
+    expect(cell('PAY-123').textContent).toBe('no MR');
+  });
+
   it('draws no Delivery column while GitLab is unconfigured', () => {
     drawList([issue('TIMIFY-123')], payload([], {}, { state: 'unconfigured', armed: false }));
     expect(headers()).toEqual(['Session', 'Key', 'Summary', 'Type', 'Status', 'Priority', 'Assignee', 'Sprint', 'Updated', 'Run']);
@@ -316,7 +337,8 @@ describe('the List’s Delivery column', () => {
     const tops = [issue('TIMIFY-123'), issue('TIMIFY-124'), issue('PAY-120')];
     drawList(tops, payload([], { TIMIFY: [{ ...MICRO, polledAt: null, failed: true }] }, { state: 'rejected', httpStatus: 401, user: null }));
     expect(headers()).toContain('Delivery');
-    expect(document.querySelectorAll('tbody tr')).toHaveLength(3);
+    // Three issue rows; the `No parent` header row above them is the lane's heading and has no key.
+    expect(document.querySelectorAll('tbody tr[data-key]')).toHaveLength(3);
     expect(cell('TIMIFY-123').textContent).toBe('—');
     expect(cell('TIMIFY-124').textContent).toBe('—');
     expect(cell('PAY-120').textContent).toBe('');

@@ -590,8 +590,8 @@ button.rail-count { cursor: pointer }
   background: var(--strip); border-radius: 12px;
   cursor: pointer; overflow: hidden;
 }
-/* Hover fills the card with --card-hover (shared/theme.css says why it is its own token). `.jira-card-match`'s amber ring is a box-shadow, so a hovered
-   matching card keeps it. */
+/* Hover fills the card with --card-hover (shared/theme.css says why it is its own token). A live Jira card's `ui-stripe` edge is a box-shadow, so a hovered
+   live card keeps it. */
 .board-card:hover { background: var(--card-hover) }
 /* Every padding and gap the card has lives in this one rule, so the
    compact-density retune stays a single block (of variables) rather than a
@@ -688,20 +688,15 @@ button.rail-count { cursor: pointer }
 .jira-card-prio[data-tone="low"], .jira-card-prio[data-tone="other"] { background: var(--strip-hi); color: var(--ink3) }
 /* In Detail's facts the pill is a value in `dd`, which sits at the start of its column like every other value; the head's push-right is the card's alone. */
 .jira-detail-facts .jira-card-prio { margin-left: 0 }
-/* The fold block (grouped-board spec §4, DESIGN.md §8.9.1): after the foot and before the marker row — the line, then the spread bar and its caption,
-   which are `SpreadBar`'s own look. The line is 12/500 --ink2: a sub-line of the card, a step quieter than the title and a step louder than the caption. */
-.jira-card-fold { display: flex; flex-direction: column; gap: 6px }
-.jira-card-fold-line { font-size: 12px; font-weight: 500; color: var(--ink2) }
-/* F1's ring (grouped-board spec §5): a top card shown only because an issue folded under it matches the filter. An INSET ring, so the card keeps its
-   size and the column does not shift by 4 px when a search starts; `--amber-solid` is the mark, and the `match` marker's word beside it is --amber-text. */
-.jira-card-match { box-shadow: inset 0 0 0 2px var(--amber-solid) }
+/* The lane card's priority slot: a page-owned span around `PriorityPill` (a ui-* family a page rule may not name), pushed to the head's right end. It is
+   drawn only with a pill, so a card with no priority keeps its key and crumb at the left, where the deck's head keeps them too. */
+.jira-card-prio-slot { margin-left: auto; flex: none; display: inline-flex }
 .jira-card-key { flex: none; font-weight: 600; color: var(--ink); white-space: nowrap }
 .jira-card-crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* The deck face is a 14 px title column, not `.jira-card-head` (12 px, `--ink3`), so the crumb that moved down into it inherited 16 px `--ink` and out-sized the title. */
 .jira-deck-face .jira-card-crumb { font-size: 12px; color: var(--ink3) }
-/* The foot's person: a 22 px initials disc tinted magenta (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
-   the Board card's project name. An unassigned issue draws the disc empty and dashed, so the row keeps its shape. */
-.jira-card-who { display: flex; align-items: center; gap: 6px; min-width: 0 }
+/* The initials disc of Detail, the List and Mentions: 22 px, tinted magenta (never an avatar image — the browser does not talk to Jira). The lane card and
+   header draw `PersonMark` (`.ui-person`), the same look in the ui primitives block. An unassigned issue draws the disc empty and dashed. */
 .jira-card-av {
   display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 999px;
   background: color-mix(in srgb, var(--magenta) 14%, var(--strip)); color: var(--magenta); font-size: 11px; font-weight: 600;
@@ -712,13 +707,6 @@ button.rail-count { cursor: pointer }
 .jira-status-dot[data-tone="doing"] { background: var(--amber-solid) }
 .jira-status-dot[data-tone="done"] { background: var(--green-solid) }
 .jira-card-status { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
-.jira-card-name { font-size: 12px; font-weight: 400; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
-/* The repository on the foot: branch glyph and the one path's basename (or `N repos`), quiet ink like the worktree chip beside it. */
-.jira-card-repo { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--ink3) }
-.jira-card-repo > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-/* The worktree chip on the marker row (DESIGN.md §8.9.1): the branch of the ticket's one tree, or `N worktrees`. Quiet `--ink3`, like a marker, and it
-   ellipsises first — the Run chip beside it keeps its width. */
-.jira-card-tree { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink3) }
 /* The MR chip (GitLab connection spec §7.2, `MrChip`): the lead MR's card-chip words on a tint of its tone, and the amber `not merged` beside it. The mock's
    22 px pill at 11 px, but 500 rather than its 600 — §1's pill weight, as Detail's state pill beside an `Also:` MR (`.jira-dlv-word`, whose tone table it
    shares below). It shrinks and ellipsises like the worktree chip, so `Run ▾` keeps its width, and is a block box rather than a flex one, because
@@ -1172,12 +1160,6 @@ button.rail-count { cursor: pointer }
 @media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
 
-/* The Jira board's columns (Jira phase 2, spec §6.2; DESIGN.md §8.9.1): `.board-columns` with three tracks instead of four — To Do, In Progress, Done, one
-   per status category. Declared after the Board's three rules so the 1100 px step (two tracks) is overridden: three categories over two tracks would put
-   Done under To Do, which reads as a fourth column rather than as the third. Below 700 px they stack exactly as the Board's do. */
-.jira-board-columns { grid-template-columns: repeat(3, minmax(0, 1fr)) }
-@media (max-width: 700px) { .jira-board-columns { grid-template-columns: 1fr } }
-
 .board-col { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0 }
 .board-col-name {
   font-size: 15px; font-weight: 500;
@@ -1207,17 +1189,10 @@ button.rail-count { cursor: pointer }
    cards without dragging the header off its rule with them. */
 .board-col-cards { display: flex; flex-direction: column; gap: var(--card-gap) }
 /* A column's ground (mock Board.dc.html; restyle spec §4.3 gave it to Jira alone and the user extended it to the GitHub Board, 2026-11-06): a `--steel` well,
-   radius 16, 12 px padding with the header inside it, on `[data-ground]` — which `BoardView` and `JiraShelves` set and Archive does not, because its sticky
-   `.archive-month` paints `--board` and would read as a white band across it. The Jira shelves' toned header (`[data-tone]`) is separate: the dot and
-   the count are page-local spans rather than `.ui-dot` / `.ui-pill` — `Dot` has no todo/doing/done tones and guard 7 forbids a page rule naming a ui-* family
-   token. Plain colours and a solid `--strip` pill, no tint, so nothing joins the daylight-contrast PINNED list; 11/500 `--ink2` on `--strip` is a
-   surface pair the contrast suite already measures. */
+   radius 16, 12 px padding with the header inside it, on `[data-ground]` — which `BoardView` sets and Archive does not, because its sticky
+   `.archive-month` paints `--board` and would read as a white band across it. The Jira shelves' toned header went with the shelves (parent lanes); the lane
+   board draws its own column heads (`.jira-lanes-head`). */
 .board-col[data-ground] { background: var(--steel); border-radius: 16px; padding: 12px; --card-hover: var(--card-hover-steel) }
-.board-col-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ink3) }
-.board-col[data-tone='doing'] .board-col-dot { background: var(--amber-solid) }
-.board-col[data-tone='done'] .board-col-dot { background: var(--green-solid) }
-.board-col[data-tone] .board-col-name { font-size: 13px; font-weight: 600; color: var(--ink) }
-.board-col-count { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--strip); font-size: 11px; font-weight: 500; color: var(--ink2) }
 
 /* ---------------------------------------------- archive month groups
    Archive's columns are grouped by the month of `updated ?? created` rather
@@ -1644,7 +1619,7 @@ button.rail-count { cursor: pointer }
 .jira-sess-mono { color: var(--ink2) }
 .jira-sess-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
 
-/* The agent deck (spec §7.1, DESIGN.md §8.9.1): a heading row with the tally, then a wrapping grid of session cards above the status shelves. A card wears
+/* The agent deck (spec §7.1, DESIGN.md §8.9.1): a heading row with the tally, then a wrapping grid of session cards above the lanes. A card wears
    `.jira-sess`'s ground, radius and face padding (restated at deck width, not composed: that class also fixes Detail's 290 px column), with the grid, the
    heading and the three lines the deck card adds: the summary button (14/500 like a board card's title), the buttons row and the quiet context %. */
 .jira-deck { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px }
@@ -1675,10 +1650,83 @@ button.rail-count { cursor: pointer }
 .jira-open-row:hover:not([aria-disabled='true']) { background: var(--strip-hi) }
 .jira-open-row[aria-disabled='true'] { cursor: default; color: var(--ink3); background: var(--strip) }
 .jira-open-danger { color: var(--red); background: var(--strip) }
-/* A shelf's `+ N more` / `show fewer`: a quiet row at the foot of the column, left-aligned with the cards' own edge. */
-.jira-shelf-more { display: flex; padding-top: 2px }
-/* The shelf row's extra line (spec §7.1): the newest ended session, or `N sessions`. Quiet, a step under the marker row, and Reopen sits right after the words. */
+/* A card's extra line (spec §7.1): the newest ended session, or `N sessions`. Quiet, a step under the marker row, and Reopen sits right after the words. */
 .jira-card-ended { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--ink3) }
+
+/* ── Jira › Board as parent lanes (parent-lanes spec §3; DESIGN.md §8.9.1; mocks Board.dc.html, BoardDeep.dc.html) ──────────────────────────────────────
+   One sticky column header over every lane, then each lane a `--steel` well (the ground the shelves' columns had, radius 16, 12 px padding) holding its
+   header row and three cells. Lanes are drawn FLAT, so nesting is a left margin read off `data-depth` (0–3, `LANE_INDENT_CAP` already applied), one step
+   per level — never an indent compounded through wrappers. Every value is a token or a step the Board's columns already use; the mocks' pixel values are
+   not the source. */
+.jira-lanes { display: flex; flex-direction: column; gap: 12px; min-width: 0 }
+/* The column header: the shelves' toned head (dot, 13/600 name, solid `--strip` count) once for the page, sticky over `--board` so the lanes scroll under
+   it. The grid matches `.jira-lane-cells` plus the lane's 12 px padding, so each name sits over its cells. */
+.jira-lanes-head {
+  position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--col-gap);
+  padding: 8px 12px; background: var(--board);
+}
+.jira-lanes-col { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink) }
+.jira-lanes-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ink3) }
+.jira-lanes-col[data-tone='doing'] .jira-lanes-dot { background: var(--amber-solid) }
+.jira-lanes-col[data-tone='done'] .jira-lanes-dot { background: var(--green-solid) }
+.jira-lanes-count {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--strip); font-size: 11px; font-weight: 500; color: var(--ink2)
+}
+.jira-lane { display: flex; flex-direction: column; gap: 10px; min-width: 0; background: var(--steel); border-radius: 16px; padding: 12px; --card-hover: var(--card-hover-steel) }
+.jira-lane[data-depth='1'] { margin-left: 24px }
+.jira-lane[data-depth='2'] { margin-left: 48px }
+.jira-lane[data-depth='3'] { margin-left: 72px }
+/* The header row: chevron, the main column (state line, the issue's line, the open control, the ended line), then the right-hand cluster. */
+.jira-lane-head { display: flex; align-items: flex-start; gap: 8px; min-width: 0 }
+.jira-lane-chev {
+  display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px;
+  background: none; color: var(--ink2); cursor: pointer;
+}
+.jira-lane-chev:hover:not(:disabled) { background: var(--strip-hi) }
+.jira-lane-chev:disabled { cursor: default; color: var(--ink3) }
+.jira-lane-main { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; padding-top: 4px }
+.jira-lane-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; font-size: 12px; color: var(--ink3) }
+/* The header's title is a button (it opens Detail, or reads an off-board parent) set as the card title's 14/500 words. */
+.jira-lane-title {
+  min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: 0; background: none;
+  font: inherit; font-size: 14px; font-weight: 500; color: var(--ink); text-align: left; cursor: pointer;
+}
+.jira-lane-title:hover:not(:disabled) { text-decoration: underline }
+.jira-lane-title:disabled { cursor: progress; color: var(--ink2) }
+/* `not on this board`: why an off-board header has no Run ▾, assignee or priority. Dashed, the stroke an absent value already uses. */
+.jira-lane-tag { flex: none; padding: 1px 7px; border-radius: 8px; border: 1px dashed var(--hairline2); font-size: 11px; font-weight: 500; color: var(--ink3); white-space: nowrap }
+.jira-lane-label { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; line-height: 28px; color: var(--ink) }
+/* The on-board header's right-hand cluster: spread, count and the card's marks (repo, worktree, MR, `Run ▾`) on ONE line, as the mocks draw it. It wraps
+   inside its 45% only once the main side's title has truncated as far as it goes (spec §3.2: the title gives way first); /ui-verify found it a column, which
+   put `Run ▾` on a second line at every width. */
+.jira-lane-side {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px; flex: none; max-width: 45%; min-width: 0; padding-top: 4px
+}
+.jira-lane-side > .jira-lane-tally { padding-top: 0 }
+/* Spread bar and count. The bar is `SpreadBar`'s; `.jira-lane-bar` is the page-owned span that gives it a width, since its own class is a ui-* family. */
+.jira-lane-tally { display: flex; align-items: center; gap: 8px; flex: none; padding-top: 4px }
+.jira-lane-bar { display: block; flex: none; width: 96px }
+.jira-lane-count { font-size: 12px; color: var(--ink2); white-space: nowrap }
+.jira-lane-head[data-kind='none'] > .jira-lane-tally, .jira-lane-head[data-kind='off'] > .jira-lane-tally { margin-left: auto }
+.jira-lane-marks { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; min-width: 0 }
+.jira-lane-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--col-gap) }
+.jira-lane-cell { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0 }
+/* A cell's `+ N more` / `show fewer`: a quiet row at the foot of the cell, left-aligned with the cards' own edge. */
+.jira-lane-more { display: flex; padding-top: 2px }
+@media (max-width: 700px) {
+  .jira-lanes-head, .jira-lane-cells { grid-template-columns: 1fr }
+  .jira-lane[data-depth] { margin-left: 0 }
+  .jira-lane-head { flex-wrap: wrap }
+  /* The cluster takes its own line under the title (spec §3.2), indented past the chevron: as a row beside a `flex: 1 1 0%` main it would fit on the title's
+     line and squeeze the title to nothing, which /ui-verify measured at 9 px. */
+  .jira-lane-side { flex: 1 1 100%; max-width: 100%; justify-content: flex-start; padding-left: 36px }
+}
+/* A live card's (or header's) state line: the deck card's words with the stripe's dot, `+N` for the key's other live sessions a step quieter. */
+.jira-card-live { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; font-weight: 500; color: var(--ink2) }
+.jira-card-live-more { color: var(--ink3) }
+.jira-card-open { display: flex }
+/* `SessionOpen`'s menu is an absolute popover, which the card's radius clip would cut: while it is open the card overflows, as it does for `Run ▾`. */
+.board-card:has(.jira-open-rows) { overflow: visible }
 
 /* The history timeline (spec §7.3): newest first, in its own strip card, one entry per hairline-divided row with a hollow node — the state a session ended
    in is not a colour. A line's head is `<how> · ended <age> ago`, Reopen at the right of the head, and the meta (surface · duration · name) under both. */
@@ -1803,10 +1851,11 @@ button.rail-count { cursor: pointer }
   .jira-issues-scroll { overflow-x: auto }
 }
 .jira-issues-table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: 13px; color: var(--ink) }
-.jira-issues-table thead th:nth-child(1) { width: 140px } /* Session: the word ellipsises (`Waiting on your answer` is longer); the dot and the age are the reading and never cut. 140, not 110: the
-   second line's `↳ TIMIFY-26366` pill (a session on a folded ticket) is 96 px and `+1` beside it another 18, which 132 cut to `TIMIFY-26…` in /ui-verify.
-   Summary pays. */
-.jira-issues-table thead th:nth-child(2) { width: 108px } /* Key: fits a twelve-character key (TIMIFY-28086) at 13 px. */
+.jira-issues-table thead th:nth-child(1) { width: 126px } /* Session: the word ellipsises (`Waiting on your answer` is longer); the dot and the age are
+   the reading and never cut. 126 keeps `Working · 12m` whole. It was 140 for the second line's `↳ PAY-10012345` pill (a session on a folded ticket), which went
+   with the fold (parent-lanes spec §4.3); the 14 px it freed went to Key. */
+.jira-issues-table thead th:nth-child(2) { width: 122px } /* Key: a twelve-character key (PAY-10012345, 82 px at 13 px) whole at depth 0 and 1 of the
+   lane indent. */
 .jira-issues-table thead th:nth-child(4) { width: 100px }
 .jira-issues-table thead th:nth-child(5) { width: 116px }
 .jira-issues-scroll[data-delivery] .jira-issues-table { min-width: 1376px }
@@ -1829,6 +1878,34 @@ button.rail-count { cursor: pointer }
 /* The whole row opens the modal (`rowOpens`), so it wears the pointer and the session table's half-transparent hover fill. */
 .jira-issues-row { cursor: pointer }
 .jira-issues-row:hover td { background-color: color-mix(in srgb, var(--tile-hover) 60%, transparent) }
+/* A lane's header row (parent-lanes spec §4.2) sits on the page's own ground, so the eye finds the groups before it reads a cell; the hover fill above still
+   wins on an on-board header, which opens Detail like any row. An off-board or `No parent` header has no issue behind it and opens nothing on a row click. */
+.jira-issues-lane td { background-color: var(--board) }
+.jira-issues-lane[data-kind='off'], .jira-issues-lane[data-kind='none'] { cursor: default }
+.jira-issues-lane[data-kind='off']:hover td, .jira-issues-lane[data-kind='none']:hover td { background-color: var(--board) }
+/* The lane chevron is 28 px in a 44 px row; it pulls left into the cell's padding so the title lines up near where a card row's starts. */
+.jira-issues-summary .jira-lane-chev { margin-left: -6px }
+.jira-issues-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600 }
+/* A header row's Summary line (chevron, title, `↳` chip, tag, count) wraps rather than squeeze the title. Summary is the column that pays for every fixed one,
+   down to 116 px at 1440 with Delivery shown, and there /ui-verify measured every header title at 0–11 px beside the never-cut count. The title keeps a floor
+   of what is left after the chevron (28 px less its 6 px pull, plus the 8 px gap) up to 12em, so the chip, the tag and the count drop to a second line first;
+   where Summary is wide the line stays one and the title grows, pushing the count to the cell's right edge as the mock draws it. The tag ellipsises here, as
+   it never needs to in a Board header. */
+.jira-issues-lane .jira-issues-summary .jira-issues-flex { flex-wrap: wrap; row-gap: 2px }
+.jira-issues-lane .jira-issues-summary .jira-issues-title, .jira-issues-lane .jira-issues-summary .jira-issues-label {
+  flex: 1 1 0; min-width: min(12em, calc(100% - 30px))
+}
+.jira-issues-summary .jira-lane-tag { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis }
+/* Indent is padding inside the Key cell, never a column (spec §4.1): `data-depth` is the lane depth capped at LANE_INDENT_CAP (3). The step is 14 px, not the
+   Board's 24, because the Key column is a fixed 122 px and a twelve-character key must still mostly fit at the cap. An indented key gives up most of its
+   right padding to the indent — the Summary cell's own 12 px still separates the two — so /ui-verify measured a twelve-character key whole at depth 1 and a
+   nine-character one (PAY-10018) whole at the cap, where 108 px with the full padding cut every child row's twelve-character key. */
+.jira-issues-row td.jira-issues-key[data-depth='1'], .jira-issues-row td.jira-issues-key[data-depth='2'], .jira-issues-row td.jira-issues-key[data-depth='3'] {
+  padding-right: 4px
+}
+.jira-issues-row td.jira-issues-key[data-depth='1'] { padding-left: 26px }
+.jira-issues-row td.jira-issues-key[data-depth='2'] { padding-left: 40px }
+.jira-issues-row td.jira-issues-key[data-depth='3'] { padding-left: 54px }
 /* The box rounds at 12 px and clips nothing at wide widths, so the last row's hover fill would paint square past it: its corner cells round to the 11 px inside
    the 1 px border. The head's corners too, for a head that ever wears a fill. */
 .jira-issues-row:last-child td:first-child { border-bottom-left-radius: 11px }
@@ -1840,11 +1917,11 @@ button.rail-count { cursor: pointer }
 /* The session's reading is the word AND its age: the age is `flex: none` and only the word ellipsises. `white-space: pre` keeps the space before ` · ` that a flex item would otherwise drop at its line start. */
 .jira-issues-sess { display: flex; min-width: 0 }
 .jira-issues-age { flex: none; white-space: pre }
-/* The cell's second line, drawn only when the session runs on a folded ticket: that ticket's `FoldMark`, and `+N` for the card's other live sessions, which
-   never shrinks — the mark takes the ellipsis. Two lines in this one cell grow its row a little; every other row keeps the 44 px. */
-.jira-issues-stack { display: flex; flex-direction: column; gap: 3px; min-width: 0 }
-.jira-issues-on { display: flex; align-items: center; gap: 4px; min-width: 0 }
+/* `+N` for the key's other live sessions sits after the age and never shrinks — the state's word takes the ellipsis. */
 .jira-issues-more { flex: none; font-size: 11px; color: var(--ink3) }
+/* An off-board header row's Summary when its parent read failed: the line, then the failure sentence under it. Two lines grow that one row a little. */
+.jira-issues-stack { display: flex; flex-direction: column; gap: 3px; min-width: 0 }
+.jira-issues-stack .jira-modal-error { margin: 0; white-space: normal }
 .jira-issues-key a { color: var(--ink2); text-decoration: none }
 .jira-issues-key a:hover { text-decoration: underline }
 .jira-issues-title {
@@ -4165,9 +4242,6 @@ button.rail-count { cursor: pointer }
    it — and no rule of its own beyond the colour, because a marker is a weight
    and an ink and nothing else (§8.3). */
 .ui-marker-untyped { color: var(--amber-ink) }
-/* The Jira card's F1 marker (grouped-board spec §5). `--amber-text`, the amber word set on paper: the card's 2 px `--amber-solid` ring beside it
-   already carries the hue, and bare `--amber` fails daylight contrast as type (test/guards/daylight-contrast.test.ts). */
-.ui-marker-match { color: var(--amber-text) }
 /* Multi-dashboard task 10: `running on <machine>` / `Starting on <machine>`. A place, not a warning — `--ink3`, the same ink as `kind` (§8.3). */
 .ui-marker-machine { color: var(--ink3) }
 
@@ -4644,12 +4718,48 @@ tr.ui-stripe > :first-child { box-shadow: inset 3px 0 0 var(--stripe, transparen
 .ui-stripe-dot[data-tone='red'] { background: var(--red) }
 .ui-stripe-dot[data-tone='grey'] { background: var(--hairline2) }
 
-/* FoldMark — the `↳ <key>` pill (§8.9.1): the deck card names the top its ticket folds under, the List's Session cell the folded ticket its session runs on. It
-   may shrink and ellipsise inside a narrow cell (its `title` holds the whole key); where there is room it is its own width. */
+/* FoldMark — the `↳ <key>` pill (§8.9.1): the deck card names the parent its ticket hangs under, an on-board lane header and the List's
+   header row the header's own parent. It may shrink and ellipsise inside a narrow cell (its `title` holds the whole key); where there is room it is its
+   own width. */
 .ui-fold {
   display: inline-block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   padding: 1px 7px; border-radius: 8px; border: 1px solid var(--hairline2); font-size: 11px; font-weight: 500; color: var(--ink2); background: var(--strip)
 }
+
+/* The Jira issue's marks (§8.9.1, parent-lanes spec §3.2, §3.4) — one look each for the lane card and the on-board lane header, which draw the same issue
+   as a card and as a row. Detail, the List and Mentions still draw the older page-local `.jira-card-type` / `.jira-card-prio` / `.jira-card-av` /
+   `.jira-status-dot` with the same values until they adopt these; the tints below repeat theirs exactly, so the daylight suite measures the same pairs. */
+/* IssueTypeTile — an 18 px radius-5 tile round the type glyph. Bug and story are tinted marks; every other type is the neutral tile. */
+.ui-issue-type { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 5px; background: var(--strip-hi); color: var(--ink2) }
+.ui-issue-type > svg { stroke: currentColor }
+.ui-issue-type[data-tone="bug"] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
+.ui-issue-type[data-tone="story"] { background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)); color: var(--green) }
+/* PriorityPill — 18 px, 11/500. Jira's five names fold to three tones; a custom name is the low look with no glyph. Where it sits is the composer's. */
+.ui-prio {
+  display: inline-flex; align-items: center; gap: 3px; flex: none; height: 18px; padding: 0 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 500; white-space: nowrap; background: var(--strip-hi); color: var(--ink3);
+}
+.ui-prio[data-tone="high"] { background: color-mix(in srgb, var(--red) 12%, var(--strip)); color: var(--red) }
+.ui-prio[data-tone="med"] { background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)); color: var(--amber-ink) }
+/* PersonMark — a 22 px initials disc tinted magenta (never an avatar image: the browser does not talk to Jira) and the name, which ellipsises. Unassigned
+   draws the disc empty and dashed, so the row keeps its shape. */
+.ui-person { display: inline-flex; align-items: center; gap: 6px; min-width: 0 }
+.ui-person-av {
+  display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 999px; box-sizing: border-box;
+  background: color-mix(in srgb, var(--magenta) 14%, var(--strip)); color: var(--magenta); font-size: 11px; font-weight: 600;
+}
+.ui-person-av.none { background: none; border: 1px dashed var(--hairline2) }
+.ui-person-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; color: var(--ink2) }
+/* IssueStatus — the raw status name after a 6 px dot in its category's tone, so the name and the column it sits in agree. */
+.ui-issue-status { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
+.ui-issue-status-dot { flex: none; width: 6px; height: 6px; border-radius: 999px; background: var(--ink3) }
+.ui-issue-status-dot[data-tone="doing"] { background: var(--amber-solid) }
+.ui-issue-status-dot[data-tone="done"] { background: var(--green-solid) }
+/* RepoMark — the branch glyph and the one mapped path's basename (or `N repos`), quiet ink like the worktree chip beside it. */
+.ui-repo { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--ink3) }
+.ui-repo > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* TreeMark — the branch of the ticket's one worktree, or `N worktrees`. Quiet `--ink3`, and it ellipsises first: the Run chip beside it keeps its width. */
+.ui-tree { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink3) }
 
 /* GlyphTile — a glyph on a tinted square. The tint is the dark themes' own surface mixed 12-14 % toward the hue (daylight keeps the -solid mark), and the glyph
    takes the text token of its hue so it clears 4.5:1 over it. Radius steps with the box: 5 / 8 / 9. */

@@ -347,6 +347,12 @@ describe('guard 7 — one home per primitive', () => {
     '.ui-status',
     '.ui-glyph-tile',
     '.ui-fold',
+    '.ui-issue-type',
+    '.ui-prio',
+    '.ui-person',
+    '.ui-issue-status',
+    '.ui-repo',
+    '.ui-tree',
     '.chev'
   ];
 
@@ -540,5 +546,26 @@ describe('guard 9 — the strip’s height and the well’s gap are one token', 
     expect(styles).toMatch(/@media \(max-width: 700px\) \{ \.launch-tiles \{ grid-template-columns: minmax\(0, 1fr\) \} \}/);
     expect(body('.jira-issues-under')).toMatch(/flex:\s*none/);
     expect(body('.jira-issues-age')).toMatch(/flex:\s*none/);
+  });
+
+  /**
+   * The Jira parent-lanes ui-verify fixes (2026-11-18, D1–D5), pinned as rule text for the same reason: the on-board
+   * lane header's right-hand cluster is one wrapping row, not a column that put `Run ▾` on a second line (D1), and under the phone fold it takes its own line
+   * so it cannot squeeze the title (D4); the column header's count sits beside its name (D2); a List header row's Summary line wraps with a floor under the
+   * title, which 116 px of Summary squeezed to 0 (D3); an indented key cell gives its right padding to the indent so a twelve-character key stays whole (D5).
+   */
+  it('keeps the parent-lanes ui-verify geometry fixes', () => {
+    const body = (selector: string): string => styleRules.find((r) => r.selector === selector)?.body ?? '';
+    expect(body('.jira-lane-side')).toMatch(/flex-wrap:\s*wrap/);
+    expect(body('.jira-lane-side')).not.toMatch(/flex-direction:\s*column/);
+    // The second `.jira-lane-side` rule is the one inside the 700 px block (the first is the base rule read above).
+    expect(styleRules.filter((r) => r.selector === '.jira-lane-side')[1]?.body).toMatch(/flex:\s*1 1 100%/);
+    expect(body('.jira-lanes-count')).not.toMatch(/margin-left:\s*auto/);
+    expect(body('.jira-issues-lane .jira-issues-summary .jira-issues-flex')).toMatch(/flex-wrap:\s*wrap/);
+    const floor = '.jira-issues-lane .jira-issues-summary .jira-issues-title, .jira-issues-lane .jira-issues-summary .jira-issues-label';
+    expect(body(floor)).toMatch(/flex:\s*1 1 0;\s*min-width:\s*min\(/);
+    expect(body('.jira-issues-summary .jira-lane-tag')).toMatch(/min-width:\s*0[^}]*text-overflow:\s*ellipsis/);
+    expect(styles).toMatch(/td\.jira-issues-key\[data-depth='3'\] \{\s*padding-right: 4px\s*\}/);
+    expect(styles).toMatch(/thead th:nth-child\(2\) \{ width: 122px \}/);
   });
 });

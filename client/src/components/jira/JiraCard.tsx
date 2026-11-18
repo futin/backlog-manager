@@ -1,83 +1,67 @@
+import type { ReactNode } from 'react';
+
+import { useAction } from '../../hooks/useAction';
 import { useDeliveryIndex } from '../../hooks/useDeliveryIndex';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useNarrow } from '../../hooks/useNarrow';
 import { ticketDelivery } from '../../lib/delivery';
-import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, priorityTone, statusTone, typeTone, type cardFold } from '../../lib/jira';
-import { endedLine } from '../../lib/jira-deck';
-import { openButtons, type SessionLink } from '../../lib/jira-sessions';
-import type { JiraAction, JiraBoard, JiraIssue, JiraWorktree } from '../../../../shared/types';
-import { Glyph } from '../ui/Glyphs';
-import { JiraTypeIcon } from '../ui/JiraTypeIcon';
-import { Marker } from '../ui/Marker';
-import { SpreadBar } from '../ui/SpreadBar';
+import { cardAgeStamp, crumbOf, crumbText, openDesktopJira } from '../../lib/jira';
+import { endedLine, type SessionCell } from '../../lib/jira-deck';
+import { openButtons, stripTitle, type SessionLink } from '../../lib/jira-sessions';
+import { sessionTone } from '../../lib/tones';
+import { pollAge } from '../../lib/tracker';
+import { STATE_LABEL } from '../../../../shared/jira-sessions';
+import type { JiraAction, JiraBoard, JiraIssue, JiraParentRef, JiraWorktree } from '../../../../shared/types';
+import { IssueStatus } from '../ui/IssueStatus';
+import { IssueTypeTile } from '../ui/IssueTypeTile';
+import { PersonMark } from '../ui/PersonMark';
+import { PriorityPill } from '../ui/PriorityPill';
+import { RepoMark } from '../ui/RepoMark';
+import { TreeMark } from '../ui/TreeMark';
 import { JiraRunMenu } from './JiraRunMenu';
 import { MrChip } from './MrChip';
-import { OpenChip } from './SessionOpen';
+import { OpenChip, SessionOpen } from './SessionOpen';
 
 /**
- * JiraCard — one issue on the Jira board (Jira phase 2, spec §6.2; DESIGN.md §8.9.1, which applies §8.3's card to a Jira issue).
+ * JiraCard — one issue in a lane cell of the Jira board (parent-lanes spec §3.4; Jira phase 2, spec §6.2; DESIGN.md §8.9.1, which applies §8.3's card to a
+ * Jira issue).
  *
  * **It is the Board's card, not a second one.** The ground, the radius, the face's padding and gap, the title's 14/500 and the marker row are `.board-card`,
  * `.board-card-face`, `.board-card-title`, `.board-card-foot`, `.board-card-meta` and `.board-card-markers` — composed, never restated — so a density or
- * theme change to the Board's card moves this one with it. What a Jira issue has that a backlog item does not is ONE row: the head (type icon, key, crumb),
- * which is the only family this file adds (`.jira-card-*`), plus the initials disc in the foot. The column already says the status CATEGORY; the pill
- * carries the RAW status name beside a 6 px dot in the column's tone, because `In Review` and `In Progress` are one column and two very different facts to the person reading it.
- * The card's marks (Card mock, spec §4.2): the type is an 18 px tinted tile, the priority a pill pushed right on the head (tone by `priorityTone`; a custom name
- * like `P1` is the grey pill with no glyph, an empty or null one nothing), and the foot's left is the mapped repository — the basename of the one path, or
- * `N repos` with every path in the title — so the marker row, now the foot, is always drawn.
+ * theme change to the Board's card moves this one with it. What a Jira issue has that a backlog item does not — the type tile, the priority pill, the
+ * initials disc, the raw status, the mapped repo and the worktree chip — are `components/ui/` primitives (`IssueTypeTile`, `PriorityPill`, `PersonMark`,
+ * `IssueStatus`, `RepoMark`, `TreeMark`), because an on-board lane header draws the same issue as a row (`JiraLaneHeader`) and the two must not drift.
  *
- * **Everything the card prints comes from `lib/jira.ts`.** The crumb's words (`root`, `↳ PAY-120 Refund flows`, `Assigned to me`) are `crumbText`'s, the
- * initials `initialsOf`'s, the age `cardAgeStamp`'s (a relative `4m` / `2d`, aged against the page's `now` so every card shares one clock), the fold
- * block's line and caption `cardFold`'s — this file holds no copy of any of them (spec §6.1's one-home rule).
+ * **Everything the card prints comes from `lib/`.** The crumb's words are `crumbText`'s, the age `cardAgeStamp`'s (aged against the page's `now` so every
+ * card shares one clock), the ended line `endedLine`'s — this file holds no copy of any of them (spec §6.1's one-home rule).
  *
- * **A card is a TOP issue** (grouped-board spec §3–§4): every on-board descendant folds into it, and `fold` is what the card says about them — the
- * `C children · D below them` line, then `SpreadBar` with its `done · in progress · to do` caption — drawn after the foot and before the marker row,
- * and only when something is folded. The `N subtasks` marker this card used to draw is gone: `JiraIssue.subtasks` counts Jira subtasks on the board or
- * not, and a subtask off the board is not this board's business, so nothing here reads it. The age stays the top's OWN, never the newest under it (that
- * is only the column's sort key, and it is never drawn).
+ * **The crumb never names the parent** (parent-lanes spec §3.4). The lane the card sits in already says it, so `crumbOf`'s `parent` kind draws nothing here;
+ * the precedence — root, then parent, then mine — is unchanged, so a followed root still reads `root` and a parentless issue assigned to me reads
+ * `Assigned to me`, while a card under a parent draws no crumb even when it is mine. Dropping the rung instead would print `Assigned to me` on every card of
+ * a "my tasks" board. `parent` is the parent the lane model KEPT (`JiraLanes.parentOf`), not the raw field, so a link dropped to break a cycle is no parent.
  *
- * **The browser never talks to Jira.** The person is initials on a disc, never Jira's `avatarUrls` — an `<img>` would be a request to Atlassian from every
- * reader's browser, with their cookies. The one link out is the issue's `url` exactly as the SERVER built it, in a new tab with no referrer; the card never
- * composes a Jira URL of its own.
+ * **No fold block and no match ring any more.** A card has no children on the board by definition — an issue with one is a lane header — and filters match
+ * per issue, so nothing is folded under a card for a ring to explain.
  *
- * **The ring answers "why is this here"** (F1, grouped-board spec §5). `matches` holds the keys of folded issues that match the page's filter or search
- * when this top does NOT match on its own; then the card carries a 2 px `--amber-solid` inset ring (`.jira-card-match`) and, first on its marker row, a
- * `match` marker — `1 match: PAY-162`, or `N matches` with the keys in its title. A card that matches on its own needs no answer, so `matches` is empty
- * and neither is drawn; with no filter and no search every top matches itself, so nothing is ever ringed then — no special case. The ring is a page
- * class rather than a `.board-card` variant: it is this board's reading of a filter, not a look the Board's card has.
+ * **A card with a live session stays in its cell** (D7, §3.4). `session` is `sessionCells`' answer for this card's OWN key: with a `lead`, the card wears
+ * the `ui-stripe` leading edge in the state's tone (`data-tone`, plus `data-state` for the reading), a state line — the deck card's `STATE_LABEL · age`,
+ * `+N` for the key's other live sessions — and `SessionOpen` as the deck card mounts it, with the hand-over error under it. An ended cell (`lead` null)
+ * draws none of that: the ended line says it. `Run ▾` stays on a live card and draws what `runChipState` says, untouched.
  *
- * **`Run ▾`, and no live strip any more** (Jira phase 5, spec §6.2, §7; Jira sessions spec §7.1; DESIGN.md §8.9.1). The marker row is ALWAYS drawn — `Run ▾`
- * is its last item, pushed to the right edge (`JiraRunMenu`; it stops the card's click and Enter/Space, as the link out does). A top with a live session on
- * itself or on anything folded under it is not a shelf row at all: its deck card (`JiraAgentDeck`) represents it, so this card never draws the `LiveStrip`
- * it used to, and `lib/jira-deck.ts` is what takes the row off the shelf.
+ * **The browser never talks to Jira.** The person is initials on a disc, never Jira's `avatarUrls`. The one link out is the issue's `url` exactly as the
+ * SERVER built it, in a new tab with no referrer; the card never composes a Jira URL of its own.
  *
- * **The extra line** (Jira sessions spec §7.1). `ended` is the ticket's own ended sessions, newest first; `endedLine` turns them into `run ended 2h ago` with
- * a Reopen link for one, or `N sessions` for several, and a ticket that was never run draws nothing. It sits after the marker row so the face's order is
- * still the card's own, and Reopen stops the card's click and Enter/Space for the reason the link out does.
- *
- * **The worktree chip** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1). `trees` is `ticketWorktrees`' answer for THIS card's own key, computed once by the
- * page from its one `GET /api/jira/worktrees`: the branch name when the ticket has one tree, `N worktrees` when it has several, the paths in the title. A card
- * with none draws nothing — and so does one whose read failed, which is why this is a prop and not a request: the card has no error state to draw. Only the
- * card's own key counts; a folded issue's tree shows in its own modal, as a folded issue's session shows only in the strip's key.
- *
- * **The MR chip** (GitLab connection spec §7.2, mock `Cards.dc.html`). After the worktree chip and before `Run ▾`, `MrChip` draws this card's lead merge
- * request — the TOP's own, or its parent's for a sub-task with none (`ticketDelivery`), never one picked from the issues folded under it (the user's pick: a
- * folded sub-task's MR shows on that sub-task, in Detail) — plus the amber `not merged` chip when the ticket is done and its own MR still open. A ticket with
- * no MR, an unknown one, or one whose project maps no GitLab project draws nothing, and so does every card while GitLab is not shown at all
- * (`useDeliveryIndex` is `null`). The card reads the shell's GitLab answer itself rather than taking a prop, for the reason the worktree chip does not: the
- * answer is one context value, not a per-page request with an error state the card would need told about.
- *
- * The whole card is a `role="button"` that opens the issue (`onOpen`, which the page wires to the issue modal's slot), Enter and Space included, exactly as
- * `ItemCard`; the link out stops both the click and those two keys for the reasons `ItemCard`'s own link spells out at length — without it one click opens
- * Jira AND the modal, and the card's `preventDefault()` on Enter would cancel the anchor's own activation.
+ * The whole card is a `role="button"` that opens the issue (`onOpen`), Enter and Space included, exactly as `ItemCard`; the link out, `Run ▾`, the session's
+ * open control and Reopen each stop both the click and those two keys — without that one press opens Jira AND the modal, and the card's `preventDefault()`
+ * on Enter would cancel the inner control's own activation.
  */
 export function JiraCard({
   issue,
   board,
   me,
   now,
-  fold,
-  matches,
+  parent,
+  session,
   ended,
   trees,
   onOpen,
@@ -87,29 +71,25 @@ export function JiraCard({
   board: JiraBoard;
   me: { accountId: string } | null;
   now: number;
-  fold: ReturnType<typeof cardFold>;
-  matches: readonly string[];
+  parent: JiraParentRef | null;
+  session: SessionCell | null;
   ended: readonly SessionLink[];
   trees: readonly JiraWorktree[];
   onOpen: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
-  const crumb = crumbText(crumbOf(issue, board, me));
-  const match = matchMarker(matches);
+  const kind = crumbOf(issue, board, me, parent);
+  const crumb = kind?.kind === 'parent' ? null : crumbText(kind);
   const open = (): void => onOpen(issue);
-  const last = endedLine(ended, now);
-  const phone = useNarrow();
-  const { data } = useJiraContext();
-  // The foot's repository is the status' own mapping for this project (`runChipState` reads the same field); a non-array is unmapped, as it is there.
-  const mapped: unknown = data?.repos[issue.project.key];
-  const paths = Array.isArray(mapped) ? (mapped as string[]) : [];
-  const prio = priorityTone(issue.priority === '' ? null : issue.priority);
-  const index = useDeliveryIndex();
-  const delivery = index === null ? null : ticketDelivery(issue, index);
+  const lead = session?.lead ?? null;
+  const tone = lead === null ? undefined : sessionTone(lead.state);
 
   return (
     <div
-      className={match === null ? 'board-card' : 'board-card jira-card-match'}
+      className={lead === null ? 'board-card' : 'board-card ui-stripe'}
+      data-tone={tone}
+      data-state={lead?.state}
+      data-key={issue.key}
       role="button"
       tabIndex={0}
       onClick={open}
@@ -121,100 +101,172 @@ export function JiraCard({
       }}
     >
       <div className="board-card-face">
+        {session !== null && lead !== null && <SessionStateLine cell={session} now={now} />}
         <div className="jira-card-head">
-          {/* The type is the icon's title rather than a word on the row: the key and the crumb need the width, and the type is the reading a person
-              hovers for, not the one they scan by. */}
-          <span className="jira-card-type" data-tone={typeTone(issue.type)} title={issue.type.name}>
-            <JiraTypeIcon type={issue.type} />
-          </span>
+          <IssueTypeTile type={issue.type} />
           <span className="jira-card-key">{issue.key}</span>
           {crumb !== null && <span className="jira-card-crumb">{crumb}</span>}
-          {issue.priority !== null && prio !== null && (
-            <span className="jira-card-prio" data-tone={prio} title={`priority ${issue.priority}`}>
-              {prio !== 'other' && <Glyph name={prio === 'high' ? 'up' : prio === 'med' ? 'equals' : 'down'} size={10} />}
-              {issue.priority}
+          {/* The slot is page-owned so the push right lives on a page class (guard 7 keeps page rules off `ui-*`), and it is drawn only when the pill is —
+              PriorityPill draws nothing for a null or empty name, and an empty slot would still be the head's last child. */}
+          {issue.priority !== null && issue.priority !== '' && (
+            <span className="jira-card-prio-slot">
+              <PriorityPill priority={issue.priority} />
             </span>
           )}
         </div>
         <div className="board-card-title">{issue.summary}</div>
         <div className="board-card-foot">
-          <span className="jira-card-who">
-            {/* Initials only (never an avatar image — see the header); an unassigned issue draws the empty disc, so the row does not shift by a disc's
-                width between one card and the next. */}
-            <span className={issue.assignee === null ? 'jira-card-av none' : 'jira-card-av'} aria-hidden="true">
-              {issue.assignee === null ? '' : initialsOf(issue.assignee.name)}
-            </span>
-            <span className="jira-card-name">{issue.assignee === null ? 'unassigned' : issue.assignee.name}</span>
-          </span>
-          <span className="jira-card-status">
-            <span className="jira-status-dot" data-tone={statusTone(issue.status.category)} aria-hidden="true" />
-            {issue.status.name}
-          </span>
+          <PersonMark name={issue.assignee?.name ?? null} />
+          <IssueStatus status={issue.status} />
           <span className="board-card-meta">{cardAgeStamp(issue, now)}</span>
-          <a
-            className="board-card-link"
-            href={issue.url}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`open ${issue.key} in Jira`}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
-            }}
-          >
-            ↗
-          </a>
+          <IssueLinkOut issueKey={issue.key} url={issue.url} />
         </div>
-        {fold !== null && (
-          <div className="jira-card-fold">
-            <div className="jira-card-fold-line">{fold.line}</div>
-            <SpreadBar done={fold.progress.done} doing={fold.progress.doing} todo={fold.progress.todo} caption={fold.caption} />
-          </div>
-        )}
         <div className="board-card-markers" data-testid="marker-row">
-          {paths.length > 0 && (
-            <span className="jira-card-repo" title={paths.join('\n')}>
-              <Glyph name="branch" size={14} />
-              <span>{paths.length === 1 ? (paths[0].replace(/\/+$/, '').split('/').pop() ?? paths[0]) : `${paths.length} repos`}</span>
-            </span>
-          )}
-          {match !== null && (
-            <Marker tone="match" title={match.title}>
-              {match.word}
-            </Marker>
-          )}
-          {trees.length > 0 && (
-            <span className="jira-card-tree" title={trees.map((t) => t.path).join('\n')}>
-              {trees.length === 1 ? (trees[0].branch ?? '') : `${trees.length} worktrees`}
-            </span>
-          )}
-          {delivery !== null && <MrChip delivery={delivery} now={now} />}
-          <JiraRunMenu issue={issue} onPick={onRun} />
+          <IssueMarks issue={issue} trees={trees} now={now} onRun={onRun} />
         </div>
-        {last !== null && (
-          <div className="jira-card-ended" data-testid="ended-line">
-            <span>{last.text}</span>
-            {last.reopen !== null && last.reopen.sessionId !== null && (
-              // Stops the click and the two keys the card answers to, so Reopen opens the session and never Detail on top of it.
-              <span
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
-                }}
-              >
-                <OpenChip
-                  button={openButtons(last.reopen, null, 'ended', { phone, wide: false }).primary}
-                  sessionId={last.reopen.sessionId}
-                  row={null}
-                  launch={last.reopen.surface}
-                  primary={false}
-                  onHandover={() => {}}
-                />
-              </span>
-            )}
-          </div>
-        )}
+        {lead !== null && <SessionControl cell={session as SessionCell} />}
+        <EndedLine ended={ended} now={now} />
       </div>
+    </div>
+  );
+}
+
+/** Stops a press from reaching the card (or header) round it, so an inner control never also opens Detail. */
+function Contained({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <span
+      className={className}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** The `↗` link out — the server's `url` for an on-board issue, or the one an off-board header composes from the site. */
+export function IssueLinkOut({ issueKey, url }: { issueKey: string; url: string }) {
+  return (
+    <a
+      className="board-card-link"
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={`open ${issueKey} in Jira`}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+      }}
+    >
+      ↗
+    </a>
+  );
+}
+
+/**
+ * The issue's marks and its one action, in the order the card's marker row draws them: the mapped repo (the status' own mapping for the project, which
+ * `runChipState` reads too — a non-array is unmapped there and here), the worktree chip, the lead MR (`ticketDelivery`, read from the shell's GitLab
+ * answer, `null` while GitLab is not shown), and `Run ▾` last. The card and an on-board lane header both mount this, so the two cannot disagree about
+ * what an issue carries; `Run ▾` is never hidden on either.
+ */
+export function IssueMarks({
+  issue,
+  trees,
+  now,
+  onRun
+}: {
+  issue: JiraIssue;
+  trees: readonly JiraWorktree[];
+  now: number;
+  onRun: (issue: JiraIssue, action: JiraAction) => void;
+}) {
+  const { data } = useJiraContext();
+  const mapped: unknown = data?.repos[issue.project.key];
+  const paths = Array.isArray(mapped) ? (mapped as string[]) : [];
+  const index = useDeliveryIndex();
+  const delivery = index === null ? null : ticketDelivery(issue, index);
+  return (
+    <>
+      <RepoMark paths={paths} />
+      <TreeMark trees={trees} />
+      {delivery !== null && <MrChip delivery={delivery} now={now} />}
+      <JiraRunMenu issue={issue} onPick={onRun} />
+    </>
+  );
+}
+
+/** A live session's state line — the deck card's words (`STATE_LABEL · age`) with its dot, plus `+N` for the key's other live sessions. */
+export function SessionStateLine({ cell, now }: { cell: SessionCell; now: number }) {
+  const age = pollAge(cell.since, now);
+  const words = age === null ? STATE_LABEL[cell.state] : `${STATE_LABEL[cell.state]} · ${age}`;
+  return (
+    <div className="jira-card-live" data-testid="session-line" title={stripTitle(cell.state)}>
+      <i className="ui-stripe-dot" data-tone={sessionTone(cell.state)} aria-hidden="true" />
+      <span>{words}</span>
+      {cell.more > 0 && <span className="jira-card-live-more">{`+${cell.more}`}</span>}
+    </div>
+  );
+}
+
+/**
+ * The lead session's open control, mounted exactly as the deck card mounts it (`openButtons`' narrow reading, the hand-over through `useAction` with its
+ * error under it). A reservation (`starting`) has no link yet and so no control — the state line still says it.
+ */
+export function SessionControl({ cell }: { cell: SessionCell }) {
+  const phone = useNarrow();
+  const handover = useAction();
+  const lead = cell.lead;
+  const link = lead?.link ?? null;
+  const sessionId = link?.sessionId ?? null;
+  if (lead === null || link === null || sessionId === null) return null;
+  const row = link.row ?? null;
+  return (
+    <>
+      <Contained className="jira-card-open">
+        <SessionOpen
+          issueKey={lead.issue.key}
+          sessionId={sessionId}
+          row={row}
+          launch={link.surface ?? null}
+          state={lead.state}
+          buttons={openButtons(link, row, lead.state, { phone, wide: false })}
+          onHandover={(id) => handover.run(() => openDesktopJira(id))}
+        />
+      </Contained>
+      {handover.error !== null && (
+        <p className="jira-modal-error" role="alert">
+          {handover.error}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * The extra line (Jira sessions spec §7.1): the ticket's OWN ended sessions, newest first — `run ended 2h ago` with a Reopen for one, `N sessions` for
+ * several, nothing for a ticket never run. Reopen stops the click and the two keys for the reason the link out does.
+ */
+export function EndedLine({ ended, now }: { ended: readonly SessionLink[]; now: number }) {
+  const phone = useNarrow();
+  const last = endedLine(ended, now);
+  if (last === null) return null;
+  return (
+    <div className="jira-card-ended" data-testid="ended-line">
+      <span>{last.text}</span>
+      {last.reopen !== null && last.reopen.sessionId !== null && (
+        <Contained>
+          <OpenChip
+            button={openButtons(last.reopen, null, 'ended', { phone, wide: false }).primary}
+            sessionId={last.reopen.sessionId}
+            row={null}
+            launch={last.reopen.surface}
+            primary={false}
+            onHandover={() => {}}
+          />
+        </Contained>
+      )}
     </div>
   );
 }

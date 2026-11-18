@@ -246,7 +246,7 @@ describe('SessionOpen cleanup (#478)', () => {
     expect(sessionOpen).not.toMatch(/from '\.\/JiraSessionCard'/);
     expect(sessionOpen).toMatch(/export function OpenChip\(/);
     expect(read('JiraSessionCard.tsx')).not.toMatch(/function OpenChip\(/);
-    expect(read('JiraCard.tsx')).toMatch(/import \{ OpenChip \} from '\.\/SessionOpen'/);
+    expect(read('JiraCard.tsx')).toMatch(/import \{ OpenChip, SessionOpen \} from '\.\/SessionOpen'/);
     // One Confirm in the file, inside StopConfirm: the two copies cannot drift apart again.
     expect(sessionOpen.match(/<Confirm\b/g)).toHaveLength(1);
     expect(sessionOpen.match(/jira-stop-confirm/g)).toHaveLength(1);

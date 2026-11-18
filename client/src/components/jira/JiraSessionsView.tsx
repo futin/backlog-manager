@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useNow } from '../../hooks/useNow';
 import { usePickedJiraBoard } from '../../hooks/usePickedJiraBoard';
-import type { JiraChildrenIndex } from '../../lib/jira';
+import { laneParents, type JiraChildrenIndex } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
 import type { JiraAction, JiraIssue } from '../../../../shared/types';
 import { Band } from '../ui/Band';
@@ -17,7 +17,7 @@ import { JiraSessionList } from './JiraSessionList';
  * `SessionTable.dc.html` for the table, which is `JiraSessionList` as it was on the Board's List view, unrestyled).
  *
  * **It loads the picked board exactly as the Board page does** — `usePickedJiraBoard`, the one stored pick under `JIRA_BOARD_KEY` (C4) and the same `nudge` — because
- * `JiraSessionList` scopes its rows and stubs the off-board ones from the board's loaded `issues` and the fold's `childrenOf`. A pick made here is the Board
+ * `JiraSessionList` scopes its rows and stubs the off-board ones from the board's loaded `issues` and the lanes' `childrenOf`. A pick made here is the Board
  * page's pick, and a write landed in Detail re-reads this list at once, as it does there. It starts no poll: the sessions are `useJiraSessionsContext`'s one answer.
  *
  * **The List's bar is drawn in every state** (C8). Whatever the board is doing, `JiraSessionList` always mounts and is handed `unavailable` — the Board page's
@@ -40,7 +40,7 @@ export function JiraSessionsView({
   nudge: number;
 }) {
   const { data } = useJiraContext();
-  const { boards, board, unreadable, pick, list, fold, loaded, shown } = usePickedJiraBoard(nudge);
+  const { boards, board, unreadable, pick, list, lanes, loaded, shown } = usePickedJiraBoard(nudge);
   const now = useNow(true);
   const [search, setSearch] = useState('');
 
@@ -71,7 +71,7 @@ export function JiraSessionsView({
       // The board's name leads (spec: the sub "names the picked board") — Sessions' title is the page's, not the board's, as it is on the Board page.
       <>
         <span className="jira-band-sub">{shown.name} · </span>
-        <JiraBandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />
+        <JiraBandSub board={shown} site={data?.site ?? ''} counts={loaded ? { issues: list.issues.length, parents: laneParents(lanes) } : null} />
         {!loaded &&
           (list.loading ? ' · loading…' : <span className="jira-band-sub failing"> · board unavailable</span>)}
       </>
@@ -94,7 +94,7 @@ export function JiraSessionsView({
         issues={loaded ? list.issues : []}
         search={search}
         now={now}
-        childrenOf={fold.childrenOf}
+        childrenOf={lanes.childrenOf}
         onOpenIssue={onOpenIssue}
         onRun={onRun}
         unavailable={unavailable}

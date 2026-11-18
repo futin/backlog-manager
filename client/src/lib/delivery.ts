@@ -255,21 +255,21 @@ function isFailing(mr: GitlabMr): boolean {
 }
 
 /**
- * The Board band's GitLab line (spec §7.2): `GitLab: 3 open · 1 failing · 1 merged · polled 2 m ago`, over the TOPS on the board, each top's lead MR as
- * `ticketDelivery` resolves it — inherited ones included, and never a second derivation of its own, so the band cannot count an MR the card does not show.
- * Each distinct MR counts once however many tops lead with it (an MR carrying two keys). `failing` is a subset of `open`, drafts count in `open` only, and
- * closed MRs are not counted. A zero part is omitted; all three zero reads `no merge requests`.
+ * The Board band's GitLab line (spec §7.2): `GitLab: 3 open · 1 failing · 1 merged · polled 2 m ago`, over the issues that match the board's filters, each
+ * issue's lead MR as `ticketDelivery` resolves it — inherited ones included, and never a second derivation of its own, so the band cannot count an MR the card
+ * does not show. Each distinct MR counts once however many issues lead with it (an MR carrying two keys). `failing` is a subset of `open`, drafts count in
+ * `open` only, and closed MRs are not counted. A zero part is omitted; all three zero reads `no merge requests`.
  *
- * The age is the OLDEST `polledAt` among the projects the tops map, so the line never claims fresher data than its stalest part; while any of them has
- * never been read the line reads `GitLab: not read yet` instead. `null` when no top draws delivery — the band then has no GitLab line at all.
+ * The age is the OLDEST `polledAt` among the projects those issues map, so the line never claims fresher data than its stalest part; while any of them has
+ * never been read the line reads `GitLab: not read yet` instead. `null` when no matching issue draws delivery — the band then has no GitLab line at all.
  */
-export function bandTotals(tops: readonly JiraIssue[], index: DeliveryIndex, now: number): string | null {
+export function bandTotals(issues: readonly JiraIssue[], index: DeliveryIndex, now: number): string | null {
   const projects = new Map<string, GitlabProjectView>();
   const leads = new Map<string, GitlabMr>();
-  for (const top of tops) {
-    const d = ticketDelivery(top, index);
+  for (const issue of issues) {
+    const d = ticketDelivery(issue, index);
     if (d.kind === 'hidden') continue;
-    for (const v of index.jiraProjects[top.project.key] ?? []) projects.set(v.path, v);
+    for (const v of index.jiraProjects[issue.project.key] ?? []) projects.set(v.path, v);
     if (d.kind === 'mrs') leads.set(`${d.lead.project}!${d.lead.iid}`, d.lead);
   }
   if (projects.size === 0) return null;

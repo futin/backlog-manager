@@ -1,6 +1,6 @@
 /**
- * jira-view.ts — which of the Board page's two views (`board`, the agent deck over the status shelves, or `list`, one row per board card — the issue table) this browser last had
- * open (Jira sessions spec §7, C1; DESIGN.md §8.9.1).
+ * jira-view.ts — which of the Board page's two views (`board`, the agent deck over the parent lanes, or `list`, the same lanes as rows of the issue table)
+ * this browser last had open (Jira sessions spec §7, C1; DESIGN.md §8.9.1).
  *
  * The key, the member list and the guard, and nothing that touches React — `lib/jira-page.ts`'s split, for its reason: the guard can be tested without
  * rendering a page, and `hooks/useJiraView.ts` is the one binding over it. It is NOT another `JIRA_PAGES` entry: the rail's Jira tree is `Board` / `Sessions` / `Mentions` / `Setup`
