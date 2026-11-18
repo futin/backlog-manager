@@ -68,11 +68,11 @@ a plan bug becomes a branch bug). Disagree with the plan where the code says oth
   - Entities and escapes: `'a &amp; b &lt; &#169; &#x41; &hellip; \\*'` → text `a & b < © A &hellip; *`.
   - Fallbacks: `'- # h'` → list item's paragraph `h` with `strong`; `'> # h'` → blockquote paragraph `h` with `strong`; `'- [ ] todo'` → list item text
     `[ ] todo`; raw HTML `'<b>x</b>'` → its source text in a paragraph; an image `'![alt](/a.png)'` → its source text.
-  - Remaining table rows: `'__s__ *e*'` → `s`+strong, `e`+em; `'    code'` (indented) → `codeBlock` with no `language`; `'[m](mailto:a@b.io)'` → link
+  - Remaining table rows: `'__s__ *e*'` → `s`+strong, `e`+em; `'a\n\n    code'` (indented) → `paragraph[a]`, `codeBlock` with no `language`; `'[m](mailto:a@b.io)'` → link
     mark kept; `'[t](https://x.io "T")'` → link mark `{href:'https://x.io'}`, no title; `'&gt; &quot; &#39;'` → text `> " '`; `` '```\n```' `` →
     `codeBlock` with no content.
-  - Containers: `'- a\n\n  ---'` → the list item holds `paragraph[a]`, `paragraph[---]`; `'> | a |\n> | - |\n> | b |'` → blockquote paragraphs `a`, `b`
-    (one per row, cells joined ` | `); `'- ```\n  x\n  ```'` → list item's first child an empty `paragraph`, then `codeBlock`.
+  - Containers: `'- a\n\n  ---'` → the list item holds `paragraph[a]`, `paragraph[---]`; `'> | a | b |\n> | - | - |\n> | c | d |'` → blockquote
+    paragraphs `a | b`, `c | d` (one per row, cells joined ` | `); `'- ```\n  x\n  ```'` → list item's first child an empty `paragraph`, then `codeBlock`.
   - Prose that only looks like Markdown (Review Focus 2): `'snake_case_name and 2 * 3 * 4'` → one paragraph, one plain text node after the mention;
     `'#123 is fixed'` → paragraph text `#123 is fixed`; `'1) first'` → `orderedList` (CommonMark marker — the preview renders the same list, which is
     the contract: post what the preview shows).
@@ -214,7 +214,7 @@ a plan bug becomes a branch bug). Disagree with the plan where the code says oth
   Reply editor), light theme (`daylight`), with fixture data from `page.route` on `**/api/jira/mentions*` and `**/api/jira/thread*` carrying an open
   mention with a ~7900-character Markdown draft (headings, lists, a table). Shoot: the draft box (does the action bar wrap with four chips?), the editor
   at 1440 × 900 and at 699 × 900, the editor at `fontScale` 80 and 130. Assert `scrollWidth <= clientWidth` on the editor, both columns and the document;
-  at 1440 assert each column's `scrollHeight > clientHeight` (each scrolls on its own) and the foot's bounding box lies inside the viewport.
+  at 1440 assert `scrollHeight > clientHeight` on the Write `textarea` and on the Preview column (each scrolls on its own) and the foot's bounding box lies inside the viewport.
 - [ ] **Step 2:** Fix any defect, re-run the affected shots, commit.
 
 ---
