@@ -43,6 +43,15 @@ import {
   foldBoard,
   laneBoard,
   NO_PARENT_LANE,
+  laneViews,
+  laneColumnCounts,
+  laneParents,
+  laneCell,
+  LANE_CELL_LIMIT,
+  clampLaneFolds,
+  laneOverrides,
+  laneOpen,
+  setLaneFold,
   foldMatches,
   foldProgress,
   matchMarker,
@@ -80,7 +89,7 @@ import {
   typeTone,
   statusTone
 } from '../../client/src/lib/jira';
-import type { JiraFold, JiraLane, JiraLanes } from '../../client/src/lib/jira';
+import type { JiraFold, JiraLane, JiraLanes, JiraLaneFolds, JiraLaneView } from '../../client/src/lib/jira';
 import { DELIVERY_FILTER_LABELS, effectiveDeliveryFilter } from '../../client/src/lib/delivery';
 import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../../client/src/lib/jira';
 import { modelEffortFlags } from '../../client/src/lib/agents';
@@ -2433,5 +2442,203 @@ describe('dispatchReply', () => {
       permissionMode: 'acceptEdits',
       remoteControl: true
     });
+  });
+});
+
+describe('lane views', () => {
+  const now = Date.now();
+  const todo = { status: { name: 'To Do', category: 'new' as const } };
+  const doing = { status: { name: 'In Progress', category: 'indeterminate' as const } };
+  const done = { status: { name: 'Done', category: 'done' as const } };
+  const n = (key: string, parent: string | null, ms: number, over: Partial<JiraIssue> = {}): JiraIssue =>
+    issue({
+      key,
+      summary: `${key} summary`,
+      parent: parent === null ? null : { key: parent, summary: `${parent} summary`, type: null, status: null },
+      updated: ago(now, ms),
+      ...todo,
+      ...over
+    });
+  const only = (...ks: string[]) => (i: JiraIssue): boolean => ks.includes(i.key);
+  const sum = (p: { done: number; doing: number; todo: number }): number => p.done + p.doing + p.todo;
+  const nesting = (): JiraIssue[] => [
+    n('PAY-40', null, 6 * HOUR),
+    n('PAY-41', 'PAY-40', 5 * HOUR),
+    n('PAY-42', 'PAY-41', 1 * HOUR),
+    n('PAY-43', 'PAY-41', 2 * HOUR),
+    n('PAY-44', 'PAY-40', 3 * HOUR)
+  ];
+  const off = (): JiraIssue[] => [n('PAY-11', 'PAY-1', 3 * HOUR), n('PAY-12', 'PAY-1', 1 * HOUR), n('PAY-13', 'PAY-1', 2 * HOUR), n('PAY-20', null, 4 * HOUR)];
+
+  it('keeps only the matching cards of a lane and counts them', () => {
+    const v = laneViews(laneBoard(off()), only('PAY-13'));
+    const lane = v.find((x) => x.lane.key === 'PAY-1')!;
+    expect(lane.cards.map((i) => i.key)).toEqual(['PAY-13']);
+    expect(lane.count).toBe(1);
+    expect(sum(lane.progress)).toBe(1);
+    expect(lane.headerMatches).toBe(false);
+  });
+
+  it('draws no view for a lane nothing in matches', () => {
+    expect(laneViews(laneBoard(off()), () => false)).toEqual([]);
+    expect(laneViews(laneBoard(off()), only('PAY-20')).map((x) => x.lane.key)).toEqual([NO_PARENT_LANE]);
+  });
+
+  it('draws a lane for a matching on-board header alone, with empty cells and count 0', () => {
+    const board = laneBoard([n('PAY-30', null, 5 * HOUR), n('PAY-31', 'PAY-30', 1 * HOUR), n('PAY-32', 'PAY-30', 2 * HOUR)]);
+    const v = laneViews(board, only('PAY-30'));
+    expect(v).toHaveLength(1);
+    expect(v[0].headerMatches).toBe(true);
+    expect(v[0].cards).toEqual([]);
+    expect(v[0].count).toBe(0);
+  });
+
+  it('keeps the ancestors of a nested lane drawn when only the nested header matches', () => {
+    const v = laneViews(laneBoard(nesting()), only('PAY-41'));
+    expect(v).toHaveLength(1);
+    expect(v[0].lane.key).toBe('PAY-40');
+    expect(v[0].headerMatches).toBe(false);
+    expect(v[0].cards).toEqual([]);
+    expect(v[0].count).toBe(1);
+    expect(v[0].lanes).toHaveLength(1);
+    expect(v[0].lanes[0].lane.key).toBe('PAY-41');
+    expect(v[0].lanes[0].headerMatches).toBe(true);
+    expect(v[0].lanes[0].count).toBe(0);
+  });
+
+  it('counts nested headers in the parent lane, and the own header in neither', () => {
+    const v = laneViews(laneBoard(nesting()), () => true);
+    expect(v[0].count).toBe(4);
+    expect(v[0].lanes[0].count).toBe(2);
+    expect(sum(v[0].progress)).toBe(4);
+    expect(sum(v[0].lanes[0].progress)).toBe(2);
+  });
+
+  it('keeps the lanes’ own order', () => {
+    const board = laneBoard(off());
+    expect(laneViews(board, () => true).map((x) => x.lane.key)).toEqual(board.lanes.map((l) => l.key));
+  });
+
+  it('never mutates a lane or its stub', () => {
+    const board = laneBoard(off());
+    const before = JSON.stringify(board.lanes);
+    laneViews(board, only('PAY-13'));
+    expect(JSON.stringify(board.lanes)).toBe(before);
+  });
+
+  describe('laneColumnCounts', () => {
+    const issues = (): JiraIssue[] => [
+      n('PAY-40', null, 6 * HOUR, doing),
+      n('PAY-41', 'PAY-40', 5 * HOUR, doing),
+      n('PAY-42', 'PAY-41', 1 * HOUR, done),
+      n('PAY-43', 'PAY-41', 2 * HOUR),
+      n('PAY-44', 'PAY-40', 3 * HOUR)
+    ];
+    it('counts matching cards per column at every depth, headers in none', () => {
+      expect(laneColumnCounts(laneViews(laneBoard(issues()), () => true))).toEqual({ todo: 2, doing: 0, done: 1 });
+    });
+    it('follows the predicate', () => {
+      expect(laneColumnCounts(laneViews(laneBoard(issues()), (i) => i.key !== 'PAY-43'))).toEqual({ todo: 1, doing: 0, done: 1 });
+    });
+  });
+
+  describe('laneParents', () => {
+    it('counts lanes that are not No parent, every depth', () => {
+      expect(laneParents(laneBoard(nesting()))).toBe(2);
+      expect(laneParents(laneBoard(off()))).toBe(1);
+      expect(laneParents(laneBoard([n('PAY-71', 'PAY-72', HOUR), n('PAY-72', 'PAY-71', 2 * HOUR)]))).toBe(0);
+    });
+  });
+});
+
+describe('laneCell', () => {
+  const cards = (k: number): JiraIssue[] => Array.from({ length: k }, (_, i) => issue({ key: `PAY-${i + 1}` }));
+  const keysOf = (l: JiraIssue[]): string[] => l.map((i) => i.key);
+  const live = (...ks: string[]) => (k: string): boolean => ks.includes(k);
+
+  it('cuts at five when closed', () => {
+    expect(LANE_CELL_LIMIT).toBe(5);
+    const r = laneCell(cards(7), live(), false);
+    expect(keysOf(r.shown)).toEqual(['PAY-1', 'PAY-2', 'PAY-3', 'PAY-4', 'PAY-5']);
+    expect(r.hidden).toBe(2);
+  });
+  it('keeps a live card past the fifth, in order', () => {
+    const r = laneCell(cards(7), live('PAY-7'), false);
+    expect(keysOf(r.shown)).toEqual(['PAY-1', 'PAY-2', 'PAY-3', 'PAY-4', 'PAY-5', 'PAY-7']);
+    expect(r.hidden).toBe(1);
+  });
+  it('shows everything when open', () => {
+    const r = laneCell(cards(7), live(), true);
+    expect(r.shown).toHaveLength(7);
+    expect(r.hidden).toBe(0);
+  });
+  it('hides nothing at five, or at six with the sixth live', () => {
+    expect(laneCell(cards(5), live(), false).hidden).toBe(0);
+    const r = laneCell(cards(6), live('PAY-6'), false);
+    expect(r.shown).toHaveLength(6);
+    expect(r.hidden).toBe(0);
+  });
+});
+
+describe('lane folds', () => {
+  const none = (v: unknown, id: string): boolean => Object.keys(laneOverrides(clampLaneFolds(v), id)).length === 0;
+  const lane = (key: string, lanes: JiraLane[] = []): JiraLane =>
+    ({ key, kind: key === 'none' ? 'none' : 'off', header: null, stub: null, cards: [], lanes, depth: 0, subtree: [], settled: false, stamp: 0 }) as JiraLane;
+  const boardOf = (lanes: JiraLane[]): JiraLanes => ({ lanes, childrenOf: new Map(), parentOf: new Map() });
+
+  it('clamps a value that is not an object of board entries to no overrides', () => {
+    for (const v of [null, 'x', 42, [], [{ 'PAY-1': 'closed' }]]) expect(none(v, 'b1')).toBe(true);
+  });
+  it('drops a bad board entry and a bad lane value alone', () => {
+    const f = clampLaneFolds({ b1: { 'PAY-1': 'closed', 'PAY-2': 'junk' }, b2: 'nope', b3: ['open'], b4: null });
+    expect(laneOverrides(f, 'b1')).toEqual({ 'PAY-1': 'closed' });
+    for (const id of ['b2', 'b3', 'b4']) expect(laneOverrides(f, id)).toEqual({});
+  });
+
+  it('reads prototype names as absent', () => {
+    const f = clampLaneFolds(JSON.parse('{"b1":{"PAY-1":"closed"}}'));
+    for (const id of ['constructor', '__proto__', 'toString']) expect(laneOverrides(f, id)).toEqual({});
+  });
+  it('stores a board named like a prototype member and survives a JSON round trip', () => {
+    const board = boardOf([lane('PAY-1')]);
+    for (const id of ['constructor', '__proto__']) {
+      const start = clampLaneFolds(JSON.parse('{"b1":{"PAY-1":"open"}}'));
+      const r = setLaneFold(start, id, board, 'PAY-1', false);
+      expect(laneOverrides(r, id)).toEqual({ 'PAY-1': 'closed' });
+      expect(laneOverrides(r, 'b1')).toEqual({ 'PAY-1': 'open' });
+      const back = clampLaneFolds(JSON.parse(JSON.stringify(r)));
+      expect(Object.keys(back).sort()).toEqual([id, 'b1'].sort());
+      expect(laneOverrides(back, id)).toEqual({ 'PAY-1': 'closed' });
+    }
+  });
+  it('reads a __proto__ board from storage without touching Object.prototype', () => {
+    const f = clampLaneFolds(JSON.parse('{"__proto__":{"PAY-1":"closed"},"b1":{"PAY-1":"open"}}'));
+    expect(laneOverrides(f, '__proto__')).toEqual({ 'PAY-1': 'closed' });
+    expect(laneOverrides(f, 'b1')).toEqual({ 'PAY-1': 'open' });
+    expect((({}) as Record<string, unknown>)['PAY-1']).toBeUndefined();
+  });
+
+  it('opens a lane by override, else by whether it is settled', () => {
+    const settled = { ...lane('PAY-1'), settled: true };
+    const open = lane('PAY-2');
+    expect(laneOpen(settled, {})).toBe(false);
+    expect(laneOpen(open, {})).toBe(true);
+    expect(laneOpen(settled, { 'PAY-1': 'open' })).toBe(true);
+    expect(laneOpen(open, { 'PAY-2': 'closed' })).toBe(false);
+    expect(laneOpen(open, JSON.parse('{"constructor":"closed"}'))).toBe(true);
+  });
+
+  it('writes a toggle, prunes stale lanes at any depth, leaves other boards and the input alone', () => {
+    const folds: JiraLaneFolds = { b1: { 'PAY-9': 'closed', 'PAY-1': 'open', 'PAY-2': 'closed' }, b2: { 'PAY-9': 'closed' } };
+    const snapshot = JSON.stringify(folds);
+    const board = boardOf([lane('PAY-1', [lane('PAY-2')]), lane('none')]);
+    const r = setLaneFold(folds, 'b1', board, 'none', false);
+    expect(laneOverrides(r, 'b1')).toEqual({ 'PAY-1': 'open', 'PAY-2': 'closed', none: 'closed' });
+    expect(laneOverrides(r, 'b2')).toEqual({ 'PAY-9': 'closed' });
+    expect(JSON.stringify(folds)).toBe(snapshot);
+  });
+  it('stores a toggle equal to the default', () => {
+    const r = setLaneFold({}, 'b1', boardOf([lane('PAY-1')]), 'PAY-1', true);
+    expect(laneOverrides(r, 'b1')).toEqual({ 'PAY-1': 'open' });
   });
 });

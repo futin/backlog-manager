@@ -573,6 +573,141 @@ const sortLanes = (lanes: readonly JiraLane[]): JiraLane[] =>
       compareKeys(a.key, b.key)
   );
 
+// ── Lane views, cells and folds ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One lane as drawn under the filters (parent-lanes spec §6.2). Matching is per issue and nothing rolls up: `cards` are the lane's own cards that match,
+ * `count` and `progress` are read off the matching issues of the lane's `subtree` — nested headers included, this lane's own header not, since the header is
+ * what the lane is about and not something under it — so the number and the bar beside it always agree. `headerMatches` is false for an off-board and a
+ * `No parent` lane, which have no header issue.
+ */
+export interface JiraLaneView {
+  lane: JiraLane;
+  headerMatches: boolean;
+  cards: readonly JiraIssue[];
+  lanes: readonly JiraLaneView[];
+  count: number;
+  progress: JiraProgress;
+}
+
+/**
+ * The lanes a filter leaves (§6.2): a lane is drawn when any issue in its subtree matches or its own on-board header does. A nested header sits in its
+ * parent lane's subtree, so a drawn nested lane always has its ancestors drawn above it. Pure, never mutates a lane, and keeps the lanes' own order.
+ */
+export function laneViews(board: JiraLanes, matches: (issue: JiraIssue) => boolean): JiraLaneView[] {
+  const view = (lane: JiraLane): JiraLaneView | null => {
+    const headerMatches = lane.header !== null && matches(lane.header);
+    const hits = lane.subtree.filter(matches);
+    if (hits.length === 0 && !headerMatches) return null;
+    return {
+      lane,
+      headerMatches,
+      cards: lane.cards.filter(matches),
+      lanes: lane.lanes.map(view).filter((v): v is JiraLaneView => v !== null),
+      count: hits.length,
+      progress: foldProgress(hits)
+    };
+  };
+  return board.lanes.map(view).filter((v): v is JiraLaneView => v !== null);
+}
+
+/** Matching cards per column across every drawn lane at every depth — a header is a lane's heading, in no column (§3.1). */
+export function laneColumnCounts(views: readonly JiraLaneView[]): Record<JiraColumnSlug, number> {
+  const counts: Record<JiraColumnSlug, number> = { todo: 0, doing: 0, done: 0 };
+  const walk = (vs: readonly JiraLaneView[]): void => {
+    for (const v of vs) {
+      for (const c of v.cards) counts[columnOf(c)] += 1;
+      walk(v.lanes);
+    }
+  };
+  walk(views);
+  return counts;
+}
+
+/** Lanes with a parent behind them — every kind but `No parent`, at every depth, unfiltered (the `M parents` count, §3.1). */
+export function laneParents(board: JiraLanes): number {
+  const walk = (lanes: readonly JiraLane[]): number => lanes.reduce((n, l) => n + (l.kind === 'none' ? 0 : 1) + walk(l.lanes), 0);
+  return walk(board.lanes);
+}
+
+/** A cell shows this many cards before its `+ N more` chip (§3.3); one constant where the shelves had three. */
+export const LANE_CELL_LIMIT = 5;
+
+/** How many nesting steps the draw indents; the model's `depth` is uncapped (§1.3). */
+export const LANE_INDENT_CAP = 3;
+
+/**
+ * A cell's cut (§3.3): the first `LANE_CELL_LIMIT` cards, plus any card past them with a live session — the cut may hide finished and waiting work, never
+ * running work, and exempting a card reorders nothing. `open` shows all. `hidden` is the cards actually left out, so no chip when it is 0.
+ */
+export function laneCell(cards: readonly JiraIssue[], isLive: (key: string) => boolean, open: boolean): { shown: JiraIssue[]; hidden: number } {
+  if (open) return { shown: [...cards], hidden: 0 };
+  const shown = cards.filter((c, i) => i < LANE_CELL_LIMIT || isLive(c.key));
+  return { shown, hidden: cards.length - shown.length };
+}
+
+/** The per-browser key holding every board's lane folds — ONE key, since `usePersistedState` reads storage once on mount (§3.6). */
+export const JIRA_LANE_FOLDS_KEY = 'backlog-manager.jira-lane-folds';
+
+export type LaneFold = 'open' | 'closed';
+/** Lane key → the person's override; a lane absent here follows its default (`!settled`). */
+export type LaneOverrides = Readonly<Record<string, LaneFold>>;
+/** Board id → that board's overrides. */
+export type JiraLaneFolds = Readonly<Record<string, LaneOverrides>>;
+
+const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+
+/**
+ * A stored value as lane folds. Takes `unknown` like `clampJiraPanelFilters`: anything but an object of board entries reads as none, a bad board entry
+ * drops alone and a bad lane value drops alone. Both levels are keyed by ids a person or Jira chose, so the maps are prototype-less: a board named
+ * `__proto__` or `constructor` is then an ordinary own entry that survives a JSON round trip, and `Object.prototype` is never written.
+ */
+export function clampLaneFolds(v: unknown): JiraLaneFolds {
+  const out: Record<string, LaneOverrides> = Object.create(null);
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return out;
+  for (const [id, entry] of Object.entries(v)) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const lanes: Record<string, LaneFold> = Object.create(null);
+    for (const [key, fold] of Object.entries(entry)) if (fold === 'open' || fold === 'closed') lanes[key] = fold;
+    out[id] = lanes;
+  }
+  return out;
+}
+
+/** One board's overrides — an own-property read, so `constructor` or `toString` is never mistaken for a stored board. `{}` when absent. */
+export function laneOverrides(folds: JiraLaneFolds, boardId: string): LaneOverrides {
+  return hasOwn(folds, boardId) ? folds[boardId] : {};
+}
+
+/** Whether a lane is open: the person's override when it has one, else the default — open lanes start open, settled lanes folded (§3.6). */
+export function laneOpen(lane: JiraLane, overrides: LaneOverrides): boolean {
+  return hasOwn(overrides, lane.key) ? overrides[lane.key] === 'open' : !lane.settled;
+}
+
+/**
+ * The folds with one lane toggled. The board's entry is pruned against every lane key in `board` at any depth — the caller hands the UNFILTERED lanes of a
+ * loaded list, since a filtered view or a list still loading would wipe overrides for lanes that are merely not shown (§3.6). A toggle is stored even when
+ * it equals the default: the lane was touched. Other boards and the input are left alone.
+ */
+export function setLaneFold(folds: JiraLaneFolds, boardId: string, board: JiraLanes, laneKey: string, open: boolean): JiraLaneFolds {
+  const live = new Set<string>();
+  const collect = (lanes: readonly JiraLane[]): void => {
+    for (const l of lanes) {
+      live.add(l.key);
+      collect(l.lanes);
+    }
+  };
+  collect(board.lanes);
+  const prior = laneOverrides(folds, boardId);
+  const next: Record<string, LaneFold> = Object.create(null);
+  for (const k of Object.keys(prior)) if (live.has(k)) next[k] = prior[k];
+  next[laneKey] = open ? 'open' : 'closed';
+  const out: Record<string, LaneOverrides> = Object.create(null);
+  for (const id of Object.keys(folds)) out[id] = folds[id];
+  out[boardId] = next;
+  return out;
+}
+
 // ── Sentences ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** `1 root`, `2 roots`; `queries` is the one plural that is not the noun plus `s`. */
