@@ -1,6 +1,6 @@
 # Jira Board: one column per status, ordered per board
 
-Status: written, awaiting approval. Date: 2026-11-18. Branch `feat/jira-status-columns`. Amends
+Status: approved (autopilot, after two review rounds). Date: 2026-11-18. Branch `feat/jira-status-columns`. Amends
 [2026-11-18-jira-parent-lanes-design.md](2026-11-18-jira-parent-lanes-design.md) §3.1 and §3.3 (the three category columns).
 
 ## Intent
@@ -54,6 +54,10 @@ list's order, the rule `boardFilterOptions` already applies to a name two catego
 `CATEGORY_RANK`. A column's dot takes its category's tone (`statusTone`); a saved name no loaded issue carries has no category, and its dot takes the
 `todo` tone, the page's default grey.
 
+An issue whose status name is empty (the mapper reads a missing name as `''`, `server/src/jira/map-issue.ts`) still gets a column, so no card can vanish:
+one column keyed `''`, labelled `No status`, placed by the Order rule like any unsaved name with the category of the first such issue. It is never saved:
+the sheet does not list it and never sends it.
+
 **Order** (my call). Start from the saved names in their saved order. Then take the unsaved names sorted by `CATEGORY_RANK` and then by name (the
 `byText` compare `boardFilterOptions` uses), and insert each one in turn **immediately after the last column already in the list whose rank is lower than or
 equal to its own**, or at the front when there is none. A saved name with no category has no rank and is skipped by that search. With nothing saved, this
@@ -65,30 +69,35 @@ sheet, adding `In Progress` by name if no issue has it yet, fixes it for good.
 each entry, drop any that is not a string or whose trimmed length is not 1–100, remove duplicates (first one kept), keep the first 50. `readBoard` warns
 per dropped entry in the usual way; a missing or non-array `columns` reads as `[]`, so every board saved before this change still loads.
 `parseBoardWrite` accepts an optional `columns`. A non-array is a 400 with `columns must be an array of status names`; bad entries are dropped rather than
-refused, so one odd status name can never fail a save of the board's name and queries. When a write leaves `columns` out, `writeBoard`'s
-`{ ...stored, ...board }` merge keeps the stored value.
+refused, so one odd status name can never fail a save of the board's name and queries. When a write leaves `columns` out, `writeBoard` leaves the
+stored raw `columns` key untouched (its merged object must not carry a `columns` key), and the route's answer carries the stored order as `readBoard`
+normalises it, which is `[]` on a create.
 
 **Sheet.** The board settings sheet (`JiraBoardSheet.tsx`) gains a `Columns` section, hint `the Board's columns, left to right`. Its rows come from the
 same derivation as the Board, fed with the issues of the sheet's one existing mount read of `/api/jira/boards/:id/issues` (today it seeds the roots'
 summaries) and with the section's working list, which starts as the board's saved `columns`. Until that read lands, or when it fails (the read stays
 silent and is not retried, as today), or on a new board (which has no read), the rows are the working list alone. When the read lands, the unsaved
 statuses join by the Order rule, and every move already made survives, because a move edits the working list and the working list is the "saved" input.
+The first move, add or remove first replaces the working list with the full list as drawn (minus the `No status` column), then applies the edit. From then
+on, the working list is what the rows show.
 - Each row: the status name, `Move <name> up` and `Move <name> down` icon buttons (accessible names exact; the first row's up and the last row's down are
   disabled), and, only on a row no loaded issue carries, `Remove <name>`, which takes it out of the working list. A status some issue carries cannot be
   removed: it would come straight back.
 - Under the rows: a text field with placeholder `Add a status by name` and an `Add` button, which appends the trimmed name to the working list (no-op when
-  it is empty or already there). This is how a column exists before any issue has that status.
+  it is empty or already drawn as a row). This is how a column exists before any issue has that status.
 - `Reset to default` empties the working list.
 - Empty, with no rows: `No columns yet — they appear once this board has issues.`
 - On save the sheet sends `columns` only when the section was touched (a move, add, remove or reset). It then sends the full list as drawn, or `[]` after a
   reset with nothing touched since. An untouched section leaves `columns` out, and the stored order is kept. Names the write would drop are never sent: the
-  derivation skips empty names, and `Add` refuses a name over 100 characters, the field's `maxLength`.
+  `No status` column is not a row, and `Add` refuses a name over 100 characters, the field's `maxLength`.
 - No live preview: the Board takes the order on save, as it takes the rest of the board.
 
 **Board.** `JiraLaneBoard` draws its header and its cells from the derived list instead of `JIRA_COLUMNS`. A cell's key becomes `lane:status-name`, which
 means a cell opened past its cut is remembered per status. The counts are per column. `laneColumnCounts` keys by status name. The cut of 5 per cell is
 unchanged. When there are no columns at all (an empty list and nothing saved), the header row draws no columns and the empty line (`No issues`)
-stays under it.
+stays under it. Attributes and test ids move from the category slug to the status name: `data-col="<name>"`, `data-testid="lanes-col-<name>"` and
+`cell-<lane key>-<name>`. `data-tone` stays `statusTone`'s slug (`todo`, `doing`, `done`), because CSS colours the dot by it. The suites that pin three
+columns change with it: `test/jira/jira-board.test.tsx` and `test/jira/jira-lib.test.ts` (`laneColumnCounts`).
 
 **Width.** The header grid and the cell grid take `repeat(var(--jira-cols), minmax(0, 1fr))`, as today with a variable count. The component sets
 `--jira-cols` to `max(N, 1)` through React's `style` prop, which writes CSSOM and is allowed under the `style-src 'self'` CSP, as
@@ -101,7 +110,11 @@ only if it would read wrong beside the new status-keyed helper. That is the buil
 
 ## Tests (behaviour, not code)
 
-- The derivation, given TIMIFY's statuses (To Do / new, In Progress / indeterminate, In Review / new, In Testing / new, Done / done):
+- The derivation, given TIMIFY's statuses (To Do / new, In Progress / indeterminate, In Review / new, In Testing / new, Done / done). In every case
+  below, each saved name is also carried by an issue on the list unless the case says otherwise:
+  - with saved `[To Do, In Progress]`, where no issue carries `In Progress`, and `To Do` and `QA` (indeterminate) on the list →
+    `To Do, QA, In Progress` (the uncarried `In Progress` has no rank and is skipped);
+  - an issue with an empty status name → a `No status` column, and its card in it;
   - with all five on the list and nothing saved → `In Review, In Testing, To Do, In Progress, Done`;
   - with no `In Progress` issue and nothing saved → `In Review, In Testing, To Do, Done`;
   - with saved `[To Do, In Progress, In Review, In Testing, Done]` → exactly that;
@@ -112,7 +125,7 @@ only if it would read wrong beside the new status-keyed helper. That is the buil
   - with an unsaved `QA` (indeterminate) and saved `[In Progress, To Do]` → `In Progress, To Do, QA` (the last column of rank ≤ indeterminate is
     `To Do`, rank new);
   - with nothing on the list and nothing saved → `[]`.
-- A status only an on-board lane header carries still gets a column, and a status with an empty name gets none.
+- A status only an on-board lane header carries still gets a column.
 - A name carried as `new` by the first issue and `indeterminate` by a later one takes `new`.
 - Filtering to one status keeps every column; only the counts and cards change.
 - A saved name no issue carries still draws a column, with a count of 0 and the `todo` tone.
@@ -129,5 +142,6 @@ only if it would read wrong beside the new status-keyed helper. That is the buil
 
 - Where the derivation lives (`client/src/lib/jira.ts` beside `laneColumnCounts` is the natural home).
 - The exact layout of the sheet section, which composes `components/ui/` primitives per `.claude/DESIGN.md`.
-- Which subsystem docs need a line (`docs/subsystems/jira.md` for `columns`, `board.md` for the columns).
+- Which subsystem docs need a line (`docs/subsystems/jira.md` for `columns`, `board.md` for the columns). `.claude/DESIGN.md` must move with the code:
+  §8.9.1 (the lanes and Columns paragraphs, which today say three columns, one per status category) and §8.9.3 (the board sheet's new section).
 - `/ui-verify` on the live TIMIFY board as the last plan task, including a 5-column board at the pane's width.
