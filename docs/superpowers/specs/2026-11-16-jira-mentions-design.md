@@ -120,7 +120,8 @@ Success: a question asked of the user on any ticket shows up on the page within 
 - Posting without a person's click. No session, schedule or auto-mode ever posts a reply (Anti-goals).
 - Phone or desktop push notifications. A later step if the rail count is not enough.
 - Comments that ask the user something without @-mentioning them, and comments on tickets merely watched or assigned. The page is "someone named me".
-- Rich editing of the reply (formatting toolbar, attachments, editing a posted comment). The reply is plain paragraphs.
+- Rich editing of the reply (formatting toolbar, attachments, editing a posted comment). The reply is plain paragraphs. Superseded for formatting: the reply is
+  Markdown since `2026-11-18-jira-reply-markdown-design.md`.
 
 ## Anti-goals
 
