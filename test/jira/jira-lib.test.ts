@@ -1619,7 +1619,7 @@ describe('branch choice derivations', () => {
 
   describe('the sheet draft', () => {
     const tickets = refsOf([branch('timify-123-x', true), branch('develop', false)]);
-    it('execute with a ticket branch: Continue on it, and New and the MR target still filled for a switch', () => {
+    it('execute with a ticket branch: Continue on it, and New and the target still filled for a switch', () => {
       expect(branchDraft('execute', tickets, 'TIMIFY-123', 'Export contacts', undefined)).toEqual({
         mode: 'continue',
         continueBranch: 'timify-123-x',
@@ -1700,9 +1700,37 @@ describe('branch choice derivations', () => {
       const draft = { mode: 'continue' as const, continueBranch: 'b', newBranch: 'n', base: 'develop', openMr: true, review: true, target: 'main' };
       expect(branchChoiceOf(draft, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: true, target: 'main' });
       expect(branchChoiceOf({ ...draft, target: '' }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: true, target: null });
-      expect(branchChoiceOf({ ...draft, openMr: false }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: false, review: true, target: null });
+      // #567: review alone carries the target too — it is the base the review diffs against — and with both switches off nothing reads it.
+      expect(branchChoiceOf({ ...draft, openMr: false, target: 'develop' }, 'execute')).toEqual({
+        mode: 'continue',
+        branch: 'b',
+        openMr: false,
+        review: true,
+        target: 'develop'
+      });
+      expect(branchChoiceOf({ ...draft, openMr: false, target: '' }, 'execute')).toEqual({
+        mode: 'continue',
+        branch: 'b',
+        openMr: false,
+        review: true,
+        target: null
+      });
+      expect(branchChoiceOf({ ...draft, openMr: false, review: false }, 'execute')).toEqual({
+        mode: 'continue',
+        branch: 'b',
+        openMr: false,
+        review: false,
+        target: null
+      });
       expect(branchChoiceOf({ ...draft, review: false }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, review: false, target: 'main' });
       expect(branchChoiceOf(draft, 'context')).toEqual({ mode: 'continue', branch: 'b', openMr: false, review: false, target: null });
+      expect(branchChoiceOf({ ...draft, openMr: false }, { skill: 's_0a1b2c3d' })).toEqual({
+        mode: 'continue',
+        branch: 'b',
+        openMr: false,
+        review: false,
+        target: null
+      });
       expect(branchChoiceOf({ ...draft, mode: 'new' }, 'execute')).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: true, review: true });
       expect(branchChoiceOf({ ...draft, mode: 'new' }, { skill: 's_0a1b2c3d' })).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: false, review: false });
       expect(branchChoiceOf({ ...draft, mode: 'none' }, 'context')).toEqual({ mode: 'none' });
@@ -1730,7 +1758,7 @@ describe('branch choice derivations', () => {
         review: false
       });
     });
-    it('the draft refusal reads the mode\'s own fields, then a typed MR target', () => {
+    it('the draft refusal reads the mode\'s own fields, then a typed target', () => {
       const draft = { mode: 'new' as const, continueBranch: 'develop', newBranch: 'timify-123-n', base: '', openMr: false, review: true, target: '' };
       expect(draftRefusal(draft, 'execute', 'TIMIFY-123', tickets)?.text).toBe('base is required for a new branch');
       expect(draftRefusal({ ...draft, mode: 'continue' }, 'execute', 'TIMIFY-123', tickets)?.text).toBe(
@@ -1739,7 +1767,9 @@ describe('branch choice derivations', () => {
       const cont = { ...draft, mode: 'continue' as const, continueBranch: 'timify-123-x', openMr: true };
       expect(draftRefusal({ ...cont, target: 'a..b' }, 'execute', 'TIMIFY-123', null)?.text).toBe('target may not contain ..');
       expect(draftRefusal(cont, 'execute', 'TIMIFY-123', null)).toBeNull();
-      expect(draftRefusal({ ...cont, target: 'a..b', openMr: false }, 'execute', 'TIMIFY-123', null)).toBeNull();
+      // #567: review alone carries the target, so a typed bad one is refused with the MR off too; with both switches off it is not sent, so not judged.
+      expect(draftRefusal({ ...cont, target: 'a:b', openMr: false }, 'execute', 'TIMIFY-123', null)?.text).toBe('target may hold only A-Z a-z 0-9 . _ / -');
+      expect(draftRefusal({ ...cont, target: 'a..b', openMr: false, review: false }, 'execute', 'TIMIFY-123', null)).toBeNull();
       expect(draftRefusal({ ...draft, mode: 'none' }, 'context', 'TIMIFY-123', tickets)).toBeNull();
       expect(draftRefusal({ ...draft, mode: 'continue', continueBranch: '' }, 'execute', 'TIMIFY-123', tickets)?.text).toBe('choose a branch to continue');
     });

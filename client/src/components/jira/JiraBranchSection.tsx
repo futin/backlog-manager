@@ -116,8 +116,10 @@ export function useBranchState(
  * **A review's branch is locked** (spec §5.4): `action === 'review'` draws `Continue` and the MR's source branch as two static values — no mode switch, no picker,
  * no Open MR switch, because the session works on the MR's branch and pushes to it, and a new branch or an MR of its own would be a second review target.
  *
- * **Open MR when done** is `execute`'s with a branch only, off on every open (spec §5.6); with Continue it asks for the MR's target, opening on the repo's
- * default base. A skill's prompt is its template, with no commit rule for the switch to amend.
+ * **Open MR when done** is `execute`'s with a branch only, off on every open (spec §5.6). A skill's prompt is its template, with no commit rule for the switch
+ * to amend. **Target** is asked with Continue whenever Review before finishing or Open MR is on, opening on the repo's default base: it is the branch the
+ * work lands in, so it is the base the review diffs against as well as the MR's target (#567) — a Continue branch cut from another base is changed here
+ * before Start rather than reviewed against `origin/HEAD`.
  */
 export function JiraBranchSection({
   branch,
@@ -269,7 +271,7 @@ export function JiraBranchSection({
           </div>
         </>
       )}
-      {ready && action === 'execute' && draft.mode === 'continue' && draft.openMr && (
+      {ready && action === 'execute' && draft.mode === 'continue' && (draft.openMr || draft.review) && (
         <label className="sheet-field">
           <span className="set-name">Target</span>
           {listed !== null ? (

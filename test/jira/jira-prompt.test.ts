@@ -488,6 +488,14 @@ describe('the workspace block', () => {
       expect(prompt).not.toContain('null');
     });
 
+    it('on, continue with the MR off and a target: reviews against the target, opens no merge request, and still ends with "Do not push." (#567)', () => {
+      const prompt = exe('/r', contWs({ review: true, openMr: false, target: 'release/9' }));
+      expect(reviewSentence(prompt)).toContain('against release/9');
+      expect(prompt).not.toContain('open one merge request');
+      expect(prompt.endsWith('Do not push.')).toBe(true);
+      expect(count(prompt, 'Do not push.')).toBe(1);
+    });
+
     it('adds at most 500 characters of fixed text — repo, branch, base and worktree all empty', () => {
       const bare = (review: boolean) => exe('', newWs({ review, branch: '', base: '', worktree: '' }));
       expect(bare(true).length - bare(false).length).toBeLessThanOrEqual(500);

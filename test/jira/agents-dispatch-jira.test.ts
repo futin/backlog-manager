@@ -247,6 +247,7 @@ describe('refusals before the reservation — no Jira write, no spawn, nothing r
     ['a base with continue', { mode: 'continue' }, 'base is only for a new branch'],
     ['an MR for context', { action: 'context', openMr: true }, 'openMr is only for execute with a branch'],
     ['a review for context', { action: 'context', review: true }, 'review is only for execute with a branch'],
+    ['a target with neither switch', { mode: 'continue', base: undefined, target: 'release/9' }, 'target is only for continue with openMr or review'],
     ['a non-boolean review', { review: 'maybe' }, 'review must be true or false'],
     ['a non-boolean review beside an edited prompt', { review: 'maybe', prompt: 'edited' }, 'review must be true or false'],
     ['an unknown surface', { surface: 'terminal' }, 'surface must be dashboard or desktop'],
@@ -541,6 +542,16 @@ describe('the branch choice', () => {
     const prompt = sent.spawns[0].prompt as string;
     expect(prompt.startsWith(`Workspace: repository ${REPO}, mode continue, branch pay-1-export, expected worktree /work/pay-hand-made. `)).toBe(true);
     expect(prompt).toContain('open one merge request from it into release/9');
+  });
+
+  it('a continued branch under review with the MR off reviews against the target it was sent (#567)', async () => {
+    readRefs.mockResolvedValue(refs([branch('develop', REPO), branch('pay-1-export')]));
+    await build();
+    const sent = stubDashboard();
+    await post({ ...BODY, mode: 'continue', base: undefined, review: true, target: 'release/9' }).expect(200);
+    const prompt = sent.spawns[0].prompt as string;
+    expect(prompt).toContain('against release/9');
+    expect(prompt).not.toContain('open one merge request');
   });
 
   it('none makes no git read at all', async () => {

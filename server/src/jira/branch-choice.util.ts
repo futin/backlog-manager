@@ -62,6 +62,11 @@ export function replyChoiceIsNarrow(raw: JiraBranchChoiceRaw): boolean {
  * says the same sentence. `execute` is the one action that needs a branch: `none` is the "work in the mapped checkout" mode, and an execute with no worktree
  * would commit on whatever the checkout holds. `openMr` rides the query as `'true'`/`'false'` and the body as a boolean; absent is `false`, and so is `review`, which
  * is checked right after it and before `target`.
+ *
+ * `target` is the branch a Continue branch's work lands in — the MR's target when `openMr` is on, the base the review diffs against when `review` is on, both
+ * when both are (#567). One fact, not two: the branch a change will merge into is the base it should be reviewed against, which is why `executeText` reads
+ * `ws.target ?? ws.base` for the review. It is Continue's alone because a New branch already names that base as `base`; and it needs one of the two switches,
+ * since with both off nothing in the prompt reads it.
  */
 export function parseBranchChoice(raw: JiraBranchChoiceRaw, key: string, action: JiraAction): JiraBranchChoiceParse {
   const fail = (error: string): JiraBranchChoiceParse => ({ ok: false, error });
@@ -104,7 +109,7 @@ export function parseBranchChoice(raw: JiraBranchChoiceRaw, key: string, action:
 
   let target: string | null = null;
   if (!absent(raw.target)) {
-    if (!(openMr && mode === 'continue')) return fail('target is only for openMr with continue');
+    if (!((openMr || review) && mode === 'continue')) return fail('target is only for continue with openMr or review');
     const problem = nameProblem('target', raw.target, 'target is required');
     if (problem !== null) return fail(problem);
     target = raw.target as string;
