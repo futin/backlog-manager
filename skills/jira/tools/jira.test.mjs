@@ -1274,9 +1274,11 @@ test('jira/SKILL.md is the jira skill, triggered by /jira', () => {
   const front = text.match(/^---\n([\s\S]*?)\n---\n/)
   assert.ok(front, 'SKILL.md has no frontmatter')
   assert.match(front[1], /^name: jira$/m)
-  const description = front[1].match(/^description: >\n((?: {2}.*\n?)+)/m)
+  // `>` or `>-` — the two folded forms differ only by a trailing newline. The `Trigger: /jira` trailer went in #557 (it duplicated the `trigger:` key and
+  // was preloaded into every session); what routes a person here now is the description naming `/jira` or a Jira ticket.
+  const description = front[1].match(/^description: >-?\n((?: {2}.*\n?)+)/m)
   assert.ok(description, 'the description is not a folded block')
-  assert.match(description[1].trim(), /Trigger: \/jira$/)
+  assert.match(description[1], /\/jira\b|Jira ticket/)
 })
 
 test('jira/SKILL.md documents every command, through the braced plugin root', () => {

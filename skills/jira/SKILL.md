@@ -1,11 +1,8 @@
 ---
 name: jira
-description: >
-  Read a Jira ticket and move it through this machine's backlog-manager API: show it, list and apply its transitions, assign it to me, link or unlink this
-  session, check the connection, and on a Jira Run make its git worktree. Use it for /jira, "show PAY-131", "move PAY-131 to In Progress", "assign PAY-131 to
-  me", "link this session to PAY-131", "what can PAY-131 move to", or "is Jira connected". Never posts, edits ticket text or calls Jira directly; `draft` hands text to the board, and a person
-  posts it.
-  Trigger: /jira
+description: >-
+  Read a Jira ticket and move it through the local backlog-manager API: show it, list and apply its transitions, assign it to me, link this session, check the
+  connection, make a Jira Run's worktree. Use for /jira, "show PAY-131", "move PAY-131 to In Progress" or "is Jira connected".
 trigger: /jira
 ---
 

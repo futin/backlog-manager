@@ -1,10 +1,8 @@
 ---
 name: backlog
-description: >
-  Print the current backlog board — the open bugs, ideas, tasks and refactors in this
-  repo — and nothing else; it never writes. Use for /backlog, "what's open", "show my
-  backlog", "what's on the board", or "what am I working on next". Filing something new is a
-  different skill (backlog-capture), not this one. Trigger: /backlog
+description: >-
+  Print the backlog board — the open bugs, ideas, tasks and refactors in this repo — read-only. Use for /backlog, "what's open", "show my backlog" or "what am I
+  working on next". Not for filing an item — that is /backlog-capture.
 trigger: /backlog
 ---
 

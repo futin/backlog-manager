@@ -64,6 +64,21 @@ lands on disk only, so an item has to be committed before an orchestrator run ca
 reviewer, a PR that holds a plan is the person's review, and it never runs under a `[backlog-tick]` marker, so a tick's groom stays on disk. A tick treats
 that tree and branch as a groom already taken. `skills/backlog-groom/references/pr-mode.md` is the flow.
 
+#### Descriptions carry routing only
+
+Every model-invocable skill's and agent's `description:` is preloaded into every Claude Code session on a machine with the plugin installed, in any
+project, so it carries routing and nothing else: one clause on what the skill does, the phrases a person or a dispatch prompt actually uses, and at most one
+"Not for X — that is /Y" line where two skills are easily confused. Mechanism and guarantees ("never commits unless …") live in the SKILL.md body, which loads
+only when the skill runs, and the `Trigger: /x` trailer is gone — the `trigger:` key already holds it. Two skills are typed-only
+(`disable-model-invocation: true`), so their descriptions are not preloaded at all: `backlog-tick`, which only the dashboard's routines start, as a typed
+`/backlog-manager:backlog-tick`, and `backlog-retro`, which nothing in `server/`, `client/` or another skill invokes. `backlog-groom`, `backlog-execute`
+and `backlog-capture` must stay model-invocable — the board's dispatch prompt names them in natural language (`server/src/agents/prompt.util.ts`) and
+`backlog-tick` step 2 invokes groom and execute through the Skill tool — and so must `jira`, whose Run prompts say `Use the backlog-manager:jira skill`
+(`server/src/jira/prompt.util.ts`). `backlog-orchestrate` and `pr-resolve` are started by the board through typed triggers but stay model-invocable: people
+ask to "drain the backlog". `backlog-reviewer` is dispatched by `subagent_type`, never chosen by its description, so its description is one sentence.
+`test/guards/skill-descriptions.test.ts` pins all of it — the block-scalar form, no trailer, exactly those two typed-only, the four that must stay invocable,
+and a byte ratchet on the model-invocable total (4,911 B before #557, 2,398 B after), lowered when a trim lands and raised only with a reason in the PR.
+
 ### The CLIs
 
 - `skills/backlog/tools/backlog.mjs` — the CLI every skill calls, and the registry's only writer. Since task-45 it also carries `connect github [owner/repo]`,

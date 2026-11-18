@@ -1,10 +1,9 @@
 ---
 name: backlog-orchestrate
-description: >
-  Drain a project's groomed backlog unattended, one item per worktree and headless backlog-execute session, each reviewed and verified, then merged into the
-  run's base (main or a branch) or left as a branch. Use it to drain the backlog, work the whole queue, run the backlog while I'm away, orchestrate tasks 3-7,
-  drain the backlog onto feature/x, work the queue on a branch instead of main, drain the backlog but leave me branches to merge by hand, or to --resume or
-  --abort an interrupted run. The only skill that merges into a base. Trigger: /backlog-orchestrate
+description: >-
+  Drain a project's groomed backlog unattended: one worktree and headless backlog-execute session per item, each reviewed and verified, then merged into the
+  run's base or left as a branch. Use to drain the backlog, work the whole queue, run the backlog while I'm away, orchestrate tasks 3-7, or --resume / --abort a
+  run.
 trigger: /backlog-orchestrate
 ---
 

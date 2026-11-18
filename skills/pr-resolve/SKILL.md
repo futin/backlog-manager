@@ -1,9 +1,8 @@
 ---
 name: pr-resolve
-description: >
-  Resolve a conflicting GitHub pull request unattended: merge its base into its head in a detached worktree, resolve only the mechanical conflicts, prove the
-  result with the project's own checks and push the merge commit — or, when any conflict is a judgment call, push nothing and say why on the PR. Started by the
-  board's Resolve conflicts, or typed. Never asks a question, never rebases and never force-pushes. Trigger: /backlog-manager:pr-resolve <owner>/<repo>#<number>
+description: >-
+  Resolve a conflicting GitHub pull request unattended: merge its base into its head, resolve the mechanical conflicts, prove it with the project's checks and
+  push — or push nothing and say why on the PR. Started by the board's Resolve conflicts, or typed as /backlog-manager:pr-resolve <owner>/<repo>#<number>.
 trigger: /backlog-manager:pr-resolve
 ---
 

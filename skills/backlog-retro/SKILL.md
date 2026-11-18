@@ -1,10 +1,10 @@
 ---
 name: backlog-retro
-description: >
+description: >-
   Sweep every orchestrator run on this machine into one report: what the pipeline cost, where the time went, how much was rework, what changed since the last
-  sweep. Use it for /backlog-retro, retro the orchestrator, how did the runs do, sweep the runs, what did the pipeline cost, where is the money going, or how
-  much of our spend is fix loops. Files only the backlog items you pick; never writes run state and never commits. Trigger: /backlog-retro
+  sweep. Use for /backlog-retro or retro the orchestrator.
 trigger: /backlog-retro
+disable-model-invocation: true
 ---
 
 # /backlog-retro — measure the pipeline, then improve it

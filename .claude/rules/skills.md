@@ -120,6 +120,9 @@ paths: ["skills/**", "agents/**", "server/src/tick/tick.service.ts", "server/src
   `retro.mjs`'s is the long-form copy. `backlog.test.mjs`'s `CLI_SOURCES` is where the list of files lives — never a count in prose — and it is the only one of
   the cases that covers an entry point nobody has written yet. Why:
   [invariants.md](docs/subsystems/invariants.md#every-skill-cli-exits-through-processexitcode-never-processexit)
+- **A skill or agent `description:` carries routing only, as a `>-` block scalar with no `Trigger:` trailer; only `backlog-tick` and `backlog-retro` are
+  typed-only.** Guarantees go in the SKILL.md body; `test/guards/skill-descriptions.test.ts` pins the shape and a byte ratchet. Why:
+  [skills.md](docs/subsystems/skills.md#descriptions-carry-routing-only)
 - **Editing `skills/` changes nothing until it is committed, pushed, and `pnpm run plugin:sync` runs.** An install is a copy of the pushed HEAD, never the
   working tree; the sync refuses dirty/unpushed/behind states. New skills load on the next Claude Code restart. Why:
   [invariants.md](docs/subsystems/invariants.md#editing-skills-changes-nothing-until-commit--push--pluginsync)
