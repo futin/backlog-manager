@@ -84,8 +84,7 @@ import {
 } from '../../client/src/lib/jira';
 import type { JiraLane, JiraLanes, JiraLaneFolds, JiraLaneView } from '../../client/src/lib/jira';
 import { DELIVERY_FILTER_LABELS, effectiveDeliveryFilter } from '../../client/src/lib/delivery';
-import { boardColumns, columnTone } from '../../client/src/lib/jira';
-import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../../client/src/lib/jira';
+import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardColumns, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, columnTone, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../../client/src/lib/jira';
 import { modelEffortFlags } from '../../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../../client/src/lib/jira-page';
 import { boardAgents, childSessions, deckCrumb, deckGroup, deckTally, endedByKey, endedLine, sessionCells } from '../../client/src/lib/jira-deck';
@@ -2449,11 +2448,17 @@ describe('lane views', () => {
       n('PAY-43', 'PAY-41', 2 * HOUR),
       n('PAY-44', 'PAY-40', 3 * HOUR)
     ];
-    it('counts matching cards per column at every depth, headers in none', () => {
-      expect(laneColumnCounts(laneViews(laneBoard(issues()), () => true))).toEqual({ todo: 2, doing: 0, done: 1 });
+    it('counts matching cards per status name at every depth, headers in none, a name with no card absent', () => {
+      const counts = laneColumnCounts(laneViews(laneBoard(issues()), () => true));
+      expect(counts.get('To Do')).toBe(2);
+      expect(counts.get('Done')).toBe(1);
+      expect(counts.get('In Progress')).toBeUndefined();
     });
     it('follows the predicate', () => {
-      expect(laneColumnCounts(laneViews(laneBoard(issues()), (i) => i.key !== 'PAY-43'))).toEqual({ todo: 1, doing: 0, done: 1 });
+      const counts = laneColumnCounts(laneViews(laneBoard(issues()), (i) => i.key !== 'PAY-43'));
+      expect(counts.get('To Do')).toBe(1);
+      expect(counts.get('Done')).toBe(1);
+      expect(counts.get('In Progress')).toBeUndefined();
     });
   });
 

@@ -524,12 +524,15 @@ export function laneViews(board: JiraLanes, matches: (issue: JiraIssue) => boole
   return board.lanes.map(view).filter((v): v is JiraLaneView => v !== null);
 }
 
-/** Matching cards per column across every drawn lane at every depth — a header is a lane's heading, in no column (§3.1). */
-export function laneColumnCounts(views: readonly JiraLaneView[]): Record<JiraColumnSlug, number> {
-  const counts: Record<JiraColumnSlug, number> = { todo: 0, doing: 0, done: 0 };
+/**
+ * Matching cards per status name across every drawn lane at every depth — a header is a lane's heading, in no column (§3.1). A name with no card is absent,
+ * so the caller reads `?? 0`.
+ */
+export function laneColumnCounts(views: readonly JiraLaneView[]): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
   const walk = (vs: readonly JiraLaneView[]): void => {
     for (const v of vs) {
-      for (const c of v.cards) counts[columnOf(c)] += 1;
+      for (const c of v.cards) counts.set(c.status.name, (counts.get(c.status.name) ?? 0) + 1);
       walk(v.lanes);
     }
   };

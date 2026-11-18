@@ -3,9 +3,9 @@ import { useMemo, useState } from 'react';
 import type { LaneFoldState } from '../../hooks/useLaneFolds';
 import type { OffBoardRead } from '../../hooks/useOffBoardParent';
 import {
-  JIRA_COLUMNS,
   LANE_INDENT_CAP,
-  columnOf,
+  boardColumns,
+  columnTone,
   laneCell,
   laneColumnCounts,
   type JiraLaneView,
@@ -23,29 +23,32 @@ const NO_ENDED: readonly SessionLink[] = [];
 /**
  * JiraLaneBoard — the Board as one lane per parent (parent-lanes spec §3; .claude/DESIGN.md §8.9.1; mocks `Board.dc.html`, `BoardDeep.dc.html`).
  *
- * **One column header for every lane** (§3.1). `To Do`, `In Progress`, `Done` in `JIRA_COLUMNS`' order and tones, each with `laneColumnCounts`' number — the
- * cards that pass the filters across every drawn lane, folded or cut or not, so a page whose settled lanes start folded still says how much is Done. Header
- * issues are in no column and add nothing. The row is sticky, so it stays above the lanes while they scroll under it.
+ * **One column header for every lane** (§3.1), one column per status name (status-columns spec): `boardColumns` over the UNFILTERED loaded list (`issues`,
+ * cards and lane headers alike) and the board's saved order, so filters and search change the counts and the cards but never the set of columns. Each header
+ * carries `laneColumnCounts`' number for its name — the cards that pass the filters across every drawn lane, folded or cut or not, so a page whose settled
+ * lanes start folded still says how much is Done — and `columnTone`'s dot. Header issues are in no column and add nothing. The row is sticky, so it stays
+ * above the lanes while they scroll under it. `--jira-cols` (`max(N, 1)`) is how many tracks both grids draw; with no column at all the row is empty.
  *
- * **A lane is its header, then three cells, then its nested lanes** (§3.2, §3.3). The lanes are drawn FLAT, each nested lane a sibling after its parent's
+ * **A lane is its header, then one cell per column, then its nested lanes** (§3.2, §3.3). The lanes are drawn FLAT, each nested lane a sibling after its parent's
  * cells rather than a child element, so indentation is one `data-depth` read by CSS — `Math.min(depth, LANE_INDENT_CAP)`, the model's depth uncapped — and
  * never an indent that compounds through wrappers; a folded lane draws its header and skips its cells and every lane under it. Depth reaches CSS as an
  * attribute because the CSP allows no inline style.
  *
  * **A cell's cut is `laneCell`'s** — five cards, plus any card past them with a live session, never reordered — with `+ N more` / `show fewer` as the
- * flat chip with `aria-expanded`. Which cells are open is this component's state, keyed `<lane key>:<column>`, lost on reload as the shelves' was; a key
+ * flat chip with `aria-expanded`. Which cells are open is this component's state, keyed `<lane key>:<status name>`, lost on reload as the shelves' was; a key
  * whose lane has left the board is simply never read again.
  *
  * **Folds are `useLaneFolds`'** (§3.6) and **the off-board read is `useOffBoardParent`'s**, both owned by the page (`JiraBoardView`) and handed in, because
  * the List draws the same lanes with the same folds (§4.1): a fold made in either view is the other's, and the newest click on any off-board header, in
  * either view, is the only one that may open Detail.
  *
- * Empty: the column header stays with its zeros and one line under it — the List's words, `No issues` for an empty loaded list and `No issues match`
+ * Empty: the column header stays with its zeros (none at all with nothing loaded and nothing saved) and one line under it — the List's words, `No issues` for an empty loaded list and `No issues match`
  * when the filters hide everything.
  */
 export function JiraLaneBoard({
   views,
   lanes,
+  issues,
   folds,
   read,
   total,
@@ -62,6 +65,8 @@ export function JiraLaneBoard({
   views: readonly JiraLaneView[];
   /** The UNFILTERED lanes of the loaded list — the kept parents (`parentOf`). */
   lanes: JiraLanes;
+  /** The UNFILTERED loaded list — every issue, cards and lane headers, the set the columns are derived from. */
+  issues: readonly JiraIssue[];
   folds: LaneFoldState;
   read: OffBoardRead;
   /** How many issues the loaded list holds — `No issues` at 0, `No issues match` otherwise. */
@@ -77,6 +82,7 @@ export function JiraLaneBoard({
   onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
   const counts = useMemo(() => laneColumnCounts(views), [views]);
+  const cols = useMemo(() => boardColumns(issues, board.columns ?? []), [issues, board.columns]);
   const [openCells, setOpenCells] = useState<ReadonlySet<string>>(() => new Set());
   const isLive = (key: string): boolean => (cells.get(key)?.lead ?? null) !== null;
   const toggleCell = (id: string): void =>
@@ -112,13 +118,13 @@ export function JiraLaneBoard({
         />
         {open && (
           <div className="jira-lane-cells">
-            {JIRA_COLUMNS.map((col) => {
-              const id = `${lane.key}:${col.slug}`;
+            {cols.map((col) => {
+              const id = `${lane.key}:${col.name}`;
               const cellOpen = openCells.has(id);
-              const all = view.cards.filter((c) => columnOf(c) === col.slug);
+              const all = view.cards.filter((c) => c.status.name === col.name);
               const { shown, hidden } = laneCell(all, isLive, cellOpen);
               return (
-                <div key={col.slug} className="jira-lane-cell" data-col={col.slug} data-testid={`cell-${lane.key}-${col.slug}`}>
+                <div key={col.name} className="jira-lane-cell" data-col={col.name} data-tone={columnTone(col)} data-testid={`cell-${lane.key}-${col.name}`}>
                   {shown.map((issue) => (
                     <JiraCard
                       key={issue.key}
@@ -153,13 +159,13 @@ export function JiraLaneBoard({
   };
 
   return (
-    <div className="jira-lanes">
+    <div className="jira-lanes" style={{ ['--jira-cols' as string]: Math.max(cols.length, 1) }}>
       <div className="jira-lanes-head">
-        {JIRA_COLUMNS.map((col) => (
-          <div key={col.slug} className="jira-lanes-col" data-tone={col.slug} data-testid={`lanes-col-${col.slug}`}>
+        {cols.map((col) => (
+          <div key={col.name} className="jira-lanes-col" data-tone={columnTone(col)} data-testid={`lanes-col-${col.name}`}>
             <span className="jira-lanes-dot" aria-hidden="true" />
             <span className="jira-lanes-name">{col.label}</span>
-            <span className="jira-lanes-count">{counts[col.slug]}</span>
+            <span className="jira-lanes-count">{counts.get(col.name) ?? 0}</span>
           </div>
         ))}
       </div>
