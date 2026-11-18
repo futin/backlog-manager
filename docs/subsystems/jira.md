@@ -337,7 +337,7 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `parseJiraBoardIssues` (`lib/jira.ts`): a body with no `issues` array is `null`, a failed poll to the hook and a silent no-op to the sheet, and a row without a
   string `key` and `summary` is dropped rather than blanking the board. A CHANGE of `nudge` — a counter `JiraView` owns and bumps when the Detail dialog
   reports a landed write — asks at once through the same coalesced request, whatever the interval, `off` included (spec §6.1).
-- **`lib/jira.ts`** is the one home of every derivation the five surfaces print — the columns (`JIRA_COLUMNS`, `columnOf`, `sortForBoard`), the card's crumb
+- **`lib/jira.ts`** is the one home of every derivation the five surfaces print — the columns (`boardColumns` and `columnTone`, one per status name; `JIRA_COLUMNS`/`columnOf` for the category tones; `sortForBoard`), the card's crumb
   (`crumbOf`/`crumbText`), initials, age (`cardAgeStamp`), the lanes (`laneBoard` — the one walk of the parent chain, into the lanes in drawing order, the `childrenOf` index and each issue's kept parent,
   `parentOf` — then `laneViews` for the filtered reading, `laneColumnCounts`, `laneCell` and `LANE_CELL_LIMIT`, `foldProgress` and the modal's `modalTree`), the
   lane folds' storage (`JIRA_LANE_FOLDS_KEY`, `clampLaneFolds`, `setLaneFold`) and their sentences (`progressLine`, `laneCountText`), the band line (`bandSub`,

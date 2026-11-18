@@ -1664,7 +1664,7 @@ button.rail-count { cursor: pointer }
 
 /* ── Jira › Board as parent lanes (parent-lanes spec §3; DESIGN.md §8.9.1; mocks Board.dc.html, BoardDeep.dc.html) ──────────────────────────────────────
    One sticky column header over every lane, then each lane a `--steel` well (the ground the shelves' columns had, radius 16, 12 px padding) holding its
-   header row and three cells. Lanes are drawn FLAT, so nesting is a left margin read off `data-depth` (0–3, `LANE_INDENT_CAP` already applied), one step
+   header row and one cell per column. Lanes are drawn FLAT, so nesting is a left margin read off `data-depth` (0–3, `LANE_INDENT_CAP` already applied), one step
    per level — never an indent compounded through wrappers. Every value is a token or a step the Board's columns already use; the mocks' pixel values are
    not the source. */
 .jira-lanes { display: flex; flex-direction: column; gap: 12px; min-width: 0 }

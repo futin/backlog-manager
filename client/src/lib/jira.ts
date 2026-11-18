@@ -91,8 +91,10 @@ export const JIRA_CUSTOM_QUERY: JiraQueryPreset = { chip: 'Custom JQL', label: '
 export type JiraColumnSlug = 'todo' | 'doing' | 'done';
 
 /**
- * The board's three columns, in render order. A column is a Jira STATUS CATEGORY, never a status name: workflows are per project and a name is whatever a
- * team typed, but every status in Jira belongs to one of exactly three categories (`undefined`, "No Category", is mapped to `new` by the server — P5).
+ * The three Jira STATUS CATEGORIES as tones, in rank order: the status dot, the spread bar and the settled-lane test read them (`columnOf`, `statusTone`).
+ * Every status in Jira belongs to one of exactly three categories (`undefined`, "No Category", is mapped to `new` by the server — P5). They are no longer
+ * the Board's columns: since the status-columns spec those are one per status NAME, from `boardColumns`, because a workflow like TIMIFY's files
+ * `In Testing` and `In Review` under `new`. `label` is the category's own name, kept for the tone's readers and pinned by `jira-lib.test.ts`.
  */
 export const JIRA_COLUMNS: { slug: JiraColumnSlug; label: string; category: JiraStatusCategory }[] = [
   { slug: 'todo', label: 'To Do', category: 'new' },
