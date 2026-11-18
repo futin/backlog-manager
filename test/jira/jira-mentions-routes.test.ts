@@ -806,7 +806,17 @@ describe('POST /api/jira/mentions/reply (plan Task 5)', () => {
     await dismiss('SUP-500', [ivoNew.id]).expect(200);
     await reply('SUP-500', 'hi').expect(200);
     const body = fake.posted[0].body as ReturnType<typeof replyDoc>;
-    expect(body.content[0].content[0]).toEqual({ type: 'mention', attrs: { id: MARA.accountId, text: `@${MARA.displayName}` } });
+    expect((body.content[0] as { content: unknown[] }).content[0]).toEqual({ type: 'mention', attrs: { id: MARA.accountId, text: `@${MARA.displayName}` } });
+  });
+
+  // The reply is Markdown (spec 2026-11-18-jira-reply-markdown): the route hands the text to replyDoc unchanged, so what Jira receives is formatted ADF.
+  it('posts a Markdown reply as formatted ADF, the mention first', async () => {
+    await build();
+    await reply('SUP-208', '# H\n\n- **a**').expect(200);
+    const body = fake.posted[0].body as { content: { type: string; content?: unknown[] }[] };
+    expect(body.content.map((b) => b.type)).toEqual(['paragraph', 'heading', 'bulletList']);
+    expect(body.content[0].content?.[0]).toMatchObject({ type: 'mention' });
+    expect(JSON.stringify(body.content[2])).toContain('"marks":[{"type":"strong"}]');
   });
 
   it('the thread route marks the answered mention open: false after the post, though the read does not carry the reply', async () => {
