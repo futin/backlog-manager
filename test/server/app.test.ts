@@ -26,7 +26,13 @@ describe('app bootstrap', () => {
   });
 
   it('answers /api/health', async () => {
-    await request(app.getHttpServer()).get('/api/health').expect(200, { ok: true });
+    const first = await request(app.getHttpServer()).get('/api/health').expect(200);
+    expect(first.body.ok).toBe(true);
+    expect(typeof first.body.bootedAt).toBe('string');
+    expect(Number.isFinite(Date.parse(first.body.bootedAt))).toBe(true);
+    // The stamp is fixed per process: tick.mjs compares it by identity, so a second request must answer the same value.
+    const second = await request(app.getHttpServer()).get('/api/health').expect(200);
+    expect(second.body.bootedAt).toBe(first.body.bootedAt);
   });
 
   it('answers /api/items with an empty index on an empty registry — never a 500', async () => {
