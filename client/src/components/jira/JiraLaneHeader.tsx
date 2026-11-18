@@ -95,7 +95,9 @@ export function JiraLaneHeader({
   const tally =
     view.count > 0 ? (
       <span className="jira-lane-tally">
-        <SpreadBar done={view.progress.done} doing={view.progress.doing} todo={view.progress.todo} />
+        <span className="jira-lane-bar">
+          <SpreadBar done={view.progress.done} doing={view.progress.doing} todo={view.progress.todo} />
+        </span>
         <span className="jira-lane-count">{laneCountText(view.count)}</span>
       </span>
     ) : null;

@@ -106,7 +106,13 @@ export function JiraCard({
           <IssueTypeTile type={issue.type} />
           <span className="jira-card-key">{issue.key}</span>
           {crumb !== null && <span className="jira-card-crumb">{crumb}</span>}
-          <PriorityPill priority={issue.priority} />
+          {/* The slot is page-owned so the push right lives on a page class (guard 7 keeps page rules off `ui-*`), and it is drawn only when the pill is —
+              PriorityPill draws nothing for a null or empty name, and an empty slot would still be the head's last child. */}
+          {issue.priority !== null && issue.priority !== '' && (
+            <span className="jira-card-prio-slot">
+              <PriorityPill priority={issue.priority} />
+            </span>
+          )}
         </div>
         <div className="board-card-title">{issue.summary}</div>
         <div className="board-card-foot">

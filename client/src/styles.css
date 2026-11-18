@@ -688,9 +688,9 @@ button.rail-count { cursor: pointer }
 .jira-card-prio[data-tone="low"], .jira-card-prio[data-tone="other"] { background: var(--strip-hi); color: var(--ink3) }
 /* In Detail's facts the pill is a value in `dd`, which sits at the start of its column like every other value; the head's push-right is the card's alone. */
 .jira-detail-facts .jira-card-prio { margin-left: 0 }
-/* The lane card's priority (`PriorityPill`, a ui-* family a page rule may not name) is the head's last child, pushed right; with no priority the last child
-   is the crumb or the key, and pushing it right changes nothing a reader would see. Scoped to the card's face so the deck's head keeps its own flow. */
-.board-card-face > .jira-card-head > :last-child { margin-left: auto }
+/* The lane card's priority slot: a page-owned span around `PriorityPill` (a ui-* family a page rule may not name), pushed to the head's right end. It is
+   drawn only with a pill, so a card with no priority keeps its key and crumb at the left, where the deck's head keeps them too. */
+.jira-card-prio-slot { margin-left: auto; flex: none; display: inline-flex }
 .jira-card-key { flex: none; font-weight: 600; color: var(--ink); white-space: nowrap }
 .jira-card-crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* The deck face is a 14 px title column, not `.jira-card-head` (12 px, `--ink3`), so the crumb that moved down into it inherited 16 px `--ink` and out-sized the title. */
@@ -1189,17 +1189,10 @@ button.rail-count { cursor: pointer }
    cards without dragging the header off its rule with them. */
 .board-col-cards { display: flex; flex-direction: column; gap: var(--card-gap) }
 /* A column's ground (mock Board.dc.html; restyle spec §4.3 gave it to Jira alone and the user extended it to the GitHub Board, 2026-11-06): a `--steel` well,
-   radius 16, 12 px padding with the header inside it, on `[data-ground]` — which `BoardView` sets (and the Jira shelves did, until parent lanes) and Archive does not, because its sticky
-   `.archive-month` paints `--board` and would read as a white band across it. The toned header (`[data-tone]`, no caller since the Jira shelves became lanes, whose `.jira-lanes-head` copies its look) is separate: the dot and
-   the count are page-local spans rather than `.ui-dot` / `.ui-pill` — `Dot` has no todo/doing/done tones and guard 7 forbids a page rule naming a ui-* family
-   token. Plain colours and a solid `--strip` pill, no tint, so nothing joins the daylight-contrast PINNED list; 11/500 `--ink2` on `--strip` is a
-   surface pair the contrast suite already measures. */
+   radius 16, 12 px padding with the header inside it, on `[data-ground]` — which `BoardView` sets and Archive does not, because its sticky
+   `.archive-month` paints `--board` and would read as a white band across it. The Jira shelves' toned header went with the shelves (parent lanes); the lane
+   board draws its own column heads (`.jira-lanes-head`). */
 .board-col[data-ground] { background: var(--steel); border-radius: 16px; padding: 12px; --card-hover: var(--card-hover-steel) }
-.board-col-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ink3) }
-.board-col[data-tone='doing'] .board-col-dot { background: var(--amber-solid) }
-.board-col[data-tone='done'] .board-col-dot { background: var(--green-solid) }
-.board-col[data-tone] .board-col-name { font-size: 13px; font-weight: 600; color: var(--ink) }
-.board-col-count { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--strip); font-size: 11px; font-weight: 500; color: var(--ink2) }
 
 /* ---------------------------------------------- archive month groups
    Archive's columns are grouped by the month of `updated ?? created` rather
@@ -1704,9 +1697,9 @@ button.rail-count { cursor: pointer }
 .jira-lane-tag { flex: none; padding: 1px 7px; border-radius: 8px; border: 1px dashed var(--hairline2); font-size: 11px; font-weight: 500; color: var(--ink3); white-space: nowrap }
 .jira-lane-label { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; line-height: 28px; color: var(--ink) }
 .jira-lane-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; max-width: 45%; min-width: 0; padding-top: 4px }
-/* Spread bar and count. The bar is `SpreadBar`'s; this rule only gives its box a width, by position, since its class is a ui-* family. */
+/* Spread bar and count. The bar is `SpreadBar`'s; `.jira-lane-bar` is the page-owned span that gives it a width, since its own class is a ui-* family. */
 .jira-lane-tally { display: flex; align-items: center; gap: 8px; flex: none; padding-top: 4px }
-.jira-lane-tally > :first-child { width: 96px }
+.jira-lane-bar { display: block; flex: none; width: 96px }
 .jira-lane-count { font-size: 12px; color: var(--ink2); white-space: nowrap }
 .jira-lane-head[data-kind='none'] > .jira-lane-tally, .jira-lane-head[data-kind='off'] > .jira-lane-tally { margin-left: auto }
 .jira-lane-marks { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; min-width: 0 }

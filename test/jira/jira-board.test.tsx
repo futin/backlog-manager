@@ -18,6 +18,7 @@ import { JIRA_PAGE_KEY } from '../../client/src/lib/jira-page';
 import { GitlabContext } from '../../client/src/hooks/GitlabContext';
 import { NoGitlab } from '../helpers/no-gitlab';
 import { daysAgoStamp } from '../helpers/dates';
+import { readStyles, ruleBlock } from '../helpers/css-rule';
 import {
   JIRA_BUILTIN_LABELS,
   type AgentsStatus,
@@ -669,14 +670,25 @@ describe('the lane card', () => {
       renderPage();
       await screen.findByText('Pill case');
       const pill = name === null ? null : within(card('Pill case')).getByTitle(`priority ${name}`);
-      if (tone === null) expect(card('Pill case').querySelector('[title^="priority "]')).toBeNull();
-      else {
+      if (tone === null) {
+        expect(card('Pill case').querySelector('[title^="priority "]')).toBeNull();
+        // No pill, no slot: an empty slot would be the head's last child, and the key would not move anyway — but nothing stands in for a priority.
+        expect(card('Pill case').querySelector('.jira-card-prio-slot')).toBeNull();
+      } else {
         expect(pill).toHaveClass('ui-prio');
         expect(pill).toHaveAttribute('data-tone', tone);
         expect(pill?.querySelector('svg') !== null).toBe(glyph);
+        // The page lays the primitive out through its own span (guard 7), which is what the push right hangs on.
+        expect(pill?.parentElement).toHaveClass('jira-card-prio-slot');
       }
       cleanup();
     }
+    // The push right is the slot's alone: no structural selector reaches past it into the head's last child, so a card with no priority keeps its key left.
+    const css = readStyles();
+    expect(ruleBlock(css, '.jira-card-prio-slot') as string).toMatch(/margin-left:\s*auto/);
+    expect(css).not.toMatch(/\.jira-card-head\s*>\s*:last-child/);
+    expect(css).not.toMatch(/\.jira-lane-tally\s*>\s*:first-child/);
+    expect(ruleBlock(css, '.jira-lane-bar') as string).toMatch(/width:\s*96px/);
   });
 
   it('the status is the raw name beside a tone dot, and the type tile carries a tone per type', async () => {
@@ -1157,6 +1169,37 @@ describe('the lane folds', () => {
     expect(screen.queryByTestId('cell-PAY-200-done')).toBeNull();
     expect(screen.queryByText('Shipped story')).toBeNull();
     expect(headOf('PAY-200').querySelector('.jira-lane-count')).toHaveTextContent('1 issue');
+  });
+
+  // Case 15's page half: a folded lane draws no cells, but its cards still count in the column heads — the heads count the board, not what is unfolded.
+  it('a folded settled lane still counts in the column heads', async () => {
+    const parentOf = (key: string, summary: string) => ({ key, summary, type: null, status: null });
+    lists[ALPHA.id] = [
+      issue({ key: 'PAY-210', summary: 'Open epic', type: { name: 'Epic', level: 1, subtask: false } }),
+      issue({ key: 'PAY-211', summary: 'Open story one', parent: parentOf('PAY-210', 'Open epic') }),
+      issue({ key: 'PAY-212', summary: 'Open story two', parent: parentOf('PAY-210', 'Open epic') }),
+      issue({
+        key: 'PAY-220',
+        summary: 'Closed epic',
+        type: { name: 'Epic', level: 1, subtask: false },
+        status: { name: 'Done', category: 'done' },
+        resolved: daysAgoStamp(2)
+      }),
+      ...[1, 2, 3].map((n) =>
+        issue({
+          key: `PAY-22${n}`,
+          summary: `Closed story ${n}`,
+          status: { name: 'Done', category: 'done' },
+          parent: parentOf('PAY-220', 'Closed epic'),
+          resolved: daysAgoStamp(2)
+        })
+      )
+    ];
+    renderPage();
+    await screen.findByText('Open story one');
+    expect(screen.getByRole('button', { name: 'Expand PAY-220' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Closed story 1')).toBeNull();
+    expect(colCounts()).toEqual(['2', '0', '3']);
   });
 
   it('folding a lane hides its cells and every lane under it', async () => {
@@ -1841,20 +1884,38 @@ describe('the agent deck and the lane cells', () => {
     await userEvent.click(within(group).getByRole('button', { name: 'Board' }));
   });
 
-  // Case 4: a cell cuts at five; `+ N more` opens that cell alone, and reads `show fewer` while it is open.
+  // Case 4: a cell cuts at five; `+ N more` opens that cell alone, and reads `show fewer` while it is open. Two lanes each hold a 7-card To Do cell, so
+  // "alone" is pinned against the same column of another lane — an open-cell set keyed by the column only would open both — and against another column
+  // of the same lane.
   it('a cell of 7 shows 5 and `+ 2 more`; the click opens only that cell', async () => {
-    lists[ALPHA.id] = [...todos(7), ...dones(6)];
+    const epic = issue({ key: 'PAY-500', summary: 'Checkout epic', type: { name: 'Epic', level: 1, subtask: false } });
+    const under = Array.from({ length: 7 }, (_, i) =>
+      issue({
+        key: `PAY-${510 + i}`,
+        summary: `Epic todo ${i}`,
+        updated: daysAgoStamp(i + 1),
+        parent: { key: 'PAY-500', summary: 'Checkout epic', type: null, status: null }
+      })
+    );
+    lists[ALPHA.id] = [...todos(7), ...dones(6), epic, ...under];
     await renderDeck('Todo 0');
     expect(cellRows('none', 'todo')).toBe(5);
     expect(cellRows('none', 'done')).toBe(5);
+    expect(cellRows('PAY-500', 'todo')).toBe(5);
     const more = cellMore('none', 'todo') as HTMLElement;
     expect(more).toHaveTextContent('+ 2 more');
     expect(more).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByTestId('lanes-col-todo').querySelector('.jira-lanes-count')).toHaveTextContent('7');
+    // The column counts every card in it, across both lanes; the epic is a header and counts nothing.
+    expect(screen.getByTestId('lanes-col-todo').querySelector('.jira-lanes-count')).toHaveTextContent('14');
     await userEvent.click(more);
     expect(cellRows('none', 'todo')).toBe(7);
     expect(cellMore('none', 'todo')).toHaveTextContent('show fewer');
     expect(cellMore('none', 'todo')).toHaveAttribute('aria-expanded', 'true');
+    // The other lane's cell in the SAME column stays cut.
+    expect(cellRows('PAY-500', 'todo')).toBe(5);
+    expect(cellMore('PAY-500', 'todo')).toHaveTextContent('+ 2 more');
+    expect(cellMore('PAY-500', 'todo')).toHaveAttribute('aria-expanded', 'false');
+    // And another column of the same lane does too.
     expect(cellRows('none', 'done')).toBe(5);
     expect(cellMore('none', 'done')).toHaveTextContent('+ 1 more');
     await userEvent.click(cellMore('none', 'todo') as HTMLElement);

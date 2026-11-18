@@ -20,17 +20,15 @@ import { Pill } from '../ui/Pill';
  * union stays closed rather than becoming `Section` because the fifth member is
  * exactly what `RAMP_SLUGS` below has to be able to exclude.
  *
- * `todo`, `doing` and `done` are the Jira board's three columns (Jira phase 2): a tracker's status categories, which are neither a backlog TYPE nor a
- * rejection, so they join the union as slugs with no ramp hue of their own. Without a `tone` each draws the same plain `Dot` the `out-of-scope` column
- * does. The Jira shelves passed `tone` until parent lanes (no caller now) (the restyle, spec §4.3), and then the column draws a page-local `.board-col-dot` and `.board-col-count` instead,
- * styled under `.board-col[data-tone]`: the rules key on the tone and not the slug, so `styles.css` still carries no `.board-col-<slug>` rule for these three.
+ * The Jira shelves' `todo`, `doing` and `done` left the union with the shelves (parent lanes): the lane board draws its own column heads
+ * (`.jira-lanes-head`), so no caller passes a status category here any more.
  */
-export type BoardColumnSlug = 'refactors' | 'ideas' | 'bugs' | 'tasks' | 'out-of-scope' | 'todo' | 'doing' | 'done';
+export type BoardColumnSlug = 'refactors' | 'ideas' | 'bugs' | 'tasks' | 'out-of-scope';
 
 /**
  * The four slugs that name a TYPE, and so carry the category ramp's hue (§8.2).
  *
- * `out-of-scope` (and, since Jira phase 2, `todo`/`doing`/`done`) is deliberately absent and falls through to `Dot`'s own
+ * `out-of-scope` is deliberately absent and falls through to `Dot`'s own
  * toneless base, a plain `--ink3` (§8.5): a rejection is a verdict rather than a
  * type, and giving it a ramp colour would put it in the same vocabulary as the
  * three columns beside it that are still live work. Written as a list to
@@ -65,20 +63,15 @@ export function BoardColumn({
   slug,
   label,
   count,
-  tone,
   ground,
   children,
 }: {
   slug: BoardColumnSlug;
   label: string;
   count: number;
-  /** Jira restyle §4.3: only the Jira shelves passed it, and they are gone (parent lanes). It tones the header: the dot is a page-local `.board-col-dot` and the count a `.board-col-count` span
-   *  because `Dot` has no such tones and a page rule naming `.ui-dot` / `.ui-pill` fails design-guards guard 7. The `--steel` ground is NOT this prop's any
-   *  more — it is `ground`'s, so a column can have one without a tone. Absent, the column draws its ramp `Dot` and neutral `Pill` as it always did. */
-  tone?: 'todo' | 'doing' | 'done';
   /** Opt-in `--steel` ground (radius 16, 12 px padding, the header inside it — mock `Board.dc.html`; user override of restyle spec §4.3, 2026-11-06, which
-   *  limited it to Jira). `BoardView` passes it (the Jira shelves did); `ArchiveView` does not, because its sticky `.archive-month` paints `--board` and would read
-   *  as a white band across a steel column. Drawn by `.board-col[data-ground]`; `data-tone` keeps only the dot's colour. */
+   *  limited it to Jira). `BoardView` passes it; `ArchiveView` does not, because its sticky `.archive-month` paints `--board` and would read as a white band
+   *  across a steel column. Drawn by `.board-col[data-ground]`. */
   ground?: boolean;
   children: ReactNode;
 }) {
@@ -88,7 +81,7 @@ export function BoardColumn({
   const ramp = (RAMP_SLUGS as readonly string[]).includes(slug) ? (slug as (typeof RAMP_SLUGS)[number]) : null;
 
   return (
-    <div className={`board-col board-col-${slug}`} data-testid="board-col" data-tone={tone} data-ground={ground ? '' : undefined}>
+    <div className={`board-col board-col-${slug}`} data-testid="board-col" data-ground={ground ? '' : undefined}>
       {/* `.board-col-head`, not the `.board-col-h` this markup was extracted
           from. That class carried a hairline rule under the header and was
           Archive's alone once the Board stopped drawing one; task-39 put
@@ -98,7 +91,7 @@ export function BoardColumn({
           "nothing on `--board` uses `--strip-hi` as its only separator" rule
           does not apply, because a gap is not a stroke. */}
       <div className="board-col-head">
-        {tone !== undefined ? <span className="board-col-dot" aria-hidden="true" /> : ramp === null ? <Dot /> : <Dot tone={`ramp-${ramp}`} />}
+        {ramp === null ? <Dot /> : <Dot tone={`ramp-${ramp}`} />}
         <span className="board-col-name" data-testid="col-name">
           {label}
         </span>
@@ -108,7 +101,7 @@ export function BoardColumn({
             CSS lays a primitive out, and this span is where that laying out
             happens (the design spec's §12.1). */}
         <span className="board-col-pill" data-testid="col-count">
-          {tone !== undefined ? <span className="board-col-count">{count}</span> : <Pill tone="neutral">{count}</Pill>}
+          <Pill tone="neutral">{count}</Pill>
         </span>
       </div>
       {/* The column's cards, in their own element rather than as this
