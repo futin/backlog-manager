@@ -600,7 +600,7 @@ button.rail-count { cursor: pointer }
   display: flex; flex-direction: column; gap: var(--card-inner-gap);
   padding: var(--card-pad-t) var(--card-pad-x) var(--card-pad-b);
 }
-.board-card-title { font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere }
+.board-card-title { font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--ink) }
 /* The foot: project dot + name left, `id · date` pushed right. No wrapping —
    the row's two halves have fixed jobs and a second line would put the date
    under the project name, where it reads as a second fact about it. What gives
@@ -1664,14 +1664,14 @@ button.rail-count { cursor: pointer }
 
 /* ── Jira › Board as parent lanes (parent-lanes spec §3; DESIGN.md §8.9.1; mocks Board.dc.html, BoardDeep.dc.html) ──────────────────────────────────────
    One sticky column header over every lane, then each lane a `--steel` well (the ground the shelves' columns had, radius 16, 12 px padding) holding its
-   header row and one cell per column. Lanes are drawn FLAT, so nesting is a left margin read off `data-depth` (0–3, `LANE_INDENT_CAP` already applied), one step
+   header row and three cells. Lanes are drawn FLAT, so nesting is a left margin read off `data-depth` (0–3, `LANE_INDENT_CAP` already applied), one step
    per level — never an indent compounded through wrappers. Every value is a token or a step the Board's columns already use; the mocks' pixel values are
    not the source. */
 .jira-lanes { display: flex; flex-direction: column; gap: 12px; min-width: 0 }
 /* The column header: the shelves' toned head (dot, 13/600 name, solid `--strip` count) once for the page, sticky over `--board` so the lanes scroll under
    it. The grid matches `.jira-lane-cells` plus the lane's 12 px padding, so each name sits over its cells. */
 .jira-lanes-head {
-  position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(var(--jira-cols, 3), minmax(0, 1fr)); gap: var(--col-gap);
+  position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--col-gap);
   padding: 8px 12px; background: var(--board);
 }
 .jira-lanes-col { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink) }
@@ -1718,7 +1718,7 @@ button.rail-count { cursor: pointer }
 .jira-lane-count { font-size: 12px; color: var(--ink2); white-space: nowrap }
 .jira-lane-head[data-kind='none'] > .jira-lane-tally, .jira-lane-head[data-kind='off'] > .jira-lane-tally { margin-left: auto }
 .jira-lane-marks { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; min-width: 0 }
-.jira-lane-cells { display: grid; grid-template-columns: repeat(var(--jira-cols, 3), minmax(0, 1fr)); gap: var(--col-gap) }
+.jira-lane-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--col-gap) }
 .jira-lane-cell { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0 }
 /* A cell's `+ N more` / `show fewer`: a quiet row at the foot of the cell, left-aligned with the cards' own edge. */
 .jira-lane-more { display: flex; padding-top: 2px }
@@ -2318,12 +2318,6 @@ button.rail-count { cursor: pointer }
 .jira-sheet-match-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .jira-sheet-match-meta { flex: none; margin-left: auto; font-size: 12px; color: var(--ink3) }
 
-/* Columns: a status per row — dot and name from the Board's own header classes, the ↑/↓ pair the Skills card's, and a × only for a name no issue carries. */
-.jira-sheet-col { display: flex; align-items: center; gap: 8px; min-height: 36px; border-bottom: 1px solid var(--hairline) }
-.jira-sheet-col .jira-lanes-col { flex: 1; font-weight: 500 }
-.jira-sheet-col-x { margin-left: 0 }
-.jira-sheet-col-add { display: flex; align-items: center; gap: 8px }
-.jira-sheet-col-add .jira-sheet-search-field { flex: 1; width: auto; min-width: 0 }
 /* The four query chips wrap as one line of chips; the project `Select` takes the third chip's place while open. */
 .jira-sheet-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px }
 /* A query row: label and ×, the JQL box under them, the check line under that — the mock's `.qrow`. */

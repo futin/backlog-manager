@@ -968,11 +968,6 @@ export interface JiraBoard {
   roots: string[];
   queries: JiraQuery[];
   interval: SyncInterval;
-  /**
-   * Status names in the order the Board draws its columns, `[]` when nothing is saved. Optional in the TYPE so fixtures written before it still typecheck;
-   * `readBoard` always sets it, and client readers use `board.columns ?? []`.
-   */
-  columns?: string[];
 }
 
 /** A prompt template the Start sheet offers beside `execute` and `context`. `prompt` is the template itself, not a rendered prompt. */

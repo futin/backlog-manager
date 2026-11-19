@@ -91,10 +91,8 @@ export const JIRA_CUSTOM_QUERY: JiraQueryPreset = { chip: 'Custom JQL', label: '
 export type JiraColumnSlug = 'todo' | 'doing' | 'done';
 
 /**
- * The three Jira STATUS CATEGORIES as tones, in rank order: the status dot, the spread bar and the settled-lane test read them (`columnOf`, `statusTone`).
- * Every status in Jira belongs to one of exactly three categories (`undefined`, "No Category", is mapped to `new` by the server — P5). They are no longer
- * the Board's columns: since the status-columns spec those are one per status NAME, from `boardColumns`, because a workflow like TIMIFY's files
- * `In Testing` and `In Review` under `new`. `label` is the category's own name, kept for the tone's readers and pinned by `jira-lib.test.ts`.
+ * The board's three columns, in render order. A column is a Jira STATUS CATEGORY, never a status name: workflows are per project and a name is whatever a
+ * team typed, but every status in Jira belongs to one of exactly three categories (`undefined`, "No Category", is mapped to `new` by the server — P5).
  */
 export const JIRA_COLUMNS: { slug: JiraColumnSlug; label: string; category: JiraStatusCategory }[] = [
   { slug: 'todo', label: 'To Do', category: 'new' },
@@ -526,15 +524,12 @@ export function laneViews(board: JiraLanes, matches: (issue: JiraIssue) => boole
   return board.lanes.map(view).filter((v): v is JiraLaneView => v !== null);
 }
 
-/**
- * Matching cards per status name across every drawn lane at every depth — a header is a lane's heading, in no column (§3.1). A name with no card is absent,
- * so the caller reads `?? 0`.
- */
-export function laneColumnCounts(views: readonly JiraLaneView[]): ReadonlyMap<string, number> {
-  const counts = new Map<string, number>();
+/** Matching cards per column across every drawn lane at every depth — a header is a lane's heading, in no column (§3.1). */
+export function laneColumnCounts(views: readonly JiraLaneView[]): Record<JiraColumnSlug, number> {
+  const counts: Record<JiraColumnSlug, number> = { todo: 0, doing: 0, done: 0 };
   const walk = (vs: readonly JiraLaneView[]): void => {
     for (const v of vs) {
-      for (const c of v.cards) counts.set(c.status.name, (counts.get(c.status.name) ?? 0) + 1);
+      for (const c of v.cards) counts[columnOf(c)] += 1;
       walk(v.lanes);
     }
   };
@@ -944,46 +939,6 @@ export function clampJiraPanelFilters(v: unknown): JiraPanelFilters {
 const CATEGORY_RANK: Record<JiraStatusCategory, number> = { new: 0, indeterminate: 1, done: 2 };
 
 const byText = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true });
-
-/** One Board column: a status name (`''` for an issue with none), the label drawn, and the category of the first issue seen with it, `null` when none carries it. */
-export interface JiraBoardColumn {
-  name: string;
-  label: string;
-  category: JiraStatusCategory | null;
-}
-
-/**
- * The Board's columns (status-columns spec, "Columns" and "Order"): every distinct status name among the loaded, unfiltered issues plus every saved name, so a
- * column the user placed stays while empty. The saved names keep their order; each unsaved name, sorted by `CATEGORY_RANK` then `byText`, goes immediately
- * after the last column already listed whose rank is lower or equal, or first when there is none. A saved name no issue carries has no category and no rank,
- * so that search skips it. The first issue seen fixes a name's category, the same rule `boardFilterOptions` applies.
- */
-export function boardColumns(issues: readonly JiraIssue[], saved: readonly string[]): JiraBoardColumn[] {
-  const seen = new Map<string, JiraStatusCategory>();
-  for (const i of issues) if (!seen.has(i.status.name)) seen.set(i.status.name, i.status.category);
-  const column = (name: string): JiraBoardColumn => ({ name, label: name === '' ? 'No status' : name, category: seen.get(name) ?? null });
-  const rankOf = (c: JiraBoardColumn): number | null => (c.category === null ? null : CATEGORY_RANK[c.category]);
-  const cols = saved.map(column);
-  const unsaved = [...seen.keys()]
-    .filter((n) => !saved.includes(n))
-    .map(column)
-    .sort((a, b) => CATEGORY_RANK[a.category!] - CATEGORY_RANK[b.category!] || byText(a.name, b.name));
-  for (const col of unsaved) {
-    const rank = CATEGORY_RANK[col.category!];
-    let at = 0;
-    cols.forEach((c, idx) => {
-      const r = rankOf(c);
-      if (r !== null && r <= rank) at = idx + 1;
-    });
-    cols.splice(at, 0, col);
-  }
-  return cols;
-}
-
-/** A column's dot tone: its category's, or the page's default grey (`todo`) for a saved name no loaded issue carries. */
-export function columnTone(col: JiraBoardColumn): JiraColumnSlug {
-  return col.category === null ? 'todo' : statusTone(col.category);
-}
 
 /**
  * The picks the panel offers, read off the LOADED list rather than off Jira's own catalogue: a type or a sprint no card on this board carries would be a

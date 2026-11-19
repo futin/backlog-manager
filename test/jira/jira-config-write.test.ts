@@ -91,16 +91,6 @@ describe('parseBoardWrite', () => {
     });
   });
 
-  it('leaves columns undefined when the body has none, refuses a non-array, and drops bad entries silently', () => {
-    const none = parseBoardWrite(valid);
-    expect(none.ok && none.value.columns).toBeUndefined();
-    expect(parseBoardWrite({ ...valid, columns: 'x' })).toEqual({ ok: false, error: 'columns must be an array of status names' });
-    const r = parseBoardWrite({ ...valid, columns: ['To Do', '', 'a'.repeat(101), 'To Do', 'Done'] });
-    expect(r.ok && r.value.columns).toEqual(['To Do', 'Done']);
-    const empty = parseBoardWrite({ ...valid, columns: [] });
-    expect(empty.ok && empty.value.columns).toEqual([]);
-  });
-
   it('refuses a bad name, naming the field', () => {
     bad({ name: '' }, 'name');
     bad({ name: '   ' }, 'name');
@@ -169,18 +159,6 @@ describe('writeBoard', () => {
     expect(board.queries[0].id).not.toBe('q_deadbeef');
     expect(parsed().boards).toHaveLength(1);
     expect(readJiraConfig(file).boards[0]).toEqual(board);
-  });
-
-  it('stores columns on an update, leaves the raw key alone when a later update omits them, and writes [] on a create', () => {
-    put({ boards: [b1] });
-    const first = writeBoard(input({ id: 'b_11111111', columns: ['B', 'A'] }), file);
-    expect(first.columns).toEqual(['B', 'A']);
-    const second = writeBoard(input({ id: 'b_11111111', name: 'Renamed' }), file);
-    expect(second.columns).toEqual(['B', 'A']);
-    expect((parsed().boards as { columns: string[] }[])[0].columns).toEqual(['B', 'A']);
-    const created = writeBoard(input(), file);
-    expect(created.columns).toEqual([]);
-    expect((parsed().boards as { id: string }[]).find((b) => b.id === created.id)).toEqual(created);
   });
 
   it('ignores a client id on create', () => {

@@ -55,7 +55,7 @@ describe('readJiraConfig — the file as a whole', () => {
     const repos = { PAY: ['/w/payments-api', '/w/payments-web'] };
     const skills = [{ id: 's_0123abcd', name: 'Groom', prompt: '/jira-groom {key}' }];
     put({ boards: [validBoard], repos, skills });
-    expect(readJiraConfig(file)).toEqual({ boards: [{ ...validBoard, columns: [] }], repos, repoDefaults: {}, skills, unreadable: null });
+    expect(readJiraConfig(file)).toEqual({ boards: [validBoard], repos, repoDefaults: {}, skills, unreadable: null });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -110,26 +110,6 @@ describe('readJiraConfig — boards', () => {
     expect(warn).toHaveBeenCalledTimes(4);
   });
 
-  it('reads columns as [] when missing or not an array', () => {
-    put({ boards: [validBoard, { ...validBoard, id: 'b_0000aaaa', columns: 'x' }] });
-    expect(readJiraConfig(file).boards.map((b) => b.columns)).toEqual([[], []]);
-    expect(warn).not.toHaveBeenCalled();
-  });
-
-  it('normalises columns, warning per dropped entry and keeping the board', () => {
-    put({ boards: [{ ...validBoard, columns: [1, ' ', ' In Review ', 'In Review', 'Done'] }] });
-    const { boards } = readJiraConfig(file);
-    expect(boards).toHaveLength(1);
-    expect(boards[0].columns).toEqual(['In Review', 'Done']);
-    expect(warn).toHaveBeenCalledTimes(3);
-  });
-
-  it('keeps the first 50 of 60 distinct columns', () => {
-    const names = Array.from({ length: 60 }, (_, i) => `S${i}`);
-    put({ boards: [{ ...validBoard, columns: names }] });
-    expect(readJiraConfig(file).boards[0].columns).toEqual(names.slice(0, 50));
-  });
-
   it('keeps a valid interval other than the default', () => {
     put({ boards: [{ ...validBoard, interval: '15s' }] });
     expect(readJiraConfig(file).boards[0].interval).toBe('15s');
@@ -154,7 +134,7 @@ describe('readJiraConfig — boards', () => {
     const { boards } = readJiraConfig(file);
     expect(boards[0].roots).toEqual(['PAY-1', 'PAY-3']);
     expect(boards[0].queries).toEqual([{ id: 'q_0123abcd', label: 'ok', jql: 'x' }]);
-    expect(boards[1]).toEqual({ id: 'b_0000cccc', name: 'all bad', roots: [], queries: [], interval: '1m', columns: [] });
+    expect(boards[1]).toEqual({ id: 'b_0000cccc', name: 'all bad', roots: [], queries: [], interval: '1m' });
   });
 
   it('reads a board whose roots or queries are missing or not arrays as having none', () => {
