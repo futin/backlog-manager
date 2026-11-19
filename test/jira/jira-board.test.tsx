@@ -325,9 +325,14 @@ const headOf = (key: string): HTMLElement => lane(key)?.querySelector('.jira-lan
 const laneKeys = (): string[] => Array.from(document.querySelectorAll('section.jira-lane')).map((s) => s.getAttribute('data-lane') ?? '');
 const cellSummaries = (laneKey: string, slug: 'todo' | 'doing' | 'done'): string[] =>
   Array.from(screen.getByTestId(`cell-${laneKey}-${slug}`).querySelectorAll('.board-card-title')).map((t) => t.textContent ?? '');
-/** The shared column header's three counts, To Do · In Progress · Done. */
-const colCounts = (): string[] =>
-  (['todo', 'doing', 'done'] as const).map((s) => screen.getByTestId(`lanes-col-${s}`).querySelector('.jira-lanes-count')?.textContent ?? '');
+/** One lane's three tile counts, To Do · In Progress · Done — each tile's own head, there is no page-wide column header. */
+const tileCounts = (laneKey: string): string[] =>
+  (['todo', 'doing', 'done'] as const).map((s) => screen.getByTestId(`cell-${laneKey}-${s}`).querySelector('.jira-cell-count')?.textContent ?? '');
+/** Every drawn tile's count summed per category, To Do · In Progress · Done — what the cards on screen add up to. */
+const tileTotals = (): number[] =>
+  (['todo', 'doing', 'done'] as const).map((s) =>
+    Array.from(document.querySelectorAll(`.jira-cell-head[data-tone="${s}"] .jira-cell-count`)).reduce((a, e) => a + Number(e.textContent), 0)
+  );
 /** What `GET /api/jira/issue/<KEY>` answers for an off-board parent's read. */
 const detailOf = (i: JiraIssue) => ({ ...i, description: '', children: [], transitions: [], boards: [], session: null });
 function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void } {
@@ -613,18 +618,36 @@ describe('the band', () => {
 });
 
 /*
-  The lanes (parent-lanes spec §3; DESIGN.md §8.9.1): one sticky column header for the page, then one lane per parent — an on-board header, an off-board
-  stub, or `No parent` — each with its three cells. ALPHA's list makes two: PAY-131 under the off-board PAY-99, and the other three under `No parent`.
+  The lanes (parent-lanes spec §3; DESIGN.md §8.9.1): no page-wide column header, one lane per parent — an on-board header, an off-board stub, or
+  `No parent` — each with its three cell tiles, every tile headed by its category and its count. ALPHA's list makes two: PAY-131 under the off-board PAY-99, and the other three under `No parent`.
 */
 describe('the lanes', () => {
-  it('draws one column header: To Do, In Progress and Done in tone order, each with a page-local dot and the count of the cards under it', async () => {
+  it('draws no page-wide column header; every tile names its category in tone order, with a dot and its own lane’s count', async () => {
     await renderAlpha();
-    const cols = (['todo', 'doing', 'done'] as const).map((s) => screen.getByTestId(`lanes-col-${s}`));
-    expect(cols.map((c) => c.getAttribute('data-tone'))).toEqual(['todo', 'doing', 'done']);
-    expect(cols.map((c) => c.querySelector('.jira-lanes-name')?.textContent)).toEqual(['To Do', 'In Progress', 'Done']);
-    for (const c of cols) expect(c.querySelectorAll('.jira-lanes-dot')).toHaveLength(1);
-    expect(colCounts()).toEqual(['2', '1', '1']);
-    expect(document.querySelectorAll('.jira-lanes-head')).toHaveLength(1);
+    expect(document.querySelector('.jira-lanes-head')).toBeNull();
+    for (const key of ['none', 'PAY-99']) {
+      const heads = (['todo', 'doing', 'done'] as const).map((s) => screen.getByTestId(`cell-${key}-${s}`).querySelector('.jira-cell-head') as HTMLElement);
+      expect(heads.map((h) => h.getAttribute('data-tone'))).toEqual(['todo', 'doing', 'done']);
+      expect(heads.map((h) => h.querySelector('.jira-cell-name')?.textContent)).toEqual(['To Do', 'In Progress', 'Done']);
+      for (const h of heads) expect(h.querySelectorAll('.jira-cell-dot')).toHaveLength(1);
+    }
+    // Lane-local, not page totals: `No parent` holds two To Do cards and one Done, PAY-99 the one In Progress card.
+    expect(tileCounts('none')).toEqual(['2', '0', '1']);
+    expect(tileCounts('PAY-99')).toEqual(['0', '1', '0']);
+  });
+
+  it('a status Jira files under To Do (In Testing, In Review) sits in the To Do tile, its own status word on the card', async () => {
+    lists[ALPHA.id] = [
+      issue({ key: 'PAY-701', summary: 'Testing ticket', status: { name: 'In Testing', category: 'new' }, updated: daysAgoStamp(1) }),
+      issue({ key: 'PAY-702', summary: 'Review ticket', status: { name: 'In Review', category: 'new' }, updated: daysAgoStamp(2) })
+    ];
+    renderPage();
+    await screen.findByText('Testing ticket');
+    expect(cellSummaries('none', 'todo')).toEqual(['Testing ticket', 'Review ticket']);
+    expect(tileCounts('none')).toEqual(['2', '0', '0']);
+    const todo = screen.getByTestId('cell-none-todo');
+    expect(within(todo).getByText('In Testing')).toBeInTheDocument();
+    expect(within(todo).getByText('In Review')).toBeInTheDocument();
   });
 
   it('puts PAY-131 in its off-board parent’s lane and the rest under `No parent`, each cell newest first', async () => {
@@ -637,19 +660,18 @@ describe('the lanes', () => {
     expect(within(headOf('none')).getByText('No parent')).toBeInTheDocument();
   });
 
-  it('a board with no issues draws the column header with zeros and `No issues`', async () => {
+  it('a board with no issues draws `No issues` and no lanes', async () => {
     lists[ALPHA.id] = [];
     renderPage();
-    await waitFor(() => expect(colCounts()).toEqual(['0', '0', '0']));
-    expect(screen.getByText('No issues')).toBeInTheDocument();
+    expect(await screen.findByText('No issues')).toBeInTheDocument();
+    expect(document.querySelector('.jira-lanes-head')).toBeNull();
     expect(laneKeys()).toEqual([]);
     expect(screen.queryByText('No boards yet')).toBeNull();
   });
 
-  it('filters that match nothing keep the zeros and read `No issues match`', async () => {
+  it('filters that match nothing read `No issues match`', async () => {
     await renderAlpha();
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'zzz-nothing');
-    expect(colCounts()).toEqual(['0', '0', '0']);
     expect(screen.getByText('No issues match')).toBeInTheDocument();
     expect(laneKeys()).toEqual([]);
   });
@@ -658,7 +680,7 @@ describe('the lanes', () => {
   // PAY-160 are headers. A lane's count is its subtree's matching issues, nested headers included.
   it('counts cards, never headers, and a lane counts its subtree: `4 issues` on PAY-120, `2 issues` on the nested PAY-160', async () => {
     await renderGroup();
-    expect(colCounts()).toEqual(['2', '1', '2']);
+    expect(tileTotals()).toEqual([2, 1, 2]);
     expect(headOf('PAY-120').querySelector('.jira-lane-count')).toHaveTextContent('4 issues');
     expect(headOf('PAY-160').querySelector('.jira-lane-count')).toHaveTextContent('2 issues');
     expect(headOf('PAY-120').querySelectorAll('.ui-spread-seg').length).toBeGreaterThan(0);
@@ -1284,7 +1306,8 @@ describe('the lane folds', () => {
     await screen.findByText('Open story one');
     expect(screen.getByRole('button', { name: 'Expand PAY-220' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('Closed story 1')).toBeNull();
-    expect(colCounts()).toEqual(['2', '0', '3']);
+    // A folded lane draws no tiles, so its Done cards are counted on its header only.
+    expect(screen.queryByTestId('cell-PAY-220-done')).toBeNull();
   });
 
   it('folding a lane hides its cells and every lane under it', async () => {
@@ -1357,7 +1380,7 @@ describe('filters over lanes', () => {
     expect(laneKeys()).toEqual(['PAY-50']);
     expect(cellSummaries('PAY-50', 'todo')).toEqual(['Gamma card']);
     expect(headOf('PAY-50').querySelector('.jira-lane-count')).toHaveTextContent('1 issue');
-    expect(colCounts()).toEqual(['1', '0', '0']);
+    expect(tileCounts('PAY-50')).toEqual(['1', '0', '0']);
   });
 
   it('a header that matches on its own draws with empty cells and no count or bar', async () => {
@@ -2015,8 +2038,9 @@ describe('the agent deck and the lane cells', () => {
     const more = cellMore('none', 'todo') as HTMLElement;
     expect(more).toHaveTextContent('+ 2 more');
     expect(more).toHaveAttribute('aria-expanded', 'false');
-    // The column counts every card in it, across both lanes; the epic is a header and counts nothing.
-    expect(screen.getByTestId('lanes-col-todo').querySelector('.jira-lanes-count')).toHaveTextContent('14');
+    // A tile counts its lane's matching cards before the cut, so `+ 2 more` and the count agree; the epic is a header and counts nothing.
+    expect(screen.getByTestId('cell-none-todo').querySelector('.jira-cell-count')).toHaveTextContent('7');
+    expect(screen.getByTestId('cell-PAY-500-todo').querySelector('.jira-cell-count')).toHaveTextContent('7');
     await userEvent.click(more);
     expect(cellRows('none', 'todo')).toBe(7);
     expect(cellMore('none', 'todo')).toHaveTextContent('show fewer');

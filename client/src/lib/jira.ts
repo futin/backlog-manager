@@ -524,19 +524,6 @@ export function laneViews(board: JiraLanes, matches: (issue: JiraIssue) => boole
   return board.lanes.map(view).filter((v): v is JiraLaneView => v !== null);
 }
 
-/** Matching cards per column across every drawn lane at every depth — a header is a lane's heading, in no column (§3.1). */
-export function laneColumnCounts(views: readonly JiraLaneView[]): Record<JiraColumnSlug, number> {
-  const counts: Record<JiraColumnSlug, number> = { todo: 0, doing: 0, done: 0 };
-  const walk = (vs: readonly JiraLaneView[]): void => {
-    for (const v of vs) {
-      for (const c of v.cards) counts[columnOf(c)] += 1;
-      walk(v.lanes);
-    }
-  };
-  walk(views);
-  return counts;
-}
-
 /** Lanes with a parent behind them — every kind but `No parent`, at every depth, unfiltered (the `M parents` count, §3.1). */
 export function laneParents(board: JiraLanes): number {
   const walk = (lanes: readonly JiraLane[]): number => lanes.reduce((n, l) => n + (l.kind === 'none' ? 0 : 1) + walk(l.lanes), 0);

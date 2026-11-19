@@ -600,7 +600,7 @@ button.rail-count { cursor: pointer }
   display: flex; flex-direction: column; gap: var(--card-inner-gap);
   padding: var(--card-pad-t) var(--card-pad-x) var(--card-pad-b);
 }
-.board-card-title { font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--ink) }
+.board-card-title { font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere }
 /* The foot: project dot + name left, `id · date` pushed right. No wrapping —
    the row's two halves have fixed jobs and a second line would put the date
    under the project name, where it reads as a second fact about it. What gives
@@ -1200,7 +1200,7 @@ button.rail-count { cursor: pointer }
 /* A column's ground (mock Board.dc.html; restyle spec §4.3 gave it to Jira alone and the user extended it to the GitHub Board, 2026-11-06): a `--steel` well,
    radius 16, 12 px padding with the header inside it, on `[data-ground]` — which `BoardView` sets and Archive does not, because its sticky
    `.archive-month` paints `--board` and would read as a white band across it. The Jira shelves' toned header went with the shelves (parent lanes); the lane
-   board draws its own column heads (`.jira-lanes-head`). */
+   board labels each of its cell tiles instead (`.jira-cell-head`). */
 .board-col[data-ground] { background: var(--steel); border-radius: 16px; padding: 12px; --card-hover: var(--card-hover-steel) }
 
 /* ---------------------------------------------- archive month groups
@@ -1663,25 +1663,14 @@ button.rail-count { cursor: pointer }
 .jira-card-ended { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--ink3) }
 
 /* ── Jira › Board as parent lanes (parent-lanes spec §3; DESIGN.md §8.9.1; mocks Board.dc.html, BoardDeep.dc.html) ──────────────────────────────────────
-   One sticky column header over every lane, then each lane a `--steel` well (the ground the shelves' columns had, radius 16, 12 px padding) holding its
-   header row and three cells. Lanes are drawn FLAT, so nesting is a left margin read off `data-depth` (0–3, `LANE_INDENT_CAP` already applied), one step
-   per level — never an indent compounded through wrappers. Every value is a token or a step the Board's columns already use; the mocks' pixel values are
-   not the source. */
-.jira-lanes { display: flex; flex-direction: column; gap: 12px; min-width: 0 }
-/* The column header: the shelves' toned head (dot, 13/600 name, solid `--strip` count) once for the page, sticky over `--board` so the lanes scroll under
-   it. The grid matches `.jira-lane-cells` plus the lane's 12 px padding, so each name sits over its cells. */
-.jira-lanes-head {
-  position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--col-gap);
-  padding: 8px 12px; background: var(--board);
-}
-.jira-lanes-col { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink) }
-.jira-lanes-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ink3) }
-.jira-lanes-col[data-tone='doing'] .jira-lanes-dot { background: var(--amber-solid) }
-.jira-lanes-col[data-tone='done'] .jira-lanes-dot { background: var(--green-solid) }
-.jira-lanes-count {
-  display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--strip); font-size: 11px; font-weight: 500; color: var(--ink2)
-}
-.jira-lane { display: flex; flex-direction: column; gap: 10px; min-width: 0; background: var(--steel); border-radius: 16px; padding: 12px; --card-hover: var(--card-hover-steel) }
+   Each lane sits on the page ground, a hairline above every lane but the first, holding its header row and three cells; each CELL is its own `--steel`
+   tile (radius 16, 8 px padding, cards white on it) headed by its category — mock `Board.dc.html`'s tiles, plus the user's option D (2026-11-19): the
+   category label moved off a page-wide sticky header into every tile, and the page header is gone. Lanes are drawn FLAT, so nesting is a left margin read
+   off `data-depth` (0–3, `LANE_INDENT_CAP` already applied), one step per level — never an indent compounded through wrappers. Every value is a token or a
+   step the Board's columns already use; the mocks' pixel values are not the source. */
+.jira-lanes { display: flex; flex-direction: column; min-width: 0 }
+.jira-lane { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px 0; border-top: 1px solid var(--hairline2) }
+.jira-lane:first-of-type { border-top: 0; padding-top: 4px }
 .jira-lane[data-depth='1'] { margin-left: 24px }
 .jira-lane[data-depth='2'] { margin-left: 48px }
 .jira-lane[data-depth='3'] { margin-left: 72px }
@@ -1719,11 +1708,21 @@ button.rail-count { cursor: pointer }
 .jira-lane-head[data-kind='none'] > .jira-lane-tally, .jira-lane-head[data-kind='off'] > .jira-lane-tally { margin-left: auto }
 .jira-lane-marks { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; min-width: 0 }
 .jira-lane-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--col-gap) }
-.jira-lane-cell { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0 }
+.jira-lane-cell {
+  display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0; padding: 8px; border-radius: 16px; background: var(--steel);
+  --card-hover: var(--card-hover-steel)
+}
+/* A tile's head: the category's dot (`--ink3`, `--amber-solid`, `--green-solid`), the name at 12/600 and a `--strip` count of this lane's matching cards in
+   the cell, the count beside the name (never pushed right — the parent-lanes ui-verify D2). */
+.jira-cell-head { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 4px 0; font-size: 12px; font-weight: 600; color: var(--ink2) }
+.jira-cell-dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; flex: none; background: var(--ink3) }
+.jira-cell-head[data-tone='doing'] .jira-cell-dot { background: var(--amber-solid) }
+.jira-cell-head[data-tone='done'] .jira-cell-dot { background: var(--green-solid) }
+.jira-cell-count { display: inline-block; padding: 0 7px; border-radius: 999px; background: var(--strip); font-size: 11px; font-weight: 500; color: var(--ink3) }
 /* A cell's `+ N more` / `show fewer`: a quiet row at the foot of the cell, left-aligned with the cards' own edge. */
 .jira-lane-more { display: flex; padding-top: 2px }
 @media (max-width: 700px) {
-  .jira-lanes-head, .jira-lane-cells { grid-template-columns: 1fr }
+  .jira-lane-cells { grid-template-columns: 1fr }
   .jira-lane[data-depth] { margin-left: 0 }
   .jira-lane-head { flex-wrap: wrap }
   /* The cluster takes its own line under the title (spec §3.2), indented past the chevron: as a row beside a `flex: 1 1 0%` main it would fit on the title's

@@ -41,7 +41,6 @@ import {
   laneBoard,
   NO_PARENT_LANE,
   laneViews,
-  laneColumnCounts,
   laneParents,
   laneCell,
   LANE_CELL_LIMIT,
@@ -2440,21 +2439,6 @@ describe('lane views', () => {
     expect(JSON.stringify(board.lanes)).toBe(before);
   });
 
-  describe('laneColumnCounts', () => {
-    const issues = (): JiraIssue[] => [
-      n('PAY-40', null, 6 * HOUR, doing),
-      n('PAY-41', 'PAY-40', 5 * HOUR, doing),
-      n('PAY-42', 'PAY-41', 1 * HOUR, done),
-      n('PAY-43', 'PAY-41', 2 * HOUR),
-      n('PAY-44', 'PAY-40', 3 * HOUR)
-    ];
-    it('counts matching cards per column at every depth, headers in none', () => {
-      expect(laneColumnCounts(laneViews(laneBoard(issues()), () => true))).toEqual({ todo: 2, doing: 0, done: 1 });
-    });
-    it('follows the predicate', () => {
-      expect(laneColumnCounts(laneViews(laneBoard(issues()), (i) => i.key !== 'PAY-43'))).toEqual({ todo: 1, doing: 0, done: 1 });
-    });
-  });
 
   describe('laneParents', () => {
     it('counts lanes that are not No parent, every depth', () => {

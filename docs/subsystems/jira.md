@@ -339,7 +339,7 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   reports a landed write — asks at once through the same coalesced request, whatever the interval, `off` included (spec §6.1).
 - **`lib/jira.ts`** is the one home of every derivation the five surfaces print — the columns (`JIRA_COLUMNS`, `columnOf`, `sortForBoard`), the card's crumb
   (`crumbOf`/`crumbText`), initials, age (`cardAgeStamp`), the lanes (`laneBoard` — the one walk of the parent chain, into the lanes in drawing order, the `childrenOf` index and each issue's kept parent,
-  `parentOf` — then `laneViews` for the filtered reading, `laneColumnCounts`, `laneCell` and `LANE_CELL_LIMIT`, `foldProgress` and the modal's `modalTree`), the
+  `parentOf` — then `laneViews` for the filtered reading, `laneCell` and `LANE_CELL_LIMIT`, `foldProgress` and the modal's `modalTree`), the
   lane folds' storage (`JIRA_LANE_FOLDS_KEY`, `clampLaneFolds`, `setLaneFold`) and their sentences (`progressLine`, `laneCountText`), the band line (`bandSub`,
   whose issue and `M parents` counts, `laneParents`, come from the lanes once the list has loaded), a Setup row's sentence (`boardRowLine`), the
   failure phrase, the chip's CALLS reading (`callsReading`, against `JIRA_SWEEP_CALL_CEILING` = 100, red inside `JIRA_429_RED_MS` = 15 min of the last 429),
@@ -352,8 +352,8 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   stored per browser — a stored pick the list does not offer reads as any; the summary search is per mount.
   `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. The board draws one lane per parent (`JiraLaneBoard`, `JiraLaneHeader`; DESIGN.md §8.9.1): `laneBoard` reads the loaded list once and every
   issue is drawn once — a header issue (the parent of something on the board) heads its own lane, every other issue is a card in its parent's lane, in
-  `No parent`, or in an off-board lane whose header is a stub built from the freshest card under it. A lane's cards sit in To Do, In Progress and Done cells under
-  one sticky column header, each cell cut at `LANE_CELL_LIMIT` (5) plus any card past it with a live session, and the nested lanes follow their parent's cells.
+  `No parent`, or in an off-board lane whose header is a stub built from the freshest card under it. A lane's cards sit in To Do, In Progress and Done cells, each a
+  `--steel` tile headed by its category and its count (no page-wide header), each cell cut at `LANE_CELL_LIMIT` (5) plus any card past it with a live session, and the nested lanes follow their parent's cells.
   Matching is per issue — `matchesBoardFilters`, then `matchesDelivery` while a delivery filter is picked — and `laneViews` keeps a lane while anything in its
   subtree matches. A lane folds from its chevron: settled lanes start closed, a person's toggle is stored per board as an override
   (`JIRA_LANE_FOLDS_KEY`, one key holding a board id to overrides map, clamped on read by `clampLaneFolds`), and while the search box holds text every lane draws open.
