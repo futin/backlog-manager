@@ -666,6 +666,19 @@ describe('the Jira row’s Needs-you badge', () => {
     expect(view.result.current[0]).toBe('list');
   });
 
+  it('draws no row for the `ticket` page while it is the stored one — the tree shows four pages until Task 8 draws the held key', () => {
+    const page = renderHook(() => useJiraPage());
+    act(() => page.result.current[1]('ticket'));
+    try {
+      render(tree(payload([]), jest.fn(), 'jira'));
+      const rows = Array.from(screen.getByRole('group', { name: 'Jira pages' }).querySelectorAll('.rail-sublink'));
+      expect(rows.map((b) => b.textContent)).toEqual(['Board', 'Sessions', 'Mentions', 'Setup']);
+      expect(rows.some((b) => b.getAttribute('aria-current') === 'true')).toBe(false);
+    } finally {
+      act(() => page.result.current[1]('board'));
+    }
+  });
+
   it('draws Board, Sessions, Mentions, Setup in the open Jira tree; Sessions carries the count as its own button, and the row itself still just sets the page', async () => {
     const onChange = jest.fn();
     const page = renderHook(() => useJiraPage());

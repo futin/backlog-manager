@@ -217,7 +217,7 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   const pagesOf: Partial<Record<Section, readonly string[]>> = {
     files: FILES_PAGES,
     github: GITHUB_PAGES,
-    jira: JIRA_PAGES,
+    jira: JIRA_TREE_PAGES,
     runs: RUNS_MODES,
     settings: SETTINGS_SCOPES
   };
@@ -306,7 +306,7 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
                 section="jira"
                 current={section}
                 counts={pending.jira}
-                items={JIRA_PAGES}
+                items={JIRA_TREE_PAGES}
                 value={jiraPage}
                 labelFor={(p) => RAIL_JIRA_LABEL[p]}
                 onPick={setJiraPage}
@@ -561,11 +561,17 @@ const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
  * `Board` repeats the source trees' word on purpose: under the `Jira` row it reads as Jira's board, and the page it opens is a board — three columns of
  * cards — in the same sense Files › Board and GitHub › Board are.
  */
+// The tree's pages: `ticket` is a page the store can hold but a row the tree does not draw until a key is held and the page exists (Task 8, spec §2.2), so the
+// rail never draws an empty `ticket` row — and `sectionTotal` never sums a page the tree does not show.
+const JIRA_TREE_PAGES: readonly JiraPage[] = JIRA_PAGES.filter((p) => p !== 'ticket');
+
 const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
   board: 'Board',
   sessions: 'Sessions',
   mentions: 'Mentions',
-  setup: 'Setup'
+  setup: 'Setup',
+  // Never drawn through this map as a word: the tree's row for the ticket page shows the held key (spec §2.2, Task 8); the entry only keeps the record total.
+  ticket: 'Ticket'
 };
 
 /**
