@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
-import { useJiraPage } from '../../hooks/useJiraPage';
+import { setJiraPage, useJiraPage } from '../../hooks/useJiraPage';
+import { setJiraTicketKey, useJiraTicketKey } from '../../hooks/useJiraTicketKey';
 import type { JiraChildrenIndex } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
 import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf } from '../../../../shared/types';
@@ -15,6 +16,7 @@ import { JiraLaunchSheet } from './JiraLaunchSheet';
 import { JiraMentionsView } from './JiraMentionsView';
 import { JiraSessionsView } from './JiraSessionsView';
 import { JiraSetupView } from './JiraSetupView';
+import { JiraTicketPage, type TicketOrigin } from './JiraTicketPage';
 
 /**
  * JiraView — the Jira section (Jira phase 2, spec §6.1; DESIGN.md §8.9, and §8.0 for the tree that switches its pages). Lazy in `App`, like every section,
@@ -64,6 +66,13 @@ import { JiraSetupView } from './JiraSetupView';
  * `onStarted` is a landed Start and `onWrote` a Start refused after the server's writes landed: both are `landed` — reload the shell's status (the strip is
  * `live`, and the status poll alone runs on the boards' clock, minutes away) AND the sessions payload, and bump `nudge`, because the ticket may have been
  * assigned and moved either way. Like the open issue, the slot is cleared whenever `page` changes.
+ *
+ * **The ticket page** (Jira detail tabs spec §2) is the fifth page, `JiraTicketPage`, drawn while the page is `ticket` and the key store holds a key. `ticket`
+ * with an empty key is not a page: this draws the Board for it and writes `board` back in one effect, so the rail never highlights a row it does not draw.
+ * `openPage` is every way in but the rail's row — the modal's `Open full page ↗` and a Cmd-, Ctrl- or middle-click on a card, row or deck title: it writes
+ * the key store FIRST (the store's setter, as the two-writer rule asks), remembers the page it was called from as the ORIGIN, and only then moves the page,
+ * which closes the modal through the page-change reset below. The origin is memory, not a store (§2.3): it falls back to `board` whenever the page is
+ * left, so a rail-row entry and a reload both say `← Board`. The page shares the launch sheet and `nudge` with the board pages and opens no modal.
  */
 type OpenSlot = { issue: JiraIssue; childrenOf: JiraChildrenIndex | null };
 
@@ -71,6 +80,22 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   const { data, error, reload } = useJiraContext();
   const { reload: reloadSessions } = useJiraSessionsContext();
   const [page] = useJiraPage();
+  const ticketKey = useJiraTicketKey();
+  // `ticket` with no key draws the Board (below) and is written back to `board` once, so the store and the rail agree with what is on screen.
+  const noTicket = page === 'ticket' && ticketKey === '';
+  useEffect(() => {
+    if (noTicket) setJiraPage('board');
+  }, [noTicket]);
+  const [origin, setOrigin] = useState<TicketOrigin>('board');
+  useEffect(() => {
+    if (page !== 'ticket') setOrigin('board');
+  }, [page]);
+  const openPage = (key: string): void => {
+    setJiraTicketKey(key);
+    setOrigin(page === 'sessions' || page === 'mentions' ? page : 'board');
+    onOpenJiraPage('ticket');
+  };
+  const openPageOn = (issue: JiraIssue): void => openPage(issue.key);
   // The walk: the issue opened from a page, then every Children row clicked from there, the last one shown. A page's open STARTS a walk (one entry), a
   // tree-row click pushes, the head's Back chip pops, and a close empties it — so `[]` is "no modal" and there is no separate null slot to disagree with it.
   const [walk, setWalk] = useState<readonly OpenSlot[]>([]);
@@ -106,11 +131,19 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
     // rail badge read ONE payload, so none of them disagrees with another for a poll. This section being current is what `open` says there.
     <>
       {page === 'sessions' ? (
-        <JiraSessionsView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
+        <JiraSessionsView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onOpenPage={openPageOn} onRun={run} nudge={nudge} />
       ) : page === 'mentions' ? (
         <JiraMentionsView onOpenJiraPage={onOpenJiraPage} />
+      ) : page === 'ticket' && !noTicket ? (
+        <JiraTicketPage
+          origin={origin}
+          onLeave={() => onOpenJiraPage(origin)}
+          onWrote={() => setNudge((n) => n + 1)}
+          onRun={run}
+          onReview={runReview}
+        />
       ) : (
-        <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
+        <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onOpenPage={openPageOn} onRun={run} nudge={nudge} />
       )}
       {openIssue !== null && (
         <JiraDetail
@@ -122,6 +155,7 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onWrote={() => setNudge((n) => n + 1)}
           onRun={run}
           onReview={runReview}
+          onOpenPage={openPage}
           onClose={() => setWalk([])}
         />
       )}

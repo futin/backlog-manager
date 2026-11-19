@@ -56,6 +56,7 @@ export function JiraLaneBoard({
   now,
   site,
   onOpenIssue,
+  onOpenPage,
   onRun
 }: {
   views: readonly JiraLaneView[];
@@ -73,6 +74,8 @@ export function JiraLaneBoard({
   now: number;
   site: string;
   onOpenIssue: (issue: JiraIssue) => void;
+  /** A card's Cmd-, Ctrl- or middle-click: the ticket page (`JiraCard`). */
+  onOpenPage?: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
   const [openCells, setOpenCells] = useState<ReadonlySet<string>>(() => new Set());
@@ -134,6 +137,7 @@ export function JiraLaneBoard({
                       ended={ended.get(issue.key) ?? NO_ENDED}
                       trees={treesOf(issue.key)}
                       onOpen={onOpenIssue}
+                      onOpenPage={onOpenPage}
                       onRun={onRun}
                     />
                   ))}

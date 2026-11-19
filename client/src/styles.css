@@ -229,6 +229,8 @@ button.rail-count { cursor: pointer }
 }
 .rail-sublink:hover { color: var(--ink) }
 .rail-sublink.on { color: var(--ink); font-weight: 600; background: var(--strip) }
+/* A glyph led into a tree row's label — the Jira ticket page's row, `<KEY>` with the ticket glyph (Jira detail tabs spec §2.2). */
+.rail-sub-glyph { display: inline-flex; flex: none; margin-right: 6px; color: var(--ink3) }
 
 /* Settings sits under a 1 px rule with 24 px of air either side: it is about
    the board, the rows above it are about the work (§8.0). Inset 4 px at each
@@ -1708,6 +1710,19 @@ button.rail-count { cursor: pointer }
 .jira-tab-count { font-size: 12px; font-weight: 500; color: var(--ink3) }
 .jira-tab-count[data-live] { color: var(--green) }
 .jira-tabpanel { min-width: 0 }
+/* The ticket page (Jira detail tabs spec §2.1, `Main.html` `.topbar`): the crumbs on the left — `Jira`, the board, the parent, in --ink3, the key bold in --ink —
+   and `← <origin>`, `Open in Jira ↗` and `Run ▾` on the right, wrapping under the crumbs on a narrow main. The body sits at the main area's width; the tab
+   panes are capped at a readable ~900 px, the builder's single-column measure. `.jira-page-acts` is `Run ▾`'s row, so its popover hangs under the chip. */
+.jira-page { display: flex; flex-direction: column; gap: 10px; min-width: 0 }
+.jira-page-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; min-width: 0 }
+.jira-page-crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink3) }
+.jira-page-crumbs b { color: var(--ink); font-weight: 600 }
+.jira-page-crumb-parent { overflow-wrap: anywhere }
+.jira-page-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0 }
+.jira-page-body .jira-tabpanel { max-width: 900px }
+.jira-page-pre { display: flex; flex-direction: column; gap: 10px; min-width: 0 }
+.jira-page-failed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2) }
+.jira-page-failed p { margin: 0 }
 /* The Ticket pane (spec §1.4): the description and a 340 px Details pane, stacked under 700 px. */
 .jira-ticket-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; min-width: 0 }
 @media (max-width: 700px) { .jira-ticket-grid { grid-template-columns: minmax(0, 1fr) } }

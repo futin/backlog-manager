@@ -29,7 +29,8 @@ export function JiraChildrenTab({
   tree,
   underway,
   childrenOf,
-  onOpenIssue
+  onOpenIssue,
+  onOpenPage
 }: {
   /** The detail read when it has landed, else the frame's issue: the key and the link the comments note names. */
   src: JiraIssue;
@@ -43,6 +44,8 @@ export function JiraChildrenTab({
   underway: readonly DeckEntry[];
   childrenOf: JiraChildrenIndex | null;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+  /** A row's modifier- or middle-click: the ticket page on that child (`ChildrenTree`). Absent on the page itself. */
+  onOpenPage?: (issue: JiraIssue) => void;
 }) {
   const [childrenOpen, setChildrenOpen] = useState(true);
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -52,7 +55,7 @@ export function JiraChildrenTab({
   if (detail !== null && tree !== null) {
     childrenBody = (
       <div className="jira-detail-pane">
-        <ChildrenTree direct={direct} tree={tree} underway={underway} childrenOf={childrenOf} onOpenIssue={onOpenIssue} head={false} />
+        <ChildrenTree direct={direct} tree={tree} underway={underway} childrenOf={childrenOf} onOpenIssue={onOpenIssue} onOpenPage={onOpenPage} head={false} />
       </div>
     );
   } else if (detail !== null) {

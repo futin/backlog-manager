@@ -88,6 +88,7 @@ export function JiraTicketBody({
   onWrote,
   onReview,
   onRun,
+  onOpenPage,
   titleId
 }: {
   /** The issue the frame opened on — the card's copy in the modal. Everything the card carries draws from it until `detail` lands. */
@@ -109,6 +110,8 @@ export function JiraTicketBody({
   onReview?: (issue: JiraIssue, half: ReviewHalf, mr: GitlabMr, repos: string[]) => void;
   /** A Delivery next row's `Run ▾` (a failed pipeline): the frame's own `onRun`, the one its head's `Run ▾` calls. */
   onRun: (issue: JiraIssue, action: JiraAction) => void;
+  /** A Children row's Cmd-, Ctrl- or middle-click (spec §2.3): the ticket page on that child. The modal hands it; the page, already the page, does not. */
+  onOpenPage?: (issue: JiraIssue) => void;
   /** The heading's `id`, for a frame that names itself by it — the modal's `aria-labelledby`, so the dialog has one name and it is this title. */
   titleId?: string;
 }) {
@@ -307,6 +310,7 @@ export function JiraTicketBody({
       underway={underway}
       childrenOf={childrenOf}
       onOpenIssue={onOpenIssue}
+      onOpenPage={onOpenPage}
     />
   );
 

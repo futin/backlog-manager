@@ -1,8 +1,8 @@
-import { useId, useState } from 'react';
+import { useId } from 'react';
 
-import { useFetched } from '../../hooks/useFetched';
-import { fetchJiraDetail, typeTone, type JiraChildrenIndex } from '../../lib/jira';
-import type { GitlabMr, JiraAction, JiraIssue, JiraIssueDetail, ReviewHalf } from '../../../../shared/types';
+import { useTicketDetail } from '../../hooks/useTicketDetail';
+import { typeTone, type JiraChildrenIndex } from '../../lib/jira';
+import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
@@ -20,7 +20,7 @@ import { JiraTicketBody } from './JiraTicketBody';
  * shape's width (spec §7.1 keeps today's). The body brought its own strip and tabs, so a second column would only split one reading in two.
  *
  * **The head** holds the crumbs on the left — the type glyph, key and type, the parent as `· in <KEY> <summary>` and the sprint — and on the right
- * `Open full page ↗` (only when the frame was handed `onOpenPage`: Task 8 wires it to the ticket page), `Open in Jira ↗` and `Run ▾`; the shell's close
+ * `Open full page ↗` (only when the frame was handed `onOpenPage`, which `JiraView` always is: it closes this dialog and opens the ticket page), `Open in Jira ↗` and `Run ▾`; the shell's close
  * sits past them. The parent here is TEXT, not today's link: the link is the strip's `Parent` cell, because the body owns the parent read and its alert
  * line (`useParentRead`), and a second link up here would be a click whose failure has nowhere to be said. `Run ▾` is `JiraRunMenu`, the card's own chip
  * (`home="modal"`), its pick handed up as `onRun`; the launch sheet is hosted by `JiraView`, ABOVE this dialog, so Escape closes the sheet alone and the
@@ -40,18 +40,16 @@ import { JiraTicketBody } from './JiraTicketBody';
  * the children, the transitions and the boards that hold the issue; it also replaces the card's copy, which may be one poll old. A failed read keeps the
  * card's facts and hands the server's sentence down as `failure`, because a dialog that blanked on a Jira blip would take the readable half down with it.
  *
- * **State belongs to a key.** The detail read is keyed on the issue and on the write revision (`useFetched`, #285), which answers nothing held on the very
- * render that carries a new key, and drops a superseded answer — so reopening on another issue while a read is out never paints the first issue's text
- * under the second one's title. The re-read after a write is a `rev` bump, and the last detail that LANDED for this same key is held and handed down while it
- * is out (R8): no `loading…` flash, and no strip controls blinking to disabled-for-no-detail and back. That held copy is dropped on a key change, during
- * render, so a walk back to an issue (A → B → A) opens on `loading…` like any open, not on A's copy from before the walk.
+ * **State belongs to a key.** The detail read is `useTicketDetail`'s, shared with the ticket page: keyed on the issue and on the write revision, so reopening
+ * on another issue while a read is out never paints the first issue's text under the second one's title; the re-read after a write is its `reread()`, and
+ * the last detail that LANDED for this same key is handed down while it is out (R8) — no `loading…` flash, and no strip controls blinking to disabled and
+ * back. The held copy is dropped on a key change, so a walk back to an issue (A → B → A) opens on `loading…` like any open.
  *
  * **The walk is `JiraView`'s.** A Children row, a child-live line or the parent link swaps THIS dialog's issue through `onOpenIssue` — never a second
  * `Modal`, since Escape has one owner — and `back` is the issue one step up, which the body's heading draws as `← <key>`. Escape still closes the whole
- * dialog: Back is a step, close is leaving.
+ * dialog: Back is a step, close is leaving. A Children row Cmd-, Ctrl- or middle-clicked is not a step but an exit (spec §2.3): it goes to the ticket page on
+ * that child through the same `onOpenPage` as the head's chip, so the walk is left behind with the dialog.
  */
-
-type Held = { detail: JiraIssueDetail } | { failure: string };
 
 export function JiraDetail({
   issue,
@@ -81,31 +79,8 @@ export function JiraDetail({
   onClose: () => void;
 }) {
   const titleId = useId();
-  // Bumped by a landed write for the key still shown: it only TRIGGERS the re-read; the held detail below is what keeps the body up meanwhile (R8).
-  const [rev, setRev] = useState(0);
-  // The last detail that LANDED — R8's held copy, drawn only while a read for that same key is pending again (a write's re-read). Stored during render on
-  // the frame it lands, for the reason `useFetched` tags its answer: an effect would store it one commit late, and that commit would draw `loading…`.
-  const [kept, setKept] = useState<JiraIssueDetail | null>(null);
-  // The key the held copy may stand in for. Reset DURING render on a key change (React's "adjust state when a prop changes"), so the swapped-in issue's
-  // first frame never draws the old one's detail.
-  const [shownKey, setShownKey] = useState(issue.key);
-  if (shownKey !== issue.key) {
-    setShownKey(issue.key);
-    setKept(null);
-  }
-
-  // Every failure — a non-OK answer, a malformed body, a dropped request — resolves to a `failure`, so the read itself never rejects.
-  const { value: mine } = useFetched(
-    () =>
-      fetchJiraDetail(issue.key)
-        .then((detail): Held => ({ detail }))
-        .catch((e: unknown): Held => ({ failure: e instanceof Error ? e.message : String(e) })),
-    [issue.key, rev]
-  );
-  const landed = mine !== null && 'detail' in mine ? mine.detail : null;
-  if (landed !== null && landed !== kept) setKept(landed);
-  const detail = landed ?? (mine === null && kept !== null && kept.key === issue.key ? kept : null);
-  const failure = mine !== null && 'failure' in mine ? mine.failure : null;
+  // The read, its R8 held copy and its re-read are `useTicketDetail`'s — the hook the ticket page reads through too (see the header's last two sections).
+  const { detail, failure, reread } = useTicketDetail(issue.key);
   // The detail's copy is the fresher one; the card's is what the crumbs draw until it lands (or for good, when the read fails).
   const src: JiraIssue = detail ?? issue;
   const parent = src.parent;
@@ -153,12 +128,13 @@ export function JiraDetail({
         back={back}
         onBack={onBack}
         onOpenIssue={onOpenIssue}
-        onWrote={(reread) => {
-          if (reread) setRev((r) => r + 1);
+        onWrote={(again) => {
+          if (again) reread();
           onWrote();
         }}
         onReview={onReview}
         onRun={onRun}
+        onOpenPage={onOpenPage === undefined ? undefined : (child) => onOpenPage(child.key)}
         titleId={titleId}
       />
     </Modal>

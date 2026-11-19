@@ -20,6 +20,7 @@ import {
 } from '../../lib/jira';
 import type { SessionCell } from '../../lib/jira-deck';
 import { rowOpens } from '../../lib/jira-list';
+import { browserPlatform, fullPageTitle, wantsPage } from '../../lib/open-intent';
 import { sessionTone } from '../../lib/tones';
 import { pollAge } from '../../lib/tracker';
 import { DeliveryTrack } from '../ui/DeliveryTrack';
@@ -85,6 +86,7 @@ export function JiraIssueList({
   now,
   filtered,
   onOpenIssue,
+  onOpenPage,
   onRun
 }: {
   views: readonly JiraLaneView[];
@@ -100,6 +102,8 @@ export function JiraIssueList({
   /** A filter or a search is applied — only the empty line's wording reads it. */
   filtered: boolean;
   onOpenIssue: (issue: JiraIssue) => void;
+  /** A row's Cmd-, Ctrl- or middle-click: the ticket page on that issue (`IssueRow`). */
+  onOpenPage?: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
   const index = useDeliveryIndex();
@@ -115,6 +119,7 @@ export function JiraIssueList({
       index={index}
       now={now}
       onOpenIssue={onOpenIssue}
+      onOpenPage={onOpenPage}
       onRun={onRun}
     />
   );
@@ -322,6 +327,10 @@ function DeliveryCell({ issue, index, now }: { issue: JiraIssue; index: Delivery
 /**
  * One issue's row — a card row, or an on-board lane's header row when `head` is given (`HeadSlots`: the chevron, the parent chip and the count, set around the
  * title in the Summary cell). Both open Detail on a row click; the header row also wears the tint and carries the lane's markers.
+ *
+ * Given `onOpenPage`, a Cmd-, Ctrl- or middle-click opens the full ticket page instead (Jira detail tabs spec §2.3, `wantsPage`), and the row names the
+ * modifier in its title. The row's middle-click passes through `rowOpens` like its click, so a middle-click on the `!iid` link or inside `Run ▾` stays that
+ * control's; the title button, which `rowOpens` excludes as a button, takes both clicks itself.
  */
 function IssueRow({
   issue,
@@ -331,6 +340,7 @@ function IssueRow({
   index,
   now,
   onOpenIssue,
+  onOpenPage,
   onRun
 }: {
   issue: JiraIssue;
@@ -341,18 +351,30 @@ function IssueRow({
   index: DeliveryIndex | null;
   now: number;
   onOpenIssue: (issue: JiraIssue) => void;
+  onOpenPage?: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
-  const open = (): void => onOpenIssue(issue);
+  const open = (e: MouseEvent): void => (onOpenPage !== undefined && wantsPage(e) ? onOpenPage(issue) : onOpenIssue(issue));
   const onRowClick = (e: MouseEvent<HTMLTableRowElement>): void => {
-    if (rowOpens(e.currentTarget, e.target, window.getSelection()?.toString() ?? '')) open();
+    if (rowOpens(e.currentTarget, e.target, window.getSelection()?.toString() ?? '')) open(e);
+  };
+  // A middle-click selects nothing, so the selection argument is empty: only the inner-control exclusion applies.
+  const onRowAux = (e: MouseEvent<HTMLTableRowElement>): void => {
+    if (onOpenPage !== undefined && e.button === 1 && rowOpens(e.currentTarget, e.target, '')) onOpenPage(issue);
   };
   const updated = elapsedSince(issue.updated, now);
   const age = cell === null ? null : pollAge(cell.since, now);
   const prio = priorityTone(issue.priority);
   const isHead = head !== null;
   const title = (
-    <button type="button" className="jira-issues-title" onClick={open}>
+    <button
+      type="button"
+      className="jira-issues-title"
+      onClick={open}
+      onAuxClick={(e) => {
+        if (onOpenPage !== undefined && e.button === 1) onOpenPage(issue);
+      }}
+    >
       {issue.summary}
     </button>
   );
@@ -364,7 +386,9 @@ function IssueRow({
       data-lane={isHead ? issue.key : undefined}
       data-kind={isHead ? 'board' : undefined}
       data-state={cell?.state}
+      title={onOpenPage === undefined ? undefined : fullPageTitle(browserPlatform())}
       onClick={onRowClick}
+      onAuxClick={onRowAux}
     >
       <td className="jira-issues-session">
         {cell === null ? (

@@ -124,11 +124,14 @@ const NO_TREES: readonly JiraWorktree[] = [];
 export function JiraBoardView({
   onOpenJiraPage,
   onOpenIssue,
+  onOpenPage,
   onRun,
   nudge
 }: {
   onOpenJiraPage: (p: JiraPage) => void;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+  /** A card's, row's or deck title's Cmd-, Ctrl- or middle-click: the ticket page (Jira detail tabs spec §2.3). The page reads its own detail, so no tree rides along. */
+  onOpenPage?: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   nudge: number;
 }) {
@@ -314,12 +317,13 @@ export function JiraBoardView({
               now={now}
               filtered={boardFilterCount(applied) > 0 || searching}
               onOpenIssue={openWithTree}
+              onOpenPage={onOpenPage}
               onRun={onRun}
             />
           </>
         ) : (
           <>
-            <JiraAgentDeck entries={deck} now={now} onOpenIssue={openWithTree} />
+            <JiraAgentDeck entries={deck} now={now} onOpenIssue={openWithTree} onOpenPage={onOpenPage} />
             {/* Keyed by the board: `openCells` (the `+ N more` cut-open state, keyed `<lane>:<column>`) is local to the lane board, and a parent key can be a lane on
                 two boards — without the key a cell opened on one would arrive open on the other. */}
             <JiraLaneBoard
@@ -337,6 +341,7 @@ export function JiraBoardView({
               now={now}
               site={data?.site ?? ''}
               onOpenIssue={openWithTree}
+              onOpenPage={onOpenPage}
               onRun={onRun}
             />
           </>

@@ -130,6 +130,8 @@ export function JiraRunMenu({
       className={open ? 'jira-run jira-run-open' : 'jira-run'}
       data-state={state}
       onClick={(e) => e.stopPropagation()}
+      // A middle-click on the chip is nobody's, and must not reach the card's or row's own middle-click, which opens the ticket page (spec §2.3).
+      onAuxClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
       }}

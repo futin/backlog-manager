@@ -1,5 +1,6 @@
 import { initialsOf, progressLine, type JiraChildrenIndex, type modalTree } from '../../lib/jira';
 import type { DeckEntry } from '../../lib/jira-deck';
+import { browserPlatform, fullPageTitle, wantsPage } from '../../lib/open-intent';
 import { sessionTone } from '../../lib/tones';
 import { STATE_LABEL, type JiraSessionState } from '../../../../shared/jira-sessions';
 import type { JiraIssue } from '../../../../shared/types';
@@ -15,6 +16,9 @@ import { SpreadBar } from '../ui/SpreadBar';
  * live on wears that session's state as a neutral `Pill` led by the state's dot (`underway`, one per row), before the ticket's own status pill: an epic's
  * List row can read `Working` for a sub-task's session, and this is where the reader finds which one. `head={false}` drops the head row, for the Children
  * & comments tab, whose fold summary already carries the `Children` label, the count and `N in all` (Jira detail tabs spec §6).
+ *
+ * A row's plain click is a walk step (`onOpenIssue`). Given `onOpenPage` — the modal hands it, the ticket page does not, since it already IS the page — a
+ * Cmd-, Ctrl- or middle-click on a row opens the ticket page on that child instead (spec §2.3, `wantsPage`), and the row's title names the modifier.
  */
 export function ChildrenTree({
   direct,
@@ -22,6 +26,7 @@ export function ChildrenTree({
   underway,
   childrenOf,
   onOpenIssue,
+  onOpenPage,
   head = true
 }: {
   direct: number;
@@ -29,11 +34,14 @@ export function ChildrenTree({
   underway: readonly DeckEntry[];
   childrenOf: JiraChildrenIndex | null;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+  /** A modifier- or middle-click on a row: the ticket page on that child. Absent, every click is a walk step. */
+  onOpenPage?: (issue: JiraIssue) => void;
   /** Draw the `Children` head row (the old Detail column); the tab's fold passes `false` because its summary is that head. */
   head?: boolean;
 }) {
   const { rows, progress } = tree;
   const live = new Map(underway.map((e) => [e.issue.key, e.state] as const));
+  const pageTitle = onOpenPage === undefined ? undefined : fullPageTitle(browserPlatform());
   return (
     <>
       {head && (
@@ -51,7 +59,15 @@ export function ChildrenTree({
         {rows.map(({ issue: row, depth }) => (
           // The indent is the one inline style: a depth is data, and a class per depth would cap how deep a tree may go.
           <li key={row.key} data-depth={depth} style={{ paddingLeft: depth * 22 }}>
-            <button type="button" className="jira-tree-row" onClick={() => onOpenIssue(row, childrenOf)}>
+            <button
+              type="button"
+              className="jira-tree-row"
+              title={pageTitle}
+              onClick={(e) => (onOpenPage !== undefined && wantsPage(e) ? onOpenPage(row) : onOpenIssue(row, childrenOf))}
+              onAuxClick={(e) => {
+                if (onOpenPage !== undefined && e.button === 1) onOpenPage(row);
+              }}
+            >
               <JiraTypeIcon type={row.type} />
               {/* The spaces between the spans are what the button's accessible name reads as word breaks: `PAY-162 Ledger rounding fix`. */}
               <span className="jira-tree-key">{row.key}</span> <span className="jira-tree-summary">{row.summary}</span>{' '}

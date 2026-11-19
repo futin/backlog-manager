@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -11,6 +11,8 @@ import { JiraSessionsProvider } from '../../client/src/hooks/JiraSessionsContext
 import { JiraProvider } from '../../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { setJiraPage } from '../../client/src/hooks/useJiraPage';
+import { JIRA_TICKET_KEY_KEY, setJiraTicketKey } from '../../client/src/hooks/useJiraTicketKey';
+import { browserPlatform, fullPageTitle } from '../../client/src/lib/open-intent';
 import { setJiraDetailTab } from '../../client/src/hooks/useJiraDetailTab';
 import { setJiraView } from '../../client/src/hooks/useJiraView';
 import { elapsedSince } from '../../client/src/lib/item-age';
@@ -2724,5 +2726,150 @@ describe('the Delivery quick filter', () => {
     expect(screen.queryByRole('group', { name: 'Delivery' })).toBeNull();
     await openFilters();
     expect(screen.getAllByRole('group', { name: 'Delivery' })).toHaveLength(1);
+  });
+});
+
+/*
+  Modifier clicks (Jira detail tabs spec §2.3, T23 and Review Focus 2): on a Board card, a List row and a deck card, Cmd-click, Ctrl-click and a middle-click
+  open the full ticket page with no dialog in between — the key store set, the page `ticket`, the origin the Board — and a plain click still opens the
+  dialog. Each surface's `title` names the platform's modifier. A control inside the surface keeps its own clicks: the card's `↗` link and `Run ▾`, and a
+  List row's title-free cells' controls, never move the page. `JiraView` is real, with `onOpenJiraPage` wired to the page store as `App` wires it, so the
+  page switch is the one the shell would make; the page's own read answers `{}` here (a failed read), which is the page's business, not this block's.
+*/
+describe('modifier clicks open the ticket page', () => {
+  const MAPPED = { PAY: ['/Users/ada/pay'] };
+  const storedKey = (): unknown => JSON.parse(localStorage.getItem(JIRA_TICKET_KEY_KEY) ?? 'null');
+  const page = (): unknown => JSON.parse(localStorage.getItem(JIRA_PAGE_KEY) ?? 'null');
+  const middle = (el: Element): void => {
+    fireEvent(el, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+  };
+  const TITLE = fullPageTitle(browserPlatform());
+
+  beforeEach(() => {
+    act(() => setJiraTicketKey(''));
+  });
+  afterEach(() => {
+    act(() => {
+      setJiraView('board');
+      setJiraTicketKey('');
+    });
+  });
+
+  async function renderView(over: Partial<JiraStatusPayload> = {}, firstText = 'Refund partial captures'): Promise<void> {
+    setJiraPage('board');
+    statusAnswer = status({ repos: MAPPED, ...over });
+    render(
+      <SettingsProvider>
+        <JiraProvider>
+          <JiraSessionsProvider open>
+            <JiraView onOpenJiraPage={(p) => setJiraPage(p)} />
+          </JiraSessionsProvider>
+        </JiraProvider>
+      </SettingsProvider>,
+      { wrapper: NoGitlab }
+    );
+    await screen.findAllByText(firstText);
+  }
+
+  /** The page landed on the ticket page for `key`, from the Board, and no dialog opened on the way. */
+  async function onPage(key: string): Promise<void> {
+    await screen.findByRole('button', { name: 'Board' });
+    expect(page()).toBe('ticket');
+    expect(storedKey()).toBe(key);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  }
+
+  describe.each([
+    ['Cmd-click', (el: Element) => fireEvent.click(el, { metaKey: true })],
+    ['Ctrl-click', (el: Element) => fireEvent.click(el, { ctrlKey: true })],
+    ['middle-click', middle]
+  ])('%s', (_name, gesture) => {
+    it('on a Board card opens the page', async () => {
+      await renderView();
+      act(() => gesture(card('Refund partial captures')));
+      await onPage('PAY-131');
+    });
+
+    it('on a List row opens the page', async () => {
+      setJiraView('list');
+      await renderView();
+      const row = document.querySelector('tr[data-key="PAY-131"] td:last-child') as HTMLElement;
+      act(() => gesture(row));
+      await onPage('PAY-131');
+    });
+
+    it('on a deck card’s title opens the page', async () => {
+      await renderView({
+        live: { 'PAY-131': { sessionId: 's-1', name: 'jira run', startedAt: new Date(Date.now() - 3_600_000).toISOString(), repo: '/Users/ada/pay', starting: false } }
+      });
+      const deck = document.querySelector('.jira-deck-card[data-key="PAY-131"]') as HTMLElement;
+      act(() => gesture(within(deck).getByRole('button', { name: 'Refund partial captures' })));
+      await onPage('PAY-131');
+    });
+  });
+
+  it('a plain click on each surface still opens the dialog and leaves the page alone', async () => {
+    await renderView({
+      live: { 'PAY-131': { sessionId: 's-1', name: 'jira run', startedAt: new Date(Date.now() - 3_600_000).toISOString(), repo: '/Users/ada/pay', starting: false } }
+    });
+    await userEvent.click(card('Refund partial captures'));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(page()).toBe('board');
+    expect(storedKey()).toBe('');
+    await userEvent.keyboard('{Escape}');
+    const deck = document.querySelector('.jira-deck-card[data-key="PAY-131"]') as HTMLElement;
+    await userEvent.click(within(deck).getByRole('button', { name: 'Refund partial captures' }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(page()).toBe('board');
+  });
+
+  it('a plain click on a List row opens the dialog', async () => {
+    setJiraView('list');
+    await renderView();
+    await userEvent.click(document.querySelector('tr[data-key="PAY-131"] td:last-child') as HTMLElement);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(page()).toBe('board');
+  });
+
+  it('each surface’s title names the platform’s modifier', async () => {
+    await renderView({
+      live: { 'PAY-131': { sessionId: 's-1', name: 'jira run', startedAt: new Date(Date.now() - 3_600_000).toISOString(), repo: '/Users/ada/pay', starting: false } }
+    });
+    expect(TITLE).toMatch(/^(⌘|Ctrl)-click: full page$/);
+    expect(card('Refund partial captures')).toHaveAttribute('title', TITLE);
+    const deck = document.querySelector('.jira-deck-card[data-key="PAY-131"]') as HTMLElement;
+    expect(within(deck).getByRole('button', { name: 'Refund partial captures' })).toHaveAttribute('title', TITLE);
+    cleanup();
+    setJiraView('list');
+    await renderView();
+    expect(document.querySelector('tr[data-key="PAY-131"]')).toHaveAttribute('title', TITLE);
+  });
+
+  it('Review Focus 2: Cmd- and middle-clicks on the card’s `↗` link and its `Run ▾` stay theirs', async () => {
+    await renderView();
+    const c = card('Refund partial captures');
+    const link = within(c).getByRole('link', { name: 'open PAY-131 in Jira' });
+    link.addEventListener('click', (e) => e.preventDefault());
+    const run = within(c).getByRole('button', { name: /^Run options for PAY-/ });
+    for (const el of [link, run]) {
+      act(() => {
+        fireEvent.click(el, { metaKey: true });
+      });
+      act(() => middle(el));
+    }
+    expect(page()).toBe('board');
+    expect(storedKey()).toBe('');
+    // A Cmd-click on `Run ▾` is still a click on `Run ▾`, so its own popover opening is the control keeping it; what must not open is the card's modal.
+    expect(screen.queryAllByRole('dialog').filter((d) => d.getAttribute('aria-label') !== 'Run menu')).toEqual([]);
+  });
+
+  it('Review Focus 2: a middle-click on a control inside a List row stays that control’s', async () => {
+    setJiraView('list');
+    await renderView();
+    const row = document.querySelector('tr[data-key="PAY-131"]') as HTMLElement;
+    act(() => middle(within(row).getByRole('button', { name: /^Run options for PAY-/ })));
+    expect(page()).toBe('board');
+    expect(storedKey()).toBe('');
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
