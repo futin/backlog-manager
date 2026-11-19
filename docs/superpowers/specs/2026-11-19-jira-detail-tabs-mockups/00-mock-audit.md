@@ -1,6 +1,6 @@
 # Mock audit — Jira Detail tabs
 
-The mocks in this folder are copies of the Design-canvas artifact "Jira Detail" (<https://claude.ai/artifact/DPpfcBD3A4RDu1dq83fcjt>, Version 9). Where a
+The mocks in this folder (standalone browser copies in `html/`) are copies of the Design-canvas artifact "Jira Detail" (<https://claude.ai/artifact/DPpfcBD3A4RDu1dq83fcjt>, Version 9). Where a
 mock and [the spec](../2026-11-19-jira-detail-tabs-design.md) differ, the spec wins. Every such place:
 
 | Mock | Where | Mock draws | Spec says |
@@ -24,3 +24,5 @@ mock and [the spec](../2026-11-19-jira-detail-tabs-design.md) differ, the spec w
 | B-Modal | Agent tab live card | `Review live · 4m` | today's session card label and age, as drawn (§5.1) |
 | Main | Children & comments | comments copy in the fold | today's `Comments stay in Jira …` line instead (§5.2) |
 | States | row 15 (clean draft) | `GitLab ↗` | `next: mark ready`, sentence `Still a draft — mark it ready in GitLab.` (§4.5) |
+| States | waiting / done pills | `open`, `pipeline running`, `merged`, `closed` | `deliveryLook(mr).word` (`open, no pipeline`, `pipeline passed`, …), never `.chip`, which repeats the iid (§4.5) |
+| Main | Delivery tab head line | `· newest per target shown · click a row for the full track` | not drawn: `<N> targets · <M> MRs` only (§4.2) |

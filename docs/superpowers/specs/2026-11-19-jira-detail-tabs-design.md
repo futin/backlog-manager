@@ -3,7 +3,8 @@
 Status: written, awaiting approval. Date: 2026-11-19. Branch `jira-detail-tabs`. Amends DESIGN.md §8.9.2 (Detail dialog) and §8.9.6 (Delivery, the Detail
 half only), and the board.md rule "The Jira section's four pages". Mocks: the Design-canvas artifact "Jira Detail" (<https://claude.ai/artifact/DPpfcBD3A4RDu1dq83fcjt>,
 private, Version 9, twelve comment threads all resolved), copied into [2026-11-19-jira-detail-tabs-mockups/](2026-11-19-jira-detail-tabs-mockups/) and read
-against the code in [00-mock-audit.md](2026-11-19-jira-detail-tabs-mockups/00-mock-audit.md).
+against the code in [00-mock-audit.md](2026-11-19-jira-detail-tabs-mockups/00-mock-audit.md). The `*.dc.html` files need the canvas runtime; standalone copies that open in any
+browser, with no runtime, are in [html/](2026-11-19-jira-detail-tabs-mockups/html/index.html) (same names, `.html`).
 
 | Mock | What it fixes |
 | ---- | ------------- |
@@ -107,7 +108,8 @@ The user's, from the canvas threads and the questions after them:
 5. **Stop is hidden on a review session only** (§5.1) — a session whose link's `action` is `'review'`. Every other live session keeps Stop in its menu,
    as today.
 6. Each History row has a **`Reopen`** button, as today.
-7. The `Review live` pill in the strip is centred in its cell (a mock fix; recorded so the builder checks it).
+7. The strip's live Agent pill is centred in its cell (a mock fix; the mock's `Review live` text is the card's, not the pill's — recorded so the builder
+   checks the centring).
 8. The tab is **remembered**: the last tab used opens the next ticket, in the modal and the page.
 9. The page is a **fifth Jira page, `ticket`**.
 10. Review skills get a **separate spec, right after** this one; picking one will open the launch sheet like Run (recorded for that spec).
@@ -141,11 +143,11 @@ One `--strip` band under the heading, a row of label-over-value cells (`Main.dc.
 | Cell | Value | Control |
 | ---- | ----- | ------- |
 | Status | the status chip (category dot + raw status name) | it IS today's `Move to` control (the chip opens the popover, §8.9.2's Controls unchanged) |
-| Assignee | initials disc + name, or `Unassigned` | `Assign to me`, today's rules and titles |
+| Assignee | initials disc + name, or today's `unassigned` | `Assign to me`, today's rules and titles |
 | Sprint | sprint name | — (absent → cell not drawn) |
 | Parent | the parent link (pushes the walk, today's behaviour) | — (absent → not drawn) |
-| Delivery | one pill per target, `<target> · <word>` in `deliveryLook`'s tone (§4.2), led by the repo basename when the groups span more than one project (my call), at most three then `+N` | a pill click selects the Delivery tab and opens that target's row |
-| Agent | live: a pill `<state label> · <age>` led by the state's dot, centred in the cell, for the LEAD live session, then `+N` when more are live; otherwise `idle · N ended` or `no sessions` | a live pill click selects the Agent tab |
+| Delivery | one pill per target, `<target> · <word>` in `deliveryLook`'s tone (§4.2), led by the repo basename when the groups span more than one project (my call); ordered worst tone first (red, amber, then the rest in `leadOrder`), at most three, then `+N` in the worst tone among the folded ones; `kind: 'none'` → `no MR` (grey); `kind: 'unknown'` → `unknown` (grey, today's unknown title); not drawn when the Delivery tab is not | a pill click selects the Delivery tab and opens that target's row; `+N` selects the tab |
+| Agent | live: a pill `<STATE_LABEL[state]> · <age>` (`shared/jira-sessions.ts`'s labels; the age is `pollAge` from the link's `stateSince`, or a `starting` reservation's `startedAt` — the session card's `LiveStrip` reading) led by the state's dot, centred in the cell, for the LEAD live session, then `+N` when more are live; otherwise `idle · N ended` or `no sessions` | a live pill click selects the Agent tab |
 
 The Agent pill's lead is the live session that most wants the reader: one waiting on an answer (`question`) first, then `working`, then a `starting`
 reservation, then any other live state; newest first within a state. So a waiting session is never hidden behind a newer working one.
@@ -179,7 +181,7 @@ Two columns (`minmax(0,1fr) 340px`, stacked under 700 px): the description pane 
 ### 2.1 Page
 
 `JiraPage` gains `ticket`: `JIRA_PAGES = ['board', 'sessions', 'mentions', 'setup', 'ticket']`. The key is a second `persistedStore`
-(`backlog-manager.jira-ticket-key`), a `persistedStore<string>` whose guard accepts a Jira key (`/^[A-Z][A-Z0-9_]*-\d+$/`) or `''`, with `''` as the
+(`backlog-manager.jira-ticket-key`), a `persistedStore<string>` whose guard accepts a Jira key (`isJiraKey` / `JIRA_KEY_RE`, `shared/types.ts` — the one definition) or `''`, with `''` as the
 fallback meaning "no ticket" — `persistedStore` holds strings only, so "none" is the empty string, never `null`. A reload on the page reopens the same
 ticket. `ticket` with an empty key is not a page: `JiraView` draws the Board for it and writes `board` back through `setJiraPage` in one effect, so the rail
 never highlights a row it does not draw. (The App's hold-and-fall moves the section on `configured === false` only and is not involved; `useJiraPage`'s
@@ -191,6 +193,12 @@ on the `ticket` page) that reads the detail by key
 failed read of any kind: today's line, `could not read the ticket — <the sentence fetchJiraDetail rejects with>` (the body draws it, so the modal and the
 page word it alike), and on the page beside it `Retry` (reads again) and `Forget <KEY>` (sets the key store to `''` and returns to the origin, §2.3). No
 404 branch: `fetchJiraDetail` rejects with a sentence only, and the server's sentence already says what went wrong.
+
+**The page's frame before an issue exists** (first open, a reload, and every walk step, since the page has no card): the top bar draws the crumbs
+`Jira / <KEY>` and `← <origin>`; `Open in Jira ↗` and `Run ▾` are not drawn (both need the issue). Below it, no strip or tabs: the heading row holds the
+walk's `← <key>` Back chip (when the walk has a step to return to) and `<KEY>` in mono, then `loading…`, or the failure line with `Retry` and `Forget <KEY>`.
+Once the read lands the full frame and body draw; a later failed re-read of an issue already drawn keeps it and shows the failure line under the strip,
+as the modal does today.
 
 Top bar (`Main.dc.html` `.topbar`): crumbs `Jira / <board name> / <parent key> <parent summary> / <KEY>` on the left — the board crumb only when the
 ticket is on the picked board; on the right `← <origin>` (§2.3), `Open in Jira ↗`, and `Run ▾` (the split chip at 32 px, today's states). Under it the body
@@ -207,7 +215,7 @@ it (§2.1), so a ticket that no longer reads does not leave a row that opens an 
 
 - **Which frame a click opens** (decision 11). On every surface that opens Detail today — Board card, List row, agent-deck card, Sessions row, a Children
   row inside the modal — a plain click opens the **modal**, as today. **Cmd-click (macOS) / Ctrl-click (elsewhere) or a middle-click opens the page
-  directly** on that ticket (key store set, `onOpenJiraPage('ticket')`, origin = the surface's page), with no modal in between. These surfaces are buttons,
+  directly** on that ticket (key store set, `onOpenJiraPage('ticket')`, origin = the surface's page), with no modal in between. These surfaces are clickable elements (`role="button"` divs, `<tr>` rows, buttons),
   not links, so the modifier is read off the click event (`metaKey || ctrlKey`, `button === 1` via `onAuxClick`); a new browser tab is NOT opened — there is
   no URL to open it at. Each surface's `title` gains `⌘-click: full page` (`Ctrl-click: full page` off macOS). No setting.
 - **Modal → page.** The modal's head gains `Open full page ↗` (an outlined 28 px link-weight chip beside `Open in Jira ↗`). It closes the modal, sets the
@@ -289,31 +297,33 @@ the List, the band and the filters keep `deliveryLook` as it is, and `deliveryLo
 dashed accent ring (`--cyan`, the board's action colour — dashed so it never reads as a reached green step) and, under the step label, `next · <word>`
 when the row has a Next word, else `next`, in place of the step's own word. The compact row's state pill is the Pill column — `next: …` in the same accent
 when something is next — and its five-dot track rings the same dot. When nothing is next no dot is ringed. `<n>` in `fix <n>` is `review.open`, written
-`<n>+` when the review is `capped`. The table is the user's, row for row (`States.dc.html` draws each):
+`<n>+` when the review is `capped`. A waiting or done row's pill is `deliveryLook(mr).word` — never `.chip`, which repeats the `!<iid>` the row already
+prints. The table is the user's, row for row (`States.dc.html` draws each):
 
 | # | MR | Next | Pill | Sentence (non-Review rows) | Row button | Ignore |
 | - | -- | ---- | ---- | -------------------------- | ---------- | ------ |
 | 1 | open draft, review `none` | Review | `next: review` | — | `▶ Request review` (request half) | yes |
-| 2 | open, review `null` (not read yet) | — (waiting) | `deliveryLook(mr).chip` | — | none | no — transient, the next poll answers |
+| 2 | open, review `null` (never read) | — (waiting) | `deliveryLook(mr).word` | `The review has not been read yet.` | none | yes — stored as `'unread'` |
 | 3 | open, review `none` | Review | `next: review` | — | `▶ Request review` | yes |
 | 4 | open, review `reviewing` | — (waiting) | `reviewStepWord(review)` | — | none | no |
 | 5 | open, review `open` (findings) | Review — word `fix <n>` | `next: fix <n>` | — | `fix`: `Open session` while a live `review` link is on the key (it asks fix-or-leave); else today's split, fix half preset | yes |
 | 6 | open, review `stale` | Review — word `re-review` | `next: re-review` | — | `▶ Request review` | yes |
-| 7 | review `clean`, pipeline `running` | — (waiting) | `deliveryLook(mr).chip` | — | none | no |
+| 7 | review `clean`, pipeline `running` | — (waiting) | `deliveryLook(mr).word` | — | none | no |
 | 8 | review `clean`, pipeline `failed` | Pipeline — word `fix pipeline` | `next: fix pipeline` | `The pipeline failed — fix it in a Run session.` | `run`: a second `JiraRunMenu` (`home="modal"`), the same component and states as the frame's, disabled with `runBlockTitle` while a run is live | yes |
 | 9 | review `clean`, pipeline `success` | Merged — word `merge` | `next: merge` | `Reviewed and green — merge happens in GitLab.` | `merge`: `Merge in GitLab ↗` (the MR's URL, new tab; the board never merges GitLab) | — |
 | 10 | review `clean`, pipeline `null` or `'none'` | Merged — word `merge`; the Pipeline step keeps today's word (`pipelineWord`) and is not ringed | `next: merge` | `Reviewed, no pipeline — merge happens in GitLab.` | `merge` | — |
 | 11 | review `none`, pipeline `success` | Review (the old "skipped" case: review is simply next) | `next: review` | — | `▶ Request review` | yes |
 | 12 | review `clean`, pipeline `canceled` | Pipeline — word `re-run` | `next: re-run` | `The pipeline was canceled — re-run it in GitLab.` | `gitlab`: `GitLab ↗` (the MR's URL) | yes |
-| 13 | merged | — (done) | `deliveryLook(mr).chip` | — | none | — |
-| 14 | closed | — (it is an older MR) | `deliveryLook(mr).chip` | — | none | — |
+| 13 | merged | — (done) | `deliveryLook(mr).word` | — | none | — |
+| 14 | closed | — (an older MR, or the representative of a target with only closed MRs) | `deliveryLook(mr).word` | — | none | — |
 
 Precedence: Review before Pipeline before Merge — the first unfinished one wins, so a failed pipeline under open findings is row 5, not 8 (the fix half
 fixes both). An ignored step (§4.5.1) counts as finished. A draft follows the same rows; its Pipeline step stays `off` (`deliveryLook`'s draft rule) and so never blocks or rings — a clean draft's
 next is `Merged` with the word `mark ready`, pill `next: mark ready`, sentence `Still a draft — mark it ready in GitLab.`, button `gitlab`. `null` pipeline does not block (decision 4): worst case, Merge is offered a poll early. The
 review buttons are today's ReviewRow split and launch (§4.4); the server's 409s cover the race where the state moved on. `unknown` review (too long to read)
 waits like `reviewing` (pill `reviewStepWord(review)`, no button), but offers `Ignore`: `unknown` never clears on its own (`shared/review.ts` rule 0), so
-without it such an MR could never reach `merge`. `review: null` (row 2) offers none — it is the first poll's gap, not a state.
+without it such an MR could never reach `merge`. `review: null` (row 2) is the first poll's gap, but also any MR whose review
+read has never succeeded — it stays `null` (`.claude/rules/gitlab.md`, the review fold) — so it offers `Ignore` too, or such an MR could never reach `merge`.
 
 `Open session` (row 5) is the Agent card's open control (`SessionOpen`) for the newest live link on the key whose `action` is `'review'`; an ended review
 session does not count (it already asked), and History's `Reopen` stays its way back.
@@ -321,21 +331,24 @@ session does not count (it already asked), and History's `Reopen` stays its way 
 #### 4.5.1 Ignoring a step
 
 The rows the table marks draw a quiet `Ignore` text button after the row button (and `unknown`, §4.5). It ignores the step that is next — Review (states
-`none`, `open`, `stale`, `unknown`) or Pipeline (`failed`, `canceled`) — for that MR:
+`none`, `open`, `stale`, `unknown`, and `null` stored as `'unread'`) or Pipeline (`failed`, `canceled`) — for that MR:
 
 - The step draws grey with the word `ignored` (its title: `ignored in this browser — click to stop ignoring`); clicking the word un-ignores. The compact
   track draws the dot grey.
 - The marker moves to the next unfinished step, so a clean review over an ignored failed pipeline is row 9's `merge`.
 - Stored under `backlog-manager.jira-ignored-steps` as one JSON object, `<project>!<iid>` → `{ review?: { state, landedAt }, pipeline?: { status,
-  updatedAt } }`: the step's state when ignored, plus a stamp that moves when the thing behind it is redone — the review's `landedAt` (a new review round)
-  and the MR's `updatedAt` (a push). `persistedStore` holds one closed string, so this is a module store of the same shape (one listener set, every
+  updatedAt } }`: the step's state when ignored (`review.state` is a `ReviewState` or `'unread'` for a `null` review, row 2), plus a stamp that moves when
+  the thing behind it is redone — the review's `landedAt` (a new review round; `string | null`, and `null` is a real stamp: a `none` or unread review has
+  no landing, and `null` stays `null` until one lands, which moves the state anyway) and the MR's `updatedAt` (a push). `persistedStore` holds one closed string, so this is a module store of the same shape (one listener set, every
   mounted reader re-renders on a write) over a JSON value — a sibling helper beside `persistedStore` or a generalisation of it, the builder's call. Its
-  guard keeps only well-formed entries (a `review.state` that is a `ReviewState`, a `pipeline.status` that is a `GitlabPipeline`, string stamps) and
-  drops the rest; anything unparseable reads as `{}`.
+  guard keeps only well-formed entries (a `review.state` that is a `ReviewState` or `'unread'` with a `landedAt` that is a string or `null`; a
+  `pipeline.status` that is a `GitlabPipeline` with a string `updatedAt`) and drops the rest; anything unparseable reads as `{}`.
 - An ignore holds only while the step still reads that state AND the stamp is unchanged; otherwise it is dropped on read, so a new review or a new push
   is judged fresh. Limit, accepted: a pipeline retried by hand on the same commit and failing again keeps its ignore (nothing on the MR moves) — the
   reader asked to ignore that commit's pipeline, and `ignored` is one click to undo. A comment that bumps `updatedAt` drops a pipeline ignore early —
-  the safe direction. Pruned of MRs not in the current delivery on every write.
+  the safe direction. On every write, the entries of THIS ticket's delivery groups (§4.1) whose MR is no longer open are dropped; entries of MRs the
+  ticket's delivery does not hold are never touched (they belong to other tickets), and nothing is pruned while the GitLab payload is `null` or the
+  ticket's delivery is not `kind: 'mrs'`.
 - This browser only, by design (no server route, no write): ignoring is a reader's call about what to look at next, not a fact about the MR.
 - Detail only, as §4.5: the strip's Delivery pill, the card, the List and the filters keep `deliveryLook` — a failed pipeline stays red there.
 
@@ -349,8 +362,8 @@ closed by default, `Worktrees <count>` in its summary. Drawn when the ticket has
 
 Every string this change draws says `review` / `review bot`, never a product. Today's one drawn name goes: `reviewRowText`'s `CodeRabbit · ` prefix
 (`lib/review-copy.ts`) becomes `Review · `. The review session's prompt (`reviewText` in `server/src/jira/prompt.util.ts`, `request` half) stops writing
-`` `@coderabbitai review` `` and tells the session to post the review trigger the mr-review-loop skill uses — the skill owns its trigger, so the prompt names
-no account at all. Not by passing `gitlabReviewBot` (`server/src/gitlab/env.util.ts`) in: `jira/` may import `gitlab/remote.util.ts` and nothing else
+`` `@coderabbitai review` `` and tells the session to post the review trigger the mr-review-loop skill uses (its trigger step), and — for a skill version that names none — to mention
+the repository's review bot account with `review`, as the MR's earlier review threads show it. The prompt names no account itself. Not by passing `gitlabReviewBot` (`server/src/gitlab/env.util.ts`) in: `jira/` may import `gitlab/remote.util.ts` and nothing else
 (`.claude/rules/jira.md`), and dispatch and the preview would both need the name threaded. `reviewText`'s signature and the preview/dispatch callers are
 unchanged. Code
 identifiers, file names and server comments keep their names — renaming them is churn with no reader. DESIGN.md's "CodeRabbit row" heading and the
@@ -400,7 +413,7 @@ The walk (`OpenSlot`, push/pop, `← <key>`), the one `useAction` write guard, t
 
 ## 8 What does not change
 
-- Server: no route, no type, no request. `JiraIssueDetail`, `GET /api/jira/issue/:key`, the review dispatch and its 409s are as they are.
+- Server: no route, no type, no request — except §4.7's prompt wording. `JiraIssueDetail`, `GET /api/jira/issue/:key`, the review dispatch and its 409s are as they are.
 - The board card, the List, the agent deck.
 - The Mentions page and its modal.
 - `Run ▾`'s menu and the launch sheet.
@@ -431,7 +444,7 @@ Detail body (jsdom, rendered in the modal and on the page with the same fixtures
 10. Arrow keys move the tab selection.
 11. Strip: status chip opens `Move to`; `Assign to me` disabled with today's titles; a failing pipeline's pill is red on the Ticket tab (the strip is
     tab-independent); a live session's pill click selects Agent.
-12. Delivery tab with the fixture of case 3: two rows; the first is open and shows the full track and the review row; the second's summary shows
+12. Delivery tab with the fixture of case 3: two rows; the first is open and shows the full track and the next row; the second's summary shows
     `+4 earlier`; opening it shows the nested fold reading `4 earlier MRs into demo · 3 merged, 1 closed`.
 13. A strip Delivery pill click selects the tab and opens that row.
 14. The `demo` row's next-step button (open representative, review `none`) calls the review launch with `demo`'s iid; a merged representative draws no
@@ -452,14 +465,19 @@ Page (jsdom):
     = that page; a plain click on each → the modal, page unchanged.
 
 24. Row 5 with a live `review` link on the key draws `Open session` (opening that session); with only an ended one, the fix-half split.
-25. `Ignore` on a failed pipeline writes `{ pipeline: 'failed' }` under `<project>!<iid>`, the step reads `ignored`, the pill reads `next: merge`; clicking
+25. `Ignore` on a failed pipeline writes `{ pipeline: { status: 'failed', updatedAt: <the MR's updatedAt> } }` under `<project>!<iid>`, the step reads `ignored`, the pill reads `next: merge`; clicking
     `ignored` removes the entry; the strip's Delivery pill stays red throughout.
+26. `reviewRowText` for an `open` review starts `Review · `; no drawn string in the Delivery tab contains `CodeRabbit` (rendered-text assertion); the
+    `request` prompt contains no `@coderabbitai` and still names the mr-review-loop skill's trigger step.
 27. Strip Agent pill: a `working` session newer than a `question` one → the pill shows the `question` session and `+1`.
 28. Page with a failing read: `could not read the ticket — <sentence>`, `Retry` reads again, `Forget <KEY>` sets the key to `''` and returns to the origin;
     the rail row is then gone. A stored key that fails the guard (`foo`) reads as `''`.
-29. Ignore store guard: a stored value with a bad `review.state`, a non-string stamp or non-JSON reads those entries as absent.
-26. `reviewRowText` for an `open` review starts `Review · `; no drawn string in the Delivery tab contains `CodeRabbit` (rendered-text assertion); the
-    `request` prompt contains no `@coderabbitai` and still names the mr-review-loop skill's trigger step.
+29. Ignore store guard: a stored value with a bad `review.state`, a numeric stamp or non-JSON reads those entries as absent; `{ review: { state: 'none',
+    landedAt: null } }` and `{ review: { state: 'unread', landedAt: null } }` survive a write and a re-read, and `Ignore` on a `none` review (row 3)
+    still reads `ignored` after a remount (the store round trip, not `deliveryNext` alone).
+30. Prune: ticket A ignores its open MR, ticket B's delivery merges a different MR → A's entry is untouched; A's own MR merges → A's entry is dropped on
+    the next write; a write while the GitLab payload is `null` drops nothing.
+
 
 Guards: grep `test/` for every hook and helper the diff adds a caller of (`useJiraPage`, `persistedStore`, `useOrchestratorRuns` if touched,
 `fetchJiraDetail`) and run each hit (CLAUDE.md's source-guard rule).
@@ -479,7 +497,9 @@ and a ticket with two targets — with live data where it exists and a fixture w
 - `.claude/DESIGN.md` §8.9.5's Review mode paragraph ("opened by the CodeRabbit row's button") → the review row.
 - `docs/subsystems/invariants.md`: the headings behind board.md's anchors `#the-jira-sections-four-pages-…` and `#the-coderabbit-button-belongs-to-the-mr-never-to-run`
   are renamed with the rules, and each anchor in board.md, CLAUDE.md and the subsystem docs is updated to match (grep the old anchors; none may remain).
-- `docs/subsystems/board.md` where it lists the Jira pages.
+- `docs/subsystems/board.md` where it lists the Jira pages, and the same "four pages" in `docs/overview.md` and `docs/subsystems/jira.md`.
+- `.claude/rules/board.md`'s Escape rule, which names `components/jira/JiraDetail.tsx` as the Move-to popover's home (update to the body component if it
+  moves), and `hooks/persistedStore.ts`'s header list of its users (`useJiraTicketKey` and, if built on it, the ignore store).
 - `lib/jira-page.ts` and `hooks/useJiraPage.ts` header comments (the latter already says "board, sessions or setup" — stale before this change).
 
 ## Left to the builder
@@ -488,4 +508,3 @@ and a ticket with two targets — with live data where it exists and a fixture w
 - How `Modal` draws head + single body (§7.1).
 - CSS class names, exact spacing, the tab underline style — follow `Main.dc.html` and DESIGN.md tokens.
 - The page's max content width.
-- Whether the strip's Delivery pills cap at three or fit-then-`+N`.
