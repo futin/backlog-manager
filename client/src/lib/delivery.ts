@@ -55,6 +55,17 @@ export function deliveryShown(payload: GitlabPayload | null): boolean {
 }
 
 /**
+ * The unknown lines (spec §7, "Known versus none") — an answer that is not yet trustworthy says so, and says where to look when it is a failure. Here
+ * rather than in `DeliveryPane` since the Detail body's strip titles its grey `unknown` pill with the same sentence (Jira detail tabs spec §1.2), and one
+ * reading of "why is this unknown" must not be worded twice.
+ */
+export const UNKNOWN_LINE = {
+  'not-read': 'GitLab not read yet',
+  failed: 'GitLab could not be read — Settings › Shared › Sources',
+  capped: 'more merge requests than were read — some may be missing'
+} as const;
+
+/**
  * One ticket's delivery, every case a surface draws differently:
  * - `hidden` — its Jira project maps no GitLab project on the site, so no surface draws anything for it;
  * - `unknown` — no MR found, but the answer is not yet trustworthy: a mapped project never read (`not-read`, or `failed` when that first read failed) or

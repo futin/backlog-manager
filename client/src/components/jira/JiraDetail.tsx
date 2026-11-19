@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraSessionsContext } from '../../hooks/JiraSessionsContext';
@@ -16,41 +16,39 @@ import {
   issueDatesLine,
   modalTree,
   priorityTone,
-  progressLine,
   repoBasename,
   resolveJiraAction,
   runChipState,
   stopJira,
   ticketWorktrees,
   statusTone,
-  transitionOptions,
   typeTone,
   unlinkJira,
   type JiraChildrenIndex
 } from '../../lib/jira';
-import { childSessions, type DeckEntry } from '../../lib/jira-deck';
-import { parentLineText, parentLiveLine } from '../../lib/jira-parent';
-import { ticketSessions, type SessionLink } from '../../lib/jira-sessions';
-import { sessionTone } from '../../lib/tones';
+import { childSessions } from '../../lib/jira-deck';
+import { parentLiveLine } from '../../lib/jira-parent';
+import { ticketSessions } from '../../lib/jira-sessions';
 import { pollAge } from '../../lib/tracker';
 import { elapsedSince } from '../../lib/item-age';
-import { renderMarkdown } from '../../lib/markdown';
-import { STATE_LABEL, type JiraSessionState } from '../../../../shared/jira-sessions';
 import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
-import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf, JiraTransition, JiraIssueDetail, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
+import type { GitlabMr, JiraAction, JiraIssue, ReviewHalf, JiraIssueDetail, JiraWorktreesPayload } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Fact } from '../ui/Fact';
 import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
 import { Chevron } from '../ui/Chevron';
-import { Pill } from '../ui/Pill';
 import { Popover } from '../ui/Popover';
-import { SpreadBar } from '../ui/SpreadBar';
 import { DeliveryPane } from './DeliveryPane';
 import { JiraRunMenu } from './JiraRunMenu';
 import { JiraHistoryLine, JiraSessionCards, JiraStartingCard } from './JiraSessionCard';
-import { WorktreeRow } from './JiraWorktreeRow';
+import { ChildrenTree } from './ChildrenTree';
+import { ChildSessionLine } from './ChildSessionLine';
+import { Description } from './Description';
+import { JiraMoveRows } from './JiraMoveRows';
+import { ParentSessionLine } from './ParentSessionLine';
+import { WorktreesList } from './WorktreesList';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
@@ -581,199 +579,5 @@ export function JiraDetail({
         </p>
       </div>
     </Modal>
-  );
-}
-
-/**
- * The ticket's worktrees (header, "The Worktrees list"): one `WorktreeRow` per tree — branch, path and repo through `displayPath` — and a `Remove` that
- * copies the command and runs nothing (the row's own header says how). It is disabled while `live` — the shell knows of a session on this key — and its
- * title then names the key.
- */
-function WorktreesList({ trees, issueKey, live, home }: { trees: readonly JiraWorktree[]; issueKey: string; live: boolean; home: string | null }) {
-  return (
-    <section className="jira-wt">
-      <div className="jira-tree-head">
-        <h3>Worktrees</h3>
-        <Pill tone="neutral">{trees.length}</Pill>
-      </div>
-      <ul className="jira-wt-list">
-        {trees.map((t) => (
-          <WorktreeRow key={t.path} tree={t} home={home} liveKey={live ? issueKey : null} showRepo />
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/**
- * The description, collapsed to its first few lines (`.jira-desc`'s max-height) with a `Show more` under it — a long ticket otherwise pushes the Children
- * and everything after them a screen down, which is the very thing that makes Jira's own issue view hard to scan. The toggle is drawn only when the text
- * actually overflows the clamp, measured rather than guessed from a character count, because a short line of Markdown can render as a tall table and a
- * long one as a single paragraph. The measure re-runs when the content's own box changes (an image arriving, the modal folding under 700 px) where the
- * browser has a `ResizeObserver`; where it has none, the one measure after the HTML lands is what it gets.
- */
-function Description({ markdown }: { markdown: string }) {
-  const outer = useRef<HTMLDivElement>(null);
-  const inner = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  const html = renderMarkdown(markdown);
-
-  useLayoutEffect(() => {
-    const box = outer.current;
-    const content = inner.current;
-    if (box === null || content === null) return;
-    // Measured against the clamp only while collapsed: expanded, the box is as tall as its content and would always read as fitting.
-    const measure = (): void => {
-      if (!box.classList.contains('open')) setOverflows(box.scrollHeight > box.clientHeight + 1);
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [html]);
-
-  return (
-    <>
-      <div ref={outer} className={expanded ? 'jira-desc open' : overflows ? 'jira-desc clamped' : 'jira-desc'}>
-        <div ref={inner} dangerouslySetInnerHTML={{ __html: html }} />
-      </div>
-      {(overflows || expanded) && (
-        <button type="button" className="jira-desc-more" aria-expanded={expanded} onClick={() => setExpanded((e) => !e)}>
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      )}
-    </>
-  );
-}
-
-/**
- * The Children section — head row, spread bar, tree — over `modalTree` (see the header). Drawn only when the detail has direct children. A row a session is
- * live on wears that session's state as a neutral `Pill` led by the state's dot (`underway`, one per row), before the ticket's own status pill: an epic's
- * List row can read `Working` for a sub-task's session, and this is where the reader finds which one.
- */
-function ChildrenTree({
-  direct,
-  tree,
-  underway,
-  childrenOf,
-  onOpenIssue
-}: {
-  direct: number;
-  tree: ReturnType<typeof modalTree>;
-  underway: readonly DeckEntry[];
-  childrenOf: JiraChildrenIndex | null;
-  onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
-}) {
-  const { rows, progress } = tree;
-  const live = new Map(underway.map((e) => [e.issue.key, e.state] as const));
-  return (
-    <>
-      <div className="jira-tree-head">
-        <h3>Children</h3>
-        <Pill tone="neutral">{direct}</Pill>
-        {rows.length > direct && <span className="jira-tree-all">{`${rows.length} in all`}</span>}
-      </div>
-      {/* Wrapped, because the spacing is this surface's and the primitive's own selectors stay in the ui block (design-guard 7). */}
-      <div className="jira-tree-spread">
-        <SpreadBar done={progress.done} doing={progress.doing} todo={progress.todo} caption={progressLine(progress)} />
-      </div>
-      <ul className="jira-tree">
-        {rows.map(({ issue: row, depth }) => (
-          // The indent is the one inline style: a depth is data, and a class per depth would cap how deep a tree may go.
-          <li key={row.key} data-depth={depth} style={{ paddingLeft: depth * 22 }}>
-            <button type="button" className="jira-tree-row" onClick={() => onOpenIssue(row, childrenOf)}>
-              <JiraTypeIcon type={row.type} />
-              {/* The spaces between the spans are what the button's accessible name reads as word breaks: `PAY-162 Ledger rounding fix`. */}
-              <span className="jira-tree-key">{row.key}</span> <span className="jira-tree-summary">{row.summary}</span>{' '}
-              {/* The card's own disc: initials or the empty one, never an image, so every row's status pill lines up. */}
-              <span className={row.assignee === null ? 'jira-card-av none' : 'jira-card-av'} aria-hidden="true">
-                {row.assignee === null ? '' : initialsOf(row.assignee.name)}
-              </span>
-              {live.has(row.key) && <RowSession state={live.get(row.key) as JiraSessionState} />}
-              <Pill tone="neutral">{row.status.name}</Pill>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </>
-  );
-}
-
-/** A Children row's session: the state's dot and word in a neutral pill, wrapped so the tree places it (`.jira-tree-session`) without restyling `Pill`. */
-function RowSession({ state }: { state: JiraSessionState }) {
-  return (
-    <span className="jira-tree-session">
-      <Pill tone="neutral" title={`a session is ${STATE_LABEL[state].toLowerCase()} on this ticket`}>
-        <i className="ui-stripe-dot" data-tone={sessionTone(state)} aria-hidden="true" />
-        {STATE_LABEL[state]}
-      </Pill>
-    </span>
-  );
-}
-
-/**
- * The empty agent band's third line when a child has a live session (`underway[0]`, the deck's lead among the tree's rows): `<state> on <key>`, `+N more`
- * when others are live too. It opens that child the way its Children row does — the same `onOpenIssue` and the same snapshot — so a reader who came here from a
- * `Working` epic reaches the session in one press.
- */
-function ChildSessionLine({ first, more, onOpen }: { first: DeckEntry; more: number; onOpen: () => void }) {
-  return (
-    <button type="button" className="jira-detail-agent-child" onClick={onOpen}>
-      <i className="ui-stripe-dot" data-tone={sessionTone(first.state)} aria-hidden="true" />
-      <span className="jira-detail-agent-child-text">{`${STATE_LABEL[first.state]} on ${first.issue.key} →`}</span>
-      {more > 0 && <span className="jira-detail-agent-child-more">{`+${more} more`}</span>}
-    </button>
-  );
-}
-
-/**
- * The sub-task band's parent-live line (spec §4.3; DESIGN.md §8.9.2): `ChildSessionLine`'s skin — the lead session's tone dot, the words, `+N more` — pointed
- * UP at the parent, whose newest live session leads. A click opens the parent's Detail, as the head's parent link does.
- */
-function ParentSessionLine({ parentKey, lead, more, onOpen }: { parentKey: string; lead: SessionLink; more: number; onOpen: () => void }) {
-  return (
-    <button type="button" className="jira-detail-agent-child jira-detail-parent-line" onClick={onOpen}>
-      <i className="ui-stripe-dot" data-tone={sessionTone(lead.state)} aria-hidden="true" />
-      <span className="jira-detail-agent-child-text">{parentLineText(parentKey, lead)}</span>
-      {more > 0 && <span className="jira-detail-agent-child-more">{`+${more} more`}</span>}
-    </button>
-  );
-}
-
-/**
- * The Move-to popover's rows (`Modal.dc.html`, spec §4.4): one per offered transition in Jira's order, labelled by `transitionOptions` (the landing status, or the
- * transition's own name when two land together), each with a dot in the landing status's tone. Every row that lands on the CURRENT status is pinned first, in
- * Jira's order, with a tick and `aria-disabled` — a move to where the ticket already is would post a no-op — and the rest follow in Jira's order. The disabled rows
- * stay buttons, not `disabled` ones, so a screen reader still reads them; they just do nothing. Focus lands on the first row that DOES something when the panel
- * mounts, since it mounts only while open.
- */
-function JiraMoveRows({ transitions, current, onPick }: { transitions: readonly JiraTransition[]; current: string; onPick: (id: string) => void }) {
-  const labels = transitionOptions(transitions);
-  const rows = transitions.map((t, i) => ({ t, label: labels[i].label, here: t.to.name === current }));
-  const ordered = [...rows.filter((r) => r.here), ...rows.filter((r) => !r.here)];
-  const first = useRef<HTMLButtonElement>(null);
-  useEffect(() => first.current?.focus(), []);
-  const firstEnabled = ordered.findIndex((r) => !r.here);
-  return (
-    <>
-      <div className="jira-move-head">Move to</div>
-      {ordered.map((r, i) => (
-        <button
-          key={r.t.id}
-          ref={i === firstEnabled ? first : undefined}
-          type="button"
-          className="jira-move-row"
-          aria-disabled={r.here ? true : undefined}
-          onClick={() => !r.here && onPick(r.t.id)}
-        >
-          <span className="jira-status-dot" data-tone={statusTone(r.t.to.category)} aria-hidden="true" />
-          <span className="jira-move-label">{r.label}</span>
-          {r.here && <Glyph name="tick" size={14} />}
-        </button>
-      ))}
-      <div className="jira-move-note">Jira transitions, applied on click</div>
-    </>
   );
 }

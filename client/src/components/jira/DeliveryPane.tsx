@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
 import { useGitlabContext } from '../../hooks/GitlabContext';
-import { deliveryIndex, deliveryLook, deliveryShown, mrRepo, ticketDelivery, type TrackStep } from '../../lib/delivery';
+import { deliveryIndex, deliveryLook, deliveryShown, mrRepo, ticketDelivery, UNKNOWN_LINE, type TrackStep } from '../../lib/delivery';
 import { polledPhrase } from '../../lib/jira';
 import { reviewStepTitleSuffix, reviewStepWord } from '../../lib/review-copy';
 import { pollAge } from '../../lib/tracker';
@@ -71,13 +71,6 @@ function MrLink({ mr, className }: { mr: GitlabMr; className: string }) {
     </a>
   );
 }
-
-/** The unknown lines (spec §7, "Known versus none") — an answer that is not yet trustworthy says so, and says where to look when it is a failure. */
-const UNKNOWN_LINE = {
-  'not-read': 'GitLab not read yet',
-  failed: 'GitLab could not be read — Settings › Shared › Sources',
-  capped: 'more merge requests than were read — some may be missing'
-} as const;
 
 export function DeliveryPane({ issue, now, onReview }: { issue: JiraIssue; now: number; onReview?: (half: ReviewHalf, mr: GitlabMr, repos: string[]) => void }) {
   const { data } = useGitlabContext();
