@@ -1625,7 +1625,7 @@ button.rail-count { cursor: pointer }
   display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--ink)
 }
 /* The Agent and Children & comments tabs' folds (spec §5.2, §6: History, Children, Comments) — the Worktrees fold's summary, with the mock's right-aligned
-   meta (`5 ended · last 13 Nov, 17:33`, `N in all`) at 12 px `--ink3`, and the body 12 px under it. */
+   meta (`5 ended · last nov 13, 17:33`, `N in all`) at 12 px `--ink3`, and the body 12 px under it. */
 .jira-fold > summary {
   display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--ink)
 }

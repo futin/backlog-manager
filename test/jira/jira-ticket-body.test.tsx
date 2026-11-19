@@ -541,7 +541,7 @@ const AGENTS_ON: AgentsStatus = {
   spawnMaxPermission: 'acceptEdits',
   projectPaths: ['/Users/dana/pay']
 };
-const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const panel = (): HTMLElement => screen.getByRole('tabpanel');
 /** A fold's summary, found by its label, so a press toggles it as the reader's would. */
 const summaryOf = (label: string): HTMLElement => {
@@ -579,10 +579,12 @@ describe('JiraTicketBody — Agent tab (T15)', () => {
     const newest = payload.links.find((l) => l.sessionId === 's-ended-1')?.endedAt as string;
     mount({ sessions: payload });
     openTab(/^Agent/);
+    // Built from the parts, not from `formatCreated`, so the case pins the shape the client's dates share: lowercase month, day, then the zone's clock.
     const zone = browserTimeZone();
     const at = Date.parse(newest);
     const p = zonedParts(at, zone);
-    expect(summaryOf('History')).toHaveTextContent(`History5 ended · last ${p.day} ${MONTH[p.month - 1]}, ${formatZonedClock(at, zone)}`);
+    const year = p.year === zonedParts(Date.now(), zone).year ? '' : ` '${String(p.year).slice(-2)}`;
+    expect(summaryOf('History')).toHaveTextContent(`History5 ended · last ${MONTH[p.month - 1]} ${p.day}${year}, ${formatZonedClock(at, zone)}`);
     expect(foldOf('History')).not.toHaveAttribute('open');
     expect(within(panel()).queryByText('Reopen')).toBeNull();
 

@@ -134,7 +134,7 @@ export function JiraAgentTab({
             <>
               <Chevron dir={historyOpen ? 'down' : 'right'} />
               <span className="jira-fold-label">History</span>
-              <span className="jira-fold-meta">{historySummary(ended, zone)}</span>
+              <span className="jira-fold-meta">{historySummary(ended, now, zone)}</span>
             </>
           }
         >
