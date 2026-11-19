@@ -144,7 +144,7 @@ a save while the credential is rejected or the site `unsupported` touches only `
 
 | route                           | body                                    | answers                                                                                           |
 | ------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `POST /api/jira/boards`         | `{ id?, name, interval, roots, queries, columns? }` | the board as stored, ids server-minted; waits for `boardSaved` (below); 404 for an `id` the file does not hold |
+| `POST /api/jira/boards`         | `{ id?, name, interval, roots, queries }` | the board as stored, ids server-minted; waits for `boardSaved` (below); 404 for an `id` the file does not hold |
 | `POST /api/jira/boards/delete`  | `{ id }`                                | `{ ok: true }`; drops the board's cache at once (`boardDeleted`) and re-`arm()`s; 404 for an unknown id, a second delete included |
 | `POST /api/jira/sweep`          | none read                               | the `GET /api/jira` payload, `live` filled; the popover head's site-wide `Sync now`: forces every non-`off` board and sweeps once, joins a sweep in flight, answers `done` with no call inside `SWEEP_FLOOR_MS` (5 s) of the last one; 409 `{ message: 'Jira is not being polled' }` when nothing is armed, 429 `{ message: 'rate limited', retryAt }` inside a stored window (the only Jira sweep that refuses there); a 401/5xx is a 200 carrying `access` |
 | `POST /api/jira/boards/sweep`   | `{ id }`                                | `{ ok: true }`; writes NOTHING — the chip's per-board `now`: awaits `boardSaved(id)`, a save's own sweep, so a 429 window or an unanswered boot leaves the board owed rather than refusing; 409 for an unreadable file, 404 `unknown board` |
@@ -157,7 +157,7 @@ a save while the credential is rejected or the site `unsupported` touches only `
 `parseBoardWrite` holds spec §5's bounds: a trimmed `name` of 1–80; an `interval` in `SYNC_INTERVALS`; at most 20 roots, each passing `isJiraKey`,
 deduplicated; at most 10 queries, each a trimmed `label` of 1–80 and a `jql` of 1–`JIRA_JQL_MAX_CHARS`; at least one root or query. A non-string, non-null
 board `id` is a 400 naming `id`; `null` or absent is a create, whose client ids are ignored. On an update a query keeps its id only when the stored board
-holds it, and every other query is minted a fresh `q_` id — a query's identity is never inferred from its label or JQL. `columns` is optional: omitted keeps the stored order, `[]` clears it, and entries are trimmed, 1–100 characters, deduplicated and capped at the first 50; the board sheet's Columns section sends it only after an edit (DESIGN.md §8.9.3). `parseReposWrite` takes a
+holds it, and every other query is minted a fresh `q_` id — a query's identity is never inferred from its label or JQL. `parseReposWrite` takes a
 `JIRA_PROJECT_KEY_RE` key and at most 10 paths after `normaliseRepoPath`: trimmed, `~` and a leading `~/` expanded to `homedir()`, `~user/…` refused,
 absolute with no empty, `.` or `..` segment (400 `path must be absolute and normalised: <path>`), one trailing `/` dropped, duplicates removed after
 normalising — the dashboard compares paths as raw strings, so the server stores exactly one spelling.
@@ -337,9 +337,9 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `parseJiraBoardIssues` (`lib/jira.ts`): a body with no `issues` array is `null`, a failed poll to the hook and a silent no-op to the sheet, and a row without a
   string `key` and `summary` is dropped rather than blanking the board. A CHANGE of `nudge` — a counter `JiraView` owns and bumps when the Detail dialog
   reports a landed write — asks at once through the same coalesced request, whatever the interval, `off` included (spec §6.1).
-- **`lib/jira.ts`** is the one home of every derivation the five surfaces print — the columns (`boardColumns` and `columnTone`, one per status name; `JIRA_COLUMNS`/`columnOf` for the category tones; `sortForBoard`), the card's crumb
+- **`lib/jira.ts`** is the one home of every derivation the five surfaces print — the columns (`JIRA_COLUMNS`, `columnOf`, `sortForBoard`), the card's crumb
   (`crumbOf`/`crumbText`), initials, age (`cardAgeStamp`), the lanes (`laneBoard` — the one walk of the parent chain, into the lanes in drawing order, the `childrenOf` index and each issue's kept parent,
-  `parentOf` — then `laneViews` for the filtered reading, `laneColumnCounts`, `laneCell` and `LANE_CELL_LIMIT`, `foldProgress` and the modal's `modalTree`), the
+  `parentOf` — then `laneViews` for the filtered reading, `laneCell` and `LANE_CELL_LIMIT`, `foldProgress` and the modal's `modalTree`), the
   lane folds' storage (`JIRA_LANE_FOLDS_KEY`, `clampLaneFolds`, `setLaneFold`) and their sentences (`progressLine`, `laneCountText`), the band line (`bandSub`,
   whose issue and `M parents` counts, `laneParents`, come from the lanes once the list has loaded), a Setup row's sentence (`boardRowLine`), the
   failure phrase, the chip's CALLS reading (`callsReading`, against `JIRA_SWEEP_CALL_CEILING` = 100, red inside `JIRA_429_RED_MS` = 15 min of the last 429),
@@ -352,8 +352,8 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   stored per browser — a stored pick the list does not offer reads as any; the summary search is per mount.
   `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. The board draws one lane per parent (`JiraLaneBoard`, `JiraLaneHeader`; DESIGN.md §8.9.1): `laneBoard` reads the loaded list once and every
   issue is drawn once — a header issue (the parent of something on the board) heads its own lane, every other issue is a card in its parent's lane, in
-  `No parent`, or in an off-board lane whose header is a stub built from the freshest card under it. A lane's cards sit in one cell per status name — `boardColumns` over the unfiltered loaded list and the board's saved `columns`, `--jira-cols` tracks —
-  under one sticky column header whose counts are `laneColumnCounts`' map keyed by name, each cell cut at `LANE_CELL_LIMIT` (5) plus any card past it with a live session, and the nested lanes follow their parent's cells.
+  `No parent`, or in an off-board lane whose header is a stub built from the freshest card under it. A lane's cards sit in To Do, In Progress and Done cells, each a
+  `--steel` tile headed by its category and its count (no page-wide header), each cell cut at `LANE_CELL_LIMIT` (5) plus any card past it with a live session, and the nested lanes follow their parent's cells.
   Matching is per issue — `matchesBoardFilters`, then `matchesDelivery` while a delivery filter is picked — and `laneViews` keeps a lane while anything in its
   subtree matches. A lane folds from its chevron: settled lanes start closed, a person's toggle is stored per board as an override
   (`JIRA_LANE_FOLDS_KEY`, one key holding a board id to overrides map, clamped on read by `clampLaneFolds`), and while the search box holds text every lane draws open.

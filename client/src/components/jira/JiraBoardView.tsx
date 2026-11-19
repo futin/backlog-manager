@@ -79,7 +79,7 @@ const NO_TREES: readonly JiraWorktree[] = [];
  * status still says `configured`, but the boards could not be read, and `No boards yet` would invite the reader to create a board the server would refuse to
  * write. No picker then, and no chip: Setup cannot fix a file that does not parse. No boards at all → `No boards yet`, with a chip to Setup that is
  * `onOpenJiraPage('setup')` — the rail's own navigation threaded down from `App`, so it means what the tree's `Setup` entry means by construction and is not a
- * second page switch (the section has no in-page switch at any width, spec §6.1). A board with no issues draws the column header with zeros and `No issues`.
+ * second page switch (the section has no in-page switch at any width, spec §6.1). A board with no issues draws `No issues`.
  *
  * **One lane per parent** (parent-lanes spec §3; DESIGN.md §8.9.1). `laneBoard` (through `usePickedJiraBoard`) is the one walk: every issue with an
  * on-board child is a lane header, every other issue a card in its parent's lane — an on-board header, an off-board stub, or `No parent`. This page only
@@ -326,7 +326,6 @@ export function JiraBoardView({
               key={board.id}
               views={views}
               lanes={lanes}
-              issues={list.issues}
               folds={folds}
               read={read}
               total={list.issues.length}

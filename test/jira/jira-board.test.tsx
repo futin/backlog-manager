@@ -323,12 +323,16 @@ const lane = (key: string): HTMLElement | null => document.querySelector<HTMLEle
 const headOf = (key: string): HTMLElement => lane(key)?.querySelector('.jira-lane-head') as HTMLElement;
 /** Every drawn lane's key, in document order — the lanes are drawn flat, a nested lane right after its parent's cells. */
 const laneKeys = (): string[] => Array.from(document.querySelectorAll('section.jira-lane')).map((s) => s.getAttribute('data-lane') ?? '');
-const cellSummaries = (laneKey: string, status: string): string[] =>
-  Array.from(screen.getByTestId(`cell-${laneKey}-${status}`).querySelectorAll('.board-card-title')).map((t) => t.textContent ?? '');
-/** The shared column header's counts, one per status column in the order drawn. */
-const colCounts = (): string[] => Array.from(document.querySelectorAll('.jira-lanes-head .jira-lanes-count')).map((c) => c.textContent ?? '');
-/** The shared column header's names, in the order drawn. */
-const colNames = (): string[] => Array.from(document.querySelectorAll('.jira-lanes-head .jira-lanes-name')).map((c) => c.textContent ?? '');
+const cellSummaries = (laneKey: string, slug: 'todo' | 'doing' | 'done'): string[] =>
+  Array.from(screen.getByTestId(`cell-${laneKey}-${slug}`).querySelectorAll('.board-card-title')).map((t) => t.textContent ?? '');
+/** One lane's three tile counts, To Do · In Progress · Done — each tile's own head, there is no page-wide column header. */
+const tileCounts = (laneKey: string): string[] =>
+  (['todo', 'doing', 'done'] as const).map((s) => screen.getByTestId(`cell-${laneKey}-${s}`).querySelector('.jira-cell-count')?.textContent ?? '');
+/** Every drawn tile's count summed per category, To Do · In Progress · Done — what the cards on screen add up to. */
+const tileTotals = (): number[] =>
+  (['todo', 'doing', 'done'] as const).map((s) =>
+    Array.from(document.querySelectorAll(`.jira-cell-head[data-tone="${s}"] .jira-cell-count`)).reduce((a, e) => a + Number(e.textContent), 0)
+  );
 /** What `GET /api/jira/issue/<KEY>` answers for an off-board parent's read. */
 const detailOf = (i: JiraIssue) => ({ ...i, description: '', children: [], transitions: [], boards: [], session: null });
 function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void } {
@@ -614,137 +618,60 @@ describe('the band', () => {
 });
 
 /*
-  The lanes (parent-lanes spec §3; DESIGN.md §8.9.1): one sticky column header for the page, then one lane per parent — an on-board header, an off-board
-  stub, or `No parent` — each with its three cells. ALPHA's list makes two: PAY-131 under the off-board PAY-99, and the other three under `No parent`.
+  The lanes (parent-lanes spec §3; DESIGN.md §8.9.1): no page-wide column header, one lane per parent — an on-board header, an off-board stub, or
+  `No parent` — each with its three cell tiles, every tile headed by its category and its count. ALPHA's list makes two: PAY-131 under the off-board PAY-99, and the other three under `No parent`.
 */
 describe('the lanes', () => {
-  it('draws one column header per status: Backlog, To Do, In Review and Done in category order, each with a page-local dot, a tone and its count', async () => {
+  it('draws no page-wide column header; every tile names its category in tone order, with a dot and its own lane’s count', async () => {
     await renderAlpha();
-    const cols = Array.from(document.querySelectorAll<HTMLElement>('.jira-lanes-col'));
-    expect(cols.map((c) => c.getAttribute('data-testid'))).toEqual(['lanes-col-Backlog', 'lanes-col-To Do', 'lanes-col-In Review', 'lanes-col-Done']);
-    expect(cols.map((c) => c.getAttribute('data-tone'))).toEqual(['todo', 'todo', 'doing', 'done']);
-    expect(colNames()).toEqual(['Backlog', 'To Do', 'In Review', 'Done']);
-    for (const c of cols) expect(c.querySelectorAll('.jira-lanes-dot')).toHaveLength(1);
-    expect(colCounts()).toEqual(['1', '1', '1', '1']);
-    expect(document.querySelectorAll('.jira-lanes-head')).toHaveLength(1);
-    expect(document.querySelector('.jira-lanes')).toHaveStyle('--jira-cols: 4');
+    expect(document.querySelector('.jira-lanes-head')).toBeNull();
+    for (const key of ['none', 'PAY-99']) {
+      const heads = (['todo', 'doing', 'done'] as const).map((s) => screen.getByTestId(`cell-${key}-${s}`).querySelector('.jira-cell-head') as HTMLElement);
+      expect(heads.map((h) => h.getAttribute('data-tone'))).toEqual(['todo', 'doing', 'done']);
+      expect(heads.map((h) => h.querySelector('.jira-cell-name')?.textContent)).toEqual(['To Do', 'In Progress', 'Done']);
+      for (const h of heads) expect(h.querySelectorAll('.jira-cell-dot')).toHaveLength(1);
+    }
+    // Lane-local, not page totals: `No parent` holds two To Do cards and one Done, PAY-99 the one In Progress card.
+    expect(tileCounts('none')).toEqual(['2', '0', '1']);
+    expect(tileCounts('PAY-99')).toEqual(['0', '1', '0']);
   });
 
-  describe('one column per status name (status-columns spec)', () => {
-    const FIVE = ['To Do', 'In Progress', 'In Review', 'In Testing', 'Done'];
-    const st = (name: string, category: 'new' | 'indeterminate' | 'done') => ({ name, category });
-    const five = (): JiraIssue[] => [
-      issue({ key: 'PAY-601', summary: 'Five todo', status: st('To Do', 'new') }),
-      issue({ key: 'PAY-602', summary: 'Five doing', status: st('In Progress', 'indeterminate') }),
-      issue({ key: 'PAY-603', summary: 'Five review', status: st('In Review', 'indeterminate') }),
-      issue({ key: 'PAY-604', summary: 'Five testing', status: st('In Testing', 'indeterminate') }),
-      issue({ key: 'PAY-605', summary: 'Five done', status: st('Done', 'done'), resolved: daysAgoStamp(1) })
+  it('a status Jira files under To Do (In Testing, In Review) sits in the To Do tile, its own status word on the card', async () => {
+    lists[ALPHA.id] = [
+      issue({ key: 'PAY-701', summary: 'Testing ticket', status: { name: 'In Testing', category: 'new' }, updated: daysAgoStamp(1) }),
+      issue({ key: 'PAY-702', summary: 'Review ticket', status: { name: 'In Review', category: 'new' }, updated: daysAgoStamp(2) })
     ];
-    const withFive = async (saved?: string[]): Promise<void> => {
-      lists[ALPHA.id] = five();
-      if (saved !== undefined) statusAnswer = status({ boards: [{ ...ALPHA, columns: saved }, BETA] });
-      renderPage();
-      await screen.findByText('Five todo');
-    };
-
-    it('draws five headers in category order, and an In Testing card sits in its own cell, not To Do', async () => {
-      await withFive();
-      expect(colNames()).toEqual(['To Do', 'In Progress', 'In Review', 'In Testing', 'Done']);
-      expect(colCounts()).toEqual(['1', '1', '1', '1', '1']);
-      expect(cellSummaries('none', 'In Testing')).toEqual(['Five testing']);
-      expect(cellSummaries('none', 'To Do')).toEqual(['Five todo']);
-      expect(document.querySelector('.jira-lanes')).toHaveStyle('--jira-cols: 5');
-    });
-
-    it('draws the saved order', async () => {
-      await withFive(['Done', 'In Testing', 'In Review', 'In Progress', 'To Do']);
-      expect(colNames()).toEqual(['Done', 'In Testing', 'In Review', 'In Progress', 'To Do']);
-      expect(cellSummaries('none', 'In Testing')).toEqual(['Five testing']);
-    });
-
-    it('a saved name no issue carries draws a header with count 0 and the todo tone', async () => {
-      await withFive([...FIVE, 'Blocked']);
-      expect(screen.getByTestId('lanes-col-Blocked')).toHaveAttribute('data-tone', 'todo');
-      expect(screen.getByTestId('lanes-col-Blocked').querySelector('.jira-lanes-count')).toHaveTextContent('0');
-      expect(screen.getByTestId('cell-none-Blocked').querySelectorAll('.board-card')).toHaveLength(0);
-    });
-
-    it('filtering down to one status keeps every header and zeroes the others', async () => {
-      await withFive();
-      await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'Five testing');
-      expect(colNames()).toEqual(FIVE);
-      expect(colCounts()).toEqual(['0', '0', '0', '1', '0']);
-    });
-
-    it('an empty-name card is in the cell with an empty name, under a No status header', async () => {
-      lists[ALPHA.id] = [...five(), issue({ key: 'PAY-610', summary: 'Nameless', status: st('', 'new') })];
-      renderPage();
-      await screen.findByText('Nameless');
-      expect(colNames()).toContain('No status');
-      expect(screen.getByTestId('lanes-col-').querySelector('.jira-lanes-name')).toHaveTextContent('No status');
-      expect(cellSummaries('none', '')).toEqual(['Nameless']);
-    });
-
-    it('for every drawn lane the cards across its cells equal the lane’s cards, with an empty-name card and a status missing from the saved order', async () => {
-      lists[ALPHA.id] = [...GROUP, ...five(), issue({ key: 'PAY-630', summary: 'Nameless', status: st('', 'new') })];
-      // Only `Done` is saved, so every other status (and the empty name) is placed by `boardColumns`' rule, not by the saved order.
-      statusAnswer = status({ boards: [{ ...ALPHA, columns: ['Done'] }, BETA] });
-      renderPage();
-      await screen.findByText('Nameless');
-      // The cards each lane owns in this fixture: PAY-120 holds PAY-170, PAY-160 holds PAY-161 and PAY-162 (two columns), PAY-999 holds PAY-190, and
-      // `No parent` holds PAY-180, the five, and the nameless card. No cell reaches the cut of five, so every card is drawn.
-      const owned: Record<string, number> = { 'PAY-120': 1, 'PAY-160': 2, 'PAY-999': 1, none: 7 };
-      expect([...laneKeys()].sort()).toEqual(Object.keys(owned).sort());
-      for (const key of laneKeys()) {
-        const cells = Array.from(lane(key)!.querySelectorAll('.jira-lane-cell'));
-        expect(cells).toHaveLength(colNames().length);
-        expect(cells.reduce((n, c) => n + c.querySelectorAll('.board-card').length, 0)).toBe(owned[key]);
-      }
-      expect(cellSummaries('PAY-160', 'Done')).toHaveLength(1);
-      expect(cellSummaries('PAY-160', 'To Do')).toHaveLength(1);
-      expect(cellSummaries('none', '')).toEqual(['Nameless']);
-      expect(colCounts().reduce((n, c) => n + Number(c), 0)).toBe(Object.values(owned).reduce((n, c) => n + c, 0));
-    });
-
-    it('a lane header whose status no card shares still draws its column, with count 0', async () => {
-      lists[ALPHA.id] = [
-        issue({ key: 'PAY-620', summary: 'Reviewed epic', type: { name: 'Epic', level: 1, subtask: false }, status: st('In Review', 'indeterminate') }),
-        issue({ key: 'PAY-621', summary: 'Child todo', parent: { key: 'PAY-620', summary: 'Reviewed epic', type: null, status: null } })
-      ];
-      renderPage();
-      await screen.findByText('Child todo');
-      expect(colNames()).toEqual(['To Do', 'In Review']);
-      expect(screen.getByTestId('lanes-col-In Review').querySelector('.jira-lanes-count')).toHaveTextContent('0');
-    });
+    renderPage();
+    await screen.findByText('Testing ticket');
+    expect(cellSummaries('none', 'todo')).toEqual(['Testing ticket', 'Review ticket']);
+    expect(tileCounts('none')).toEqual(['2', '0', '0']);
+    const todo = screen.getByTestId('cell-none-todo');
+    expect(within(todo).getByText('In Testing')).toBeInTheDocument();
+    expect(within(todo).getByText('In Review')).toBeInTheDocument();
   });
 
   it('puts PAY-131 in its off-board parent’s lane and the rest under `No parent`, each cell newest first', async () => {
     await renderAlpha();
     expect([...laneKeys()].sort()).toEqual(['PAY-99', 'none']);
-    expect(cellSummaries('PAY-99', 'In Review')).toEqual(['Refund partial captures']);
+    expect(cellSummaries('PAY-99', 'doing')).toEqual(['Refund partial captures']);
     // PAY-151 was updated today and PAY-120 two days ago — the list order (PAY-120 first) must not survive.
-    expect(cellSummaries('none', 'Backlog')).toEqual(['Rounding wrong on invoices over 1,000']);
-    expect(cellSummaries('none', 'To Do')).toEqual(['Refund flows']);
-    expect(cellSummaries('none', 'Done')).toEqual(['Currency symbol missing on receipts']);
+    expect(cellSummaries('none', 'todo')).toEqual(['Rounding wrong on invoices over 1,000', 'Refund flows']);
+    expect(cellSummaries('none', 'done')).toEqual(['Currency symbol missing on receipts']);
     expect(within(headOf('none')).getByText('No parent')).toBeInTheDocument();
   });
 
-  it('a board with no issues and nothing saved draws a header row with no columns and `No issues`', async () => {
+  it('a board with no issues draws `No issues` and no lanes', async () => {
     lists[ALPHA.id] = [];
     renderPage();
-    await screen.findByText('No issues');
-    expect(document.querySelectorAll('.jira-lanes-head')).toHaveLength(1);
-    expect(colCounts()).toEqual([]);
-    expect(document.querySelector('.jira-lanes')).toHaveStyle('--jira-cols: 1');
+    expect(await screen.findByText('No issues')).toBeInTheDocument();
+    expect(document.querySelector('.jira-lanes-head')).toBeNull();
     expect(laneKeys()).toEqual([]);
     expect(screen.queryByText('No boards yet')).toBeNull();
   });
 
-  it('filters that match nothing keep the zeros and read `No issues match`', async () => {
+  it('filters that match nothing read `No issues match`', async () => {
     await renderAlpha();
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'zzz-nothing');
-    expect(colNames()).toEqual(['Backlog', 'To Do', 'In Review', 'Done']);
-    expect(colCounts()).toEqual(['0', '0', '0', '0']);
     expect(screen.getByText('No issues match')).toBeInTheDocument();
     expect(laneKeys()).toEqual([]);
   });
@@ -753,8 +680,7 @@ describe('the lanes', () => {
   // PAY-160 are headers. A lane's count is its subtree's matching issues, nested headers included.
   it('counts cards, never headers, and a lane counts its subtree: `4 issues` on PAY-120, `2 issues` on the nested PAY-160', async () => {
     await renderGroup();
-    expect(colCounts()).toEqual(['2', '1', '2']);
-    expect(colNames()).toEqual(['To Do', 'In Progress', 'Done']);
+    expect(tileTotals()).toEqual([2, 1, 2]);
     expect(headOf('PAY-120').querySelector('.jira-lane-count')).toHaveTextContent('4 issues');
     expect(headOf('PAY-160').querySelector('.jira-lane-count')).toHaveTextContent('2 issues');
     expect(headOf('PAY-120').querySelectorAll('.ui-spread-seg').length).toBeGreaterThan(0);
@@ -765,8 +691,8 @@ describe('the lanes', () => {
     expect(laneKeys().indexOf('PAY-160')).toBe(laneKeys().indexOf('PAY-120') + 1);
     expect(lane('PAY-120')).toHaveAttribute('data-depth', '0');
     expect(lane('PAY-160')).toHaveAttribute('data-depth', '1');
-    expect(cellSummaries('PAY-120', 'Done')).toEqual(['Summary of PAY-170']);
-    expect(cellSummaries('PAY-160', 'To Do')).toEqual(['Ledger rounding fix']);
+    expect(cellSummaries('PAY-120', 'done')).toEqual(['Summary of PAY-170']);
+    expect(cellSummaries('PAY-160', 'todo')).toEqual(['Ledger rounding fix']);
     for (const i of GROUP) expect(screen.getAllByText(i.key)).toHaveLength(1);
   });
 
@@ -786,7 +712,7 @@ describe('the lanes', () => {
     expect(laneKeys()).toEqual(['PAY-1', 'PAY-2', 'PAY-3', 'PAY-4', 'PAY-5', 'PAY-6']);
     expect(laneKeys().map((k) => lane(k)?.getAttribute('data-depth'))).toEqual(['0', '1', '2', '3', '3', '3']);
     for (const i of chain) expect(screen.getAllByText(i.summary)).toHaveLength(1);
-    expect(cellSummaries('PAY-6', 'To Do')).toEqual(['Chain 7']);
+    expect(cellSummaries('PAY-6', 'todo')).toEqual(['Chain 7']);
   });
 
   // Review Focus 1: a cached list with a cycle renders, terminates and draws each member once.
@@ -906,7 +832,7 @@ describe('the lane card', () => {
     await screen.findByText('Followed root');
     expect(within(card('Followed root')).getByText('root')).toBeInTheDocument();
     expect(card('Followed root').querySelector('.ui-fold')).toBeNull();
-    expect(cellSummaries('PAY-110', 'To Do')).toEqual(['Followed root']);
+    expect(cellSummaries('PAY-110', 'todo')).toEqual(['Followed root']);
   });
 
   // Grouped-board spec §4: no `N subtasks` marker. PAY-131 and PAY-120 both carry a non-zero `subtasks`, so this is not vacuous.
@@ -1304,7 +1230,7 @@ describe('reading an off-board parent', () => {
     lists[ALPHA.id] = [...GROUP, second, ...Array.from({ length: 6 }, (_, i) => issue({ key: `PAY-${700 + i}`, summary: `Loose ${i}`, updated: daysAgoStamp(i + 2) }))];
     renderPage();
     await screen.findByText('Ledger export');
-    await userEvent.click(within(screen.getByTestId('cell-none-To Do')).getByRole('button', { name: '+ 2 more' }));
+    await userEvent.click(within(screen.getByTestId('cell-none-todo')).getByRole('button', { name: '+ 2 more' }));
     await userEvent.click(within(headOf('PAY-998')).getByRole('button', { name: 'Ledger platform' }));
     statusAnswer = status({ boards: [{ ...OFF, polledAt: new Date().toISOString() }, BETA] });
     lists = { ...lists, [ALPHA.id]: GROUP };
@@ -1347,7 +1273,7 @@ describe('the lane folds', () => {
     expect(screen.getByRole('button', { name: 'Collapse PAY-120' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Collapse No parent' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Expand PAY-200' })).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByTestId('cell-PAY-200-Done')).toBeNull();
+    expect(screen.queryByTestId('cell-PAY-200-done')).toBeNull();
     expect(screen.queryByText('Shipped story')).toBeNull();
     expect(headOf('PAY-200').querySelector('.jira-lane-count')).toHaveTextContent('1 issue');
   });
@@ -1380,14 +1306,15 @@ describe('the lane folds', () => {
     await screen.findByText('Open story one');
     expect(screen.getByRole('button', { name: 'Expand PAY-220' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('Closed story 1')).toBeNull();
-    expect(colCounts()).toEqual(['2', '3']);
+    // A folded lane draws no tiles, so its Done cards are counted on its header only.
+    expect(screen.queryByTestId('cell-PAY-220-done')).toBeNull();
   });
 
   it('folding a lane hides its cells and every lane under it', async () => {
     await renderFolds();
     await userEvent.click(screen.getByRole('button', { name: 'Collapse PAY-120' }));
     expect(lane('PAY-160')).toBeNull();
-    expect(screen.queryByTestId('cell-PAY-120-Done')).toBeNull();
+    expect(screen.queryByTestId('cell-PAY-120-done')).toBeNull();
     expect(lane('PAY-120')).toHaveAttribute('data-open', 'false');
   });
 
@@ -1451,9 +1378,9 @@ describe('filters over lanes', () => {
     await renderFilters();
     await search('gamma');
     expect(laneKeys()).toEqual(['PAY-50']);
-    expect(cellSummaries('PAY-50', 'To Do')).toEqual(['Gamma card']);
+    expect(cellSummaries('PAY-50', 'todo')).toEqual(['Gamma card']);
     expect(headOf('PAY-50').querySelector('.jira-lane-count')).toHaveTextContent('1 issue');
-    expect(colCounts()).toEqual(['1', '0', '0']);
+    expect(tileCounts('PAY-50')).toEqual(['1', '0', '0']);
   });
 
   it('a header that matches on its own draws with empty cells and no count or bar', async () => {
@@ -1591,7 +1518,7 @@ describe('Run ▾ on the card, and the deck card for a live key', () => {
     expect(deck.querySelector('.ui-fold')).toHaveTextContent('↳ PAY-160');
     expect(deck.querySelector('.jira-card-crumb')).not.toHaveTextContent('↳');
     expect(deck.querySelector('.jira-card-crumb')).toHaveTextContent('pay');
-    expect(within(screen.getByTestId('cell-PAY-160-To Do')).getByText('Folded sub-task')).toBeInTheDocument();
+    expect(within(screen.getByTestId('cell-PAY-160-todo')).getByText('Folded sub-task')).toBeInTheDocument();
     expect(headOf('PAY-160')).toHaveAttribute('data-kind', 'board');
   });
 
@@ -2029,9 +1956,9 @@ describe('the agent deck and the lane cells', () => {
 
   const deckStates = (): string[] =>
     Array.from(document.querySelectorAll('.jira-deck-card')).map((c) => `${c.getAttribute('data-key')}:${c.getAttribute('data-state')}`);
-  const cellRows = (laneKey: string, status: string): number => screen.getByTestId(`cell-${laneKey}-${status}`).querySelectorAll('.board-card').length;
-  const cellMore = (laneKey: string, status: string): HTMLElement | null =>
-    screen.getByTestId(`cell-${laneKey}-${status}`).querySelector<HTMLElement>('.jira-lane-more button');
+  const cellRows = (laneKey: string, slug: 'todo' | 'doing' | 'done'): number => screen.getByTestId(`cell-${laneKey}-${slug}`).querySelectorAll('.board-card').length;
+  const cellMore = (laneKey: string, slug: 'todo' | 'doing' | 'done'): HTMLElement | null =>
+    screen.getByTestId(`cell-${laneKey}-${slug}`).querySelector<HTMLElement>('.jira-lane-more button');
   const todos = (n: number): JiraIssue[] =>
     Array.from({ length: n }, (_, i) => issue({ key: `PAY-${300 + i}`, summary: `Todo ${i}`, updated: daysAgoStamp(i + 1) }));
   const dones = (n: number): JiraIssue[] =>
@@ -2105,27 +2032,28 @@ describe('the agent deck and the lane cells', () => {
     );
     lists[ALPHA.id] = [...todos(7), ...dones(6), epic, ...under];
     await renderDeck('Todo 0');
-    expect(cellRows('none', 'To Do')).toBe(5);
-    expect(cellRows('none', 'Done')).toBe(5);
-    expect(cellRows('PAY-500', 'To Do')).toBe(5);
-    const more = cellMore('none', 'To Do') as HTMLElement;
+    expect(cellRows('none', 'todo')).toBe(5);
+    expect(cellRows('none', 'done')).toBe(5);
+    expect(cellRows('PAY-500', 'todo')).toBe(5);
+    const more = cellMore('none', 'todo') as HTMLElement;
     expect(more).toHaveTextContent('+ 2 more');
     expect(more).toHaveAttribute('aria-expanded', 'false');
-    // The column counts every card in it, across both lanes; the epic is a header and counts nothing.
-    expect(screen.getByTestId('lanes-col-To Do').querySelector('.jira-lanes-count')).toHaveTextContent('14');
+    // A tile counts its lane's matching cards before the cut, so `+ 2 more` and the count agree; the epic is a header and counts nothing.
+    expect(screen.getByTestId('cell-none-todo').querySelector('.jira-cell-count')).toHaveTextContent('7');
+    expect(screen.getByTestId('cell-PAY-500-todo').querySelector('.jira-cell-count')).toHaveTextContent('7');
     await userEvent.click(more);
-    expect(cellRows('none', 'To Do')).toBe(7);
-    expect(cellMore('none', 'To Do')).toHaveTextContent('show fewer');
-    expect(cellMore('none', 'To Do')).toHaveAttribute('aria-expanded', 'true');
+    expect(cellRows('none', 'todo')).toBe(7);
+    expect(cellMore('none', 'todo')).toHaveTextContent('show fewer');
+    expect(cellMore('none', 'todo')).toHaveAttribute('aria-expanded', 'true');
     // The other lane's cell in the SAME column stays cut.
-    expect(cellRows('PAY-500', 'To Do')).toBe(5);
-    expect(cellMore('PAY-500', 'To Do')).toHaveTextContent('+ 2 more');
-    expect(cellMore('PAY-500', 'To Do')).toHaveAttribute('aria-expanded', 'false');
+    expect(cellRows('PAY-500', 'todo')).toBe(5);
+    expect(cellMore('PAY-500', 'todo')).toHaveTextContent('+ 2 more');
+    expect(cellMore('PAY-500', 'todo')).toHaveAttribute('aria-expanded', 'false');
     // And another column of the same lane does too.
-    expect(cellRows('none', 'Done')).toBe(5);
-    expect(cellMore('none', 'Done')).toHaveTextContent('+ 1 more');
-    await userEvent.click(cellMore('none', 'To Do') as HTMLElement);
-    expect(cellRows('none', 'To Do')).toBe(5);
+    expect(cellRows('none', 'done')).toBe(5);
+    expect(cellMore('none', 'done')).toHaveTextContent('+ 1 more');
+    await userEvent.click(cellMore('none', 'todo') as HTMLElement);
+    expect(cellRows('none', 'todo')).toBe(5);
   });
 
   // The `+ N more` state is the lane board's own and keyed `<lane>:<column>`, so a parent key that is a lane on two boards would carry an opened cell across a
@@ -2138,13 +2066,13 @@ describe('the agent deck and the lane cells', () => {
     lists[ALPHA.id] = [epic, ...under(510)];
     lists[BETA.id] = [epic, ...under(610)];
     await renderDeck('Epic todo 510');
-    await userEvent.click(cellMore('PAY-500', 'To Do') as HTMLElement);
-    expect(cellRows('PAY-500', 'To Do')).toBe(7);
+    await userEvent.click(cellMore('PAY-500', 'todo') as HTMLElement);
+    expect(cellRows('PAY-500', 'todo')).toBe(7);
     await userEvent.click(screen.getByRole('button', { name: 'Pick a Jira board: Alpha board' }));
     await userEvent.click(within(screen.getByRole('dialog', { name: 'Boards' })).getByRole('button', { name: 'Beta board' }));
     await screen.findAllByText('Epic todo 610');
-    expect(cellRows('PAY-500', 'To Do')).toBe(5);
-    expect(cellMore('PAY-500', 'To Do')).toHaveTextContent('+ 2 more');
+    expect(cellRows('PAY-500', 'todo')).toBe(5);
+    expect(cellMore('PAY-500', 'todo')).toHaveTextContent('+ 2 more');
   });
 
   // Case 6: a live card past the cut is never hidden — the cut keeps it, in its place, and hides one fewer.
@@ -2152,9 +2080,9 @@ describe('the agent deck and the lane cells', () => {
     lists[ALPHA.id] = todos(7);
     sessionsAnswer = () => ({ links: [linkOn('PAY-306', 's306', 'working', 1)], reachable: true, rowsAt: null });
     await renderDeck('Todo 0');
-    await waitFor(() => expect(cellRows('none', 'To Do')).toBe(6));
-    expect(cellMore('none', 'To Do')).toHaveTextContent('+ 1 more');
-    expect(cellSummaries('none', 'To Do')).toEqual(['Todo 0', 'Todo 1', 'Todo 2', 'Todo 3', 'Todo 4', 'Todo 6']);
+    await waitFor(() => expect(cellRows('none', 'todo')).toBe(6));
+    expect(cellMore('none', 'todo')).toHaveTextContent('+ 1 more');
+    expect(cellSummaries('none', 'todo')).toEqual(['Todo 0', 'Todo 1', 'Todo 2', 'Todo 3', 'Todo 4', 'Todo 6']);
   });
 
   // Case 5 (D7): a live card stays in its cell, as a stripe with the deck card's words and the open control, Run ▾ still on it, and the deck has it too.
@@ -2163,7 +2091,7 @@ describe('the agent deck and the lane cells', () => {
     sessionsAnswer = () => ({ links: [linkOn('PAY-131', 's131', 'working', 3)], reachable: true, rowsAt: null });
     await renderDeck('Refund partial captures');
     await waitFor(() => expect(deckStates()).toEqual(['PAY-131:working']));
-    const c = within(screen.getByTestId('cell-PAY-99-In Review')).getByText('Refund partial captures').closest('.board-card') as HTMLElement;
+    const c = within(screen.getByTestId('cell-PAY-99-doing')).getByText('Refund partial captures').closest('.board-card') as HTMLElement;
     await waitFor(() => expect(c).toHaveClass('ui-stripe'));
     expect(c).toHaveAttribute('data-tone', 'green');
     expect(within(c).getByTestId('session-line')).toHaveTextContent('Working · 3h');

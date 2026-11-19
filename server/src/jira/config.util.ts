@@ -116,29 +116,6 @@ export function readQuery(value: unknown, file: string, where: string): JiraQuer
   return { id: value.id, label: value.label, jql: value.jql };
 }
 
-/** Spec's write-time bounds for a board's saved status-column order; `normaliseColumns` applies them on read and on write alike. */
-export const JIRA_COLUMNS_MAX = 50;
-export const JIRA_COLUMN_NAME_MAX_CHARS = 100;
-
-/**
- * A board's saved status-column order, normalised: each entry trimmed; an entry that is not a string or whose trimmed length is not 1–`JIRA_COLUMN_NAME_MAX_CHARS`
- * dropped; repeats dropped (first kept); only the first `JIRA_COLUMNS_MAX` kept. Anything that is not an array is `[]`. `onDrop` hears each dropped entry's
- * index and reason, so the reader can warn per entry while the write path stays silent — one odd status name must never fail a save of a board's name and queries.
- */
-export function normaliseColumns(raw: unknown, onDrop?: (index: number, why: string) => void): string[] {
-  const out: string[] = [];
-  if (!Array.isArray(raw)) return out;
-  raw.forEach((entry, i) => {
-    if (typeof entry !== 'string') return onDrop?.(i, 'not a string');
-    const name = entry.trim();
-    if (name.length < 1 || name.length > JIRA_COLUMN_NAME_MAX_CHARS) return onDrop?.(i, `its length is not 1–${JIRA_COLUMN_NAME_MAX_CHARS}`);
-    if (out.includes(name)) return onDrop?.(i, 'a repeat');
-    if (out.length >= JIRA_COLUMNS_MAX) return onDrop?.(i, `past the first ${JIRA_COLUMNS_MAX}`);
-    out.push(name);
-  });
-  return out;
-}
-
 /**
  * One board, or `null` (warned) when it is not an object, its id is not a `b_` id or its name is empty. Everything inside a valid board degrades alone: roots
  * that are not issue keys and queries that fail `readQuery` are dropped one by one, a `roots` or `queries` that is not an array reads as none, and an
@@ -167,8 +144,7 @@ export function readBoard(value: unknown, file: string, where: string): JiraBoar
     name: value.name,
     roots,
     queries,
-    interval: isSyncInterval(value.interval) ? value.interval : DEFAULT_JIRA_INTERVAL,
-    columns: normaliseColumns(value.columns, (i, why) => void drop(file, `${where} column #${i}`, why))
+    interval: isSyncInterval(value.interval) ? value.interval : DEFAULT_JIRA_INTERVAL
   };
 }
 
@@ -352,8 +328,6 @@ export interface JiraBoardWrite {
   roots: string[];
   queries: { id: string | null; label: string; jql: string }[];
   interval: SyncInterval;
-  /** Absent = keep the stored order; present (even `[]`) replaces it. */
-  columns?: string[];
 }
 
 /** What `POST /api/jira/skills` validated: `id` is absent for a create and whatever string the client sent for an update. */
@@ -402,15 +376,7 @@ export function parseBoardWrite(body: unknown): Parsed<JiraBoardWrite> {
     queries.push({ id: typeof q.id === 'string' ? q.id : null, label: q.label.trim(), jql: q.jql.trim() });
   }
   if (roots.length === 0 && queries.length === 0) return { ok: false, error: 'a board needs at least one of roots or queries' };
-  let columns: string[] | undefined;
-  if (body.columns !== undefined) {
-    if (!Array.isArray(body.columns)) return { ok: false, error: 'columns must be an array of status names' };
-    columns = normaliseColumns(body.columns);
-  }
-  const value: JiraBoardWrite = { id, name: body.name.trim(), roots, queries, interval: body.interval };
-  // Left off when absent, so `toEqual` and the merge in `writeBoard` both see "keep the stored order" rather than an explicit `undefined`.
-  if (columns !== undefined) value.columns = columns;
-  return { ok: true, value };
+  return { ok: true, value: { id, name: body.name.trim(), roots, queries, interval: body.interval } };
 }
 
 /**
@@ -577,14 +543,12 @@ export function writeBoard(input: JiraBoardWrite, file: string = jiraConfigFile(
   const taken = idsIn(current);
   let index = -1;
   let held = new Set<string>();
-  let storedColumns: string[] = [];
   if (input.id !== null) {
     // Matched on the id first and read second, so a neighbouring malformed entry is not warned about on every update.
     index = boards.findIndex((entry) => isRecord(entry) && entry.id === input.id);
     const stored = index < 0 ? null : readBoard(boards[index], file, `board "${input.id}"`);
     if (stored === null) throw new JiraUnknownIdError(input.id);
     held = new Set(stored.queries.map((q) => q.id));
-    storedColumns = stored.columns ?? [];
   }
   // What a client sent is reserved even when it is not kept, so the id minted for such a query is provably not the one it asked for.
   for (const q of input.queries) if (q.id !== null) taken.add(q.id);
@@ -599,14 +563,10 @@ export function writeBoard(input: JiraBoardWrite, file: string = jiraConfigFile(
     name: input.name,
     roots: input.roots,
     queries,
-    interval: input.interval,
-    columns: input.columns ?? storedColumns
+    interval: input.interval
   };
-  if (index >= 0) {
-    // An update without `columns` must not carry the key at all, so the raw stored one survives untouched (a hand-edited value included).
-    const { columns, ...rest } = board;
-    boards[index] = { ...(boards[index] as Record<string, unknown>), ...rest, ...(input.columns !== undefined ? { columns } : {}) };
-  } else boards.push(board);
+  if (index >= 0) boards[index] = { ...(boards[index] as Record<string, unknown>), ...board };
+  else boards.push(board);
   writeJsonAtomic(file, { ...current, boards });
   return board;
 }

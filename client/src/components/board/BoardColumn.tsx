@@ -20,8 +20,8 @@ import { Pill } from '../ui/Pill';
  * union stays closed rather than becoming `Section` because the fifth member is
  * exactly what `RAMP_SLUGS` below has to be able to exclude.
  *
- * The Jira shelves' `todo`, `doing` and `done` left the union with the shelves (parent lanes): the lane board draws its own column heads
- * (`.jira-lanes-head`), so no caller passes a status category here any more.
+ * The Jira shelves' `todo`, `doing` and `done` left the union with the shelves (parent lanes): the lane board heads each of its own cell
+ * tiles (`.jira-cell-head`), so no caller passes a status category here any more.
  */
 export type BoardColumnSlug = 'refactors' | 'ideas' | 'bugs' | 'tasks' | 'out-of-scope';
 

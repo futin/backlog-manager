@@ -163,7 +163,7 @@ describe('configured, against a healthy Jira', () => {
   it('POST /boards creates a board: 200, a minted id, listed by GET /api/jira, and swept before the answer', async () => {
     expect(searches()).toEqual([]);
     const res = await post('/boards', BOARD).expect(200);
-    expect(res.body).toEqual({ ...BOARD, columns: [], id: expect.stringMatching(/^b_[0-9a-f]{8}$/) });
+    expect(res.body).toEqual({ ...BOARD, id: expect.stringMatching(/^b_[0-9a-f]{8}$/) });
     expect(searches().some((jql) => jql.includes('PAY-120'))).toBe(true);
     const body = await status();
     expect(body.boards).toEqual([expect.objectContaining({ id: res.body.id, name: 'Payments', polledAt: expect.any(String) })]);
@@ -174,13 +174,6 @@ describe('configured, against a healthy Jira', () => {
     const res = await post('/boards', { ...BOARD, name: 'Quiet', interval: 'off' }).expect(200);
     const board = (await status()).boards.find((b) => b.id === res.body.id);
     expect(board).toMatchObject({ name: 'Quiet', interval: 'off', polledAt: expect.any(String) });
-  });
-
-  it('an update that leaves columns out answers with the stored order', async () => {
-    const created = (await post('/boards', BOARD).expect(200)).body;
-    await post('/boards', { ...BOARD, id: created.id, columns: ['B', 'A'] }).expect(200);
-    const res = await post('/boards', { ...BOARD, id: created.id, name: 'Again' }).expect(200);
-    expect(res.body.columns).toEqual(['B', 'A']);
   });
 
   it('updates a board it holds, keeping its id', async () => {

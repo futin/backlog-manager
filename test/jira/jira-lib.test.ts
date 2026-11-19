@@ -41,7 +41,6 @@ import {
   laneBoard,
   NO_PARENT_LANE,
   laneViews,
-  laneColumnCounts,
   laneParents,
   laneCell,
   LANE_CELL_LIMIT,
@@ -84,7 +83,7 @@ import {
 } from '../../client/src/lib/jira';
 import type { JiraLane, JiraLanes, JiraLaneFolds, JiraLaneView } from '../../client/src/lib/jira';
 import { DELIVERY_FILTER_LABELS, effectiveDeliveryFilter } from '../../client/src/lib/delivery';
-import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardColumns, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, columnTone, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../../client/src/lib/jira';
+import { NO_JIRA_FILTERS, NO_JIRA_PANEL_FILTERS, boardFilterCount, boardFilterOptions, clampJiraPanelFilters, effectiveBoardFilters, launchFootLine, matchesBoardFilters } from '../../client/src/lib/jira';
 import { modelEffortFlags } from '../../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../../client/src/lib/jira-page';
 import { boardAgents, childSessions, deckCrumb, deckGroup, deckTally, endedByKey, endedLine, sessionCells } from '../../client/src/lib/jira-deck';
@@ -2440,27 +2439,6 @@ describe('lane views', () => {
     expect(JSON.stringify(board.lanes)).toBe(before);
   });
 
-  describe('laneColumnCounts', () => {
-    const issues = (): JiraIssue[] => [
-      n('PAY-40', null, 6 * HOUR, doing),
-      n('PAY-41', 'PAY-40', 5 * HOUR, doing),
-      n('PAY-42', 'PAY-41', 1 * HOUR, done),
-      n('PAY-43', 'PAY-41', 2 * HOUR),
-      n('PAY-44', 'PAY-40', 3 * HOUR)
-    ];
-    it('counts matching cards per status name at every depth, headers in none, a name with no card absent', () => {
-      const counts = laneColumnCounts(laneViews(laneBoard(issues()), () => true));
-      expect(counts.get('To Do')).toBe(2);
-      expect(counts.get('Done')).toBe(1);
-      expect(counts.get('In Progress')).toBeUndefined();
-    });
-    it('follows the predicate', () => {
-      const counts = laneColumnCounts(laneViews(laneBoard(issues()), (i) => i.key !== 'PAY-43'));
-      expect(counts.get('To Do')).toBe(1);
-      expect(counts.get('Done')).toBe(1);
-      expect(counts.get('In Progress')).toBeUndefined();
-    });
-  });
 
   describe('laneParents', () => {
     it('counts lanes that are not No parent, every depth', () => {
@@ -2560,55 +2538,5 @@ describe('lane folds', () => {
   it('stores a toggle equal to the default', () => {
     const r = setLaneFold({}, 'b1', boardOf([lane('PAY-1')]), 'PAY-1', true);
     expect(laneOverrides(r, 'b1')).toEqual({ 'PAY-1': 'open' });
-  });
-});
-
-describe('boardColumns', () => {
-  const st = (name: string, category: 'new' | 'indeterminate' | 'done'): JiraIssue => issue({ key: `X-${name}`, status: { name, category } });
-  const todo = st('To Do', 'new');
-  const doing = st('In Progress', 'indeterminate');
-  const review = st('In Review', 'new');
-  const testing = st('In Testing', 'new');
-  const done = st('Done', 'done');
-  const all = [todo, doing, review, testing, done];
-  const names = (issues: JiraIssue[], saved: string[]): string[] => boardColumns(issues, saved).map((c) => c.name);
-
-  it('orders by category then name with nothing saved', () => {
-    expect(names(all, [])).toEqual(['In Review', 'In Testing', 'To Do', 'In Progress', 'Done']);
-    expect(names([todo, review, testing, done], [])).toEqual(['In Review', 'In Testing', 'To Do', 'Done']);
-  });
-
-  it('keeps a full saved order exactly', () => {
-    const saved = ['To Do', 'In Progress', 'In Review', 'In Testing', 'Done'];
-    expect(names(all, saved)).toEqual(saved);
-  });
-
-  it('slots unsaved names after the last column of equal or lower rank', () => {
-    expect(names(all, ['To Do', 'In Progress', 'Done'])).toEqual(['To Do', 'In Review', 'In Testing', 'In Progress', 'Done']);
-    expect(names([...all, st('Blocked', 'new')], ['To Do', 'In Progress', 'In Review', 'In Testing', 'Done'])).toEqual([
-      'To Do', 'In Progress', 'In Review', 'In Testing', 'Blocked', 'Done'
-    ]);
-    expect(names([doing, todo, st('QA', 'indeterminate')], ['In Progress', 'To Do'])).toEqual(['In Progress', 'To Do', 'QA']);
-  });
-
-  it('keeps a saved name no issue carries, without a category, in the todo tone, skipped by the rank search', () => {
-    const cols = boardColumns([todo, st('QA', 'indeterminate')], ['To Do', 'In Progress']);
-    expect(cols.map((c) => c.name)).toEqual(['To Do', 'QA', 'In Progress']);
-    expect(cols[2].category).toBeNull();
-    expect(columnTone(cols[2])).toBe('todo');
-    expect(columnTone(cols[1])).toBe('doing');
-  });
-
-  it('gives an issue with no status name a No status column', () => {
-    const cols = boardColumns([st('', 'new')], []);
-    expect(cols).toEqual([{ name: '', label: 'No status', category: 'new' }]);
-  });
-
-  it('takes the category of the first issue seen', () => {
-    expect(boardColumns([st('X', 'new'), st('X', 'indeterminate')], [])[0].category).toBe('new');
-  });
-
-  it('is empty with nothing loaded and nothing saved', () => {
-    expect(boardColumns([], [])).toEqual([]);
   });
 });
