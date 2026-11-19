@@ -13,30 +13,36 @@ import { SpreadBar } from '../ui/SpreadBar';
 /**
  * The Children section — head row, spread bar, tree — over `modalTree` (see the header). Drawn only when the detail has direct children. A row a session is
  * live on wears that session's state as a neutral `Pill` led by the state's dot (`underway`, one per row), before the ticket's own status pill: an epic's
- * List row can read `Working` for a sub-task's session, and this is where the reader finds which one.
+ * List row can read `Working` for a sub-task's session, and this is where the reader finds which one. `head={false}` drops the head row, for the Children
+ * & comments tab, whose fold summary already carries the `Children` label, the count and `N in all` (Jira detail tabs spec §6).
  */
 export function ChildrenTree({
   direct,
   tree,
   underway,
   childrenOf,
-  onOpenIssue
+  onOpenIssue,
+  head = true
 }: {
   direct: number;
   tree: ReturnType<typeof modalTree>;
   underway: readonly DeckEntry[];
   childrenOf: JiraChildrenIndex | null;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+  /** Draw the `Children` head row (the old Detail column); the tab's fold passes `false` because its summary is that head. */
+  head?: boolean;
 }) {
   const { rows, progress } = tree;
   const live = new Map(underway.map((e) => [e.issue.key, e.state] as const));
   return (
     <>
-      <div className="jira-tree-head">
-        <h3>Children</h3>
-        <Pill tone="neutral">{direct}</Pill>
-        {rows.length > direct && <span className="jira-tree-all">{`${rows.length} in all`}</span>}
-      </div>
+      {head && (
+        <div className="jira-tree-head">
+          <h3>Children</h3>
+          <Pill tone="neutral">{direct}</Pill>
+          {rows.length > direct && <span className="jira-tree-all">{`${rows.length} in all`}</span>}
+        </div>
+      )}
       {/* Wrapped, because the spacing is this surface's and the primitive's own selectors stay in the ui block (design-guard 7). */}
       <div className="jira-tree-spread">
         <SpreadBar done={progress.done} doing={progress.doing} todo={progress.todo} caption={progressLine(progress)} />

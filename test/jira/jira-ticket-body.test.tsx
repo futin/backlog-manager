@@ -12,9 +12,12 @@ import { JIRA_DETAIL_TAB_KEY, setJiraDetailTab } from '../../client/src/hooks/us
 import { SettingsProvider } from '../../client/src/hooks/useSettings';
 import { UNKNOWN_LINE } from '../../client/src/lib/delivery';
 import type { SessionLink } from '../../client/src/lib/jira-sessions';
+import { browserTimeZone, formatZonedClock, zonedParts } from '../../client/src/lib/time-zone';
 import { pollAge } from '../../client/src/lib/tracker';
 import { STATE_LABEL, type JiraSessionState } from '../../shared/jira-sessions';
 import type {
+  AgentsStatus,
+  DashboardRow,
   GitlabMr,
   GitlabPayload,
   GitlabProjectView,
@@ -216,9 +219,12 @@ let onWrote: jest.Mock;
 let onOpenIssue: jest.Mock;
 let onBack: jest.Mock;
 let reload: jest.Mock;
+/** The agents status the session cards ask for: `null` never answers (see the stub), a value answers — only the Stop cases need one. */
+let agentsStatus: AgentsStatus | null;
 
 beforeEach(() => {
   posts = [];
+  agentsStatus = null;
   post = () => json({ ok: true, reread: true });
   onWrote = jest.fn();
   onOpenIssue = jest.fn();
@@ -231,6 +237,7 @@ beforeEach(() => {
       posts.push(url);
       return post(url);
     }
+    if (url === '/api/agents/status' && agentsStatus !== null) return json(agentsStatus);
     // The two reads this suite asserts nothing about — the Worktrees list's and the session cards' agents status — never answer: an answer would land after
     // a synchronous case's last line, outside `act`, and neither is what these cases are about (`jira-detail.test.tsx` covers both).
     if (url === '/api/agents/status' || url === '/api/jira/worktrees') return new Promise<Response>(() => {});
@@ -519,5 +526,188 @@ describe('JiraTicketBody — heading and Ticket pane', () => {
     const panel = screen.getByRole('tabpanel');
     expect(within(panel).getAllByRole('article')).toHaveLength(2);
     expect(within(panel).queryByRole('button', { name: /Run/ })).toBeNull();
+  });
+});
+
+/*
+  The Agent tab (spec §5, case 15) and the Children & comments tab (spec §6, case 16). The folds render their body only while open (`ui/Fold`), so "closed"
+  is asserted as the rows not being in the document at all, and a summary is pressed by its label.
+*/
+const AGENTS_ON: AgentsStatus = {
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'acceptEdits',
+  projectPaths: ['/Users/dana/pay']
+};
+const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const panel = (): HTMLElement => screen.getByRole('tabpanel');
+/** A fold's summary, found by its label, so a press toggles it as the reader's would. */
+const summaryOf = (label: string): HTMLElement => {
+  const el = within(panel()).getByText(label, { selector: '.jira-fold-label' }).closest('summary');
+  if (el === null) throw new Error(`no summary for ${label}`);
+  return el as HTMLElement;
+};
+const foldOf = (label: string): HTMLElement => summaryOf(label).closest('details') as HTMLElement;
+const openTab = (name: RegExp): void => {
+  fireEvent.click(screen.getByRole('tab', { name }));
+};
+/** Opens a card's `Session actions` menu and says whether it holds `name`; a card with no menu rows has no chevron at all. */
+async function cardMenuHas(card: HTMLElement, name: string): Promise<boolean> {
+  const chev = within(card).queryByRole('button', { name: 'More for PAY-12' });
+  if (chev === null) return false;
+  fireEvent.click(chev);
+  const has = within(screen.getByRole('dialog', { name: 'Session actions' })).queryByRole('button', { name }) !== null;
+  fireEvent.click(chev);
+  return has;
+}
+const CHILD_A: JiraIssue = {
+  ...ISSUE,
+  key: 'PAY-21',
+  id: '10021',
+  summary: 'Ledger rounding fix',
+  status: { name: 'To Do', category: 'new' },
+  parent: { key: 'PAY-12', summary: 'Refund partial captures', type: null, status: null }
+};
+const CHILD_B: JiraIssue = { ...CHILD_A, key: 'PAY-22', id: '10022', summary: 'Refund webhook retries', status: { name: 'Done', category: 'done' } };
+const NO_SESSIONS: JiraSessionsPayload = { links: [], reachable: true, rowsAt: new Date().toISOString() };
+
+describe('JiraTicketBody — Agent tab (T15)', () => {
+  it('T15: History is a closed fold reading `5 ended · last <date, time>`; opened, five rows each with `Reopen`', () => {
+    const payload = sessions();
+    const newest = payload.links.find((l) => l.sessionId === 's-ended-1')?.endedAt as string;
+    mount({ sessions: payload });
+    openTab(/^Agent/);
+    const zone = browserTimeZone();
+    const at = Date.parse(newest);
+    const p = zonedParts(at, zone);
+    expect(summaryOf('History')).toHaveTextContent(`History5 ended · last ${p.day} ${MONTH[p.month - 1]}, ${formatZonedClock(at, zone)}`);
+    expect(foldOf('History')).not.toHaveAttribute('open');
+    expect(within(panel()).queryByText('Reopen')).toBeNull();
+
+    fireEvent.click(summaryOf('History'));
+    expect(foldOf('History')).toHaveAttribute('open');
+    const rows = within(foldOf('History')).getAllByRole('listitem');
+    expect(rows).toHaveLength(5);
+    for (const row of rows) expect(within(row).getByText('Reopen')).toBeInTheDocument();
+  });
+
+  it('T15: a live `review` card with a `stopState` offers no `Stop session`; an `execute` card with one still does', async () => {
+    agentsStatus = AGENTS_ON;
+    const stoppable = (id: string): DashboardRow => ({ id, status: 'busy', surface: 'dashboard', stopState: 'ready' });
+    mount({
+      sessions: {
+        links: [
+          link({ sessionId: 's-review', action: 'review', state: 'working', row: stoppable('s-review'), startedAt: minutesAgo(4) }),
+          link({ sessionId: 's-exec', action: 'execute', state: 'working', row: stoppable('s-exec'), startedAt: minutesAgo(8) })
+        ],
+        reachable: true,
+        rowsAt: new Date().toISOString()
+      }
+    });
+    openTab(/^Agent/);
+    const review = within(panel()).getByRole('article', { name: 'Session s-review' });
+    const exec = within(panel()).getByRole('article', { name: 'Session s-exec' });
+    // The execute card's Stop appears once the agents status lands; only then is the review card's absence a finding rather than a race.
+    await waitFor(() => expect(within(exec).getByRole('button', { name: 'More for PAY-12' })).toBeInTheDocument());
+    await waitFor(async () => expect(await cardMenuHas(exec, 'Stop session')).toBe(true));
+    expect(await cardMenuHas(review, 'Stop session')).toBe(false);
+  });
+
+  it('with no live session: `No session on this ticket`, the `default: … · last run <age>` line, and no `Run ▾` in the pane', () => {
+    const payload = sessions();
+    const endedOnly: JiraSessionsPayload = { ...payload, links: payload.links.filter((l) => l.endedAt !== null) };
+    const newest = endedOnly.links.find((l) => l.sessionId === 's-ended-1')?.endedAt as string;
+    mount({ sessions: endedOnly });
+    openTab(/^Agent/);
+    expect(within(panel()).getByText('No session on this ticket')).toBeInTheDocument();
+    expect(within(panel()).getByText(`default: Work it end to end · last run ${pollAge(newest, Date.now())}`)).toBeInTheDocument();
+    expect(within(panel()).queryByRole('button', { name: /Run/ })).toBeNull();
+    expect(within(panel()).queryByRole('article')).toBeNull();
+  });
+
+  it('the gate line sits at the top of the tab, above the cards', () => {
+    mount();
+    openTab(/^Agent/);
+    const gate = within(panel()).getByText('Next Run can start once this one is quiet.');
+    const [first] = within(panel()).getAllByRole('article');
+    expect(gate.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('an opened History closes again on a walk step to the next ticket', () => {
+    const both: JiraSessionsPayload = { ...sessions('PAY-12'), links: [...sessions('PAY-12').links, ...sessions('PAY-21').links] };
+    const { rerender } = mount({ sessions: both });
+    openTab(/^Agent/);
+    fireEvent.click(summaryOf('History'));
+    expect(foldOf('History')).toHaveAttribute('open');
+    rerender(tree({ issue: CHILD_A, detail: detail({ ...CHILD_A }), sessions: both, back: ISSUE }));
+    expect(foldOf('History')).not.toHaveAttribute('open');
+  });
+
+  it('a ticket that never had a session draws no History fold', () => {
+    mount({ sessions: NO_SESSIONS });
+    openTab(/^Agent/);
+    expect(within(panel()).queryByText('History')).toBeNull();
+  });
+});
+
+describe('JiraTicketBody — Children & comments tab (T16)', () => {
+  it('T16: a Children row click opens the child and the tab stays; `← PAY-12` is the frame’s Back', () => {
+    const { rerender } = mount({ detail: detail({ children: [CHILD_A, CHILD_B] }), sessions: NO_SESSIONS });
+    openTab(/^Children & comments/);
+    expect(summaryOf('Children')).toHaveTextContent('Children2');
+    expect(foldOf('Children')).toHaveAttribute('open');
+    fireEvent.click(within(panel()).getByRole('button', { name: /^PAY-21 Ledger rounding fix/ }));
+    expect(onOpenIssue).toHaveBeenCalledWith(CHILD_A, null);
+
+    rerender(tree({ issue: CHILD_A, detail: detail({ ...CHILD_A }), sessions: NO_SESSIONS, back: ISSUE }));
+    expect(selected()).toBe('Children & comments');
+    fireEvent.click(screen.getByRole('button', { name: 'Back to PAY-12' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('T16: the Agent tab’s child-live line opens the child and the Agent tab stays selected', () => {
+    const childLive: JiraSessionsPayload = { ...NO_SESSIONS, links: [link({ key: 'PAY-21', sessionId: 's-child', state: 'working' })] };
+    const { rerender } = mount({ detail: detail({ children: [CHILD_A, CHILD_B] }), sessions: childLive });
+    openTab(/^Agent/);
+    fireEvent.click(within(panel()).getByRole('button', { name: `${STATE_LABEL.working} on PAY-21 →` }));
+    expect(onOpenIssue).toHaveBeenCalledWith(CHILD_A, null);
+
+    rerender(tree({ issue: CHILD_A, detail: detail({ ...CHILD_A }), sessions: childLive, back: ISSUE }));
+    expect(selected()).toMatch(/^Agent/);
+  });
+
+  it('while the detail read is out the Children fold reads `loading…`', () => {
+    mount({ detail: null });
+    openTab(/^Children & comments/);
+    expect(within(foldOf('Children')).getByText('loading…')).toBeInTheDocument();
+  });
+
+  it('a failed read draws nothing in the Children fold (the Ticket tab carries the failure line)', () => {
+    mount({ detail: null, failure: 'Jira unreachable: timeout' });
+    openTab(/^Children & comments/);
+    const fold = foldOf('Children');
+    expect(fold).toHaveAttribute('open');
+    expect(fold.textContent).toBe('Children');
+    expect(within(panel()).queryByText(/could not read the ticket/)).toBeNull();
+  });
+
+  it('zero children: `No child tickets.` in the fold, and neither the tab nor the fold draws a count', () => {
+    mount({ detail: detail({ children: [] }) });
+    expect(screen.getByRole('tab', { name: /^Children & comments/ }).textContent).toBe('Children & comments');
+    openTab(/^Children & comments/);
+    expect(within(foldOf('Children')).getByText('No child tickets.')).toBeInTheDocument();
+    expect(summaryOf('Children').textContent).toBe('Children');
+  });
+
+  it('Comments is a closed fold; opened, today’s sentence and the issue’s link', () => {
+    mount();
+    openTab(/^Children & comments/);
+    expect(foldOf('Comments')).not.toHaveAttribute('open');
+    expect(within(panel()).queryByText(/Comments stay in Jira/)).toBeNull();
+    fireEvent.click(summaryOf('Comments'));
+    expect(within(foldOf('Comments')).getByText(/Comments stay in Jira — v1 neither reads nor writes them\./)).toBeInTheDocument();
+    expect(within(foldOf('Comments')).getByRole('link', { name: 'PAY-12 in Jira ↗' })).toHaveAttribute('href', ISSUE.url);
   });
 });

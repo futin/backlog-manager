@@ -2,6 +2,7 @@ import { QUIET_TITLE, type JiraSessionState } from '../../../shared/jira-session
 import { JIRA_BUILTIN_LABELS, type DashboardRow, type JiraLink, type JiraSessionsPayload } from '../../../shared/types';
 import { sessionUrl } from './agents';
 import { elapsedSince } from './item-age';
+import { formatZonedClock, zonedParts } from './time-zone';
 
 /**
  * jira-sessions.ts — which "open" buttons a linked Jira session shows, and whether the Desktop one may be pressed (Jira sessions spec C2, C3, §7.5).
@@ -188,6 +189,21 @@ export function ticketSessions(key: string, payload: JiraSessionsPayload | null)
     live: mine.filter((l) => l.endedAt === null).sort(newest('startedAt')),
     ended: mine.filter((l) => l.endedAt !== null).sort(newest('endedAt'))
   };
+}
+
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * The History fold's summary (Jira detail tabs spec §5.2): `<N> ended · last <date, time>` — `13 Nov, 17:33`, the mock's form — over `ticketSessions`'
+ * `ended`, whose first entry is the newest end. The date is the board's shared `zone`'s, as every clock on the page is; a newest end that does not parse
+ * leaves `<N> ended` alone rather than printing a date nobody can trust.
+ */
+export function historySummary(ended: readonly Pick<JiraLink, 'endedAt'>[], zone: string): string {
+  const count = `${ended.length} ended`;
+  const at = ended.length === 0 || ended[0].endedAt === null ? NaN : Date.parse(ended[0].endedAt);
+  if (Number.isNaN(at)) return count;
+  const p = zonedParts(at, zone);
+  return `${count} · last ${p.day} ${MONTH_ABBR[p.month - 1]}, ${formatZonedClock(at, zone)}`;
 }
 
 /** `7f3c…a91e` — the first and last four of a session id, which is what a person matches against the dashboard's own list. A short id is returned whole. */

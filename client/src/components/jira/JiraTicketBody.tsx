@@ -8,7 +8,6 @@ import { useFetched } from '../../hooks/useFetched';
 import { setJiraDetailTab, useJiraDetailTab, type DetailTab } from '../../hooks/useJiraDetailTab';
 import { useNow } from '../../hooks/useNow';
 import { useParentRead } from '../../hooks/useParentRead';
-import { useSettings } from '../../hooks/useSettings';
 import { deliveryTargets, targetRowId, ticketDelivery, UNKNOWN_LINE } from '../../lib/delivery';
 import { elapsedSince } from '../../lib/item-age';
 import {
@@ -16,8 +15,6 @@ import {
   fetchJiraWorktrees,
   modalTree,
   repoBasename,
-  resolveJiraAction,
-  runChipState,
   stopJira,
   ticketWorktrees,
   typeTone,
@@ -25,22 +22,16 @@ import {
   type JiraChildrenIndex
 } from '../../lib/jira';
 import { childSessions } from '../../lib/jira-deck';
-import { parentLiveLine } from '../../lib/jira-parent';
 import { ticketSessions } from '../../lib/jira-sessions';
 import { stripAgent, stripDelivery } from '../../lib/jira-strip';
-import { pollAge } from '../../lib/tracker';
-import { JIRA_BUILTIN_LABELS } from '../../../../shared/types';
 import type { GitlabMr, JiraAction, JiraIssue, JiraIssueDetail, JiraWorktreesPayload, ReviewHalf } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
-import { Glyph } from '../ui/Glyphs';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
-import { ChildrenTree } from './ChildrenTree';
-import { ChildSessionLine } from './ChildSessionLine';
+import { JiraAgentTab } from './JiraAgentTab';
+import { JiraChildrenTab } from './JiraChildrenTab';
 import { JiraDeliveryTab, useOpenRows } from './JiraDeliveryTab';
-import { JiraHistoryLine, JiraSessionCards, JiraStartingCard } from './JiraSessionCard';
 import { JiraTicketPane } from './JiraTicketPane';
 import { JiraTicketStrip, type StripDeliveryCell } from './JiraTicketStrip';
-import { ParentSessionLine } from './ParentSessionLine';
 import { WorktreesFold } from './WorktreesList';
 
 /**
@@ -70,8 +61,9 @@ import { WorktreesFold } from './WorktreesList';
  * **The slots.** The Ticket pane is `JiraTicketPane`. The Delivery, Agent and Children panes are named render functions below (`deliverySlot`, `agentSlot`,
  * `childrenSlot`). Delivery is `JiraDeliveryTab` (spec §4): one fold row per target, and which rows are open is THIS body's state (`useOpenRows`, reset on
  * a key change), because a strip pill opens its row from outside the tab — the pill's click adds the row and selects the tab. The Worktrees fold (spec
- * §4.6) sits at the bottom of the Delivery tab, or of the Ticket tab when the ticket draws no Delivery tab, so it is drawn once either way. The Agent and
- * Children panes draw today's regions — the agent band's content and history, the Children tree and the comments note — until the tasks that redraw them.
+ * §4.6) sits at the bottom of the Delivery tab, or of the Ticket tab when the ticket draws no Delivery tab, so it is drawn once either way. Agent is
+ * `JiraAgentTab` (spec §5: the gate line, the live cards or the empty band, History folded) and Children & comments is `JiraChildrenTab` (spec §6: two
+ * folds); a fold's open state is per ticket in both, and both take their writes and walk steps from this body.
  */
 
 /**
@@ -119,7 +111,6 @@ export function JiraTicketBody({
 }) {
   const { data, reload } = useJiraContext();
   const { data: sessions, reload: reloadSessions } = useJiraSessionsContext();
-  const { settings } = useSettings();
   const { busy, error: writeError, run, clearError } = useAction();
   const now = useNow(true);
   const ids = useId();
@@ -284,85 +275,36 @@ export function JiraTicketBody({
     />
   );
 
-  /** The Agent slot: today's agent band content and history, less `Run ▾` and the band's label (the frame's head and the tab's count carry those now). */
-  const agentSlot = (): ReactNode => {
-    const parentLine = parentLiveLine(src, sessions);
-    const parentLineEl =
-      parentLine === null || parent === null ? null : (
-        <ParentSessionLine parentKey={parent.key} lead={parentLine.lead} more={parentLine.more} onOpen={openParent} />
-      );
-    const defaultAction = resolveJiraAction(settings.jiraDefaultAction, data?.skills ?? []);
-    const defaultLabel =
-      typeof defaultAction === 'string' ? JIRA_BUILTIN_LABELS[defaultAction] : (data?.skills.find((k) => k.id === defaultAction.skill)?.name ?? '');
-    const lastRun = ended.length > 0 ? pollAge(ended[0].endedAt, now) : null;
-    const bandSub = `default: ${defaultLabel}${lastRun === null ? '' : ` · last run ${lastRun}`}`;
-    // The gate line explains the frame's `Run ▾`, from the chip's own state, so the line and a disabled chip can never disagree.
-    const gate = data === null ? null : runChipState(issue, data, sessions);
-    const runLive = liveLinks.some((l) => l.how === 'run');
-    const nextLine = gate === 'live' ? 'Next Run can start once this one is quiet.' : gate === 'ready' && runLive ? 'Quiet — a new Run can start now.' : null;
-    return (
-      <div className="jira-detail-agent">
-        <div className="jira-detail-agent-band">
-          {nextLine !== null && <span className="jira-detail-next">{nextLine}</span>}
-          {liveCount > 0 ? (
-            <>
-              {parentLineEl}
-              {starting !== null && <JiraStartingCard session={starting} now={now} />}
-              {liveLinks.length > 0 && (
-                <JiraSessionCards
-                  links={liveLinks}
-                  now={now}
-                  busy={busy}
-                  onUnlink={(sessionId) => sessionWrite((key) => unlinkJira(key, sessionId))}
-                  onStop={(sessionId) => sessionWrite((key) => stopJira(key, sessionId))}
-                />
-              )}
-            </>
-          ) : (
-            <div className="jira-detail-agent-row">
-              <span className="jira-detail-agent-tile" aria-hidden="true">
-                <Glyph name="robot" size={16} />
-              </span>
-              <div className="jira-detail-agent-text">
-                <span className="jira-detail-agent-none">No session on this ticket</span>
-                <span className="jira-detail-agent-sub">{bandSub}</span>
-                {parentLineEl}
-                {underway.length > 0 && (
-                  <ChildSessionLine first={underway[0]} more={underway.length - 1} onOpen={() => onOpenIssue(underway[0].issue, childrenOf)} />
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-        {ended.length > 0 && (
-          <>
-            <div className="jira-detail-lbl">History</div>
-            <ol className="jira-hist-list">
-              {ended.map((link) => (
-                <JiraHistoryLine key={`${link.sessionId ?? ''}\u0000${link.startedAt}`} link={link} now={now} />
-              ))}
-            </ol>
-          </>
-        )}
-      </div>
-    );
-  };
+  /** The Agent slot (spec §5): the gate line, the band's content and History, whose fold resets itself on a walk step (see `JiraAgentTab`). */
+  const agentSlot = (): ReactNode => (
+    <JiraAgentTab
+      issue={issue}
+      src={src}
+      live={liveLinks}
+      ended={ended}
+      starting={starting}
+      underway={underway}
+      now={now}
+      busy={busy}
+      onOpenParent={openParent}
+      onOpenChild={() => onOpenIssue(underway[0].issue, childrenOf)}
+      onUnlink={(sessionId) => sessionWrite((key) => unlinkJira(key, sessionId))}
+      onStop={(sessionId) => sessionWrite((key) => stopJira(key, sessionId))}
+    />
+  );
 
-  /** The Children slot: today's Children tree and comments note, as they were; the Worktrees moved to a fold (`worktreesFold`). */
+  /** The Children & comments slot (spec §6): the two folds, keyed by the ticket so Children opens again on the next one. */
   const childrenSlot = (): ReactNode => (
-    <div className="jira-detail-ticket">
-      {detail !== null && tree !== null && (
-        <div className="jira-detail-pane">
-          <ChildrenTree direct={detail.children.length} tree={tree} underway={underway} childrenOf={childrenOf} onOpenIssue={onOpenIssue} />
-        </div>
-      )}
-      <p className="jira-modal-comments">
-        Comments stay in Jira — v1 neither reads nor writes them.{' '}
-        <a href={src.url} target="_blank" rel="noreferrer">
-          {`${src.key} in Jira ↗`}
-        </a>
-      </p>
-    </div>
+    <JiraChildrenTab
+      key={issue.key}
+      src={src}
+      detail={detail}
+      failure={failure}
+      tree={tree}
+      underway={underway}
+      childrenOf={childrenOf}
+      onOpenIssue={onOpenIssue}
+    />
   );
 
   const pane: Record<DetailTab, () => ReactNode> = {

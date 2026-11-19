@@ -1602,7 +1602,8 @@ button.rail-count { cursor: pointer }
 }
 .jira-dlv-tgt > summary::-webkit-details-marker,
 .jira-dlv-older > summary::-webkit-details-marker,
-.jira-wt-fold > summary::-webkit-details-marker { display: none }
+.jira-wt-fold > summary::-webkit-details-marker,
+.jira-fold > summary::-webkit-details-marker { display: none }
 .jira-dlv-tgt > summary:hover { background: var(--strip-hi) }
 .jira-dlv-into { font-size: 12px; color: var(--ink3); white-space: nowrap }
 .jira-dlv-into b { font-size: 13px; font-weight: 600; color: var(--ink) }
@@ -1623,6 +1624,13 @@ button.rail-count { cursor: pointer }
 .jira-wt-fold > summary {
   display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--ink)
 }
+/* The Agent and Children & comments tabs' folds (spec §5.2, §6: History, Children, Comments) — the Worktrees fold's summary, with the mock's right-aligned
+   meta (`5 ended · last 13 Nov, 17:33`, `N in all`) at 12 px `--ink3`, and the body 12 px under it. */
+.jira-fold > summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--ink)
+}
+.jira-fold-meta { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--ink3); text-align: right }
+.jira-fold > .jira-fold-body { margin-top: 12px }
 .jira-dlv-word { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 500; white-space: nowrap }
 .jira-dlv-word[data-tone='green'], .jira-mr-chip[data-tone='green'] { color: var(--green); background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)) }
 .jira-dlv-word[data-tone='red'], .jira-mr-chip[data-tone='red'] { color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--strip)) }
