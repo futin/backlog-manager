@@ -34,7 +34,7 @@ export function LaneChevron({ label, open, locked, onToggle }: { label: string; 
 }
 
 /**
- * JiraLaneHeader — the row above a lane's three cells (parent-lanes spec §3.2; .claude/DESIGN.md §8.9.1; mocks `Board.dc.html`, `BoardDeep.dc.html`). Three
+ * JiraLaneHeader — the row above a lane's cells, one per column (parent-lanes spec §3.2; .claude/DESIGN.md §8.9.1; mocks `Board.dc.html`, `BoardDeep.dc.html`). Three
  * kinds, one per `JiraLane['kind']`:
  *
  * **On the board.** The header issue's card laid out as a row — it was a full card before lanes and loses nothing by becoming a header, which is why the mock's

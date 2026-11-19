@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useMountedRef } from '../../hooks/useMountedRef';
 import { useNow } from '../../hooks/useNow';
-import { JIRA_CUSTOM_QUERY, JIRA_QUERY_PRESETS, parseJiraBoardIssues, type JiraQueryPreset } from '../../lib/jira';
+import { boardColumns, columnTone, JIRA_CUSTOM_QUERY, JIRA_QUERY_PRESETS, parseJiraBoardIssues, type JiraQueryPreset } from '../../lib/jira';
 import { errorOf, postJson } from '../../lib/http';
 import { pollAge } from '../../lib/tracker';
 import {
@@ -32,7 +32,7 @@ import { SettingsRow } from '../ui/SettingsRow';
  * the status poll while the sheet is open, so a sheet that re-read its board from every new status would throw away a person's half-typed edit the moment
  * the server's clock ticked. The status the sheet was opened from is the one it edits; the server is the judge of whether that board still exists (404).
  *
- * Three sections, in the mock's order:
+ * Four sections (the first three in the mock's order):
  *
  * - **Name & sync** — two `SettingsRow`s (§8.6's row, the same one Setup's cards draw): the name in a `.set-text`, the interval as a `Segmented` pill over
  *   `SYNC_INTERVALS`, the same control GitHub › Settings' Sync card draws for a GitHub repo's interval, so the two read alike.
@@ -44,6 +44,12 @@ import { SettingsRow } from '../ui/SettingsRow';
  *   is silent, because a missing summary costs the person nothing the key does not already say.
  * - **Queries** — the four chips (`JIRA_QUERY_PRESETS` and `JIRA_CUSTOM_QUERY`; the leading `+ ` is drawn here, the presets store their chip text
  *   without it) and a row per query: label `.set-text`, JQL `.sheet-prompt` textarea, and the check line.
+ * - **Columns** — the Board's status columns in the order the Board draws them: `boardColumns` over the cached list the Roots read already fetched and the
+ *   board's saved `columns`, minus the `No status` column (it has no name to store). `↑` / `↓` reorder, a status no loaded issue carries (one a person typed
+ *   or one that has since left the list) has a `×`, and the add field takes a name for a status that has no issue yet. The working list is `null` until the
+ *   first edit — Save then sends NO `columns`, so the server keeps the stored order — and every edit first freezes the rows AS DRAWN, then applies itself, so
+ *   an edit made while the read is still out survives the read landing (the rows are derived from the list, never stored beside it). `Reset to default`
+ *   sends `[]`, which the server reads as "forget the order".
  *
  * **Every refusal keeps the sheet.** Save and Delete leave it open on any answer but a 200, with every edit where the person left it and the server's own
  * `error` sentence under the footer (Review Focus 2: a `jira.json` that stopped parsing while the sheet was open answers 409, and the sentence says what
@@ -100,6 +106,11 @@ export function JiraBoardSheet({
   const [name, setName] = useState(board?.name ?? '');
   const [interval, setSyncInterval] = useState<SyncInterval>(board?.interval ?? DEFAULT_JIRA_INTERVAL);
   const [roots, setRoots] = useState<string[]>(board?.roots ?? []);
+  const [readIssues, setReadIssues] = useState<JiraIssue[]>([]);
+  // `null` = untouched (the board's saved `columns` stand); `reset` = the last edit was `Reset to default`, which saves `[]`.
+  const [working, setWorking] = useState<string[] | null>(null);
+  const [columnsReset, setColumnsReset] = useState(false);
+  const [columnText, setColumnText] = useState('');
   const [summaries, setSummaries] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [rows, setRows] = useState<QueryRowState[]>(() => (board?.queries ?? []).map((q) => ({ key: nextKey.current++, ...q })));
   const [pickingProject, setPickingProject] = useState(false);
@@ -120,6 +131,7 @@ export function JiraBoardSheet({
         if (!res.ok) return;
         const parsed = parseJiraBoardIssues(await res.json());
         if (!mounted.current || parsed === null) return;
+        setReadIssues(parsed.issues);
         setSummaries((prev) => {
           const next = new Map(prev);
           for (const i of parsed.issues) if (!next.has(i.key)) next.set(i.key, i.summary);
@@ -130,6 +142,30 @@ export function JiraBoardSheet({
       }
     })();
   }, [boardId, mounted]);
+
+  // A `''` name is the `No status` column: drawn on the Board, never a row here and never sent.
+  const columnRows = boardColumns(readIssues, working ?? board?.columns ?? []).filter((c) => c.name !== '');
+  const columnNames = columnRows.map((c) => c.name);
+  const editColumns = (next: (names: string[]) => string[]): void => {
+    setWorking(next(columnNames));
+    setColumnsReset(false);
+  };
+  const moveColumn = (at: number, by: -1 | 1): void =>
+    editColumns((names) => {
+      const out = [...names];
+      [out[at], out[at + by]] = [out[at + by], out[at]];
+      return out;
+    });
+  const addColumn = (): void => {
+    const added = columnText.trim();
+    if (added === '' || columnNames.includes(added)) return;
+    editColumns((names) => [...names, added]);
+    setColumnText('');
+  };
+  const resetColumns = (): void => {
+    setWorking([]);
+    setColumnsReset(true);
+  };
 
   const addRoot = (picked: JiraIssue): void => {
     setRoots((rs) => (rs.includes(picked.key) ? rs : [...rs, picked.key]));
@@ -152,7 +188,9 @@ export function JiraBoardSheet({
         name,
         interval,
         roots,
-        queries: rows.map((r) => ({ id: r.id, label: r.label, jql: r.jql }))
+        queries: rows.map((r) => ({ id: r.id, label: r.label, jql: r.jql })),
+        // Absent while untouched: the server keeps the stored order. `[]` after a reset, the rows as drawn after any other edit.
+        ...(working !== null && { columns: columnsReset ? [] : columnNames })
       });
       // A landed save reloads the status even when the sheet was closed (Escape, Cancel) while it was in flight: the write happened, and the card under the
       // sheet would otherwise read the pre-save board until the next status poll — which, for a page of `off` boards, is never (the reason the route waits for the sweep at all).
@@ -310,6 +348,64 @@ export function JiraBoardSheet({
             onRemove={() => setRows((rs) => rs.filter((r) => r.key !== row.key))}
           />
         ))}
+      </section>
+
+      <section className="jira-sheet-sec" aria-label="Columns">
+        <h4 className="jira-sheet-sec-title">Columns</h4>
+        <p className="jira-sheet-why">the Board&apos;s columns, left to right</p>
+        {columnRows.length === 0 ? (
+          <p className="jira-sheet-empty">No columns yet — they appear once this board has issues.</p>
+        ) : (
+          columnRows.map((col, at) => (
+            <div key={col.name} className="jira-sheet-col">
+              <span className="jira-lanes-col" data-tone={columnTone(col)}>
+                <span className="jira-lanes-dot" aria-hidden="true" />
+                <span className="jira-lanes-name">{col.name}</span>
+              </span>
+              <span className="jira-setup-move">
+                <Chip variant="flat" size={28} aria-label={`Move ${col.name} up`} disabled={at === 0} onClick={() => moveColumn(at, -1)}>
+                  ↑
+                </Chip>
+                <Chip variant="flat" size={28} aria-label={`Move ${col.name} down`} disabled={at === columnRows.length - 1} onClick={() => moveColumn(at, 1)}>
+                  ↓
+                </Chip>
+              </span>
+              {col.category === null && (
+                <button
+                  type="button"
+                  className="jira-sheet-x jira-sheet-col-x"
+                  aria-label={`Remove ${col.name}`}
+                  onClick={() => editColumns((names) => names.filter((n) => n !== col.name))}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))
+        )}
+        <div className="jira-sheet-col-add">
+          <input
+            className="set-text jira-sheet-search-field"
+            type="text"
+            aria-label="Add a column"
+            placeholder="Add a status by name"
+            maxLength={100}
+            value={columnText}
+            onChange={(e) => setColumnText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addColumn();
+              }
+            }}
+          />
+          <Chip size={28} disabled={columnText.trim() === '' || columnNames.includes(columnText.trim())} onClick={addColumn}>
+            Add
+          </Chip>
+          <Chip size={28} variant="flat" disabled={columnsReset || (working === null && (board?.columns ?? []).length === 0)} onClick={resetColumns}>
+            Reset to default
+          </Chip>
+        </div>
       </section>
     </FormSheet>
   );

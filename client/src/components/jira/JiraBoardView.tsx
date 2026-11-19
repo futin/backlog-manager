@@ -326,6 +326,7 @@ export function JiraBoardView({
               key={board.id}
               views={views}
               lanes={lanes}
+              issues={list.issues}
               folds={folds}
               read={read}
               total={list.issues.length}
