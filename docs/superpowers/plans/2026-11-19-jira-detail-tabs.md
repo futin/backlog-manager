@@ -301,8 +301,10 @@ Mocks: `html/Main.html` (`.strip`, the tab row, the Ticket pane), `html/B-Modal.
   - `JiraTicketBody` props: `{ issue: JiraIssue; detail: JiraIssueDetail | null; failure: string | null; back: … | null; onBack; onOpenIssue;
     onWrote; onRun; onReview?; tree: <children source>; worktrees: … }` — the builder settles the exact list from what `JiraDetail` passes its regions
     today. It draws no crumbs, no frame head and no `Run ▾`. **Ownership:** each frame owns the detail read and re-read (`JiraDetail.tsx:243-249` today;
-    the page reads by key) and passes `detail` / `failure` / `onWrote` (re-read) down; the body owns the one `useAction` write guard
-    (`JiraDetail.tsx:217`) and draws the write-error line (`role="alert"`, under the strip; today 311–339) because its strip holds the write controls. It renders the Agent, Delivery and Children panes as named slots that Tasks 5–6 fill; until
+    the page reads by key) and passes `detail` / `failure` / `onWrote` down — the frame's `onWrote` does both of today's steps, the detail re-read and the board
+    `onWrote` nudge (`JiraDetail.tsx:314-318`). The body owns, from this task on, the one `useAction` write guard (`JiraDetail.tsx:217`), its error
+    reset and the write-error line (`role="alert"`, under the strip; today `JiraDetail.tsx:535-539`), because its strip holds the write controls. The
+    parent read (`useParentRead`) and its alert line (`JiraDetail.tsx:541-545`) are the body's too: the parent link is in the strip, on both frames. It renders the Agent, Delivery and Children panes as named slots that Tasks 5–6 fill; until
     then those tabs draw today's regions moved as they are (the agent band content, `DeliveryPane`, Children + Worktrees).
 
 - [ ] **Step 1: Write the failing tests.** Fixtures: `PAY-12` Story, assignee `Dana Novak`, sprint `Sprint 40`, parent `PAY-3`, two targets
@@ -373,10 +375,15 @@ Mocks: `html/Main.html` (`details.tgt`, the next row, the older fold, the Worktr
     reads `5 earlier MRs into demo · 4 merged, 1 closed`; rerender with `demo` gone → one row, no error.
 - [ ] **Step 2: Run, expect FAIL.**
 - [ ] **Step 3: Implement.** Until Task 7, the old modal's delivery region (`JiraDetail.tsx:414`) renders `JiraDeliveryTab` in place of `DeliveryPane`,
-  so the modal stays green between Tasks 5 and 7. Each row is a `<details>` (or a button + region with `aria-expanded`); fold state lives in the body, keyed by row id.
+  so the modal stays green between Tasks 5 and 7: `openRows` / `onToggleRow` / `onOpenRow` are local state there, `worktrees` is empty (the old modal
+  still draws its own Worktrees at 571–575, so it is never drawn twice), and `liveReviewLink` is the newest of its `liveLinks` with `action:
+  'review'`. Each row is a `<details>` (or a button + region with `aria-expanded`); fold state lives in the body, keyed by row id.
   `Ignore` writes pass the ticket's delivery MRs (or `null` when the payload is `null` or the delivery is not `mrs`) as `ticketMrs`.
 - [ ] **Step 4: Run, expect PASS**, plus `test/jira/jira-detail.test.tsx`, `test/jira/jira-delivery-pane.test.tsx` and `test/jira/jira-delivery-surfaces.test.tsx` (update the `Also:`
-  and lead-only ReviewRow cases to the new placement — those cases are the old behaviour, so changing them is the task, not a regression) and typecheck.
+  and lead-only ReviewRow cases to the new placement — those cases are the old behaviour, so changing them is the task, not a regression). The pane
+  suite's `draw` helper (`jira-delivery-pane.test.tsx:103-109`, which passes only `issue` and `now`) is re-pointed at the new props, and its
+  none / unknown / hidden / not-shown cases move to `test/jira/jira-delivery-tab.test.tsx` with their assertions unchanged; the same licence covers the
+  delivery cases in `test/jira/jira-detail.test.tsx` and typecheck.
 - [ ] **Step 5: Commit** — `feat(jira): one delivery row per target with the next step`.
 
 ### Task 6: Agent tab, Children & comments tab, Stop off review sessions
@@ -424,9 +431,10 @@ Mock: `html/B-Modal.html`.
   calls `onOpenPage('PAY-12')`; Escape still closes the whole dialog; the walk's `← <key>` still pops. Re-point every existing `jira-detail.test.tsx`
   case that queried a fact or the band by its old column to the tab that now holds it — a case's assertion stays; only where it looks changes.
 - [ ] **Step 2: Run, expect FAIL.**
-- [ ] **Step 3: Implement.** Keep the one `useAction` guard, the `shownKey` reset, `useParentRead`. If `Modal` gains a shape, its header comment says
+- [ ] **Step 3: Implement.** The `useAction` guard, its error line and `useParentRead` are already the body's (Task 4); `JiraDetail` keeps the
+  `shownKey` reset and the detail read, and must not add a second guard. If `Modal` gains a shape, its header comment says
   which composers use it; the `Mentions` modal's `lead` shape is untouched.
-- [ ] **Shared cases:** move T8, T9, T11, T15 and T16 from `test/jira/jira-ticket-body.test.tsx` into a case table in `test/helpers/ticket-body-cases.ts`
+- [ ] **Shared cases:** move T8–T16 (from `test/jira/jira-ticket-body.test.tsx` and `test/jira/jira-delivery-tab.test.tsx`) into a case table in `test/helpers/ticket-body-cases.ts`
   (`(mount: (fixture) => void) => void`, registering the `it`s), run here through the modal; Task 8 runs the same table through the page (spec §9, "in
   the modal and on the page with the same fixtures").
 - [ ] **Step 4: Run, expect PASS** — the four suites above, `test/jira/jira-mention-modal.test.tsx`, `test/ui/ui-modal-scroll-style.test.ts`,
