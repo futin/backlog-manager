@@ -173,7 +173,7 @@ paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**", "
   **`jira/` imports `gitlab/remote.util.ts` for `isGitlabProjectPath` and for nothing else** — a pure helper, no Nest, no poller, so the one `jira/` → `gitlab/`
   edge cannot drag `GitlabModule` in (`GitlabModule` imports `JiraModule`; the reverse would be a cycle). The prompt carries no finding text: it names the MR as
   `!<iid>` in its project, tells the session to use the `mr-review-loop` skill (both run its Step 1 discovery for host, project and token only; `request` skips Steps 2-3, posts the
-  `@coderabbitai review` trigger and runs the whole loop through push and reply/resolve, `fix` starts at fetching the open findings and posts no trigger) and to stop if the skill is absent, so nothing a bot or a stranger wrote on the
+  review trigger the skill's trigger step names — never a bot's name of its own; with none named, it mentions the repo's review bot account with `review` — and runs the whole loop through push and reply/resolve, `fix` starts at fetching the open findings and posts no trigger) and to stop if the skill is absent, so nothing a bot or a stranger wrote on the
   MR is in the prompt. The half is DERIVED, never accepted: dispatch (`reviewOrThrow`, step 3a) reads `findMr` and `reposFor` and answers 400 `!<iid> is not an
   open merge request of <KEY>` (not cached, not `opened`, or its `keys` carry neither the key nor — checked once the detail is read — its parent's), 400 `<repo>
   is not a review candidate for !<iid>`, 400 `a review continues <branch>` (anything but `continue` on the MR's source branch without `openMr`), then 409 `no

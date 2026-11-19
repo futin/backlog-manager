@@ -3457,14 +3457,14 @@ Jira › Setup holds `jira.json`'s writes: the control governs one source, and i
 keeps the read-only report of every source this machine reaches, the `Sources` card, alone in its left column, against Watchdog, Tick and Time zone in its
 right; its two links (`GitHub › Settings ↗`, `Jira › Setup ↗`) are the shell's pairs threaded down, and each is drawn only while the section it opens is drawn.
 
-## The Jira section's four pages are switched by the rail's tree, and the section is drawn only when configured
+## The Jira section's five pages are switched by the rail's tree, and the section is drawn only when configured
 
-The Jira section's four pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
+The Jira section's five pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
 `GET /api/jira` says configured. The two halves are separate rules that happen to meet in one rail row, and each has a precedent or a failure behind it.
 
 ### The tree rule is Runs' and Settings', applied a third time
 
-Board, Sessions, Mentions and Setup are four pages under one rail entry, which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared, Dashboards) already have, and the rule those
+Board, Sessions, Mentions and Setup are four pages under one rail entry — five with the ticket page, whose row the tree draws only while a key is held — which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared, Dashboards) already have, and the rule those
 two settled is that the tree is the switch at every width: the rail's trees stand open below 700 px, so a segmented control on the page would be a second
 wording of the same choice, free to drift from the tree's and reached in the same number of taps. Task-38 deleted Runs' in-page pair for that reason and task-42
 never gave Settings one; a Jira page switch would have been the first thing a later reader removed, so it was never drawn.
@@ -3475,6 +3475,13 @@ shell's `change`), and hands it down, exactly as Settings' `Live view` link is `
 construction; a link built inside the page out of its own `localStorage` write and its own section call would mean it only until one of the two changed. The
 page value lives in a module store (`hooks/useJiraPage.ts`, on `hooks/persistedStore.ts`) rather than a `usePersistedState` per caller for the same reason Runs' does:
 the tree and the page are two mounted writers, and a per-caller copy would leave one of them looking at the page the other has just left.
+
+The ticket page (Jira detail tabs spec §2) adds links of the same kind and no switch: the issue modal's `Open full page ↗`, and a Cmd-, Ctrl- or middle-click
+on a card, a list row or a Sessions title. Each is `JiraView`'s `openPage`, which writes the ticket key store first and then calls the same threaded
+`onOpenJiraPage('ticket')`, so a link to a ticket means what the rail's ticket row means. That row is the one tree entry that is not always there: a `ticket`
+page with no key would be a page with nothing to read, so the key, not the page value, decides whether the row draws, and `JiraView` writes `board` back for a
+stored `ticket` with no key rather than letting the rail highlight a row it does not draw. The key lives in its own store (`hooks/useJiraTicketKey.ts`)
+because leaving the page must not clear it — the rail's row is how a reader gets back to the ticket — while the page value moves on every click.
 
 The chip's popover was once a reading with no link at all, for the rule's other face: a `Setup ›` link there would be an in-page switch on a surface that is not
 even in the section. Spec §3 of the app restyle overrode that: the popover now carries `Sync now`, per-board sync icons and a `Jira setup ↗` link, and the link is
@@ -4381,12 +4388,18 @@ Run's session, a manual link or a hand-made request cannot plant a draft under a
 draft's own controls live), and a reply link never shows through the Run readers (`get`, `snapshot`, `confirmed`, `hasConfirmed`), so it neither takes nor frees a Run's reservation. A draft is
 text a stranger's thread may have shaped, which is why it is only ever shown for editing: it reaches Jira after a person has read it, through `/mentions/reply`.
 
-## The CodeRabbit button belongs to the MR, never to Run
+## The review button belongs to the MR, never to Run
 
 A review acts on one merge request's threads, and `Run ▾` is a ticket's menu: it has no MR to name, and a row in it would either guess the lead MR or add a pick
 the launch sheet already owns. So the button lives on the row under the MR's own track, `JiraRunMenu` never offers `review`, and the row opens the sheet
 pre-set: one tile, the MR's source branch locked as `continue`, and only the repos the MR resolves to. A review on any other branch would be a review of a
 different change, and a tile or a branch the person can change would let the sheet disagree with the MR the row drew.
+
+Since the Delivery tab (Jira detail tabs spec §4) the button is per target, not per ticket: every expanded target row whose lead MR is open draws the split in
+its own next row, because a ticket delivered to `develop` and `demo` has two MRs with two review states, and a single lead-only row would hide the second
+one's findings behind the first's. The button and its sentences never name the bot (spec §4.7): which bot reviews is the repository's, so the row opens
+`Review · ` and the `request` prompt tells the session to post the trigger the mr-review-loop skill's trigger step names, rather than a mention this server
+would have to keep in step with every repository and every version of the skill.
 
 ## The claim protocol: lowest live comment id wins
 

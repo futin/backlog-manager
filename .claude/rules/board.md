@@ -59,21 +59,25 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   first on Shared) — `.set-cols` survives only on GitHub › Settings and Jira › Setup. One `RailTree` renders every tree — Files, GitHub, Jira, Runs and Settings, five call sites; `SECTIONS`/`Section`
   live in `client/src/lib/sections.ts` because the rail reading `useSettings` closed a cycle with `lib/settings.ts`. Why:
   [invariants.md](docs/subsystems/invariants.md#settings-is-three-pages-the-page-is-the-scope)
-- **The Jira section's four pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
+- **The Jira section's five pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
   `GET /api/jira` says configured.** `jira` sits in `SECTIONS` (`lib/sections.ts`) between `github` and `runs` UNCONDITIONALLY — `resolveLegacySection`
   (`lib/source-page.ts`) runs in a `useState` initializer, before the status exists — and the conditional half is the shell's alone. `SideRail`'s `drawn` skips
   the row unless the shell's one `useJira` (`JiraProvider`) says `configured: true`, or the status is unknown (`data` null) while `jira` is the section on
   screen. `App`'s hold-and-fall effect moves a `jira` section on `configured === false` and on nothing else — through `change` to `firstDrawn`
   (`lib/sources.ts`) of the projects answer, or, unwritten, to the provisional `FALLBACK_SECTION` while that answer is unknown, for the settle to correct;
   unknown holds,
-  drawn in `JiraView`'s `loading…` or `Jira unavailable` shape. The page is `JIRA_PAGES` (`board | sessions | mentions | setup`), `JIRA_PAGE_KEY` and
+  drawn in `JiraView`'s `loading…` or `Jira unavailable` shape. The page is `JIRA_PAGES` (`board | sessions | mentions | setup | ticket`), `JIRA_PAGE_KEY` and
   `isJiraPage` in
   `lib/jira-page.ts`, held by `hooks/useJiraPage.ts` — a `persistedStore` (`hooks/persistedStore.ts`, the one home of the client's persisted module
-  store), because the rail's `RailTree` and the in-page links are two mounted writers. The Board and Sessions pages share one board pick and load (`hooks/usePickedJiraBoard.ts`, `JiraBoardPicker`). The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board or Sessions page) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
+  store), because the rail's `RailTree` and the in-page links are two mounted writers. `ticket` is a page only
+  while `hooks/useJiraTicketKey.ts` (`backlog-manager.jira-ticket-key`, a `persistedJsonStore`) holds a key: the rail draws its row, labelled with the key,
+  only then, and `JiraView` draws the Board for `ticket` with an empty key and writes `board` back. The Board and Sessions pages share one board pick and load (`hooks/usePickedJiraBoard.ts`, `JiraBoardPicker`). The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board or Sessions page, and the issue modal's `Open full page ↗` and a
+  Cmd-, Ctrl- or middle-click on a card, list row or Sessions title, which `JiraView`'s `openPage` turns into a key-store write and then
+  `onOpenJiraPage('ticket')`) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
   `change('jira')` and handed down through `JiraView`; the Sources card's `Jira › Setup ↗` link is the same pair, threaded `App` → `SettingsView` → `SharedPage`
   → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a page switch of its own (its `Sync now` and per-board icons sweep, they do not navigate). Settings' `Opens on` offers `Jira` only while
   configured (`landingOptions`), keeping a stored `jira` pin's option; a `landing: 'jira'` takes the same fall. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-jira-sections-four-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
+  [invariants.md](docs/subsystems/invariants.md#the-jira-sections-five-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
 - **A source row (Files, GitHub) is drawn only while a registered project has that source, and its pages are switched by the rail's tree or a link threaded down
   from it.** `files` and `github` sit in `SECTIONS` UNCONDITIONALLY and whether a row draws is the projects answer's: `ProjectsProvider`
   (`hooks/ProjectsContext.tsx`) is the shell's one read of `GET /api/projects`, through `useRefreshing` with no `armed` (mount + focus), keeping the last answer
@@ -129,17 +133,19 @@ paths: ["client/src/**", "shared/agent.ts", "shared/theme.css", "client/index.ht
   `enabled` answer, never on `hidden`, and draws none before the agents status has landed; `Copy prompt` waits on the preview and a clipboard and on nothing
   else. Do not hide `Run ▾` on `BM_AGENTS` off to match the Board's buttons. Why:
   [invariants.md](docs/subsystems/invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake)
-- **The CodeRabbit button is the MR's, not Run ▾'s: `JiraRunMenu` never offers `review`, and the Detail row opens the launch sheet already set.** `ReviewRow`
-  (`components/jira/ReviewRow.tsx`) draws under Detail's delivery track for the LEAD MR only (`Also:` MRs get none), and only where `reviewRowText` has a
-  sentence — absent for `reviewing`, `clean`, `unknown` and an unread review. Its button is HIDDEN, not disabled, where it can never work (no candidate repo,
+- **The review button is the MR's, not Run ▾'s: `JiraRunMenu` never offers `review`, and the Delivery tab's next row opens the launch sheet already set.**
+  The review split (`ReviewSplit`, `ReviewWhy` and `reviewGate`, `components/jira/ReviewRow.tsx`) draws in `NextRow`'s `request`/`fix` branch on EACH
+  expanded target row whose lead MR is open, not on one lead for the ticket, and only where `reviewRowText` has a sentence, which opens `Review · ` and never
+  names the bot — absent for `reviewing`, `clean`, `unknown` and an unread review. Its button is HIDDEN, not disabled, where it can never work (no candidate repo,
   agents off or not yet answered, no `onReview`) and DISABLED while `reviewGate` holds (a live `run` link, quiet or not, or `status.live` entry on the key — strict, as a review's dispatch is, or a live link
   or `working`/`question` row on the MR's source branch in a candidate) — in the dashed skin, titled with `reviewGateText`, and pointing (`aria-describedby`)
-  at a reason line under the row, since a disabled ink split draws like an enabled one; dispatch's 409s stay the authority for what the client cannot see. The click calls `DeliveryPane`'s `onReview`, threaded through `JiraDetail` to `JiraView`'s launch state, and dispatches nothing itself. The sheet
+  at a reason line under the row, since a disabled ink split draws like an enabled one; dispatch's 409s stay the authority for what the client cannot see. The click calls the row's `onReview`, threaded `JiraDeliveryTab` → `JiraTicketBody` → the modal or the ticket page's frame to `JiraView`'s launch state, and dispatches nothing itself. The sheet
   in review mode (`review` prop) shows ONE pressed tile (`Fix review` / `Request review`), offers only the MR's candidate repos (`GitlabProjectView.repos`, not
   every path the project maps), and locks the branch to `continue` on the MR's source branch (`useBranchState`'s `locked`, so the preview, Copy and Start carry
   one choice); the MR and half ride the preview's query and Start's body. Every sentence is `lib/review-copy.ts`'s and the state is `shared/review.ts`'s,
-  derived at draw time against `now`, so the step, the row, the chip and the `Review open` filter cannot word one MR two ways. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-coderabbit-button-belongs-to-the-mr-never-to-run)
+  derived at draw time against `now`, so the step, the row, the chip and the `Review open` filter cannot word one MR two ways. A step's
+  `Ignore` is this browser's alone, in `hooks/useIgnoredSteps.ts` (`backlog-manager.jira-ignored-steps`, keyed by MR and pruned against the ticket's MRs). Why:
+  [invariants.md](docs/subsystems/invariants.md#the-review-button-belongs-to-the-mr-never-to-run)
 - **A crashed run renders as crashed, never as nothing.** The Board counts it in `RunChip`'s own line (`1 run · crashed ›`) and says nothing the payload does
   not carry; badges, card live strips and `runClaimBlock` stay freshness-based. The Runs page reads the same payload (bug-29): `MergedRun.live` is the data
   authority, `MergedRun.isLive` the presentation gate; both status badges read `crashed` through `runStatusChip` (`lib/run-stage.ts`), never from `authority`,
